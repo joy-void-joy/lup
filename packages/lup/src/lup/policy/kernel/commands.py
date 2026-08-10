@@ -1,24 +1,23 @@
-# lup: ignore[empty-collection, import-re, re-call, string-split, tuple-shape]
+# lup: ignore[empty-collection, import-re, re-call, string-split]
 # The dependency-free runtime deliberately uses primitive rows and stdlib scanners.
 """Per-command shell classification for the judged executables."""
 
 import posixpath
 import re
+from typing import TypedDict
 
 from .decision import KernelDecision, unjudged
 from .rows import ShellRuleRow, UrlScopeRow
 from .words import (
     INTERPRETERS,
-    UV_RUN_ALLOWED_TARGETS,
     flag_matches,
-    is_repository_tmp_script,
     opaque_argument,
     uv_run_words,
 )
 from .fetch import decide_fetch
 
 SED_SAFE_SHORT_FLAGS = "nErsuz"
-SED_SAFE_LONG_OPTIONS = (
+SED_SAFE_LONG_OPTIONS = (  # lup: ignore[library-default] — sed's own long spellings of the short flags above
     "--quiet",
     "--silent",
     "--regexp-extended",
@@ -74,9 +73,20 @@ def apply_command_row(row: ShellRuleRow, arguments: list[str]) -> KernelDecision
     return KernelDecision(row["effect"], row["reason"])
 
 
+class Subcommand(TypedDict):
+    """The subcommand word a command line names, and the arguments after it.
+
+    ``word`` is empty when the line carried only global flags, which leaves
+    the default row to answer for it.
+    """
+
+    word: str
+    remainder: list[str]
+
+
 def split_subcommand(
     executable: str, arguments: list[str], default: ShellRuleRow | None
-) -> tuple[str, list[str]] | KernelDecision:
+) -> Subcommand | KernelDecision:
     """Find the subcommand word, honoring global value-taking and guarded flags."""
     ask_flags = default["ask_flags"] if default else []
     value_flags = default["value_flags"] if default else []
@@ -84,13 +94,13 @@ def split_subcommand(
     while position < len(arguments):
         word = arguments[position]
         if not word.startswith("-"):
-            return word, arguments[position + 1 :]
+            return Subcommand(word=word, remainder=arguments[position + 1 :])
         if flag_matches(word, ask_flags):
             return KernelDecision(
                 "ask", f"{executable} global flag {word} requires approval"
             )
         position += 2 if word in value_flags else 1
-    return "", []
+    return Subcommand(word="", remainder=[])
 
 
 def decide_command_rows(words: list[str], rows: list[ShellRuleRow]) -> KernelDecision:
@@ -108,7 +118,8 @@ def decide_command_rows(words: list[str], rows: list[ShellRuleRow]) -> KernelDec
     split = split_subcommand(executable, arguments, default)
     if isinstance(split, KernelDecision):
         return split
-    subword, remainder = split
+    subword = split["word"]
+    remainder = split["remainder"]
     subrows = [row for row in matches if subword and row["subcommand"] == subword]
     if not subrows:
         if default is None:
@@ -371,6 +382,7 @@ def decide_awk_words(words: list[str]) -> KernelDecision:
     return KernelDecision("allow", "read-only awk program")
 
 
+# lup: ignore[library-default] — curl's own flags that change reporting and not the request; the value follows curl's manual, not a project's taste
 CURL_SAFE_FLAGS = (
     "-s",
     "--silent",
@@ -392,7 +404,28 @@ CURL_SAFE_FLAGS = (
     "-4",
     "-6",
 )
-CURL_VALUE_FLAGS = (
+# The single letters above, which curl accepts clustered as readily as apart.
+# `-sS` is one word to every shell and to curl, and reading it as an unknown
+# option refused the request's most ordinary spellings while admitting the
+# same flags written with spaces between them.
+CURL_SAFE_CLUSTER_LETTERS = "".join(
+    flag[1] for flag in CURL_SAFE_FLAGS if len(flag) == 2 and not flag[1].isdigit()
+)
+
+
+def curl_safe_flag(word: str) -> bool:
+    """Whether one curl word is a declared reporting flag, clustered or alone."""
+    if word in CURL_SAFE_FLAGS:
+        return True
+    return (
+        len(word) > 1
+        and word.startswith("-")
+        and not word.startswith("--")
+        and all(letter in CURL_SAFE_CLUSTER_LETTERS for letter in word[1:])
+    )
+
+
+CURL_VALUE_FLAGS = (  # lup: ignore[library-default] — curl's own value-taking flags; misreading one shifts the argument scan
     "-H",
     "--header",
     "-m",
@@ -406,6 +439,23 @@ CURL_VALUE_FLAGS = (
     "-r",
     "--range",
 )
+
+
+def curl_url(word: str) -> str:
+    """Spell one curl operand the way curl itself resolves it.
+
+    curl accepts a URL with no ``scheme://`` and guesses one, defaulting to
+    HTTP — which is how a liveness probe is actually typed, and how its own
+    manual documents it. Reading the bare form as malformed put an approval
+    question on ``curl localhost:8000/health`` while the identical request
+    spelled in full was already declared safe.
+
+    Guessing HTTP where curl guesses HTTP keeps the verdict conservative on
+    its own terms: a scope declared for ``https`` alone does not match the
+    guess, so an origin reachable only over TLS still asks rather than
+    inheriting a grant its scheme never gave.
+    """
+    return word if "://" in word else f"http://{word}"
 
 
 def decide_curl_words(
@@ -437,7 +487,7 @@ def decide_curl_words(
         if word.startswith("--request="):
             method = word.partition("=")[2]
             continue
-        if word in CURL_SAFE_FLAGS:
+        if curl_safe_flag(word):
             continue
         if word in CURL_VALUE_FLAGS:
             expect_value = True
@@ -460,13 +510,13 @@ def decide_curl_words(
     if not urls:
         return unjudged("curl has no URL")
     for url in urls:
-        verdict = decide_fetch(url, allowed_scopes, denied_scopes)
+        verdict = decide_fetch(curl_url(url), allowed_scopes, denied_scopes)
         if verdict.effect != "allow":
             return verdict
     return KernelDecision("allow", "read-only curl within declared scopes")
 
 
-def decide_uv(words: list[str]) -> KernelDecision:
+def decide_uv(words: list[str], runner_targets: list[str]) -> KernelDecision:
     """Classify a uv invocation, gating dependency and inline-code forms."""
     subcommand = words[1]
     if subcommand in ("add", "sync"):
@@ -481,13 +531,6 @@ def decide_uv(words: list[str]) -> KernelDecision:
             return unjudged("uv run has no command")
         run_command = posixpath.basename(run_words[0])
         bare_target = "/" not in run_words[0]
-        script = (
-            run_words[1]
-            if bare_target and run_command in INTERPRETERS and len(run_words) > 1
-            else run_words[0]
-        )
-        if is_repository_tmp_script(script):
-            return KernelDecision("allow", "declared temporary script")
         if run_command in INTERPRETERS or run_command in ("-c", "-m", "--script"):
             return KernelDecision("deny", "inline code is not allowed")
         risky = ("--with", "--with-editable", "--with-requirements", "--env-file")
@@ -499,7 +542,7 @@ def decide_uv(words: list[str]) -> KernelDecision:
             return KernelDecision(
                 "ask", "uv run --with fetches and executes external code"
             )
-        if bare_target and run_command in UV_RUN_ALLOWED_TARGETS:
+        if bare_target and run_command in runner_targets:
             return KernelDecision("allow")
         if bare_target and len(run_words) == 2 and run_words[1] == "--help":
             return KernelDecision("allow", "command help is read-only")

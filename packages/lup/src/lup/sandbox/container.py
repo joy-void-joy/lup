@@ -14,17 +14,23 @@ Examples:
 
         >>> with Sandbox(session_id="demo", shared_dir="/tmp/shared") as sb:
         ...     result = sb.run_code("import math; print(math.pi)")
-        ...     result["stdout"]
+        ...     result.stdout
         '3.141592653589793\\n'
-        ...     result["exit_code"]
+        ...     result.exit_code
         0
+
+    A cell ending in an expression echoes it, the way a notebook cell does::
+
+        >>> with Sandbox(session_id="demo", shared_dir="/tmp/shared") as sb:
+        ...     sb.run_code("import math; math.pi").result
+        '3.141592653589793'
 
     State persists across calls within the same session::
 
         >>> with Sandbox(session_id="demo", shared_dir="/tmp/shared") as sb:
         ...     sb.run_code("x = 42")
         ...     result = sb.run_code("print(x * 2)")
-        ...     result["stdout"]
+        ...     result.stdout
         '84\\n'
 
     Install packages and create MCP tools for an agent::
@@ -39,7 +45,7 @@ import logging
 import os
 import tarfile
 import time
-from collections.abc import Generator, Sequence
+from collections.abc import Generator, Mapping, Sequence
 from contextlib import contextmanager
 from pathlib import Path
 from types import TracebackType
@@ -65,11 +71,10 @@ from lup.mcp import (
 from lup.sandbox.models import (
     DEFAULT_PRE_INSTALL,
     CodeExecutionTimeoutError,
+    DockerUnreachableError,
     ExecuteCodeInput,
-    ExecuteCodeOutput,
     ExecuteCodeResult,
     InstallPackageInput,
-    InstallPackageOutput,
     InstallPackageResult,
     Mount,
     NetworkMode,
@@ -80,6 +85,24 @@ from lup.sandbox.process import decode_output, process_is_alive, process_start_t
 from lup.sandbox.repl import REPL_SERVER_SCRIPT, ReplSession
 
 logger = logging.getLogger(__name__)
+
+
+def connected_docker_client() -> docker.DockerClient:
+    """Connect to the Docker daemon, naming what to check when it is absent.
+
+    A stopped daemon, a socket this user cannot open, and a sandbox that
+    denies that socket all arrive as one opaque connection error. The sandbox
+    is reached through documented tooling, so the caller is usually reading a
+    traceback for a machine they did not know was part of the story.
+    """
+    try:
+        return docker.from_env()
+    except DockerException as exc:
+        raise DockerUnreachableError(
+            "Cannot reach the Docker daemon. Check that it is running, that "
+            "this user may open its socket, and that no sandbox is denying "
+            f"that socket: {exc}"
+        ) from exc
 
 
 class Sandbox:
@@ -102,9 +125,16 @@ class Sandbox:
         network_mode: Network access level ("bridge" or "none").
         timeout_seconds: Default timeout for code execution.
         pre_install: Packages to pre-install on start. Pass ``None`` to skip.
+        source_roots: Host import roots to bind read-only and put on
+            ``PYTHONPATH``. Name the source directories themselves, never a
+            repository root: a checkout carries its `.env` files too, and the
+            default network mode would carry them back out.
     """
 
-    DEFAULT_DOCKER_IMAGE = "ghcr.io/astral-sh/uv:python3.12-bookworm-slim"
+    DEFAULT_DOCKER_IMAGE = "ghcr.io/astral-sh/uv:python3.14-bookworm-slim"
+
+    SOURCE_ROOT = "/sources"
+    """Where read-only host source trees are mounted, one directory each."""
 
     def __init__(
         self,
@@ -115,6 +145,7 @@ class Sandbox:
         network_mode: NetworkMode = "bridge",
         timeout_seconds: int = 30,
         pre_install: Sequence[str] | None = DEFAULT_PRE_INSTALL,
+        source_roots: Mapping[str, Path] | None = None,
     ) -> None:
         suffix = session_id.replace("/", "-")  # lup: ignore[string-replace] — slug
         self.container_name = f"lup-sandbox-{suffix}"
@@ -124,6 +155,9 @@ class Sandbox:
         self.network_mode = network_mode
         self.timeout_seconds = timeout_seconds
         self.pre_install = list(pre_install) if pre_install is not None else None
+        self.source_roots = {
+            name: Path(root).resolve() for name, root in (source_roots or {}).items()
+        }
         self.active_container: Container | None = None
         self.docker_client: docker.DockerClient | None = None
         self.repl: ReplSession | None = None
@@ -167,7 +201,32 @@ class Sandbox:
                     "read host inputs and write host outputs here."
                 ),
             ),
+            *[
+                Mount(
+                    container_path=f"{self.SOURCE_ROOT}/{name}",
+                    source=str(root),
+                    kind="bind",
+                    mode="ro",
+                    purpose=(
+                        f"Read-only import root from the host directory {root}; "
+                        "on PYTHONPATH, so this project's code imports here."
+                    ),
+                )
+                for name, root in sorted(self.source_roots.items())
+            ],
         ]
+
+    def source_path(self) -> str:
+        """The container-side ``PYTHONPATH`` for every mounted source root.
+
+        Import roots are mounted rather than installed, and only the roots a
+        caller names: a project's checkout also holds its `.env` files, and
+        this sandbox reaches the network by default, so the repository root
+        is a path out rather than a convenience.
+        """
+        return ":".join(
+            f"{self.SOURCE_ROOT}/{name}" for name in sorted(self.source_roots)
+        )
 
     @property
     def is_active(self) -> bool:
@@ -186,11 +245,7 @@ class Sandbox:
         if self.docker_client is None:
             return
         try:
-            old = (
-                self.docker_client.containers.get(  # lup: ignore[dict-get] — docker API
-                    self.container_name
-                )
-            )
+            old = self.docker_client.containers.get(self.container_name)
             logger.warning("Removing stale container: %s", self.container_name)
             old.remove(force=True)
         except NotFound:
@@ -261,9 +316,7 @@ class Sandbox:
                     self.VOLUME_LABEL
                 )
                 if volume_name:
-                    volume = self.docker_client.volumes.get(  # lup: ignore[dict-get] — docker API
-                        volume_name
-                    )
+                    volume = self.docker_client.volumes.get(volume_name)
                     volume.remove()
             except (NotFound, APIError, DockerException) as e:
                 logger.warning("Orphan cleanup of %s failed: %s", container.name, e)
@@ -282,9 +335,7 @@ class Sandbox:
 
         if self.docker_client is not None:
             try:
-                vol = self.docker_client.volumes.get(  # lup: ignore[dict-get] — docker API
-                    self.volume_name
-                )
+                vol = self.docker_client.volumes.get(self.volume_name)
                 vol.remove()
             except (NotFound, APIError):
                 pass
@@ -323,7 +374,7 @@ class Sandbox:
         Creates a new Docker container for code execution. Removes any
         stale container with the same name first.
         """
-        self.docker_client = docker.from_env()
+        self.docker_client = connected_docker_client()
         try:
             self.start_container()
         except (APIError, DockerException, OSError, RuntimeError):
@@ -357,6 +408,7 @@ class Sandbox:
             working_dir="/workspace",
             mem_limit="1g",
             network_mode=self.network_mode,
+            environment={"PYTHONPATH": self.source_path()} if self.source_roots else {},
             labels={
                 self.SANDBOX_LABEL: "1",
                 self.CREATED_AT_LABEL: str(time.time()),
@@ -411,6 +463,19 @@ class Sandbox:
         self.repl.start()
         logger.info("REPL restarted (state cleared)")
 
+    def rebuild_container(self) -> None:
+        """Replace a container that is gone, keeping the workspace volume.
+
+        Deliberately not :meth:`stop` first: ``stop`` runs
+        ``destroy_container``, which removes the session volume too.
+        ``start_container`` drops the old container by name and mounts the
+        same named volume, so files under ``/workspace`` outlive a rebuild
+        even though the Python namespace and installed packages do not.
+        """
+        self.repl = None
+        self.active_container = None
+        self.start()
+
     def __enter__(self) -> Self:
         """Enter context manager, starting the sandbox."""
         started = False
@@ -439,8 +504,9 @@ class Sandbox:
         """Execute Python code in the sandbox's persistent REPL.
 
         Variables, imports, and data persist between calls within the same
-        session. If the REPL crashes, it is restarted automatically (but
-        state from previous cells is lost).
+        session. A crashed REPL is recovered before this returns — by
+        re-exec, or by rebuilding the container — and the returned result
+        says which state that cost (see :meth:`recover_from_crash`).
 
         Args:
             code: Python code to execute.
@@ -459,25 +525,49 @@ class Sandbox:
 
         try:
             return self.repl.execute(code, timeout_seconds)
-        except ReplCrashedError:
-            logger.warning("REPL crashed, restarting")
-            self.repl.stop()
+        except ReplCrashedError as crash:
+            logger.warning("REPL crashed, recovering")
+            return self.recover_from_crash(self.repl, crash)
+
+    def recover_from_crash(
+        self, repl: ReplSession, crash: ReplCrashedError
+    ) -> ExecuteCodeResult:
+        """Bring the sandbox back up, reporting what the crash cost.
+
+        Escalates in two steps: re-exec the REPL inside the existing
+        container, and rebuild the container only if that fails. A broken
+        exec socket usually means the container itself is gone, and
+        re-execing into a container that no longer exists can never
+        succeed.
+
+        Recovery finishes inside the call that observed the crash, so its
+        caller is always told what was lost. Leaving the sandbox
+        uninitialized instead would push the rebuild onto the next call,
+        which has no idea a crash happened and would report a wiped
+        namespace as an ordinary success.
+        """
+        repl.stop()
+        try:
+            repl.start()
+            lost = "Variables from previous cells have been lost."
+        except (RuntimeError, DockerException, APIError, SocketError):
+            logger.warning("REPL re-exec failed, rebuilding the container")
             try:
-                self.repl.start()
-            except (RuntimeError, DockerException, APIError, SocketError):
-                logger.exception("REPL restart failed")
+                self.rebuild_container()
+            except (APIError, DockerException, OSError, RuntimeError) as e:
+                logger.exception("Sandbox rebuild failed")
                 self.repl = None
-                raise SandboxNotInitializedError("REPL restart failed")
-            return ExecuteCodeResult(
-                exit_code=1,
-                stdout="",
-                stderr=(
-                    "REPL process crashed and was restarted. "
-                    "Variables from previous cells have been lost. "
-                    "Please re-run any setup code."
-                ),
-                duration_ms=0,
-            )
+                raise SandboxNotInitializedError(
+                    f"REPL crashed and the sandbox could not be rebuilt: {e}"
+                ) from crash
+            lost = "Variables and installed packages have been lost."
+        return ExecuteCodeResult(
+            exit_code=1,
+            stderr=(
+                f"REPL process crashed and was restarted. {lost} "
+                "Please re-run any setup code."
+            ),
+        )
 
     def run_install(self, packages: list[str]) -> InstallPackageResult:
         """Install Python packages using uv.
@@ -489,7 +579,14 @@ class Sandbox:
             Result containing exit code, output, and package list.
         """
         cmd = ["uv", "pip", "install", "--system", *packages]
-        result: ExecResult = self.container.exec_run(cmd, demux=False)
+        try:
+            result: ExecResult = self.container.exec_run(cmd, demux=False)
+        except NotFound:
+            # Same dead-container case run_code recovers from, reached
+            # through the install path instead of the REPL socket.
+            logger.warning("Container gone during install, rebuilding")
+            self.rebuild_container()
+            result = self.container.exec_run(cmd, demux=False)
 
         output_text = decode_output(result.output)
 
@@ -521,6 +618,8 @@ class Sandbox:
         @lup_tool(
             "Execute Python code in an isolated Docker container with persistent state. "
             "Variables, imports, and data persist between calls — no need to re-define them. "
+            "A cell ending in an expression returns that value's repr as 'result' and "
+            "binds it to '_', so you only need print() for intermediate output. "
             f"{network_text}Timeout: {timeout_seconds}s.\n\n"
             f"Filesystem (use absolute paths; the cwd is /workspace):\n{filesystem_text}\n\n"
             "Examples:\n"
@@ -532,11 +631,10 @@ class Sandbox:
             "State persists: define variables in one call, use them in the next.",
             name="execute_code",
         )
-        async def execute_code(inp: ExecuteCodeInput) -> ExecuteCodeOutput:
+        async def execute_code(inp: ExecuteCodeInput) -> ExecuteCodeResult:
             try:
                 self.ensure_started()
-                result = self.run_code(inp.code)
-                return ExecuteCodeOutput(**result)
+                return self.run_code(inp.code)
             except SandboxNotInitializedError as e:
                 logger.error("Sandbox not initialized: %s", e)
                 raise ToolError(f"Sandbox error: {e}") from e
@@ -552,11 +650,10 @@ class Sandbox:
             "in the container across executions.",
             name="install_package",
         )
-        async def install_package(inp: InstallPackageInput) -> InstallPackageOutput:
+        async def install_package(inp: InstallPackageInput) -> InstallPackageResult:
             try:
                 self.ensure_started()
-                result = self.run_install(inp.packages)
-                return InstallPackageOutput(**result)
+                return self.run_install(inp.packages)
             except SandboxNotInitializedError as e:
                 logger.error("Sandbox not initialized: %s", e)
                 raise ToolError(f"Sandbox error: {e}") from e
@@ -593,16 +690,20 @@ def sandbox_cleanup(session_id: str, shared_dir: Path) -> Generator[None]:
         yield
     finally:
         sandbox = Sandbox(session_id=session_id, shared_dir=shared_dir)
-        client = docker.from_env()
-        sandbox.docker_client = client
+        # Connecting here can fail on the way out of a failed session, and
+        # raising would replace whatever the session was already raising.
         try:
-            sandbox.remove_stale_container()
-            client.volumes.get(  # lup: ignore[dict-get] — docker API
-                sandbox.volume_name
-            ).remove()
-        except NotFound:
-            pass
-        except (APIError, DockerException) as e:
-            logger.warning("Post-session sandbox cleanup failed: %s", e)
-        finally:
-            client.close()
+            client = connected_docker_client()
+        except DockerUnreachableError as e:
+            logger.warning("Skipping post-session sandbox cleanup: %s", e)
+        else:
+            sandbox.docker_client = client
+            try:
+                sandbox.remove_stale_container()
+                client.volumes.get(sandbox.volume_name).remove()
+            except NotFound:
+                pass
+            except (APIError, DockerException) as e:
+                logger.warning("Post-session sandbox cleanup failed: %s", e)
+            finally:
+                client.close()

@@ -12,7 +12,8 @@ from pathlib import Path
 import pytest
 import sh
 
-from lup_template.devtools.dev import worktree
+from lup.devtools.dev import worktree
+from tests.unit.repos import initialized_repo
 
 ATTRIBUTES = Path(__file__).parents[2] / ".gitattributes"
 MANIFESTS = (".claude/.lup-ownership.json", ".codex/.lup-ownership.json")
@@ -51,20 +52,7 @@ def repo(tmp_path: Path) -> Path:
     work = tmp_path / "repo"
     (work / ".claude").mkdir(parents=True)
     (work / ".codex").mkdir(parents=True)
-    hooks = tmp_path / "no-hooks"
-    hooks.mkdir()
-    git = sh.Command("git").bake(
-        "-C",
-        str(work),
-        "-c",
-        "commit.gpgsign=false",
-        "-c",
-        f"core.hooksPath={hooks}",
-        _tty_out=False,
-    )
-    git("init", "-b", "main")
-    git("config", "user.email", "test@example.com")
-    git("config", "user.name", "Test")
+    git = initialized_repo(work, tmp_path / "no-hooks")
     (work / ".gitattributes").write_text(
         ATTRIBUTES.read_text(encoding="utf-8"), encoding="utf-8"
     )

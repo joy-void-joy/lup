@@ -1,4 +1,4 @@
-<!-- Generated from src/lup_template/devtools/harness/content/template_codex.py via `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/generated-artifacts.md. -->
+<!-- Generated from lup_template.devtools.harness.content.template_codex by `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/harness.md. -->
 
 # AGENTS.md Template
 
@@ -407,15 +407,13 @@ Use `$lup:merge` (with no argument) for guided conflict resolution. See the comm
 
 ### Commit Guidelines
 
-- **Commit before responding** -- Always commit your work before responding to the user. Don't accumulate multiple changes across responses.
-- **Commit early, commit often** -- Frequent commits provide checkpoints and make rebasing easier.
-- **Keep commits atomic** -- Each commit should do one thing. If you need "and" in your message, it should be two commits.
-- **History will be rebased** -- Don't worry about perfect messages during development. The history will be cleaned up before merge.
-- **Meaningful final commits** -- After rebasing, each commit should tell a story: what changed and why.
+- **Commit before responding** — Don't accumulate changes across responses
+- **Commit early, commit often** — Frequent commits provide checkpoints
+- **Keep commits atomic** — If you need "and" in your message, it should be two commits
+- **History will be rebased** — Don't worry about perfect messages during development
+- **Meaningful final commits** — After rebasing, each commit should tell what changed and why
 
-### Commit Message Format
-
-Use conventional commit syntax: `type(scope): description`
+**Format:** `type(scope): description`
 
 **Types:**
 
@@ -704,7 +702,9 @@ There is no editor-integrated language server in this environment. Run `uv run p
 
 All development tooling lives in `src/<project>/devtools/` and is exposed as the `lup-devtools` CLI entry point. **Always use `lup-devtools` instead of ad-hoc commands.** Never use `uv run python -c "..."` or bare `python`/`python3` -- these are denied by the Bash permission hook.
 
-If you find yourself running the same command repeatedly, **add a command** to `src/<project>/devtools/`. Use `tmp/*.py` for one-off scripts.
+If you find yourself running the same command repeatedly, **add a command** to `src/<project>/devtools/`.
+
+`tmp/` is scratch: gitignored, so nothing written there reaches a diff, a reviewer, or the human — which is why it does not execute. For one-off work, in order: run it in the sandbox where the work allows; add a `lup-devtools` command, which is reviewable because `devtools/` lands in the diff; or, as a last resort, `python3 <<<EOF` behind a `# lup: escalate: <why>` marker. The argument is reviewability, not power — an agent may already edit `devtools/` and run it.
 
 **Write scripts in Python using [typer](https://typer.tiangolo.com/)** for CLI interfaces. Use **[sh](https://sh.readthedocs.io/)** for shell commands instead of `subprocess`.
 
@@ -727,7 +727,7 @@ application-owned `HookSet` in `devtools/harness/catalog.py`. Harness generation
 compiles one hermetic dispatcher and dependency-free runtime for each native
 plugin. Do not edit generated policy files directly.
 
-The policy classifies each shell command against the `lup.policy.shell_rules` vocabulary and every URL scope in a batch. Ask is
+The policy classifies each shell command against the vocabulary declared in `devtools/harness/content/shell_vocabulary.py` and every URL scope in a batch. Ask is
 reserved for judged risk; an unjudged command or unparsed construct denies with
 a hint naming the `# lup: escalate: <why>` marker, and that leading marker
 promotes the classified decision to an approval question carrying the agent's
@@ -817,7 +817,7 @@ When the user provides documentation links, incorporate that knowledge into AGEN
 
 See [The Bitter Lesson](#the-bitter-lesson) and [Tool Design Philosophy](#tool-design-philosophy) above — these are the governing principles for all agent improvements.
 
-**When analyzing failures:** Ask "what general principle would have prevented this?" not "what specific rule would catch this case?" If the agent made one bad decision, the fix is almost never a prompt line about that specific decision. Instead: does the agent have enough context? Does it have the right tools? Is the model strong enough?
+**When analyzing failures:** Ask "what general principle would have prevented this?" not "what specific rule would catch this case?" The fix is almost never a prompt line about a specific decision. Instead: does the agent have enough context? The right tools? A strong enough model?
 
 When the principle points to a workflow failure, fix the workflow at the exact juncture where the failure enters — don't add a warning about it. A step named "Classify each commit" invites whole-commit thinking regardless of how many times the text says "decompose." Renaming the step to "Extract portable pieces" and separating reading from judging makes the failure structurally impossible. Warnings coexist peacefully with the workflows they warn against; structural changes don't.
 

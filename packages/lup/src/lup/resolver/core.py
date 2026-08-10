@@ -2,62 +2,56 @@
 
 import asyncio
 import hashlib
-from collections.abc import AsyncGenerator, Callable
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict
 
 from lup.harness.contracts import SkillInvocationRenderer
 from lup.harness.models import ResolveSpec
-from lup.harness.process import LaunchRequest, ProcessLauncher
+from lup.harness.process import ProcessLauncher
 from lup.resolver.contracts import (
     ResolverAwaitingAnswers,
     ResolverObserver,
     WorktreePreparer,
 )
+from lup.resolver.actors import ActorSessions
 from lup.resolver.dag import ConcernGraph
+from lup.resolver.execution import ConcernExecutor
+from lup.resolver.joins import Joiner
+from lup.resolver.journal import (
+    ActorRef,
+    Journal,
+    RunFailedEvent,
+)
 from lup.resolver.mailbox import (
     ANSWER_POLL_SECONDS,
-    PendingQuestion,
     QuestionMailbox,
-    RecordedAnswer,
-    utc_now,
-    wait_for_answers,
 )
 from lup.resolver.models import (
-    ACCEPT,
-    ACCEPTANCE_CONCERN_ID,
-    AgentRound,
+    INTEGRATION_CONCERN_ID,
+    AdmissionRequest,
     AnswerBatch,
     CleanupRecord,
-    acceptance_question,
     Concern,
+    ConcernAdmission,
     ConcernEligibility,
     ConcernInventory,
+    ConcernOrigin,
     ConcernProgress,
     ConcernStatus,
-    ConcernExecution,
     ConcernOutcome,
-    DependencyBase,
-    FinalReview,
     IntegrationRecord,
     MaterialQuestion,
-    MergeReport,
-    QuestionAnswer,
     QuestionBatch,
     ResolveInventory,
     ResolveManifest,
     ResolvePhase,
     ResolveRequest,
+    ResolverSource,
     ReviewNote,
     ResolverConfig,
     ResolveState,
-    ReviewReport,
-    VerificationRecord,
-    WorkAssignment,
-    WorkerContext,
-    WorkerReport,
     WritableRootLease,
 )
 from lup.resolver.orchestrator import (
@@ -65,49 +59,20 @@ from lup.resolver.orchestrator import (
     WorktreeOrchestrator,
     WritableRootLeases,
 )
+from lup.resolver.questions import QuestionBroker
+from lup.resolver.run import ResolveRun, ResolverInvariantError
 from lup.resolver.state import PHASE_ORDER, ResolverStateRepository
-from lup.resolver.tools import WAIT_CONTRACT
-from lup.runtime.contracts import SessionFactory
+from lup.resolver.turns import (
+    ReviewerFactoryRecipe,
+    TurnRunner,
+    WorkerFactoryRecipe,
+)
+from lup.resolver.verification import Verifier
 from lup.runtime.models import TurnInput, turn_request
-from lup.runtime.query import query
-from lup.runtime.wrappers import CorrectionConfig, DecoratingSessionFactory
-
-
-class ResolverInvariantError(RuntimeError):
-    """A native result or persisted transition violated resolver semantics."""
-
-
-type WorkerFactoryRecipe = Callable[[WorkerContext], SessionFactory]
-type ReviewerFactoryRecipe = Callable[[Path], SessionFactory]
-type ResolverInput = ResolveRequest | ResolveInventory
-
-
-def corrective[T](
-    recipe: Callable[[T], SessionFactory],
-) -> Callable[[T], SessionFactory]:
-    """Give each opened session corrective structured-output reprompts.
-
-    Every resolver turn ends in a typed submission; a model that answers in
-    prose instead of calling the submission tool would otherwise fail the
-    whole run on its first miss.
-    """
-
-    def factory(argument: T) -> SessionFactory:
-        return DecoratingSessionFactory(
-            recipe(argument), correction=CorrectionConfig(cycles=2)
-        )
-
-    return factory
 
 
 APPROVE = "approve"
 DEFER = "defer"
-
-ASK_PREAMBLE = (
-    "When a decision is not yours to make, ask through the resolver's question "
-    "tools — queue_questions, await_answers, ask_questions — rather than "
-    "guessing or ending your turn to report it. " + WAIT_CONTRACT
-)
 
 
 class ApprovalDecisions(BaseModel):
@@ -117,6 +82,15 @@ class ApprovalDecisions(BaseModel):
 
     directly_approved: list[str]
     eligible: list[str]
+
+
+class EvidenceCitation(BaseModel):
+    """One concern's evidence, named in the fields the concern carries."""
+
+    model_config = ConfigDict(frozen=True)
+
+    notes: list[ReviewNote]
+    evidence: str
 
 
 def resolver_config_digest(config: ResolverConfig) -> str:
@@ -140,11 +114,11 @@ INVENTORY_PLAN_ATTEMPTS = 3
 
 
 def coverage_complaint(referenced: list[int], total: int) -> str | None:
-    """Name the notes a plan ignored and the evidence it invented.
+    """Name the evidence a plan ignored and the evidence it invented.
 
     A note is not a unit of work: one can raise several concerns and several
-    can raise one, so concerns reference notes rather than partitioning them.
-    What still cannot happen is a note no concern claims, because that note
+    can raise one, so concerns reference evidence rather than partitioning
+    it. What still cannot happen is evidence no concern claims, because it
     goes unresolved with nothing to show for it.
     """
     faults = [
@@ -153,6 +127,29 @@ def coverage_complaint(referenced: list[int], total: int) -> str | None:
     ]
     named = [f"{label}: {sorted(indexes)}" for label, indexes in faults if indexes]
     return "; ".join(named) if named else None
+
+
+def planned_evidence(request: ResolveRequest, indexes: list[int]) -> EvidenceCitation:
+    """Split one plan's positional references back into what it cites.
+
+    Positions below the note count name notes; the rest continue into the
+    statements, so a planner references either kind the same way and the
+    materialized concern still carries each in the form it came in.
+    """
+    return EvidenceCitation(
+        notes=[
+            ReviewNote.model_validate(
+                request.notes[index].model_dump(exclude={"context"})
+            )
+            for index in indexes
+            if index < len(request.notes)
+        ],
+        evidence="\n".join(
+            request.statements[index - len(request.notes)]
+            for index in indexes
+            if index >= len(request.notes)
+        ),
+    )
 
 
 def merge_parked(parked: list[ResolverAwaitingAnswers]) -> ResolverAwaitingAnswers:
@@ -212,7 +209,16 @@ def approval_decisions(
 
 
 class ResolverCore:
-    """Own all resolver phases while composing only portable capabilities."""
+    """Drive one run through its phases, composing who does each of them.
+
+    What stays here is the sequence and the boundaries: plan an inventory,
+    put its gates to a human, lease a writable root per approved concern,
+    walk the dependency graph, assemble the review branch, and free what the
+    run held. Everything a phase does inside those boundaries belongs to a
+    collaborator that can be reached without reaching this class — the run's
+    state, the question desk, the turn runner, the joiner, the verifier, and
+    the per-concern executor.
+    """
 
     def __init__(
         self,
@@ -229,10 +235,6 @@ class ResolverCore:
     ) -> None:
         self.config = config
         self.spec = spec
-        self.worker_factory = corrective(worker_factory)
-        self.reviewer_factory = corrective(reviewer_factory)
-        self.invocation_renderer = invocation_renderer
-        self.process_launcher = process_launcher
         self.answer_wait_seconds = answer_wait_seconds
         self.poll_interval_seconds = poll_interval_seconds
         self.observer = observer
@@ -242,78 +244,168 @@ class ResolverCore:
             process_launcher, config.workspace, worktree_preparer
         )
         self.mailbox = QuestionMailbox(self.repository.root)
-        self.wake = asyncio.Event()
-        self.state_lock = asyncio.Lock()
-        self.state: ResolveState | None = None
+        self.journal = Journal(self.repository.root)
+        self.actors = ActorSessions(self.repository.root, self.journal, self.mailbox)
+        self.run_state = ResolveRun(self.repository, self.journal, observer)
+        self.questions = QuestionBroker(
+            config,
+            self.run_state,
+            self.mailbox,
+            self.journal,
+            answer_wait_seconds,
+            poll_interval_seconds,
+        )
+        self.turns = TurnRunner(
+            spec,
+            self.run_state,
+            self.actors,
+            self.mailbox,
+            worker_factory,
+            reviewer_factory,
+            invocation_renderer,
+        )
+        self.verifier = Verifier(config.verification_commands, process_launcher)
+        self.joiner = Joiner(
+            self.run_state,
+            self.turns,
+            self.questions,
+            self.verifier,
+            self.worktrees,
+            self.journal,
+        )
+        self.executor = ConcernExecutor(
+            config,
+            self.run_state,
+            self.turns,
+            self.questions,
+            self.joiner,
+            self.verifier,
+            self.worktrees,
+            self.leases,
+            self.repository,
+            self.journal,
+        )
 
-    async def run(self, source: ResolverInput) -> ResolveManifest:
+    @property
+    def state(self) -> ResolveState | None:
+        """The live state, held by the run every phase shares."""
+        return self.run_state.state
+
+    @state.setter
+    def state(self, value: ResolveState | None) -> None:
+        self.run_state.state = value
+
+    @property
+    def state_lock(self) -> asyncio.Lock:
+        """The lock every writer of that state takes."""
+        return self.run_state.lock
+
+    @property
+    def wake(self) -> asyncio.Event:
+        """Set whenever recorded answers change, to end a poll early."""
+        return self.run_state.wake
+
+    def require_state(self) -> ResolveState:
+        return self.run_state.require()
+
+    def persist(self, state: ResolveState) -> None:
+        """Persist while keeping the phase a monotonic high-water mark."""
+        self.run_state.persist(state)
+
+    async def run(self, source: ResolverSource) -> ResolveManifest:
         """Run through final review and stop at the human acceptance boundary."""
         with self.repository.exclusive():
-            inventory = (
-                await self.plan_inventory(source)
-                if isinstance(source, ResolveRequest)
-                else source
-            )
+            inventory = await source.inventory(self.plan_inventory)
             return await self.run_exclusive(inventory)
 
-    async def plan_inventory(self, request: ResolveRequest) -> ResolveInventory:
+    async def plan_inventory(
+        self,
+        request: ResolveRequest,
+        origin: ConcernOrigin = ConcernOrigin.INVENTORY,
+        taken: list[str] | None = None,
+    ) -> ResolveInventory:
         """Organize raw review evidence into concerns in a read-only turn.
 
         A rejected partition is fed back to the planner by name rather than
         ending the run: intake is the point where the least work is persisted
-        and the most would be lost.
+        and the most would be lost. ``taken`` names the ids a live run has
+        already recorded, so evidence planned into a run that is already
+        moving cannot collide with the concerns it joins.
         """
+        reserved = (
+            "\nThese ids already name a concern in this run and may not be "
+            "reused; depend on one by id instead: " + ", ".join(taken)
+            if taken
+            else ""
+        )
         prompt = (
-            "Organize every review note into generalized implementation concerns "
-            "without editing. Cluster by underlying issue, not file. Reference "
-            "notes through note_indexes using each note's zero-based position in "
-            "the evidence below. A note is not a unit of work: split one that "
+            "Organize every piece of review evidence into generalized "
+            "implementation concerns without editing. Cluster by underlying "
+            "issue, not file. Reference evidence through evidence_indexes using "
+            "its zero-based position in the evidence below — notes first, then "
+            "statements. A note is not a unit of work: split one that "
             "raises several issues across several concerns, and reference it "
             "from each. Every index must appear at least once; none may repeat "
             "within a single concern. Give each concern path-safe id, complete acceptance "
-            "criteria, dependencies, material questions, and starting files. Declare "
+            "criteria, dependencies, material questions, and starting files. Every "
+            "concern's criteria must scope analysis and action together — never "
+            "plan one concern to audit and a second to act on what it found. That "
+            "splits one piece of work across two leases that cannot see each "
+            "other, and the auditing half finds real violations it is forbidden "
+            "to fix. Declare "
             "an allowance only when the plan cannot be carried out without the gate "
-            "it names, so approving the concern approves what it actually needs. Do "
+            "it names, so approving the concern approves what it actually needs. A "
+            "question offering an option that would need a gate names it on the "
+            "question too, and the concern must request it — an option the concern "
+            "cannot be granted is one to omit, not one to disclaim in its text. A "
+            "concern's own notes are stripped from its lease before the worker "
+            "starts, so never write a criterion demanding an in-place marker "
+            "conversion: the worker finishes by writing `# lup: solved: <the "
+            "note's original words>` fresh at the site, and the "
+            "do-not-reintroduce rule governs open feedback only. Do "
             "not decide eligibility or integration approval; the resolver asks the "
-            "user."
+            f"user.{reserved}"
             f"\n\nReview evidence:\n{request.model_dump_json(indent=2)}"
         )
-        correction = ""
+        planner = self.turns.reviewer_session(
+            ActorRef(kind="planner", id=self.config.run_id), self.config.workspace
+        )
+        # A retry is a second turn on the planner's own session, so the
+        # correction is the whole input: it already holds the evidence and the
+        # partition it just proposed, and restating both would invite it to
+        # re-derive from scratch what it should be revising.
+        attempt = prompt
         complaint: str | None = None
         for _ in range(INVENTORY_PLAN_ATTEMPTS):
-            result = await query(
-                self.reviewer_factory(self.config.workspace),
-                turn_request(TurnInput(text=prompt + correction), ConcernInventory),
+            result = await planner.turn(
+                turn_request(TurnInput(text=attempt), ConcernInventory)
             )
             referenced = [
                 index
                 for planned in result.output.concerns
-                for index in planned.note_indexes
+                for index in planned.evidence_indexes
             ]
-            complaint = coverage_complaint(referenced, len(request.notes))
+            complaint = coverage_complaint(referenced, request.evidence_count())
             if complaint is None:
                 break
-            correction = (
-                f"\n\nA previous attempt left review evidence unaccounted for — "
-                f"{complaint}. Every index from 0 to {len(request.notes) - 1} must "
-                "be referenced by at least one concern."
+            attempt = (
+                f"That partition left review evidence unaccounted for — "
+                f"{complaint}. Every index from 0 to "
+                f"{request.evidence_count() - 1} must be referenced by at least "
+                "one concern. Revise and resubmit."
             )
         else:
             raise ResolverInvariantError(
-                "inventory planner left review notes unaccounted for across "
+                "inventory planner left review evidence unaccounted for across "
                 f"{INVENTORY_PLAN_ATTEMPTS} attempts — {complaint}"
             )
         concerns = [
             Concern(
-                notes=[
-                    ReviewNote.model_validate(
-                        request.notes[index].model_dump(exclude={"context"})
-                    )
-                    for index in planned.note_indexes
-                ],
+                **planned_evidence(request, planned.evidence_indexes).model_dump(),
+                origin=origin,
                 eligible=True,
                 integration_approved=True,
-                **planned.model_dump(exclude={"note_indexes"}),
+                **planned.model_dump(exclude={"evidence_indexes"}),
             )
             for planned in result.output.concerns
         ]
@@ -358,13 +450,29 @@ class ResolverCore:
             )
         state = self.repository.load()
         self.state = state
-        if (
-            state.run_id != self.config.run_id
-            or state.spec != self.spec
-            or state.config_digest != resolver_config_digest(self.config)
-        ):
+        moved = [
+            name
+            for name, persisted, current in (
+                ("run id", state.run_id, self.config.run_id),
+                ("specification", state.spec, self.spec),
+                (
+                    "configuration",
+                    state.config_digest,
+                    resolver_config_digest(self.config),
+                ),
+            )
+            if persisted != current
+        ]
+        if moved:
+            # Naming neither what moved nor the way out left one recovery to
+            # guess at, and the run holding the most answers is the one that
+            # hits this: parking exposes a defect, and fixing the defect is
+            # what moves the configuration under the parked run.
             raise ResolverInvariantError(
-                "persisted resolver identity or specification does not match"
+                f"resolver run {state.run_id!r} was persisted under a different "
+                + " and ".join(moved)
+                + "; resume it from the same tree and gate, or abort it with "
+                "--abort <reason> to start a run that matches"
             )
         if state.phase == ResolvePhase.ABORTED:
             raise ResolverInvariantError(
@@ -373,10 +481,6 @@ class ResolverCore:
         if state.phase == ResolvePhase.COMPLETE:
             self.state = state
             return self.manifest(state)
-        if state.phase == ResolvePhase.ACCEPTANCE:
-            self.state = state
-            async with self.promoting():
-                return self.manifest(await self.settle_acceptance())
         if state.phase == ResolvePhase.FAILED:
             if state.resume_from is None:
                 raise ResolverInvariantError(
@@ -411,54 +515,62 @@ class ResolverCore:
 
         Waiting reads ``answers/``, and only a promoter writes there, so any
         wait that runs without this is a wait no door can satisfy.
+
+        Every actor's session is released here too. A park is an exit like
+        any other: the session ids are persisted on the way out, so resuming
+        reattaches to the conversations rather than starting new ones.
         """
         self.mailbox.clear_park()
         stop = asyncio.Event()
-        promoter = asyncio.create_task(self.promote_until(stop))
+        promoter = asyncio.create_task(self.questions.promote_until(stop))
         try:
             yield
         finally:
             stop.set()
             await promoter
+            await self.actors.close()
 
     async def advance_exclusive(self, state: ResolveState) -> ResolveManifest:
-        """Advance while a promoter is folding every door's answers in."""
-        if state.questions is None:
-            initial_questions = QuestionBatch(
-                run_id=state.run_id,
-                questions=[
-                    question
-                    for concern in state.concerns
-                    for question in concern.questions
-                ]
-                + [
-                    approval_question(concern)
-                    for concern in state.concerns
-                    if concern.eligible and concern.integration_approved
-                ],
-            )
-            self.queue_questions(initial_questions.questions, "planning")
+        """Advance while a promoter is folding every door's answers in.
+
+        Each stage asks what the current concern set still needs rather than
+        whether the stage has run before, so a concern admitted after the run
+        started reaches the same gates as one from intake instead of skipping
+        the stages its siblings already passed.
+        """
+        asked = {
+            question.id
+            for question in (state.questions.questions if state.questions else [])
+        }
+        unasked = [
+            question
+            for question in self.pending_questions(state.concerns)
+            if question.id not in asked
+        ]
+        if state.questions is None or unasked:
+            self.questions.queue_questions(unasked, "planning")
             state = state.model_copy(
                 update={
                     "phase": ResolvePhase.QUESTIONS,
-                    "questions": initial_questions,
+                    "questions": QuestionBatch(
+                        run_id=state.run_id,
+                        questions=[
+                            *(state.questions.questions if state.questions else []),
+                            *unasked,
+                        ],
+                    ),
                 }
             )
-            state = self.progress_state(
+            state = self.run_state.progress_state(
                 state,
-                [
-                    concern.id
-                    for concern in state.concerns
-                    if concern.questions
-                    or (concern.eligible and concern.integration_approved)
-                ],
+                [question.concern_id for question in unasked],
                 ConcernStatus.WAITING_FOR_ANSWERS,
             )
             self.persist(state)
         questions = state.questions
         if questions is None:
             raise ResolverInvariantError("question phase has no persisted batch")
-        await self.await_questions(questions.questions)
+        await self.questions.await_questions(questions.questions)
         state = self.require_state()
 
         answers = state.answers
@@ -469,7 +581,9 @@ class ResolverCore:
         approved_ids = decisions.eligible
         graph = ConcernGraph(state.concerns)
         approved = [concern for concern in state.concerns if concern.id in approved_ids]
-        if not state.eligibility:
+        settled = {item.concern_id for item in state.eligibility}
+        undecided = [concern for concern in state.concerns if concern.id not in settled]
+        if undecided:
             eligibility = [
                 ConcernEligibility(
                     concern_id=concern.id,
@@ -485,20 +599,20 @@ class ResolverCore:
                         )
                     ),
                 )
-                for concern in state.concerns
+                for concern in undecided
             ]
             state = state.model_copy(
                 update={
                     "phase": ResolvePhase.ELIGIBILITY,
-                    "eligibility": eligibility,
+                    "eligibility": [*state.eligibility, *eligibility],
                 }
             )
-            state = self.progress_state(
+            state = self.run_state.progress_state(
                 state,
                 [item.concern_id for item in eligibility if item.eligible],
                 ConcernStatus.ELIGIBLE,
             )
-            state = self.progress_state(
+            state = self.run_state.progress_state(
                 state,
                 [item.concern_id for item in eligibility if not item.eligible],
                 ConcernStatus.INELIGIBLE,
@@ -519,19 +633,24 @@ class ResolverCore:
             for lease in state.leases
             if lease.concern_id != "integration"
         }
-        if not lease_by_concern:
-            for concern in approved:
-                branch = f"resolve/{self.config.run_id}/{concern.id}"
-                lease_by_concern[concern.id] = self.leases.acquire(concern.id, branch)
+        unleased = [
+            concern for concern in approved if concern.id not in lease_by_concern
+        ]
+        if unleased:
+            fresh = [
+                self.leases.acquire(concern.id, self.concern_branch(concern.id))
+                for concern in unleased
+            ]
+            lease_by_concern.update({lease.concern_id: lease for lease in fresh})
             state = state.model_copy(
                 update={
                     "phase": ResolvePhase.LEASES,
-                    "leases": list(lease_by_concern.values()),
+                    "leases": [*state.leases, *fresh],
                 }
             )
-            state = self.progress_state(
+            state = self.run_state.progress_state(
                 state,
-                [concern.id for concern in approved],
+                [concern.id for concern in unleased],
                 ConcernStatus.LEASED,
             )
             self.persist(state)
@@ -572,7 +691,7 @@ class ResolverCore:
                     completed_ids.add(blocked.id)
                 results = await asyncio.gather(
                     *[
-                        self.execute_concern(
+                        self.executor.execute_concern(
                             concern,
                             lease_by_concern[concern.id],
                             commits,
@@ -582,11 +701,13 @@ class ResolverCore:
                     ],
                     return_exceptions=True,
                 )
-                executions = [
-                    result for result in results if isinstance(result, ConcernExecution)
-                ]
                 failures = [
                     result for result in results if isinstance(result, BaseException)
+                ]
+                executions = [
+                    result
+                    for result in results
+                    if not isinstance(result, BaseException)
                 ]
                 for execution in executions:
                     outcomes.append(execution.outcome)
@@ -605,7 +726,7 @@ class ResolverCore:
                         "outcomes": outcomes,
                     }
                 )
-                state = self.progress_state(
+                state = self.run_state.progress_state(
                     state,
                     [blocked.id for blocked in selected if blocked not in runnable],
                     ConcernStatus.FAILED,
@@ -638,17 +759,18 @@ class ResolverCore:
             state = state.model_copy(update={"phase": ResolvePhase.REVIEW})
             self.persist(state)
             state = await self.integrate(state, outcomes)
-        elif state.final_review is None:
+        elif state.integration is None or not state.integration.completed:
+            # A resumed run re-enters integration until the record says it
+            # finished. `completed` is written once verification passes, which
+            # is the last mechanical fact the run produces — the judgement on
+            # top of it belongs to whoever opens the journal afterwards.
             state = await self.integrate(state, outcomes)
-        if state.phase is ResolvePhase.ACCEPTANCE and state.accepted is None:
-            state = await self.settle_acceptance()
-        return self.manifest(state)
+        self.land_nested(state)
+        return self.manifest(self.release(state))
 
     def restore_leases(self, state: ResolveState) -> None:
         """Validate persisted authority and reset incomplete attempts for retry."""
-        self.leases.leases = {
-            lease.concern_id: lease for lease in state.leases if lease.active
-        }
+        self.leases.adopt(state.leases)
         outcomes = {outcome.concern_id: outcome for outcome in state.outcomes}
         bases = {base.concern_id: base for base in state.bases}
         concerns = {concern.id: concern for concern in state.concerns}
@@ -659,48 +781,24 @@ class ResolverCore:
         }
         for lease in self.leases.leases.values():
             if lease.concern_id == "integration":
-                # lup: defer[when the resolver review loop is next revised]: an
-                # integration that has not finished has no `IntegrationRecord`
-                # — it is written only once `join_commits` returns — so this
-                # falls to the source commit and `restore_worktree` hard-resets
-                # the worktree, discarding every join already completed. A run
-                # that parks partway through integration therefore redoes all
-                # of them on each resume, re-running a merge turn per parent and
-                # re-deriving the same conflicts. Observed: six joins built and
-                # thrown away, and the same semantic question re-asked under a
-                # fresh id because the whole integration restarted beneath it,
-                # so the human answered it twice. Record join progress as it is
-                # made, and resume from the last completed join rather than from
-                # the source commit. The reset below now preserves committed
-                # joins, but the deeper shape is still wrong: `IntegrationRecord`
-                # carries one `commit` that means "all joins done, verification
-                # pending", so there is nowhere to record "joined 6 of 12".
-                # Persisting that record mid-join would make `integrate` skip
-                # the join block entirely and verify a half-merged tree — worse
-                # than replaying. Give join progress its own field so a resume
-                # can start at the next unjoined parent instead of re-running a
-                # merge turn for every parent already in HEAD.
+                # Three states, and each names the commit it expects rather
+                # than accepting whatever HEAD happens to hold. A finished
+                # integration expects its record; a partway one expects the
+                # last join it recorded, so the joins already built survive
+                # and only the interrupted merge and its index are discarded;
+                # one that never started expects the source commit.
                 if (
                     state.integration is not None
                     and state.integration.commit is not None
                 ):
                     recorded = True
                     expected = state.integration.commit
+                elif state.join_progress is not None:
+                    recorded = True
+                    expected = state.join_progress.commit
                 else:
-                    # Joins already committed are progress, not a failed
-                    # attempt. `reset` exists to discard an uncommitted attempt,
-                    # and resetting to the worktree's own HEAD does exactly
-                    # that: a half-finished merge and its index go, every
-                    # completed join stays. Naming the source commit here
-                    # discarded all of them on every resume, so a run that
-                    # parked mid-integration replayed every join and re-derived
-                    # the same questions under fresh ids.
                     recorded = False
-                    expected = (
-                        self.worktrees.head(lease)
-                        if lease.root.exists()
-                        else state.source.commit
-                    )
+                    expected = state.source.commit
                 self.restore_worktree(lease, expected, recorded)
                 continue
             outcome = (
@@ -723,19 +821,6 @@ class ResolverCore:
             if not lease.root.exists() and not self.worktrees.branch_exists(lease):
                 self.restore_concern_progress(lease.concern_id)
                 continue
-            # lup: defer[when the resolver review loop is next revised]: a
-            # concern with no outcome yet has not finished a round, which is
-            # exactly the state a worker parks in when it asks a question — so
-            # every park discards that turn's entire work and the concern
-            # re-runs from a clean base. That is coherent as retry semantics,
-            # since the rerun has the answer in hand, but it prices asking at
-            # one wasted turn per question while the guidance tells workers to
-            # ask the moment a decision is not theirs. Nothing reports the cost,
-            # and a rerun re-derives its question under a new id that no
-            # recorded answer matches, so the same decision can be answered
-            # repeatedly — observed four times for one question in a single run.
-            # Decide deliberately whether a park should preserve the attempt or
-            # keep discarding it, and either way surface what it costs.
             self.restore_worktree(lease, expected, False)
             self.restore_concern_progress(lease.concern_id)
 
@@ -749,33 +834,19 @@ class ResolverCore:
             else:
                 self.worktrees.create(lease, expected)
         self.worktrees.branch(lease)
-        # lup: defer[when the resolver review loop is next revised]: this
-        # invariant bricks a run whose concern failed. The caller passes
-        # `outcome.commit or expected`, and a concern that never verified has
-        # no commit, so `expected` falls back to the run's source commit — but
-        # the orchestrator has already moved that worktree's HEAD with its own
-        # `resolve: clear review notes` commit. Every later resume then raises,
-        # naming an invariant the resolver itself violated, and no CLI
-        # operation repairs it. Observed on docs-set-restructure: HEAD sat at
-        # the note-clearing commit while expected was the source commit, so the
-        # whole run could not resume until the worktree was reset by hand. A
-        # failed concern's restore should expect whatever HEAD its own recorded
-        # commits left, or record that commit when it clears notes.
         if terminal:
             if self.worktrees.head(lease) != expected:
                 raise ResolverInvariantError(
                     f"persisted commit changed for {lease.concern_id}"
                 )
             return
-        # A merge left open is not an abandoned attempt: it is the join a turn
-        # was resolving when the run parked to ask about it, and the resolution
-        # lives in the working tree the reset would wipe. Preparing the same
-        # join is idempotent, so leaving this alone is what lets an answered
-        # question resume the work it interrupted rather than recreate the
-        # conflict it was asked about.
-        if self.worktrees.merging(lease) is not None:
-            return
-        self.worktrees.reset(lease, expected)
+        # A park is a pause, not an abandonment. What sits in the working tree
+        # is the turn a question interrupted — the join being resolved, or the
+        # edits a worker made before it found the decision it could not take —
+        # and the actor's session is reattached still holding it. Discarding it
+        # priced every question at a wasted turn, and the rerun re-derived that
+        # question under an id no recorded answer matched, so the same decision
+        # was put to the human as many as four times in one run.
 
     def restore_concern_progress(self, concern_id: str) -> None:
         """Return one interrupted concern to its leased retry boundary."""
@@ -786,11 +857,11 @@ class ResolverCore:
         if current == ConcernStatus.LEASED:
             return
         if current != ConcernStatus.ELIGIBLE:
-            state = self.progress_state(
+            state = self.run_state.progress_state(
                 state, [concern_id], ConcernStatus.ELIGIBLE, "retry after interruption"
             )
             self.persist(state)
-        state = self.progress_state(
+        state = self.run_state.progress_state(
             state, [concern_id], ConcernStatus.LEASED, "retry lease restored"
         )
         self.persist(state)
@@ -801,6 +872,8 @@ class ResolverCore:
         resume_from = (
             state.resume_from if state.phase == ResolvePhase.FAILED else state.phase
         )
+        for message in failure_messages(error):
+            self.journal.record(RunFailedEvent(reason=message))
         self.persist(
             state.model_copy(
                 update={
@@ -811,479 +884,40 @@ class ResolverCore:
             )
         )
 
-    async def execute_concern(
-        self,
-        concern: Concern,
-        lease: WritableRootLease,
-        commits: dict[str, str],  # lup: ignore[dict-str-payload] — concern-id index
-        builder: DependencyBaseBuilder,
-    ) -> ConcernExecution:
-        """Execute one concern while persisting a terminal failure on exceptions."""
-        try:
-            return await self.execute_concern_inner(concern, lease, commits, builder)
-        except ResolverAwaitingAnswers:
-            await self.transition_concern(
-                concern.id,
-                ConcernStatus.WAITING_FOR_ANSWERS,
-                "parked on material questions",
-            )
-            raise
-        except Exception as error:
-            await self.transition_concern(concern.id, ConcernStatus.FAILED, str(error))
-            raise
+    async def admit_concern(self, concern: Concern) -> None:
+        """Take a concern discovered mid-run into the run that discovered it.
 
-    async def execute_concern_inner(
-        self,
-        concern: Concern,
-        lease: WritableRootLease,
-        commits: dict[str, str],  # lup: ignore[dict-str-payload] — concern-id index
-        builder: DependencyBaseBuilder,
-    ) -> ConcernExecution:
-        """Build dependencies, run bounded revisions, and verify one concern."""
-        parent_commits = [commits[parent] for parent in concern.dependencies]
-        if len(parent_commits) > 1:
-            joined = await self.join_commits(
-                lease,
-                parent_commits,
-                f"dependency base for {concern.id}",
-                f"resolve: join dependencies for {concern.title}",
-            )
-            base = builder.build(concern, commits, joined_commit=joined)
-            await self.record_dependency_base(base)
-        else:
-            base = builder.build(concern, commits)
-            await self.record_dependency_base(base)
-            if not lease.root.exists():
-                self.worktrees.create(lease, base.commit)
-
-        cleared = self.worktrees.clear_notes(lease, concern, base.commit)
-        answers = self.answers_for(concern.id)
-        assignment = WorkAssignment(
-            run_id=self.config.run_id,
-            concern=concern,
-            lease=lease,
-            dependency_base=base,
-            rendered_skill_invocation=self.invocation_renderer.render(
-                self.spec.worker_skill
-            ),
-            answers=answers,
-        )
-        rounds: list[AgentRound] = []  # lup: ignore[empty-collection]
-        current_base = cleared.commit
-        feedback = ""
-        maximum_round = self.config.max_revision_rounds + 1
-        for round_number in range(1, maximum_round + 1):
-            await self.transition_concern(concern.id, ConcernStatus.RUNNING)
-            worker = await self.worker_turn(assignment, feedback)
-            outstanding = await self.unanswered_for(concern.id)
-            if outstanding:
-                raise ResolverAwaitingAnswers(outstanding, [])
-            await self.transition_concern(concern.id, ConcernStatus.VALIDATING)
-            diff = self.worktrees.validate_and_commit(
-                concern, worker, lease, current_base, self.leases
-            )
-            if not diff.valid or diff.commit is None:
-                review = ReviewReport(
-                    concern_id=concern.id,
-                    accepted=False,
-                    generalized=False,
-                    reason=diff.reason,
-                )
-            else:
-                await self.transition_concern(concern.id, ConcernStatus.REVIEWING)
-                review = await self.review_turn(
-                    concern, worker, diff.commit, lease.root
-                )
-                expected_criteria = {criterion.id for criterion in concern.criteria}
-                if (
-                    review.accepted
-                    and set(  # lup: ignore[set-shape] — identity comparison
-                        review.criteria_met
-                    )
-                    != expected_criteria
-                ):
-                    review = review.model_copy(
-                        update={
-                            "accepted": False,
-                            "reason": "review omitted persisted acceptance criteria",
-                        }
-                    )
-            rounds.append(
-                AgentRound(
-                    concern_id=concern.id,
-                    round=round_number,
-                    worker=worker,
-                    diff=diff,
-                    review=review,
-                )
-            )
-            self.repository.write_round(rounds[-1])
-            if diff.commit is not None:
-                current_base = diff.commit
-            if review.accepted and diff.commit is not None:
-                await self.transition_concern(concern.id, ConcernStatus.VERIFIED)
-                return ConcernExecution(
-                    base=base,
-                    outcome=ConcernOutcome(
-                        concern_id=concern.id,
-                        branch=lease.branch,
-                        commit=diff.commit,
-                        verified=True,
-                        rounds=rounds,
-                        notes_cleared=cleared.clearance.cleared,
-                        notes_missing=cleared.clearance.missing,
-                    ),
-                )
-            await self.transition_concern(
-                concern.id, ConcernStatus.REVISING, review.reason
-            )
-            feedback = review.reason + "\n" + "\n".join(review.residual)
-        await self.transition_concern(
-            concern.id, ConcernStatus.FAILED, "revision limit exhausted"
-        )
-        return ConcernExecution(
-            base=base,
-            outcome=ConcernOutcome(
-                concern_id=concern.id,
-                branch=lease.branch,
-                commit=rounds[-1].diff.commit if rounds else None,
-                verified=False,
-                rounds=rounds,
-                failure="revision limit exhausted",
-                notes_cleared=cleared.clearance.cleared,
-                notes_missing=cleared.clearance.missing,
-            ),
-        )
-
-    async def worker_turn(
-        self, assignment: WorkAssignment, feedback: str
-    ) -> WorkerReport:
-        prompt = (
-            "Execute the portable worker skill below. You may edit only the assigned "
-            "writable root. Do not create branches or commits; the orchestrator owns "
-            "that authority. Resolve every acceptance criterion. Your concern's "
-            "review-note markers are already gone from this worktree — the "
-            "orchestrator removed them before you started, so the spec is the whole "
-            "of the feedback. Do not re-introduce a marker, and do not leave an "
-            "explanatory comment where one stood. Every `# lup:` marker still "
-            "present belongs to another concern or is parked work behind a wake "
-            "condition: leave it in place. If resolving your concern means deleting "
-            "or moving code that carries one, do so and name it in your summary.\n\n"
-            f"{ASK_PREAMBLE}\n\n"
-            f"{assignment.rendered_skill_invocation}\n\n"
-            f"Assignment:\n{assignment.model_dump_json(indent=2)}"
-        )
-        if feedback:
-            prompt += f"\n\nPersisted review feedback:\n{feedback}"
-        result = await query(
-            self.worker_factory(
-                WorkerContext(
-                    root=assignment.lease.root,
-                    concern_id=assignment.concern.id,
-                    allowances=assignment.concern.allowances,
-                )
-            ),
-            turn_request(TurnInput(text=prompt), WorkerReport),
-        )
-        if result.output.concern_id != assignment.concern.id:
-            raise ResolverInvariantError("worker returned a foreign concern id")
-        return result.output
-
-    async def join_commits(
-        self,
-        lease: WritableRootLease,
-        commits: list[str],
-        purpose: str,
-        title: str,
-    ) -> str:
-        """Join parents one at a time so every conflict reaches semantic review."""
-        if len(commits) < 2:
-            raise ValueError("a semantic join requires at least two commits")
-        if not lease.root.exists():
-            self.worktrees.create(lease, commits[0])
-        current = self.worktrees.head(lease)
-        for parent in commits[1:]:
-            # The loop carries no resumption point, so a resumed join re-enters
-            # at the first parent. One already contained in HEAD has nothing to
-            # merge, and a merge turn spent on it is not free: the session
-            # cannot tell "already joined" from "something upstream is wrong",
-            # so it reasonably asks rather than reporting success, and every
-            # such round costs a question and a resume. Skip what is already in.
-            if self.worktrees.already_joined(lease, parent):
-                continue
-            self.worktrees.prepare_join(lease, [current, parent])
-            merge = await self.merge_turn(
-                lease,
-                [current, parent],
-                self.invocation_renderer.render(self.spec.merge_skill),
-                purpose,
-            )
-            if not merge.completed or merge.unresolved_paths:
-                raise ResolverInvariantError(
-                    f"semantic join failed for {lease.concern_id}: {merge.summary}"
-                )
-            current = self.worktrees.commit_join(lease, title)
-        return current
-
-    async def review_turn(
-        self, concern: Concern, worker: WorkerReport, commit: str, worktree: Path
-    ) -> ReviewReport:
-        invocation = self.invocation_renderer.render(self.spec.review_skill)
-        prompt = (
-            "Independently review the committed concern against every persisted "
-            "acceptance criterion.\n\n"
-            f"{invocation}\n\nConcern:\n{concern.model_dump_json(indent=2)}\n\n"
-            f"Worker report:\n{worker.model_dump_json(indent=2)}\n\n"
-            f"Commit: {commit}"
-        )
-        result = await query(
-            self.reviewer_factory(worktree),
-            turn_request(TurnInput(text=prompt), ReviewReport),
-        )
-        if result.output.concern_id != concern.id:
-            raise ResolverInvariantError("reviewer returned a foreign concern id")
-        return result.output
-
-    # lup: defer[when the resolver review loop is next revised]: the join is the
-    # one place where N parallel concerns meet, and it is the least accountable
-    # step in the run. This turn is a fresh one-shot session whose entire input
-    # is a purpose string, a worktree path and two shas — it never sees the
-    # concern specs it is merging, their acceptance criteria, or the human's
-    # recorded answers, so it can read what changed but not which behaviour was
-    # a deliberate decision. `MergeReport` then cannot express what it did:
-    # `completed`, `summary`, `unresolved_paths` and nothing for what it kept
-    # from each side, dropped, or chose between, and nothing validates it
-    # against the diff the way `validate_and_commit` checks `WorkerReport`.
-    # `WorkerReport` is even FROZEN_STRICT for the stated reason that a retired
-    # field must fail loudly rather than vanish; this one is only FROZEN. The
-    # classic failure of parallel edits is one feature silently overriding
-    # another, and the pipeline would not report it — an observed conflict was
-    # confirmed correct only because a human audited it by hand. Three
-    # questions, not one answer: whether the merger should receive the concerns
-    # it is joining, whether its report should declare every semantic choice and
-    # be validated like a worker's, and whether a context-free one-shot is the
-    # right shape at all. The isolation may be deliberate, so weigh that before
-    # widening it. Weigh this too: observed, the merger's judgement was good and
-    # its bookkeeping was not. It caught a semantic conflict neither parent could
-    # see, cited the sibling precedent by line, measured the blast radius, ran
-    # the deletion audit, and declined to guess a classification that writes into
-    # a hand-maintained table — then left the file it had correctly resolved
-    # unstaged, twice, because this prompt told it not to. The shell policy
-    # allows `git add` (a reversible-local subcommand), and the /lup:merge skill
-    # tells it to stage; the prompt below said the orchestrator owns commit
-    # authority, and the agent read staging as part of that. Two instructions,
-    # opposite answers, and the agent obeyed the nearer one — which cost most of
-    # this run's integration failures. The prompt now separates staging from
-    # committing, but a contract this load-bearing should not live only in
-    # sentences: the report has no field for "I resolved but could not stage",
-    # so the orchestrator saw an unexplained incompletion each time.
-    # And because each join is a fresh session, a question it
-    # asks cannot be answered to the session that asked it: the answer lands
-    # after that turn ends, the next turn re-derives a differently-worded
-    # question under a different id, and the human answers the same thing twice.
-    # So the gap that cost real time here was continuity and mechanics, not
-    # context. The accountability question stands untouched regardless: nothing
-    # in the pipeline would have reported a silent override, and the one merge
-    # audited by hand was confirmed correct only because a human looked. `lup-devtools dev conflict audit` and the /lup:merge skill
-    # already carry deletion-audit guidance, but both are prompt-level, and the
-    # guidance itself says a prompt rule coexists with the failure it warns of.
-    def settled_merge_decisions(self, lease: WritableRootLease) -> str:
-        """Recite what earlier merge turns on this lease were already told.
-
-        Each join opens a fresh session, so an answer to a question one turn
-        asked arrives after that turn has ended and the next turn re-derives
-        the question under an id no recorded answer matches. Reciting the
-        settled ones is continuity, not context: it carries only what this
-        same role was told in this same run, and no concern's specification.
+        The worked example this exists for: an audit concern whose criteria
+        forbade it from moving code, with a second concern depending on it to
+        act — two concerns that should have been one, discovered only once
+        both were leased. Without admission the choice was to drop the
+        finding or restart the run and lose every answer already given.
         """
-        answered = {
-            record.answer.question_id: record.answer.value
-            for record in self.mailbox.answers()
-        }
-        settled = [
-            f"- Asked: {item.question.prompt.splitlines()[0]}\n  Settled: {value}"
-            for item in self.mailbox.questions()
-            if item.question.concern_id == lease.concern_id
-            for value in [answered[item.question.id]]
-            if item.question.id in answered
-        ]
-        if not settled:
-            return ""
-        return (
-            "Decisions already settled for this merge in this run — treat each "
-            "as binding and do not re-ask it, however you would have worded the "
-            "question:\n" + "\n".join(settled) + "\n\n"
-        )
-
-    async def merge_turn(
-        self,
-        lease: WritableRootLease,
-        commits: list[str],
-        invocation: str,
-        purpose: str,
-    ) -> MergeReport:
-        prompt = (
-            "Resolve the prepared semantic merge in the assigned worktree. Stage "
-            "every resolution with `git add` — settling the index is your work "
-            "and the merge cannot complete without it. Do not commit and do not "
-            "change branches; the orchestrator owns commit authority, which "
-            "covers committing only.\n\n"
-            + self.settled_merge_decisions(lease)
-            + f"{invocation}\n\nPurpose: {purpose}\nWorktree: {lease.root}\n"
-            + "Parent commits:\n"
-            + "\n".join(commits)
-        )
-        result = await query(
-            self.worker_factory(
-                WorkerContext(root=lease.root, concern_id=lease.concern_id)
-            ),
-            turn_request(TurnInput(text=prompt), MergeReport),
-        )
-        return result.output
-
-    async def unanswered_for(self, concern_id: str) -> list[MaterialQuestion]:
-        """Questions this concern asked that no door has answered yet.
-
-        A worker asks through its tools and waits there, so reaching this
-        point with anything outstanding means the tool returned ``parked``
-        and the worker submitted rather than guessing. Reading the mailbox
-        is what turns that into the run's existing park.
-        """
-        await self.apply_mailbox()
-        answered = self.mailbox.answered_ids()
-        return [
-            item.question
-            for item in self.mailbox.questions()
-            if item.question.concern_id == concern_id
-            and item.question.id not in answered
-        ]
-
-    def queue_questions(self, questions: list[MaterialQuestion], asked_by: str) -> None:
-        """Publish questions so any door can answer them."""
-        for question in questions:
-            self.mailbox.queue(
-                PendingQuestion(
-                    run_id=self.config.run_id,
-                    question=question,
-                    asked_by=asked_by,
-                    asked_at=utc_now(),
-                )
-            )
-
-    def promote_offers(self) -> list[str]:
-        """Promote what the doors offered, and report what could not count.
-
-        This is the only writer of recorded answers. A design question's
-        choices are the planner's suggestions, so an answer in the human's own
-        words is recorded as given; only the reserved integration gates close
-        their domain, and an offer outside one is a correctable problem rather
-        than a fatal one — a door is a form, not a trusted caller.
-        """
-        questions = {
-            item.question.id: item.question for item in self.mailbox.questions()
-        }
-        answered = self.mailbox.answered_ids()
-        fresh = [
-            offer
-            for offer in sorted(self.mailbox.offers(), key=lambda item: item.offered_at)
-            if offer.question_id in questions and offer.question_id not in answered
-        ]
-        valid = [
-            offer
-            for offer in fresh
-            if not questions[offer.question_id].closed_choices
-            or offer.value in questions[offer.question_id].choices
-        ]
-        for offer in valid:
-            self.mailbox.record(
-                RecordedAnswer(
-                    run_id=self.config.run_id,
-                    answer=QuestionAnswer(
-                        question_id=offer.question_id, value=offer.value
-                    ),
-                    door=offer.door,
-                    answered_at=utc_now(),
-                )
-            )
-        return [
-            f"{offer.question_id} was answered {offer.value!r}, but that gate "
-            "accepts only: " + ", ".join(questions[offer.question_id].choices)
-            for offer in fresh
-            if offer not in valid
-        ]
-
-    async def apply_mailbox(self) -> list[str]:
-        """Promote the doors' offers and fold the mailbox into persisted state."""
-        problems = self.promote_offers()
         async with self.state_lock:
             state = self.require_state()
-            questions = QuestionBatch(
-                run_id=state.run_id,
-                questions=[item.question for item in self.mailbox.questions()],
-            )
-            answers = AnswerBatch(
-                run_id=state.run_id,
-                answers=[record.answer for record in self.mailbox.answers()],
-            )
-            if state.questions != questions or state.answers != answers:
-                self.persist(
-                    state.model_copy(
-                        update={"questions": questions, "answers": answers}
-                    )
+            if any(item.id == concern.id for item in state.concerns):
+                raise ResolverInvariantError(
+                    f"concern {concern.id!r} is already in this run"
                 )
-        self.wake.set()
-        return problems
-
-    async def promote_until(self, stop: asyncio.Event) -> None:
-        """Keep promoting for the lifetime of one advance."""
-        while not stop.is_set():
-            await self.apply_mailbox()
-            try:
-                async with asyncio.timeout(self.poll_interval_seconds):
-                    await stop.wait()
-            except TimeoutError:
-                continue
-        await self.apply_mailbox()
-
-    async def await_questions(self, questions: list[MaterialQuestion]) -> AnswerBatch:
-        """Wait for every named question, or park the run on what is missing."""
-        if not questions:
-            return AnswerBatch(run_id=self.config.run_id, answers=[])
-        await self.apply_mailbox()
-        result = await wait_for_answers(
-            self.mailbox,
-            [question.id for question in questions],
-            wait_seconds=self.answer_wait_seconds,
-            poll_interval_seconds=self.poll_interval_seconds,
-            wake=self.wake,
-        )
-        problems = await self.apply_mailbox()
-        if result.unanswered:
-            raise ResolverAwaitingAnswers(
-                [
-                    question
-                    for question in questions
-                    if question.id in result.unanswered
-                ],
-                problems,
+            self.persist(
+                state.model_copy(
+                    update={
+                        "concerns": [*state.concerns, concern],
+                        "progress": [
+                            *state.progress,
+                            ConcernProgress(
+                                concern_id=concern.id,
+                                status=ConcernStatus.DISCOVERED,
+                                reason=(
+                                    f"admitted mid-run, superseding {concern.supersedes}"
+                                    if concern.supersedes
+                                    else "admitted mid-run"
+                                ),
+                            ),
+                        ],
+                    }
+                )
             )
-        return AnswerBatch(
-            run_id=self.config.run_id,
-            answers=[record.answer for record in result.answered],
-        )
-
-    def answers_for(self, concern_id: str) -> list[QuestionAnswer]:
-        state = self.require_state()
-        question_ids = {
-            question.id
-            for question in (state.questions.questions if state.questions else [])
-            if question.concern_id == concern_id
-        }
-        return [
-            answer
-            for answer in (state.answers.answers if state.answers else [])
-            if answer.question_id in question_ids
-        ]
 
     async def integrate(
         self, state: ResolveState, outcomes: list[ConcernOutcome]
@@ -1296,7 +930,7 @@ class ResolverCore:
             )
             if integration_lease is None:
                 integration_lease = self.leases.acquire(
-                    "integration", self.config.integration_branch
+                    "integration", self.integration_lease_branch()
                 )
                 leases = [*state.leases, integration_lease]
             else:
@@ -1304,7 +938,7 @@ class ResolverCore:
             state = state.model_copy(
                 update={"phase": ResolvePhase.INTEGRATION, "leases": leases}
             )
-            state = self.progress_state(
+            state = self.run_state.progress_state(
                 state,
                 [outcome.concern_id for outcome in verified],
                 ConcernStatus.INTEGRATING,
@@ -1317,7 +951,7 @@ class ResolverCore:
             ]
             if commits:
                 parents = [state.source.commit, *commits]
-                integration_commit = await self.join_commits(
+                integration_commit = await self.joiner.join_commits(
                     integration_lease,
                     parents,
                     "final review-master integration",
@@ -1333,9 +967,15 @@ class ResolverCore:
                 commit=integration_commit,
                 completed=False,
             )
-            state = state.model_copy(
+            # Re-read rather than updating the copy this scope has held since
+            # before the joins: `join_commits` persisted progress under it,
+            # and building from the stale local would drop what it recorded.
+            # The record supersedes that progress, so it is cleared with the
+            # same write that establishes it.
+            state = self.require_state().model_copy(
                 update={
                     "integration": integration,
+                    "join_progress": None,
                 }
             )
             self.persist(state)
@@ -1351,22 +991,7 @@ class ResolverCore:
                 ) from error
 
         if not integration.completed:
-            verification: list[VerificationRecord] = []  # lup: ignore[empty-collection]
-            for command in self.config.verification_commands:
-                status = self.process_launcher.launch(
-                    LaunchRequest(
-                        arguments=command.arguments,
-                        cwd=integration_lease.root,
-                    )
-                )
-                verification.append(
-                    VerificationRecord(
-                        name=command.name,
-                        arguments=command.arguments,
-                        passed=status.code == 0,
-                        exit_code=status.code,
-                    )
-                )
+            verification = self.verifier.verify(integration_lease.root)
             state = state.model_copy(
                 update={
                     "phase": ResolvePhase.VERIFICATION,
@@ -1379,6 +1004,7 @@ class ResolverCore:
                 raise ResolverInvariantError(
                     "integration verification failed: " + ", ".join(failed)
                 )
+            await self.joiner.recheck_criteria(state, integration)
             integrated_ids = {identifier: True for identifier in integration.concerns}
             integration = integration.model_copy(update={"completed": True})
             integrated_outcomes = [
@@ -1393,7 +1019,7 @@ class ResolverCore:
                     "integration": integration,
                 }
             )
-            state = self.progress_state(
+            state = self.run_state.progress_state(
                 state,
                 integration.concerns,
                 ConcernStatus.INTEGRATED,
@@ -1405,53 +1031,115 @@ class ResolverCore:
         if any(not record.passed for record in verification):
             raise ResolverInvariantError("persisted integration verification failed")
 
-        review_prompt = (
-            "Perform an independent final review of the dedicated review branch. "
-            "The user's source branch must remain untouched.\n\n"
-            f"{self.invocation_renderer.render(self.spec.review_skill)}\n\n"
-            f"Integration:\n{integration.model_dump_json(indent=2)}\n\n"
-            f"Verification:\n"
-            + "\n".join(record.model_dump_json() for record in verification)
-        )
-        reviewed = await query(
-            self.reviewer_factory(integration.worktree),
-            turn_request(TurnInput(text=review_prompt), FinalReview),
-        )
-        state = state.model_copy(
-            update={
-                "phase": ResolvePhase.ACCEPTANCE,
-                "final_review": reviewed.output,
-            }
-        )
-        self.persist(state)
         return state
 
-    async def settle_acceptance(self) -> ResolveState:
-        """Offer the review decision through the mailbox and apply any answer.
+    async def admit(self, request: AdmissionRequest) -> ConcernAdmission:
+        """Plan evidence found mid-run into the run that found it.
 
-        Acceptance is a reserved question, so the page, a CLI door, and
-        ``--accept``/``--reject`` are one form rather than three separate
-        paths into cleanup. A run whose decision has not arrived returns
-        unchanged, exactly as it did before there was a door to answer
-        through — the decision is a boundary, not a failure.
+        Restarting was the only way to widen a concern set, and it re-derived
+        the inventory from scratch — discarding every material answer already
+        collected at exactly the moment a run holds the most of them. Only the
+        new evidence is planned here; the run keeps its id, its answers, and
+        its completed work, so nothing already decided is decided again.
+
+        Admission stops at integration, because past it the review branch is
+        assembled and a concern joining would have to reopen it. Everything
+        earlier is fair game: the admitted concern enters at ``discovered``
+        and walks the same question, approval, eligibility, and lease path as
+        one from intake.
+
+        Nothing is written until the widened set holds: a writable root the
+        run already handed out refuses the admission, and so does a graph
+        that would not be a unique-id, present-dependency, acyclic one.
         """
-        question = acceptance_question()
-        self.queue_questions([question], ACCEPTANCE_CONCERN_ID)
-        await self.apply_mailbox()
-        result = await wait_for_answers(
-            self.mailbox,
-            [question.id],
-            wait_seconds=self.answer_wait_seconds,
-            poll_interval_seconds=self.poll_interval_seconds,
-            wake=self.wake,
-        )
-        await self.apply_mailbox()
-        if result.unanswered:
-            return self.require_state()
-        self.record_human_acceptance_exclusive(
-            result.answered[0].answer.value == ACCEPT
-        )
-        return self.require_state()
+        with self.repository.exclusive():
+            state = self.repository.load()
+            self.state = state
+            if state.phase in {ResolvePhase.ABORTED, ResolvePhase.COMPLETE}:
+                raise ResolverInvariantError(f"run is already {state.phase}")
+            reached = (
+                state.resume_from or state.phase
+                if state.phase is ResolvePhase.FAILED
+                else state.phase
+            )
+            if PHASE_ORDER[reached] >= PHASE_ORDER[ResolvePhase.INTEGRATION]:
+                raise ResolverInvariantError(
+                    f"run has reached {reached}; a concern may only join a run "
+                    "before its review branch is assembled"
+                )
+            planned = await self.plan_inventory(
+                ResolveRequest(
+                    source=state.source,
+                    notes=request.notes,
+                    statements=request.statements,
+                ),
+                origin=ConcernOrigin.ADMITTED,
+                taken=[concern.id for concern in state.concerns],
+            )
+            self.leases.adopt(state.leases)
+            for concern in planned.concerns:
+                self.leases.plan(concern.id, self.concern_branch(concern.id))
+            concerns = [*state.concerns, *planned.concerns]
+            ConcernGraph(concerns)
+            # An admitted concern's questions join the run's batch the way
+            # intake's do. Returning them without recording them left the
+            # concern admitted and unanswerable: no door could see a question
+            # that was never written, and the gate it names can never pass.
+            admitted = self.pending_questions(planned.concerns)
+            self.questions.queue_questions(admitted, "admission")
+            # An answer offered in the same invocation is offered before the
+            # question exists, so only promoting here can match the two. The
+            # run's own rerun recipe hands out `--answer` flags, which made
+            # combining them with `--admit` the obvious thing to try and
+            # silently discarded every one of them.
+            problems = self.questions.promote_offers()
+            widened = state.model_copy(
+                update={
+                    "concerns": concerns,
+                    "questions": QuestionBatch(
+                        run_id=state.run_id,
+                        questions=[
+                            *(state.questions.questions if state.questions else []),
+                            *admitted,
+                        ],
+                    ),
+                    "answers": AnswerBatch(
+                        run_id=state.run_id,
+                        answers=[record.answer for record in self.mailbox.answers()],
+                    ),
+                    "progress": [
+                        *state.progress,
+                        *[
+                            ConcernProgress(concern_id=concern.id)
+                            for concern in planned.concerns
+                        ],
+                    ],
+                }
+            )
+            self.persist(widened)
+            return ConcernAdmission(
+                run_id=state.run_id,
+                phase=self.require_state().phase,
+                concerns=planned.concerns,
+                questions=admitted,
+                outstanding=[
+                    question
+                    for question in admitted
+                    if question.id not in self.mailbox.answered_ids()
+                ],
+                rejected=problems,
+            )
+
+    def concern_branch(self, concern_id: str) -> str:
+        return f"resolve/{self.config.run_id}/{concern_id}"
+
+    def pending_questions(self, concerns: list[Concern]) -> list[MaterialQuestion]:
+        """Every gate these concerns must pass before any work begins."""
+        return [question for concern in concerns for question in concern.questions] + [
+            approval_question(concern)
+            for concern in concerns
+            if concern.eligible and concern.integration_approved
+        ]
 
     def abort(self, reason: str) -> ResolveManifest:
         """End a run from any phase, freeing its leases but keeping its evidence.
@@ -1475,7 +1163,7 @@ class ResolverCore:
                     action="retained",
                     reason=f"review branch retained after abort: {reason}",
                 )
-                if lease.concern_id == ACCEPTANCE_CONCERN_ID
+                if lease.concern_id == INTEGRATION_CONCERN_ID
                 else self.abort_lease(lease)
                 for lease in state.leases
             ]
@@ -1496,29 +1184,79 @@ class ResolverCore:
 
     def abort_lease(self, lease: WritableRootLease) -> CleanupRecord:
         """Free one concern lease, reporting a dirty tree instead of forcing it."""
-        removed = self.worktrees.remove(lease)
+        removal = self.worktrees.remove(lease)
+        if not removal.freed:
+            return CleanupRecord(
+                path=lease.root,
+                branch=lease.branch,
+                action="retained",
+                reason=f"worktree not freed; remove manually: {removal.detail}",
+            )
         return CleanupRecord(
             path=lease.root,
             branch=lease.branch,
-            action="removed" if removed else "retained",
-            reason=(
-                "concern worktree freed by abort"
-                if removed
-                else "worktree holds uncommitted work; remove manually"
+            action="removed",
+            reason="; ".join(
+                part
+                for part in ["concern worktree freed by abort", removal.detail]
+                if part
             ),
         )
 
-    def record_human_acceptance(self, accepted: bool) -> ResolveManifest:
-        """Record cleanup/retention after the human decides on the review branch."""
-        with self.repository.exclusive():
-            return self.record_human_acceptance_exclusive(accepted)
+    def nested(self) -> bool:
+        """Whether this run integrates onto a branch already checked out."""
+        return (
+            self.worktrees.current_branch(self.config.workspace)
+            == self.config.integration_branch
+        )
 
-    def record_human_acceptance_exclusive(self, accepted: bool) -> ResolveManifest:
-        """Complete a run while holding its inter-process authority lease."""
-        state = self.repository.load()
-        self.state = state
-        if state.phase != ResolvePhase.ACCEPTANCE:
-            raise ResolverInvariantError("run is not awaiting human acceptance")
+    def integration_lease_branch(self) -> str:
+        """The branch the integration worktree owns.
+
+        A nested run cannot take the review branch directly, because git will
+        not add a second worktree for a branch that is already checked out.
+        It builds on a ref of its own and the standing worktree
+        fast-forwards to it at the end, which moves ref, index and working
+        tree in one step.
+        """
+        if self.nested():
+            return f"{self.config.integration_branch}-wip-{self.config.run_id}"
+        return self.config.integration_branch
+
+    def land_nested(self, state: ResolveState) -> None:
+        """Advance the launching worktree's review branch to what this run built."""
+        if not self.nested() or state.integration is None:
+            return
+        built = state.integration.commit
+        if built is None or self.worktrees.fast_forward(self.config.workspace, built):
+            return
+        self.journal.record(
+            RunFailedEvent(
+                reason=(
+                    f"{self.config.integration_branch} could not fast-forward to "
+                    f"{built[:12]}; it moved while this run was building on it. "
+                    "Merge it by hand."
+                )
+            )
+        )
+
+    def concern_failed(self, state: ResolveState, concern_id: str) -> bool:
+        return any(
+            item.concern_id == concern_id and item.status == ConcernStatus.FAILED
+            for item in state.progress
+        )
+
+    def release(self, state: ResolveState) -> ResolveState:
+        """Free the concern leases and hand the review branch over.
+
+        There was a human gate here, and it decided nothing. Accept and
+        reject both retained the integration lease, both removed every
+        concern lease, and differed only in a sentence recorded against the
+        cleanup — so the run stopped, spent a question, and used the answer
+        to choose wording. Per-concern control is the live stop-and-retarget
+        channel while the run moves, and the acceptance of the result is
+        whatever the human does with the branch afterwards.
+        """
         cleanup: list[CleanupRecord] = []  # lup: ignore[empty-collection]
         progress = state
         for lease in state.leases:
@@ -1528,36 +1266,40 @@ class ResolverCore:
                         path=lease.root,
                         branch=lease.branch,
                         action="retained",
-                        reason=(
-                            "review branch accepted for manual integration"
-                            if accepted
-                            else "review branch retained for revision or inspection"
-                        ),
+                        reason="review branch retained for the human to land",
                     )
                 )
                 continue
-            removed = self.worktrees.remove(lease)
-            progress = self.progress_state(
-                progress,
-                [lease.concern_id],
-                ConcernStatus.CLEANED if removed else ConcernStatus.RETAINED,
-            )
+            removal = self.worktrees.remove(lease)
+            # A concern that failed keeps saying so. Cleaning its worktree is
+            # housekeeping, and relabelling it CLEANED would erase the one
+            # thing the run is evidence of.
+            if not self.concern_failed(progress, lease.concern_id):
+                progress = self.run_state.progress_state(
+                    progress,
+                    [lease.concern_id],
+                    ConcernStatus.CLEANED if removal.freed else ConcernStatus.RETAINED,
+                )
             cleanup.append(
                 CleanupRecord(
                     path=lease.root,
                     branch=lease.branch,
-                    action="removed" if removed else "retained",
-                    reason=(
-                        "concern worktree cleaned after review"
-                        if removed
-                        else "automatic cleanup failed; remove manually"
+                    action="removed" if removal.freed else "retained",
+                    reason="; ".join(
+                        part
+                        for part in [
+                            "concern worktree cleaned after review"
+                            if removal.freed
+                            else "automatic cleanup failed; remove manually",
+                            removal.detail,
+                        ]
+                        if part
                     ),
                 )
             )
         completed = progress.model_copy(
             update={
                 "phase": ResolvePhase.CLEANUP,
-                "accepted": accepted,
                 "cleanup": cleanup,
                 "leases": [
                     lease.model_copy(update={"active": False}) for lease in state.leases
@@ -1567,96 +1309,7 @@ class ResolverCore:
         self.persist(completed)
         completed = completed.model_copy(update={"phase": ResolvePhase.COMPLETE})
         self.persist(completed)
-        return self.manifest(completed)
-
-    def persist(self, state: ResolveState) -> None:
-        """Persist while keeping the phase a monotonic high-water mark.
-
-        Resumed runs re-enter completed stages whose persisted evidence makes
-        them no-ops; the re-entered stage may not move the recorded phase
-        backward. Failure recording and explicit failed-state resumption are
-        the only non-forward moves and stay owned by ``save()``.
-        """
-        current = self.state
-        if (
-            current is not None
-            and ResolvePhase.FAILED not in {current.phase, state.phase}
-            and PHASE_ORDER[state.phase] < PHASE_ORDER[current.phase]
-        ):
-            state = state.model_copy(update={"phase": current.phase})
-        self.state = state
-        self.repository.save(state)
-        self.emit_transitions(current, state)
-
-    def emit_transitions(
-        self, previous: ResolveState | None, state: ResolveState
-    ) -> None:
-        """Report only durably saved phase and concern changes to the observer."""
-        if self.observer is None:
-            return
-        if previous is None or previous.phase != state.phase:
-            self.observer.phase_changed(state.phase)
-        before = (
-            {item.concern_id: item for item in previous.progress}
-            if previous is not None
-            else {}
-        )
-        for item in state.progress:
-            prior = before[item.concern_id] if item.concern_id in before else None
-            if prior != item:
-                self.observer.concern_changed(item)
-
-    def progress_state(
-        self,
-        state: ResolveState,
-        concern_ids: list[str],
-        status: ConcernStatus,
-        reason: str = "",
-    ) -> ResolveState:
-        """Return one state with the selected concern transitions applied."""
-        selected = dict.fromkeys(concern_ids)
-        return state.model_copy(
-            update={
-                "progress": [
-                    item.model_copy(update={"status": status, "reason": reason})
-                    if item.concern_id in selected
-                    else item
-                    for item in state.progress
-                ]
-            }
-        )
-
-    async def transition_concern(
-        self, concern_id: str, status: ConcernStatus, reason: str = ""
-    ) -> None:
-        """Persist one concern transition without losing parallel sibling updates."""
-        async with self.state_lock:
-            state = self.require_state()
-            self.persist(self.progress_state(state, [concern_id], status, reason))
-
-    async def record_dependency_base(self, base: DependencyBase) -> None:
-        """Persist one immutable dependency base before worker execution."""
-        async with self.state_lock:
-            state = self.require_state()
-            existing = next(
-                (
-                    candidate
-                    for candidate in state.bases
-                    if candidate.concern_id == base.concern_id
-                ),
-                None,
-            )
-            if existing is not None and existing != base:
-                raise ResolverInvariantError(
-                    f"dependency base changed for {base.concern_id}"
-                )
-            if existing is None:
-                self.persist(state.model_copy(update={"bases": [*state.bases, base]}))
-
-    def require_state(self) -> ResolveState:
-        if self.state is None:
-            raise ResolverInvariantError("resolver state is not initialized")
-        return self.state
+        return completed
 
     def manifest(self, state: ResolveState) -> ResolveManifest:
         return ResolveManifest(
@@ -1669,7 +1322,5 @@ class ResolverCore:
             ),
             outcomes=state.outcomes,
             verification=state.verification,
-            final_review=state.final_review,
-            accepted=state.accepted,
             cleanup=state.cleanup,
         )

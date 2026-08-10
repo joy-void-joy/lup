@@ -2,7 +2,8 @@
 
 import asyncio
 import json
-from collections.abc import AsyncGenerator, AsyncIterator, Mapping
+import logging
+from collections.abc import AsyncGenerator, AsyncIterator, Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from datetime import timedelta
@@ -22,18 +23,25 @@ from lup.runtime.contracts import (
     EventStream,
     ForkSession,
     Interrupt,
-    SessionFactory,
     TurnToolBinder,
 )
-from lup.runtime.errors import ProviderTurnError, TurnFailure
+from lup.runtime.errors import (
+    DeltaStreamingDisabled,
+    ProviderTurnError,
+    TurnError,
+    TurnFailure,
+    TurnInterruptedError,
+)
+from lup.runtime.factory import SessionFactory
 from lup.runtime.models import (
     BlockCompletedEvent,
     BlockDeltaEvent,
+    LiveTurnEvent,
+    MessageCompletedEvent,
     SessionHandle,
     SessionId,
-    SubmissionDecision,
     SubmissionGateResolver,
-    TurnBlock,
+    AnyTurnBlock,
     TurnIdentifiers,
     TurnId,
     TurnCompletedEvent,
@@ -42,7 +50,8 @@ from lup.runtime.models import (
     TurnMessage,
     TurnToolBinding,
 )
-from lup.runtime.output import submit_output
+from lup.runtime.transcript import fold_blocks, fold_transcript
+from lup.runtime.output import TurnSubmission, bound_submission
 from lup.types import (
     EnvVars,
     JsonObject,
@@ -50,6 +59,8 @@ from lup.types import (
     SubagentSpec,
     Usage,
 )
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     import claude_agent_sdk as claude
@@ -90,10 +101,22 @@ class ClaudeSessionConfig(BaseModel):
         | None
     ) = "bypassPermissions"
     max_turns: int | None = None
+    delta_streaming: bool = True
+    """Whether partial-message deltas are streamed, which gates `live()`."""
+
     max_thinking_tokens: int | None = SESSION_THINKING_TOKENS
     effort: Literal["low", "medium", "high", "xhigh", "max"] | None = None
     cwd: Path | None = None
     add_dirs: list[Path] = Field(default_factory=list)
+    plugin_dirs: list[Path] = Field(default_factory=list)
+    """Plugin directories this session loads, the way `--plugin-dir` does.
+
+    A session given none of these resolves plugins through the project
+    settings at `cwd` instead, and those name a marketplace by a key shared
+    across every checkout that declares it — so a session opened in one
+    worktree can be judged by a plugin generated from another's commit.
+    Naming the directory is what makes a session load the tree it is in.
+    """
     environment: EnvVars = Field(default_factory=dict)
     sandbox: ClaudeSandboxConfig | None = None
     hooks: LupHooksConfig | None = None
@@ -106,22 +129,51 @@ class ClaudeSessionConfig(BaseModel):
     )
 
 
+type SubmissionBindingSource = Callable[[], TurnSubmission | None]
+
+
+def turn_error(interrupt: "ClaudeInterrupt") -> type[TurnError]:
+    """Classify a failed turn the way Codex's terminal status does."""
+    return TurnInterruptedError if interrupt.requested else ProviderTurnError
+
+
 class ClaudeConversationState:
     """Adapter-private reconnect/resume state for one Lup session."""
 
-    def __init__(
-        self, factory: "ClaudeSessionFactory", resume: SessionId | None
-    ) -> None:
-        self.factory = factory
-        self.config = factory.config
+    def __init__(self, opener: "ClaudeSessionOpener", resume: SessionId | None) -> None:
+        self.opener = opener
+        self.config = opener.config
         self.resume = resume.value if resume is not None else None
         self.session_id = self.resume or str(uuid4())
         self.client: claude.ClaudeSDKClient | None = None
-        self.binding: TurnToolBinding[BaseModel] | None = None
+        self.submission: TurnSubmission | None = None
+        self.schema_digest: str | None = None
+        self.completion: asyncio.Task[CompletedTurn] | None = None
+
+    def current_submission(self) -> TurnSubmission | None:
+        """Resolve the submission a live connection's tool should serve."""
+        return self.submission
+
+    async def settle_reader(self) -> None:
+        """Unwind an unfinished turn's read before its transport goes away.
+
+        Leaving a session interrupts the active turn without awaiting it, so
+        the reader can still be suspended inside `receive_response()` when the
+        transport closes that generator underneath it. Cancelling is what
+        bounds the wait: awaiting the turn itself would hang teardown on any
+        turn that never terminates.
+        """
+        completion = self.completion
+        self.completion = None
+        if completion is None or completion.done():
+            return
+        completion.cancel()
+        await asyncio.wait([completion])
 
     async def disconnect(self) -> None:
         if self.client is None:
             return
+        await self.settle_reader()
         try:
             await self.client.disconnect()
         finally:
@@ -130,16 +182,55 @@ class ClaudeConversationState:
     async def connect(self) -> "claude.ClaudeSDKClient":
         if self.client is not None:
             return self.client
+        # The runtime assigns the id and this state reads it off the first
+        # result, mirroring `CodexTurnChannel.ensure_thread`. Dictating one
+        # instead let the two adapters disagree about who owns a session's
+        # identity, and only one of them can be right about a conversation the
+        # provider is the one persisting.
+        options = self.opener.build_options(
+            binding=self.current_submission,
+            resume=self.resume,
+            session_id=None,
+        )
+        # Connecting is where a refused resume surfaces, and it is as much a
+        # failed turn as one that breaks midway — so it leaves through the
+        # portable error the rest of the runtime raises. Escaping as the SDK's
+        # own exception let it past every caller that handles a turn failing,
+        # which is how a resume the provider had lost ended whole runs.
+        try:
+            self.client = await self.connected(options)
+        except Exception as error:
+            if self.resume is None:
+                raise ProviderTurnError(TurnFailure(message=str(error))) from error
+            # The provider no longer holds what this state was resuming. A
+            # turn that cannot reach its history still beats one that cannot
+            # happen, so the conversation is forgotten rather than the run.
+            logger.warning(
+                "Claude refused to resume session %s (%s); continuing on a new one",
+                self.resume,
+                error,
+            )
+            self.resume = None
+            try:
+                self.client = await self.connected(
+                    self.opener.build_options(
+                        binding=self.current_submission, resume=None, session_id=None
+                    )
+                )
+            except Exception as fresh_error:
+                raise ProviderTurnError(
+                    TurnFailure(message=str(fresh_error))
+                ) from fresh_error
+        return self.client
+
+    async def connected(
+        self, options: "claude.ClaudeAgentOptions"
+    ) -> "claude.ClaudeSDKClient":
+        """One connected client for these options, or the failure that stopped it."""
         import claude_agent_sdk as claude
 
-        options = self.factory.build_options(
-            binding=self.binding,
-            resume=self.resume,
-            session_id=None if self.resume is not None else self.session_id,
-        )
         client = claude.ClaudeSDKClient(options=options)
         await client.connect()
-        self.client = client
         return client
 
     async def start_turn(self, text: str) -> AcceptedTurn:
@@ -149,37 +240,46 @@ class ClaudeConversationState:
             session=SessionId(value=self.session_id),
             turn=TurnId(value=uuid4().hex),
         )
-        events: asyncio.Queue[TurnEvent | None] = asyncio.Queue()
+        events: asyncio.Queue[LiveTurnEvent | None] = asyncio.Queue()
         events.put_nowait(TurnStartedEvent(identifiers=identifiers))
+        interrupt = ClaudeInterrupt(self)
 
         async def complete() -> CompletedTurn:
             from claude_agent_sdk import types as claude_types
 
-            messages: list[TurnMessage] = []  # lup: ignore[empty-collection]
+            nonlocal identifiers
+            durable: list[TurnEvent] = []  # lup: ignore[empty-collection]
             result: claude_types.ResultMessage | None = None
             started = perf_counter()
+
+            def record(message: TurnMessage) -> None:
+                """Emit one message and its blocks, so both views agree."""
+                for block in message.blocks:
+                    completed = BlockCompletedEvent(
+                        identifiers=identifiers, block=block
+                    )
+                    durable.append(completed)
+                    events.put_nowait(completed)
+                whole = MessageCompletedEvent(identifiers=identifiers, message=message)
+                durable.append(whole)
+                events.put_nowait(whole)
+
             try:
                 async for message in client.receive_response():
                     match message:
                         case claude_types.AssistantMessage(content=content):
-                            blocks = [convert_claude_block(block) for block in content]
-                            messages.append(
+                            record(
                                 TurnMessage(
                                     role="assistant",
-                                    blocks=blocks,
+                                    blocks=[
+                                        convert_claude_block(block) for block in content
+                                    ],
                                 )
                             )
-                            for block in blocks:
-                                events.put_nowait(
-                                    BlockCompletedEvent(
-                                        identifiers=identifiers,
-                                        block=block,
-                                    )
-                                )
                         case claude_types.UserMessage(content=content) if isinstance(
                             content, list
                         ):
-                            messages.append(
+                            record(
                                 TurnMessage(
                                     role="tool",
                                     blocks=[
@@ -190,13 +290,25 @@ class ClaudeConversationState:
                         case claude_types.UserMessage(content=str(text)):
                             from lup.runtime.models import TurnTextBlock
 
-                            messages.append(
+                            record(
                                 TurnMessage(
                                     role="user", blocks=[TurnTextBlock(text=text)]
                                 )
                             )
                         case claude_types.ResultMessage() as terminal:
                             result = terminal
+                        # The CLI persists the transcript under its own id,
+                        # not the channel id this side minted — adopting it is
+                        # what lets a later resume name a conversation that
+                        # actually exists on disk.
+                        case claude_types.SystemMessage(
+                            subtype="init", data={"session_id": str(adopted)}
+                        ) if adopted != self.session_id:
+                            self.session_id = adopted
+                            self.resume = adopted
+                            identifiers = identifiers.model_copy(
+                                update={"session": SessionId(value=adopted)}
+                            )
                         case claude_types.StreamEvent(event=event):
                             match event:
                                 case {
@@ -213,12 +325,10 @@ class ClaudeConversationState:
                                         )
                                     )
             except Exception as error:
-                raise ProviderTurnError(
+                raise turn_error(interrupt)(
                     TurnFailure(
                         message=str(error),
-                        blocks=[
-                            block for message in messages for block in message.blocks
-                        ],
+                        blocks=fold_blocks(durable),
                         duration=timedelta(seconds=perf_counter() - started),
                         identifiers=identifiers,
                     )
@@ -228,20 +338,19 @@ class ClaudeConversationState:
                 raise ProviderTurnError(
                     TurnFailure(
                         message="Claude completed without a terminal result",
-                        blocks=[
-                            block for message in messages for block in message.blocks
-                        ],
+                        blocks=fold_blocks(durable),
                         identifiers=identifiers,
                     )
                 )
             if result.session_id is not None:
                 self.session_id = result.session_id
                 self.resume = result.session_id
-            blocks = [block for message in messages for block in message.blocks]
+            messages = fold_transcript(durable)
+            blocks = fold_blocks(durable)
             usage = claude_usage(result.usage, total_cost_usd=result.total_cost_usd)
             duration = timedelta(milliseconds=result.duration_ms or 0)
             if result.is_error:
-                raise ProviderTurnError(
+                raise turn_error(interrupt)(
                     TurnFailure(
                         message=str(result.result or "Claude turn failed"),
                         blocks=blocks,
@@ -255,6 +364,7 @@ class ClaudeConversationState:
                 blocks=blocks,
                 usage=usage,
                 duration=duration,
+                identifiers=identifiers,
             )
 
         async def complete_with_events() -> CompletedTurn:
@@ -265,6 +375,7 @@ class ClaudeConversationState:
                 events.put_nowait(None)
 
         completion = asyncio.create_task(complete_with_events())
+        self.completion = completion
 
         def observe_completion(task: asyncio.Task[CompletedTurn]) -> None:
             if not task.cancelled():
@@ -278,65 +389,89 @@ class ClaudeConversationState:
         return AcceptedTurn(
             identifiers=identifiers,
             complete=await_completion,
-            events=ClaudeLiveEventStream(events),
-            interrupt=ClaudeInterrupt(self),
+            events=ClaudeLiveEventStream(events, self.config.delta_streaming),
+            interrupt=interrupt,
         )
 
 
 class ClaudeLiveEventStream(EventStream):
-    """Expose SDK partial-message events separately from completed replay."""
+    """One ordered queue, viewed either with in-flight deltas or without.
 
-    def __init__(self, events: asyncio.Queue[TurnEvent | None]) -> None:
+    The durable view filters the same sequence rather than reading a second
+    one, so the two can never report different histories.
+    """
+
+    def __init__(
+        self,
+        events: asyncio.Queue[LiveTurnEvent | None],
+        delta_streaming: bool = False,
+    ) -> None:
         self.queue = events
         self.consumed = False
+        self.delta_streaming = delta_streaming
 
-    async def iterate(self) -> AsyncIterator[TurnEvent]:
+    async def iterate(self) -> AsyncIterator[LiveTurnEvent]:
         if self.consumed:
             raise RuntimeError("live event stream can only be consumed once")
         self.consumed = True
-        while (event := await self.queue.get()) is not None:  # lup: ignore[dict-get]
+        while (event := await self.queue.get()) is not None:
             yield event
 
+    async def durable(self) -> AsyncIterator[TurnEvent]:
+        async for event in self.iterate():
+            if (durable := event.durable) is not None:
+                yield durable
+
     def events(self) -> AsyncIterator[TurnEvent]:
+        return self.durable()
+
+    def live(self) -> AsyncIterator[LiveTurnEvent]:
+        if not self.delta_streaming:
+            raise DeltaStreamingDisabled(
+                "this session was built without partial message streaming"
+            )
         return self.iterate()
 
 
 class ClaudeTurnToolBinder(TurnToolBinder):
-    """Reconnect on every binding so schema and handler state are both current."""
+    """Refresh handler state in place and reconnect only to change the schema.
+
+    A connection advertises its submission schema once, so a turn that asks for
+    a different one has to reconnect. A turn that asks for the same one does
+    not, and reconnecting anyway would spend the conversation to install a tool
+    identical to the one already there — which is what every worker turn does,
+    against a provider that no longer persists a transcript to resume.
+    """
 
     def __init__(self, state: ClaudeConversationState) -> None:
         self.state = state
 
     async def bind[T: BaseModel](self, binding: TurnToolBinding[T] | None) -> None:
-        if binding is None and self.state.binding is None:
+        if binding is None and self.state.submission is None:
             return
-        await self.state.disconnect()
-        if binding is None:
-            self.state.binding = None
-            return
-
-        async def gate(
-            value: BaseModel,  # lup: ignore[bare-basemodel] — adapter-local generic erasure
-        ) -> SubmissionDecision:
-            if binding.gate is None:
-                return SubmissionDecision(accepted=True)
-            typed = binding.output_type.model_validate(value.model_dump(mode="json"))
-            return await binding.gate(typed)
-
-        self.state.binding = TurnToolBinding[BaseModel](
-            output_type=binding.output_type,
-            store=binding.store,
-            gate=gate if binding.gate is not None else None,
-        )
+        submission = bound_submission(binding) if binding is not None else None
+        digest = submission.digest if submission is not None else None
+        if digest != self.state.schema_digest:
+            await self.state.disconnect()
+        self.state.schema_digest = digest
+        self.state.submission = submission
 
 
 class ClaudeInterrupt(Interrupt):
-    """Interrupt the currently connected Claude turn."""
+    """Interrupt the currently connected Claude turn, and remember asking.
+
+    The SDK ends an interrupted turn the way it ends a failed one, so what
+    separates them is only that someone asked. Recording the request is what
+    lets the turn raise as interrupted rather than as a provider failure the
+    recovery wrapper would dutifully retry.
+    """
 
     def __init__(self, state: ClaudeConversationState) -> None:
         self.state = state
+        self.requested = False
 
     async def interrupt(self) -> None:
+        self.requested = True
         if self.state.client is not None:
             await self.state.client.interrupt()
 
@@ -368,12 +503,12 @@ class ClaudeFork(ForkSession):
                 self.state.session_id,
                 directory,
             )
-        factory = self.state.factory
-        async with factory.open(SessionId(value=result.session_id)) as handle:
+        opener = self.state.opener
+        async with opener.open_session(SessionId(value=result.session_id)) as handle:
             yield handle
 
 
-class ClaudeSessionFactory(SessionFactory):
+class ClaudeSessionOpener:
     """Open independently configured reconnecting Claude sessions."""
 
     def __init__(self, config: ClaudeSessionConfig) -> None:
@@ -386,7 +521,7 @@ class ClaudeSessionFactory(SessionFactory):
     def build_options(
         self,
         *,
-        binding: TurnToolBinding[BaseModel] | None,
+        binding: SubmissionBindingSource,
         resume: str | None,
         session_id: str | None,
     ) -> "claude.ClaudeAgentOptions":
@@ -395,20 +530,16 @@ class ClaudeSessionFactory(SessionFactory):
             self.config, binding=binding, resume=resume, session_id=session_id
         )
 
-    def open(
-        self, resume: SessionId | None = None
-    ) -> AbstractAsyncContextManager[SessionHandle]:
-        return self.open_session(resume)
-
     @asynccontextmanager
     async def open_session(
-        self, resume: SessionId | None
+        self, resume: SessionId | None = None
     ) -> AsyncGenerator[SessionHandle]:
         state = self.create_state(resume)
         session = ComposedSession(
             starter=state.start_turn,
             binder=ClaudeTurnToolBinder(state),
             gate_resolver=self.config.submission_gate_resolver,
+            submission_tool=SUBMISSION_TOOL,
         )
         try:
             yield SessionHandle(session=session, fork=ClaudeFork(state))
@@ -423,7 +554,7 @@ def create_claude_session_factory(
     config: ClaudeSessionConfig,
 ) -> SessionFactory:
     """Create the named Claude runtime composition root."""
-    return ClaudeSessionFactory(config)
+    return SessionFactory(ClaudeSessionOpener(config).open_session)
 
 
 # The fully qualified name of the turn-bound submission tool as Claude Code
@@ -433,18 +564,28 @@ SUBMISSION_TOOL = "mcp__lup-output__submit_output"
 
 
 def build_submission_server(
-    binding: TurnToolBinding[BaseModel],
+    current: SubmissionBindingSource,
 ) -> LupMcpServerConfig:
-    """Build an exact-schema MCP server whose handler closes over this turn."""
+    """Build an exact-schema MCP server reading the binding the turn installed.
+
+    The schema is fixed for a connection's lifetime because changing it
+    reconnects, but a same-schema turn refreshes store and gate in place. So
+    the handler resolves the binding when it runs rather than closing over the
+    one that happened to be installed when the connection opened, which would
+    write every later turn's output into the first turn's store.
+    """
     server = Server("lup-output", version="1")
 
     @server.list_tools()
     async def list_tools() -> list[Tool]:
+        submission = current()
+        if submission is None:
+            return []
         return [
             Tool(
                 name="submit_output",
                 description="Submit the final validated result for this turn.",
-                inputSchema=binding.output_type.model_json_schema(),
+                inputSchema=submission.schema,
             )
         ]
 
@@ -452,7 +593,18 @@ def build_submission_server(
     async def call_tool(name: str, arguments: JsonObject) -> CallToolResult:
         if name != "submit_output":
             raise ValueError(f"unknown output tool {name!r}")
-        response = await submit_output(binding, arguments)
+        submission = current()
+        if submission is None:
+            return CallToolResult(
+                content=[
+                    TextContent(
+                        type="text",
+                        text="No matching turn output binding is active.",
+                    )
+                ],
+                isError=True,
+            )
+        response = await submission.submit(arguments)
         return CallToolResult(
             content=[TextContent(type="text", text=response.message)],
             isError=not response.accepted,
@@ -468,7 +620,7 @@ def build_submission_server(
 def build_claude_options(
     config: ClaudeSessionConfig,
     *,
-    binding: TurnToolBinding[BaseModel] | None,
+    binding: SubmissionBindingSource,
     resume: str | None,
     session_id: str | None,
 ) -> "claude.ClaudeAgentOptions":
@@ -479,13 +631,22 @@ def build_claude_options(
 
     servers = dict(config.tool_servers)
     allowed = list(config.allowed_tools)
-    if binding is not None:
+    if binding() is not None:
         servers["lup-output"] = build_submission_server(binding)
         allowed.append(SUBMISSION_TOOL)
 
     def native_server(server: McpServerEntry) -> "claude_types.McpServerConfig":
+        """Project one entry into the server config this SDK's options take.
+
+        The projection belongs here because it is this provider's spelling: a
+        server we host becomes an SDK config, while an external one already is
+        the SDK's transport shape and passes through. Asking the neutral entry
+        to convert itself would move that spelling into library code, beside a
+        second adapter that projects the same entry into an unrelated
+        subprocess shape.
+        """
         match server:
-            case LupMcpServerConfig():
+            case LupMcpServerConfig():  # lup: ignore[own-model-dispatch] — seam
                 return claude_types.McpSdkServerConfig(
                     type="sdk", name=server.name, instance=server.server
                 )
@@ -532,6 +693,10 @@ def build_claude_options(
         effort=config.effort,
         cwd=config.cwd,
         add_dirs=[str(path) for path in config.add_dirs],
+        plugins=[
+            claude_types.SdkPluginConfig(type="local", path=str(path))
+            for path in config.plugin_dirs
+        ],
         env=config.environment,
         sandbox=sandbox,
         hooks=(
@@ -539,7 +704,7 @@ def build_claude_options(
             if config.hooks is not None and config.hooks.by_event()
             else None
         ),
-        include_partial_messages=True,
+        include_partial_messages=config.delta_streaming,
         resume=resume,
         session_id=session_id,
         output_format=None,
@@ -549,7 +714,7 @@ def build_claude_options(
     )
 
 
-def convert_claude_block(block: "claude.ContentBlock") -> TurnBlock:
+def convert_claude_block(block: "claude.ContentBlock") -> AnyTurnBlock:
     """Convert one SDK block directly into the portable runtime vocabulary."""
     import claude_agent_sdk as claude
     from claude_agent_sdk import types as claude_types

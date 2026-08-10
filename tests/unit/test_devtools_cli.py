@@ -18,11 +18,17 @@ import pytest
 import typer
 from typer.testing import CliRunner
 
-from lup_template.devtools.dev import pr
+from lup.devtools.dev import pr
 from lup_template.devtools.main import app
-from lup_template.devtools.sync import load_json
+from lup.devtools.sync import load_json
 
-runner = CliRunner()
+# Typer renders usage errors through Rich, which styles option tokens whenever
+# it believes it is writing to a terminal. That splits a flag name from the
+# prose beside it with escape codes, so output assertions only hold when the
+# console is plain: FORCE_COLOR is cleared and a dumb terminal is declared.
+PLAIN_CONSOLE = {"FORCE_COLOR": None, "NO_COLOR": "1", "TERM": "dumb"}
+
+runner = CliRunner(env=PLAIN_CONSOLE)
 
 
 def iter_command_paths(
@@ -138,3 +144,20 @@ def test_annotated_downstream_config_raises_a_typed_recovery_error(
 
     with pytest.raises(typer.BadParameter, match="not valid JSON"):
         load_json(path)
+
+
+def test_ending_a_run_needs_no_adapter_but_driving_one_still_does() -> None:
+    """An abort takes no turn, so the flag that picks a runtime is not its own.
+
+    Ending a run reads recorded state and frees worktrees; nothing renders a
+    skill invocation, so demanding the adapter refused the one operation a
+    run in trouble most needs.
+    """
+    ended = runner.invoke(
+        app, ["harness", "resolve", "--abort", "reason", "--run-id", "absent-run"]
+    )
+    assert "--adapter is required" not in ended.output
+    assert "no resolver run 'absent-run' to abort" in ended.output
+
+    driven = runner.invoke(app, ["harness", "resolve", "--run-id", "absent-run"])
+    assert "--adapter is required" in driven.output

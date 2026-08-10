@@ -1,7 +1,7 @@
 ---
 name: version-explorer
 description: "Inventory version-impact evidence across the repository"
-tools: Read, Grep, Glob, Bash
+tools: Read, Bash
 model: sonnet
 color: green
 ---

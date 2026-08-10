@@ -8,6 +8,11 @@ spelling, architecture — is listed with its scope, diagnostic, and the module
 that defines and enforces it. `uv run lup-devtools dev rules` renders this
 registry into the checked-in `docs/rules.md` reference that deny messages
 point at, so no rule is discoverable only through the scanner that owns it.
+
+A rule the typed grammar refines carries that refinement on its card, because
+the reference is where the two surfaces are reconciled: the edit hook decides
+on the spelling alone and the whole-file audit may decide otherwise once a
+type oracle has resolved what the spelling refers to.
 """
 
 from typing import Literal
@@ -17,16 +22,28 @@ from pydantic import BaseModel, ConfigDict
 import lup.codescan.antipatterns as antipatterns
 import lup.codescan.boundaries as boundaries
 import lup.codescan.capabilities as capabilities
+import lup.codescan.dispatch as dispatch
+import lup.codescan.grammar as grammar
+import lup.codescan.narrowing as narrowing
 import lup.codescan.portable as portable
+from lup.codescan.common import RuleStrength
 
 type RuleFamily = Literal["anti-pattern", "boundary", "spelling", "architecture"]
+
 
 RULE_REFERENCE = "docs/rules.md"
 """Repository-relative path of the generated reference deny messages cite."""
 
 
 class RegisteredRule(BaseModel):
-    """One rule's discovery card: identity, family, diagnostic, and home."""
+    """One rule's discovery card: identity, family, diagnostic, and home.
+
+    ``refinement`` is empty for a rule that decides the same way everywhere.
+    Where it is set, the edit hook's verdict is the broad one the ``example``
+    shows and the whole-file audit narrows it — the card says how, so a
+    contributor who meets a denial the repository sweep does not report can
+    tell which surface is speaking.
+    """
 
     model_config = ConfigDict(frozen=True)
 
@@ -36,8 +53,14 @@ class RegisteredRule(BaseModel):
     example: str
     message: str
     defined_in: str
+    refinement: str = ""
+    strength: RuleStrength = "soft"
+    """Soft by default: a rule earns ``strong`` by having a replacement that is
+    right every time, and until someone can say what that replacement is, the
+    honest answer is that an exception might exist."""
 
 
+# lup: ignore[library-default] — one card per rule the library's own scanners define
 STRUCTURAL_RULES: list[RegisteredRule] = [
     RegisteredRule(
         id=capabilities.RULE_ID,
@@ -49,6 +72,37 @@ STRUCTURAL_RULES: list[RegisteredRule] = [
             "implementations do not inherit multiple capabilities or reusable behavior."
         ),
         defined_in=capabilities.__name__,
+    ),
+    RegisteredRule(
+        id=dispatch.RULE_ID,
+        family="architecture",
+        scope="Python architecture",
+        example="if isinstance(part, TextPart): ...",
+        message=(
+            "A union we declare answers through its members: the base names the "
+            "operation and each variant answers or declines it. Branching on the "
+            "variant's own type — isinstance, a case arm, an assert_never net — "
+            "leaves a filter that goes stale the moment a variant is added. "
+            "Narrowing untyped data at a boundary is the different case and is "
+            "not reported: the rule fires only on project classes that inherit "
+            "pydantic.BaseModel."
+        ),
+        defined_in=dispatch.__name__,
+    ),
+    RegisteredRule(
+        id=narrowing.RULE_ID,
+        family="architecture",
+        scope="Python architecture",
+        example="if isinstance(n, ast.Name): ...\nelif isinstance(n, ast.Attribute): ...",
+        message=(
+            "Narrowing one subject again, in a later arm of the same if/elif chain, "
+            "is a dispatch in the older spelling: each arm becomes a case pattern, an "
+            "and conjunct becomes its guard, and the fallthrough becomes case _. A "
+            "single narrowing is sanctioned and stays silent, as does isinstance in "
+            "expression position, where match has no spelling at all."
+        ),
+        defined_in=narrowing.__name__,
+        strength="strong",
     ),
     RegisteredRule(
         id=boundaries.RULE_ID,
@@ -85,6 +139,20 @@ STRUCTURAL_RULES: list[RegisteredRule] = [
         defined_in=portable.__name__,
     ),
     RegisteredRule(
+        id=boundaries.LIBRARY_DEFAULT_RULE_ID,
+        family="boundary",
+        scope="Neutral library modules",
+        example='READ_ONLY_COMMANDS = ("ls", "cat", "grep")',
+        message=(
+            "A data table a library declares is a choice made for every adopter: it "
+            "reaches them as an overridable default — a parameter default, a pydantic "
+            "field default, or the sentinel a mutable default is written as — so they "
+            "replace the vocabulary instead of editing the library. Suppress only a "
+            "canonical table, whose value is fixed outside this repository."
+        ),
+        defined_in=boundaries.__name__,
+    ),
+    RegisteredRule(
         id=boundaries.KERNEL_IMPORT_RULE_ID,
         family="boundary",
         scope="Policy kernel",
@@ -98,8 +166,12 @@ STRUCTURAL_RULES: list[RegisteredRule] = [
 """Project-shape rules enforced by the AST scanners, one card per rule id."""
 
 
-def anti_pattern_rules() -> list[RegisteredRule]:
+def anti_pattern_rules(
+    rules: antipatterns.AntiPatternSet | None = None,
+) -> list[RegisteredRule]:
     """Project every anti-pattern rule into its registry card."""
+    declared = rules or antipatterns.AntiPatternSet()
+    refined = {rule.id: rule.refinement for rule in grammar.GRAMMAR_RULES}
     return [
         RegisteredRule(
             id=rule.id,
@@ -108,15 +180,19 @@ def anti_pattern_rules() -> list[RegisteredRule]:
             example=rule.pattern.pattern,
             message=rule.message,
             defined_in=antipatterns.__name__,
+            refinement=refined[rule.id] if rule.id in refined else "",
+            strength=rule.strength,
         )
-        for scope, rules in (
-            ("Python", antipatterns.PYTHON_ANTI_PATTERNS),
-            ("TypeScript", antipatterns.TS_ANTI_PATTERNS),
+        for scope, scoped in (
+            ("Python", declared.python),
+            ("TypeScript", declared.typescript),
         )
-        for rule in rules
+        for rule in scoped
     ]
 
 
-def all_rules() -> list[RegisteredRule]:
+def all_rules(
+    rules: antipatterns.AntiPatternSet | None = None,
+) -> list[RegisteredRule]:
     """Every registered rule across all families, structural rules first."""
-    return [*STRUCTURAL_RULES, *anti_pattern_rules()]
+    return [*STRUCTURAL_RULES, *anti_pattern_rules(rules)]

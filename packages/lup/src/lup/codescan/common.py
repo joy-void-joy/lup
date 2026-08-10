@@ -1,4 +1,4 @@
-# lup: ignore[import-re, re-call, set-shape, empty-collection, tuple-shape, dict-get, string-split] — the scanner that enforces these rules is written in the vocabulary they govern
+# lup: ignore[import-re, set-shape, empty-collection, dict-get, string-split] — the scanner that enforces these rules is written in the vocabulary they govern
 """Shared scanning core for the review-marker and anti-pattern scanners.
 
 Both `lup.codescan.markers` and `lup.codescan.antipatterns` walk a file line by
@@ -12,15 +12,22 @@ The `# lup: ignore` escape hatch — inline, or as a standalone file-level
 opt-out — is matched here too, `LineProjections` holds the token-masked line
 views a context-aware rule scans, and `LineCursor` is the shared line walk that
 lets a scanner absorb a note's continuation lines without index bookkeeping.
+
+`PythonSource` is the unit whole-project scanners consume, and `Refutation`
+the shape a refiner returns when it proves a matched line is not what its rule
+is about — the one mechanism by which a broad regex hit is dropped with a
+reason attached.
 """
 
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Set as AbstractSet
+from pathlib import Path, PurePosixPath
 from typing import Literal, Self
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from lup.policy.kernel.edit import (
+    FILE_IGNORE_RE,
     docstring_lines as python_docstring_lines,
     mask_python_string_literals,
     python_code_lines,
@@ -28,25 +35,28 @@ from lup.policy.kernel.edit import (
     python_tokens,
 )
 
+type RuleStrength = Literal["soft", "strong"]
+"""Whether a rule admits a reasoned exception, or admits none.
+
+Most rules are ``soft``: they name a shape that is usually wrong and sometimes
+is the only thing that works — ``Any`` at an untyped boundary, a vendor's own
+constant, a narrowing the type system needs. A suppression there is the
+mechanism working, and the audit grades each one missing, bare, or dead.
+
+A ``strong`` rule names a shape whose replacement is right every time. There is
+no input for which an `isinstance` chain beats the `match` it compiles to, and
+no call site where a bare tuple beats the `TypedDict` naming its fields — so a
+suppression there is not a reasoned exception, it is the defect with a comment
+on it. Those are refused, and the message says to write the replacement.
+"""
+
 type RuleContext = Literal["code", "comment"]
 """The syntactic surface a scan rule inspects: masked code, or comment text."""
 
-# An `ignore` directive is bare (`# lup: ignore`, silences every rule) or typed
-# pyright-style (`# lup: ignore[rule-id, other-rule]`, silences only the named
-# rules). The optional `ids` group captures the comma-separated list when typed.
-IGNORE_RE = re.compile(
-    r"(#|//)\s*lup\s*:\s*ignore\b(?:\s*\[(?P<ids>[^\]]*)\])?", re.IGNORECASE
-)
-# The file-level form is the same directive standing alone on its own line, so
-# the leading anchor is what separates it from a trailing inline one. It may
-# carry a reason after the ids, introduced by a dash or a colon the way the
-# inline form and `defer[<condition>]:` already do — a suppression that cannot
-# say why it exists is the shape these rules were written to discourage.
-FILE_IGNORE_RE = re.compile(
-    r"^\s*(#|//)\s*lup\s*:\s*ignore\b(?:\s*\[(?P<ids>[^\]]*)\])?"
-    r"\s*(?:[-—–:]\s*(?P<reason>\S.*?))?\s*$",
-    re.IGNORECASE,
-)
+# Both directive spellings come from the kernel rather than being restated
+# here. The hook and this audit have to agree on what a directive *is* before
+# they can agree on what it silences, and two regexes drifted apart is exactly
+# how a file ends up exempt to one gate and denied by the other.
 
 
 def ignore_rule_ids(match: re.Match[str]) -> set[str] | None:
@@ -89,6 +99,92 @@ def file_level_ignore(text: str, max_lines: int = 10) -> FileIgnore | None:
         if match is not None:
             return FileIgnore(line=i + 1, rule_ids=ignore_rule_ids(match))
     return None
+
+
+# lup: ignore[library-default] — this library's own import root, fixed by the
+# name it is distributed under rather than by any adopter's taste.
+LIBRARY_PACKAGE_ROOT = "lup"
+
+PACKAGE_ROOTS = frozenset({LIBRARY_PACKAGE_ROOT})  # lup: ignore[frozenset-shape]
+"""Import roots a scan resolves module names against, by default this library's
+own. An application adds the package it publishes, whose name it alone knows —
+initialization renames it, so a value written down here would go on naming a
+package that no longer exists and silently resolve nothing."""
+
+
+class PythonSource(BaseModel):
+    """One import-resolvable Python module a project-wide scanner reads.
+
+    The unit every whole-project scan consumes: the architecture audit builds
+    its symbol index from these, and the typed grammar parses them for the
+    sites it judges.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    path: Path
+    module: str
+    text: str
+
+
+def module_name(path: Path, roots: AbstractSet[str] = PACKAGE_ROOTS) -> str:
+    """Infer a dotted module name from a repository-relative Python path.
+
+    A distribution laid out as ``packages/<name>/src/<name>/…`` repeats its
+    name in the directory above ``src``, so the import root is the one ``src``
+    introduces rather than the first segment that happens to match. Taking the
+    first match instead resolves ``packages/lup/src/lup/harness/models.py`` to
+    ``lup.src.lup.harness.models``, which no import ever names — every
+    cross-module lookup against it silently misses.
+    """
+    parts = list(PurePosixPath(path.as_posix()).parts)
+    matched = [
+        index
+        for index, part in enumerate(parts)
+        if part in roots and (index == 0 or parts[index - 1] == "src")
+    ]
+    selected = parts[matched[-1] if matched else 0 :]
+    if selected[-1] == "__init__.py":
+        selected = selected[:-1]
+    else:
+        selected[-1] = PurePosixPath(selected[-1]).stem
+    return ".".join(selected)
+
+
+def sources_from_paths(
+    paths: list[Path], roots: AbstractSet[str] = PACKAGE_ROOTS
+) -> list[PythonSource]:
+    """Read source files and assign import-resolvable module names."""
+    return [
+        PythonSource(
+            path=path,
+            module=module_name(path, roots),
+            text=path.read_text(encoding="utf-8"),
+        )
+        for path in paths
+    ]
+
+
+class Refutation(BaseModel):
+    """One rule hit a refiner proved does not apply, and the proof.
+
+    A refiner sharpens a broad line rule after the fact: the regex says the
+    shape is present, the refiner says this instance is not what the rule is
+    about. The AST exemptions for deliberate empty-collection defaults and the
+    typed grammar's receiver resolution both speak this shape, so the audit
+    has one mechanism for "matched, but refuted" — and a `# lup: ignore` left
+    guarding a refuted line becomes a dead directive the audit reports.
+
+    ``subject`` is the source expression the verdict is about and ``evidence``
+    the sentence that justifies it, so a dropped finding is always accountable.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    rule_id: str
+    line: int
+    subject: str
+    evidence: str
 
 
 class PythonContext(BaseModel):
@@ -150,6 +246,20 @@ class LineProjections(BaseModel):
         return lines[line_no - 1].strip()
 
 
+class NumberedLine(BaseModel):
+    """One line of a scanned file, and its 1-based number."""
+
+    number: int
+    text: str
+
+
+class MappedLine[T](BaseModel):
+    """What a mapper made of one line, and the 1-based number it came from."""
+
+    number: int
+    value: T
+
+
 class LineCursor:
     """Forward cursor over a file's lines with a take-a-run helper.
 
@@ -167,28 +277,28 @@ class LineCursor:
     def __iter__(self) -> Self:
         return self
 
-    def __next__(self) -> tuple[int, str]:
+    def __next__(self) -> NumberedLine:
         if self.pos >= len(self.lines):
             raise StopIteration
         line = self.lines[self.pos]
         self.pos += 1
-        return self.pos, line
+        return NumberedLine(number=self.pos, text=line)
 
     def take_mapping[T](
         self, mapper: Callable[[int, str], T | None]
-    ) -> list[tuple[int, T]]:
+    ) -> list[MappedLine[T]]:
         """Consume and map following lines until `mapper` returns ``None``.
 
         The rejecting line is left unconsumed for the next `__next__`. A mapper
         may return a falsy-but-not-``None`` value (an empty continuation line),
         which is kept; only ``None`` ends the run.
         """
-        taken: list[tuple[int, T]] = []
+        taken: list[MappedLine[T]] = []
         while self.pos < len(self.lines):
             line_no = self.pos + 1
             mapped = mapper(line_no, self.lines[self.pos])
             if mapped is None:
                 break
             self.pos += 1
-            taken.append((line_no, mapped))
+            taken.append(MappedLine(number=line_no, value=mapped))
         return taken

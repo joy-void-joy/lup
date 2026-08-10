@@ -1,7 +1,11 @@
 """Canonical declaration, native rendering, and reconciliation tests."""
 
+import ast
 import json
 import os
+import sys
+import tomllib
+from collections.abc import Callable
 from pathlib import Path
 from typing import Literal, get_args
 
@@ -12,8 +16,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from lup.policy.identity import AGENT_IDENTITY_ENV
 from lup.types import JsonObject
-from lup.adapters.claude.harness import ClaudeSpellings
-from lup.adapters.codex.harness import CodexSpellings
+from lup.adapters.claude.harness import CLAUDE_DISPATCHER, ClaudeSpellings
+from lup.adapters.codex.harness import CODEX_DISPATCHER, CodexSpellings
 from lup.adapters.codex.harness_runtime import (
     PluginCacheConfig,
     directory_digest,
@@ -25,9 +29,19 @@ from lup.adapters.harness import (
     compile_claude,
     compile_codex,
 )
+from lup.codescan.registry import RULE_REFERENCE
+from lup.harness.banner import (
+    ARTIFACT_COMMENT_ROUTER,
+    REGENERATE_COMMAND,
+    GeneratedBanner,
+)
+from lup.harness.generation import ArtifactValidationError
 from lup.harness.materialization import AtomicMaterializer, MaterializationConflictError
+from lup.harness.validation import validated_tree
 from lup.harness.models import (
-    GUIDANCE_CHARACTER_BUDGET,
+    GUIDANCE_BYTE_BUDGET,
+    INVOCATION_SIGILS,
+    Agent,
     Argument,
     Artifact,
     ArgumentsRef,
@@ -37,6 +51,7 @@ from lup.harness.models import (
     Harness,
     InvocationArgument,
     NativePath,
+    Plugin,
     PluginPath,
     PromptDocument,
     PromptPart,
@@ -44,12 +59,16 @@ from lup.harness.models import (
     RequestApproval,
     ResolverEntry,
     RuntimeDocs,
+    SemanticPart,
     Skill,
     SkillInvocation,
     SkillPattern,
+    SpellingExample,
     TextPart,
+    document_byte_size,
     document_text_size,
 )
+from lup.harness.contracts import PromptRenderer
 from lup.harness.ownership import (
     OwnershipManifestError,
     build_manifest,
@@ -66,22 +85,43 @@ from lup.harness.reconciliation import (
     source_patch_base_digest,
 )
 from lup.policy.bundle import policy_kernel_modules
+from lup.policy.dispatcher import (
+    SHARED_MEMBER,
+    SPLICED_MEMBERS,
+    SHARED_PACKAGE,
+    DispatcherDeclaration,
+    SourceHalf,
+    compile_dispatcher,
+    half_functions,
+    half_imports,
+    resolvable,
+    source_half,
+)
 from lup.types import EnvVars
-from lup_template.devtools.harness.catalog import portable_harness
+from lup_template.agent.toolsets import EXAMPLE_GROUP, NOTES_GROUP, tool_group_names
+from lup_template.devtools.agent.serve import (
+    collect_tools_by_server,
+    harness_session_context,
+)
+from lup.devtools.dev.rules import rule_reference_artifact
+from lup_template.devtools.harness.catalog import HARNESS_SESSION, portable_harness
+from lup_template.devtools.harness.content.docs.catalog import DOCUMENTS
 from lup_template.devtools.harness.content.guidance import DOCUMENT as GUIDANCE
 from lup_template.devtools.harness.content.settings import project_settings
-from lup_template.devtools.harness import launch
-from lup_template.devtools.harness.launch import codex_sandbox_arguments
+from lup.devtools.harness import launch
+from lup.devtools.harness.launch import codex_sandbox_arguments
 from lup_template.devtools.harness.content.template_claude import (
     DOCUMENT as TEMPLATE_CLAUDE,
 )
 from lup_template.devtools.harness.content.template_codex import (
     DOCUMENT as TEMPLATE_CODEX,
 )
-from lup_template.devtools.harness.generate import (
+from lup_template.devtools.harness.composition import (
+    claude_target,
+    codex_target,
+)
+from lup.devtools.harness.generate import (
     GenerationRecipe,
-    claude_generation_recipe,
-    codex_generation_recipe,
     current_reader,
     generate,
     inspect_generation,
@@ -133,11 +173,77 @@ class CodexPermissionOutput(BaseModel):
     hook_specific_output: CodexPermissionHookOutput = Field(alias="hookSpecificOutput")
 
 
+class ShippedDispatcher(BaseModel):
+    """One hook dispatcher: its declaration, its half, its script, its runtime."""
+
+    model_config = ConfigDict(frozen=True)
+
+    declaration: DispatcherDeclaration
+    asset: Path
+    script: Path
+    runtime: Path
+
+
+SHIPPED_DISPATCHERS: dict[str, ShippedDispatcher] = {
+    "claude": ShippedDispatcher(
+        declaration=CLAUDE_DISPATCHER,
+        asset=Path("packages/lup/src/lup/adapters/claude/assets/policy_dispatcher.py"),
+        script=Path(".claude/plugins/lup/hooks/scripts/policy.py"),
+        runtime=Path(".claude/plugins/lup/hooks/runtime"),
+    ),
+    "codex": ShippedDispatcher(
+        declaration=CODEX_DISPATCHER,
+        asset=Path("packages/lup/src/lup/adapters/codex/assets/policy_dispatcher.py"),
+        script=Path(".codex/plugins/lup/hooks/scripts/policy.py"),
+        runtime=Path(".codex/plugins/lup/hooks/runtime"),
+    ),
+}
+"""Every script a session's permissions run through, canonical and shipped."""
+
+SHARED_DISPATCHER_HALF = Path("packages/lup/src/lup/policy/assets/host.py")
+"""The host-side half both dispatchers above are compiled from."""
+
+
+def compiled_functions(script: str) -> dict[str, str]:  # lup: ignore[dict-str-payload]
+    """Every top-level function of a compiled dispatcher, by name.
+
+    Open keys by construction: whatever the compiled source happens to define
+    is what a reader of it can compare, which is the point of reading it back.
+    """
+    tree = ast.parse(script)
+    return {
+        node.name: ast.get_source_segment(script, node) or ""
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef)
+    }
+
+
+class PyrightExecutionEnvironment(BaseModel):
+    """One type-checking scope and the search paths it resolves imports on."""
+
+    model_config = ConfigDict(frozen=True)
+
+    root: Path
+    extra_paths: list[Path] = Field(alias="extraPaths", default=[])
+
+
+class PyrightConfiguration(BaseModel):
+    """The workspace type-checking scope, as pyproject.toml declares it."""
+
+    model_config = ConfigDict(frozen=True)
+
+    include: list[Path]
+    exclude: list[Path] = []
+    execution_environments: list[PyrightExecutionEnvironment] = Field(
+        alias="executionEnvironments", default=[]
+    )
+
+
 def test_catalog_has_one_portable_skill_per_baseline_command() -> None:
     harness = portable_harness()
     plugin = harness.plugins[0]
 
-    assert len(plugin.skills) == 30
+    assert len(plugin.skills) == 31
     assert len(plugin.agents) == 4
     assert {skill.name for skill in plugin.skills} >= {
         "resolve",
@@ -152,16 +258,39 @@ def test_catalog_has_one_portable_skill_per_baseline_command() -> None:
 
 def test_claude_tree_renders_every_typed_support_document() -> None:
     paths = {
-        artifact.path
-        for artifact in claude_generation_recipe(Path.cwd()).desired.artifacts
+        artifact.path for artifact in claude_target(Path.cwd()).recipe.desired.artifacts
     }
 
-    assert Path(".claude/PATTERNS.md") in paths
+    assert Path("docs/orchestration.md") in paths
+    assert Path("docs/patterns.md") in paths
     assert Path(".claude/plugins/lup/TEMPLATE_CLAUDE.md") in paths
     assert Path(".claude/plugins/lup/scripts/file_suggest.sh") in paths
     assert Path(".claude/settings.json") in paths
-    assert Path("docs/self-improvement.md") in paths
-    assert Path("docs/permissions.md") in paths
+    assert {document.path for document in DOCUMENTS} <= paths
+
+
+def test_every_published_document_is_generated_and_banners_itself() -> None:
+    """A document under docs/ that generation does not own could be hand-edited.
+
+    The roster is the only source of documents, so an entry missing from the
+    tree, a stray file beside them, or a page whose banner does not name its
+    own module all mean a reader cannot trust the banner to be true.
+    """
+    artifacts = {
+        artifact.path: artifact
+        for artifact in claude_target(Path.cwd()).recipe.desired.artifacts
+    }
+    published = {document.path for document in DOCUMENTS}
+    unmanaged = sorted(
+        path for path in Path("docs").glob("*.md") if path not in published
+    )
+
+    assert unmanaged == [Path(RULE_REFERENCE)]
+    for document in DOCUMENTS:
+        banner = GeneratedBanner(
+            source=document.document.declared_source(), command=REGENERATE_COMMAND
+        )
+        assert banner.opens(document.path, artifacts[document.path].content)
 
 
 def test_guidance_reaches_sections_by_name_not_by_anchor() -> None:
@@ -177,7 +306,13 @@ def test_guidance_reaches_sections_by_name_not_by_anchor() -> None:
 
 
 def test_guidance_stays_within_its_always_loaded_budget() -> None:
-    """The budget bounds what a session loads, not what the declaration holds."""
+    """The budget bounds what a session loads, not what the declaration holds.
+
+    Measured in UTF-8 bytes, because that is the unit the runtime's own
+    ceiling counts in — a character count runs looser than the real cap
+    wherever the document uses non-ASCII punctuation, and would pass a
+    document the runtime would silently truncate.
+    """
     declared = document_text_size(GUIDANCE)
     rendered = {
         "claude": claude_prompt_renderer().render(GUIDANCE),
@@ -185,18 +320,27 @@ def test_guidance_stays_within_its_always_loaded_budget() -> None:
     }
 
     for runtime, document in rendered.items():
-        used = len(document)
+        used = document_byte_size(document)
         assert used >= declared
-        assert used <= GUIDANCE_CHARACTER_BUDGET, (
-            f"{runtime} guidance is {used} characters, over budget by "
-            f"{used - GUIDANCE_CHARACTER_BUDGET}"
+        assert used <= GUIDANCE_BYTE_BUDGET, (
+            f"{runtime} guidance is {used} bytes, over budget by "
+            f"{used - GUIDANCE_BYTE_BUDGET}"
         )
+
+
+def test_codex_config_states_the_same_ceiling_the_check_enforces() -> None:
+    """A generated config that disagreed with the check would truncate silently."""
+    config = next(
+        artifact
+        for artifact in codex_target(Path.cwd()).recipe.desired.artifacts
+        if artifact.path.as_posix() == ".codex/config.toml"
+    )
+    assert f"project_doc_max_bytes = {GUIDANCE_BYTE_BUDGET}" in config.content
 
 
 def test_codex_tree_renders_the_agents_flavored_template() -> None:
     paths = {
-        artifact.path
-        for artifact in codex_generation_recipe(Path.cwd()).desired.artifacts
+        artifact.path for artifact in codex_target(Path.cwd()).recipe.desired.artifacts
     }
 
     assert Path(".codex/plugins/lup/TEMPLATE_AGENTS.md") in paths
@@ -226,7 +370,7 @@ def test_template_flavors_share_sections_and_differ_natively() -> None:
 
 
 def test_claude_recipe_overrides_legacy_hook_entry_with_hermetic_dispatcher() -> None:
-    recipe = claude_generation_recipe(Path.cwd())
+    recipe = claude_target(Path.cwd()).recipe
     artifacts = {artifact.path: artifact for artifact in recipe.desired.artifacts}
 
     hook_config = artifacts[Path(".claude/plugins/lup/hooks/hooks.json")].content
@@ -238,7 +382,7 @@ def test_claude_recipe_overrides_legacy_hook_entry_with_hermetic_dispatcher() ->
 
 
 def test_codex_recipe_registers_semantic_permission_approval() -> None:
-    recipe = codex_generation_recipe(Path.cwd())
+    recipe = codex_target(Path.cwd()).recipe
     artifacts = {artifact.path: artifact for artifact in recipe.desired.artifacts}
 
     hook_config = artifacts[Path(".codex/plugins/lup/hooks/hooks.json")].content
@@ -308,6 +452,9 @@ class PartExpectation(BaseModel):
 
 PART_CONTRACT: dict[str, PartExpectation] = {
     "TextPart": PartExpectation(part=TextPart(text="plain prose"), diverges=False),
+    "SpellingExample": PartExpectation(
+        part=SpellingExample(text="`/lup:merge` beside `$lup:merge`"), diverges=False
+    ),
     "SkillInvocation": PartExpectation(
         part=SkillInvocation(plugin="lup", skill="merge"), diverges=True
     ),
@@ -343,9 +490,9 @@ PART_CONTRACT: dict[str, PartExpectation] = {
 def test_every_prompt_part_states_what_it_promises_across_runtimes() -> None:
     """A part neither renderer handles renders as nothing, silently.
 
-    Pyright's ``assert_never`` catches the arm nobody wrote; this catches the
-    part nobody decided about — whether its two renderings agree is a design
-    choice no type can hold.
+    The base catches the kind that never says how it is spelled; this catches
+    the kind nobody decided about — whether its two renderings agree is a
+    design choice no type can hold.
     """
     union, _ = get_args(PromptPart.__value__)
 
@@ -364,6 +511,138 @@ def test_each_prompt_part_keeps_its_cross_runtime_promise(name: str) -> None:
 
     assert claude.strip() and codex.strip()
     assert (claude != codex) is expectation.diverges
+
+
+class PartQuestion(BaseModel):
+    """One question the harness asks a part, and the kinds that answer it."""
+
+    model_config = ConfigDict(frozen=True)
+
+    ask: Callable[[SemanticPart], bool]
+    answered_by: list[str]
+
+
+PART_QUESTIONS: dict[str, PartQuestion] = {
+    "text_payload": PartQuestion(
+        ask=lambda part: part.text_payload is not None,
+        answered_by=["TextPart", "SpellingExample"],
+    ),
+    "invocation": PartQuestion(
+        ask=lambda part: part.invocation is not None, answered_by=["SkillInvocation"]
+    ),
+    "named_plugin": PartQuestion(
+        ask=lambda part: part.named_plugin is not None,
+        answered_by=["SkillInvocation", "PluginPath", "SkillPattern"],
+    ),
+    "named_agent": PartQuestion(
+        ask=lambda part: part.named_agent is not None, answered_by=["Delegate"]
+    ),
+    "references_arguments": PartQuestion(
+        ask=lambda part: part.references_arguments, answered_by=["ArgumentsRef"]
+    ),
+}
+"""Every question a walk asks a part rather than deciding about it from outside."""
+
+
+@pytest.mark.parametrize("question", sorted(PART_QUESTIONS))
+def test_each_question_is_answered_by_exactly_the_parts_that_carry_it(
+    question: str,
+) -> None:
+    """A kind that carries something and declines to say so is the silent bug.
+
+    Every question here defaults to declining, so a walk that asks it can never
+    miss a kind by omission — but a kind that carries prose, or names a plugin,
+    and forgets to answer would go unseen. Pinning who answers turns that into
+    a failure the moment a new kind joins ``PART_CONTRACT``.
+    """
+    asked = PART_QUESTIONS[question]
+
+    answering = [
+        name
+        for name, expectation in PART_CONTRACT.items()
+        if asked.ask(expectation.part)
+    ]
+
+    assert answering == asked.answered_by
+
+
+@pytest.mark.parametrize("name", sorted(PART_CONTRACT))
+def test_each_prompt_part_round_trips_through_its_discriminator(name: str) -> None:
+    """Answering for itself leaves a part exactly as parseable as it was."""
+    document = PromptDocument(parts=[PART_CONTRACT[name].part])
+
+    restored = PromptDocument.model_validate_json(document.model_dump_json())
+
+    assert restored == document
+    assert type(restored.parts[0]) is type(document.parts[0])
+
+
+def test_prompt_documents_parse_every_part_from_its_discriminator() -> None:
+    """One document holding every kind still validates through ``type`` alone."""
+    payload = {
+        "parts": [
+            expectation.part.model_dump() for expectation in PART_CONTRACT.values()
+        ]
+    }
+
+    document = PromptDocument.model_validate(payload)
+
+    assert [type(part).__name__ for part in document.parts] == list(PART_CONTRACT)
+
+
+def test_an_undeclared_plugin_behind_an_invocation_names_the_invocation() -> None:
+    """One part answers two questions, and the sharper gate must speak first.
+
+    An invocation names a plugin, so both the plugin gate and the invocation
+    gate see it — but only one of them can say which skill went missing.
+    """
+    source = portable_harness().model_dump()
+    source["guidance"]["parts"].append(
+        SkillInvocation(plugin="absent", skill="merge").model_dump()
+    )
+
+    with pytest.raises(ValueError, match="unknown declaration: absent:merge"):
+        Harness.model_validate(source)
+
+
+class UnansweredPart(SemanticPart):
+    """A thirteenth kind that declines to say how it should be spelled."""
+
+    type: Literal["unanswered"] = "unanswered"
+
+
+class AnsweredPart(SemanticPart):
+    """A thirteenth kind that answers the base and declines everything else."""
+
+    type: Literal["answered"] = "answered"
+
+    def spell(self, renderer: PromptRenderer) -> str:
+        return f"{renderer.own.runtime_name} answered"
+
+
+def test_a_part_that_answers_nothing_cannot_be_constructed() -> None:
+    """The base is what forces a new kind to decide, not a walk that meets it."""
+
+    def construct(kind: type[SemanticPart]) -> SemanticPart:
+        return kind()
+
+    assert construct(AnsweredPart)
+
+    with pytest.raises(TypeError, match="abstract"):
+        construct(UnansweredPart)
+
+
+def test_a_new_kind_of_part_renders_without_editing_a_renderer_or_walk() -> None:
+    """The walk hands over the reader's vocabulary and never names a kind."""
+    document = PromptDocument.model_construct(parts=[AnsweredPart()])
+
+    assert claude_prompt_renderer().render(document) == (
+        f"{ClaudeSpellings().runtime_name} answered\n"
+    )
+    assert codex_prompt_renderer().render(document) == (
+        f"{CodexSpellings().runtime_name} answered\n"
+    )
+    assert document_text_size(document) == 0
 
 
 def test_every_tree_paths_read_the_same_under_either_runtime() -> None:
@@ -406,11 +685,29 @@ def test_skill_argument_declarations_require_a_matching_reference(
         )
 
 
-def test_typed_content_package_has_expected_module_inventory() -> None:
-    content = Path("src/lup_template/devtools/harness/content")
-    sources = list(content.rglob("*.py"))
+def test_every_typed_content_module_is_reachable_from_a_catalog() -> None:
+    """An orphaned content module renders into no tree and drifts unnoticed.
 
-    assert len(sources) == 47
+    Importing the generation recipes pulls in every declaration a catalog
+    aggregates, so a module still on disk but absent from ``sys.modules`` is
+    one no artifact is rendered from — a retired skill left behind, or a
+    document nobody listed.
+    """
+    content = Path("src/lup_template/devtools/harness/content")
+    loaded = {
+        Path(source).resolve()
+        for source in (
+            getattr(module, "__file__", None) for module in list(sys.modules.values())
+        )
+        if source is not None
+    }
+    orphans = [
+        path.as_posix()
+        for path in sorted(content.rglob("*.py"))
+        if path.name != "__init__.py" and path.resolve() not in loaded
+    ]
+
+    assert not orphans
 
 
 def test_source_tree_contains_no_embedded_base64() -> None:
@@ -428,15 +725,143 @@ def test_retired_native_catalog_paths_stay_deleted() -> None:
     assert not (harness / "importer.py").exists()
 
 
-def test_canonical_text_rejects_provider_invocation_spelling() -> None:
-    harness = portable_harness()
-    payload = harness.model_dump(mode="python")
-    payload["guidance"] = PromptDocument(parts=[TextPart(text="Run $lup:merge")])
+INVOCATION_IN_PROSE = "then run /lup:merge and wait"
 
-    source = Harness.model_validate(payload)
+PROSE_DECLARATIONS: dict[
+    str, Callable[[str], Agent | Argument | Plugin | SemanticPart | Skill]
+] = {
+    "Agent.description": lambda prose: Agent(
+        id="agent.probe",
+        name="probe",
+        description=prose,
+        prompt=PromptDocument(parts=[TextPart(text="body")]),
+    ),
+    "Argument.description": lambda prose: Argument(name="target", description=prose),
+    "AskUser.question": lambda prose: AskUser(question=prose),
+    "Delegate.prompt": lambda prose: Delegate(
+        subagent_type="lup:trace-explorer", prompt=prose
+    ),
+    "Plugin.description": lambda prose: Plugin(
+        id="plugin.probe",
+        name="probe",
+        marketplace="probe",
+        version="0.0.0",
+        description=prose,
+        skills=[],
+        agents=[],
+    ),
+    "RelocateSession.path": lambda prose: RelocateSession(path=prose),
+    "RequestApproval.action": lambda prose: RequestApproval(
+        action=prose, reason="it is visible"
+    ),
+    "RequestApproval.reason": lambda prose: RequestApproval(
+        action="pushing", reason=prose
+    ),
+    "Skill.argument_hint": lambda prose: Skill(
+        id="skill.probe",
+        name="probe",
+        description="Probe",
+        argument_hint=prose,
+        prompt=PromptDocument(parts=[TextPart(text="body")]),
+    ),
+    "Skill.description": lambda prose: Skill(
+        id="skill.probe",
+        name="probe",
+        description=prose,
+        prompt=PromptDocument(parts=[TextPart(text="body")]),
+    ),
+    "TextPart.text": lambda prose: TextPart(text=prose),
+}
+"""Every field a declaration holds as free text, and how one is declared.
 
-    with pytest.raises(ValueError, match="provider invocation syntax"):
-        compile_codex(source)
+A native tree renders each of these as prose, so each is the whole of the way
+an invocation could reach a reader who cannot use it."""
+
+
+NAMES_RATHER_THAN_PROSE = [
+    "Agent.id",
+    "Harness.generator_version",
+    "Plugin.id",
+    "Plugin.version",
+    "Skill.id",
+    "SpellingExample.text",
+]
+"""Declared strings deliberately exempt from the portable-prose constraint.
+
+Most identify or version a declaration rather than teaching anything, so they
+never reach a reader as words. ``SpellingExample.text`` is the one that does
+and is exempt anyway: its whole subject is what each runtime spells, which is
+the one thing portable prose cannot say. Every other free-text field a prompt
+or its discovery metadata carries is portable, and a new field has to join one
+list or the other rather than quietly accepting anything."""
+
+
+def test_every_free_text_declaration_field_is_portable_prose() -> None:
+    """A field typed plain ``str`` is the one way back to scanning afterwards."""
+    union, _ = get_args(PromptPart.__value__)
+    declarations = [*get_args(union), Argument, Skill, Agent, Plugin, Harness]
+
+    unconstrained = [
+        f"{declaration.__name__}.{name}"
+        for declaration in declarations
+        for name, field in declaration.model_fields.items()
+        if not field.metadata and field.annotation in (str, str | None)
+    ]
+
+    assert sorted(unconstrained) == NAMES_RATHER_THAN_PROSE
+
+
+@pytest.mark.parametrize("field", sorted(PROSE_DECLARATIONS))
+def test_declaring_an_invocation_in_prose_is_refused(field: str) -> None:
+    """The words are refused where an author writes them, not where they compile."""
+    declare = PROSE_DECLARATIONS[field]
+
+    assert declare("then run the merge skill and wait")
+
+    with pytest.raises(ValueError, match="portable prose spells"):
+        declare(INVOCATION_IN_PROSE)
+
+
+def test_a_refused_declaration_names_its_field_and_the_offending_spelling() -> None:
+    """Naming both is what lets a contributor go straight to the words."""
+    with pytest.raises(ValueError) as refusal:
+        Agent(
+            id="agent.probe",
+            name="probe",
+            description=INVOCATION_IN_PROSE,
+            prompt=PromptDocument(parts=[TextPart(text="body")]),
+        )
+
+    report = str(refusal.value)
+    assert "Agent" in report
+    assert "description" in report
+    assert "'/lup:merge'" in report
+
+
+def test_no_runtime_spells_an_invocation_portable_prose_would_admit() -> None:
+    """The shape is syntax, so each runtime proves its own sigil is one of them.
+
+    That is what lets the declaration layer refuse an invocation without
+    knowing which plugins exist or which runtime will read the words.
+    """
+    for runtime in (ClaudeSpellings(), CodexSpellings()):
+        for spelling in (
+            runtime.render(SkillInvocation(plugin="lup", skill="merge")),
+            runtime.invocation_pattern("lup", "*"),
+            runtime.invocation_pattern("lup", "<name>"),
+        ):
+            assert spelling[0] in INVOCATION_SIGILS
+            with pytest.raises(ValueError, match="portable prose spells"):
+                TextPart(text=f"Run {spelling}")
+
+
+def test_deserializing_a_harness_refuses_an_invocation_in_guidance() -> None:
+    """Reading a harness back is a declaration too, and refuses the same words."""
+    source = portable_harness().model_dump()
+    source["guidance"]["parts"].append({"type": "text", "text": "Run $lup:merge"})
+
+    with pytest.raises(ValueError, match="portable prose spells"):
+        Harness.model_validate(source)
 
 
 def test_artifact_paths_reject_backslash_traversal() -> None:
@@ -453,9 +878,9 @@ def test_both_native_trees_compile_deterministically() -> None:
     assert codex == compile_codex(harness)
     assert (
         len([item for item in claude.artifacts if "/commands/" in item.path.as_posix()])
-        == 30
+        == 31
     )
-    assert len([item for item in codex.artifacts if item.path.name == "SKILL.md"]) == 30
+    assert len([item for item in codex.artifacts if item.path.name == "SKILL.md"]) == 31
     assert Path(".codex/plugins/lup/.codex-plugin/plugin.json") in {
         item.path for item in codex.artifacts
     }
@@ -493,10 +918,60 @@ def test_codex_compiles_prefix_safe_shell_allows_to_native_rules() -> None:
     assert 'pattern = ["git", "push"]' not in rules
 
 
+def test_every_commentable_generated_file_carries_the_one_banner_form() -> None:
+    harness = portable_harness()
+    root = Path.cwd()
+    trees = [
+        claude_target(root).recipe.desired,
+        codex_target(root).recipe.desired,
+        ArtifactTree(artifacts=[rule_reference_artifact()]),
+    ]
+    bannered = [
+        (artifact, artifact.banner)
+        for tree in trees
+        for artifact in tree.artifacts
+        if isinstance(artifact.banner, GeneratedBanner)
+    ]
+
+    assert {Path("docs/rules.md"), Path("docs/permissions.md")} <= {
+        artifact.path for artifact, _ in bannered
+    }
+    for artifact, banner in bannered:
+        assert banner.opens(artifact.path, artifact.content)
+        assert f"Generated from {banner.source} by " in artifact.content
+        assert f"`{banner.command}`" in artifact.content
+    for tree in trees:
+        for artifact in tree.artifacts:
+            spelled = ARTIFACT_COMMENT_ROUTER.route_for(artifact.path)
+            assert (artifact.banner is not None) == (spelled is not None)
+    assert harness == portable_harness()
+
+
+def test_a_generated_file_that_states_no_provenance_fails_the_check() -> None:
+    silent = Artifact(
+        path=Path("docs/invented.md"), content="# Invented\n", semantic_id="docs.new"
+    )
+
+    with pytest.raises(ArtifactValidationError, match="declares no generated-from"):
+        validated_tree([silent])
+
+
+def test_a_banner_the_content_does_not_open_with_is_rejected() -> None:
+    banner = GeneratedBanner(source="lup_template.invented", command="uv run invent")
+
+    with pytest.raises(ValueError, match="does not open with the banner"):
+        Artifact(
+            path=Path("docs/invented.md"),
+            content="# Invented\n",
+            semantic_id="docs.new",
+            banner=banner,
+        )
+
+
 def test_repository_generated_harness_is_drift_clean() -> None:
     reports = [
-        inspect_generation(claude_generation_recipe(Path.cwd())),
-        inspect_generation(codex_generation_recipe(Path.cwd())),
+        inspect_generation(claude_target(Path.cwd()).recipe),
+        inspect_generation(codex_target(Path.cwd()).recipe),
     ]
 
     assert all(report.clean for report in reports)
@@ -911,6 +1386,150 @@ def test_generated_claude_hook_executes_the_canonical_kernel() -> None:
     output = ClaudeHookOutput.model_validate_json(result.stdout)
     assert output.hook_specific_output.permission_decision == "deny"
     assert "interpreters" in output.hook_specific_output.permission_decision_reason
+
+
+@pytest.mark.parametrize("target", sorted(SHIPPED_DISPATCHERS))
+def test_generated_dispatcher_resolves_its_runtime_from_anywhere(
+    target: str, tmp_path: Path
+) -> None:
+    """A plugin host spawns the hook as a bare script and arranges nothing.
+
+    Isolated mode drops the working directory, the script's own directory, and
+    every ``PYTHON*`` variable from the search path, and the environment is
+    empty, so reaching ``kernel.*`` and ``policy_data`` at all proves the
+    script finds its runtime from its own location.
+    """
+    result = sh.Command(sys.executable)(
+        "-I",
+        str(SHIPPED_DISPATCHERS[target].script.resolve()),
+        _in='{"tool_name":"Bash","tool_input":{"command":"python -c 1"}}',
+        _cwd=str(tmp_path),
+        _env={},
+        _ok_code=[0, 2],
+        _return_cmd=True,
+    )
+
+    assert isinstance(result, sh.RunningCommand)
+    match target:
+        case "claude":
+            decision = ClaudeHookOutput.model_validate_json(
+                result.stdout
+            ).hook_specific_output
+            assert decision.permission_decision == "deny"
+            reason = decision.permission_decision_reason
+        case _:
+            assert result.exit_code == 2
+            reason = result.stderr.decode()
+    assert "interpreters" in reason
+
+
+def test_static_checking_reaches_every_shipped_dispatcher() -> None:
+    """A dispatcher is the one artifact whose breakage is silent.
+
+    A plugin host runs these scripts, not the workspace, so an unresolved
+    import or a mistyped argument surfaces as a permission decision that never
+    happens — in a session that only sees the tool go through. Every scope
+    that could exempt one is asserted here rather than trusted.
+    """
+    declared = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
+    config = PyrightConfiguration.model_validate(declared["tool"]["pyright"])
+    halves = [SHARED_DISPATCHER_HALF]
+
+    for dispatcher in SHIPPED_DISPATCHERS.values():
+        halves.append(dispatcher.asset)
+        for source in (dispatcher.asset, dispatcher.script):
+            assert dispatcher.runtime in [
+                path
+                for environment in config.execution_environments
+                if source.is_relative_to(environment.root)
+                for path in environment.extra_paths
+            ]
+        assert SHARED_DISPATCHER_HALF.parent in [
+            path
+            for environment in config.execution_environments
+            if dispatcher.asset.is_relative_to(environment.root)
+            for path in environment.extra_paths
+        ]
+    for source in [*halves, *[item.script for item in SHIPPED_DISPATCHERS.values()]]:
+        assert any(source.is_relative_to(root) for root in config.include)
+        assert not any(source.is_relative_to(root) for root in config.exclude)
+
+
+def test_both_dispatchers_are_compiled_from_one_shared_host_half() -> None:
+    """The half neither runtime spells differently is written exactly once.
+
+    Every function the two scripts genuinely share must be a function the
+    shared half offers — anything else is the same code living in two places,
+    which is how the halves drifted apart before they were compiled.
+    """
+    shared = [
+        node.name
+        for member in SPLICED_MEMBERS
+        for node in half_functions(source_half(SHARED_PACKAGE, member))
+    ]
+    claude = compiled_functions(compile_dispatcher(CLAUDE_DISPATCHER))
+    codex = compiled_functions(compile_dispatcher(CODEX_DISPATCHER))
+
+    assert "sandbox_active" in shared and "existing_write_targets" in shared
+    assert "granted_allowances" in shared and "declared_identity" in shared
+    # Every kernel call site is shared, which is what stops one runtime from
+    # passing a fact the other has quietly stopped passing.
+    assert "bash_decision" in shared and "edit_decision" in shared
+    identical = [
+        name
+        for name in claude
+        if name in codex
+        and ast.dump(ast.parse(claude[name])) == ast.dump(ast.parse(codex[name]))
+    ]
+    assert sorted(identical) == sorted(shared)
+    assert all(claude[name] == codex[name] for name in shared)
+
+
+@pytest.mark.parametrize("target", sorted(SHIPPED_DISPATCHERS))
+def test_compiled_dispatcher_reaches_only_what_a_bare_script_resolves(
+    target: str,
+) -> None:
+    """The compiled script keeps the hermeticity floor its runtime promises.
+
+    ``host`` is deliberately absent: the shared half is compiled in rather
+    than shipped beside the script, so there is no second runtime module to
+    keep in step with the one this dispatcher was type-checked against.
+    """
+    dispatcher = SHIPPED_DISPATCHERS[target]
+    script = compile_dispatcher(dispatcher.declaration)
+    modules = [
+        item.module
+        for item in half_imports(
+            SourceHalf(module=target, text=script, tree=ast.parse(script))
+        )
+    ]
+
+    assert modules
+    assert all(resolvable(module, dispatcher.declaration) for module in modules)
+    assert SHARED_MEMBER not in modules
+    assert not any(module == "lup" or module.startswith("lup.") for module in modules)
+    assert script == dispatcher.script.read_text(encoding="utf-8")
+
+
+def test_compilation_refuses_a_dispatcher_that_breaks_its_declaration() -> None:
+    """A dispatcher that cannot be proven is a session without a boundary.
+
+    Every axis is read back out of the syntax rather than trusted, so a tool
+    the plugin registers the hook for but the router never reaches stops
+    generation instead of reaching a session as a decision that never happens.
+    """
+    unrouted = CLAUDE_DISPATCHER.model_copy(
+        update={"routed_tools": [*CLAUDE_DISPATCHER.routed_tools, "NotebookEdit"]}
+    )
+    misread = CODEX_DISPATCHER.model_copy(update={"managed_root_env": "CODEX_ROOT"})
+    unregistered = CODEX_DISPATCHER.model_copy(update={"hook_events": ["PreToolUse"]})
+
+    with pytest.raises(ValueError, match="routes"):
+        compile_dispatcher(unrouted)
+    with pytest.raises(ValueError, match="never reads CODEX_ROOT"):
+        compile_dispatcher(misread)
+    with pytest.raises(ValueError, match="not registered for"):
+        compile_dispatcher(unregistered)
 
 
 AUTONOMY_PROBE = {
@@ -1403,9 +2022,10 @@ def test_proposal_rewrite_is_idempotent_but_tampering_refuses(tmp_path: Path) ->
 
 
 def test_project_settings_derive_sandbox_from_hook_declaration() -> None:
-    hooks = portable_harness().plugins[0].hooks
+    plugin = portable_harness().plugins[0]
+    hooks = plugin.hooks
     assert hooks is not None
-    settings = project_settings(hooks)
+    settings = project_settings(plugin)
     sandbox = settings["sandbox"]
     assert isinstance(sandbox, dict)
     filesystem = sandbox["filesystem"]
@@ -1419,9 +2039,27 @@ def test_project_settings_derive_sandbox_from_hook_declaration() -> None:
     assert "sandbox" not in project_settings(None)
 
 
+def test_a_declared_tool_server_is_granted_rather_than_asked_about() -> None:
+    """A server the harness wires in is this project's own code.
+
+    The grant names each server by the scoped name a runtime addresses a
+    plugin's server by; the bare key it is declared under matches nothing.
+    """
+    plugin = portable_harness().plugins[0]
+    permissions = project_settings(plugin)["permissions"]
+    assert isinstance(permissions, dict)
+    allowed = permissions["allow"]
+    assert isinstance(allowed, list)
+    for server in plugin.mcp_servers:
+        assert f"mcp__plugin_{plugin.name}_{server.name}" in allowed
+    assert "WebSearch" in allowed
+
+
 def test_codex_sandbox_arguments_establish_the_envelope() -> None:
     environment: EnvVars = {}
-    arguments = codex_sandbox_arguments(environment, ["--model", "gpt-5.2"])
+    arguments = codex_sandbox_arguments(
+        portable_harness().plugins[0], environment, ["--model", "gpt-5.2"]
+    )
     assert arguments[:2] == ["--sandbox", "workspace-write"]
     assert environment["LUP_SANDBOX_ACTIVE"] == "1"
 
@@ -1432,7 +2070,7 @@ def test_codex_sandbox_widens_the_root_to_sibling_worktrees(
     """Codex roots writes at the launch cwd; the prescribed worktree is outside."""
     monkeypatch.setattr(launch, "get_tree_dir", lambda: tmp_path)
     environment: EnvVars = {}
-    arguments = codex_sandbox_arguments(environment, [])
+    arguments = codex_sandbox_arguments(portable_harness().plugins[0], environment, [])
     roots = arguments[arguments.index("-c") + 1]
 
     assert roots.startswith("sandbox_workspace_write.writable_roots=")
@@ -1450,7 +2088,7 @@ def test_codex_sandbox_omits_the_root_outside_a_tree_layout(
     monkeypatch.setattr(launch, "get_tree_dir", no_tree)
     environment: EnvVars = {}
 
-    assert codex_sandbox_arguments(environment, []) == [
+    assert codex_sandbox_arguments(portable_harness().plugins[0], environment, []) == [
         "--sandbox",
         "workspace-write",
     ]
@@ -1467,5 +2105,59 @@ def test_codex_sandbox_arguments_defer_to_a_caller_envelope() -> None:
         ["--dangerously-bypass-approvals-and-sandbox"],
     ]
     for extra_args in caller_forms:
-        assert codex_sandbox_arguments(environment, extra_args) == []
+        assert (
+            codex_sandbox_arguments(
+                portable_harness().plugins[0], environment, extra_args
+            )
+            == []
+        )
     assert "LUP_SANDBOX_ACTIVE" not in environment
+
+
+def test_declared_tool_servers_are_the_registry_the_backends_assemble() -> None:
+    """A group added to the toolsets registry reaches a native session too."""
+    servers = portable_harness().plugins[0].mcp_servers
+    assert [server.name for server in servers] == tool_group_names(realtime=False)
+
+
+def test_each_runtime_spells_the_project_root_a_tool_server_starts_from() -> None:
+    """Neither tree may leave the root to whatever directory a launch had."""
+    server = portable_harness().plugins[0].mcp_servers[0]
+    assert "${CLAUDE_PROJECT_DIR}" in server.command_line(ClaudeSpellings())
+    assert "." in server.command_line(CodexSpellings())
+
+
+def test_claude_tree_offers_the_tool_servers_as_a_plugin_configuration() -> None:
+    """The scope that follows the plugin, so enabling it is what starts them."""
+    tree = compile_claude(portable_harness())
+    declaration = next(
+        artifact
+        for artifact in tree.artifacts
+        if artifact.path == Path(".claude/plugins/lup/.mcp.json")
+    )
+    servers = json.loads(declaration.content)["mcpServers"]
+    assert sorted(servers) == sorted(tool_group_names(realtime=False))
+    assert servers["notes"]["command"] == "uv"
+    assert "${CLAUDE_PROJECT_DIR}" in servers["notes"]["args"]
+
+
+def test_codex_tree_offers_the_tool_servers_in_its_project_config() -> None:
+    """Codex keeps a project's servers beside the rest of its project config."""
+    tree = compile_codex(portable_harness())
+    config = next(
+        artifact
+        for artifact in tree.artifacts
+        if artifact.path == Path(".codex/config.toml")
+    )
+    parsed = tomllib.loads(config.content)
+    assert parsed["features"]["hooks"] is True
+    assert sorted(parsed["mcp_servers"]) == sorted(tool_group_names(realtime=False))
+    assert parsed["mcp_servers"]["notes"]["command"] == "uv"
+
+
+def test_a_named_session_is_what_makes_a_native_server_serve_real_tools() -> None:
+    """No adapter relays a context to a natively launched server; it opens one."""
+    assert collect_tools_by_server(None).keys() == {EXAMPLE_GROUP}
+    context = harness_session_context(HARNESS_SESSION)
+    assert context.session_id == HARNESS_SESSION
+    assert NOTES_GROUP in collect_tools_by_server(context)

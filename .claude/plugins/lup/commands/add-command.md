@@ -1,6 +1,6 @@
 ---
 description: "Create a new slash command in the lup plugin"
-allowed-tools: Read, Write, Edit, Glob, Grep, AskUserQuestion
+allowed-tools: Read, Write, Edit, AskUserQuestion
 argument-hint: "[name] [description]"
 ---
 
@@ -44,7 +44,7 @@ Gather any info **not already provided via arguments**, asking the user one ques
 
 Commands are generated artifacts. Write the declaration, not the markdown.
 
-1. Create `src/lup_template/devtools/harness/content/skills/<name>.py` exporting a `SKILL`:
+1. Decide which half owns it: a skill that automates work *inside* a project is the library's (`packages/lup/src/lup/devtools/harness/content/skills/`); a skill whose subject is standing a project up or keeping it in step with upstream is this repository's (`src/lup_template/devtools/harness/content/skills/`). Create `<name>.py` there, exporting a `SKILL`:
 
 ```python
 import lup.harness.models as models
@@ -68,7 +68,7 @@ SKILL = models.Skill(
 
 Build `parts` from `models.TextPart(text=r'...')` for the prose, splicing in `models.ArgumentsRef()` wherever the prompt needs the raw arguments and `models.SkillInvocation(plugin="lup", skill="<other>")` wherever it names another skill. Never hardcode a slash-command string — the invocation part renders the right syntax for each harness. Copy the raw-string style from a neighbouring skill module.
 
-2. Register it in `src/lup_template/devtools/harness/content/catalog.py`: import `SKILL as SKILL_<NAME>` alongside its siblings, then add `SKILL_<NAME>` to the `SKILLS` list. Both are alphabetical.
+2. Register it in the `content/catalog.py` of that same half: import `SKILL as SKILL_<NAME>` alongside its siblings, then add `SKILL_<NAME>` to `LIBRARY_SKILLS` (library) or `PROJECT_SKILLS` (this repository). Both lists are alphabetical, and the project catalog composes them into the `SKILLS` the plugin ships.
 
 3. Regenerate both native plugins:
 
@@ -101,7 +101,7 @@ SKILL = models.Skill(
 )
 ```
 
-Its prompt body walks the agent through finding relevant files with Glob, searching for patterns with Grep, reading the key files, and reporting findings in a structured format.
+Its prompt body walks the agent through finding relevant files and searching for patterns with `Bash`, reading the key files, and reporting findings in a structured format.
 
 ### Skill with arguments:
 

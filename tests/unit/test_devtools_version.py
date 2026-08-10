@@ -14,7 +14,7 @@ import pytest
 import typer
 
 from lup.workspace import paths
-from lup_template.devtools import version
+from lup.devtools import version
 
 
 @pytest.mark.parametrize(

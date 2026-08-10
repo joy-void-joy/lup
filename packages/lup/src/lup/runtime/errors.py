@@ -4,7 +4,7 @@ from datetime import timedelta
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from lup.runtime.models import TurnBlock, TurnIdentifiers
+from lup.runtime.models import AnyTurnBlock, TurnIdentifiers
 from lup.types import Usage
 
 
@@ -22,11 +22,20 @@ class TurnFailure(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     message: str
-    blocks: list[TurnBlock] = Field(default_factory=list)
+    blocks: list[AnyTurnBlock] = Field(default_factory=list)
     usage: Usage = Field(default_factory=Usage)
     duration: timedelta = timedelta()
     identifiers: TurnIdentifiers | None = None
     validation_history: list[ValidationAttempt] = Field(default_factory=list)
+
+    correctable: bool = True
+    """Whether re-prompting could produce a different outcome.
+
+    A correction cycle re-sends the turn with an instruction appended, which
+    is worth doing when the model could have answered and did not. When the
+    submission tool was refused rather than misused, the same prompt meets
+    the same refusal, so the cycles only delay the failure they report.
+    """
 
 
 class TurnError(Exception):
@@ -63,3 +72,12 @@ class StructuredOutputError(TurnError):
 
 class TurnAlreadyActiveError(RuntimeError):
     """A session was asked to start a second concurrent turn."""
+
+
+class DeltaStreamingDisabled(RuntimeError):
+    """A live view was asked of a session built without partial streaming.
+
+    Raised rather than yielding a delta-free stream, because a stream that
+    is quiet because nothing was configured looks exactly like one that is
+    quiet because nothing happened.
+    """

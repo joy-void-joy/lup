@@ -12,30 +12,15 @@ import pytest
 import sh
 import typer
 
-from lup_template.devtools.dev import branches
+from lup.devtools.dev import branches
+from tests.unit.repos import commit_file, initialized_repo
 
 
 @pytest.fixture
 def repo(tmp_path: Path) -> Path:
     work = tmp_path / "repo"
-    work.mkdir()
-    hooks = tmp_path / "no-hooks"
-    hooks.mkdir()
-    git = sh.Command("git").bake(
-        "-C",
-        str(work),
-        "-c",
-        "commit.gpgsign=false",
-        "-c",
-        f"core.hooksPath={hooks}",
-        _tty_out=False,
-    )
-    git("init", "-b", "main")
-    git("config", "user.email", "test@example.com")
-    git("config", "user.name", "Test")
-    (work / "file.txt").write_text("base\n", encoding="utf-8")
-    git("add", "file.txt")
-    git("commit", "-m", "chore: base")
+    git = initialized_repo(work, tmp_path / "no-hooks")
+    commit_file(git, work, "file.txt", "base\n", "chore: base")
     git("worktree", "add", str(tmp_path / "feature"), "-b", "feature")
     (tmp_path / "feature" / "file.txt").write_text("dirty\n", encoding="utf-8")
     return work

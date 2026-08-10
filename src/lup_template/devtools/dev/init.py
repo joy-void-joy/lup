@@ -22,8 +22,9 @@ from pathlib import Path
 import typer
 
 from lup.workspace.paths import find_project_root
-from lup_template.devtools.dev.plugin import set_marketplace_name
-from lup_template.devtools.utils import git
+from lup.devtools.dev.plugin import set_marketplace_name
+from lup_template.devtools.harness.catalog import declared_plugin
+from lup.devtools.utils import git
 
 PACKAGE_IMPORT_RE = re.compile(
     r"""
@@ -234,7 +235,10 @@ def rename_package(
     all_changes.extend(rename_cli_app_name(cli_path, new_name, dry_run))
 
     typer.echo("\nMarketplace:" if dry_run else "Naming the plugin marketplace...")
-    all_changes.extend(f"  {c}" for c in set_marketplace_name(root, new_name, dry_run))
+    all_changes.extend(
+        f"  {c}"
+        for c in set_marketplace_name(root, new_name, declared_plugin().name, dry_run)
+    )
 
     if dry_run:
         typer.echo("\nDirectory rename:")

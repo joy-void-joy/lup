@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from lup.harness.models import (
         ArtifactTree,
         CapabilityEvidence,
+        LocatedPart,
         ModelTier,
         PluginLocation,
         PromptDocument,
@@ -146,6 +147,17 @@ class NativeSpellings(SkillInvocationRenderer):  # lup: ignore[abc-capability]
         """Name this runtime's own documentation, wherever it lives."""
 
     @abstractmethod
+    def project_root(self) -> str:
+        """Spell how a process this runtime spawns names the repository root.
+
+        A tool server started from a native tree has to find the project whose
+        tools it serves, and no runtime lets it ask the same way: one
+        substitutes the root into the command it spawns, another only
+        guarantees to spawn it there. Like :meth:`model_alias` this reaches a
+        generated artifact rather than prose, so it spells a bare string.
+        """
+
+    @abstractmethod
     def model_alias(self, tier: ModelTier) -> str | None:
         """Spell one portable tier into agent metadata, or decline it.
 
@@ -156,11 +168,23 @@ class NativeSpellings(SkillInvocationRenderer):  # lup: ignore[abc-capability]
 
 
 class PromptRenderer(ABC):
-    """Own one native runtime's complete prompt-document spelling."""
+    """Own one native runtime's complete prompt-document spelling.
+
+    A part spells itself against this, so what a renderer offers is the whole
+    of what a part may reach for: the reader's vocabulary, and the one question
+    — scope — that no single vocabulary can answer alone.
+    """
+
+    own: NativeSpellings
+    """The vocabulary of the runtime that will read what this renders."""
 
     @abstractmethod
     def render(self, prompt: PromptDocument) -> str:
         """Render every semantic prompt part into native prompt text."""
+
+    @abstractmethod
+    def location(self, part: LocatedPart) -> str:
+        """Spell one location for the reader, or for every runtime at once."""
 
 
 class CurrentTreeReader(ABC):

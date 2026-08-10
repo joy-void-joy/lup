@@ -1,3 +1,8 @@
+# lup: ignore[own-model-dispatch]
+# Which semantic tool a native payload decodes to is exactly what these parity
+# tests claim: `UnknownTool` is the fail-closed outcome for a novel or
+# malformed operation, `ShellCommand` the recognized one. The decoded type is
+# the assertion, observed from outside both decoders.
 """Cross-native semantic decoding and conservative policy parity tests."""
 
 import ast
@@ -30,6 +35,8 @@ from lup.adapters.codex.native import (
     CodexUnknownOperation,
     CodexDecisionRenderer,
 )
+from lup.harness.enforcement import declared_path_rules, semantic_policy_for
+from lup.harness.models import HookSet
 from lup.policy.chain import UnknownToolPolicy
 from lup.policy.bundle import (
     bundled_antipattern_rows,
@@ -39,6 +46,8 @@ from lup.policy.bundle import (
     runtime_url_scope,
 )
 from lup.policy.kernel.decision import KernelDecision
+from lup.policy.kernel.edit import decide_edit
+from lup.policy.kernel.rows import PathRoleRow
 from lup.policy.kernel.lex import shell_write_targets
 from lup.policy.models import (
     Decision,
@@ -50,12 +59,17 @@ from lup.policy.models import (
 )
 from lup.policy.rules import (
     EditPolicy,
+    antipattern_rows,
     FetchPolicy,
     PathRule,
     ShellPolicy,
     UrlScope,
     human_owned_path_rule,
+    path_rule_row,
 )
+
+from lup_template.devtools.harness.catalog import declared_hook_set, portable_harness
+from lup_template.devtools.harness.content.shell_vocabulary import SHELL_RULES
 
 
 class DecisionCase(BaseModel):
@@ -84,10 +98,33 @@ class EditDecisionCase(BaseModel):
     path_exists: bool = True
 
 
+# The roles this repository declares, mirrored so the fixtures judge the same
+# vocabulary the generated runtime is rendered with.
+FIXTURE_PATH_ROLES = [
+    PathRoleRow(root="tests", role="test"),
+    PathRoleRow(root="tmp", role="scratch"),
+]
+
+FIXTURE_PATH_RULES = declared_path_rules(declared_hook_set())
+"""The protected-path table this repository declares.
+
+Shared by the shell and edit fixtures rather than restated for each, because
+a table the two gates could be given differently is the drift these cases
+exist to catch."""
+
+FIXTURE_RECOVERABLE_LIMIT = 5
+FIXTURE_RUNNER_TARGETS = ["pyright", "pytest", "ruff", "lup-devtools"]
+"""What this project declares `uv run <target>` may reach, which is what the
+shell fixtures below are written against."""
+"""How many restorable files one command may destroy before it asks."""
+
 SHELL_POLICY_CASES = [
     DecisionCase(input="env MODE=test python script.py", effect="deny"),
     DecisionCase(input="uv run --with requests python -c 'x'", effect="deny"),
-    DecisionCase(input="uv run pytest | uv run python tmp/oneoff.py", effect="allow"),
+    # A scratch root is gitignored, so a script there reaches no reviewer and
+    # no diff; the escalation ladder routes one-off work to devtools instead.
+    DecisionCase(input="uv run pytest | uv run python tmp/oneoff.py", effect="deny"),
+    DecisionCase(input="uv run python tmp/oneoff.py", effect="deny"),
     DecisionCase(input="find . -name '*.py' | xargs grep TODO", effect="allow"),
     DecisionCase(input="echo x | xargs rm -rf", effect="ask"),
     DecisionCase(input="cd /tmp/worktree && uv run pytest", effect="allow"),
@@ -121,6 +158,20 @@ SHELL_POLICY_CASES = [
     DecisionCase(
         input="uv run lup-devtools dev worktree create feature", effect="allow"
     ),
+    # The conflict workflow is documented without `uv run`, whose manifest
+    # parse is exactly what a conflicted manifest defeats, so the classifier
+    # resolves the launcher named by path. Nothing else about the toolchain is
+    # admitted that way — it bounces back naming the spelling that is.
+    DecisionCase(
+        input=".venv/bin/lup-devtools dev conflict status --json", effect="allow"
+    ),
+    DecisionCase(
+        input=".venv/bin/lup-devtools dev conflict audit pyproject.toml", effect="allow"
+    ),
+    DecisionCase(input=".venv/bin/lup-devtools dev conflict complete", effect="allow"),
+    DecisionCase(input="lup-devtools dev conflict list", effect="allow"),
+    DecisionCase(input=".venv/bin/lup-devtools dev check", effect="deny"),
+    DecisionCase(input=".venv/bin/lup-devtools harness generate all", effect="deny"),
     # Redirections: discards and fd duplication are stripped; file writes ask.
     DecisionCase(input="grep x f 2>&1", effect="allow"),
     DecisionCase(input="grep x f > /dev/null", effect="allow"),
@@ -151,11 +202,41 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="echo x > /tmp/other/file", effect="allow"),
     DecisionCase(input="TMPDIR=/etc; echo x > $TMPDIR/passwd", effect="ask"),
     DecisionCase(input="for TMPDIR in /etc; do echo x > $TMPDIR/f; done", effect="ask"),
-    # Removal confined to the disposable roots is as safe as writing them;
-    # any long flag, opaque word, or outside target keeps the rm ask.
-    # A generated plugin tree joins them: regeneration restores it byte for
-    # byte, while its parent keeps settings, trust state, and authored skills
-    # that nothing can restore, so the grant stops at the plugins root.
+    # Publishing is how work becomes reviewable, so the verbs that put a
+    # branch and its pull request in front of a reader are ordinary. What
+    # keeps the ask is what a second attempt cannot restore, and what reaches
+    # another person rather than describing your own work.
+    DecisionCase(input="git push", effect="allow"),
+    DecisionCase(input="git push --force origin HEAD", effect="allow"),
+    DecisionCase(input="git push --delete origin feat", effect="ask"),
+    DecisionCase(input="gh pr create --fill", effect="allow"),
+    DecisionCase(input="gh pr ready 3", effect="allow"),
+    DecisionCase(input="gh pr comment 3 --body hi", effect="ask"),
+    DecisionCase(input="gh pr merge 3", effect="ask"),
+    # A default-method gh api call is a query; the flags that make it
+    # anything else carry the ask instead of the subcommand carrying it.
+    DecisionCase(input="gh api repos/o/r/pulls", effect="allow"),
+    DecisionCase(input="gh api -X POST repos/o/r/issues", effect="ask"),
+    DecisionCase(input="gh api -f title=x repos/o/r/issues", effect="ask"),
+    # Reading a repository is read-only however deep in git's own vocabulary
+    # the question is spelled.
+    DecisionCase(input="git ls-remote --heads origin", effect="allow"),
+    DecisionCase(input="git diff-tree -r HEAD", effect="allow"),
+    DecisionCase(input="git check-ignore -v build/x", effect="allow"),
+    DecisionCase(input="git submodule status", effect="allow"),
+    DecisionCase(input="git bisect log", effect="allow"),
+    DecisionCase(input="git bisect start", effect="ask"),
+    # A protected path is protected from the shell too. Creating a file
+    # destroys nothing, which is why an ordinary new target is written
+    # freely — but the rules that guard a path guard it by who owns it, not
+    # by what replacing it would cost, so they answer ahead of that grant and
+    # the shell cannot reach what the edit gate stops.
+    DecisionCase(input="echo x > README.md", effect="ask"),
+    DecisionCase(input="echo x > sync.json", effect="ask"),
+    DecisionCase(input="echo x > .env.local", effect="ask"),
+    DecisionCase(input="echo x > docs/fresh-note.md", effect="allow"),
+    # Housekeeping confined to the disposable roots is as safe as writing
+    # them; any long flag, opaque word, or outside target keeps the verb's ask.
     DecisionCase(input="rm tmp/oneoff.py", effect="allow"),
     DecisionCase(input="rm -rf tmp/scratch", effect="allow"),
     DecisionCase(input="rm -f $TMPDIR/out.txt", effect="allow"),
@@ -164,13 +245,58 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="rm tmp/../src/x.py", effect="ask"),
     DecisionCase(input="rm --no-preserve-root -rf tmp", effect="ask"),
     DecisionCase(input="rm -rf /", effect="ask"),
-    DecisionCase(input="rm .codex/plugins/lup/hooks/scripts/policy.py", effect="allow"),
-    DecisionCase(input="rm -rf .claude/plugins", effect="allow"),
-    DecisionCase(input="rm .claude/plugins/lup/x tmp/y", effect="allow"),
     DecisionCase(input="rm .claude/settings.local.json", effect="ask"),
     DecisionCase(input="rm -rf .claude/skills", effect="ask"),
     DecisionCase(input="rm .claude/plugins/../settings.json", effect="ask"),
-    DecisionCase(input="rm /home/u/.claude/plugins/lup/x", effect="ask"),
+    # A generated plugin tree is a build product the running runtime already
+    # loaded, so writing one by hand changes nothing it will honor and the
+    # next generation reverts it. Every writing form refuses it and names the
+    # typed source instead; a long flag the allow would not recognize must not
+    # buy a way past the refusal, and reading such a path stays ordinary.
+    DecisionCase(input="rm .codex/plugins/lup/hooks/scripts/policy.py", effect="deny"),
+    DecisionCase(input="rm -rf .claude/plugins", effect="deny"),
+    DecisionCase(input="rm .claude/plugins/lup/x tmp/y", effect="deny"),
+    DecisionCase(input="rm --recursive .claude/plugins/lup", effect="deny"),
+    DecisionCase(
+        input="mv tmp/policy.py .claude/plugins/lup/hooks/policy.py", effect="deny"
+    ),
+    DecisionCase(input="cp tmp/a .codex/plugins/lup/b", effect="deny"),
+    DecisionCase(input="mkdir -p .claude/plugins/lup/hooks", effect="deny"),
+    DecisionCase(input="touch .codex/plugins/lup/marker", effect="deny"),
+    DecisionCase(
+        input="echo x > .claude/plugins/lup/hooks/scripts/policy.py", effect="deny"
+    ),
+    DecisionCase(input="echo x >> .codex/plugins/lup/data.py", effect="deny"),
+    DecisionCase(
+        input="cp .claude/plugins/lup/hooks/scripts/policy.py tmp/copy.py",
+        effect="allow",
+    ),
+    DecisionCase(
+        input="cat .claude/plugins/lup/hooks/scripts/policy.py", effect="allow"
+    ),
+    # Every path-taking judged-ask verb reads the same role, so a scratch root
+    # is housekept without friction while production keeps the verb's ask.
+    DecisionCase(input="cp tmp/a.json tmp/b.json", effect="allow"),
+    DecisionCase(input="mv tmp/draft.md tmp/final.md", effect="allow"),
+    DecisionCase(input="mkdir -p tmp/run/logs", effect="allow"),
+    DecisionCase(input="touch tmp/marker", effect="allow"),
+    DecisionCase(input="rmdir tmp/run", effect="allow"),
+    DecisionCase(input="mv tmp/draft.md src/final.md", effect="ask"),
+    # An empty directory anywhere, unlike the file beside it: `mkdir` cannot
+    # overwrite and leaves nothing to run, so what lands inside is judged on
+    # its own path rather than the directory being refused up front.
+    DecisionCase(input="mkdir src/newpkg", effect="allow"),
+    DecisionCase(input="touch src/newfile.py", effect="ask"),
+    DecisionCase(input="cp --archive tmp/a tmp/b", effect="ask"),
+    # Copying reads its sources and writes only its destination, so landing
+    # production in a scratch root destroys nothing; moving out of one does,
+    # because the source is removed, and that keeps the verb's ask.
+    DecisionCase(input="cp src/a.py tmp/a.py", effect="allow"),
+    DecisionCase(input="cp /etc/hosts tmp/hosts", effect="allow"),
+    DecisionCase(input="cp tmp/a src/b.py", effect="ask"),
+    DecisionCase(input="mv src/a.py tmp/a.py", effect="ask"),
+    DecisionCase(input="rm /home/u/.claude/plugins/lup/x", effect="deny"),
+    DecisionCase(input="echo x > /srv/tree/dev/.codex/plugins/lup/y", effect="deny"),
     DecisionCase(input="rm .codex/config.local.toml", effect="ask"),
     # Quote-aware substitution: inert inside single quotes; a live $(...)
     # classifies recursively — the inner command joins the batch, and the
@@ -184,7 +310,7 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="[[ -n $(git status --porcelain) ]]", effect="allow"),
     DecisionCase(input="echo $(echo $(ls))", effect="allow"),
     DecisionCase(input="F=$(ls); echo $F", effect="allow"),
-    DecisionCase(input="echo $(git push)", effect="ask"),
+    DecisionCase(input="echo $(git push --delete origin feat)", effect="ask"),
     DecisionCase(input="echo $(rm -rf /)", effect="ask"),
     DecisionCase(input="git log $(cat names.txt)", effect="deny"),
     DecisionCase(input="F=$(ls); sed $F 's/a/b/' f", effect="deny"),
@@ -250,7 +376,7 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="git stash drop", effect="ask"),
     DecisionCase(input="git reset --hard", effect="ask"),
     DecisionCase(input="git clean -fd", effect="ask"),
-    DecisionCase(input="git push --force", effect="ask"),
+    DecisionCase(input="git push --delete origin feat", effect="ask"),
     DecisionCase(input="git checkout -- file", effect="deny"),
     # Ref-sourced pathspec restores name their content's commit; the shell
     # option builtin is shell-local. Both anchor history-rebuild batches.
@@ -278,7 +404,7 @@ SHELL_POLICY_CASES = [
     # Global value flags are consumed, never read as the subcommand; globals
     # that change execution behavior ask.
     DecisionCase(input="git -C /other status", effect="allow"),
-    DecisionCase(input="git -C status push", effect="ask"),
+    DecisionCase(input="git -C status restore f", effect="ask"),
     DecisionCase(input="git -c core.pager=touch log", effect="ask"),
     DecisionCase(input="git --exec-path=/tmp/x status", effect="ask"),
     # Exec-bearing and file-writing flags on allowed subcommands ask.
@@ -288,7 +414,6 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="git log --output=/tmp/f", effect="ask"),
     DecisionCase(input="git reflog", effect="allow"),
     DecisionCase(input="git reflog expire --expire=now --all", effect="ask"),
-    DecisionCase(input="git push", effect="ask"),
     DecisionCase(input="git pull", effect="allow"),
     DecisionCase(input="git clone https://x.test/r.git", effect="ask"),
     DecisionCase(input="git restore f", effect="ask"),
@@ -312,14 +437,14 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="git apply $PATCH", effect="deny"),
     DecisionCase(input="git switch main", effect="allow"),
     DecisionCase(input="git checkout main", effect="deny"),
-    DecisionCase(input="git bisect start", effect="deny"),
+    DecisionCase(input="git filter-branch --tree-filter x", effect="deny"),
     DecisionCase(input="sort --compress-program=/tmp/x f", effect="ask"),
     # gh: read-only operations allow; mutating forms ask.
     DecisionCase(input="gh run view 1", effect="allow"),
     DecisionCase(input="gh repo view", effect="allow"),
     DecisionCase(input="gh pr close 1", effect="ask"),
     DecisionCase(input="gh api -X POST /repos", effect="ask"),
-    DecisionCase(input="gh pr create --title x", effect="ask"),
+    DecisionCase(input="gh issue create --title x", effect="ask"),
     DecisionCase(input="gh pr checkout 123", effect="allow"),
     DecisionCase(input="gh auth status", effect="allow"),
     DecisionCase(input="gh secret list", effect="deny"),
@@ -416,19 +541,19 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="cat <<EOF\nplain body\nEOF", effect="allow"),
     DecisionCase(input="cat <<EOF\n$(id)\nEOF", effect="deny"),
     DecisionCase(input="grep x <<< 'needle haystack'", effect="allow"),
-    # A heredoc rewriting an existing file is shell file authoring over work
-    # the edit gate already saw: deny toward the Edit tool and tmp/*.py in
-    # both operator orders, even sandboxed. Authoring a file that is not
-    # there yet overwrites nothing and passes.
+    # A heredoc is judged by what its target costs, not by its own shape: an
+    # unrecoverable file asks in both operator orders, and one that is not
+    # there yet overwrites nothing and passes. The body never decides —
+    # `echo` authors the same content and always could.
     DecisionCase(
-        input="cat > out.py <<'EOF'\nbody\nEOF", effect="deny", existing=["out.py"]
+        input="cat > out.py <<'EOF'\nbody\nEOF", effect="ask", existing=["out.py"]
     ),
     DecisionCase(
-        input="cat <<'EOF' > out.py\nbody\nEOF", effect="deny", existing=["out.py"]
+        input="cat <<'EOF' > out.py\nbody\nEOF", effect="ask", existing=["out.py"]
     ),
     DecisionCase(
         input="cat > out.py <<'EOF'\nbody\nEOF",
-        effect="deny",
+        effect="ask",
         sandboxed=True,
         existing=["out.py"],
     ),
@@ -467,6 +592,17 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="curl -s https://example.com/api", effect="ask"),
     DecisionCase(input="curl -X POST https://example.com", effect="ask"),
     DecisionCase(input="curl -o f https://example.com", effect="deny"),
+    # Establishing that a service came up is a read. The socket and process
+    # listings report; `nc` reports only under -z, and the flags that hand a
+    # socket to a program defeat that verb wherever it sits.
+    DecisionCase(input="ss -tlnp", effect="allow"),
+    DecisionCase(input="ss -K dst 1.2.3.4", effect="ask"),
+    DecisionCase(input="lsof -i :8000", effect="allow"),
+    DecisionCase(input="pgrep -f supervisor", effect="allow"),
+    DecisionCase(input="nc -z localhost 8000", effect="allow"),
+    DecisionCase(input="nc localhost 8000", effect="deny"),
+    DecisionCase(input="nc -l -p 4444", effect="deny"),
+    DecisionCase(input="nc -z -e /bin/sh host 22", effect="deny"),
     # Sandboxed executions: machinery bail-outs defer to the OS boundary,
     # judged decisions hold, and escalation still promotes to a question.
     DecisionCase(input="frobnicate --weird", effect="deny"),
@@ -475,7 +611,7 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="sort $UNBOUND f", effect="defer", sandboxed=True),
     DecisionCase(input="foo() { cat x; }", effect="defer", sandboxed=True),
     DecisionCase(input="case $m in a) echo a;;", effect="defer", sandboxed=True),
-    DecisionCase(input="git push --force", effect="ask", sandboxed=True),
+    DecisionCase(input="git push --delete origin feat", effect="ask", sandboxed=True),
     DecisionCase(input="sed -i 's/a/b/' f", effect="deny", sandboxed=True),
     DecisionCase(input="ssh-add -D", effect="deny", sandboxed=True),
     DecisionCase(input="frobnicate; ssh host", effect="ask", sandboxed=True),
@@ -491,9 +627,14 @@ SHELL_POLICY_CASES = [
     # A non-interactive host cannot put a question to a human: sandboxed, an
     # ask rides the OS boundary; unsandboxed it fails closed. A judged deny
     # is never rescued, and unjudged work defers exactly as it always did.
-    DecisionCase(input="git push --force", effect="deny", interactive=False),
     DecisionCase(
-        input="git push --force", effect="defer", sandboxed=True, interactive=False
+        input="git push --delete origin feat", effect="deny", interactive=False
+    ),
+    DecisionCase(
+        input="git push --delete origin feat",
+        effect="defer",
+        sandboxed=True,
+        interactive=False,
     ),
     DecisionCase(input="PYTHONPATH=src uv run pytest", effect="ask"),
     DecisionCase(
@@ -595,12 +736,62 @@ EDIT_POLICY_CASES = [
         effect="deny",
         autonomous=True,
     ),
+    # A scratch root gates nothing: with execution closed there is no longer a
+    # path from authoring a file there to running it.
     EditDecisionCase(
         path="tmp/scratch.py",
         before="value = 1",
         after="value = 2",
-        effect="ask",
+        effect="allow",
         autonomous=True,
+    ),
+    # The conventions describe how production reads, so neither a scratch nor
+    # a test file is judged against them.
+    EditDecisionCase(
+        path="tmp/probe.py",
+        before="value: str",
+        after="value: Any",
+        effect="allow",
+    ),
+    EditDecisionCase(
+        path="tests/unit/test_thing.py",
+        before="value: str",
+        after="value: Any",
+        effect="allow",
+    ),
+    # The small-change gate is a reviewability convention, and it reaches
+    # exactly as far as the conventions do: a fixture is written whole.
+    EditDecisionCase(
+        path="tests/unit/test_thing.py",
+        before="value = 1",
+        after="a = 1\nb = 2\nc = 3\nd = 4\ne = 5",
+        effect="allow",
+    ),
+    # Creating a file is the same reach for the same reason. Adding lines to
+    # a test freely while asking to create one is not a coherent boundary.
+    EditDecisionCase(
+        path="tests/unit/test_new.py",
+        before=None,
+        after="def test_thing() -> None:\n    assert True\n",
+        effect="allow",
+    ),
+    EditDecisionCase(
+        path="src/module.py",
+        before=None,
+        after="def thing() -> None:\n    pass\n",
+        effect="ask",
+    ),
+    EditDecisionCase(
+        path="src/module.py",
+        before="value = 1",
+        after="a = 1\nb = 2\nc = 3\nd = 4\ne = 5",
+        effect="defer",
+    ),
+    EditDecisionCase(
+        path="src/module.py",
+        before="value: str",
+        after="value: Any",
+        effect="deny",
     ),
     EditDecisionCase(
         path="README.md",
@@ -740,6 +931,7 @@ def assembled_edit_decision(
         path_exists=Path(path).exists(),
         path_rules=runtime_path_rules(protected_roots, human_owned_files),
         antipattern_rows=rows,
+        path_roles=FIXTURE_PATH_ROLES,
         autonomous=autonomous,
         python_source=suffix in (".py", ".pyi"),
     )
@@ -766,13 +958,16 @@ def test_assembled_kernel_runs_without_site_packages(tmp_path: Path) -> None:
             ],
             protected_roots=[
                 ".claude",
-                "tmp",
                 "pyproject.toml",
                 "sync.json",
                 "downstream.json",
             ],
             human_owned_files=["README.md"],
             autonomous_agent_identities=["resolver-worker"],
+            path_roles=FIXTURE_PATH_ROLES,
+            shell_rules=SHELL_RULES,
+            recoverable_target_limit=FIXTURE_RECOVERABLE_LIMIT,
+            runner_targets=FIXTURE_RUNNER_TARGETS,
         ),
         encoding="utf-8",
     )
@@ -798,7 +993,8 @@ def test_assembled_kernel_runs_without_site_packages(tmp_path: Path) -> None:
         "from kernel.shell import decide_shell\n"
         "from policy_data import (\n"
         "    ALLOWED_FETCH_SCOPES, ANTI_PATTERN_ROWS, DENIED_FETCH_SCOPES,\n"
-        "    MAXIMUM_ADDED_LINES, PATH_RULES, SHELL_RULES,\n"
+        "    MAXIMUM_ADDED_LINES, PATH_ROLES, PATH_RULES, RUNNER_TARGETS,\n"
+        "    SHELL_RULES,\n"
         ")\n"
         "fixtures = json.loads(\n"
         "    (Path(__file__).parent / 'fixtures.json').read_text(encoding='utf-8')\n"
@@ -807,7 +1003,10 @@ def test_assembled_kernel_runs_without_site_packages(tmp_path: Path) -> None:
         "    result = decide_shell(\n"
         "        case['input'], SHELL_RULES, sandboxed=case['sandboxed'],\n"
         "        interactive=case['interactive'],\n"
+        "        path_roles=PATH_ROLES,\n"
+        "        path_rules=PATH_RULES,\n"
         "        existing_targets=case['existing'],\n"
+        "        runner_targets=RUNNER_TARGETS,\n"
         "    )\n"
         "    assert result.effect == case['effect'], case\n"
         "for case in fixtures['fetch']:\n"
@@ -821,7 +1020,8 @@ def test_assembled_kernel_runs_without_site_packages(tmp_path: Path) -> None:
         "    decision = decide_edit(\n"
         "        case['path'], case['before'], case['after'],\n"
         "        path_exists=case['path_exists'], path_rules=PATH_RULES,\n"
-        "        antipattern_rows=rows, maximum_added_lines=MAXIMUM_ADDED_LINES,\n"
+        "        antipattern_rows=rows, path_roles=PATH_ROLES,\n"
+        "        maximum_added_lines=MAXIMUM_ADDED_LINES,\n"
         "        autonomous=case['autonomous'],\n"
         "        python_source=suffix in ('.py', '.pyi'),\n"
         "    )\n"
@@ -962,6 +1162,7 @@ def test_bundled_fetch_matches_canonical_scheme_port_and_path(tmp_path: Path) ->
 
 def test_curl_screen_consults_the_declared_fetch_scopes() -> None:
     policy = ShellPolicy(
+        SHELL_RULES,
         allowed_urls=[UrlScope(origin=AnyHttpUrl("https://docs.example.com"))],
         denied_urls=[UrlScope(origin=AnyHttpUrl("https://internal.example.com"))],
     )
@@ -970,16 +1171,195 @@ def test_curl_screen_consults_the_declared_fetch_scopes() -> None:
         return policy.decide(ShellCommand(command=command)).effect
 
     assert effect("curl -s https://docs.example.com/api/one") == "allow"
-    assert effect("curl -sI https://docs.example.com/") == "deny"
+    # A cluster is one word to the shell and to curl, so it is judged as the
+    # flags it spells rather than as an option nobody declared.
+    assert effect("curl -sI https://docs.example.com/") == "allow"
     assert effect("curl -s -I https://docs.example.com/") == "allow"
+    assert effect("curl -sSf https://docs.example.com/") == "allow"
+    # Only the declared reporting letters cluster. One that follows redirects
+    # or carries a body reaches past the scopes, so it stays unclassified
+    # wherever it is spelled.
+    assert effect("curl -fsSL https://docs.example.com/") == "deny"
+    assert effect("curl -sd a=b https://docs.example.com/api") == "deny"
     assert effect("curl -s https://internal.example.com/x") == "deny"
     assert effect("curl -s https://elsewhere.example.com/") == "ask"
     assert effect("curl -X DELETE https://docs.example.com/api") == "ask"
     assert effect("curl -d a=b https://docs.example.com/api") == "deny"
 
 
+def test_a_schemeless_curl_url_is_judged_the_way_curl_resolves_it() -> None:
+    """curl guesses HTTP for a bare host, and so does the screen judging it.
+
+    `curl localhost:8000/health` is how a liveness probe is typed, and
+    reading it as a malformed URL put an approval question on the one form
+    an agent reaches for while the fully spelled twin was already declared
+    safe. Guessing where curl guesses keeps the verdict conservative: the
+    guess is HTTP, so an origin declared for TLS alone is not covered by it.
+    """
+    policy = ShellPolicy(
+        SHELL_RULES,
+        allowed_urls=[
+            UrlScope(origin=AnyHttpUrl("http://localhost"), any_port=True),
+            UrlScope(origin=AnyHttpUrl("https://docs.example.com")),
+        ],
+    )
+
+    def effect(command: str) -> str:
+        return policy.decide(ShellCommand(command=command)).effect
+
+    assert effect("curl -s localhost:8000/health") == "allow"
+    assert effect("curl -s http://localhost:8000/health") == "allow"
+    # The guess is HTTP, so a scope that only ever declared HTTPS is unmatched
+    # and the bare spelling asks rather than inheriting a grant.
+    assert effect("curl -s docs.example.com/api") == "ask"
+    assert effect("curl -s https://docs.example.com/api") == "allow"
+
+
+def test_a_scope_may_cover_every_port_on_one_host() -> None:
+    """A local service is the same service at whatever port it was started on.
+
+    Every surface this repository serves takes `--port`, so a scope pinned to
+    one number puts the question back the first time somebody moves it —
+    while the reason loopback is grantable at all, that nothing off this
+    machine can reach it, holds at every port equally.
+    """
+    policy = FetchPolicy(
+        [
+            UrlScope(origin=AnyHttpUrl("http://127.0.0.1"), any_port=True),
+            UrlScope(origin=AnyHttpUrl("https://pinned.example.com:8443")),
+        ],
+        [],
+    )
+
+    def effect(url: str) -> str:
+        return policy.decide(FetchUrl(url=AnyHttpUrl(url))).effect
+
+    assert effect("http://127.0.0.1:8765/api/runs") == "allow"
+    assert effect("http://127.0.0.1:9999/") == "allow"
+    assert effect("http://127.0.0.1/") == "allow"
+    assert effect("https://pinned.example.com:8443/x") == "allow"
+    assert effect("https://pinned.example.com:9000/x") == "ask"
+
+
+def committed_tree(root: Path, *names: str) -> None:
+    """A repository whose every named file is tracked with nothing pending.
+
+    The recoverable grant is the host's answer to a Git question, so a case
+    about it needs a real repository rather than a stub: what is being tested
+    is that `ls-files` and `status --porcelain` agree a path costs a checkout.
+    """
+    sh.Command("git")("init", "-q", str(root))
+    for name in names:
+        (root / name).write_text("body\n", encoding="utf-8")
+    git = sh.Command("git").bake(
+        "-C", str(root), "-c", "user.email=t@e", "-c", "user.name=t"
+    )
+    git("add", "-A")
+    git("commit", "-qm", "in")
+
+
+def test_a_recoverable_grant_never_covers_a_protected_path(tmp_path: Path) -> None:
+    """Git restoring a file says nothing about who is allowed to replace it.
+
+    The grant answers what destroying a path costs, which is the wrong
+    question for one protected by ownership: a clean tracked `README.md` is
+    exactly as restorable as any other file, and exactly as off-limits. The
+    two gates read one table so they cannot come to differ about a path.
+    """
+    committed_tree(tmp_path, "README.md", "notes.md")
+    policy = ShellPolicy(
+        SHELL_RULES,
+        path_rules=[human_owned_path_rule("README.md")],
+        runner_targets=FIXTURE_RUNNER_TARGETS,
+    )
+
+    def effect(command: str) -> str:
+        return policy.decide(ShellCommand(command=command, cwd=tmp_path)).effect
+
+    assert effect("rm notes.md") == "allow"
+    assert effect("rm README.md") == "ask"
+    assert effect("cp notes.md README.md") == "ask"
+
+
+def test_moving_a_recoverable_file_costs_what_deleting_it_costs(
+    tmp_path: Path,
+) -> None:
+    """A move is a delete and a create, and neither half is worth a question.
+
+    The verb wrote both operands, so a destination that did not exist yet
+    failed the recoverable test and took the whole command to an ask — which
+    left `mv` asking about a file `rm` would have removed without one, for
+    the sake of a path that holds nothing.
+    """
+    committed_tree(tmp_path, "notes.md", "other.md")
+    policy = ShellPolicy(SHELL_RULES, runner_targets=FIXTURE_RUNNER_TARGETS)
+
+    def effect(command: str) -> str:
+        return policy.decide(ShellCommand(command=command, cwd=tmp_path)).effect
+
+    assert effect("rm notes.md") == "allow"
+    assert effect("mv notes.md renamed.md") == "allow"
+    assert effect("cp notes.md copy.md") == "allow"
+    # Replacing a tracked, clean file still costs only a checkout; replacing
+    # one the host cannot vouch for costs whatever was in it.
+    assert effect("mv notes.md other.md") == "allow"
+    (tmp_path / "dirty.md").write_text("uncommitted\n", encoding="utf-8")
+    assert effect("mv notes.md dirty.md") == "ask"
+    # Content leaving a scratch root enters production without the edit gate
+    # ever having read it, so an empty destination is not the whole question.
+    scratch = ShellPolicy(
+        SHELL_RULES,
+        path_roles=FIXTURE_PATH_ROLES,
+        runner_targets=FIXTURE_RUNNER_TARGETS,
+    )
+    (tmp_path / "tmp").mkdir()
+    (tmp_path / "tmp" / "draft.md").write_text("draft\n", encoding="utf-8")
+    assert (
+        scratch.decide(
+            ShellCommand(command="mv tmp/draft.md arrived.md", cwd=tmp_path)
+        ).effect
+        == "ask"
+    )
+
+
+def test_redirecting_over_a_file_costs_what_deleting_it_costs(
+    tmp_path: Path,
+) -> None:
+    """The three writing forms answer one question about the same path.
+
+    A redirection's target was resolved for existence but never for
+    recoverability, so `rm notes.md` and `cp x notes.md` were granted while
+    `echo x > notes.md` asked about the identical clean, tracked file. The
+    heredoc form carried a further deny, justified by an edit gate a
+    redirection into a *new* file already bypasses — so it drew the line
+    where the cost was lowest rather than where the risk was.
+    """
+    committed_tree(tmp_path, "notes.md")
+    policy = ShellPolicy(
+        SHELL_RULES,
+        path_rules=[human_owned_path_rule("README.md")],
+        runner_targets=FIXTURE_RUNNER_TARGETS,
+    )
+
+    def effect(command: str) -> str:
+        return policy.decide(ShellCommand(command=command, cwd=tmp_path)).effect
+
+    # Every form writing a tracked, clean file costs one checkout.
+    assert effect("rm notes.md") == "allow"
+    assert effect("echo x > notes.md") == "allow"
+    assert effect("echo x >> notes.md") == "allow"
+    assert effect("cat > notes.md <<'EOF'\nbody\nEOF") == "allow"
+    # A file the host cannot vouch for keeps its ask, whatever the shape.
+    (tmp_path / "dirty.md").write_text("uncommitted\n", encoding="utf-8")
+    assert effect("echo x > dirty.md") == "ask"
+    assert effect("cat > dirty.md <<'EOF'\nbody\nEOF") == "ask"
+    # Ownership is a different question from cost, and still answers first.
+    (tmp_path / "README.md").write_text("human\n", encoding="utf-8")
+    assert effect("echo x > README.md") == "ask"
+
+
 def test_shell_policy_checks_every_segment_and_deny_wins() -> None:
-    policy = ShellPolicy()
+    policy = ShellPolicy(SHELL_RULES, runner_targets=FIXTURE_RUNNER_TARGETS)
 
     assert policy.decide(
         ShellCommand(command="git status && uv run pytest")
@@ -995,7 +1375,7 @@ def test_shell_policy_checks_every_segment_and_deny_wins() -> None:
 
 def test_shell_policy_confines_trusted_native_skill_scripts() -> None:
     root = "/opt/codex/skills"
-    policy = ShellPolicy(trusted_script_roots=[root])
+    policy = ShellPolicy(SHELL_RULES, trusted_script_roots=[root])
 
     def effect(command: str) -> str:
         return policy.decide(ShellCommand(command=command)).effect
@@ -1008,7 +1388,7 @@ def test_shell_policy_confines_trusted_native_skill_scripts() -> None:
     assert effect(f"node {root}/../escape.mjs") == "deny"
     assert effect("node --eval 'process.exit()'") == "deny"
     assert (
-        ShellPolicy(trusted_script_roots=["/"])
+        ShellPolicy(SHELL_RULES, trusted_script_roots=["/"])
         .decide(ShellCommand(command="node /tmp/untrusted-script.mjs"))
         .effect
         == "deny"
@@ -1019,14 +1399,32 @@ def test_shell_policy_preserves_golden_compound_and_wrapper_outcomes(
     tmp_path: Path,
 ) -> None:
     bundled = load_bundled_kernel(tmp_path, "shell")
-    policy = ShellPolicy()
-    sandboxed_policy = ShellPolicy(sandbox_active=True)
+    policy = ShellPolicy(
+        SHELL_RULES,
+        path_roles=FIXTURE_PATH_ROLES,
+        path_rules=FIXTURE_PATH_RULES,
+        runner_targets=FIXTURE_RUNNER_TARGETS,
+    )
+    sandboxed_policy = ShellPolicy(
+        SHELL_RULES,
+        sandbox_active=True,
+        path_roles=FIXTURE_PATH_ROLES,
+        path_rules=FIXTURE_PATH_RULES,
+        runner_targets=FIXTURE_RUNNER_TARGETS,
+    )
 
     for index, case in enumerate(SHELL_POLICY_CASES):
         if case.interactive:
             active = sandboxed_policy if case.sandboxed else policy
         else:
-            active = ShellPolicy(sandbox_active=case.sandboxed, interactive=False)
+            active = ShellPolicy(
+                SHELL_RULES,
+                sandbox_active=case.sandboxed,
+                interactive=False,
+                path_roles=FIXTURE_PATH_ROLES,
+                path_rules=FIXTURE_PATH_RULES,
+                runner_targets=FIXTURE_RUNNER_TARGETS,
+            )
         # Each case judges a tree of its own, so a file one case declares
         # present never leaks into the next case's create-versus-overwrite.
         root = tmp_path / f"case{index}"
@@ -1042,7 +1440,10 @@ def test_shell_policy_preserves_golden_compound_and_wrapper_outcomes(
             policy.rules,
             sandboxed=case.sandboxed,
             interactive=case.interactive,
+            path_roles=FIXTURE_PATH_ROLES,
+            path_rules=policy.path_rules,
             existing_targets=case.existing,
+            runner_targets=FIXTURE_RUNNER_TARGETS,
         ).effect
         assert bundled_effect == case.effect, case.input
 
@@ -1061,7 +1462,7 @@ def test_write_targets_name_only_the_paths_a_command_opens_for_writing() -> None
 def test_creating_a_file_passes_where_overwriting_one_still_asks(
     tmp_path: Path,
 ) -> None:
-    policy = ShellPolicy()
+    policy = ShellPolicy(SHELL_RULES)
     existing = tmp_path / "kept.txt"
     existing.write_text("prior work", encoding="utf-8")
     command = "echo x > kept.txt"
@@ -1072,7 +1473,7 @@ def test_creating_a_file_passes_where_overwriting_one_still_asks(
 
 
 def test_sandbox_escape_reenters_the_deny_lattice() -> None:
-    policy = ShellPolicy(sandbox_active=True)
+    policy = ShellPolicy(SHELL_RULES, sandbox_active=True)
     confined = policy.decide(ShellCommand(command="frobnicate --weird"))
     assert confined.effect == "defer"
     escaped = policy.decide(
@@ -1084,11 +1485,13 @@ def test_sandbox_escape_reenters_the_deny_lattice() -> None:
 
 def test_non_interactive_denials_do_not_prescribe_escalation() -> None:
     """Codex hooks cannot complete the approval flow, so they never name it."""
-    interactive = ShellPolicy().decide(ShellCommand(command="git push --force"))
+    interactive = ShellPolicy(SHELL_RULES).decide(
+        ShellCommand(command="git push --delete origin feat")
+    )
     assert interactive.effect == "ask"
 
-    blocked = ShellPolicy(interactive=False).decide(
-        ShellCommand(command="git push --force")
+    blocked = ShellPolicy(SHELL_RULES, interactive=False).decide(
+        ShellCommand(command="git push --delete origin feat")
     )
     assert blocked.effect == "deny"
     assert "escalate" not in blocked.reason
@@ -1135,6 +1538,353 @@ def test_edit_policy_checks_every_file_before_allowing_batch() -> None:
     assert policy.decide(protected).effect == "ask"
 
 
+def test_retiring_a_stale_suppression_needs_no_approval() -> None:
+    """Removing an `ignore` whose violation is gone is ordinary tidying."""
+    policy = EditPolicy(protected=[])
+    retired = EditBatch(
+        changes=[
+            EditChange(
+                path=Path("a.py"),
+                before="value: Any  # lup: ignore[any-type]",
+                after="value: str",
+            )
+        ]
+    )
+    assert policy.decide(retired).effect == "allow"
+
+
+def test_removing_a_live_suppression_is_caught_by_the_anti_pattern_gate() -> None:
+    """No marker gate is needed: the violation it covered resurfaces first."""
+    policy = EditPolicy(protected=[])
+    exposed = EditBatch(
+        changes=[
+            EditChange(
+                path=Path("a.py"),
+                before="value: Any  # lup: ignore[any-type]",
+                after="value: Any",
+            )
+        ]
+    )
+    decision = policy.decide(exposed)
+    assert decision.effect == "deny"
+    assert "any-type" in decision.reason
+
+
+def test_declaring_a_suppression_still_asks() -> None:
+    """Silencing a rule is a decision a human makes, not a small safe edit."""
+    policy = EditPolicy(protected=[])
+    declared = EditBatch(
+        changes=[
+            EditChange(
+                path=Path("a.py"),
+                before="value: str",
+                after="value: Any  # lup: ignore[any-type]",
+            )
+        ]
+    )
+    decision = policy.decide(declared)
+    assert decision.effect == "ask"
+    assert decision.reason.startswith("edit introduces an antipattern suppression")
+
+
+def test_dropping_one_rule_from_a_suppression_needs_no_approval() -> None:
+    """Shrinking a directive is what the audit asks for when it calls one spurious.
+
+    Reading the added line alone cannot tell this from a suppression appearing
+    out of nowhere, so the gate used to ask — and the audit was already
+    demanding the very edit it asked to approve.
+    """
+    policy = EditPolicy(protected=[])
+    narrowed = EditBatch(
+        changes=[
+            EditChange(
+                path=Path("a.py"),
+                before="# lup: ignore[any-type, dict-get]\nvalue = 1\n",
+                after="# lup: ignore[any-type]\nvalue = 1\n",
+            )
+        ]
+    )
+    assert policy.decide(narrowed).effect == "allow"
+
+
+def test_a_bare_suppression_narrowed_to_named_rules_needs_no_approval() -> None:
+    """The bare directive covers every rule, so naming a few can only shrink it."""
+    policy = EditPolicy(protected=[])
+    typed = EditBatch(
+        changes=[
+            EditChange(
+                path=Path("a.py"),
+                before="# lup: ignore\nvalue = 1\n",
+                after="# lup: ignore[any-type]\nvalue = 1\n",
+            )
+        ]
+    )
+    assert policy.decide(typed).effect == "allow"
+
+
+def test_widening_a_suppression_still_asks() -> None:
+    """Adding a rule to a directive silences something it did not before."""
+    policy = EditPolicy(protected=[])
+    widened = EditBatch(
+        changes=[
+            EditChange(
+                path=Path("a.py"),
+                before="# lup: ignore[any-type]\nvalue = 1\n",
+                after="# lup: ignore[any-type, dict-get]\nvalue = 1\n",
+            )
+        ]
+    )
+    assert policy.decide(widened).effect == "ask"
+
+
+def test_a_named_suppression_going_bare_still_asks() -> None:
+    """Dropping the names widens the directive to every rule."""
+    policy = EditPolicy(protected=[])
+    widened = EditBatch(
+        changes=[
+            EditChange(
+                path=Path("a.py"),
+                before="# lup: ignore[any-type]\nvalue = 1\n",
+                after="# lup: ignore\nvalue = 1\n",
+            )
+        ]
+    )
+    assert policy.decide(widened).effect == "ask"
+
+
+def test_prose_mentioning_a_suppression_is_not_declaring_one() -> None:
+    """Documenting the escape hatch is neither a note nor a directive."""
+    policy = EditPolicy(protected=[])
+    documented = EditBatch(
+        changes=[
+            EditChange(
+                path=Path("a.py"),
+                before='NOTE_RE = compile(r"lup")',
+                after=(
+                    "# Matching `# lup: ignore` here is prose, not a directive.\n"
+                    'NOTE_RE = compile(r"lup")'
+                ),
+            )
+        ]
+    )
+    assert policy.decide(documented).effect == "allow"
+
+
+def test_a_granted_suppression_releases_only_its_own_gate() -> None:
+    """An allowance answers the gate it names, never the rest of the lattice."""
+    change = EditChange(
+        path=Path("a.py"),
+        before="x = 1  # lup: fix",
+        after="value: Any  # lup: ignore[any-type]",
+    )
+    decision = decide_edit(
+        "a.py",
+        change.before,
+        change.after,
+        path_exists=False,
+        path_rules=[],
+        antipattern_rows=antipattern_rows(change),
+        allowances=["antipattern-suppression"],
+        python_source=True,
+    )
+    assert decision.effect == "deny"
+    assert "removes inline review feedback" in decision.reason
+
+
+def test_adding_feedback_asks_and_deleting_it_is_refused() -> None:
+    """The two directions are different acts and get different answers.
+
+    An ask is something an agent argues through in the turn that wanted the
+    deletion, and a deleted note is the one thing nobody can review after the
+    fact: its absence is indistinguishable from a note that never existed.
+    """
+    policy = EditPolicy(protected=[])
+    added = EditBatch(
+        changes=[
+            EditChange(path=Path("a.py"), before="x = 1", after="x = 1  # lup: fix")
+        ]
+    )
+    removed = EditBatch(
+        changes=[
+            EditChange(path=Path("a.py"), before="x = 1  # lup: fix", after="x = 1")
+        ]
+    )
+
+    assert policy.decide(added).effect == "ask"
+    assert policy.decide(removed).effect == "deny"
+
+
+def test_converting_a_note_into_a_claim_is_the_way_through() -> None:
+    """Resolving keeps the words and changes the keyword, so it stays checkable."""
+    policy = EditPolicy(protected=[])
+    claimed = EditBatch(
+        changes=[
+            EditChange(
+                path=Path("a.py"),
+                before="x = 1  # lup: fix the cache",
+                after="x = 1  # lup: solved: fix the cache",
+            )
+        ]
+    )
+
+    assert policy.decide(claimed).effect == "allow"
+
+
+def test_no_allowance_retires_a_claim_through_the_edit_gate() -> None:
+    """A claim is checked by someone other than whoever made it.
+
+    The verify pass's authority lives in its own instrument
+    (`dev comments --retire/--restore`), never in a session environment —
+    so a grant claiming otherwise changes nothing here.
+    """
+    change = EditChange(
+        path=Path("a.py"),
+        before="x = 1  # lup: solved: fix the cache",
+        after="x = 1",
+    )
+    batch = EditBatch(changes=[change])
+
+    assert EditPolicy(protected=[]).decide(batch).effect == "deny"
+    assert (
+        decide_edit(
+            "a.py",
+            change.before,
+            change.after,
+            path_exists=True,
+            path_rules=[],
+            antipattern_rows=antipattern_rows(change),
+            allowances=["note-resolution"],
+            python_source=True,
+        ).effect
+        == "deny"
+    )
+
+
+def test_prose_documenting_the_marker_syntax_is_not_feedback() -> None:
+    """A backtick span is an example, which is how a reader tells them apart.
+
+    Counting quoted markers made documenting the convention indistinguishable
+    from leaving a note, so writing about the gate tripped it.
+    """
+    policy = EditPolicy(protected=[])
+    documented = EditBatch(
+        changes=[
+            EditChange(
+                path=Path("a.py"),
+                before='"""Doc."""\n',
+                after='"""Resolve a note by writing `# lup: solved:` before it."""\n',
+            )
+        ]
+    )
+
+    assert policy.decide(documented).effect == "allow"
+
+
+def test_a_note_in_scratch_is_not_gated() -> None:
+    """Nothing under a scratch root persists to be read, so no reader is owed."""
+    policy = EditPolicy(protected=[], path_roles=FIXTURE_PATH_ROLES)
+    batch = EditBatch(
+        changes=[
+            EditChange(
+                path=Path("tmp/probe.py"), before="x = 1  # lup: fix", after="x = 1"
+            )
+        ]
+    )
+    assert policy.decide(batch).effect == "allow"
+
+
+def test_a_note_in_a_test_is_still_gated() -> None:
+    """A test file persists and is read, so feedback left there is owed too."""
+    policy = EditPolicy(protected=[], path_roles=FIXTURE_PATH_ROLES)
+    batch = EditBatch(
+        changes=[
+            EditChange(
+                path=Path("tests/unit/test_thing.py"),
+                before="x = 1  # lup: fix",
+                after="x = 1",
+            )
+        ]
+    )
+    assert policy.decide(batch).effect == "deny"
+
+
+def test_retiring_a_suppression_the_ast_refutes_is_allowed() -> None:
+    """The gate that demanded this marker gone must not be the one refusing it.
+
+    A route decorator trips the `dict-get` regex and nothing else, so before
+    the refiner the audit called the marker spurious while the kernel denied
+    every edit that removed it — a change one gate required and the other
+    forbade, with no operation in between.
+    """
+    policy = EditPolicy(protected=[])
+    batch = EditBatch(
+        changes=[
+            EditChange(
+                path=Path("a.py"),
+                before='@app.get("/x")  # lup: ignore[dict-get]\ndef read() -> None:\n    pass\n',
+                after='@app.get("/x")\ndef read() -> None:\n    pass\n',
+            )
+        ]
+    )
+    assert policy.decide(batch).effect == "allow"
+
+
+def test_a_suppression_ask_names_every_line_it_is_asking_about() -> None:
+    """A prompt carries the reason and nothing else, so it has to locate the line."""
+    policy = EditPolicy(protected=[])
+    batch = EditBatch(
+        changes=[
+            EditChange(
+                path=Path("a.py"),
+                before="x = 1\n",
+                after=(
+                    "x = 1\n"
+                    "first: Any = 1  # lup: ignore[any-type]\n"
+                    "second: Any = 2  # lup: ignore[any-type]\n"
+                ),
+            )
+        ]
+    )
+    decision = policy.decide(batch)
+
+    assert decision.effect == "ask"
+    assert "line 2: first: Any = 1  # lup: ignore[any-type]" in decision.reason
+    assert "line 3: second: Any = 2  # lup: ignore[any-type]" in decision.reason
+
+
+def test_a_denial_names_the_line_that_tripped_it() -> None:
+    policy = EditPolicy(protected=[])
+    batch = EditBatch(
+        changes=[
+            EditChange(path=Path("a.py"), before="x = 1\n", after="x = 1\ny: Any = 2\n")
+        ]
+    )
+    decision = policy.decide(batch)
+
+    assert decision.effect == "deny"
+    assert decision.reason.startswith("line 2: ")
+
+
+def test_a_composed_session_enforces_the_rules_the_generated_tree_does() -> None:
+    """One declaration, two enforcement paths, and nothing between them.
+
+    A generated dispatcher compiles the hook set into rows; a session this
+    program composes builds policy objects from the same hook set. Neither
+    can see the other, so a rule added to one and not the other would make a
+    run's permissions depend on who launched it — which is exactly how a
+    resolver worker ran under a directory ACL while every plugin generated
+    from the same declaration judged the acts semantically.
+    """
+    hooks = next(plugin.hooks for plugin in portable_harness().plugins if plugin.hooks)
+    composed = [path_rule_row(rule) for rule in declared_path_rules(hooks)]
+    generated = runtime_path_rules(
+        [root.as_posix() for root in hooks.protected_edit_roots],
+        [path.as_posix() for path in hooks.human_owned_files],
+    )
+
+    assert composed == generated
+
+
 def test_canonical_edit_policy_preserves_shared_security_outcomes() -> None:
     protected = [
         PathRule(
@@ -1142,11 +1892,6 @@ def test_canonical_edit_policy_preserves_shared_security_outcomes() -> None:
             value=".claude",
             reason="protected path requires approval",
             allow_autonomous=True,
-        ),
-        PathRule(
-            kind="subtree",
-            value="tmp",
-            reason="scratch path requires approval",
         ),
         human_owned_path_rule("README.md"),
         PathRule(
@@ -1164,7 +1909,11 @@ def test_canonical_edit_policy_preserves_shared_security_outcomes() -> None:
     ]
 
     for case in EDIT_POLICY_CASES:
-        policy = EditPolicy(protected=protected, autonomous=case.autonomous)
+        policy = EditPolicy(
+            protected=protected,
+            autonomous=case.autonomous,
+            path_roles=FIXTURE_PATH_ROLES,
+        )
         decision = policy.decide(
             EditBatch(
                 changes=[
@@ -1189,11 +1938,6 @@ def test_bundled_edit_policy_matches_canonical_security_outcomes(
                 reason="protected path requires approval",
                 allow_autonomous=True,
             ),
-            PathRule(
-                kind="subtree",
-                value="tmp",
-                reason="scratch path requires approval",
-            ),
             human_owned_path_rule("README.md"),
             PathRule(
                 kind="subtree",
@@ -1207,7 +1951,8 @@ def test_bundled_edit_policy_matches_canonical_security_outcomes(
                 reason="protected path requires approval",
                 allow_autonomous=True,
             ),
-        ]
+        ],
+        path_roles=FIXTURE_PATH_ROLES,
     )
     cases = [
         item
@@ -1229,7 +1974,7 @@ def test_bundled_edit_policy_matches_canonical_security_outcomes(
             case.path,
             case.before,
             case.after,
-            [".claude", "tmp", "pyproject.toml", "sync.json", "downstream.json"],
+            [".claude", "pyproject.toml", "sync.json", "downstream.json"],
             ["README.md"],
         )
         assert canonical.effect == generated.effect == case.effect
@@ -1245,7 +1990,7 @@ def test_bundled_autonomous_worker_keeps_guardrails(tmp_path: Path) -> None:
             case.path,
             case.before,
             case.after,
-            [".claude", "tmp"],
+            [".claude"],
             ["README.md"],
             autonomous=True,
         )
@@ -1299,7 +2044,7 @@ def test_edit_policy_bundle_embeds_canonical_ast_refinement(tmp_path: Path) -> N
 
 
 def test_content_prose_examples_do_not_trip_code_or_marker_gates() -> None:
-    path = Path("src/lup_template/devtools/harness/content/skills/commit.py")
+    path = Path("packages/lup/src/lup/devtools/harness/content/skills/commit.py")
     before = path.read_text(encoding="utf-8")
     after = before + (
         '\nPROSE_GATE_EXAMPLE = """Any and # lup: examples remain prose."""\n'
@@ -1310,3 +2055,73 @@ def test_content_prose_examples_do_not_trip_code_or_marker_gates() -> None:
     )
 
     assert decision.effect == "allow"
+
+
+def test_a_granted_new_devtools_allowance_releases_exactly_that_gate() -> None:
+    """A concern's grant skips the new-devtools ask and nothing adjacent."""
+    rule = PathRule(
+        kind="new_devtools",
+        value="src",
+        reason="new devtools module requires approval",
+    )
+    creation = EditBatch(
+        changes=[
+            EditChange(
+                path=Path("src/app/devtools/harness/content/docs/newborn.py"),
+                after='"""Newborn."""\n',
+            )
+        ]
+    )
+    ungranted = EditPolicy(protected=[rule], autonomous=True).decide(creation)
+    assert ungranted.effect == "ask"
+    assert "new devtools module" in ungranted.reason
+    granted = EditPolicy(
+        protected=[rule], autonomous=True, allowances=["new-devtools-module"]
+    )
+    assert granted.decide(creation).effect == "allow"
+
+
+def test_fragment_edits_are_judged_as_the_documents_they_produce(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A marker mentioned inside a string literal is prose, not feedback.
+
+    The path is repo-relative because the session scratchpad is exempt from
+    the marker gate by role, and the gate is what this test drives.
+    """
+    monkeypatch.chdir(tmp_path)
+    Path("content.py").write_text(
+        'TABLE = """\nA note spells itself as # lup: fix this here.\n"""\n',
+        encoding="utf-8",
+    )
+    fragment = EditBatch(
+        changes=[
+            EditChange(
+                path=Path("content.py"),
+                before="A note spells itself as # lup: fix this here.\n",
+                after="",
+            )
+        ]
+    )
+    policy = EditPolicy(protected=[])
+    assert policy.decide(fragment).effect == "deny"
+    assert policy.decide(fragment.as_documents()).effect == "allow"
+
+
+def test_semantic_policy_threads_allowances_into_the_edit_gate() -> None:
+    """The composed policy honours the same grants the dispatchers read."""
+    creation = EditBatch(
+        changes=[
+            EditChange(
+                path=Path("src/app/devtools/newborn.py"),
+                after='"""Newborn."""\n',
+            )
+        ]
+    )
+    hooks = HookSet(id="test", policy_ids=["edit"])
+    withheld = semantic_policy_for(hooks, autonomous=True)
+    assert withheld.decide(creation).effect == "ask"
+    released = semantic_policy_for(
+        hooks, autonomous=True, allowances=["new-devtools-module"]
+    )
+    assert released.decide(creation).effect == "allow"

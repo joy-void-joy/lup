@@ -10,7 +10,7 @@ from lup.adapters.claude.runtime import (
 )
 from lup.runtime.background import BackgroundAgent, BackgroundConfig
 from lup.runtime.errors import TurnError
-from lup.runtime.models import TurnInput, TurnRequest, TurnResult, turn_request
+from lup.runtime.models import TurnRequest, TurnResult, turn_request
 
 from examples.common import Summary
 
@@ -24,9 +24,7 @@ class DraftState(BaseModel):
 
 
 def request_for(state: DraftState) -> TurnRequest[Summary]:
-    return turn_request(
-        TurnInput(text=f"Summarize the latest draft:\n\n{state.text}"), Summary
-    )
+    return turn_request(f"Summarize the latest draft:\n\n{state.text}", Summary)
 
 
 async def main() -> None:

@@ -10,8 +10,6 @@ from lup.adapters.claude.runtime import (
     ClaudeSessionConfig,
     create_claude_session_factory,
 )
-from lup.runtime.models import TurnInput, turn_request
-from lup.runtime.query import query
 
 from examples.common import Summary
 
@@ -25,9 +23,8 @@ async def main() -> None:
         {"base_url": "http://localhost:4000"}
     )
     configured = ClaudeCompatibilityTransform(endpoint).apply(base)
-    result = await query(
-        create_claude_session_factory(configured),
-        turn_request(TurnInput(text="Confirm the compatible endpoint."), Summary),
+    result = await create_claude_session_factory(configured).query(
+        "Confirm the compatible endpoint.", Summary
     )
     print(result.output.summary)
 

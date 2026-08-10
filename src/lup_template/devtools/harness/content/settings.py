@@ -2,42 +2,61 @@
 
 from urllib.parse import urlsplit
 
-from lup.harness.models import HookSet, HookUrlScope
+from lup.harness.models import HookSet, HookUrlScope, Plugin
 from lup.types import JsonObject, JsonValue
+
+OFFICIAL_PLUGINS: dict[str, JsonValue] = {
+    "agent-sdk-dev@claude-plugins-official": True,
+    "claude-md-management@claude-plugins-official": True,
+    "github@claude-plugins-official": True,
+}
 
 SETTINGS: JsonObject = {
     "coauthorship": False,
-    "enabledPlugins": {
-        "agent-sdk-dev@claude-plugins-official": True,
-        "claude-md-management@claude-plugins-official": True,
-        "github@claude-plugins-official": True,
-        "lup@lup-template": True,
-        "pyright-lsp@claude-plugins-official": True,
-    },
+    "enabledPlugins": OFFICIAL_PLUGINS,
     "env": {"ENABLE_TOOL_SEARCH": "false"},
-    "extraKnownMarketplaces": {
-        "lup-template": {"source": {"path": "./.claude/plugins", "source": "directory"}}
-    },
     "fileSuggestion": {
         "command": ".claude/plugins/lup/scripts/file_suggest.sh",
         "type": "command",
     },
-    "permissions": {
-        "allow": [
-            "WebSearch",
-            "Skill(lup:hooks)",
-            "Read(./.claude/settings.json.local*)",
-            "Read(./sync.json.local)",
-            "Read(./downstream.json.local)",
-        ],
-        "deny": [
-            "Read(./**/.env*.local)",
-            "Read(./**/.env.local)",
-            "Read(./**/secrets*.local)",
-            "Read(./**/*.secret.local)",
-        ],
-    },
 }
+
+ALLOWED: list[JsonValue] = [
+    "WebSearch",
+    "Skill(lup:hooks)",
+    # The guidance sends every change through a worktree, so entering and
+    # leaving one is the first thing a session does and the last. Asking
+    # about the step the workflow mandates is asking whether to follow it.
+    # Neither tool writes: `EnterWorktree` moves this session into a tree
+    # `dev worktree create` already made, and `ExitWorktree` only removes one
+    # when asked to, which is its own question.
+    "EnterWorktree",
+    "ExitWorktree",
+    "Read(./.claude/settings.json.local*)",
+    "Read(./sync.json.local)",
+    "Read(./downstream.json.local)",
+]
+
+DENIED: list[JsonValue] = [
+    "Read(./**/.env*.local)",
+    "Read(./**/.env.local)",
+    "Read(./**/secrets*.local)",
+    "Read(./**/*.secret.local)",
+]
+
+
+def served_tool_grants(plugin: Plugin) -> list[JsonValue]:
+    """Grant every tool the plugin's own servers serve.
+
+    A declared server is this project's own code, wired in deliberately, so
+    asking per call would make the declaration a suggestion. A new group in
+    the toolsets registry is granted by being declared, with nothing here to
+    extend.
+
+    The scoped name is what a runtime addresses a plugin's server by; the bare
+    key it is declared under matches nothing.
+    """
+    return [f"mcp__plugin_{plugin.name}_{server.name}" for server in plugin.mcp_servers]
 
 
 def allowed_network_domains(hooks: HookSet) -> list[str]:
@@ -63,8 +82,8 @@ def allowed_network_domains(hooks: HookSet) -> list[str]:
     return list(dict.fromkeys(merged))
 
 
-def project_settings(hooks: HookSet | None) -> JsonObject:
-    """Render the settings artifact, deriving the sandbox block from hooks.
+def project_settings(plugin: Plugin | None) -> JsonObject:
+    """Render the settings artifact, deriving both blocks from the declaration.
 
     The sandbox stays permissive where the semantic policy already judges
     (allowUnsandboxedCommands defaults on, so escapes re-enter the deny
@@ -72,14 +91,35 @@ def project_settings(hooks: HookSet | None) -> JsonObject:
     human-owned files become OS-level write denials and the declared
     credential paths become sandbox read denials.
     """
+    settings: JsonObject = dict(SETTINGS)
+    if plugin is not None:
+        # Marketplace names share one global namespace, so this must be the
+        # per-project name the declaration carries. A literal here would
+        # register every adopter under one key, and whichever repo installed
+        # last would serve its plugin to all of them.
+        settings["extraKnownMarketplaces"] = {
+            str(plugin.marketplace): {
+                "source": {"path": "./.claude/plugins", "source": "directory"}
+            }
+        }
+        settings["enabledPlugins"] = {
+            **OFFICIAL_PLUGINS,
+            f"{plugin.name}@{plugin.marketplace}": True,
+        }
+    settings["permissions"] = {
+        "allow": [*ALLOWED, *(served_tool_grants(plugin) if plugin else [])],
+        "deny": DENIED,
+    }
+    hooks = plugin.hooks if plugin is not None else None
     if hooks is None or hooks.sandbox is None:
-        return dict(SETTINGS)
+        return settings
     domains: list[JsonValue] = list(allowed_network_domains(hooks))
     sandbox_block: JsonObject = {
         "enabled": True,
         "network": {"allowedDomains": domains},
         "filesystem": {
-            "denyWrite": [path.as_posix() for path in hooks.human_owned_files]
+            "denyWrite": [path.as_posix() for path in hooks.human_owned_files],
+            "allowWrite": list(hooks.sandbox.writable_paths),
         },
         "credentials": {
             "files": [
@@ -88,6 +128,5 @@ def project_settings(hooks: HookSet | None) -> JsonObject:
             ]
         },
     }
-    settings: JsonObject = dict(SETTINGS)
     settings["sandbox"] = sandbox_block
     return settings

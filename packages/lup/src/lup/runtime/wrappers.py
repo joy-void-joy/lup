@@ -3,7 +3,7 @@
 import asyncio
 import hashlib
 from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
-from contextlib import AbstractAsyncContextManager, asynccontextmanager
+from contextlib import asynccontextmanager
 from datetime import timedelta
 from pathlib import Path
 
@@ -14,7 +14,6 @@ from lup.runtime.contracts import (
     EventStream,
     Interrupt,
     Session,
-    SessionFactory,
     Steer,
     Turn,
 )
@@ -27,12 +26,14 @@ from lup.runtime.errors import (
     TurnTimeoutError,
     ValidationAttempt,
 )
+from lup.runtime.factory import SessionFactory
 from lup.runtime.models import (
     SessionHandle,
     SessionId,
-    TurnBlock,
+    AnyTurnBlock,
     TurnHandle,
     TurnIdentifiers,
+    LiveTurnEvent,
     TurnEvent,
     TurnInput,
     TurnMessage,
@@ -114,7 +115,7 @@ class DisplayRecord(BaseModel):
 
     identifiers: TurnIdentifiers
     messages: list[TurnMessage]
-    blocks: list[TurnBlock]
+    blocks: list[AnyTurnBlock]
 
 
 type TraceSink = Callable[[TraceRecord], Awaitable[None]]
@@ -190,7 +191,7 @@ class SwitchingEventStream(EventStream):
         self.closed = True
         self.changed.set()
 
-    async def iterate(self) -> AsyncIterator[TurnEvent]:
+    async def iterate(self, deltas: bool) -> AsyncIterator[LiveTurnEvent]:
         if self.consumed:
             raise RuntimeError("logical live event stream can only be consumed once")
         self.consumed = True
@@ -200,7 +201,8 @@ class SwitchingEventStream(EventStream):
             version = self.version
             if current is not None and version != observed:
                 observed = version
-                async for event in current.events():
+                view = current.live() if deltas else current.events()
+                async for event in view:
                     yield event
                 continue
             if self.closed:
@@ -210,8 +212,16 @@ class SwitchingEventStream(EventStream):
                 continue
             await self.changed.wait()
 
+    async def durable(self) -> AsyncIterator[TurnEvent]:
+        async for event in self.iterate(deltas=False):
+            if (durable := event.durable) is not None:
+                yield durable
+
     def events(self) -> AsyncIterator[TurnEvent]:
-        return self.iterate()
+        return self.durable()
+
+    def live(self) -> AsyncIterator[LiveTurnEvent]:
+        return self.iterate(deltas=True)
 
 
 class TimeoutTurn[T: BaseModel | None](Turn[T]):
@@ -319,7 +329,7 @@ class ResilientTurn[T: BaseModel | None](Turn[T]):
                     cycles = (
                         self.correction.cycles if self.correction is not None else 0
                     )
-                    if correction_cycles >= cycles:
+                    if not error.failure.correctable or correction_cycles >= cycles:
                         raise StructuredOutputError(
                             combined_failure(error.failure, failures)
                         ) from error
@@ -622,58 +632,42 @@ class SerializedSession(Session):
         )
 
 
-class DecoratingSessionFactory(SessionFactory):
+def decorated_session_factory(
+    inner: SessionFactory,
+    *,
+    timeout: TimeoutConfig | None = None,
+    budget: BudgetConfig | None = None,
+    recovery: RecoveryConfig | None = None,
+    correction: CorrectionConfig | None = None,
+    persistence: PersistenceConfig | None = None,
+    tracing: TracingConfig | None = None,
+    usage: UsageConfig | None = None,
+    display: DisplayConfig | None = None,
+    serialized: bool = False,
+) -> SessionFactory:
     """Apply configured whole-turn decorators to every opened session."""
-
-    def __init__(
-        self,
-        inner: SessionFactory,
-        *,
-        timeout: TimeoutConfig | None = None,
-        budget: BudgetConfig | None = None,
-        recovery: RecoveryConfig | None = None,
-        correction: CorrectionConfig | None = None,
-        persistence: PersistenceConfig | None = None,
-        tracing: TracingConfig | None = None,
-        usage: UsageConfig | None = None,
-        display: DisplayConfig | None = None,
-        serialized: bool = False,
-    ) -> None:
-        self.inner = inner
-        self.timeout = timeout
-        self.budget = budget
-        self.recovery = recovery
-        self.correction = correction
-        self.persistence = persistence
-        self.tracing = tracing
-        self.usage = usage
-        self.display = display
-        self.serialized = serialized
-
-    def open(
-        self, resume: SessionId | None = None
-    ) -> AbstractAsyncContextManager[SessionHandle]:
-        return self.open_decorated(resume)
 
     @asynccontextmanager
     async def open_decorated(
-        self, resume: SessionId | None
+        resume: SessionId | None = None,
     ) -> AsyncGenerator[SessionHandle]:
-        async with self.inner.open(resume) as handle:
+        async with inner.open(resume) as handle:
             session: Session = DecoratingSession(
                 handle.session,
-                timeout=self.timeout,
-                budget=self.budget,
-                recovery=self.recovery,
-                correction=self.correction,
-                persistence=self.persistence,
-                tracing=self.tracing,
-                usage=self.usage,
-                display=self.display,
+                timeout=timeout,
+                budget=budget,
+                recovery=recovery,
+                correction=correction,
+                persistence=persistence,
+                tracing=tracing,
+                usage=usage,
+                display=display,
             )
-            if self.serialized:
+            if serialized:
                 session = SerializedSession(session)
             yield SessionHandle(session=session, fork=handle.fork)
+
+    return SessionFactory(open_decorated)
 
 
 def failure_from_result[T: BaseModel | None](

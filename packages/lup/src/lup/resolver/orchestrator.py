@@ -2,18 +2,44 @@
 
 from pathlib import Path
 
-from lup.harness.process import LaunchRequest, ProcessLauncher
+from lup.codescan.symbols import DefinedSymbol, defined_symbols, symbols_lost
+from lup.harness.process import ExitStatus, LaunchRequest, ProcessLauncher
 from lup.resolver.contracts import WorktreePreparer
 from lup.resolver.notes import clear_concern_notes
 from lup.resolver.models import (
     Concern,
     DependencyBase,
     DiffValidation,
+    DropCandidate,
     NoteClearanceCommit,
     SourceSnapshot,
     WorkerReport,
+    WorktreeRemoval,
     WritableRootLease,
 )
+
+
+def report_mismatch(undeclared: list[str], unswept: list[str]) -> str:
+    """Name exactly which paths a worker must reconcile to pass this gate.
+
+    A revision round can only converge on something it can read. The prior
+    wording named no path at all, so a worker re-derived the same report and
+    failed identically until the round budget ran out.
+    """
+    return "; ".join(
+        [
+            *(
+                [f"changed but not declared: {', '.join(undeclared)}"]
+                if undeclared
+                else []
+            ),
+            *(
+                [f"declared swept but not changed: {', '.join(unswept)}"]
+                if unswept
+                else []
+            ),
+        ]
+    )
 
 
 class LeaseViolationError(RuntimeError):
@@ -28,6 +54,18 @@ class WritableRootLeases:
         self.leases: dict[str, WritableRootLease] = {}
 
     def acquire(self, concern_id: str, branch: str) -> WritableRootLease:
+        lease = self.plan(concern_id, branch)
+        self.leases[concern_id] = lease
+        return lease
+
+    def plan(self, concern_id: str, branch: str) -> WritableRootLease:
+        """Resolve one non-overlapping writable root without taking it.
+
+        A concern admitted mid-run is checked against the roots this run
+        already handed out before anything about the run is written, so an
+        overlap is refused at the boundary rather than discovered by a
+        worker editing another concern's tree.
+        """
         if concern_id in self.leases and self.leases[concern_id].active:
             raise LeaseViolationError(f"concern {concern_id!r} already has a lease")
         candidate = (self.root / concern_id).resolve()
@@ -46,13 +84,21 @@ class WritableRootLeases:
                     f"writable roots overlap for {concern_id!r} and "
                     f"{existing.concern_id!r}"
                 )
-        lease = WritableRootLease(
+        return WritableRootLease(
             concern_id=concern_id,
             root=candidate,
             branch=branch,
         )
-        self.leases[concern_id] = lease
-        return lease
+
+    def adopt(self, leases: list[WritableRootLease]) -> None:
+        """Take a run's persisted active leases as this process's authority.
+
+        Every later acquisition is then checked against roots this run
+        already handed out, which is what makes a lease acquired long after
+        the first batch — for a concern admitted mid-run — refuse an overlap
+        instead of quietly sharing a writable root.
+        """
+        self.leases = {lease.concern_id: lease for lease in leases if lease.active}
 
     def assert_path(self, concern_id: str, path: Path) -> None:
         try:
@@ -79,8 +125,24 @@ class WorktreeOrchestrator:
         self.workspace = workspace
         self.preparer = preparer
 
+    def require(self, request: LaunchRequest, failure: str) -> ExitStatus:
+        """Launch one step whose failure refuses the run, in git's own words.
+
+        A sequence reported under one message cannot say which of its steps
+        failed, and a bare status code names neither the step nor anything
+        to act on. Raising at the step also stops the sequence there, so a
+        later step never runs against a tree an earlier one failed to make.
+        """
+        status = self.launcher.launch(request)
+        if status.code != 0:
+            raise RuntimeError(
+                f"{failure}: `{' '.join(request.arguments)}` exited "
+                f"{status.code}: {status.stderr.strip()}"
+            )
+        return status
+
     def create(self, lease: WritableRootLease, base_commit: str) -> None:
-        status = self.launcher.launch(
+        self.require(
             LaunchRequest(
                 arguments=[
                     "git",
@@ -92,10 +154,9 @@ class WorktreeOrchestrator:
                     base_commit,
                 ],
                 cwd=self.workspace,
-            )
+            ),
+            f"failed to create worktree for {lease.concern_id}",
         )
-        if status.code != 0:
-            raise RuntimeError(f"failed to create worktree for {lease.concern_id}")
         if self.preparer is not None:
             self.preparer.prepare(lease.root)
 
@@ -209,26 +270,20 @@ class WorktreeOrchestrator:
         actual = {path.as_posix() for path in changed}
         reported = {path.as_posix() for path in report.files_changed}
         swept = {path.as_posix() for path in report.swept_beyond_scope}
-        # lup: defer[when the resolver review loop is next revised]: this gate
-        # discarded 71 files of correct work over two stale entries, three
-        # rounds running, and the worker could not have learned why. Two
-        # separable defects. First, `reported != actual` rejects a worker that
-        # over-reports, but the safety property here is that nothing changes
-        # undeclared — `actual <= reported` states that, while equality also
-        # punishes a stale path the worker believed it had touched. The
-        # observed failure was exactly that: reported minus actual held two
-        # content modules the worker ended up creating elsewhere, and actual
-        # minus reported was empty, so nothing was hidden. Second, the reason
-        # names no path, so a revision round cannot converge — every retry
-        # re-derives the same report and fails identically until the budget is
-        # spent. Name the symmetric difference in the reason, and treat an
-        # unchanged verdict across rounds as grounds to escalate rather than to
-        # spend another round.
-        if reported != actual or not swept <= actual:
+        # The safety property is that nothing changes undeclared, which is
+        # containment and not equality. Requiring equality also punished a
+        # worker for a stale path it believed it had touched, and cost 71
+        # files of correct work over two such entries — nothing was hidden in
+        # either. Over-reporting is named back rather than rejected, because a
+        # reason that names no path cannot converge: every retry re-derives
+        # the same report and fails identically until the budget is spent.
+        undeclared = sorted(actual - reported)
+        unswept = sorted(swept - actual)
+        if undeclared or unswept:
             return DiffValidation(
                 concern_id=concern.id,
                 valid=False,
-                reason="worker report does not match the inspected changed paths",
+                reason=report_mismatch(undeclared, unswept),
             )
         if not changed:
             return DiffValidation(
@@ -278,33 +333,51 @@ class WorktreeOrchestrator:
             commit=commit_lines[0],
         )
 
-    def remove(self, lease: WritableRootLease) -> bool:
+    def remove(self, lease: WritableRootLease) -> WorktreeRemoval:
+        """Free a lease's worktree, reporting what actually stands in the way.
+
+        An exit status cannot tell a dirty worktree from one that is no
+        longer there — `git worktree remove` refuses both — so reading the
+        refusal as uncommitted work sent a human to directories that did not
+        exist and described work that was not being held. What remains on
+        disk is observable, so it is observed rather than inferred, and the
+        refusal git gave is carried instead of a guess at it.
+        """
         status = self.launcher.launch(
             LaunchRequest(
                 arguments=["git", "worktree", "remove", str(lease.root)],
                 cwd=self.workspace,
             )
         )
+        notes: list[str] = []
         if status.code != 0:
-            return False
+            if lease.root.exists():
+                return WorktreeRemoval(freed=False, detail=status.stderr.strip())
+            self.launcher.launch(
+                LaunchRequest(
+                    arguments=["git", "worktree", "prune"], cwd=self.workspace
+                )
+            )
+            notes.append("worktree was already gone")
         deleted = self.launcher.launch(
             LaunchRequest(
                 arguments=["git", "branch", "-D", lease.branch],
                 cwd=self.workspace,
             )
         )
-        return deleted.code == 0
+        if deleted.code != 0:
+            notes.append(f"branch retained: {deleted.stderr.strip()}")
+        return WorktreeRemoval(freed=True, detail="; ".join(notes))
 
     def restore(self, lease: WritableRootLease) -> None:
         """Restore a persisted branch into its persisted writable root."""
-        status = self.launcher.launch(
+        self.require(
             LaunchRequest(
                 arguments=["git", "worktree", "add", str(lease.root), lease.branch],
                 cwd=self.workspace,
-            )
+            ),
+            f"failed to restore worktree for {lease.concern_id}",
         )
-        if status.code != 0:
-            raise RuntimeError(f"failed to restore worktree for {lease.concern_id}")
         if self.preparer is not None:
             self.preparer.prepare(lease.root)
 
@@ -358,38 +431,35 @@ class WorktreeOrchestrator:
             raise RuntimeError(f"worktree branch changed for {lease.concern_id}")
         return lines[0]
 
-    def reset(self, lease: WritableRootLease, commit: str) -> None:
-        """Discard an uncommitted attempt before safely retrying a concern."""
-        reset = self.launcher.launch(
-            LaunchRequest(
-                arguments=["git", "reset", "--hard", commit],
-                cwd=lease.root,
-            )
-        )
-        cleaned = self.launcher.launch(
-            LaunchRequest(
-                arguments=["git", "clean", "-fd"],
-                cwd=lease.root,
-            )
-        )
-        if reset.code != 0 or cleaned.code != 0:
-            raise RuntimeError(f"failed to reset worktree for {lease.concern_id}")
-
+    # lup: solved: reset lost its production caller when restore_worktree chose to
+    # preserve the interrupted turn (a park is a pause, not an abandonment);
+    # decide whether any retry path still owes a hard discard, or remove
+    # this method and the three tests that exercise it.
     def head(self, lease: WritableRootLease) -> str:
         """Read the exact current commit identity for an orchestrated worktree."""
-        identified = self.launcher.launch(
+        identified = self.require(
             LaunchRequest(
                 arguments=["git", "rev-parse", "HEAD"],
                 cwd=lease.root,
-            )
+            ),
+            f"failed to identify worktree {lease.concern_id}",
         )
         lines = identified.stdout.splitlines()
-        if identified.code != 0 or len(lines) != 1 or not lines[0]:
-            raise RuntimeError(f"failed to identify worktree {lease.concern_id}")
+        if len(lines) != 1 or not lines[0]:
+            raise RuntimeError(
+                f"failed to identify worktree {lease.concern_id}: `git rev-parse "
+                f"HEAD` named {len(lines)} commits: {identified.stdout.strip()!r}"
+            )
         return lines[0]
 
-    def prepare_join(self, lease: WritableRootLease, parent_commits: list[str]) -> None:
-        """Stage a no-commit merge so the portable merger can resolve semantics."""
+    def prepare_join(self, lease: WritableRootLease, parent_commits: list[str]) -> bool:
+        """Stage a no-commit merge, reporting whether git had to leave a conflict.
+
+        The answer is what decides whether an agent turn is spent at all.
+        Accepting exit 0 and exit 1 identically meant a merger was invoked on
+        every parent, handed an already-correct tree it could edit, with
+        nothing to decide — ten such turns in a twelve-parent run.
+        """
         if len(parent_commits) != 2:
             raise ValueError("one semantic join step requires exactly two commits")
         # Preparing is idempotent: a merge already open against this same parent
@@ -397,7 +467,9 @@ class WorktreeOrchestrator:
         # over it would fail on the existing MERGE_HEAD anyway. Leaving it in
         # place is what lets a resolution survive the park that interrupted it.
         if self.merging(lease) == parent_commits[1]:
-            return
+            # A merge left open is one a turn was already resolving, so the
+            # question it was invoked over stands whatever git reported then.
+            return True
         status = self.launcher.launch(
             LaunchRequest(
                 arguments=[
@@ -412,8 +484,155 @@ class WorktreeOrchestrator:
         )
         if status.code not in {0, 1}:
             raise RuntimeError(
-                f"failed to prepare semantic join for {lease.concern_id}"
+                f"failed to prepare semantic join for {lease.concern_id}: "
+                f"`git merge` exited {status.code}: {status.stderr.strip()}"
             )
+        return status.code == 1
+
+    def conflicted_paths(self, lease: WritableRootLease) -> list[Path]:
+        """Every path git left unmerged, which git already knows exactly."""
+        unmerged = self.launcher.launch(
+            LaunchRequest(
+                arguments=["git", "diff", "--name-only", "--diff-filter=U"],
+                cwd=lease.root,
+            )
+        )
+        return [Path(line) for line in unmerged.stdout.splitlines() if line]
+
+    def current_branch(self, root: Path) -> str:
+        """Which branch a worktree has checked out, empty when detached."""
+        named = self.launcher.launch(
+            LaunchRequest(arguments=["git", "branch", "--show-current"], cwd=root)
+        )
+        lines = named.stdout.splitlines()
+        return lines[0] if named.code == 0 and lines else ""
+
+    def fast_forward(self, root: Path, source: str) -> bool:
+        """Advance a checked-out branch from inside the worktree holding it.
+
+        Every plumbing route that moves the ref from outside corrupts the
+        view: ``git branch -f`` refuses outright, while ``git update-ref``
+        and ``git push .`` both report success and leave the standing
+        worktree showing a staged modification nobody made, because the ref
+        moved and the index did not. Merging from inside moves ref, index
+        and working tree together.
+        """
+        merged = self.launcher.launch(
+            LaunchRequest(arguments=["git", "merge", "--ff-only", source], cwd=root)
+        )
+        return merged.code == 0
+
+    def merge_base(self, lease: WritableRootLease, left: str, right: str) -> str:
+        """Where two commits forked, so a contribution can be read from there."""
+        found = self.launcher.launch(
+            LaunchRequest(
+                arguments=["git", "merge-base", left, right],
+                cwd=lease.root,
+            )
+        )
+        lines = found.stdout.splitlines()
+        if found.code != 0 or not lines:
+            raise RuntimeError(f"{left} and {right} share no history")
+        return lines[0]
+
+    def changed_between(
+        self, lease: WritableRootLease, base: str, commit: str
+    ) -> list[Path]:
+        """Every path that differs between two commits."""
+        named = self.launcher.launch(
+            LaunchRequest(
+                arguments=["git", "diff", "--name-only", base, commit],
+                cwd=lease.root,
+            )
+        )
+        return [Path(line) for line in named.stdout.splitlines() if line]
+
+    def added_lines(
+        self, lease: WritableRootLease, base: str, parent: str, path: Path
+    ) -> list[str]:
+        """Every substantive line one parent adds to one path.
+
+        Blank and near-punctuation lines are excluded because they carry no
+        identity: a closing brace surviving proves nothing about the hunk
+        that added it, and including them would bury a real loss under noise
+        the merger then has to account for.
+        """
+        diffed = self.launcher.launch(
+            LaunchRequest(
+                arguments=["git", "diff", "-U0", base, parent, "--", path.as_posix()],
+                cwd=lease.root,
+            )
+        )
+        return [
+            stripped
+            for line in diffed.stdout.splitlines()
+            if line.startswith("+") and not line.startswith("+++")
+            for stripped in [line[1:].strip()]
+            if len(stripped) > 3 and any(character.isalnum() for character in stripped)
+        ]
+
+    def file_at(self, lease: WritableRootLease, commit: str, path: Path) -> str:
+        """One path's content at one commit, empty where it does not exist."""
+        shown = self.launcher.launch(
+            LaunchRequest(
+                arguments=["git", "show", f"{commit}:{path.as_posix()}"],
+                cwd=lease.root,
+            )
+        )
+        return shown.stdout if shown.code == 0 else ""
+
+    def drop_candidates(
+        self, lease: WritableRootLease, base: str, parent: str, result: str
+    ) -> list[DropCandidate]:
+        """What this parent contributed that the joined tree no longer holds.
+
+        Line presence rather than hunk identity, so a resolution that merely
+        moved code within its file still reads as kept. A line that was
+        genuinely rewritten does read as missing — which is the point, since
+        a rewrite is exactly the choice the merger has to declare.
+        """
+        found: list[DropCandidate] = []  # lup: ignore[empty-collection]
+        for path in self.changed_between(lease, base, parent):
+            contributed = self.added_lines(lease, base, parent, path)
+            lost = self.lost_symbols(lease, base, parent, result, path)
+            if not contributed and not lost:
+                continue
+            held = self.file_at(lease, result, path)
+            missing = [line for line in contributed if line not in held]
+            if missing or lost:
+                found.append(
+                    DropCandidate(
+                        parent=parent, path=path, missing=missing, lost_symbols=lost
+                    )
+                )
+        return found
+
+    def lost_symbols(
+        self,
+        lease: WritableRootLease,
+        base: str,
+        parent: str,
+        result: str,
+        path: Path,
+    ) -> list[DefinedSymbol]:
+        """Definitions this parent introduced that the joined tree dropped.
+
+        Restricted to what the parent itself added, so a definition removed
+        deliberately on the other side is that side's decision and not this
+        parent's loss. The convention this repository states for merges is
+        exactly this comparison — account for every missing `def` and `class`
+        — and stating it in a guidance document made it a step a merger could
+        skip, where computing it makes the answer an obligation.
+        """
+        if path.suffix.lower() not in {".py", ".pyi"}:
+            return []
+        introduced = symbols_lost(
+            self.file_at(lease, parent, path), self.file_at(lease, base, path)
+        )
+        held = {
+            symbol.name for symbol in defined_symbols(self.file_at(lease, result, path))
+        }
+        return [symbol for symbol in introduced if symbol.name not in held]
 
     def commit_join(self, lease: WritableRootLease, title: str) -> str:
         """Create and read the orchestrator-owned semantic join commit."""
@@ -439,8 +658,9 @@ class WorktreeOrchestrator:
                 f"semantic join for {lease.concern_id} still has "
                 f"invalid changes: {checked.stdout.strip() or unresolved.stderr.strip()}"
             )
-        status = self.launcher.launch(
-            LaunchRequest(arguments=["git", "status", "--porcelain"], cwd=lease.root)
+        status = self.require(
+            LaunchRequest(arguments=["git", "status", "--porcelain"], cwd=lease.root),
+            f"failed to inspect semantic join for {lease.concern_id}",
         )
         merge_head = self.launcher.launch(
             LaunchRequest(
@@ -448,37 +668,20 @@ class WorktreeOrchestrator:
                 cwd=lease.root,
             )
         )
-        if status.code != 0:
-            raise RuntimeError(
-                f"failed to inspect semantic join for {lease.concern_id}"
-            )
         if not status.stdout.splitlines() and merge_head.code != 0:
             return self.head(lease)
-        added = self.launcher.launch(
-            LaunchRequest(arguments=["git", "add", "-A"], cwd=lease.root)
+        self.require(
+            LaunchRequest(arguments=["git", "add", "-A"], cwd=lease.root),
+            f"failed to stage semantic join for {lease.concern_id}",
         )
-        committed = self.launcher.launch(
+        self.require(
             LaunchRequest(
                 arguments=["git", "commit", "-m", title],
                 cwd=lease.root,
-            )
+            ),
+            f"failed to commit semantic join for {lease.concern_id}",
         )
-        identified = self.launcher.launch(
-            LaunchRequest(
-                arguments=["git", "rev-parse", "HEAD"],
-                cwd=lease.root,
-            )
-        )
-        lines = identified.stdout.splitlines()
-        if (
-            added.code != 0
-            or committed.code != 0
-            or identified.code != 0
-            or len(lines) != 1
-            or not lines[0]
-        ):
-            raise RuntimeError(f"failed to commit semantic join for {lease.concern_id}")
-        return lines[0]
+        return self.head(lease)
 
 
 class DependencyBaseBuilder:

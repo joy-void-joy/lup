@@ -21,9 +21,17 @@ syntactic ``context`` it inspects, and Python source is tokenized once (via
 literals and comments blanked while "comment" directive rules see comments
 intact. The detectors themselves stay regexes because that is the primitive
 form the hermetic hook runtime can carry (ruff has no plugin API, and engines
-that do — flake8, pylint, semgrep — could not run inside the hook); AST
-refiners such as `empty_collection_exempt_lines` sharpen individual rules, and
-regex alone remains only where a rule is genuinely text-shaped. The
+that do — flake8, pylint, semgrep — could not run inside the hook).
+
+Refiners sharpen individual rules on top of that floor, and what a refiner
+needs decides who can run it. `refined_exempt_lines` reads the AST alone, so
+the hook applies it too and both gates judge a line the same way — a broad
+regex the kernel keeps flagging while the audit calls its marker spurious is
+a change one gate demands and the other refuses. `lup.codescan.grammar` goes
+further and resolves what a matched receiver is declared on, so `dict-get` can
+distinguish a mapping from an HTTP client; that needs a type oracle and stays
+audit-side. Both return `Refutation` rows this module drops — and reports the
+surviving directives for. Regex alone remains where a rule is text-shaped. The
 `lup.codescan.registry` index and the generated `docs/rules.md` reference list
 this family beside the boundary, spelling, and architecture rules.
 
@@ -37,23 +45,48 @@ consumers and the auditor import directly.
 """
 
 import re
+from collections.abc import Callable
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 
 from lup.codescan.boundaries import (
+    LIBRARY_DEFAULT_RULE_ID,
     NATIVE_SPELLING_RULE_ID,
     RULE_ID as SEAM_BOUNDARY_RULE_ID,
 )
 from lup.codescan.capabilities import RULE_ID as ABC_CAPABILITY_RULE_ID
+from lup.codescan.dispatch import RULE_ID as OWN_MODEL_DISPATCH_RULE_ID
 from lup.codescan.common import (
-    IGNORE_RE,
     LineProjections,
     PythonContext,
+    Refutation,
     RuleContext,
+    RuleStrength,
     file_level_ignore,
     ignore_rule_ids,
 )
-from lup.policy.kernel.edit import empty_collection_exempt_lines
+from lup.policy.kernel.edit import (
+    IGNORE_RE,
+    dict_get_exempt_lines,
+    empty_collection_exempt_lines,
+    tuple_shape_exempt_lines,
+)
+
+
+class Refiner(BaseModel):
+    """An AST context that narrows one rule, and what a cleared match really is.
+
+    ``exempt`` returns the lines the context clears, and ``evidence`` says why
+    in the words a refuted finding carries. The kernel owns these functions
+    because the hook must apply them with no types and no dependencies to
+    hand; the rule holds the same object so the narrowing is visible where
+    the rule is declared.
+    """
+
+    model_config = {"arbitrary_types_allowed": True}
+
+    exempt: Callable[[str], set[int]]
+    evidence: str
 
 
 class AntiPattern(BaseModel):
@@ -71,6 +104,16 @@ class AntiPattern(BaseModel):
     is matched with comments intact. Where no tokenizer applies (the
     TypeScript-family table, text that fails to tokenize) every rule scans the
     raw line — those rules are genuinely text-shaped.
+
+    ``refiner`` is present when the regex is wider than the defect the rule
+    names and an AST context settles the difference. It carries the function
+    itself, so reading the rule tells you what narrows it rather than only
+    that something does. The kernel reaches the same functions through
+    :data:`lup.policy.kernel.edit.REFINERS`, because a row projected into the
+    hermetic runtime is primitive and cannot carry a callable;
+    ``test_declared_refiners_are_the_kernel_refiners`` pins the two to the
+    same objects, since a rule refined on one side only is exactly the split
+    that makes a marker unremovable.
     """
 
     model_config = {"arbitrary_types_allowed": True}
@@ -79,6 +122,16 @@ class AntiPattern(BaseModel):
     pattern: re.Pattern[str]
     message: str
     context: RuleContext = "code"
+    refiner: Refiner | None = None
+    strength: RuleStrength = "soft"
+    """Whether a `# lup: ignore` may silence this rule at all.
+
+    Soft by default, because most of these name a shape that is usually wrong
+    and occasionally the only thing that works, and the audit exists to grade
+    those exceptions. A rule is ``strong`` only when its replacement is right
+    every time — then a suppression is not a reasoned exception but the defect
+    with a comment on it, and this refuses to be silenced.
+    """
 
 
 PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
@@ -107,16 +160,19 @@ PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
     ),
     AntiPattern(
         id="generic-base",
+        strength="strong",
         pattern=re.compile(r"\bGeneric\["),
         message="Use Python 3.12+ class[T] syntax instead of Generic[T]",
     ),
     AntiPattern(
         id="typing-union",
+        strength="strong",
         pattern=re.compile(r"\b(?:Optional|Union)\["),
         message="Use PEP 604 unions — X | None instead of Optional, X | Y instead of Union",
     ),
     AntiPattern(
         id="typing-generics",
+        strength="strong",
         pattern=re.compile(r"\b(?:List|Dict|Tuple|Set)\["),
         message="Use lowercase builtin generics — list, dict, tuple, set — "
         "instead of the capitalized typing aliases",
@@ -154,18 +210,19 @@ PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
     AntiPattern(
         # Flags every `.get(` — the user's explicit broad choice over a narrow
         # rule. On payload/TypedDict-shaped data use typed attribute access; on
-        # a genuinely open dict (a registry or cache) it is one comment.
-        # lup: refute whole-file dict-get findings by receiver type — ask
-        # pyright (textDocument/definition on the matched attribute) whether it
-        # resolves into the mapping family's stubs, and drop confirmed
-        # non-mapping sites (HTTP clients, route decorators). Audit-side only;
-        # the hook kernel keeps this broad line rule because edit fragments
-        # have no types.
+        # a genuinely open dict (a registry or cache) it is one comment; a
+        # typed non-mapping receiver takes none, since the audit refutes it.
         id="dict-get",
         pattern=re.compile(r"\.get\s*\("),
+        refiner=Refiner(
+            exempt=dict_get_exempt_lines,
+            evidence="a decorator naming a route, not payload access",
+        ),
         message="`.get(` on payload/TypedDict-shaped data hides the schema — use typed "
         "attribute access (BaseModel/TypedDict). On a genuinely open dict (registry, cache) "
-        "add `# lup: ignore[dict-get]`",
+        "add `# lup: ignore[dict-get]`. On a typed non-mapping receiver (an SDK client, a "
+        "route decorator) add nothing — the audit resolves the declaration and refutes it, "
+        "and a marker here is reported spurious",
     ),
     AntiPattern(
         id="bare-object",
@@ -181,10 +238,17 @@ PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
     ),
     AntiPattern(
         id="tuple-shape",
+        strength="strong",
         pattern=re.compile(r"\btuple\["),
-        message="A declared `tuple[...]` shape hides what each position means — name the "
-        "fields with a TypedDict or BaseModel, a `type Alias = ...` for a reused shape, or "
-        "`list` for a variable-length sequence",
+        refiner=Refiner(
+            exempt=tuple_shape_exempt_lines,
+            evidence="an immutable sequence, not a positional shape",
+        ),
+        message="A fixed-arity `tuple[...]` hides what each position means — name the "
+        "fields with a BaseModel. Fall back to a TypedDict only where a model cannot go: "
+        "the hermetic kernel, which has no pydantic, or a field that must stay the caller's "
+        "own object, which validation would copy. `tuple[X, ...]` is a sequence and never "
+        "trips this",
     ),
     AntiPattern(
         # Mirrors tuple-shape for frozenset: every declared frozenset annotation
@@ -206,20 +270,29 @@ PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         # its "set" is not a standalone word.
         id="set-shape",
         pattern=re.compile(r"(?<!\.)\bset[\[(]|(?::|->)\s*set\b"),
-        message="A declared `set` is usually better as a dict (keyed lookup) or a "
-        "purpose-built structure. For a genuinely set-shaped value add "
-        "`# lup: ignore[set-shape]`",
+        message="A declared `set` is usually better as a dict, when the members "
+        "key something, or as a `list[BaseModel]`, when each member carries more "
+        "than its own name — a bare set of strings is often a record that lost "
+        "its other fields. Reach for membership on a local set comprehension "
+        "instead of declaring the set as the interface. For a genuinely "
+        "set-shaped value add `# lup: ignore[set-shape]`",
     ),
     AntiPattern(
-        # Broad regex trigger, refined by the AST: empty_collection_exempt_lines
-        # exempts deliberate defaults (__init__ state, call kwargs, annotated
-        # class fields), so what reaches a verdict is the build-then-append
-        # seed. The lookbehind keeps `==`/`!=`/`<=`/`>=` comparisons out.
+        # The refiner exempts deliberate defaults — __init__ state, call
+        # kwargs, annotated module and class declarations — so what reaches a
+        # verdict is the build-then-append seed. The lookbehind keeps
+        # `==`/`!=`/`<=`/`>=` comparisons out.
         id="empty-collection",
         pattern=re.compile(r"(?<![=!<>])=\s*(?:\{\}|\[\]|set\(\))"),
+        refiner=Refiner(
+            exempt=empty_collection_exempt_lines,
+            evidence="a deliberate default, not a build-then-append seed",
+        ),
         message="Empty-collection literals (`= {}`, `= []`, `= set()`) usually seed an "
-        "append/mutate loop — build the collection with a comprehension instead, or add "
-        "`# lup: ignore[empty-collection]` for a fold no comprehension can express",
+        "append/mutate loop — build the collection with a comprehension, or, when the "
+        "loop carries control flow a comprehension cannot, `yield` the items from a "
+        "nested function and let its caller collect them. Add "
+        "`# lup: ignore[empty-collection]` only for a fold neither expresses",
     ),
     AntiPattern(
         id="cast",
@@ -367,6 +440,7 @@ PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
     ),
     AntiPattern(
         id="utcnow",
+        strength="strong",
         pattern=re.compile(r"\butcnow\s*\("),
         message="datetime.utcnow() is naive and deprecated — use datetime.now(timezone.utc)",
     ),
@@ -461,6 +535,7 @@ TS_ANTI_PATTERNS: list[AntiPattern] = [
     ),
     AntiPattern(
         id="var-declaration",
+        strength="strong",
         pattern=re.compile(r"\bvar\s+[A-Za-z_$]"),
         message="Use `const` or `let` instead of `var` — var is function-scoped and hoisted",
     ),
@@ -479,11 +554,19 @@ TS_ANTI_PATTERNS: list[AntiPattern] = [
 """Anti-patterns checked against added lines of TypeScript/JavaScript files."""
 
 
+# lup: ignore[library-default] — Python's own source suffixes
 PY_SUFFIXES = (".py", ".pyi")
+# lup: ignore[library-default] — the suffixes those ecosystems compile
 TS_SUFFIXES = (".ts", ".tsx", ".js", ".jsx", ".vue", ".svelte")
 
 FOREIGN_RULE_IDS: frozenset[str] = frozenset(  # lup: ignore[frozenset-shape]
-    {ABC_CAPABILITY_RULE_ID, NATIVE_SPELLING_RULE_ID, SEAM_BOUNDARY_RULE_ID}
+    {
+        ABC_CAPABILITY_RULE_ID,
+        LIBRARY_DEFAULT_RULE_ID,
+        NATIVE_SPELLING_RULE_ID,
+        OWN_MODEL_DISPATCH_RULE_ID,
+        SEAM_BOUNDARY_RULE_ID,
+    }
 )
 """Rule ids owned by other codescan scanners.
 
@@ -493,21 +576,66 @@ reports it spurious — while an id no scanner owns still is.
 """
 
 
-EMPTY_COLLECTION_RULE_ID = "empty-collection"
+def refined_refutations(text: str, patterns: list[AntiPattern]) -> list[Refutation]:
+    """Every AST refiner's exemptions, as refutations.
 
-
-def patterns_for_suffix(suffix: str) -> list[AntiPattern] | None:
-    """The anti-pattern table that applies to a file suffix, or None to skip it.
-
-    Mirrors the hook's split: Python files are checked against the Python
-    table, TS/JS-family files against the TS table, and any other suffix is
-    not scanned (the hook only gates those two families).
+    Projecting them here means the audit has exactly one notion of "matched,
+    but refuted", whether the proof came from the AST alone or from the typed
+    grammar's type oracle. The exemptions are the kernel's own, so a line the
+    hook stops flagging is the same line the audit stops demanding a marker
+    for — which is what keeps one gate from requiring a change the other
+    refuses. Each rule carries its own refiner, so nothing here maps an id
+    back to a function that lives elsewhere.
     """
-    if suffix in PY_SUFFIXES:
-        return PYTHON_ANTI_PATTERNS
-    if suffix in TS_SUFFIXES:
-        return TS_ANTI_PATTERNS
-    return None
+    lines = text.splitlines()
+    return [
+        Refutation(
+            rule_id=rule.id,
+            line=line,
+            subject=lines[line - 1].strip()[:80],
+            evidence=rule.refiner.evidence,
+        )
+        for rule in patterns
+        if rule.refiner is not None
+        for line in sorted(rule.refiner.exempt(text))
+        if line <= len(lines)
+    ]
+
+
+class AntiPatternSet(BaseModel):
+    """Which anti-patterns a project checks, by the language they read.
+
+    The rules a project holds itself to are its own conventions written down,
+    so the tables this library ships are what a caller starts from rather than
+    what it is stuck with — one set reaches the edit hook, the whole-file
+    audit, and the generated rule reference together, so a project that
+    replaces it replaces all three at once.
+    """
+
+    model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
+
+    python: list[AntiPattern] = Field(default_factory=lambda: PYTHON_ANTI_PATTERNS)
+    typescript: list[AntiPattern] = Field(default_factory=lambda: TS_ANTI_PATTERNS)
+
+    def for_suffix(self, suffix: str) -> list[AntiPattern] | None:
+        """The table that applies to a file suffix, or None to skip it.
+
+        Mirrors the hook's split: Python files are checked against the Python
+        table, TS/JS-family files against the TS table, and any other suffix
+        is not scanned (the hook only gates those two families).
+        """
+        if suffix in PY_SUFFIXES:
+            return self.python
+        if suffix in TS_SUFFIXES:
+            return self.typescript
+        return None
+
+
+def patterns_for_suffix(
+    suffix: str, rules: AntiPatternSet | None = None
+) -> list[AntiPattern] | None:
+    """The anti-pattern table one file suffix is checked against."""
+    return (rules or AntiPatternSet()).for_suffix(suffix)
 
 
 def line_hits(
@@ -556,7 +684,11 @@ class AntiPatternFinding(BaseModel):
     rule_id: str = ""
 
 
-def audit_text(text: str, patterns: list[AntiPattern]) -> list[AntiPatternFinding]:
+def audit_text(
+    text: str,
+    patterns: list[AntiPattern],
+    refutations: list[Refutation] | None = None,
+) -> list[AntiPatternFinding]:
     """Audit one file's current text for per-rule ignore-marker health.
 
     A bare file-level `# lup: ignore` opts the whole file out (matching the
@@ -576,10 +708,14 @@ def audit_text(text: str, patterns: list[AntiPattern]) -> list[AntiPatternFindin
       bare ignore on a line that trips nothing -> "spurious";
     - a bare `# lup: ignore` that does silence the line -> "untyped".
 
-    An empty-collection hit on a line the AST refiner exempts (see
-    :func:`empty_collection_exempt_lines`) is not a trip at all, so a
-    directive naming the rule there reports "spurious" — the audit drives
-    the cleanup of markers the refiner made unnecessary.
+    A hit a refiner refuted is not a trip at all, so a directive naming that
+    rule there reports "spurious" — the audit drives the cleanup of markers
+    refinement made unnecessary. Two sources feed this: the kernel's own AST
+    exemptions (see :func:`refined_exempt_lines`), computed here, and
+    whatever `refutations` the caller resolved — the typed grammar in
+    `lup.codescan.grammar` passes the sites whose receiver a type oracle
+    proved outside the rule's family. With no refutations supplied and no
+    oracle behind them, every broad regex verdict stands.
 
     An ignore counts as a guard only where a comment actually starts (per the
     tokenizer), so a docstring or string literal that merely *mentions*
@@ -602,8 +738,10 @@ def audit_text(text: str, patterns: list[AntiPattern]) -> list[AntiPatternFindin
         file_disabled = file_ignore.rule_ids
 
     context = PythonContext.parse(text)
-    refined = any(ap.id == EMPTY_COLLECTION_RULE_ID for ap in patterns)
-    exempt = empty_collection_exempt_lines(text) if refined else set()
+    refuted = {
+        (refutation.rule_id, refutation.line)
+        for refutation in refined_refutations(text, patterns) + (refutations or [])
+    }
 
     def inline_directive(line_no: int, line: str) -> re.Match[str] | None:
         match = IGNORE_RE.search(line)
@@ -625,15 +763,32 @@ def audit_text(text: str, patterns: list[AntiPattern]) -> list[AntiPatternFindin
         if index in context.docstring_lines:
             continue  # docstring prose is not code, and no comment can guard it
         preview = line.strip()[:80]
-        hits = line_hits(projections, index, patterns)
-        if index in exempt:
-            hits = [ap for ap in hits if ap.id != EMPTY_COLLECTION_RULE_ID]
+        hits = [
+            ap
+            for ap in line_hits(projections, index, patterns)
+            if (ap.id, index) not in refuted
+        ]
         hit_ids = {ap.id for ap in hits}
         directive = inline_directive(index, line)
         inline_ids = ignore_rule_ids(directive) if directive is not None else None
 
         silenced_by_bare = False
         for ap in hits:
+            if ap.strength == "strong":
+                # No directive reaches this one. A soft rule's suppression is a
+                # reasoned exception the audit then grades; a strong rule has a
+                # replacement that is right every time, so the same comment
+                # would only record a decision to keep the defect.
+                findings.append(
+                    AntiPatternFinding(
+                        kind="missing",
+                        line=index,
+                        text=preview,
+                        message=f"{ap.message} (no suppression: write the replacement)",
+                        rule_id=ap.id,
+                    )
+                )
+                continue
             if ap.id in file_disabled:
                 # Live only when the file-level directive is the sole silencer;
                 # an inline-covered hit does not keep the file-wide id alive.

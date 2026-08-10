@@ -1,30 +1,47 @@
 # lup: ignore[native-spelling]
 # This checker necessarily owns the provider spellings it audits.
-"""AST boundary rule keeping native adapters out of neutral consumers.
+"""AST boundary rules keeping the library reusable by someone else's project.
 
-Named adapter packages, tests, and explicit application/CLI composition roots
-may import concrete implementations. Every other module composes only the
-portable contracts. A deliberate exception uses ``# lup:
-ignore[seam-boundary]`` on the import or as a file-level directive.
+Two directions are guarded. *Inward*: named adapter packages, tests, and
+explicit application/CLI composition roots may import concrete implementations
+and spell provider wire names, while every other module composes only the
+portable contracts. *Outward*: a library module may not decide for its
+adopters — a declared data table has to be reachable as an overridable
+default, so an adopter replaces the vocabulary rather than editing the library
+(``library-default``, the mechanical half of the placement criterion in
+``docs/library.md``).
+
+A deliberate exception uses the typed ``# lup: ignore[<rule-id>]`` on the
+offending line or as a file-level directive, with a reason.
 """
 
 import ast
+from collections.abc import Collection, Sequence
 from pathlib import Path
+from typing import Self, get_args
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from lup.codescan.common import (
-    IGNORE_RE,
     PythonContext,
     file_level_ignore,
     ignore_rule_ids,
 )
+from lup.policy.kernel.edit import IGNORE_RE
+from lup.harness.contracts import NativeSpellings
+from lup.harness.models import PluginLocation, TreeLocation
 from lup.policy.kernel.decision import KERNEL_IMPORT_ALLOWLIST
 
 RULE_ID = "seam-boundary"
 NATIVE_SPELLING_RULE_ID = "native-spelling"
 KERNEL_IMPORT_RULE_ID = "kernel-imports"
+LIBRARY_DEFAULT_RULE_ID = "library-default"
+LIBRARY_ROOT = "packages/lup/src/lup/"
+KERNEL_ROOT = f"{LIBRARY_ROOT}policy/kernel/"
+"""Where the decision kernel ships, derived so it cannot drift from the root."""
+# lup: ignore[library-default] — the adapter packages this library ships, so the value follows lup.adapters
 NATIVE_PREFIXES = ("lup.adapters.claude", "lup.adapters.codex")
+# lup: ignore[library-default] — each key is literally what the provider calls the thing
 NATIVE_SPELLINGS = {
     "/lup:": "Claude skill invocation",
     "$lup:": "Codex skill invocation",
@@ -45,28 +62,113 @@ NATIVE_SPELLINGS = {
 }
 
 
-def path_is_sanctioned(rel_path: Path) -> bool:
-    """Whether a path may import native implementations as a composition root."""
+def generated_tree_paths(
+    runtimes: Sequence[NativeSpellings], plugins: Sequence[str]
+) -> list[str]:
+    """Every path a runtime writes its own tree at, asked rather than listed.
+
+    A generated tree is the rendering of exactly the implementations this rule
+    guards, so what sanctions it is that a runtime spells it — and a runtime
+    that learns a location sanctions it the same day, with no second copy here
+    to keep in step.
+    """
+    return sorted(
+        {
+            *(
+                runtime.tree(location)
+                for runtime in runtimes
+                for location in get_args(TreeLocation.__value__)
+            ),
+            *(
+                runtime.plugin(plugin, location, None)
+                for runtime in runtimes
+                for plugin in plugins
+                for location in get_args(PluginLocation.__value__)
+            ),
+        }
+    )
+
+
+class ApplicationRoots(BaseModel):
+    """Where one application composes concrete implementations of the seams.
+
+    The library guards its own package and can name nothing beyond it: an
+    adopter renames the application package before writing a line, so a path
+    written down here would go on naming a package that no longer exists and
+    silently sanction nothing.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    composition: list[str] = Field(default_factory=list)
+    """Repository-relative files, or directory prefixes ending in ``/``."""
+
+    portable_prose: list[str] = Field(default_factory=list)
+    """Those composition roots whose prose must still name no provider — a
+    declaration every tree renders is written in one of them."""
+
+    def sanctions(self, rel_path: Path) -> bool:
+        """Whether this application composes natively at that path."""
+        posix = rel_path.as_posix()
+        return any(
+            posix.startswith(root) if root.endswith("/") else posix == root
+            for root in self.composition
+        )
+
+    def sanctions_spelling(self, rel_path: Path) -> bool:
+        """Whether that path may also own a provider's own wire words."""
+        return self.sanctions(rel_path) and not rel_path.as_posix().startswith(
+            tuple(self.portable_prose)
+        )
+
+
+NO_APPLICATION = ApplicationRoots()
+"""What an adopter sanctions before it says so: nothing beyond the library."""
+
+# lup: ignore[library-default] — files of this library, which no adopter relocates
+LIBRARY_COMPOSITION = (
+    f"{LIBRARY_ROOT}devtools/harness/composition.py",
+    f"{LIBRARY_ROOT}devtools/harness/launch.py",
+    f"{LIBRARY_ROOT}devtools/harness/resolve.py",
+)
+"""The library's own CLI composition roots.
+
+A launcher starts a named runtime, the resolver entry drives one, and the
+composition builders assemble one, so all three compose concrete adapters the
+way an application's own root does. They are listed rather than sanctioned by
+directory: the engines beside them — generation, drift, reconciliation — read
+a declaration and must stay portable.
+"""
+
+
+def composes_natively(rel_path: Path) -> bool:
+    """Whether this path is a composition root of the library itself."""
     posix = rel_path.as_posix()
-    return (
-        "lup/adapters/" in posix
-        or posix.startswith((".claude/", ".codex/", ".agents/"))
-        or posix == "AGENTS.md"
-        or posix.startswith("tests/")
-        or posix.startswith("examples/")
-        or posix == "src/lup_template/agent/core.py"
-        or posix.startswith("src/lup_template/devtools/harness/")
-        or posix == "src/lup_template/devtools/setup.py"
-        or posix == "src/lup_template/devtools/usage/app.py"
-    )
+    return "lup/adapters/" in posix or posix in LIBRARY_COMPOSITION
 
 
-def native_spelling_path_is_sanctioned(rel_path: Path) -> bool:
+def path_is_sanctioned(
+    rel_path: Path, application: ApplicationRoots = NO_APPLICATION
+) -> bool:
+    """Whether a path may import native implementations as a composition root."""
+    return composes_natively(rel_path) or application.sanctions(rel_path)
+
+
+def library_placement_path_is_audited(rel_path: Path) -> bool:
+    """Whether a path is a neutral library module the placement rule audits.
+
+    Adapter packages are exempt: a native spelling is canonical there by
+    definition, which is the same reason they own the spellings above.
+    """
+    posix = rel_path.as_posix()
+    return posix.startswith(LIBRARY_ROOT) and "lup/adapters/" not in posix
+
+
+def native_spelling_path_is_sanctioned(
+    rel_path: Path, application: ApplicationRoots = NO_APPLICATION
+) -> bool:
     """Whether a path may own provider wire spellings without a suppression."""
-    content_root = "src/lup_template/devtools/harness/content/"
-    return path_is_sanctioned(rel_path) and not rel_path.as_posix().startswith(
-        content_root
-    )
+    return composes_natively(rel_path) or application.sanctions_spelling(rel_path)
 
 
 class BoundaryBreach(BaseModel):
@@ -89,12 +191,39 @@ class BoundaryAuditFinding(BaseModel):
 
 
 class SourceViolation(BaseModel):
-    """One unsuppressed source shape before ordinary suppression auditing."""
+    """One unsuppressed source shape before ordinary suppression auditing.
+
+    ``line`` is where the violation is reported; ``directive_from`` and
+    ``directive_to`` bound the lines where its suppression may sit. Both
+    default to ``line`` — an import or a spelling is one line, and the repo
+    convention puts its directive on exactly that line. A rule whose subject
+    is a whole declaration widens the bound instead, so a fifty-line table can
+    be excused by a directive heading it rather than one crammed onto the
+    opening line, where a real reason would not fit.
+    """
 
     line: int
+    directive_from: int = 0
+    directive_to: int = 0
     text: str
     subject: str
     message: str
+
+    @model_validator(mode="after")
+    def default_zone_to_the_reported_line(self) -> Self:
+        self.directive_from = self.directive_from or self.line
+        self.directive_to = max(self.directive_to, self.line)
+        return self
+
+
+class TableConstant(BaseModel):
+    """One module-level constant bound to a multi-entry collection display."""
+
+    name: str
+    line: int
+    end_line: int
+    text: str
+    entries: int
 
 
 class BoundaryDirective(BaseModel):
@@ -239,6 +368,125 @@ def native_spelling_violations(text: str) -> list[SourceViolation]:
     return violations
 
 
+def collection_entries(node: ast.expr) -> int | None:
+    """How many entries a collection display holds, or ``None`` if it is not one.
+
+    Only a written-out display counts. A comprehension is derived from another
+    value rather than declared, and a scalar is a single fact, not a table.
+    """
+    match node:
+        case ast.List(elts=elts) | ast.Tuple(elts=elts) | ast.Set(elts=elts):
+            return len(elts)
+        case ast.Dict(keys=keys):
+            return len(keys)
+    return None
+
+
+def table_constants(text: str) -> list[TableConstant]:
+    """Module-level shouty constants bound to a two-or-more-entry display."""
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return []
+    lines = text.splitlines()
+
+    def declared(node: ast.stmt) -> TableConstant | None:
+        match node:
+            case (
+                ast.Assign(targets=[ast.Name(id=name)], value=value)
+                | ast.AnnAssign(target=ast.Name(id=name), value=ast.expr() as value)
+            ):
+                entries = collection_entries(value)
+            case _:
+                return None
+        if not name.isupper() or entries is None or entries < 2:
+            return None
+        line = lines[node.lineno - 1] if node.lineno <= len(lines) else ""
+        return TableConstant(
+            name=name,
+            line=node.lineno,
+            end_line=node.end_lineno or node.lineno,
+            text=line.strip(),
+            entries=entries,
+        )
+
+    return [found for node in tree.body if (found := declared(node)) is not None]
+
+
+def default_position_names(
+    text: str,
+) -> set[str]:  # lup: ignore[set-shape] — name identity membership
+    """Constant names one module reaches as a caller-replaceable default.
+
+    Three spellings count, and only these: a parameter default in a signature,
+    a pydantic ``Field`` default (or a ``default_factory`` lambda returning the
+    constant), and the two shapes a mutable default is written as — the
+    ``TABLE if argument is None else argument`` sentinel and the
+    ``argument or TABLE`` fallback.
+    """
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return set()  # lup: ignore[set-shape] — an unparseable module names nothing
+
+    def reached(node: ast.expr | None) -> list[str]:
+        match node:
+            case ast.Name(id=name) | ast.Lambda(body=ast.Name(id=name)):
+                return [name]
+        return []
+
+    def defaults(node: ast.AST) -> list[ast.expr | None]:
+        match node:
+            case ast.FunctionDef(args=args) | ast.AsyncFunctionDef(args=args):
+                return [*args.defaults, *args.kw_defaults]
+            case ast.Call(keywords=keywords):
+                return [
+                    keyword.value
+                    for keyword in keywords
+                    if keyword.arg in ("default", "default_factory")
+                ]
+            case ast.IfExp(
+                test=ast.Compare(
+                    ops=[ast.Is() | ast.IsNot()], comparators=[ast.Constant(value=None)]
+                ),
+                body=body,
+                orelse=orelse,
+            ):
+                return [body, orelse]
+            case ast.BoolOp(op=ast.Or(), values=values):
+                return list(values)
+        return []
+
+    return {
+        name
+        for node in ast.walk(tree)
+        for default in defaults(node)
+        for name in reached(default)
+    }
+
+
+def library_default_violations(
+    text: str,
+    overridable: Collection[str],
+) -> list[SourceViolation]:
+    """Find declared library tables no caller can replace with their own."""
+    return [
+        SourceViolation(
+            line=constant.line,
+            directive_from=constant.line - 1,
+            directive_to=constant.end_line,
+            text=constant.text,
+            subject=constant.name,
+            message=(
+                f"library table {constant.name} ({constant.entries} entries) is a "
+                "project choice no caller can replace — take it as a default"
+            ),
+        )
+        for constant in table_constants(text)
+        if constant.name not in overridable
+    ]
+
+
 def audit_rule(
     text: str, rule_id: str, violations: list[SourceViolation]
 ) -> list[BoundaryAuditFinding]:
@@ -274,7 +522,10 @@ def audit_rule(
         candidates = [
             (index, directive)
             for index, directive in enumerate(directives)
-            if (directive.file_level or directive.line == violation.line)
+            if (
+                directive.file_level
+                or violation.directive_from <= directive.line <= violation.directive_to
+            )
             and (directive.rule_ids is None or rule_id in directive.rule_ids)
         ]
         if not candidates:
@@ -334,12 +585,14 @@ def audit_boundaries(text: str) -> list[BoundaryAuditFinding]:
     ]
 
 
-def audit_path_boundaries(rel_path: Path, text: str) -> list[BoundaryAuditFinding]:
+def audit_path_boundaries(
+    rel_path: Path, text: str, application: ApplicationRoots = NO_APPLICATION
+) -> list[BoundaryAuditFinding]:
     """Audit only the boundary rules that apply at one repository path."""
     findings: list[BoundaryAuditFinding] = []
-    if not path_is_sanctioned(rel_path):
+    if not path_is_sanctioned(rel_path, application):
         findings.extend(audit_rule(text, RULE_ID, import_violations(text)))
-    if not native_spelling_path_is_sanctioned(rel_path):
+    if not native_spelling_path_is_sanctioned(rel_path, application):
         findings.extend(
             audit_rule(
                 text,
@@ -353,6 +606,18 @@ def audit_path_boundaries(rel_path: Path, text: str) -> list[BoundaryAuditFindin
 def audit_kernel_imports(text: str) -> list[BoundaryAuditFinding]:
     """Audit the canonical kernel against its pinned dependency allowlist."""
     return audit_rule(text, KERNEL_IMPORT_RULE_ID, kernel_import_violations(text))
+
+
+def audit_library_defaults(
+    text: str,
+    overridable: Collection[str],
+) -> list[BoundaryAuditFinding]:
+    """Audit one library module's tables against the names callers can replace."""
+    return audit_rule(
+        text,
+        LIBRARY_DEFAULT_RULE_ID,
+        library_default_violations(text, overridable),
+    )
 
 
 def find_boundary_breaches(text: str) -> list[BoundaryBreach]:
@@ -373,6 +638,18 @@ def find_native_spelling_breaches(text: str) -> list[BoundaryBreach]:
             NATIVE_SPELLING_RULE_ID,
             native_spelling_violations(text),
         )
+        if item.kind == "missing"
+    ]
+
+
+def find_library_default_breaches(
+    text: str,
+    overridable: Collection[str],
+) -> list[BoundaryBreach]:
+    """Find unsuppressed baked-in library tables, honoring suppressions."""
+    return [
+        BoundaryBreach(line=item.line, module=item.module, text=item.text)
+        for item in audit_library_defaults(text, overridable)
         if item.kind == "missing"
     ]
 

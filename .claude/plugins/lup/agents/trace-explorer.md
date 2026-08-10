@@ -1,7 +1,7 @@
 ---
 name: trace-explorer
 description: "Investigate trace evidence without changing production files"
-tools: Read, Grep, Glob, Bash
+tools: Read, Bash
 model: sonnet
 color: cyan
 ---

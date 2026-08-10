@@ -6,7 +6,7 @@ tests check the derivation itself as much as the declarations it judges.
 
 import pytest
 
-from lup.adapters.claude.harness import ClaudeSpellings
+from lup.adapters.claude.harness import ClaudeSpellings, claude_granted_tools
 from lup.adapters.codex.harness import CodexSpellings
 from lup.adapters.harness import compile_codex
 from lup.codescan.portable import native_vocabulary, prose_breaches
@@ -18,7 +18,7 @@ RUNTIMES: list[NativeSpellings] = [ClaudeSpellings(), CodexSpellings()]
 
 MARK = "<supplied by the caller>"
 
-REMAINING_PROSE_BREACHES: list[str] = []  # lup: ignore[empty-collection]
+REMAINING_PROSE_BREACHES: list[str] = []
 """Declarations whose prose still names a platform.
 
 Empty, and the compilers now refuse a breach outright, so this is a second
@@ -84,3 +84,26 @@ def test_portable_prose_names_no_platform_beyond_the_known_inventory() -> None:
         "portable prose inventory changed; converted declarations must leave "
         f"the list. Current: {remaining}"
     )
+
+
+def test_a_grant_claude_cannot_honor_never_reaches_the_rendered_tree() -> None:
+    """The portable vocabulary is a superset, and the tree gets what exists.
+
+    Claude Code ships no `Glob` and no `Grep`. Granting them is inert, which
+    is worse than harmless: it reads as search the agent has, and the agent
+    spends a turn per attempt learning otherwise. Declarations keep naming
+    the portable set, and the filter is where the runtime is known.
+    """
+    assert claude_granted_tools(["Read", "Grep", "Glob", "Bash"]) == ["Read", "Bash"]
+    assert claude_granted_tools(["Bash(git:*)", "Read"]) == ["Bash(git:*)", "Read"]
+
+    declared = [
+        (declaration.id, declaration.tools)
+        for plugin in portable_harness().plugins
+        for declaration in [*plugin.skills, *plugin.agents]
+    ]
+    assert declared, "the harness declares no skills or agents to check"
+    for identifier, tools in declared:
+        assert claude_granted_tools(tools) == [
+            tool for tool in tools if tool not in ("Glob", "Grep")
+        ], identifier

@@ -5,8 +5,11 @@ from typing import Literal
 
 from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, SecretStr
 
-from lup.adapters.claude.runtime import ClaudeSessionConfig
-from lup.runtime.config import ConfigTransform, ProfileResolver
+from lup.adapters.claude.runtime import (
+    ClaudeSessionConfig,
+    create_claude_session_factory,
+)
+from lup.runtime.config import ConfigTransform, ProfileResolver, ProfileSelector
 
 CLAUDE_CONFIG_DIR = "CLAUDE_CONFIG_DIR"
 PLACEHOLDER_CREDENTIAL = "dummy"
@@ -61,6 +64,15 @@ class ClaudeProfileResolver(ProfileResolver[ClaudeSessionConfig]):
         except KeyError as error:
             raise KeyError(f"unknown Claude profile {selected!r}") from error
         return ClaudeConfigDirectoryTransform(profile)
+
+
+def claude_profile_selector(
+    registry: ClaudeProfileRegistry,
+) -> ProfileSelector[ClaudeSessionConfig]:
+    """The surface a consumer holds over Claude account selection."""
+    return ProfileSelector(
+        ClaudeProfileResolver(registry), create_claude_session_factory
+    )
 
 
 class ClaudeCompatibleEndpoint(BaseModel):

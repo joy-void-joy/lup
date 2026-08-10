@@ -56,7 +56,7 @@ Based on your exploration and the user's input, design the command. Existing inv
 
 ## Step 3: Declare the skill
 
-Write the declaration to `src/lup_template/devtools/harness/content/skills/<command_name>.py` as a `models.Skill`, then register it in `content/catalog.py` (import `SKILL as SKILL_<NAME>`, add it to `SKILLS`) and regenerate with `uv run lup-devtools harness generate all`. The artifacts under .claude/plugins/lup/commands/ under Claude Code, .codex/plugins/lup/skills/ under Codex are generated from this — never write them by hand.
+Write the declaration to `content/skills/<command_name>.py` as a `models.Skill` — under `packages/lup/src/lup/devtools/harness/` when the investigation is one any project on lup would run, under `src/lup_template/devtools/harness/` when only this one would. Register it in that half's `content/catalog.py` (import `SKILL as SKILL_<NAME>`, add it to `LIBRARY_SKILLS` or `PROJECT_SKILLS`) and regenerate with `uv run lup-devtools harness generate all`. The artifacts under.claude/plugins/lup/commands/ under Claude Code, .codex/plugins/lup/skills/ under Codex are generated from this — never write them by hand.
 
 **Tools**: Choose the `tools` list based on what the investigator needs. Every
 grant is a `ToolGrant` from `packages/lup/src/lup/types.py` — read that closed

@@ -1,50 +1,49 @@
 """The persisted question mailbox every answer door writes through.
 
-A resolver run holds its state lock for its entire life, so nothing outside
-that process can take it. The mailbox is therefore lock-free by
-construction: one file per question, written with an atomic rename, in
-directories the state machine never prunes.
+A question is a :class:`~lup.channels.slot.Slot`: declared once by whoever
+asks, offered to by any door, and settled exactly once. Messages ride a
+:class:`~lup.channels.stream.Stream` instead, and that split is the point.
+A run parks while any *slot* it needs is unsettled; nothing parks on a
+stream. So volunteering information to a worker cannot stall the run, which
+it could when both rode the same structure.
 
-Three directories rather than two. Doors write ``offers/``, which is
-correctable — a mistyped free-text answer can be replaced right up until it
-counts, and an offer may arrive before its question exists, which is what
-lets a flag answer a question the run has not asked yet. Exactly one writer
-promotes offers into ``answers/``, taking the earliest valid one, so "first
-answer wins" is a deterministic decision rather than a race between whoever
-reached the filesystem first.
+Doors write ``offered``, which is correctable — a mistyped free-text answer
+can be replaced right up until it counts, and an offer may arrive before its
+question exists, which is what lets a flag answer a question the run has not
+asked yet. Exactly one writer promotes offers into ``settled``, taking the
+earliest valid one, so "first answer wins" is a deterministic decision
+rather than a race between whoever reached the filesystem first.
 """
 
 import asyncio
-import time
-from datetime import UTC, datetime
-from enum import StrEnum
+from datetime import datetime
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, TypeAdapter
 
+from lup.channels.models import (
+    ChannelConflictError,
+    ChannelCorruptionError,
+    Door,
+    DoorPolicy,
+    utc_now,
+)
+from lup.channels.slot import Slot, SlotSet
+from lup.channels.stream import Stream
+from lup.channels.wait import POLL_SECONDS, wait_until
 from lup.resolver.models import FROZEN, MaterialQuestion, QuestionAnswer
 
 QUESTION_DIR = "questions"
-OFFER_DIR = "offers"
-ANSWER_DIR = "answers"
-PARK_FILE = "park.request"
-ANSWER_POLL_SECONDS = 0.25
+MESSAGE_FILE = "messages.jsonl"
+PARK_DIR = "park"
+RESUME_DIR = "resume"
+ANSWER_POLL_SECONDS = POLL_SECONDS
 
-
-class MailboxConflictError(RuntimeError):
-    """A write contradicted a record the mailbox already holds."""
-
-
-class MailboxCorruptionError(RuntimeError):
-    """A mailbox file could not be read as the record it should hold."""
-
-
-class AnswerDoor(StrEnum):
-    """Which surface an answer came through."""
-
-    FLAG = "flag"
-    PAGE = "page"
-    CONSOLE = "console"
+# The resolver's own names for the channel package's shapes, so a caller
+# reads one vocabulary rather than two.
+MailboxConflictError = ChannelConflictError
+MailboxCorruptionError = ChannelCorruptionError
+AnswerDoor = Door
 
 
 class PendingQuestion(BaseModel):
@@ -90,6 +89,33 @@ class ParkRequest(BaseModel):
     reason: str
 
 
+class ActorMessage(BaseModel):
+    """One thing a door told an actor. This never settles anything.
+
+    A message is not a question, and the type is where that is enforced: a
+    stream has no unsettled state for a run to wait on, so no amount of
+    messaging can park anything.
+
+    ``redirect`` separates telling an actor something from stopping it. An
+    ordinary message rides in front of the actor's next tool call and it
+    keeps going; a redirect refuses that call and hands back the text as the
+    reason, so the actor cannot carry on with what it was doing without
+    first reading why it was stopped. Both are the same record on the same
+    stream, because an intervention belongs in order beside what it
+    interrupted.
+    """
+
+    model_config = FROZEN
+
+    run_id: str
+    to_actor: str
+    text: str
+    door: AnswerDoor
+    sent_at: datetime
+    in_reply_to: str = ""
+    redirect: bool = False
+
+
 class MailboxWait(BaseModel):
     """How one wait ended. ``reason`` is empty only on a complete answer."""
 
@@ -103,96 +129,126 @@ class MailboxWait(BaseModel):
 type MailboxRecord = PendingQuestion | AnswerOffer | RecordedAnswer | ParkRequest
 
 
-def utc_now() -> datetime:
-    return datetime.now(UTC)
+class MailboxSlotRecord(BaseModel):
+    """One question slot's payload at whichever of its three states it holds.
+
+    A slot stores one model, and a question's declaration, its correctable
+    offer, and its settled answer are three different shapes. Carrying all
+    three optionally keeps the slot generic over a single type without
+    collapsing what the three of them mean.
+    """
+
+    model_config = FROZEN
+
+    pending: PendingQuestion | None = None
+    offer: AnswerOffer | None = None
+    answer: RecordedAnswer | None = None
 
 
 class QuestionMailbox:
-    """File-backed question and answer exchange for one resolver run."""
+    """File-backed question, answer, and message exchange for one run."""
 
     def __init__(self, root: Path) -> None:
         self.root = root
-
-    def path_for(self, directory: str, question_id: str) -> Path:
-        return self.root / directory / f"{question_id}.json"
-
-    def write_atomic(self, path: Path, payload: MailboxRecord) -> None:
-        """Publish one record so no reader can observe it half-written."""
-        path.parent.mkdir(parents=True, exist_ok=True)
-        temporary = path.with_name(f".{path.name}.tmp")
-        temporary.write_text(
-            payload.model_dump_json(indent=2) + "\n", encoding="utf-8", newline="\n"
+        self.slots: SlotSet[MailboxSlotRecord] = SlotSet(
+            root / QUESTION_DIR, MailboxSlotRecord
         )
-        temporary.replace(path)  # lup: ignore[string-replace] — atomic Path rename
-
-    def read_records[T: BaseModel](self, directory: str, model: type[T]) -> list[T]:
-        source = self.root / directory
-        if not source.is_dir():
-            return []
-        records: list[T] = []
-        for path in sorted(source.glob("*.json")):
-            try:
-                records.append(model.model_validate_json(path.read_text("utf-8")))
-            except ValueError as error:
-                raise MailboxCorruptionError(
-                    f"{path} is not a {model.__name__}"
-                ) from error
-        return records
+        self.stream: Stream[ActorMessage] = Stream(
+            root / MESSAGE_FILE, TypeAdapter(ActorMessage)
+        )
+        self.park_slot: Slot[ParkRequest] = Slot(root / PARK_DIR, ParkRequest)
+        # Pause and resume are asymmetric on purpose. Pausing is a directive
+        # any door may issue; resuming is a decision, and excluding AGENT
+        # makes it one the orchestrator physically cannot take for itself.
+        self.resume_slot: Slot[ParkRequest] = Slot(
+            root / RESUME_DIR, ParkRequest, DoorPolicy(excluded=[Door.AGENT])
+        )
 
     def queue(self, pending: PendingQuestion) -> None:
         """Record a question once; re-asking the same question is a no-op."""
-        path = self.path_for(QUESTION_DIR, pending.question.id)
-        if path.exists():
-            existing = PendingQuestion.model_validate_json(path.read_text("utf-8"))
-            if existing.question != pending.question:
+        slot = self.slots.slot(pending.question.id)
+        existing = slot.declared()
+        if existing is not None and existing.pending is not None:
+            if existing.pending.question != pending.question:
                 raise MailboxConflictError(
                     f"question {pending.question.id!r} is already asked differently"
                 )
             return
-        self.write_atomic(path, pending)
+        slot.declare(MailboxSlotRecord(pending=pending))
 
     def offer(self, offer: AnswerOffer) -> None:
         """Propose an answer, replacing any earlier proposal for that question."""
-        self.write_atomic(self.path_for(OFFER_DIR, offer.question_id), offer)
+        self.slots.slot(offer.question_id).offer(
+            MailboxSlotRecord(offer=offer), offer.door
+        )
 
     def record(self, answer: RecordedAnswer) -> bool:
         """Promote one answer, or report that another door already won."""
-        path = self.path_for(ANSWER_DIR, answer.answer.question_id)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            with path.open("x", encoding="utf-8", newline="\n") as handle:
-                handle.write(answer.model_dump_json(indent=2) + "\n")
-        except FileExistsError:
-            return False
-        return True
+        return self.slots.slot(answer.answer.question_id).settle(
+            MailboxSlotRecord(answer=answer), answer.door
+        )
 
     def questions(self) -> list[PendingQuestion]:
-        return self.read_records(QUESTION_DIR, PendingQuestion)
+        return [
+            record.pending
+            for record in self.slots.declared()
+            if record.pending is not None
+        ]
 
     def offers(self) -> list[AnswerOffer]:
-        return self.read_records(OFFER_DIR, AnswerOffer)
+        return [
+            record.offer for record in self.slots.offered() if record.offer is not None
+        ]
 
     def answers(self) -> list[RecordedAnswer]:
-        return self.read_records(ANSWER_DIR, RecordedAnswer)
+        return [
+            record.answer
+            for record in self.slots.settled()
+            if record.answer is not None
+        ]
 
     def answered_ids(self) -> list[str]:
         return [record.answer.question_id for record in self.answers()]
 
+    def send(self, message: ActorMessage) -> None:
+        """Tell an actor something. This never settles and never parks a run."""
+        self.stream.append(message)
+
+    def messages_for(self, actor: str, offset: int = 0) -> list[ActorMessage]:
+        """Every message addressed to one actor, or broadcast to all of them."""
+        return [
+            pair.item
+            for pair in self.stream.read_from(offset)
+            if pair.item.to_actor in (actor, "")
+        ]
+
+    def stream_offset(self) -> int:
+        """Where a reader that has consumed everything should resume.
+
+        Taken rather than derived from the last message read, because a
+        reader filtering by actor must still skip past the ones addressed
+        elsewhere or it re-reads them on every turn.
+        """
+        found = self.stream.read_from(0)
+        return found[-1].commit_offset if found else 0
+
     def park(self, request: ParkRequest) -> None:
-        self.write_atomic(self.root / PARK_FILE, request)
+        self.park_slot.clear()
+        self.park_slot.settle(request)
 
     def parked(self) -> ParkRequest | None:
-        path = self.root / PARK_FILE
-        if not path.exists():
-            return None
-        try:
-            return ParkRequest.model_validate_json(path.read_text("utf-8"))
-        except ValueError as error:
-            raise MailboxCorruptionError(f"{path} is not a ParkRequest") from error
+        return self.park_slot.settled()
 
     def clear_park(self) -> None:
         """Drop a stale park marker so a resumed run can wait again."""
-        (self.root / PARK_FILE).unlink(missing_ok=True)
+        self.park_slot.clear()
+
+    def request_resume(self, request: ParkRequest, door: AnswerDoor) -> bool:
+        """Release a paused run. Refused for ``AGENT`` by the slot's own policy."""
+        return self.resume_slot.settle(request, door)
+
+    def resumed(self) -> ParkRequest | None:
+        return self.resume_slot.settled()
 
 
 async def wait_for_answers(
@@ -211,11 +267,14 @@ async def wait_for_answers(
     rather than a fast path and a slow path that can disagree.
     """
     wanted = list(dict.fromkeys(question_ids))
-    deadline = time.monotonic() + wait_seconds
-    while True:
-        recorded = {record.answer.question_id: record for record in mailbox.answers()}
-        answered = [recorded[name] for name in wanted if name in recorded]
-        outstanding = [name for name in wanted if name not in recorded]
+
+    def recorded() -> dict[str, RecordedAnswer]:
+        return {record.answer.question_id: record for record in mailbox.answers()}
+
+    def resolved() -> MailboxWait | None:
+        found = recorded()
+        answered = [found[name] for name in wanted if name in found]
+        outstanding = [name for name in wanted if name not in found]
         if not outstanding:
             return MailboxWait(answered=answered, unanswered=[])
         request = mailbox.parked()
@@ -223,19 +282,39 @@ async def wait_for_answers(
             return MailboxWait(
                 answered=answered, unanswered=outstanding, reason=request.reason
             )
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            return MailboxWait(
-                answered=answered,
-                unanswered=outstanding,
-                reason="no answer arrived before the wait elapsed",
-            )
-        if wake is None:
-            await asyncio.sleep(min(poll_interval_seconds, remaining))
-            continue
-        try:
-            async with asyncio.timeout(min(poll_interval_seconds, remaining)):
-                await wake.wait()
-        except TimeoutError:
-            continue
-        wake.clear()
+        return None
+
+    settled = await wait_until(
+        resolved,
+        wait_seconds=wait_seconds,
+        poll_interval_seconds=poll_interval_seconds,
+        wake=wake,
+    )
+    if settled is not None:
+        return settled
+    found = recorded()
+    return MailboxWait(
+        answered=[found[name] for name in wanted if name in found],
+        unanswered=[name for name in wanted if name not in found],
+        reason="no answer arrived before the wait elapsed",
+    )
+
+
+def new_message(
+    run_id: str,
+    to_actor: str,
+    text: str,
+    door: AnswerDoor,
+    in_reply_to: str = "",
+    redirect: bool = False,
+) -> ActorMessage:
+    """Build a message stamped now, so callers do not each reach for a clock."""
+    return ActorMessage(
+        run_id=run_id,
+        to_actor=to_actor,
+        text=text,
+        door=door,
+        sent_at=utc_now(),
+        in_reply_to=in_reply_to,
+        redirect=redirect,
+    )

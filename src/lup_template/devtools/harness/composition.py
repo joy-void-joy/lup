@@ -1,91 +1,66 @@
-"""Native composition roots wiring concrete Claude and Codex capabilities.
+"""What this project publishes through each native target, and what writes it.
 
-The one place the harness CLI touches adapter implementations: each root
-bundles a generation recipe, a runtime-readiness probe set, and a skill
-invocation renderer, and ``harness_compositions`` maps the CLI target
-selector onto those already concrete roots.
+The builders and the selector are the library's; named here is only what is
+this project's own — the content its harness compiles beside, the per-runtime
+guidance each tree carries, and the generated files that belong to no native
+tree at all.
 """
 
-from collections.abc import Callable, Sequence
+from functools import partial
 from pathlib import Path
 
-import typer
-from pydantic import BaseModel, ConfigDict
-
-from lup.adapters.claude.harness import ClaudeSpellings
-from lup.adapters.claude.harness_runtime import (
-    ClaudeCliEvidence,
-    claude_capability_probes,
+from lup.devtools.dev.rules import write_rule_reference
+from lup.devtools.dev.workflow import write_workflow
+from lup.devtools.harness.composition import (
+    NativeTargets,
+    claude_composition,
+    codex_composition,
 )
-from lup.adapters.codex.harness import CodexSpellings
-from lup.adapters.codex.harness_runtime import (
-    CodexCliEvidence,
-    codex_capability_probes,
+from lup.devtools.harness.drift import RepositoryWriter
+from lup.devtools.harness.generate import (
+    NativeHarnessComposition,
+    ProjectContent,
 )
-from lup.harness.contracts import SkillInvocationRenderer
-from lup.harness.models import CapabilityEvidence
-from lup.workspace.paths import project_root
-from lup_template.devtools.harness.generate import (
-    GenerationRecipe,
-    claude_generation_recipe,
-    codex_generation_recipe,
+from lup_template.devtools.harness.catalog import WORKFLOW, portable_harness
+from lup_template.devtools.harness.content.docs.catalog import DOCUMENTS
+from lup_template.devtools.harness.content.settings import project_settings
+from lup_template.devtools.harness.content.template_claude import (
+    DOCUMENT as TEMPLATE_CLAUDE,
+)
+from lup_template.devtools.harness.content.template_codex import (
+    DOCUMENT as TEMPLATE_CODEX,
 )
 
-type NativeCapabilityEvidence = (
-    CapabilityEvidence[ClaudeCliEvidence] | CapabilityEvidence[CodexCliEvidence]
-)
-type RuntimeReadiness = Callable[[], Sequence[NativeCapabilityEvidence]]
+CONTENT_ROOT = Path(__file__).parent / "content"
 
 
-class NativeHarnessComposition(BaseModel):
-    """Concrete capabilities supplied to one CLI composition root."""
-
-    model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
-
-    recipe: GenerationRecipe
-    readiness: RuntimeReadiness
-    invocation_renderer: SkillInvocationRenderer
-
-
-def claude_composition(root: Path) -> NativeHarnessComposition:
-    """Construct the Claude capabilities directly."""
-
-    def readiness() -> Sequence[NativeCapabilityEvidence]:
-        return [
-            probe.probe()
-            for probe in claude_capability_probes(root / ".claude" / "plugins" / "lup")
-        ]
-
-    return NativeHarnessComposition(
-        recipe=claude_generation_recipe(root),
-        readiness=readiness,
-        invocation_renderer=ClaudeSpellings(),
+def project_content(root: Path) -> ProjectContent:
+    """Everything this repository publishes beside its compiled plugin tree."""
+    harness = portable_harness(root=root)
+    return ProjectContent(
+        harness=harness,
+        documents=DOCUMENTS,
+        assets=[CONTENT_ROOT / "assets" / "file_suggest.sh"],
+        settings=project_settings(harness.plugins[0]),
     )
 
 
-def codex_composition(root: Path) -> NativeHarnessComposition:
-    """Construct the Codex capabilities directly."""
-
-    def readiness() -> Sequence[NativeCapabilityEvidence]:
-        return [probe.probe() for probe in codex_capability_probes()]
-
-    return NativeHarnessComposition(
-        recipe=codex_generation_recipe(root),
-        readiness=readiness,
-        invocation_renderer=CodexSpellings(),
-    )
+def claude_target(root: Path) -> NativeHarnessComposition:
+    """This project's content, compiled through the Claude adapter."""
+    return claude_composition(root, project_content(root), TEMPLATE_CLAUDE)
 
 
-def harness_compositions(value: str) -> list[NativeHarnessComposition]:
-    """Parse a generic CLI selector into already concrete compositions."""
-    constructors: dict[str, Callable[[Path], NativeHarnessComposition]] = {
-        "claude": claude_composition,
-        "codex": codex_composition,
-    }
-    root = project_root()
-    if value == "all":
-        return [constructor(root) for constructor in constructors.values()]
-    constructor = constructors.get(value)  # lup: ignore[dict-get]
-    if constructor is not None:
-        return [constructor(root)]
-    raise typer.BadParameter("target must be claude, codex, or all")
+def codex_target(root: Path) -> NativeHarnessComposition:
+    """This project's content, compiled through the Codex adapter."""
+    return codex_composition(root, project_content(root), TEMPLATE_CODEX)
+
+
+TARGETS = NativeTargets(builders={"claude": claude_target, "codex": codex_target})
+"""Every native runtime this project generates a tree for, by CLI selector."""
+
+
+REPOSITORY_WIDE: list[RepositoryWriter] = [
+    write_rule_reference,
+    partial(write_workflow, WORKFLOW),
+]
+"""Every project-owned generated file outside a native runtime tree."""

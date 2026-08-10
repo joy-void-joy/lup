@@ -33,7 +33,7 @@ def isolated_root(tmp_path: Path) -> Iterator[Path]:
 
 class TestToolCallView:
     def test_renders_calls_from_the_events_sidecar(self, tmp_path: Path) -> None:
-        from lup_template.devtools.trace.traces import render_tool_calls
+        from lup.devtools.trace.traces import render_tool_calls
 
         trace_path = tmp_path / "t.md"
         trace = TraceLogger(trace_path=trace_path, title="t")
@@ -47,7 +47,7 @@ class TestToolCallView:
         assert "prose" not in out
 
     def test_no_tool_calls_recorded(self, tmp_path: Path) -> None:
-        from lup_template.devtools.trace.traces import render_tool_calls
+        from lup.devtools.trace.traces import render_tool_calls
 
         trace_path = tmp_path / "t.md"
         trace = TraceLogger(trace_path=trace_path, title="t")
@@ -77,7 +77,7 @@ class TestLegacyMarkdownErrorScan:
     """
 
     def test_healthy_result_is_not_an_error(self) -> None:
-        from lup_template.devtools.trace.traces import events_from_legacy_markdown
+        from lup.devtools.trace.traces import events_from_legacy_markdown
 
         events = events_from_legacy_markdown(
             legacy_trace('{"status": "reviewed", "is_error": false}')
@@ -88,7 +88,7 @@ class TestLegacyMarkdownErrorScan:
         assert call.tool == "search" and call.ok is True
 
     def test_failing_result_emits_error_paired_to_its_tool(self) -> None:
-        from lup_template.devtools.trace.traces import events_from_legacy_markdown
+        from lup.devtools.trace.traces import events_from_legacy_markdown
 
         events = events_from_legacy_markdown(
             legacy_trace('{"is_error": true, "content": "boom"}')
@@ -98,7 +98,7 @@ class TestLegacyMarkdownErrorScan:
         assert error.tool == "search"
 
     def test_capability_phrasing_in_response_text(self) -> None:
-        from lup_template.devtools.trace.traces import events_from_legacy_markdown
+        from lup.devtools.trace.traces import events_from_legacy_markdown
 
         trace = TraceLogger(trace_path=Path("/tmp/unused.md"), title="t")
         trace.log_block(LupTextBlock(text="A tool that searches PyPI would be useful."))
@@ -113,17 +113,19 @@ class TestLegacyMarkdownErrorScan:
 
 class TestDecodeStderr:
     def test_decodes_bytes_and_trims_framing(self) -> None:
-        from lup_template.devtools.utils import decode_stderr
+        from lup.devtools.utils import decode_stderr
 
         err = sh.ErrorReturnCode.__new__(sh.ErrorReturnCode)
         err.stderr = b"boom\n"
         assert decode_stderr(err) == "boom"
 
     def test_passes_through_str(self) -> None:
-        from lup_template.devtools.utils import decode_stderr
+        from lup.devtools.utils import decode_stderr
 
         err = sh.ErrorReturnCode.__new__(sh.ErrorReturnCode)
-        err.stderr = "already text"
+        # sh 2.4 declares `stderr` read-only, and this pins the branch that
+        # runs when it holds text rather than the bytes the type promises.
+        object.__setattr__(err, "stderr", "already text")
         assert decode_stderr(err) == "already text"
 
 
@@ -132,28 +134,28 @@ class TestDecodeStderr:
 
 class TestParseRemote:
     def test_https_remote_routes_to_https_scheme(self) -> None:
-        from lup_template.devtools.dev.remote_auth import RemoteRef, parse_remote
+        from lup.devtools.dev.remote_auth import RemoteRef, parse_remote
 
         assert parse_remote("https://github.com/org/repo.git") == RemoteRef(
             scheme="https", destination="github.com"
         )
 
     def test_scp_style_extracts_user_and_host(self) -> None:
-        from lup_template.devtools.dev.remote_auth import RemoteRef, parse_remote
+        from lup.devtools.dev.remote_auth import RemoteRef, parse_remote
 
         assert parse_remote("git@github.com:org/repo.git") == RemoteRef(
             scheme="ssh", destination="git@github.com"
         )
 
     def test_ssh_scheme_extracts_user_and_host(self) -> None:
-        from lup_template.devtools.dev.remote_auth import RemoteRef, parse_remote
+        from lup.devtools.dev.remote_auth import RemoteRef, parse_remote
 
         assert parse_remote("ssh://git@example.com/org/repo") == RemoteRef(
             scheme="ssh", destination="git@example.com"
         )
 
     def test_local_path_is_not_a_remote(self) -> None:
-        from lup_template.devtools.dev.remote_auth import parse_remote
+        from lup.devtools.dev.remote_auth import parse_remote
 
         assert parse_remote("/srv/git/repo.git") is None
 
@@ -163,17 +165,17 @@ class TestParseRemote:
 
 class TestTheirsRef:
     def test_rebase_uses_rebase_head(self) -> None:
-        from lup_template.devtools.dev.conflicts import theirs_ref_for
+        from lup.devtools.dev.conflicts import theirs_ref_for
 
         assert theirs_ref_for("rebase") == "REBASE_HEAD"
 
     def test_merge_uses_merge_head(self) -> None:
-        from lup_template.devtools.dev.conflicts import theirs_ref_for
+        from lup.devtools.dev.conflicts import theirs_ref_for
 
         assert theirs_ref_for("merge") == "MERGE_HEAD"
 
     def test_cherry_pick_uses_cherry_pick_head(self) -> None:
-        from lup_template.devtools.dev.conflicts import theirs_ref_for
+        from lup.devtools.dev.conflicts import theirs_ref_for
 
         assert theirs_ref_for("cherry-pick") == "CHERRY_PICK_HEAD"
 
@@ -185,7 +187,7 @@ class TestPrCreate:
     def test_create_does_not_call_gh_with_json(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        import lup_template.devtools.dev.pr as pr
+        import lup.devtools.dev.pr as pr
 
         calls: list[tuple[str, ...]] = []
 
@@ -207,7 +209,7 @@ class TestPrCreate:
         assert results[0].url == "https://github.com/org/repo/pull/42"
 
     def test_parse_pr_url_picks_url_line(self) -> None:
-        from lup_template.devtools.dev.pr import parse_pr_url
+        from lup.devtools.dev.pr import parse_pr_url
 
         stdout = "Warning: 1 uncommitted change\nhttps://github.com/org/repo/pull/7\n"
         assert parse_pr_url(stdout) == "https://github.com/org/repo/pull/7"
@@ -218,19 +220,19 @@ class TestPrCreate:
 
 class TestDefinedIn:
     def test_imported_class_excluded(self) -> None:
-        from lup_template.devtools.py import common, info
+        from lup.devtools.py import common, info
 
         # common.py imports Path from pathlib; it is not defined there.
         assert not info.defined_in(common, "Path")
 
     def test_imported_module_excluded(self) -> None:
-        from lup_template.devtools.py import common, info
+        from lup.devtools.py import common, info
 
         # common.py imports the importlib module; it is not defined there.
         assert not info.defined_in(common, "importlib")
 
     def test_locally_defined_function_included(self) -> None:
-        from lup_template.devtools.py import common, info
+        from lup.devtools.py import common, info
 
         assert info.defined_in(common, "resolve_object")
 
@@ -247,7 +249,7 @@ class TestToolMetricsNull:
     def test_tools_does_not_crash_on_null_metrics(
         self, isolated_root: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        from lup_template.devtools.feedback import reports
+        from lup.devtools.feedback import reports
 
         self.write_session(
             isolated_root,
@@ -261,7 +263,7 @@ class TestToolMetricsNull:
     def test_errors_does_not_crash_on_null_metrics(
         self, isolated_root: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        from lup_template.devtools.feedback import reports
+        from lup.devtools.feedback import reports
 
         self.write_session(
             isolated_root,
@@ -279,7 +281,7 @@ class TestWriteEnvLocal:
     def test_preserves_comments_and_updates_in_place(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        import lup_template.devtools.setup as setup
+        import lup.devtools.setup as setup
 
         env_file = tmp_path / ".env.local"
         env_file.write_text(
@@ -305,7 +307,7 @@ class TestWriteEnvLocal:
 
 class TestSessionIdsFromStatus:
     def test_versioned_layout_and_root_anchoring(self) -> None:
-        from lup_template.devtools.feedback.commits import session_ids_from_status
+        from lup.devtools.feedback.commits import session_ids_from_status
 
         root = Path("notes/traces")
         status = "\0".join(
@@ -323,7 +325,7 @@ class TestSessionIdsFromStatus:
         assert ids == ["sess with space", "sess-2"]
 
     def test_rename_source_is_discarded(self) -> None:
-        from lup_template.devtools.feedback.commits import session_ids_from_status
+        from lup.devtools.feedback.commits import session_ids_from_status
 
         root = Path("notes/traces")
         status = "\0".join(
@@ -352,7 +354,7 @@ class TestWorktreePullsAreFastForwardOnly:
     """
 
     def test_every_pull_call_site_passes_ff_only(self) -> None:
-        from lup_template.devtools.dev import pr
+        from lup.devtools.dev import pr
 
         tree = ast.parse(Path(pr.__file__).read_text(encoding="utf-8"))
         pulls = [

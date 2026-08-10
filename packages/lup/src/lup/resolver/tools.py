@@ -10,26 +10,6 @@ stdio subprocess that rebuilds the same mailbox from the relayed run
 directory. Only where the mailbox comes from differs.
 """
 
-# lup: defer[when mid-run-concern-admission lands]: every tool here runs
-# worker to human, and nothing runs the other way, so a human can only tell a
-# worker something the worker thought to ask. Information discovered after a
-# concern's questions are answered cannot reach it: `Mailbox.record` opens with
-# "x" so first answer wins by design, and a concern whose questions are all
-# answered has no channel left at all. Widen the interface so the orchestrating
-# side can act on a live run — spawn a new worker carrying its own concern, and
-# reshape the worker/concern mapping itself (split one concern across workers,
-# merge several into one, retarget a worker that has not started). Admission of
-# a new concern is the narrow case of this; the general case is that run shape
-# stays editable while the run is alive. A worked example from the run that
-# raised this: `library-application-boundary` was planned as an audit whose
-# criterion 6 forbids it from moving any code, with `policy-data-to-template`
-# depending on it to act — so the audit wrote a rule, found real violations,
-# and was not permitted to fix them. Two concerns that should have been one,
-# discovered only once both were leased and unmergeable. The planning half of
-# that is its own defect: an audit that deliberately produces no code is the
-# human-scarcity reflex the Plan at Agent Speed guidance already rejects, so
-# criteria should scope analysis and action together rather than staging them.
-
 import asyncio
 from pathlib import Path
 from typing import Literal
@@ -37,15 +17,25 @@ from typing import Literal
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings
 
+from lup.hooks import (
+    LupHookInput,
+    LupHookMatcher,
+    LupHookOutput,
+    LupHooksConfig,
+)
 from lup.mcp import LupMcpTool, ToolError, lup_tool
+from lup.policy.assets.host import recoverable_write_targets
+from lup.channels.models import utc_now
 from lup.resolver.mailbox import (
     ANSWER_POLL_SECONDS,
+    ActorMessage,
+    AnswerDoor,
     MailboxConflictError,
     PendingQuestion,
     QuestionMailbox,
-    utc_now,
     wait_for_answers,
 )
+from lup.policy.identity import ConcernAllowance
 from lup.resolver.models import MaterialQuestion
 from lup.types import EnvVars
 
@@ -139,6 +129,109 @@ class AwaitAnswersOutput(BaseModel):
     answers: list[AnsweredQuestion]
     unanswered: list[str]
     instruction: str
+
+
+IRREVERSIBLE_VERBS = dict.fromkeys(
+    ["push", "reset", "checkout", "restore", "clean", "rebase", "filter-branch"]
+)
+
+
+def agent_may_approve(command: str, root: Path) -> bool:
+    """Whether an orchestrating agent may answer this ask, or only a human.
+
+    Recoverability decides, not the verb. Removing a file the object store
+    already holds is recoverable, so an agent may approve it; removing an
+    untracked one is not, and neither is a hard reset over uncommitted work, a
+    force-push, or anything that leaves this machine.
+
+    What counts as recoverable is the permission kernel's own answer, taken
+    from the host half rather than asked again here. Two definitions of the
+    word is how one of them ends up weaker: this asked only whether Git
+    tracked the path, so a tracked file carrying uncommitted edits read as
+    recoverable and approving its removal discarded work nothing could
+    restore. Directories are excluded there for the same reason, and now here.
+    """
+    words = command.split()
+    if not words:
+        return False
+    if any(word in IRREVERSIBLE_VERBS for word in words[:2]):
+        return False
+    if words[0] != "rm":
+        return True
+    targets = [word for word in words[1:] if not word.startswith("-")]
+    return bool(targets) and recoverable_write_targets(targets, root) == targets
+
+
+def create_inbox_hooks(mailbox: QuestionMailbox, actor: str) -> LupHooksConfig:
+    """Put anything said to this actor in front of it, mid-turn.
+
+    Non-cooperative by construction. The actor calls any tool at all and the
+    message is in its context — it never chooses to check, so it cannot fail
+    to. Waiting for the next turn would mean a directive sits unread for as
+    long as the current one runs, which on a resolver turn is most of the
+    run.
+
+    Telling and stopping are different acts and get different verdicts. A
+    message rides alongside the call and the actor keeps going. A redirect
+    denies the call and hands back the text as the reason, so an actor going
+    the wrong way cannot take one more step down it — which is the whole
+    difference between being informed and being redirected. Nothing here
+    spends an interrupt: a turn that ends mid-report is a turn whose typed
+    submission never arrives, and the actor is answering a refused tool call
+    either way.
+    """
+    offset = [mailbox.stream_offset()]
+
+    async def deliver(_input: LupHookInput) -> LupHookOutput:
+        arrived = mailbox.messages_for(actor, offset[0])
+        offset[0] = mailbox.stream_offset()
+        if not arrived:
+            return LupHookOutput(decision="allow")
+        # Everything that arrived is carried either way. The offset has already
+        # moved past all of it, so a message batched alongside a redirect has
+        # this one delivery and no other.
+        delivered = "\n".join(
+            f"[{'redirected' if message.redirect else 'message'} by {message.door}] "
+            f"{message.text}"
+            for message in arrived
+        )
+        if any(message.redirect for message in arrived):
+            return LupHookOutput(
+                decision="deny",
+                reason=delivered
+                + "\n\nStop what this call was part of and act on the above.",
+            )
+        return LupHookOutput(decision="allow", additional_context=delivered)
+
+    return LupHooksConfig(pre_tool_use=[LupHookMatcher(hook=deliver, tag="inbox")])
+
+
+class RequestAllowanceInput(BaseModel):
+    allowance: ConcernAllowance = Field(
+        description="The gate you need, which must be one this run knows"
+    )
+    reason: str = Field(
+        description="Why the work cannot be done without it, stated concretely"
+    )
+
+
+class SendMessageInput(BaseModel):
+    text: str = Field(description="What to tell the humans watching this run")
+    to_actor: str = Field(
+        default="",
+        description=(
+            "Actor label to address, like 'worker:some-concern#1'. Leave empty "
+            "to reach everyone watching."
+        ),
+    )
+    in_reply_to: str = Field(
+        default="",
+        description="The id of a message or question this answers, if any",
+    )
+
+
+class SendMessageOutput(BaseModel):
+    sent: bool = Field(description="Whether the message reached the run's record")
 
 
 def create_question_tools(
@@ -272,4 +365,56 @@ def create_question_tools(
         posted = await queue_questions(params)
         return await await_answers(AwaitAnswersInput(question_ids=posted.question_ids))
 
-    return [queue_questions, await_answers, ask_questions]
+    @lup_tool(
+        "Tell the humans watching this run — or one other actor in it — "
+        "something, without waiting for a reply. Use this to volunteer what "
+        "you have found, flag a consequence for whoever merges your work, or "
+        "answer something you were asked, naming the actor that asked. This "
+        "never blocks and never parks the run — if you need a decision before "
+        "you can continue, that is a question, not a message.",
+        name="send_message",
+    )
+    async def send_message(params: SendMessageInput) -> SendMessageOutput:
+        mailbox.send(
+            ActorMessage(
+                run_id=run_id,
+                to_actor=params.to_actor,
+                text=params.text,
+                door=AnswerDoor.AGENT,
+                sent_at=utc_now(),
+                in_reply_to=params.in_reply_to,
+            )
+        )
+        return SendMessageOutput(sent=True)
+
+    @lup_tool(
+        "Ask for a gate your concern was not approved for. A plan-time "
+        "allowance is granted when a concern is planned, and a need nobody "
+        "could have foreseen — a rule that only meets its exception once two "
+        "branches are joined — has no other route. This asks a human and "
+        "waits, like any other question.",
+        name="request_allowance",
+    )
+    async def request_allowance(params: RequestAllowanceInput) -> AwaitAnswersOutput:
+        return await ask_questions(
+            QueueQuestionsInput(
+                questions=[
+                    AskedQuestion(
+                        id=f"allow-{params.allowance}",
+                        prompt=(
+                            f"Grant `{params.allowance}` to {concern_id}?\n\n"
+                            f"{params.reason}"
+                        ),
+                        choices=["grant", "refuse"],
+                    )
+                ]
+            )
+        )
+
+    return [
+        queue_questions,
+        await_answers,
+        ask_questions,
+        send_message,
+        request_allowance,
+    ]

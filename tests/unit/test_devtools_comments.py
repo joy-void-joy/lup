@@ -3,9 +3,10 @@
 Runs against a throwaway git repo: `scan_tracked(find_feedback)` must report
 tracked notes with their read-context window, and `clear_markers` must strip
 exactly the targeted spans — inline markers keep their code, standalone
-blocks vanish whole — only ever on a `resolve/*` branch, and never a
-`defer[...]` note without `--wake`. The `dev check` comments gate and the
-listing renderer must keep deferred notes visible in their own section.
+blocks vanish whole — only ever on a `resolve/*` branch, and never a `defer`
+note without `--wake`, whether or not it stated a gate. The `dev check`
+comments gate and the listing renderer must keep deferred notes visible in
+their own section.
 """
 
 from pathlib import Path
@@ -14,9 +15,10 @@ import pytest
 import sh
 import typer
 
-from lup.codescan.markers import NoteKind
-from lup_template.devtools.dev import comments
-from lup_template.devtools.dev.check import comments_gate_lines
+from lup.codescan.markers import NoteKind, find_feedback
+from lup.devtools.dev import comments
+from lup.devtools.dev.check import inline_notes_lines
+from tests.unit.repos import commit_file, initialized_repo
 
 PY_SOURCE = """\
 alpha = 1
@@ -31,30 +33,14 @@ delta = 4  # lup: rename delta
 @pytest.fixture
 def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     work = tmp_path / "repo"
-    work.mkdir()
-    hooks = tmp_path / "no-hooks"
-    hooks.mkdir()
-    git = sh.Command("git").bake(
-        "-C",
-        str(work),
-        "-c",
-        "commit.gpgsign=false",
-        "-c",
-        f"core.hooksPath={hooks}",
-        _tty_out=False,
-    )
-    git("init", "-b", "main")
-    git("config", "user.email", "test@example.com")
-    git("config", "user.name", "Test")
-    (work / "code.py").write_text(PY_SOURCE, encoding="utf-8")
-    git("add", "code.py")
-    git("commit", "-m", "chore: base")
+    git = initialized_repo(work, tmp_path / "no-hooks")
+    commit_file(git, work, "code.py", PY_SOURCE, "chore: base")
     monkeypatch.chdir(work)
     return work
 
 
 def test_scan_reports_notes_with_read_context(repo: Path) -> None:
-    found = comments.scan_tracked(comments.find_feedback)
+    found = comments.scan_tracked(find_feedback)
 
     assert [(c.file, c.start_line, c.end_line) for c in found] == [
         ("code.py", 3, 4),
@@ -72,7 +58,7 @@ def test_scan_reports_notes_with_read_context(repo: Path) -> None:
 
 def test_scan_ignores_untracked_files(repo: Path) -> None:
     (repo / "scratch.py").write_text("# lup: never committed\n", encoding="utf-8")
-    found = comments.scan_tracked(comments.find_feedback)
+    found = comments.scan_tracked(find_feedback)
     assert all(c.file != "scratch.py" for c in found)
 
 
@@ -118,6 +104,57 @@ def test_clear_skips_malformed_and_missing_targets(repo: Path) -> None:
     assert (repo / "code.py").read_text(encoding="utf-8") == before
 
 
+CLAIMS_SOURCE = """\
+alpha = 1
+# lup: solved: rework this section
+# across the lines below
+beta = 2
+# lup: still open feedback
+gamma = 3
+"""
+
+
+def test_retire_deletes_a_claim_on_any_branch(repo: Path) -> None:
+    # The verify pass runs on real checkouts, so unlike --clear this path
+    # carries no resolve/* branch requirement — its safety is shape, not ref.
+    (repo / "claims.py").write_text(CLAIMS_SOURCE, encoding="utf-8")
+
+    comments.revise_claims(["claims.py:2"], retire=True)
+
+    text = (repo / "claims.py").read_text(encoding="utf-8")
+    assert "rework this section" not in text
+    assert "still open feedback" in text
+
+
+def test_retire_refuses_open_feedback(repo: Path) -> None:
+    (repo / "claims.py").write_text(CLAIMS_SOURCE, encoding="utf-8")
+
+    with pytest.raises(typer.Exit):
+        comments.revise_claims(["claims.py:5"], retire=True)
+
+    assert "still open feedback" in (repo / "claims.py").read_text(encoding="utf-8")
+
+
+def test_restore_reopens_a_claim_with_its_words(repo: Path) -> None:
+    (repo / "claims.py").write_text(CLAIMS_SOURCE, encoding="utf-8")
+
+    comments.revise_claims(["claims.py:2"], retire=False)
+
+    text = (repo / "claims.py").read_text(encoding="utf-8")
+    assert "# lup: rework this section" in text
+    assert "# across the lines below" in text
+
+
+def test_restore_narrowed_keeps_only_the_outstanding_part(repo: Path) -> None:
+    (repo / "claims.py").write_text(CLAIMS_SOURCE, encoding="utf-8")
+
+    comments.revise_claims(["claims.py:2"], retire=False, narrow="the second half")
+
+    text = (repo / "claims.py").read_text(encoding="utf-8")
+    assert "# lup: the second half" in text
+    assert "across the lines below" not in text
+
+
 DEFER_SOURCE = """\
 epsilon = 5
 # lup: defer[until the cache rework lands]: revisit epsilon
@@ -125,28 +162,39 @@ zeta = 6
 """
 
 
-def tracked_defer_file(repo: Path) -> Path:
+BARE_DEFER_SOURCE = """\
+epsilon = 5
+# lup: defer: revisit epsilon
+zeta = 6
+"""
+
+PARKED_SOURCES = [DEFER_SOURCE, BARE_DEFER_SOURCE]
+
+
+def tracked_defer_file(repo: Path, source: str) -> Path:
     git = sh.Command("git").bake("-C", str(repo), _tty_out=False)
     path = repo / "parked.py"
-    path.write_text(DEFER_SOURCE, encoding="utf-8")
+    path.write_text(source, encoding="utf-8")
     git("add", "parked.py")
     git("commit", "-m", "chore: park work")
     git("checkout", "-b", "resolve/x")
     return path
 
 
-def test_clear_skips_a_deferred_note_without_wake(repo: Path) -> None:
-    path = tracked_defer_file(repo)
+@pytest.mark.parametrize("source", PARKED_SOURCES)
+def test_clear_skips_a_deferred_note_without_wake(repo: Path, source: str) -> None:
+    path = tracked_defer_file(repo, source)
 
     comments.clear_markers(["parked.py:2"])
 
     assert (
-        path.read_text(encoding="utf-8") == DEFER_SOURCE
+        path.read_text(encoding="utf-8") == source
     )  # parked work survives an ordinary sweep
 
 
-def test_clear_strips_a_deferred_note_with_wake(repo: Path) -> None:
-    path = tracked_defer_file(repo)
+@pytest.mark.parametrize("source", PARKED_SOURCES)
+def test_clear_strips_a_deferred_note_with_wake(repo: Path, source: str) -> None:
+    path = tracked_defer_file(repo, source)
 
     comments.clear_markers(["parked.py:2"], wake=True)
 
@@ -173,8 +221,8 @@ def note_at(
     )
 
 
-def test_comments_gate_lists_deferred_after_unresolved() -> None:
-    lines = comments_gate_lines(
+def test_inline_notes_list_deferred_after_unresolved() -> None:
+    lines = inline_notes_lines(
         [
             note_at("a.py", 3),
             note_at(
@@ -184,22 +232,25 @@ def test_comments_gate_lists_deferred_after_unresolved() -> None:
                 condition="until branches merge",
                 text="purge notes history",
             ),
+            note_at("c.py", 5, kind="defer", text="parked with no gate"),
         ]
     )
 
     assert lines == [
-        "claude comments: FAIL (1 unresolved, 1 deferred)",
+        "inline notes: 1 unresolved, 2 deferred (advisory)",
         "  a.py:3-3",
         "  deferred[until branches merge] .gitignore:9-9",
+        "  deferred c.py:5-5",
     ]
 
 
-def test_comments_gate_stays_red_on_defers_alone() -> None:
-    lines = comments_gate_lines(
+def test_open_notes_report_without_refusing_the_tree_that_carries_them() -> None:
+    """A note asks somebody for something; a branch is expected to carry open ones."""
+    lines = inline_notes_lines(
         [note_at("a.py", 3, kind="defer", condition="until v2", text="parked")]
     )
 
-    assert lines[0] == "claude comments: FAIL (0 unresolved, 1 deferred)"
+    assert lines[0] == "inline notes: 0 unresolved, 1 deferred (advisory)"
 
 
 def test_render_separates_the_deferred_section(
@@ -209,12 +260,14 @@ def test_render_separates_the_deferred_section(
         [
             note_at("a.py", 3, kind="defer", condition="until v2", text="parked work"),
             note_at("b.py", 7, text="open feedback"),
+            note_at("c.py", 5, kind="defer", text="parked with no gate"),
         ],
         as_json=False,
         empty="none",
     )
 
     out = capsys.readouterr().out
-    assert "Deferred — parked until each wake condition is met:" in out
-    assert out.index("open feedback") < out.index("defer[until v2] parked work")
-    assert "2 comment(s) in 2 file(s) (1 deferred)" in out
+    assert "Deferred — parked until explicitly woken:" in out
+    assert out.index("open feedback") < out.index("defer[until v2]: parked work")
+    assert "defer: parked with no gate" in out
+    assert "3 comment(s) in 3 file(s) (2 deferred)" in out

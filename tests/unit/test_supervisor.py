@@ -1,3 +1,8 @@
+# lup: ignore[own-model-dispatch]
+# Which event a projection difference produced is the claim these tests make:
+# asserting `ConcernEvent` is the assertion, not a branch taken on the way to
+# one. Letting the event name itself would hand the code under test the answer
+# the test exists to check.
 """Web supervision of persisted resolver runs, through the mailbox alone.
 
 There is no session, no hub, and no thread here because the supervisor no
@@ -10,27 +15,29 @@ import re  # lup: ignore[import-re] — extracting identifiers from packaged JS
 from html.parser import HTMLParser
 from importlib import resources
 from pathlib import Path
+from typing import get_args
 
 import pytest
 import typer
 from httpx import ASGITransport, AsyncClient
 
 from lup.harness.models import ResolveSpec, SkillInvocation
+from lup.channels.models import utc_now
+from lup.resolver.journal import Journal, JournalEntry, PhaseChangedEvent, RunEvent
+from lup.runtime.models import TurnEvent
 from lup.resolver.mailbox import (
     AnswerDoor,
     PendingQuestion,
     QuestionMailbox,
     RecordedAnswer,
-    utc_now,
 )
 from lup.resolver.models import (
-    ACCEPTANCE_QUESTION_ID,
     AcceptanceCriterion,
     AnswerBatch,
     Concern,
     ConcernProgress,
     ConcernStatus,
-    FinalReview,
+    IntegrationRecord,
     MaterialQuestion,
     QuestionAnswer,
     QuestionBatch,
@@ -39,17 +46,10 @@ from lup.resolver.models import (
     SourceSnapshot,
 )
 from lup.resolver.state import ResolverStateRepository
-from lup_template.devtools.supervisor import doors
-from lup_template.devtools.supervisor.app import create_supervisor
-from lup_template.devtools.supervisor.events import (
-    ConcernEvent,
-    PhaseEvent,
-    QuestionsEvent,
-    StatusEvent,
-    run_events,
-    stream,
-)
-from lup_template.devtools.supervisor.projection import (
+from lup.devtools.supervisor import doors
+from lup.devtools.supervisor.app import create_supervisor
+from lup.devtools.supervisor.events import stream
+from lup.devtools.supervisor.projection import (
     LIVENESS_WINDOW_SECONDS,
     RunIndex,
     RunStatus,
@@ -87,8 +87,7 @@ def persisted_state(
     phase: ResolvePhase = ResolvePhase.WORKERS,
     questions: QuestionBatch | None = None,
     answers: AnswerBatch | None = None,
-    final_review: FinalReview | None = None,
-    accepted: bool | None = None,
+    integration: IntegrationRecord | None = None,
 ) -> ResolveState:
     return ResolveState(
         config_digest="config-sha",
@@ -106,8 +105,7 @@ def persisted_state(
         progress=[ConcernProgress(concern_id="alpha")],
         questions=questions,
         answers=answers,
-        final_review=final_review,
-        accepted=accepted,
+        integration=integration,
     )
 
 
@@ -143,7 +141,7 @@ def client_for(state_root: Path) -> AsyncClient:
 async def test_supervisor_serves_the_packaged_page(tmp_path: Path) -> None:
     build_run(tmp_path)
     async with client_for(tmp_path) as client:
-        response = await client.get("/")  # lup: ignore[dict-get] — HTTP client
+        response = await client.get("/")
 
     assert response.status_code == 200
     assert "Resolver supervision" in response.text
@@ -155,8 +153,8 @@ async def test_a_run_reads_back_from_its_mailbox(tmp_path: Path) -> None:
     ask(mailbox, "q1", ["yes", "no"])
 
     async with client_for(tmp_path) as client:
-        listing = await client.get("/api/runs")  # lup: ignore[dict-get] — HTTP client
-        read = await client.get("/api/state")  # lup: ignore[dict-get] — HTTP client
+        listing = await client.get("/api/runs")
+        read = await client.get("/api/state")
     index = RunIndex.model_validate(listing.json())
     state = SupervisorState.model_validate(read.json())
 
@@ -166,6 +164,7 @@ async def test_a_run_reads_back_from_its_mailbox(tmp_path: Path) -> None:
     assert state.pending[0].answered is None
     assert state.concerns[0].status is ConcernStatus.DISCOVERED
     assert "--answer q1=<value>" in state.rerun_recipe
+    assert state.progress_line == "discovered 1 of 1"
 
 
 async def test_browser_answers_become_offers_a_promoter_can_take(
@@ -265,7 +264,7 @@ async def test_an_answered_question_reports_its_promoted_value(tmp_path: Path) -
     )
 
     async with client_for(tmp_path) as client:
-        read = await client.get("/api/state")  # lup: ignore[dict-get] — HTTP client
+        read = await client.get("/api/state")
     state = SupervisorState.model_validate(read.json())
 
     assert state.pending[0].answered == "yes"
@@ -288,34 +287,72 @@ async def test_parking_from_the_page_writes_the_park_request(tmp_path: Path) -> 
     assert request.reason == "answering tomorrow"
 
 
-async def test_the_decision_is_offered_as_the_reserved_acceptance_question(
+async def test_a_message_reaches_an_actor_without_parking_the_run(
     tmp_path: Path,
 ) -> None:
-    mailbox = build_run(
+    """A message settles nothing, so no amount of messaging can park a run.
+
+    That is the whole reason messages are a stream and decisions are slots.
+    """
+    mailbox = build_run(tmp_path)
+
+    async with client_for(tmp_path) as client:
+        sent = await client.post(
+            "/api/runs/run-1/messages",
+            json={"text": "the sibling already renamed that", "to_actor": "worker:a#1"},
+        )
+
+    assert sent.status_code == 200
+    assert [message.text for message in mailbox.messages_for("worker:a#1")] == [
+        "the sibling already renamed that"
+    ]
+    assert sent.json()["status"] != "awaiting_answers"
+
+
+async def test_a_broadcast_reaches_every_actor(tmp_path: Path) -> None:
+    mailbox = build_run(tmp_path)
+
+    async with client_for(tmp_path) as client:
+        await client.post("/api/runs/run-1/messages", json={"text": "stop rewriting"})
+
+    assert len(mailbox.messages_for("merger:integration#1")) == 1
+    assert len(mailbox.messages_for("reviewer:b#2")) == 1
+
+
+async def test_the_review_branch_is_reported_with_no_decision_to_take(
+    tmp_path: Path,
+) -> None:
+    """The gate retired, so the page hands the branch over rather than asking.
+
+    What it reports is mechanical — the branch and what verification did.
+    There is no verdict to render because nothing persists one: whether the
+    merged concerns are jointly right is read off the trace by whoever lands
+    the branch, and that reader is the only actor able to act on the answer.
+    """
+    build_run(
         tmp_path,
         persisted_state(
-            phase=ResolvePhase.ACCEPTANCE,
-            final_review=FinalReview(accepted=True, reason="clean"),
+            phase=ResolvePhase.VERIFICATION,
+            integration=IntegrationRecord(
+                branch="resolve/run-1/review",
+                worktree=tmp_path / "integration",
+                concerns=["alpha"],
+                completed=True,
+            ),
         ),
     )
 
     async with client_for(tmp_path) as client:
-        response = await client.post(
-            "/api/runs/run-1/decision", json={"accepted": True}
-        )
+        response = await client.get("/api/runs/run-1")
+        gone = await client.post("/api/runs/run-1/decision", json={"accepted": True})
 
-    assert response.status_code == 200
-    offers = mailbox.offers()
-    assert [(offer.question_id, offer.value) for offer in offers] == [
-        (ACCEPTANCE_QUESTION_ID, "accept")
-    ]
+    assert response.json()["review"]["review_branch"] == "resolve/run-1/review"
+    assert gone.status_code == 404
 
 
 async def test_a_missing_run_is_reported_rather_than_invented(tmp_path: Path) -> None:
     async with client_for(tmp_path) as client:
-        response = await client.get(  # lup: ignore[dict-get] — HTTP client
-            "/api/runs/ghost"
-        )
+        response = await client.get("/api/runs/ghost")
 
     assert response.status_code == 404
 
@@ -336,18 +373,15 @@ async def test_no_door_takes_the_run_lock(tmp_path: Path) -> None:
     with pytest.MonkeyPatch.context() as patch:
         patch.setattr(ResolverStateRepository, "exclusive", refuse)
         async with client_for(tmp_path) as client:
-            await client.get("/api/runs")  # lup: ignore[dict-get] — HTTP client
-            await client.get("/api/state")  # lup: ignore[dict-get] — HTTP client
+            await client.get("/api/runs")
+            await client.get("/api/state")
             await client.post(
                 "/api/runs/run-1/answers",
                 json={"answers": [{"question_id": "q1", "value": "yes"}]},
             )
-            await client.post("/api/runs/run-1/park", json={})
-            decision = await client.post(
-                "/api/runs/run-1/decision", json={"accepted": False}
-            )
+            parked = await client.post("/api/runs/run-1/park", json={})
 
-    assert decision.status_code == 200
+    assert parked.status_code == 200
 
 
 async def test_resuming_a_moving_run_is_refused(tmp_path: Path) -> None:
@@ -436,7 +470,7 @@ async def test_an_unexpected_host_header_is_refused(tmp_path: Path) -> None:
         transport=ASGITransport(app=create_supervisor(tmp_path, BASE_URL, "run-1")),
         base_url="http://evil.example",
     ) as client:
-        response = await client.get("/")  # lup: ignore[dict-get] — HTTP client
+        response = await client.get("/")
 
     assert response.status_code == 421
 
@@ -479,6 +513,17 @@ def test_an_unanswered_question_parks_a_run_that_stopped_moving() -> None:
     assert quiet.status is RunStatus.PARKED
 
 
+def test_an_aborted_run_is_neither_live_nor_running() -> None:
+    """Aborted is terminal: a recent write must not dress it as moving."""
+    aborted = persisted_state(phase=ResolvePhase.ABORTED)
+
+    assert not run_is_live(aborted, activity=100.0, now=100.0)
+    projected = supervisor_state(
+        aborted, QuestionMailbox(Path("/nonexistent")), "claude", now=100.0
+    )
+    assert projected.status is RunStatus.ABORTED
+
+
 def projection(
     phase: ResolvePhase = ResolvePhase.WORKERS, status: ConcernStatus | None = None
 ) -> SupervisorState:
@@ -490,47 +535,101 @@ def projection(
     return supervisor_state(state, QuestionMailbox(Path("/nonexistent")), "claude")
 
 
-def test_the_first_observation_emits_nothing() -> None:
-    """A page hydrates before it connects, so replaying the run restates it."""
-    assert run_events(None, projection()) == []
+async def test_the_stream_replays_the_record_then_follows_it(tmp_path: Path) -> None:
+    journal = Journal(tmp_path / "run-1")
+    journal.record(PhaseChangedEvent(phase=ResolvePhase.REVIEW))
+
+    body = stream(journal, interval=0.0, heartbeat=0.0)
+    opening = await anext(body)
+    replayed = await anext(body)
+    journal.record(PhaseChangedEvent(phase=ResolvePhase.COMPLETE))
+    followed = await anext(body)
+    await body.aclose()
+
+    assert opening.startswith("retry:")
+    assert replayed.startswith("id: 0\n")
+    assert '"phase":"review"' in replayed
+    assert followed.startswith("id: 1\n")
+    assert '"phase":"complete"' in followed
 
 
-def test_only_observed_differences_become_events() -> None:
-    before = projection()
-    after = projection(phase=ResolvePhase.REVIEW, status=ConcernStatus.VERIFIED)
+async def test_a_reconnect_replays_only_what_it_missed(tmp_path: Path) -> None:
+    """The sequence number a reader last saw is what makes a resume exact."""
+    journal = Journal(tmp_path / "run-1")
+    journal.record(PhaseChangedEvent(phase=ResolvePhase.REVIEW))
+    journal.record(PhaseChangedEvent(phase=ResolvePhase.COMPLETE))
 
-    events = run_events(before, after)
-
-    assert PhaseEvent(phase=ResolvePhase.REVIEW) in events
-    assert any(isinstance(event, ConcernEvent) for event in events)
-    assert run_events(before, projection()) == []
-
-
-def test_a_new_question_becomes_a_questions_event(tmp_path: Path) -> None:
-    mailbox = QuestionMailbox(tmp_path / "run-1")
-    before = supervisor_state(persisted_state(), mailbox, "claude")
-    ask(mailbox, "q1", None)
-    after = supervisor_state(persisted_state(), mailbox, "claude")
-
-    events = run_events(before, after)
-
-    assert any(isinstance(event, QuestionsEvent) for event in events)
-    assert any(isinstance(event, StatusEvent) for event in events)
-
-
-async def test_the_stream_frames_events_and_keeps_the_connection_alive() -> None:
-    states = [projection(), projection(phase=ResolvePhase.REVIEW), projection()]
-
-    def read() -> SupervisorState | None:
-        return states.pop(0) if states else None
-
-    body = stream(read, interval=0.0, heartbeat=0.0)
-    frames = [await anext(body) for _ in range(3)]
+    body = stream(journal, after_seq=0, interval=0.0, heartbeat=0.0)
+    frames = [await anext(body) for _ in range(2)]
     await body.aclose()
 
     assert frames[0].startswith("retry:")
+    assert frames[1].startswith("id: 1\n")
+
+
+async def test_a_fresh_reader_gets_a_bounded_tail_not_the_whole_run(
+    tmp_path: Path,
+) -> None:
+    """Replaying a long run whole froze the page; state comes from the
+    projection, so a fresh page needs recent context, not the record."""
+    journal = Journal(tmp_path / "run-1")
+    for _ in range(6):
+        journal.record(PhaseChangedEvent(phase=ResolvePhase.REVIEW))
+
+    body = stream(journal, interval=0.0, heartbeat=0.0, catchup=2)
+    opening = await anext(body)
+    frames = [await anext(body) for _ in range(2)]
+    await body.aclose()
+
+    assert opening.startswith("retry:")
+    assert [frame.split("\n")[0] for frame in frames] == ["id: 4", "id: 5"]
+
+
+async def test_a_resuming_reader_is_never_bounded(tmp_path: Path) -> None:
+    """A named sequence is a promise: everything after it, exactly."""
+    journal = Journal(tmp_path / "run-1")
+    for _ in range(6):
+        journal.record(PhaseChangedEvent(phase=ResolvePhase.REVIEW))
+
+    body = stream(journal, after_seq=0, interval=0.0, heartbeat=0.0, catchup=2)
+    opening = await anext(body)
+    frames = [await anext(body) for _ in range(5)]
+    await body.aclose()
+
+    assert opening.startswith("retry:")
+    assert [frame.split("\n")[0] for frame in frames] == [
+        f"id: {seq}" for seq in range(1, 6)
+    ]
+
+
+async def test_the_stream_keeps_a_quiet_connection_alive(tmp_path: Path) -> None:
+    body = stream(Journal(tmp_path / "run-1"), interval=0.0, heartbeat=0.0)
+    frames = [await anext(body) for _ in range(2)]
+    await body.aclose()
+
     assert frames[1] == ": keep-alive\n\n"
-    assert '"phase":"review"' in frames[2]
+
+
+async def test_record_older_than_the_tail_is_served_page_by_page(
+    tmp_path: Path,
+) -> None:
+    """What the bounded catch-up skipped stays reachable on demand."""
+    build_run(tmp_path)
+    journal = Journal(tmp_path / "run-1")
+    for _ in range(6):
+        journal.record(PhaseChangedEvent(phase=ResolvePhase.REVIEW))
+
+    async with client_for(tmp_path) as client:
+        page = await client.get(
+            "/api/runs/run-1/journal", params={"before": 4, "count": 2}
+        )
+        start = await client.get(
+            "/api/runs/run-1/journal", params={"before": 0, "count": 2}
+        )
+
+    served = [JournalEntry.model_validate(item) for item in page.json()]
+    assert [entry.seq for entry in served] == [2, 3]
+    assert start.json() == []
 
 
 class ElementIds(HTMLParser):
@@ -558,7 +657,7 @@ def test_every_element_the_script_reaches_for_exists_in_the_markup() -> None:
     passing and the page simply stops updating that region.
     """
     page = (
-        resources.files("lup_template.devtools.supervisor")
+        resources.files("lup.devtools.supervisor")
         .joinpath("assets/index.html")
         .read_text("utf-8")
     )
@@ -572,10 +671,39 @@ def test_every_element_the_script_reaches_for_exists_in_the_markup() -> None:
     assert [name for name in referenced if name not in parser.ids] == []
 
 
+def test_the_page_draws_every_event_the_journal_can_record() -> None:
+    """A trace that omits what it cannot name is not a record.
+
+    The page switches on `event.type`, so an event union it has never heard
+    of renders as nothing at all: the routes keep passing, the entry is in
+    the journal, and the reader is simply never shown it. Reading the arms
+    back out of the page is what makes adding an event to either union fail
+    here rather than in a trace somebody is trying to read.
+    """
+    page = (
+        resources.files("lup.devtools.supervisor")
+        .joinpath("assets/index.html")
+        .read_text("utf-8")
+    )
+    drawn = set(
+        re.findall(  # lup: ignore[re-call] — switch arms in packaged JS
+            r"""case ["'](\w+)["']:""", page
+        )
+    )
+    recordable = {
+        member.model_fields["type"].default
+        for union in (RunEvent, TurnEvent)
+        for member in get_args(union.__value__)
+    }
+
+    assert recordable
+    assert sorted(recordable - drawn) == []
+
+
 def test_the_page_posts_only_routes_the_app_serves() -> None:
     """The page and the app share no schema, so a renamed route is silent."""
     page = (
-        resources.files("lup_template.devtools.supervisor")
+        resources.files("lup.devtools.supervisor")
         .joinpath("assets/index.html")
         .read_text("utf-8")
     )
@@ -585,8 +713,9 @@ def test_the_page_posts_only_routes_the_app_serves() -> None:
 
     assert sorted(dict.fromkeys(posted)) == [
         "answers",
-        "decision",
         "events",
+        "journal",
+        "messages",
         "park",
         "resume",
     ]

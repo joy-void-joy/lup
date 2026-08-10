@@ -1,8 +1,15 @@
-#!/usr/bin/env python3
-"""Generated Claude hook dispatcher over the canonical semantic kernel.
+"""Claude Code's half of the compiled hook dispatcher.
 
-Rendered from lup.adapters.claude.assets.policy_dispatcher by
-`uv run lup-devtools harness generate all` — do not edit directly.
+:mod:`lup.policy.dispatcher` compiles this module together with the shared
+host half into the plugin's `hooks/scripts/policy.py`, so this is not itself
+a script. It holds only what Claude Code spells for itself: the environment
+naming the root it installs trusted packages beneath, relativization against
+the launch directory, the four tools it routes, and the conservative ask it
+returns through its own decision channel for input nothing can decide from.
+
+The imports below resolve against the generated runtime the compiled script
+sits beside, which is why this file is type-checked against that tree rather
+than against the workspace.
 """
 
 import json
@@ -10,118 +17,50 @@ import os
 import sys
 from pathlib import Path
 
-sys.path.insert(
-    0, str(Path(__file__).parents[1] / "runtime")
-)  # lup: Why do we have sys.path.insert here?
-from kernel.decision import (
-    KernelDecision,
-)  # lup: I'm not comfortable having invalid python code here. Can't we compile it or something?
-from kernel.edit import decide_edit
-from kernel.fetch import decide_fetch
-from kernel.lex import shell_write_targets
-from kernel.shell import decide_shell
-from policy_data import (
-    AGENT_IDENTITY_ENV,
-    ALLOWED_FETCH_SCOPES,
-    ANTI_PATTERN_ROWS,
-    AUTONOMOUS_AGENT_IDENTITIES,
-    CONCERN_ALLOWANCES_ENV,
-    DENIED_FETCH_SCOPES,
-    MAXIMUM_ADDED_LINES,
-    PATH_RULES,
-    SHELL_RULES,
-)
+# The hook is launched as a bare script, promised no cwd, PYTHONPATH, or
+# interpreter environment, and `runtime/` is a plain sibling directory holding
+# the kernel package and this plugin's policy data rather than an installed
+# distribution. Naming it as a search path is what lets the imports below
+# resolve, for the interpreter and for a type checker alike.
+sys.path.insert(0, str(Path(__file__).parents[1] / "runtime"))
+from decisions import bash_decision, edit_decision, fetch_decision
+from host import declared_identity, read_document, sandbox_active
+from kernel.decision import KernelDecision
+from policy_data import AGENT_IDENTITY_ENV, AUTONOMOUS_AGENT_IDENTITIES
 
 
-def sandbox_active():
-    environ = os.environ  # lup: ignore[os-environ]
-    return "LUP_SANDBOX_ACTIVE" in environ and environ["LUP_SANDBOX_ACTIVE"] == "1"
-
-
-def managed_script_roots() -> list[str]:
-    """Return absolute package roots installed and trusted by Claude Code.
-
-    The workspace-local plugin directory is deliberately not a root: it is
-    agent-adjacent and verified only at launch, so an approved write there
-    must not grant silent execution rights for the rest of the session.
-    """
+def managed_root():
+    """The root Claude Code installs and trusts packages beneath."""
     environ = os.environ  # lup: ignore[os-environ]
     if "CLAUDE_CONFIG_DIR" in environ:
-        home = Path(environ["CLAUDE_CONFIG_DIR"])
-    elif "HOME" in environ:
-        home = Path(environ["HOME"]) / ".claude"
-    else:
-        return []
-    if not home.is_absolute():
-        return []
-    return [str(home / "skills"), str(home / "plugins" / "cache")]
+        return Path(environ["CLAUDE_CONFIG_DIR"])
+    if "HOME" in environ:
+        return Path(environ["HOME"]) / ".claude"
+    return None
 
 
-def edit_documents(path, old_text, new_text):
+def edit_documents(path, old_text, new_text, replace_all):
+    """Build the before and after documents one Edit call would produce.
+
+    A `replace_all` edit rewrites every occurrence, so requiring exactly one
+    would reject the tool's own semantics — and a rejection here is not a
+    judgment: it reaches the agent as an approval prompt that no rule
+    produced, which is how a whole class of edit went ungoverned.
+    """
     current = Path(path).read_text(encoding="utf-8")
-    if current.count(old_text) != 1:
+    occurrences = current.count(old_text)
+    if occurrences == 0:
+        raise ValueError("Edit preimage does not occur in the file")
+    if replace_all:
+        # Reproducing the Edit tool's own splice: source text has no parser
+        # here, and the preimage is a literal the caller already chose.
+        spliced = current.replace(old_text, new_text)  # lup: ignore[string-replace]
+        return current, spliced
+    if occurrences != 1:
         raise ValueError("Edit preimage must occur exactly once")
     position = current.find(old_text)
     updated = current[:position] + new_text + current[position + len(old_text) :]
     return current, updated
-
-
-def workspace_path(path_text):
-    path = Path(path_text)
-    if not path.is_absolute():
-        return path_text
-    root = Path.cwd().resolve()
-    resolved = path.resolve()
-    if resolved.is_relative_to(root):
-        return resolved.relative_to(root).as_posix()
-    return path_text
-
-
-def edit_decision(path_text, before, after, autonomous):
-    path = Path(path_text)
-    suffix = path.suffix.lower()
-    rows = ANTI_PATTERN_ROWS[suffix] if suffix in ANTI_PATTERN_ROWS else ()
-    return decide_edit(
-        workspace_path(path_text),
-        before,
-        after,
-        path_exists=path.exists(),
-        path_rules=PATH_RULES,
-        antipattern_rows=rows,
-        maximum_added_lines=MAXIMUM_ADDED_LINES,
-        autonomous=autonomous,
-        allowances=granted_allowances(),
-        python_source=suffix in (".py", ".pyi"),
-    )
-
-
-def existing_write_targets(command):
-    """Report which of a command's write targets already exist on disk.
-
-    The kernel never reads the filesystem, so it cannot tell creating a file
-    from overwriting one. Resolving that here keeps the decision itself a
-    pure function of the command text and this list.
-    """
-    return [
-        target
-        for target in shell_write_targets(command)
-        if (Path.cwd() / target).exists()
-    ]
-
-
-def declared_identity():
-    """The identity this session's launcher declared, if it declared one."""
-    environ = os.environ  # lup: ignore[os-environ]
-    return environ[AGENT_IDENTITY_ENV] if AGENT_IDENTITY_ENV in environ else ""
-
-
-def granted_allowances():
-    """Edit gates a human approved for the concern this session is working."""
-    environ = os.environ  # lup: ignore[os-environ]
-    if CONCERN_ALLOWANCES_ENV not in environ:
-        return []
-    declared = json.loads(environ[CONCERN_ALLOWANCES_ENV] or "[]")
-    return [str(name) for name in declared]
 
 
 def dispatch(payload):
@@ -130,41 +69,37 @@ def dispatch(payload):
     agent_type = payload["agent_type"] if "agent_type" in payload else ""
     autonomous = (
         agent_type in AUTONOMOUS_AGENT_IDENTITIES
-        or declared_identity() in AUTONOMOUS_AGENT_IDENTITIES
+        or declared_identity(AGENT_IDENTITY_ENV) in AUTONOMOUS_AGENT_IDENTITIES
     )
     if name == "Bash":
         unsandboxed = (
             "dangerouslyDisableSandbox" in tool_input
             and tool_input["dangerouslyDisableSandbox"] is True
         )
-        return decide_shell(
+        return bash_decision(
             tool_input["command"],
-            SHELL_RULES,
-            ALLOWED_FETCH_SCOPES,
-            DENIED_FETCH_SCOPES,
-            sandboxed=sandbox_active() and not unsandboxed,
-            trusted_script_roots=managed_script_roots(),
-            existing_targets=existing_write_targets(tool_input["command"]),
+            managed_root(),
+            sandbox_active() and not unsandboxed,
+            True,
         )
     if name == "WebFetch":
-        return decide_fetch(
-            tool_input["url"],
-            ALLOWED_FETCH_SCOPES,
-            DENIED_FETCH_SCOPES,
-        )
+        return fetch_decision(tool_input["url"])
     if name == "Edit":
+        path = tool_input["file_path"]
         before, after = edit_documents(
-            tool_input["file_path"],
+            path,
             tool_input["old_string"],
             tool_input["new_string"],
+            "replace_all" in tool_input and tool_input["replace_all"] is True,
         )
-        return edit_decision(tool_input["file_path"], before, after, autonomous)
+        return edit_decision(path, before, after, Path(path).exists(), autonomous)
     if name == "Write":
-        path = Path(tool_input["file_path"])
+        path = tool_input["file_path"]
         return edit_decision(
-            tool_input["file_path"],
-            path.read_text(encoding="utf-8") if path.exists() else None,
+            path,
+            read_document(path),
             tool_input["content"],
+            Path(path).exists(),
             autonomous,
         )
     return KernelDecision("ask", "tool is not classified")
@@ -185,12 +120,14 @@ def rendered(decision):
 def main():
     try:
         decision = dispatch(json.load(sys.stdin))
-    except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
+    # Every way this can fail means one thing — the call went unjudged — and
+    # one answer is right for all of them. Naming the exceptions instead is
+    # what let a plain unreadable file escape, and the traceback exit reaches
+    # PreToolUse as a non-blocking error, so the call proceeded ungoverned.
+    # Nothing is swallowed: the reason carries whatever went wrong, and an
+    # interrupt still passes through as the BaseException it is.
+    except Exception as error:
         decision = KernelDecision(
             "ask", f"Malformed hook input requires approval: {error}"
         )
     json.dump(rendered(decision), sys.stdout)
-
-
-if __name__ == "__main__":
-    main()

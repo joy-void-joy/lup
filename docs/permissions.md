@@ -1,11 +1,10 @@
-<!-- Generated from src/lup_template/devtools/harness/content/permissions.py via `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/generated-artifacts.md. -->
+<!-- Generated from lup.devtools.harness.content.docs.permissions by `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/harness.md. -->
 
 # Permission Policy
 
-How the generated hooks decide allow, ask, defer, or deny. For the daily
-summary and the escalation syntax, see
-[.claude/CLAUDE.md](../.claude/CLAUDE.md) § Permission Hooks; for the
-decision flow, see [architecture.md](architecture.md) § Permission policy flow.
+How the generated hooks decide allow, ask, defer, or deny, and the two
+markers that change a decision. The guidance carries the rule; this page
+carries the mechanism a denial sends you to.
 
 ## Sources of truth
 
@@ -18,7 +17,9 @@ canonical source and regenerate.
 ## Shell classification
 
 The policy classifies each shell command against the vocabulary in
-`lup.policy.shell_rules`, every URL scope, and each edit in a batch. The shell
+`devtools/harness/content/shell_vocabulary.py`, every URL scope, and each edit
+in a batch. `lup.policy.shell_rules` owns the shape that table takes and its
+erasure into the rows the kernel reads, never the words. The shell
 lattice reserves ask for judged risk; unjudged work denies, hinting the
 escalation recipe. Under a launcher-verified OS sandbox
 (`LUP_SANDBOX_ACTIVE`), unjudged work defers to that boundary, and a
@@ -53,7 +54,17 @@ without being readable sources.
 
 Edit decisions cover protected paths, marker changes, size, and the canonical
 anti-pattern audit. An edit over the size gate alone is deferred — the hook
-emits no decision, so auto-accept applies while hard gates stay explicit. The
+emits no decision, so auto-accept applies while hard gates stay explicit.
+
+Size is counted in *real* changed lines per change block, and an edit of
+three or fewer auto-allows. Imports, comments, whitespace, blank lines,
+docstrings, string literals, type annotations, and TypedDict/BaseModel bodies
+are not real lines. Pure deletions and single-line `replace_all` renames
+auto-allow outright; a multi-line `replace_all` falls through to the size
+gate, and a full-file write never auto-allows. The anti-pattern audit runs
+before any auto-allow, so keeping an edit small cannot outrun it.
+
+The
 resolver's worker receives only its declared autonomous edit exceptions;
 temporary paths, human-owned files like `README.md`, marker changes, and
 anti-pattern violations retain their guardrails in every mode.
@@ -67,3 +78,48 @@ merge a session's environment over the launching process's, so silence would
 inherit whatever the operator had exported. A hook script is spawned by the
 runtime with the runtime's environment, so an agent exporting the variable
 inside a shell tool call never reaches the dispatcher that judges it.
+
+## Two markers change a decision
+
+The guidance spells both; this is what each one does.
+
+- The escalation marker, `lup: escalate: <why>` as the leading comment line
+  of a shell command, promotes a classified deny or ask into an approval
+  question carrying that reason. It is the recovery path when work is denied
+  as unjudged: reshape the command into the allowed vocabulary, or escalate
+  with a reason.
+- The typed suppression marker, `lup: ignore[<rule-id>]` as a comment on the
+  offending line, silences exactly the anti-pattern it names and no other, so
+  the site still trips every rule it left unnamed. [contributing.md](contributing.md)
+  carries the scoping — where the marker must sit, comma-separated ids, the
+  flagged bare form, and the file-wide placement.
+
+Each rule id is shown in the deny message that cites it, and indexed in
+[rules.md](rules.md).
+
+## How one decision reaches two runtimes
+
+The generated plugins enforce permissions without importing lup, yet decide
+identically to the library.
+
+1. **Canonical sources** — the `HookSet` in `devtools/harness/catalog.py`
+   (protected edit roots, allowed fetch scopes, policy ids, shell-rule
+   extensions), the anti-pattern rule set in `lup.codescan.antipatterns`, and
+   the baseline shell vocabulary in `lup.policy.shell_rules`.
+2. **Library layer** — `lup.policy.rules` validates those inputs as Pydantic
+   surfaces and erases them into primitive rows; `lup.policy.kernel` — the
+   hermetic, stdlib-only decision core — interprets those rows to reach every
+   shell, fetch, and edit verdict; `lup.policy.chain` composes policies
+   deny-before-ask; the adapters' `native` modules decode wire payloads into
+   `lup.policy.models` events and render decisions back.
+3. **Assembly** — `lup.policy.bundle` reads the kernel source verbatim and
+   renders the erased rows as data files; the adapter hook renderers emit
+   `hooks/hooks.json`, the dispatcher `hooks/scripts/policy.py`, and
+   `hooks/runtime/{kernel.py,policy_data.py}` into each plugin tree.
+4. **Equivalence** — the shared fixture suite runs the same cases through the
+   library policies and the assembled runtime and requires identical verdicts.
+
+Every rule id a denial cites is indexed in [rules.md](rules.md).
+[harness.md](harness.md) covers changing the declarations above, and
+[platform-differentiation.md](platform-differentiation.md) records where the
+two dispatchers deliberately differ.

@@ -1,3 +1,8 @@
+# lup: ignore[own-model-dispatch]
+# A live turn returns whatever blocks the provider actually emitted, and
+# picking the text ones out of that mixture is how this smoke observes the
+# real result. It reads the union from outside on purpose: a helper inside the
+# path being smoked could agree with itself while the boundary was broken.
 """Live smokes for the four historically fragile native boundaries.
 
 These tests execute installed provider CLIs and incur real model calls. The
@@ -23,11 +28,11 @@ from lup.adapters.codex.runtime import CodexSessionConfig, create_codex_session_
 from lup.harness.process import LocalProcessLauncher
 from lup.resolver.core import ResolverCore
 from lup.mcp import create_mcp_server, server_tool_names
+from lup.channels.models import utc_now
 from lup.resolver.mailbox import (
     AnswerDoor,
     AnswerOffer,
     QuestionMailbox,
-    utc_now,
 )
 from lup.resolver.tools import create_question_tools
 from lup.resolver.models import (
@@ -38,8 +43,8 @@ from lup.resolver.models import (
     VerificationCommand,
     WorkerContext,
 )
-from lup.runtime.contracts import SessionFactory
-from lup.runtime.models import TurnInput, TurnTextBlock, turn_request
+from lup.runtime.factory import SessionFactory
+from lup.runtime.models import TurnTextBlock, turn_request
 
 pytestmark = pytest.mark.integration
 
@@ -59,7 +64,7 @@ async def test_fresh_claude_session_completes_one_turn(tmp_path: Path) -> None:
     )
     async with factory.open() as handle:
         accepted = await handle.session.start(
-            turn_request(TurnInput(text="Reply with the single word: ready"))
+            turn_request("Reply with the single word: ready")
         )
         result = await accepted.turn.result()
 
@@ -90,11 +95,9 @@ async def test_codex_thread_start_carries_a_dynamic_tool(tmp_path: Path) -> None
     async with factory.open() as handle:
         accepted = await handle.session.start(
             turn_request(
-                TurnInput(
-                    text=(
-                        "Submit your output now: call the submission tool with "
-                        "message set to 'smoke ok'."
-                    )
+                (
+                    "Submit your output now: call the submission tool with "
+                    "message set to 'smoke ok'."
                 ),
                 SmokeSubmission,
             )
@@ -102,6 +105,56 @@ async def test_codex_thread_start_carries_a_dynamic_tool(tmp_path: Path) -> None
         result = await accepted.turn.result()
 
     assert result.output.message
+    assert result.identifiers.session.value
+
+
+class RecallSubmission(BaseModel):
+    """Typed output whose schema is identical on both probe turns."""
+
+    recalled: str = Field(min_length=1)
+
+
+async def test_a_claude_session_carries_context_across_same_schema_turns(
+    tmp_path: Path,
+) -> None:
+    """The second turn is the one that broke, so a smoke test has to take one.
+
+    Every earlier smoke drove a single turn and passed while no worker could
+    finish, because what fails is the turn boundary: the provider persists no
+    headless transcript to resume, so a session that reconnects between turns
+    starts each one cold. Nothing here resumes anything — the same live
+    connection has to carry the first turn's word into the second.
+    """
+    factory = create_claude_session_factory(
+        ClaudeSessionConfig(
+            model=CLAUDE_SMOKE_MODEL,
+            system_prompt="Call the submission tool. Never ask a question.",
+            cwd=tmp_path,
+        )
+    )
+    async with factory.open() as handle:
+        first = await handle.session.start(
+            turn_request(
+                "Remember the word BATHYSPHERE. Submit it as recalled.",
+                RecallSubmission,
+            )
+        )
+        opening = await first.turn.result()
+        second = await handle.session.start(
+            turn_request(
+                "Submit the word I asked you to remember, as recalled. "
+                "Do not guess a new one.",
+                RecallSubmission,
+            )
+        )
+        result = await second.turn.result()
+
+    assert "bathysphere" in opening.output.recalled.lower()
+    # Carried by the conversation, not restated in the prompt above.
+    assert "bathysphere" in result.output.recalled.lower()
+    # The provider reports a fresh id per turn precisely because it persists
+    # nothing to attach them to, so continuity is the recalled word rather
+    # than a stable identifier.
     assert result.identifiers.session.value
 
 
@@ -139,16 +192,16 @@ def fixture_repository(root: Path) -> Path:
     repo = root / "fixture-repo"
     repo.mkdir()
     git = sh.Command("git")
-    git("init", "--initial-branch=main", _cwd=repo)
-    git("config", "user.email", "smoke@example.invalid", _cwd=repo)
-    git("config", "user.name", "Native Smoke", _cwd=repo)
+    git("init", "--initial-branch=main", _cwd=str(repo))
+    git("config", "user.email", "smoke@example.invalid", _cwd=str(repo))
+    git("config", "user.name", "Native Smoke", _cwd=str(repo))
     module = repo / "greeting.py"
     module.write_text(
         '# lup: rename GREETING_TEXT to WELCOME_TEXT\nGREETING_TEXT = "hello"\n',
         encoding="utf-8",
     )
-    git("add", ".", _cwd=repo)
-    git("commit", "-m", "chore: seed fixture", _cwd=repo)
+    git("add", ".", _cwd=str(repo))
+    git("commit", "-m", "chore: seed fixture", _cwd=str(repo))
     return repo
 
 
@@ -213,7 +266,7 @@ async def test_miniature_resolver_run_on_a_fixture_repository(tmp_path: Path) ->
     )
     stop = asyncio.Event()
     answering = asyncio.create_task(answer_every_question(core, stop))
-    head = str(sh.Command("git")("rev-parse", "HEAD", _cwd=repo)).strip()
+    head = str(sh.Command("git")("rev-parse", "HEAD", _cwd=str(repo))).strip()
     manifest = await core.run(
         ResolveRequest(
             source=SourceSnapshot(branch="main", commit=head),
@@ -233,7 +286,7 @@ async def test_miniature_resolver_run_on_a_fixture_repository(tmp_path: Path) ->
 
     assert manifest.run_id == run_id
     assert manifest.review_branch
-    branches = str(sh.Command("git")("branch", "--list", _cwd=repo))
+    branches = str(sh.Command("git")("branch", "--list", _cwd=str(repo)))
     assert manifest.review_branch in branches
 
 
@@ -250,7 +303,7 @@ def codex_edit_fixture(root: Path) -> CodexEditFixture:
     """Create a repository whose requested edit violates the Lup policy."""
     repo = root / "codex-edit-fixture"
     repo.mkdir()
-    sh.Command("git")("init", "--initial-branch=main", _cwd=repo)
+    sh.Command("git")("init", "--initial-branch=main", _cwd=str(repo))
     module = repo / "module.py"
     module.write_text('VALUE = "safe"\n', encoding="utf-8")
     return CodexEditFixture(repository=repo, module=module)

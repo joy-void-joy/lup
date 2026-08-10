@@ -1,6 +1,6 @@
 ---
 description: "Review changes since last bump and bump agent version"
-allowed-tools: Bash(uv run lup-devtools:*), Read, Grep, Glob, AskUserQuestion, Skill(lup:commit)
+allowed-tools: Bash(uv run lup-devtools:*), Read, AskUserQuestion, Skill(lup:commit)
 argument-hint: "[patch|minor|major]"
 ---
 

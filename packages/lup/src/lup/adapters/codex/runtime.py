@@ -1,9 +1,8 @@
 """Codex app-server SessionFactory with live optional turn capabilities."""
 
 import asyncio
-import hashlib
 import json
-from collections.abc import AsyncGenerator, AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator, Sequence
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from datetime import timedelta
 from pathlib import Path
@@ -18,19 +17,20 @@ from lup.runtime.contracts import (
     EventStream,
     ForkSession,
     Interrupt,
-    SessionFactory,
     Steer,
     TurnToolBinder,
 )
 from lup.runtime.errors import ProviderTurnError, TurnFailure, TurnInterruptedError
+from lup.runtime.factory import SessionFactory
 from lup.runtime.models import (
     BlockCompletedEvent,
     BlockDeltaEvent,
+    LiveTurnEvent,
+    MessageCompletedEvent,
     SessionHandle,
     SessionId,
-    SubmissionDecision,
     SubmissionGateResolver,
-    TurnBlock,
+    AnyTurnBlock,
     TurnCompletedEvent,
     TurnEvent,
     TurnStartedEvent,
@@ -40,7 +40,8 @@ from lup.runtime.models import (
     TurnMessage,
     TurnToolBinding,
 )
-from lup.runtime.output import submission_schema, submit_output
+from lup.runtime.output import TurnSubmission, bound_submission
+from lup.runtime.transcript import fold_transcript
 from lup.types import EnvVars, JsonObject, JsonValue, Usage
 
 
@@ -161,14 +162,31 @@ def notification_turn_id(notification: RpcNotification) -> str | None:
 class CodexTurnChannel:
     """Route one turn's notifications into live events and completed replay."""
 
+    notifications: Sequence[str] = (
+        "turn/started",
+        "item/agentMessage/delta",
+        "item/completed",
+        "thread/tokenUsage/updated",
+        "turn/completed",
+    )
+    """Every notification method :meth:`decode` answers.
+
+    Those arms narrow vendor method strings, which no union of ours enumerates,
+    so the roster is declared here beside them and gates the match rather than
+    describing it. A method that gains an arm without gaining an entry never
+    reaches it, and the suite naming each shape fails instead of a renamed
+    notification passing as one this turn had no interest in.
+    """
+
     def __init__(self, session_id: str) -> None:
         self.session_id = session_id
         self.turn_id: str | None = None
-        self.events: asyncio.Queue[TurnEvent | None] = asyncio.Queue()
+        self.events: asyncio.Queue[LiveTurnEvent | None] = asyncio.Queue()
         self.completed: asyncio.Future[CompletedTurn] = (
             asyncio.get_running_loop().create_future()
         )
-        self.blocks: list[TurnBlock] = []
+        self.durable: list[TurnEvent] = []
+        self.blocks: list[AnyTurnBlock] = []
         self.usage = Usage()
         self.started = perf_counter()
 
@@ -179,6 +197,11 @@ class CodexTurnChannel:
             session=SessionId(value=self.session_id),
             turn=TurnId(value=self.turn_id),
         )
+
+    def emit(self, event: TurnEvent) -> None:
+        """Record one durable event and publish it, so both views agree."""
+        self.durable.append(event)
+        self.events.put_nowait(event)
 
     def feed(self, notification: RpcNotification) -> None:
         try:
@@ -211,6 +234,8 @@ class CodexTurnChannel:
             if self.turn_id is not None and candidate != self.turn_id:
                 return
             self.turn_id = candidate
+        if notification.method not in self.notifications:
+            return
         match notification.method, notification.params:
             case "turn/started", {"turn": {"id": str()}}:
                 self.events.put_nowait(TurnStartedEvent(identifiers=self.identifiers()))
@@ -228,12 +253,19 @@ class CodexTurnChannel:
                 "turnId": str(),
                 "item": item,
             } if isinstance(item, dict):
-                for block in decode_completed_item(item):
+                completed = decode_completed_item(item)
+                for block in completed:
                     self.blocks.append(block)
-                    self.events.put_nowait(
-                        BlockCompletedEvent(
+                    self.emit(
+                        BlockCompletedEvent(identifiers=self.identifiers(), block=block)
+                    )
+                if completed:
+                    self.emit(
+                        MessageCompletedEvent(
                             identifiers=self.identifiers(),
-                            block=block,
+                            message=TurnMessage(
+                                role=message_role(item), blocks=completed
+                            ),
                         )
                     )
             case "thread/tokenUsage/updated", {
@@ -251,11 +283,7 @@ class CodexTurnChannel:
                     else (perf_counter() - self.started) * 1000
                 )
                 if status == "completed":
-                    messages = (
-                        [TurnMessage(role="assistant", blocks=self.blocks)]
-                        if self.blocks
-                        else []
-                    )
+                    messages = fold_transcript(self.durable)
                     if not self.completed.done():
                         self.completed.set_result(
                             CompletedTurn(
@@ -298,24 +326,37 @@ class CodexTurnChannel:
 
 
 class CodexLiveEventStream(EventStream):
-    """Expose only notifications observed while the native turn is live."""
+    """One ordered channel, viewed either with in-flight deltas or without.
+
+    The durable view filters the same sequence rather than reading a second
+    one, so the two can never report different histories.
+    """
 
     def __init__(self, channel: CodexTurnChannel) -> None:
         self.channel = channel
         self.consumed = False
 
-    async def iterate(self) -> AsyncIterator[TurnEvent]:
+    async def iterate(self) -> AsyncIterator[LiveTurnEvent]:
         if self.consumed:
             raise RuntimeError("live event stream can only be consumed once")
         self.consumed = True
-        while (
-            event
-            := await self.channel.events.get()  # lup: ignore[dict-get] — asyncio.Queue
-        ) is not None:
+        while (event := await self.channel.events.get()) is not None:
             yield event
 
+    async def durable(self) -> AsyncIterator[TurnEvent]:
+        async for event in self.iterate():
+            if (durable := event.durable) is not None:
+                yield durable
+
     def events(self) -> AsyncIterator[TurnEvent]:
+        return self.durable()
+
+    def live(self) -> AsyncIterator[LiveTurnEvent]:
         return self.iterate()
+
+
+SUBMISSION_TOOL = "submit_output"
+"""What the app-server advertises this turn's dynamic submission tool as."""
 
 
 class CodexConversationState:
@@ -331,7 +372,7 @@ class CodexConversationState:
         self.server = server
         self.resume = resume
         self.thread_id: str | None = None
-        self.binding: TurnToolBinding[BaseModel] | None = None
+        self.submission: TurnSubmission | None = None
         self.schema_digest: str | None = None
         self.channel: CodexTurnChannel | None = None
         self.server.server_request_handler = self.handle_server_request
@@ -342,17 +383,19 @@ class CodexConversationState:
         if self.thread_id is not None:
             return self.thread_id
         if self.resume is not None:
-            if self.binding is not None:
-                raise CodexSchemaRebindingError(
-                    "Codex thread/resume cannot attach a fresh dynamic-tool handler"
-                )
+            # Codex persists dynamic tools in the thread's rollout metadata and
+            # restores them on resume when none are supplied, so a resumed
+            # thread keeps the submission tool by saying nothing about it.
+            # Refusing to resume with a binding at all was self-imposed: the
+            # digest carried in from the persisted record is what still catches
+            # a genuine schema change, in `bind` rather than here.
             params = self.thread_parameters()
             params["threadId"] = self.resume.value
             result = await self.server.request("thread/resume", params)
         else:
             params = self.thread_parameters()
-            if self.binding is not None:
-                params["dynamicTools"] = [dynamic_tool(self.binding)]
+            if self.submission is not None:
+                params["dynamicTools"] = [dynamic_tool(self.submission)]
             result = await self.server.request("thread/start", params)
         response = CodexThreadResponse.model_validate(result)
         self.thread_id = response.thread.id
@@ -421,8 +464,8 @@ class CodexConversationState:
         if message.method != "item/tool/call":
             raise RuntimeError(f"unsupported app-server request {message.method!r}")
         call = DynamicToolCall.model_validate(message.params)
-        binding = self.binding
-        if binding is None or call.tool != "submit_output":
+        submission = self.submission
+        if submission is None or call.tool != SUBMISSION_TOOL:
             return {
                 "contentItems": [
                     {
@@ -439,7 +482,7 @@ class CodexConversationState:
                 ],
                 "success": False,
             }
-        response = await submit_output(binding, call.arguments)
+        response = await submission.submit(call.arguments)
         return {
             "contentItems": [{"type": "inputText", "text": response.message}],
             "success": response.accepted,
@@ -474,21 +517,15 @@ class CodexTurnToolBinder(TurnToolBinder):
         self.state = state
 
     async def bind[T: BaseModel](self, binding: TurnToolBinding[T] | None) -> None:
-        digest = (
-            hashlib.sha256(submission_schema(binding).encode("utf-8")).hexdigest()
-            if binding is not None
-            else None
-        )
-        if self.state.thread_id is not None and digest != self.state.schema_digest:
+        submission = bound_submission(binding) if binding is not None else None
+        digest = submission.digest if submission is not None else None
+        if self.state.schema_digest is not None and digest != self.state.schema_digest:
             raise CodexSchemaRebindingError(
                 "the installed Codex app-server exposes dynamicTools only on "
                 "thread/start; changing or removing submit_output would lose "
                 "conversation identity"
             )
-        if binding is None:
-            self.state.binding = None
-        else:
-            self.state.binding = erased_binding(binding)
+        self.state.submission = submission
         self.state.schema_digest = digest
 
 
@@ -537,25 +574,20 @@ class CodexFork(ForkSession):
         thread_id = await self.state.ensure_thread()
         result = await self.state.server.request("thread/fork", {"threadId": thread_id})
         response = CodexThreadResponse.model_validate(result)
-        factory = CodexSessionFactory(self.state.config)
-        async with factory.open(SessionId(value=response.thread.id)) as handle:
+        opener = CodexSessionOpener(self.state.config)
+        async with opener.open_session(SessionId(value=response.thread.id)) as handle:
             yield handle
 
 
-class CodexSessionFactory(SessionFactory):
+class CodexSessionOpener:
     """Open one initialized app-server process per Lup session."""
 
     def __init__(self, config: CodexSessionConfig) -> None:
         self.config = config
 
-    def open(
-        self, resume: SessionId | None = None
-    ) -> AbstractAsyncContextManager[SessionHandle]:
-        return self.open_session(resume)
-
     @asynccontextmanager
     async def open_session(
-        self, resume: SessionId | None
+        self, resume: SessionId | None = None
     ) -> AsyncGenerator[SessionHandle]:
         server = CodexAppServer(
             self.config.executable,
@@ -572,6 +604,7 @@ class CodexSessionFactory(SessionFactory):
             state.start_turn,
             CodexTurnToolBinder(state),
             gate_resolver=self.config.submission_gate_resolver,
+            submission_tool=SUBMISSION_TOOL,
         )
         try:
             yield SessionHandle(session=session, fork=CodexFork(state))
@@ -584,40 +617,17 @@ class CodexSessionFactory(SessionFactory):
 
 def create_codex_session_factory(config: CodexSessionConfig) -> SessionFactory:
     """Create the named Codex runtime composition root."""
-    return CodexSessionFactory(config)
+    return SessionFactory(CodexSessionOpener(config).open_session)
 
 
-def dynamic_tool(binding: TurnToolBinding[BaseModel]) -> JsonObject:
+def dynamic_tool(submission: TurnSubmission) -> JsonObject:
     """Render the exact Pydantic schema into the experimental native tool spec."""
     return {
-        "name": "submit_output",
+        "name": SUBMISSION_TOOL,
         "description": "Submit the final validated result for this turn.",
-        "inputSchema": binding.output_type.model_json_schema(),
+        "inputSchema": submission.schema,
         "deferLoading": False,
     }
-
-
-def erased_binding[T: BaseModel](
-    binding: TurnToolBinding[T],
-) -> TurnToolBinding[BaseModel]:
-    """Preserve the typed gate while storing a runtime-erased native binding."""
-    if binding.gate is None:
-        gate = None
-    else:
-        binding_gate = binding.gate
-
-        async def validate_gate(
-            value: BaseModel,  # lup: ignore[bare-basemodel] — adapter-local generic erasure
-        ) -> SubmissionDecision:
-            typed = binding.output_type.model_validate(value.model_dump(mode="json"))
-            return await binding_gate(typed)
-
-        gate = validate_gate
-    return TurnToolBinding[BaseModel](
-        output_type=binding.output_type,
-        store=binding.store,
-        gate=gate,
-    )
 
 
 def decode_usage(payload: JsonObject) -> Usage:
@@ -630,7 +640,25 @@ def decode_usage(payload: JsonObject) -> Usage:
     )
 
 
-def decode_completed_item(payload: JsonObject) -> list[TurnBlock]:
+def message_role(payload: JsonObject) -> Literal["user", "assistant", "tool", "system"]:
+    """Which transcript role one completed item belongs to.
+
+    A tool call and its result are the model's own act and the environment's
+    reply, and collapsing both into one assistant message is what made a
+    trace unable to show a call beside the result it produced.
+    """
+    match payload:
+        case (
+            {"type": "commandExecution"}
+            | {"type": "fileChange"}
+            | {"type": "mcpToolCall"}
+        ):
+            return "tool"
+        case _:
+            return "assistant"
+
+
+def decode_completed_item(payload: JsonObject) -> list[AnyTurnBlock]:
     """Decode one typed completed app-server item into canonical blocks."""
     from lup.runtime.models import (
         TurnTextBlock,
@@ -653,7 +681,7 @@ def decode_completed_item(payload: JsonObject) -> list[TurnBlock]:
             "aggregatedOutput": output,
             "status": status,
         }:
-            blocks: list[TurnBlock] = [
+            blocks: list[AnyTurnBlock] = [
                 TurnToolCallBlock(
                     id=identifier,
                     name="ShellCommand",
@@ -681,6 +709,32 @@ def decode_completed_item(payload: JsonObject) -> list[TurnBlock]:
                 TurnToolResultBlock(
                     tool_call_id=identifier,
                     content=str(status),
+                    is_error=status != "completed",
+                ),
+            ]
+            return blocks
+        case {
+            "type": "mcpToolCall",
+            "id": str(identifier),
+            "server": str(server),
+            "tool": str(tool),
+            "arguments": arguments,
+            "status": status,
+        }:
+            encoded_arguments: JsonObject = (
+                {str(key): value for key, value in arguments.items()}
+                if isinstance(arguments, dict)
+                else {"value": arguments}
+            )
+            blocks = [
+                TurnToolCallBlock(
+                    id=identifier,
+                    name=f"mcp__{server}__{tool}",
+                    arguments=encoded_arguments,
+                ),
+                TurnToolResultBlock(
+                    tool_call_id=identifier,
+                    content=json.dumps(payload, sort_keys=True),
                     is_error=status != "completed",
                 ),
             ]

@@ -27,9 +27,10 @@ classifiers = [
 dependencies = [
     "fastapi>=0.139.0",
     "lup[claude,codex,docker]",
+    "packaging>=26.2",
     "prompt-toolkit>=3.0.52",
     "pydantic-settings>=2.12.0",
-    "sh>=2.2.2",
+    "sh>=2.4.0",
     "tomlkit>=0.15.0",
     "typer>=0.21.1",
     "tzlocal>=5.4.3",
@@ -60,9 +61,7 @@ dev = [
 where = ["src"]
 
 [tool.setuptools.package-data]
-"lup_template.devtools.dev" = ["*.css"]
 "lup_template.devtools.dashboard" = ["assets/*.html"]
-"lup_template.devtools.supervisor" = ["assets/*.html"]
 "lup_template.devtools.harness.content" = ["assets/*.js", "assets/*.sh"]
 
 [tool.lup]
@@ -90,22 +89,75 @@ markers = ["integration: tests requiring external services (Docker, APIs)"]
 
 [tool.pyright]
 # Workspace-wide check, run from the repo root: the template (src), the
-# vendored lup library (packages/lup/src), and tests. Pyright reads only this
-# root config when invoked here — it does not discover the member config in
-# packages/lup/pyproject.toml — so every include the workspace needs is listed.
-include = ["src", "packages/lup/src", "tests"]
-# Adapter asset scripts are verbatim payloads for the generated plugin tree;
-# their imports resolve only in that runtime layout, not in this workspace.
-exclude = [
-    "packages/lup/src/lup/adapters/claude/assets",
-    "packages/lup/src/lup/adapters/codex/assets",
+# vendored lup library (packages/lup/src), tests, the runnable examples that
+# document composition, and the generated plugin hook trees. Pyright reads
+# only this root config when invoked here — it does not discover the member
+# config in packages/lup/pyproject.toml — so every include the workspace
+# needs is listed.
+include = [
+    "src",
+    "packages/lup/src",
+    "tests",
+    "packages/lup/tests",
+    "examples",
+    ".claude/plugins/lup/hooks",
+    ".codex/plugins/lup/hooks",
 ]
 pythonVersion = "3.14"
 venvPath = "."
 venv = ".venv"
+
+# `kernel`, `policy_data`, and `codex_patch` are top-level modules only inside
+# a generated plugin's `hooks/runtime`. Naming that directory as the search
+# path checks each dispatcher — the canonical asset and the script compiled
+# from it — against the exact runtime it is shipped beside. `host` is the half
+# the compiler links in rather than ships, so an asset resolves it against the
+# canonical module both scripts are compiled from.
+[[tool.pyright.executionEnvironments]]
+# The kernel-aware shared half calls the kernel and is spliced into every
+# generated script, so it reads against a generated runtime for the same
+# reason an adapter half does. Both trees are named because neither runtime
+# owns this half: they carry the same kernel and the same policy_data names,
+# so either resolves it, and naming only one would leave a workspace that has
+# generated the other unable to check the file at all.
+root = "packages/lup/src/lup/policy/assets"
+extraPaths = [
+    ".claude/plugins/lup/hooks/runtime",
+    ".codex/plugins/lup/hooks/runtime",
+]
+
+[[tool.pyright.executionEnvironments]]
+root = "packages/lup/src/lup/adapters/claude/assets"
+extraPaths = [
+    ".claude/plugins/lup/hooks/runtime",
+    "packages/lup/src/lup/policy/assets",
+]
+
+[[tool.pyright.executionEnvironments]]
+root = ".claude/plugins/lup/hooks/scripts"
+extraPaths = [".claude/plugins/lup/hooks/runtime"]
+
+[[tool.pyright.executionEnvironments]]
+root = "packages/lup/src/lup/adapters/codex/assets"
+extraPaths = [
+    ".codex/plugins/lup/hooks/runtime",
+    "packages/lup/src/lup/policy/assets",
+]
+
+[[tool.pyright.executionEnvironments]]
+root = ".codex/plugins/lup/hooks/scripts"
+extraPaths = [".codex/plugins/lup/hooks/runtime"]
 
 [tool.ruff]
 # Pinned below requires-python (>=3.14) so ruff keeps `except (A, B):`
 # parenthesized. Inferring py314 would treat the parens as redundant and
 # strip them, since `except A, B:` is valid syntax from 3.14 on.
 target-version = "py313"
+
+[tool.ruff.lint.per-file-ignores]
+# A dispatcher half is compiled, not imported: only its import block is
+# emitted into the generated script, so it must carry every module the shared
+# host half stands on. `lup.policy.dispatcher` proves that carry and fails
+# generation when one is missing — an import unused in this file alone is the
+# requirement being met, not a leftover.
+"packages/lup/src/lup/adapters/*/assets/policy_dispatcher.py" = ["F401"]

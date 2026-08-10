@@ -4,11 +4,11 @@
 - Review notes (`# lup:` / `// lup:`): actionable feedback left in the code;
   the `ignore` keyword — inline or standalone file-level — is the
   anti-pattern escape hatch, never a note and never a reason to hide one. A
-  `defer[<wake condition>]:` head marks the note as parked work rather than
-  open feedback; the scanner classifies it and parses the condition out. The
+  `defer:` head marks the note as parked work rather than open feedback; the
+  scanner classifies it and parses out the gate a bracketed one states. The
   `lup-devtools dev comments` scanner uses this to list unresolved feedback;
-  the edit-permission hook mirrors `MARKER_RE` to prompt whenever an edit
-  adds or removes a marker.
+  the edit-permission hook makes the same note/suppression split, prompting
+  whenever an edit changes the note count or adds a suppression.
 - Customization todos (`# TEMPLATE:` in comments, bare `TEMPLATE:` in
   docstrings): the template's domain decision points, gathered by
   `lup-devtools dev todos` so `/lup:init` walks every one.
@@ -41,20 +41,33 @@ from typing import Literal, Self
 
 from pydantic import BaseModel, model_validator
 
-from lup.codescan.common import IGNORE_RE, LineCursor, PythonContext
-from lup.policy.kernel.edit import marker_count as kernel_marker_count
+from lup.codescan.common import LineCursor, PythonContext
+from lup.policy.kernel.edit import IGNORE_RE
 
 MARKER_RE = re.compile(r"(#|//)\s*lup\s*:", re.IGNORECASE)
-# A deferral note parks work until a stated wake condition is met:
-# `# lup: defer[<wake condition>]: <text>`. The bracket syntax deliberately
+
+# `# lup: defer: <text>` parks work; a `defer[<gate>]: <text>` head parks it
+# behind a gate somebody other than this note can check ("until the v2 API
+# ships"). The bare spelling is the default, because nothing evaluates a
+# condition mechanically: one that only restates that this code might change
+# again is invention dressed as a trigger. The optional bracket deliberately
 # mirrors the typed `# lup: ignore[rule-id]` escape hatch — which means a
 # condition may itself contain brackets (`defer[when ignore[dict-get] sites
 # migrate]: ...`), so the head ends at the first `]` that is followed by a
-# colon, and the colon is required. A head that never closes with `]:` is
-# malformed and the note stays an ordinary (red, visible) review note. The
-# head is matched against a note's text (the part after the marker), so the
-# `ignore` keyword — which never reaches note classification — is untouched.
-DEFER_HEAD_RE = re.compile(r"^defer\s*\[(?P<condition>.+?)\]\s*:\s*", re.IGNORECASE)
+# colon, and the colon is required either way. A head that opens a bracket it
+# never closes with `]:` is malformed and the note stays an ordinary (red,
+# visible) review note. The head is matched against a note's text (the part
+# after the marker), so the `ignore` keyword — which never reaches note
+# classification — is untouched.
+DEFER_HEAD_RE = re.compile(
+    r"^defer\s*(?:\[(?P<condition>.+?)\])?\s*:\s*", re.IGNORECASE
+)
+# A resolution claim: `# lup: solved: <the note's original text>`. An agent
+# that has addressed a note converts it rather than deleting it, so the claim
+# is an artifact in the tree instead of an absence nobody can review. No
+# bracket, because the head carries no parameter — what it needs to say is
+# said by keeping the note's own words after it.
+SOLVED_HEAD_RE = re.compile(r"^solved\s*:\s*", re.IGNORECASE)
 # Customization todos are shouty and case-sensitive (like TODO:/FIXME:), so
 # prose about "the template" never matches. The comment prefix is optional
 # because a docstring todo carries no `#`; group 1 still captures the
@@ -63,11 +76,14 @@ TEMPLATE_MARKER_RE = re.compile(r"(?:(#|//)\s*)?TEMPLATE\s*:")
 FENCE_RE = re.compile(r"^\s*(```|~~~)")
 COMMENT_PREFIX_RE = re.compile(r"^\s*(#|//)")
 
+# lup: ignore[library-default] — Python's own source suffixes
 PYTHON_SUFFIXES = {".py", ".pyi"}
+# lup: ignore[library-default] — Markdown's own suffixes
 MARKDOWN_SUFFIXES = {".md", ".markdown"}
 # Languages where `#` does not open a comment (`//` does), so a `# lup:` is
 # always string content (e.g. a Python marker quoted inside a JS template) —
 # only `//` markers count as notes there.
+# lup: ignore[library-default] — the suffixes where `#` opens no comment, a language fact
 JS_SUFFIXES = {".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs"}
 
 CONTEXT_BEFORE = 2
@@ -102,16 +118,21 @@ def scan_mode_for(path: Path) -> str:
 
 
 # The closed vocabulary of review-note flavors: an ordinary actionable note,
-# or deferred work parked behind an explicit wake condition.
-type NoteKind = Literal["note", "defer"]
+# parked work — behind a stated gate or simply parked — or a claim that a
+# note has been addressed and is waiting to be checked.
+type NoteKind = Literal["note", "defer", "solved"]
 
 
 class MarkerComment(BaseModel):
     """One actionable note: the source span plus a window worth reading.
 
-    ``kind`` classifies the note; a ``defer`` note carries its wake
-    ``condition`` parsed out of the `defer[...]` head, and ``text`` holds only
-    the message that follows it. An ordinary note has no condition.
+    ``kind`` classifies the note; a ``defer`` note that stated a gate carries
+    it as ``condition``, parsed out of the `defer[...]` head, and ``text``
+    holds only the message that follows the head. A defer that stated none —
+    the default spelling — parks with ``condition`` absent, read against the
+    tree by whoever triages it. An ordinary note has no condition, and a
+    ``solved`` note carries the original note's words unchanged — that is what
+    makes the claim checkable against what was actually asked.
     """
 
     start_line: int
@@ -125,25 +146,26 @@ class MarkerComment(BaseModel):
     @model_validator(mode="after")
     def coherent_kind(self) -> Self:
         match (self.kind, self.condition):
-            case ("defer", None) | ("defer", ""):
-                raise ValueError("a defer note requires a wake condition")
-            case ("note", str()):
-                raise ValueError("an ordinary note carries no wake condition")
+            case ("note", str()) | ("solved", str()):
+                raise ValueError("only a defer note carries a wake condition")
             case _:
                 return self
 
+    def deferral_label(self) -> str:
+        """How a parked note is labelled in a listing, gate included if stated."""
+        return f"deferred[{self.condition}]" if self.condition else "deferred"
+
     def marker_text(self) -> str:
-        """The note body as written after its marker, defer head included."""
+        """The note body as written after its marker, any head included."""
         match self.kind:
-            case "defer":
+            case "defer" if self.condition:
                 return f"defer[{self.condition}]: {self.text}"
+            case "defer":
+                return f"defer: {self.text}"
+            case "solved":
+                return f"solved: {self.text}"
             case "note":
                 return self.text
-
-
-def marker_count(text: str) -> int:
-    """Count markers (feedback or ignore) — drives the hook's add/remove check."""
-    return kernel_marker_count(text)
 
 
 def inside_inline_code(line: str, pos: int) -> bool:
@@ -222,7 +244,9 @@ class MarkerScan:
 
     def notes(self) -> list[MarkerComment]:
         found: list[MarkerComment] = []
-        for line_no, line in self.cursor:
+        for numbered in self.cursor:
+            line_no = numbered.number
+            line = numbered.text
             if self.is_markdown and FENCE_RE.match(line):
                 self.in_fence = not self.in_fence
                 continue
@@ -235,11 +259,11 @@ class MarkerScan:
             end_line = line_no
 
             if not self.is_markdown and line[: match.start()].strip() == "":
-                for cont_no, content in self.cursor.take_mapping(
+                for continuation in self.cursor.take_mapping(
                     self.continuation(match.group(1))
                 ):
-                    parts.append(content)
-                    end_line = cont_no
+                    parts.append(continuation.value)
+                    end_line = continuation.number
 
             found.append(
                 MarkerComment(
@@ -265,21 +289,32 @@ def find_markers(
 
 
 def classify_deferral(note: MarkerComment) -> MarkerComment:
-    """Split a `defer[<wake condition>]:` head off one review note, if present.
+    """Split a `defer:` or `solved:` head off one review note, if present.
 
-    A matching note comes back with kind ``defer``, its wake condition parsed
-    out, and ``text`` reduced to the message after the head. Any other note —
-    including prose that merely starts with the word "defer", a head whose
-    condition is empty, or a head that never closes with `]:` — is returned
-    unchanged as an ordinary ``note``, so a malformed deferral degrades to
-    visible open feedback instead of a silently mangled condition.
+    A matching note comes back with the head's kind, the gate a bracketed
+    deferral stated parsed out, and ``text`` reduced to the message after the
+    head. Any other note — including prose that merely starts with the word
+    "defer", a bracket left empty, or a bracket that never closes with `]:` —
+    is returned unchanged as an ordinary ``note``, so a malformed head
+    degrades to visible open feedback instead of a silently mangled condition
+    or a claim nobody made. A bracket opened is a bracket that has to say
+    something; writing none at all is the ordinary way to park work.
     """
+    solved = SOLVED_HEAD_RE.match(note.text)
+    if solved is not None:
+        return note.model_copy(
+            update={"kind": "solved", "text": note.text[solved.end() :]}
+        )
     head = DEFER_HEAD_RE.match(note.text)
     if head is None:
         return note
-    condition = head.group("condition").strip()
-    if not condition:
-        return note
+    match head.group("condition"):
+        case None:
+            condition = None
+        case stated if stated.strip():
+            condition = stated.strip()
+        case _:
+            return note
     return note.model_copy(
         update={
             "kind": "defer",
@@ -297,8 +332,8 @@ def find_feedback(text: str, mode: str = ScanMode.TEXT) -> list[MarkerComment]:
     covers the standalone file-level `# lup: ignore` too: it disables
     anti-pattern checks (see `lup.codescan.antipatterns`), never note gathering,
     so feedback in an opted-out file still surfaces. Each surviving note is
-    then classified through :func:`classify_deferral`, so deferred work carries
-    its wake condition as data.
+    then classified through :func:`classify_deferral`, so parked work is
+    parked in the data rather than only in the prose.
     """
     notes = find_markers(text, mode, marker=MARKER_RE, ignore=IGNORE_RE)
     return [classify_deferral(note) for note in notes]
@@ -362,10 +397,11 @@ def remove_notes(
 ) -> NoteRemoval:
     """Strip each target's note from one file's text.
 
-    A `defer[...]` note is parked work rather than open feedback, so a target
-    landing on one leaves it in place unless *wake* is set. A target whose
-    note is absent is reported rather than raised — the code a note sat on may
-    already be gone, which is an outcome to record, not a failure.
+    A `defer` note is parked work rather than open feedback, whether or not it
+    stated a gate, so a target landing on one leaves it in place unless *wake*
+    is set. A target whose note is absent is reported rather than raised — the
+    code a note sat on may already be gone, which is an outcome to record, not
+    a failure.
     """
     candidates = find_feedback(text, mode)
     lines = text.splitlines()
@@ -384,4 +420,119 @@ def remove_notes(
     trailing = "\n" if text.endswith("\n") else ""
     return NoteRemoval(
         text="\n".join(lines) + trailing, removed=claimed, missing=missing
+    )
+
+
+class ClaimRevision(BaseModel):
+    """Rewritten text, the claims acted on, and what could not be.
+
+    ``missing`` names targets that resolved to no note at all; ``refused``
+    names notes a target landed on that are not `solved:` claims, which the
+    claim instruments decline to touch.
+    """
+
+    text: str
+    revised: list[MarkerComment]
+    missing: list[NoteTarget]
+    refused: list[MarkerComment]
+
+
+class ClaimSelection(BaseModel):
+    """Targets resolved into claims, absent targets, and refused notes."""
+
+    claimed: list[MarkerComment]
+    missing: list[NoteTarget]
+    refused: list[MarkerComment]
+
+
+def solved_claims_only(
+    candidates: list[MarkerComment], targets: list[NoteTarget]
+) -> ClaimSelection:
+    """Resolve targets to claims, refusing any note that is not one.
+
+    The refusal is the claim instruments' whole safety: open feedback and
+    parked work stay untouchable through this path no matter what a target
+    names.
+    """
+    claimed: list[MarkerComment] = []
+    missing: list[NoteTarget] = []
+    refused: list[MarkerComment] = []
+    for target in targets:
+        note = resolve_note(
+            [note for note in candidates if note not in claimed], target
+        )
+        if note is None:
+            missing.append(target)
+            continue
+        match note.kind:
+            case "solved":
+                claimed.append(note)
+            case _:
+                refused.append(note)
+    return ClaimSelection(claimed=claimed, missing=missing, refused=refused)
+
+
+def retire_claims(text: str, mode: str, targets: list[NoteTarget]) -> ClaimRevision:
+    """Delete each target's `solved:` claim — the verify pass's confirming act.
+
+    Deleting a claim through the edit gate is denied for every session, so
+    this is the one designed instrument that removes one, and it removes
+    only claims: a target landing on open feedback or parked work is
+    refused, so the reviewer's instrument structurally cannot delete what
+    was never claimed solved.
+    """
+    selection = solved_claims_only(find_feedback(text, mode), targets)
+    lines = text.splitlines()
+    for note in sorted(
+        selection.claimed, key=lambda note: note.start_line, reverse=True
+    ):
+        without_note(lines, note)
+    trailing = "\n" if text.endswith("\n") else ""
+    return ClaimRevision(
+        text="\n".join(lines) + trailing,
+        revised=selection.claimed,
+        missing=selection.missing,
+        refused=selection.refused,
+    )
+
+
+def reopened_head(line: str) -> str:
+    """One claim's head line with the `solved:` head stripped back off."""
+    marker = MARKER_RE.search(line)
+    if marker is None:
+        return line
+    remainder = line[marker.end() :].lstrip()
+    head = SOLVED_HEAD_RE.match(remainder)
+    body = remainder[head.end() :] if head is not None else remainder
+    return f"{line[: marker.end()]} {body}"
+
+
+def restore_claims(
+    text: str, mode: str, targets: list[NoteTarget], narrowed: str | None = None
+) -> ClaimRevision:
+    """Reopen each target's claim as ordinary feedback, optionally narrowed.
+
+    A plain restore strips `solved: ` from the head line and keeps every
+    continuation line untouched, so the note reads exactly as it was first
+    written. A narrowed restore replaces the whole note with the outstanding
+    part, which is the partly-resolved verdict.
+    """
+    selection = solved_claims_only(find_feedback(text, mode), targets)
+    lines = text.splitlines()
+    for note in sorted(
+        selection.claimed, key=lambda note: note.start_line, reverse=True
+    ):
+        if narrowed is None:
+            lines[note.start_line - 1] = reopened_head(lines[note.start_line - 1])
+            continue
+        head = lines[note.start_line - 1]
+        marker = MARKER_RE.search(head)
+        end = marker.end() if marker is not None else 0
+        lines[note.start_line - 1 : note.end_line] = [f"{head[:end]} {narrowed}"]
+    trailing = "\n" if text.endswith("\n") else ""
+    return ClaimRevision(
+        text="\n".join(lines) + trailing,
+        revised=selection.claimed,
+        missing=selection.missing,
+        refused=selection.refused,
     )

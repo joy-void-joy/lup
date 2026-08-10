@@ -11,7 +11,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from rich.console import Console
 
-    from lup.runtime.contracts import Session, SessionFactory
+    from lup.runtime.contracts import Session
+    from lup.runtime.factory import SessionFactory
     from lup.runtime.models import TurnResult
 
 import sh
@@ -19,7 +20,7 @@ import typer
 from pydantic import BaseModel
 
 from lup.telemetry.display import format_duration
-from lup.runtime.models import TurnInput, TurnTextBlock, turn_request
+from lup.runtime.models import turn_request
 from lup_template.agent.config import settings
 from lup_template.devtools.agent.serve import collect_registry_tools
 
@@ -111,7 +112,7 @@ async def send_interruptible(
     loop = asyncio.get_running_loop()
     interrupt_count = 0
 
-    handle = await conv.start(turn_request(TurnInput(text=prompt)))
+    handle = await conv.start(turn_request(prompt))
     send_task = asyncio.create_task(handle.turn.result())
 
     def on_sigint() -> None:
@@ -164,7 +165,7 @@ def print_response_stats(response: "TurnResult[None]", console: "Console") -> fl
     parts: list[str] = []
     cost = 0.0
     text = "\n\n".join(
-        block.text for block in response.blocks if isinstance(block, TurnTextBlock)
+        text for block in response.blocks if (text := block.text_payload) is not None
     )
     if text:
         console.print(text)

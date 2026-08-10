@@ -50,7 +50,7 @@ from lup.realtime.models import (
 from lup.realtime.scheduler import Scheduler
 from lup.runtime.background import BackgroundAgent
 from lup.runtime.errors import TurnError
-from lup.runtime.models import TurnInput, TurnResult, turn_request
+from lup.runtime.models import TurnResult, turn_request
 from lup.telemetry.trace import TraceLogger
 
 logger = logging.getLogger(__name__)
@@ -433,9 +433,7 @@ def create_observer(
         msgs_text = "\n".join(state.messages)
         last_note = notes[-1] if notes else "(none yet)"
         return turn_request(
-            TurnInput(
-                text=f"New messages:\n{msgs_text}\n\nYour last note:\n{last_note}"
-            ),
+            f"New messages:\n{msgs_text}\n\nYour last note:\n{last_note}",
             ObserverSummary,
         )
 

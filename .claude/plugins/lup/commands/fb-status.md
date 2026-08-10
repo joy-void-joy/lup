@@ -1,6 +1,6 @@
 ---
 description: "Feedback loop entry point \u2014 status, targets, and previous session context"
-allowed-tools: Bash(uv run lup-devtools:*), Read, Grep, Glob, AskUserQuestion
+allowed-tools: Bash(uv run lup-devtools:*), Read, AskUserQuestion
 ---
 
 # Status: Feedback Loop Entry Point

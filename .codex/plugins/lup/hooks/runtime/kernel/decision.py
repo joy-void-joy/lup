@@ -6,8 +6,9 @@ from typing import Literal
 type DecisionEffect = Literal["allow", "ask", "deny", "defer"]
 
 
-KERNEL_IMPORT_ALLOWLIST = (
+KERNEL_IMPORT_ALLOWLIST = (  # lup: ignore[library-default] — the stdlib the kernel actually imports; the hermetic guarantee it exists to hold
     "ast",
+    "collections.abc",
     "io",
     "posixpath",
     "re",

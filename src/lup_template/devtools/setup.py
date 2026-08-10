@@ -1,12 +1,12 @@
-"""Interactive setup wizard for project integrations.
+"""This project's setup integrations, over the reusable wizard framework.
 
-Walks through configuring external services, API keys, and local
-settings. Writes results to ``.env.local`` and provides a status
-overview of what's configured.
+The framework — env helpers, the status display, the wizard flow, and the
+``Integration`` registry — lives in :mod:`lup.devtools.setup`. This module
+holds only what *this* project configures, and composes the two into the
+``setup`` command tree.
 
-This is a **TEMPLATE**. Replace the example integrations with your
-domain's actual services. The framework (env helpers, status display,
-wizard flow, registry) is reusable as-is.
+This is a **TEMPLATE**. Replace the integrations below with your domain's
+actual services; the framework is reusable as-is.
 
 Usage::
 
@@ -22,114 +22,38 @@ Customization:
        ``setup_func`` returning ``EnvVars`` instead of declarative fields.
     3. Override status display with ``status_func`` when env-key presence
        isn't the whole story.
-    4. Shell helpers live in ``lup_template.devtools.utils`` (e.g.
+    4. Shell helpers live in ``lup.devtools.utils`` (e.g.
        ``copy_to_clipboard`` for wizard steps that hand the user a value)
 """
 
 import shutil
-import webbrowser
-from collections.abc import Callable
 from pathlib import Path
 from typing import Annotated
 from zoneinfo import ZoneInfoNotFoundError
 
 import typer
-from dotenv import dotenv_values, set_key
-from pydantic import BaseModel, Field
-from rich.console import Console
-from rich.panel import Panel
 from rich.table import Table
 from tzlocal import get_localzone_name
 
 from lup.adapters.claude.profile_store import ClaudeProfileStore
+from lup.devtools.setup import (
+    Integration,
+    IntegrationStatus,
+    PromptField,
+    console,
+    create_setup_app,
+    mask,
+    open_browser,
+    read_env_local,
+)
 from lup.types import EnvVars
 from lup.workspace.paths import project_root
 
-app = typer.Typer(
-    help="Interactive setup wizard",
-    pretty_exceptions_show_locals=False,
-    invoke_without_command=True,
-)
-
-console = Console()
-
-
-class IntegrationStatus(BaseModel):
-    """Whether an integration is configured, with the human-readable detail."""
-
-    ok: bool
-    detail: str
-
-
-PROJECT_ROOT = project_root()
-ENV_LOCAL = PROJECT_ROOT / ".env.local"
-CREDENTIALS_DIR = PROJECT_ROOT / "credentials"
+CREDENTIALS_DIR = project_root() / "credentials"
 
 profile_app = typer.Typer(no_args_is_help=True, help="Manage Claude account profiles")
-app.add_typer(profile_app, name="profile")
 
 claude_profiles = ClaudeProfileStore()
-
-
-# =====================================================================
-# .env.local helpers
-# =====================================================================
-
-
-def read_env_local() -> EnvVars:
-    """Read .env.local values (empty dict when the file is missing).
-
-    ``dotenv`` owns the parse — the same parser pydantic-settings reads the
-    file with at runtime, so the wizard sees exactly the values the app sees.
-    """
-    if not ENV_LOCAL.exists():
-        return {}
-    return {k: v for k, v in dotenv_values(ENV_LOCAL).items() if v is not None}
-
-
-def write_env_local(values: EnvVars) -> None:
-    """Update keys in .env.local, preserving existing lines, comments, order.
-
-    ``dotenv.set_key`` rewrites a ``KEY=...`` line in place and appends
-    missing keys, leaving comments, blank lines, and ordering untouched —
-    the write half pydantic-settings does not provide.
-    """
-    if not values:
-        return
-
-    ENV_LOCAL.touch()
-    for key, value in values.items():
-        set_key(ENV_LOCAL, key, value, quote_mode="never")
-
-
-def save_and_confirm(values: EnvVars) -> None:
-    """Write values to .env.local and print confirmation."""
-    if values:
-        write_env_local(values)
-        console.print("[green]Saved to .env.local[/]")
-
-
-def mask(value: str, show: int = 6) -> str:
-    """Partially reveal a secret for recognition in the status table.
-
-    Shows the first ``show`` characters so a human can tell *which* token
-    is configured at a glance, then hides the rest. This is deliberately
-    not :class:`pydantic.SecretStr`, which masks every character — that
-    prevents leakage but also makes two different tokens indistinguishable
-    in the status display.
-    """
-    if len(value) <= show:
-        return value
-    return value[:show] + "..." + "*" * min(8, len(value) - show)
-
-
-def open_browser(url: str) -> None:
-    """Open a URL in the default browser, with fallback message."""
-    console.print(f"  Opening [link={url}]{url}[/link]")
-    try:
-        webbrowser.open(url)
-    except (webbrowser.Error, OSError):
-        console.print(f"  [dim]Could not open browser. Go to: {url}[/dim]")
 
 
 def detect_system_timezone() -> str:
@@ -143,122 +67,6 @@ def detect_system_timezone() -> str:
         return get_localzone_name()
     except ZoneInfoNotFoundError:
         return ""
-
-
-# =====================================================================
-# Integration registry
-# =====================================================================
-
-
-class PromptField(BaseModel):
-    """One env var the wizard prompts for inside a token-based setup."""
-
-    key: str = Field(description="Env var name, e.g. 'SLACK_BOT_TOKEN'")
-    prompt: str = Field(description="Prompt label shown to the user")
-    secret: bool = Field(
-        default=True,
-        description="Hide the current value as the prompt default (true for tokens)",
-    )
-    parse: Callable[[str], object] | None = Field(
-        default=None,
-        description="Validator called on the entered value; rejects on raise",
-    )
-
-
-class Integration(BaseModel):
-    """A single integration the setup wizard can configure.
-
-    Most integrations are *token-based*: they print instructions, maybe
-    open a browser, then prompt for a handful of env vars. Those are
-    described declaratively via ``intro``/``browser_url``/``fields`` and
-    run by :meth:`run` — adding one is filling in this shape, not copying
-    a function. Integrations with bespoke flows (OAuth file handling,
-    timezone detection) instead supply ``setup_func``.
-    """
-
-    name: str = Field(description="Display name (e.g., 'Slack', 'Google')")
-    command: str = Field(description="Subcommand slug, e.g. 'slack' or 'api-key'")
-    help: str = Field(description="One-line help for the subcommand")
-    env_keys: list[str] = Field(description="Env vars to check for status display")
-    intro: str | None = Field(
-        default=None, description="Instructions printed before prompting"
-    )
-    browser_url: str | None = Field(
-        default=None, description="URL to open while the user follows the intro"
-    )
-    fields: list[PromptField] = Field(
-        default_factory=list, description="Env vars to prompt for, in order"
-    )
-    setup_func: Callable[[], EnvVars] | None = Field(
-        default=None,
-        description="Bespoke interactive flow, used instead of the declarative fields",
-    )
-    status_func: Callable[[EnvVars], IntegrationStatus] | None = Field(
-        default=None,
-        description="Custom status checker (default: checks env_keys)",
-    )
-
-    def run(self) -> EnvVars:
-        """Run the setup flow and return env vars to write."""
-        if self.setup_func is not None:
-            return self.setup_func()
-        return self.run_prompts()
-
-    def run_prompts(self) -> EnvVars:
-        """Standard token flow: header, reconfigure check, intro, prompts."""
-        console.print()
-        console.rule(f"[bold]{self.name}[/]")
-        console.print()
-
-        env = read_env_local()
-        # Gate re-entry only for secrets, which can't be shown as defaults;
-        # non-secret fields echo their current value, so re-walking is cheap.
-        guards_secret = any(f.secret for f in self.fields)
-        configured = all(
-            env.get(k)  # lup: ignore[dict-get] — env map
-            for k in self.env_keys
-        )
-        if guards_secret and configured:
-            console.print("[green]Already configured.[/]")
-            if not typer.confirm("Reconfigure?", default=False):
-                return {}
-
-        if self.intro:
-            console.print(self.intro)
-        if self.browser_url:
-            open_browser(self.browser_url)
-        console.print()
-
-        values: EnvVars = {}
-        for field in self.fields:
-            current = env.get(field.key, "")  # lup: ignore[dict-get] — open env map
-            raw = typer.prompt(
-                field.prompt,
-                default=current,
-                show_default=bool(current) and not field.secret,
-            ).strip()
-            if not raw:
-                continue
-            if field.parse is not None:
-                try:
-                    field.parse(raw)
-                except ValueError:
-                    console.print(f"  [yellow]Skipping {field.key}: invalid value[/]")
-                    continue
-            values[field.key] = raw
-        return values
-
-    def check_status(self, env: EnvVars) -> IntegrationStatus:
-        """Return (is_configured, detail_string)."""
-        if self.status_func:
-            return self.status_func(env)
-        values = [
-            env.get(k, "")  # lup: ignore[dict-get] — env map
-            for k in self.env_keys
-        ]
-        if all(values):
-            return IntegrationStatus(ok=True, detail=mask(values[0]))
-        return IntegrationStatus(ok=False, detail="not configured")
 
 
 # =====================================================================
@@ -509,62 +317,6 @@ INTEGRATIONS: list[Integration] = [
 
 
 # =====================================================================
-# Status display
-# =====================================================================
-
-
-def build_status_table() -> Table:
-    """Build a rich table showing configuration status."""
-    env = read_env_local()
-
-    table = Table(show_header=False, box=None, padding=(0, 2))
-    table.add_column("Status", width=3)
-    table.add_column("Integration", min_width=30)
-    table.add_column("Detail", style="dim")
-
-    for integration in INTEGRATIONS:
-        status = integration.check_status(env)
-        status_str = "[green]OK[/]" if status.ok else "[red]--[/]"
-        table.add_row(status_str, integration.name, status.detail)
-
-    return table
-
-
-@app.command("status")
-def status() -> None:
-    """Show current integration status."""
-    console.print()
-    console.print(build_status_table())
-    active = claude_profiles.active_profile()
-    if active:
-        console.print(f"  Active Claude profile: [bold]{active}[/]")
-    console.print()
-
-
-# =====================================================================
-# Individual subcommands
-#
-# One per registered integration (e.g. `lup-devtools setup slack`),
-# generated from INTEGRATIONS so a new entry gets its subcommand for free.
-# =====================================================================
-
-
-def make_setup_command(integration: Integration) -> Callable[[], None]:
-    """Build a zero-arg Typer command that runs one integration's setup."""
-
-    def run_one() -> None:
-        save_and_confirm(integration.run())
-
-    return run_one
-
-
-for _integration in INTEGRATIONS:
-    app.command(_integration.command, help=_integration.help)(
-        make_setup_command(_integration)
-    )
-
-
-# =====================================================================
 # Claude profiles
 #
 # A profile maps a name to a Claude config dir (CLAUDE_CONFIG_DIR) — its
@@ -636,37 +388,4 @@ def profile_remove_cmd(
     console.print(f"Removed profile {name!r}")
 
 
-# =====================================================================
-# Full wizard (default command)
-# =====================================================================
-
-
-@app.callback(invoke_without_command=True)
-def main(ctx: typer.Context) -> None:
-    """Walk through all integrations, skipping what's already configured."""
-    if ctx.invoked_subcommand is not None:
-        return
-
-    console.print()
-    console.print(
-        Panel(
-            "[bold]Project setup[/]\n"
-            "\n"
-            "Walking through all integrations.\n"
-            "Press [bold]Ctrl+C[/] to exit, [bold]Enter[/] to skip a field.",
-            expand=False,
-        )
-    )
-
-    console.print(build_status_table())
-
-    for integration in INTEGRATIONS:
-        values = integration.run()
-        if values:
-            write_env_local(values)
-
-    console.print()
-    console.rule("[bold green]Setup complete[/]")
-    console.print()
-    console.print(build_status_table())
-    console.print()
+app = create_setup_app(INTEGRATIONS, profile_app, claude_profiles.active_profile)

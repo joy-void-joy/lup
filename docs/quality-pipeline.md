@@ -1,3 +1,5 @@
+<!-- Generated from lup.devtools.harness.content.docs.quality_pipeline by `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/harness.md. -->
+
 # Quality pipeline
 
 Three layers guard the repository. Each runs at a different moment and
@@ -10,8 +12,8 @@ catches a class of problem the others cannot.
 generation changes tracked files.
 
 The hook triggers only when the staged commit touches generation inputs or
-generated output: the harness devtools (`src/lup_template/devtools/harness/`,
-including the typed content catalog), the `lup` library they compile
+generated output: the harness devtools and the typed content catalogs on both
+sides (`src/lup_template/devtools/harness/`), the `lup` library they compile
 (`packages/lup/src/lup/` — the adapters, harness, and policy packages plus
 the runtime modules the compiled artifacts embed), or the owned native trees
 that reconciliation reads (`.claude/`, `.codex/`, `.agents/`, `AGENTS.md`).
@@ -48,11 +50,31 @@ Unique catch: breakage observable only through a real native CLI boundary —
 installed-version drift against the evidence ledger, and live hook, plugin,
 and session behavior — which is too slow and credential-bound for the
 per-push gate. Release-evidence rules for this lane are in
-`docs/contributing.md`.
+[contributing.md](contributing.md).
+
+## What a project built on lup runs in CI
+
+One command:
+
+```yaml
+- run: uv run lup-devtools dev check
+```
+
+That is deliberately the whole of it. `dev check` is the same bar a checkout
+runs locally — format, lint, types, tests, review notes, anti-patterns, seam
+boundaries, library placement, generated-tree drift, and the guidance budget —
+so a green local run and a green pipeline cannot mean different things.
+
+Nothing is generated into an adopter's `.github/`. A workflow file is the
+project's own, and a framework that wrote one would be claiming a schedule,
+a runner, and a trigger policy that are not its to choose. This repository
+generates its own `quality.yml` because it is *this* project's workflow; an
+adopter writes the three lines above wherever its pipeline lives.
 
 ## Why the pre-commit hook is path-scoped
 
-ADR-012 in `docs/dev-tooling-decisions.md` records the decision: the
+ADR-012 in [dev-tooling-decisions.md](dev-tooling-decisions.md) records the
+decision: the
 per-push CI drift check is the gate that binds, so commit-time regeneration
 runs only where it can change the outcome — harness-relevant commits — and
 everything the pattern might miss still fails `harness check all` in CI.

@@ -1,3 +1,5 @@
+<!-- Generated from lup_template.devtools.harness.content.docs.decisions by `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/harness.md. -->
+
 # Development-tooling decisions
 
 These records capture the architectural constraints behind Lup's development
@@ -199,6 +201,4 @@ the pattern misses is caught by `harness check all` in CI. The pattern
 matches the whole `lup` package rather than an enumerated import closure so
 a new generation dependency cannot silently escape it.
 
-See the architecture, harness, adopter, contributor, resolver, migration,
-native-evidence, quality-pipeline, and generated rule guides beside this
-file.
+[README.md](README.md) indexes every guide these decisions govern.

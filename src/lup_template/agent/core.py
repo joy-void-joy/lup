@@ -1,9 +1,8 @@
 """Application composition roots over Lup's provider-neutral runtime."""
 
-import json
 import logging
 from collections.abc import AsyncGenerator, Awaitable, Callable
-from contextlib import AbstractAsyncContextManager, asynccontextmanager
+from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
@@ -29,7 +28,7 @@ from lup.adapters.codex.runtime import (
     CodexSessionConfig,
     create_codex_session_factory,
 )
-from lup.runtime.contracts import SessionFactory
+from lup.runtime.factory import SessionFactory
 from lup.runtime.composition import submission_gate_resolver
 from lup.hooks import LupHooksConfig
 from lup.runtime.models import (
@@ -38,26 +37,20 @@ from lup.runtime.models import (
     SubmissionDecision,
     SubmissionGate,
     SubmissionGateResolver,
-    TurnBlock,
-    TurnInput,
     TurnResult,
-    TurnTextBlock,
-    TurnThinkingBlock,
-    TurnToolCallBlock,
-    TurnToolResultBlock,
     turn_request,
 )
 from lup.runtime.usage import per_mtok_usage_cost
 from lup.runtime.wrappers import (
     BudgetConfig,
     CorrectionConfig,
-    DecoratingSessionFactory,
     DisplayConfig,
     DisplayRecord,
     PersistenceConfig,
     TimeoutConfig,
     TraceRecord,
     TracingConfig,
+    decorated_session_factory,
 )
 from lup.mcp import McpServerEntry
 from lup.telemetry.metrics import (
@@ -67,11 +60,6 @@ from lup.telemetry.metrics import (
 )
 from lup.telemetry.trace import TraceLogger
 from lup.types import (
-    LupContentBlock,
-    LupTextBlock,
-    LupThinkingBlock,
-    LupToolResultBlock,
-    LupToolUseBlock,
     SubagentSpec,
     Usage,
     UsageCost,
@@ -111,27 +99,22 @@ class SessionBuild(BaseModel):
     trace_logger: TraceLogger
 
 
-class CleaningSessionFactory(SessionFactory):
+def cleaning_session_factory(
+    inner: SessionFactory, cleanup: Callable[[], None]
+) -> SessionFactory:
     """Run one application resource cleanup after every opened session."""
-
-    def __init__(self, inner: SessionFactory, cleanup: Callable[[], None]) -> None:
-        self.inner = inner
-        self.cleanup = cleanup
-
-    def open(
-        self, resume: SessionId | None = None
-    ) -> AbstractAsyncContextManager[SessionHandle]:
-        return self.open_cleaned(resume)
 
     @asynccontextmanager
     async def open_cleaned(
-        self, resume: SessionId | None
+        resume: SessionId | None = None,
     ) -> AsyncGenerator[SessionHandle]:
         try:
-            async with self.inner.open(resume) as handle:
+            async with inner.open(resume) as handle:
                 yield handle
         finally:
-            self.cleanup()
+            cleanup()
+
+    return SessionFactory(open_cleaned)
 
 
 def reflection_submission_gate(gate: "ReviewGate") -> SubmissionGate[AgentOutput]:
@@ -396,7 +379,7 @@ def decorate_factory(
         async def display_result(record: DisplayRecord) -> None:
             for block in record.blocks:
                 print_block(
-                    telemetry_block(block),
+                    block.telemetry_block,
                     trace=trace_logger,
                     colors=colors,
                 )
@@ -404,7 +387,7 @@ def decorate_factory(
         async def trace_result(record: TraceRecord) -> None:
             if not record.succeeded and record.failure is not None:
                 for block in record.failure.blocks:
-                    trace_logger.log_block(telemetry_block(block))
+                    trace_logger.log_block(block.telemetry_block)
                 trace_logger.log_text(record.failure.message, heading="Turn error")
                 trace_logger.emit_event(
                     TraceEvent(
@@ -418,7 +401,7 @@ def decorate_factory(
         persistence = PersistenceConfig(directory=notes.trace_log.parent / "turns")
         tracing = TracingConfig(sink=trace_result)
         display = DisplayConfig(sink=display_result)
-    return DecoratingSessionFactory(
+    return decorated_session_factory(
         factory,
         timeout=timeout,
         budget=budget,
@@ -427,26 +410,6 @@ def decorate_factory(
         tracing=tracing,
         display=display,
     )
-
-
-def telemetry_block(block: TurnBlock) -> LupContentBlock:
-    """Project one portable completed block into the existing telemetry view."""
-    match block:
-        case TurnTextBlock(text=text):
-            return LupTextBlock(text=text)
-        case TurnThinkingBlock(thinking=thinking, redacted=redacted):
-            return LupThinkingBlock(thinking=thinking, redacted=redacted)
-        case TurnToolCallBlock(id=identifier, name=name, arguments=arguments):
-            return LupToolUseBlock(id=identifier, name=name, input=arguments)
-        case TurnToolResultBlock(
-            tool_call_id=identifier, content=content, is_error=is_error
-        ):
-            rendered = (
-                json.dumps({"is_error": True, "content": content})
-                if is_error
-                else content
-            )
-            return LupToolResultBlock(tool_use_id=identifier, content=rendered)
 
 
 def build_session_factory(
@@ -580,7 +543,7 @@ def build_session_factory(
         subagents=subagents,
     )
     if sandbox is not None:
-        factory = CleaningSessionFactory(factory, sandbox.stop)
+        factory = cleaning_session_factory(factory, sandbox.stop)
     elif (
         not toolless
         and settings.sandbox_enabled
@@ -591,7 +554,7 @@ def build_session_factory(
             "openai-compat",
         )
     ):
-        factory = CleaningSessionFactory(factory, codex_sandbox_cleanup(notes))
+        factory = cleaning_session_factory(factory, codex_sandbox_cleanup(notes))
     trace_logger = TraceLogger(
         trace_path=notes.trace_log,
         title=f"Session {session_id}",
@@ -642,7 +605,7 @@ def resolve_resume_token(reference: str) -> SessionId:
 def result_text[T: BaseModel | None](result: TurnResult[T]) -> str:
     """Concatenate completed portable text blocks."""
     return "\n\n".join(
-        block.text for block in result.blocks if isinstance(block, TurnTextBlock)
+        text for block in result.blocks if (text := block.text_payload) is not None
     )
 
 
@@ -650,12 +613,13 @@ def result_sources[T: BaseModel | None](result: TurnResult[T]) -> list[str]:
     """Extract source URLs and search queries from semantic tool calls."""
     sources: list[str] = []  # lup: ignore[empty-collection]
     for block in result.blocks:
-        if not isinstance(block, TurnToolCallBlock):
+        arguments = block.tool_arguments
+        if arguments is None:
             continue
-        if block.name in ("FetchUrl", "WebFetch"):
-            value = block.arguments.get("url")  # lup: ignore[dict-get]
-        elif block.name in ("SearchWeb", "WebSearch"):
-            value = block.arguments.get("query")  # lup: ignore[dict-get]
+        if block.tool_call_name in ("FetchUrl", "WebFetch"):
+            value = arguments.get("url")  # lup: ignore[dict-get]
+        elif block.tool_call_name in ("SearchWeb", "WebSearch"):
+            value = arguments.get("query")  # lup: ignore[dict-get]
         else:
             continue
         if isinstance(value, str) and value:
@@ -700,9 +664,7 @@ async def run_agent(
     reset_metrics()
     build = build_session_factory(identifier, task_id)
     async with build.factory.open(resume) as handle:
-        turn = await handle.session.start(
-            turn_request(TurnInput(text=task), AgentOutput)
-        )
+        turn = await handle.session.start(turn_request(task, AgentOutput))
         result = await turn.turn.result()
     log_metrics_summary()
     projected = application_result(

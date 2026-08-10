@@ -1,7 +1,7 @@
 ---
 name: implementer
 description: "Implement production changes against established acceptance tests"
-tools: Read, Grep, Glob, Bash, Write, Edit
+tools: Read, Bash, Write, Edit
 model: inherit
 color: green
 ---

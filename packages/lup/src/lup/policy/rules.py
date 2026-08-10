@@ -9,12 +9,11 @@ stay decision-identical; the shared fixture suite asserts exactly that.
 """
 
 from pathlib import Path
-from typing import Literal
 from urllib.parse import urlsplit
 
 from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field
 
-from lup.codescan.antipatterns import patterns_for_suffix
+from lup.codescan.antipatterns import AntiPattern, patterns_for_suffix
 from lup.policy.contracts import DecisionPolicy
 from lup.policy.kernel.decision import KernelDecision
 from lup.policy.kernel.edit import (
@@ -22,15 +21,25 @@ from lup.policy.kernel.edit import (
     path_rule_matches as kernel_path_rule_matches,
 )
 from lup.policy.kernel.fetch import decide_fetch
-from lup.policy.kernel.lex import parse_shell_words, shell_write_targets
-from lup.policy.kernel.rows import AntiPatternRow, PathRuleRow, UrlScopeRow
-from lup.policy.kernel.shell import decide_shell, decide_shell_segment
-from lup.policy.kernel.words import command_words as kernel_command_words
-from lup.policy.shell_rules import (
-    BASE_SHELL_RULES,
-    ShellCommandRule,
-    erase_shell_rules,
+from lup.policy.assets.host import (
+    directory_write_targets,
+    recoverable_write_targets,
 )
+from lup.policy.kernel.lex import (
+    parse_shell_words,
+    shell_path_verb_targets,
+    shell_write_targets,
+)
+from lup.policy.kernel.rows import (
+    AntiPatternRow,
+    PathRoleRow,
+    PathRuleKind,
+    PathRuleRow,
+    UrlScopeRow,
+)
+from lup.policy.kernel.shell import decide_shell, decide_shell_segment, shell_context
+from lup.policy.kernel.words import command_words as kernel_command_words
+from lup.policy.shell_rules import ShellCommandRule, erase_shell_rules
 from lup.policy.models import (
     Decision,
     EditBatch,
@@ -55,6 +64,7 @@ class UrlScope(BaseModel):
     path_prefix: UrlPathPrefix = "/"
     reason: str = ""
     include_subdomains: bool = False
+    any_port: bool = False
 
 
 def url_scope_row(scope: UrlScope) -> UrlScopeRow:
@@ -69,6 +79,7 @@ def url_scope_row(scope: UrlScope) -> UrlScopeRow:
         path_prefix=scope.path_prefix,
         reason=scope.reason,
         include_subdomains=scope.include_subdomains,
+        any_port=scope.any_port,
     )
 
 
@@ -113,20 +124,30 @@ def parse_shell_segments(command: str) -> list[ShellSegment] | None:
 class ShellPolicy(DecisionPolicy[ShellCommand]):
     """Delegate shell classification to the shared hermetic kernel.
 
-    URL scopes feed the kernel's curl screen, so shell reads and WebFetch
-    consult one declared origin table.
+    The vocabulary is the caller's: ``rules`` is the whole table this project
+    judges, not an extension of one the library chose. URL scopes feed the
+    kernel's curl screen, so shell reads and WebFetch consult one declared
+    origin table.
     """
 
     def __init__(
         self,
-        rules: list[ShellCommandRule] | None = None,
+        rules: list[ShellCommandRule],
         allowed_urls: list[UrlScope] | None = None,
         denied_urls: list[UrlScope] | None = None,
         sandbox_active: bool = False,
         trusted_script_roots: list[str] | None = None,
         interactive: bool = True,
+        path_roles: list[PathRoleRow] | None = None,
+        path_rules: list["PathRule"] | None = None,
+        recoverable_target_limit: int = 5,
+        runner_targets: list[str] | None = None,
     ) -> None:
-        self.rules = erase_shell_rules(BASE_SHELL_RULES if rules is None else rules)
+        self.path_rules = [path_rule_row(rule) for rule in path_rules or []]
+        self.path_roles = path_roles or []
+        self.recoverable_target_limit = recoverable_target_limit
+        self.runner_targets = runner_targets or []
+        self.rules = erase_shell_rules(rules)
         self.allowed_scopes = [url_scope_row(scope) for scope in allowed_urls or []]
         self.denied_scopes = [url_scope_row(scope) for scope in denied_urls or []]
         self.sandbox_active = sandbox_active
@@ -135,6 +156,7 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
 
     def decide(self, event: ShellCommand) -> Decision:
         root = event.cwd or Path.cwd()
+        acted_on = shell_path_verb_targets(event.command)
         return pydantic_decision(
             decide_shell(
                 event.command,
@@ -143,12 +165,20 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
                 self.denied_scopes,
                 sandboxed=self.sandbox_active and not event.unsandboxed,
                 trusted_script_roots=self.trusted_script_roots,
+                path_roles=self.path_roles,
+                path_rules=self.path_rules,
                 interactive=self.interactive,
                 existing_targets=[
                     target
-                    for target in shell_write_targets(event.command)
+                    for target in [*shell_write_targets(event.command), *acted_on]
                     if (root / target).exists()
                 ],
+                recoverable_targets=recoverable_write_targets(
+                    [*shell_write_targets(event.command), *acted_on], root
+                ),
+                directory_targets=directory_write_targets(acted_on, root),
+                recoverable_target_limit=self.recoverable_target_limit,
+                runner_targets=self.runner_targets,
             )
         )
 
@@ -156,20 +186,30 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
         return pydantic_decision(
             decide_shell_segment(
                 segment.words,
-                self.rules,
-                self.allowed_scopes,
-                self.denied_scopes,
-                self.trusted_script_roots,
+                shell_context(
+                    self.rules,
+                    self.allowed_scopes,
+                    self.denied_scopes,
+                    self.trusted_script_roots,
+                    self.path_roles,
+                    self.path_rules,
+                ),
             )
         )
 
 
 class PathRule(BaseModel):
-    """One semantic protected-path match supplied by a composition root."""
+    """One semantic protected-path match supplied by a composition root.
+
+    ``kind`` spans the whole primitive vocabulary rather than a subset of it.
+    A rule a generated dispatcher can enforce and a composed session cannot
+    express is a rule whose reach depends on who launched the run, which is
+    the one thing single-sourcing the policy exists to prevent.
+    """
 
     model_config = ConfigDict(frozen=True)
 
-    kind: Literal["exact", "subtree", "name_prefix", "new_subtree"]
+    kind: PathRuleKind
     value: str
     reason: str
     allow_autonomous: bool = False
@@ -202,20 +242,28 @@ def path_rule_matches(path: Path, rule: PathRule) -> bool:
     return kernel_path_rule_matches(path.as_posix(), path.exists(), path_rule_row(rule))
 
 
+def antipattern_row(rule: AntiPattern) -> AntiPatternRow:
+    """Erase one declared rule into the primitive row the kernel matches on.
+
+    The single projection from the declaration to the runtime shape. Both the
+    live policy and the bundled hermetic runtime go through it, so a field the
+    declaration gains cannot reach one gate and not the other.
+    """
+    return AntiPatternRow(
+        id=rule.id,
+        pattern=rule.pattern.pattern,
+        message=rule.message,
+        context=rule.context,
+        strength=rule.strength,
+    )
+
+
 def antipattern_rows(change: EditChange) -> list[AntiPatternRow]:
     """Compile rules selected by one edit path into primitive kernel rows."""
     patterns = patterns_for_suffix(change.path.suffix.lower())
     if patterns is None:
         return []
-    return [
-        AntiPatternRow(
-            id=rule.id,
-            pattern=rule.pattern.pattern,
-            message=rule.message,
-            context=rule.context,
-        )
-        for rule in patterns
-    ]
+    return [antipattern_row(rule) for rule in patterns]
 
 
 class EditPolicy(DecisionPolicy[EditBatch]):
@@ -226,7 +274,11 @@ class EditPolicy(DecisionPolicy[EditBatch]):
         protected: list[PathRule],
         maximum_added_lines: int = 3,
         autonomous: bool = False,
+        path_roles: list[PathRoleRow] | None = None,
+        allowances: list[str] | None = None,
     ) -> None:
+        self.path_roles = path_roles or []
+        self.allowances = allowances or []
         self.protected = list(protected)
         self.maximum_added_lines = maximum_added_lines
         self.autonomous = autonomous
@@ -254,8 +306,10 @@ class EditPolicy(DecisionPolicy[EditBatch]):
                 path_exists=change.path.exists(),
                 path_rules=[path_rule_row(rule) for rule in self.protected],
                 antipattern_rows=antipattern_rows(change),
+                path_roles=self.path_roles,
                 maximum_added_lines=self.maximum_added_lines,
                 autonomous=self.autonomous,
+                allowances=self.allowances,
                 python_source=suffix in (".py", ".pyi"),
             )
         )

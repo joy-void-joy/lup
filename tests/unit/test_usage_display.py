@@ -1,5 +1,3 @@
-# lup: ignore[dict-get]
-# Test fixtures and assertions construct these shapes deliberately.
 """Tests for the Claude Code usage display assembly.
 
 The daily breakdown is fed by the local stats cache, so it must render
@@ -13,8 +11,8 @@ from datetime import datetime, timedelta, timezone
 
 from rich.console import Console
 
-from lup_template.devtools.usage.api import StatsCache, UsageResponse
-from lup_template.devtools.usage.render import build_display, build_snapshot
+from lup.adapters.claude.usage.api import StatsCache, UsageResponse
+from lup.adapters.claude.usage.render import build_display, build_snapshot
 
 
 def recent_stats() -> StatsCache:

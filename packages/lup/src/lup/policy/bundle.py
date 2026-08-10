@@ -3,8 +3,11 @@
 Generated native plugins must decide without lup installed, so the adapters'
 hook renderers call this module to read :mod:`lup.policy.kernel` verbatim and
 to erase validated application inputs — hook URL scopes, protected roots, the
-canonical anti-pattern set — into primitive rows rendered as one generated
-data file per plugin. No decision logic lives here; the kernel decides.
+shell vocabulary, the canonical anti-pattern set — into primitive rows
+rendered as one generated data file per plugin. Each row list is declared
+against the shipped ``kernel.rows`` shapes, so a generated runtime type-checks
+as one unit against the kernel beside it. No decision logic lives here; the
+kernel decides.
 """
 
 import json
@@ -13,21 +16,23 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict
 
-from lup.codescan.antipatterns import PYTHON_ANTI_PATTERNS, TS_ANTI_PATTERNS
-from lup.policy.identity import AGENT_IDENTITY_ENV, CONCERN_ALLOWANCES_ENV
+from lup.codescan.antipatterns import AntiPatternSet
+from lup.harness.banner import REGENERATE_COMMAND, GeneratedBanner
+from lup.policy.identity import (
+    AGENT_IDENTITY_ENV,
+    CONCERN_ALLOWANCES_ENV,
+    ConcernAllowance,
+)
 import lup.policy.kernel as kernel
 from lup.policy.kernel.rows import (
     AntiPatternRow,
+    PathRoleRow,
     PathRuleRow,
     ShellRuleRow,
     UrlScopeRow,
 )
-from lup.policy.shell_rules import (
-    BASE_SHELL_RULES,
-    ShellCommandRule,
-    erase_shell_rules,
-)
-from lup.policy.rules import human_owned_path_rule, path_rule_row
+from lup.policy.shell_rules import ShellCommandRule, erase_shell_rules
+from lup.policy.rules import antipattern_row, human_owned_path_rule, path_rule_row
 
 
 class KernelModule(BaseModel):
@@ -52,26 +57,13 @@ def policy_kernel_modules() -> list[KernelModule]:
     ]
 
 
-def bundled_antipattern_rows() -> dict[str, list[AntiPatternRow]]:
+def bundled_antipattern_rows(
+    rules: AntiPatternSet | None = None,
+) -> dict[str, list[AntiPatternRow]]:
     """Compile primitive runtime rows directly from canonical rule objects."""
-    python_rows = [
-        AntiPatternRow(
-            id=rule.id,
-            pattern=rule.pattern.pattern,
-            message=rule.message,
-            context=rule.context,
-        )
-        for rule in PYTHON_ANTI_PATTERNS
-    ]
-    typescript_rows = [
-        AntiPatternRow(
-            id=rule.id,
-            pattern=rule.pattern.pattern,
-            message=rule.message,
-            context=rule.context,
-        )
-        for rule in TS_ANTI_PATTERNS
-    ]
+    declared = rules or AntiPatternSet()
+    python_rows = [antipattern_row(rule) for rule in declared.python]
+    typescript_rows = [antipattern_row(rule) for rule in declared.typescript]
     return {
         ".py": python_rows,
         ".pyi": python_rows,
@@ -89,6 +81,7 @@ def runtime_url_scope(
     path_prefix: str,
     reason: str = "",
     include_subdomains: bool = False,
+    any_port: bool = False,
 ) -> UrlScopeRow:
     """Normalize one validated hook scope into a primitive runtime row."""
     parsed = urllib.parse.urlsplit(origin)
@@ -101,6 +94,7 @@ def runtime_url_scope(
         path_prefix=path_prefix,
         reason=reason,
         include_subdomains=include_subdomains,
+        any_port=any_port,
     )
 
 
@@ -145,15 +139,10 @@ def runtime_path_rules(
     ]
 
 
-def runtime_shell_rules(extension: list[ShellCommandRule]) -> list[ShellRuleRow]:
-    """Compile the baseline shell vocabulary plus an application extension."""
-    return erase_shell_rules([*BASE_SHELL_RULES, *extension])
-
-
 def dict_rows_literal(rows: list[list[str]]) -> str:
     """Render already-escaped ``"key": value`` rows in Ruff-stable form."""
     if not rows:
-        return "()"
+        return "[]"
     blocks = [
         "    {\n" + "".join(f"        {entry},\n" for entry in row) + "    },"
         for row in rows
@@ -172,6 +161,7 @@ def url_scope_rows_literal(rows: list[UrlScopeRow]) -> str:
                 f'"path_prefix": {json.dumps(row["path_prefix"])}',
                 f'"reason": {json.dumps(row["reason"])}',
                 f'"include_subdomains": {row["include_subdomains"]}',
+                f'"any_port": {row["any_port"]}',
             ]
             for row in rows
         ]
@@ -199,24 +189,36 @@ def antipattern_rows_literal(rows: dict[str, list[AntiPatternRow]]) -> str:
     for suffix, patterns in sorted(rows.items()):
         lines.append(f"    {json.dumps(suffix)}: [")
         for row in patterns:
-            block = (
-                "        {\n"
-                f'            "id": {json.dumps(row["id"])},\n'
-                f'            "pattern": {json.dumps(row["pattern"])},\n'
-                f'            "message": {json.dumps(row["message"])},\n'
-                f'            "context": {json.dumps(row["context"])},\n'
-                "        },"
+            # Rendered from the row's own keys rather than a list of them: a
+            # field added to AntiPatternRow reaches the hermetic runtime by
+            # construction, instead of being dropped until someone notices.
+            fields = "\n".join(
+                f"            {json.dumps(key)}: {json.dumps(value)},"
+                for key, value in row.items()
             )
-            lines.append(block)
+            lines.append(f"        {{\n{fields}\n        }},")
         lines.append("    ],")
     lines.append("}")
     return "\n".join(lines)
 
 
+def path_role_rows_literal(rows: list[PathRoleRow]) -> str:
+    """Render declared path roles as primitive runtime rows."""
+    return dict_rows_literal(
+        [
+            [
+                f'"root": {json.dumps(row["root"])}',
+                f'"role": {json.dumps(row["role"])}',
+            ]
+            for row in rows
+        ]
+    )
+
+
 def string_rows_literal(rows: list[str]) -> str:
     """Render a sequence of generated string identities."""
     if not rows:
-        return "()"
+        return "[]"
     return "[\n" + "".join(f"    {json.dumps(row)},\n" for row in rows) + "]"
 
 
@@ -249,6 +251,10 @@ def shell_rule_rows_literal(rows: list[ShellRuleRow]) -> str:
     return "\n".join(lines)
 
 
+POLICY_DATA_BANNER = GeneratedBanner(source=__name__, command=REGENERATE_COMMAND)
+"""Provenance every adapter's rendered policy-data module opens with."""
+
+
 def render_policy_data(
     *,
     allowed_fetch_scopes: list[UrlScopeRow],
@@ -256,32 +262,46 @@ def render_policy_data(
     protected_roots: list[str],
     human_owned_files: list[str],
     autonomous_agent_identities: list[str],
-    shell_rule_extension: list[ShellCommandRule] | None = None,
+    path_roles: list[PathRoleRow],
+    shell_rules: list[ShellCommandRule],
+    recoverable_target_limit: int,
+    runner_targets: list[str],
 ) -> str:
     """Render one plugin's canonical policy rows without executable logic."""
     body = "\n\n".join(
         [
-            "ALLOWED_FETCH_SCOPES = " + url_scope_rows_literal(allowed_fetch_scopes),
-            "DENIED_FETCH_SCOPES = " + url_scope_rows_literal(denied_fetch_scopes),
-            "PATH_RULES = "
+            "ALLOWED_FETCH_SCOPES: list[UrlScopeRow] = "
+            + url_scope_rows_literal(allowed_fetch_scopes),
+            "DENIED_FETCH_SCOPES: list[UrlScopeRow] = "
+            + url_scope_rows_literal(denied_fetch_scopes),
+            "PATH_RULES: list[PathRuleRow] = "
             + path_rule_rows_literal(
                 runtime_path_rules(protected_roots, human_owned_files)
             ),
-            "ANTI_PATTERN_ROWS = "
+            "ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = "
             + antipattern_rows_literal(bundled_antipattern_rows()),
-            "SHELL_RULES = "
-            + shell_rule_rows_literal(runtime_shell_rules(shell_rule_extension or [])),
-            "AUTONOMOUS_AGENT_IDENTITIES = "
+            "PATH_ROLES: list[PathRoleRow] = " + path_role_rows_literal(path_roles),
+            "SHELL_RULES: list[ShellRuleRow] = "
+            + shell_rule_rows_literal(erase_shell_rules(shell_rules)),
+            "AUTONOMOUS_AGENT_IDENTITIES: list[str] = "
             + string_rows_literal(autonomous_agent_identities),
             "AGENT_IDENTITY_ENV = " + json.dumps(AGENT_IDENTITY_ENV),
             "CONCERN_ALLOWANCES_ENV = " + json.dumps(CONCERN_ALLOWANCES_ENV),
+            "KNOWN_ALLOWANCES: list[str] = "
+            + string_rows_literal([member.value for member in ConcernAllowance]),
             "MAXIMUM_ADDED_LINES = 3",
+            "RECOVERABLE_TARGET_LIMIT = " + json.dumps(recoverable_target_limit),
+            "RUNNER_TARGETS: list[str] = " + string_rows_literal(runner_targets),
         ]
     )
     return (
-        '"""Generated application-owned policy data.\n'
-        "\n"
-        "Rendered from lup.policy.bundle by\n"
-        "`uv run lup-devtools harness generate all` — do not edit directly.\n"
-        '"""\n\n' + body + "\n"
+        '"""Generated application-owned policy data."""\n\n'
+        "from kernel.rows import (\n"
+        "    AntiPatternRow,\n"
+        "    PathRoleRow,\n"
+        "    PathRuleRow,\n"
+        "    ShellRuleRow,\n"
+        "    UrlScopeRow,\n"
+        ")"
+        "\n\n\n" + body + "\n"
     )

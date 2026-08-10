@@ -25,7 +25,7 @@ if TYPE_CHECKING:
     from lup.reflect import ReviewGate
     from lup.sandbox.container import Sandbox
 
-ServerGroup = Literal["notes", "sandbox", "session", "example"]
+ServerGroup = Literal["notes", "sandbox", "codeintel", "session", "example"]
 """A tool-group name this registry can build — the group vocabulary every
 consumer shares: server registration (``core.build_session_options``),
 subprocess serving and CLI selection (``lup-devtools agent serve-tools
@@ -35,6 +35,7 @@ read the choices off the annotation.)"""
 
 NOTES_GROUP: ServerGroup = "notes"
 SANDBOX_GROUP: ServerGroup = "sandbox"
+CODEINTEL_GROUP: ServerGroup = "codeintel"
 SESSION_GROUP: ServerGroup = "session"
 EXAMPLE_GROUP: ServerGroup = "example"
 """Placeholder tools with fabricated data — never served to a live agent
@@ -56,8 +57,8 @@ def tool_group_names(*, realtime: bool) -> list[ServerGroup]:
     stay aligned.
     """
     if realtime:
-        return [NOTES_GROUP, SANDBOX_GROUP, SESSION_GROUP]
-    return [NOTES_GROUP, SANDBOX_GROUP]
+        return [NOTES_GROUP, SANDBOX_GROUP, CODEINTEL_GROUP, SESSION_GROUP]
+    return [NOTES_GROUP, SANDBOX_GROUP, CODEINTEL_GROUP]
 
 
 def build_session_toolset(
@@ -87,9 +88,12 @@ def build_session_toolset(
     Returns:
         The groups plus the shared reflection gate.
     """
+    from lup.codeintel.tools import create_codeintel_tools
+    from lup.workspace.paths import project_root
     from lup_template.agent.config import aux_model
     from lup_template.agent.tools.example import EXAMPLE_TOOLS
     from lup_template.agent.tools.reflect import create_reflect_tools
+    from lup.devtools.dev.pyright_oracle import langserver_path
 
     reflect_kit = create_reflect_tools(
         session_dir=session_dir,
@@ -105,6 +109,10 @@ def build_session_toolset(
 
     if sandbox is not None:
         groups[SANDBOX_GROUP] = sandbox.create_tools()
+
+    server = langserver_path()
+    if server is not None:
+        groups[CODEINTEL_GROUP] = create_codeintel_tools(server, project_root())
 
     if realtime_dir is not None:
         from lup.realtime.relay import RealtimeMailbox, create_realtime_relay_tools

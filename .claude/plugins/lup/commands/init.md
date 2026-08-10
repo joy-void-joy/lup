@@ -1,6 +1,6 @@
 ---
 description: "Initialize the self-improvement loop for a specific domain"
-allowed-tools: Bash(uv run lup-devtools:*, uv sync:*, uv run pyright:*, uv run ruff:*, uv run pytest:*), Read, Grep, Glob, Edit, Write, AskUserQuestion
+allowed-tools: Bash(uv run lup-devtools:*, uv sync:*, uv run pyright:*, uv run ruff:*, uv run pytest:*), Read, Edit, Write, AskUserQuestion
 ---
 
 # Initialize Self-Improvement Loop

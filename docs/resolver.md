@@ -1,3 +1,5 @@
+<!-- Generated from lup.devtools.harness.content.docs.resolver by `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/harness.md. -->
+
 # Resolver lifecycle and recovery
 
 `ResolverCore` is the single provider-neutral resolver. Concrete entries inject
@@ -53,7 +55,7 @@ The doors are `--answer <question-id>=<value>`, the supervisor page,
 `lup-devtools harness resolve answer`, and a worker's own question tools.
 `--accept`/`--reject` is not a separate path: acceptance is the reserved
 `integration-acceptance` question, so every door records it the same way. See
-`docs/supervisor.md`.
+[supervisor.md](supervisor.md).
 
 **`state.json` lags the mailbox.** The run folds `questions/` and `answers/`
 into `state.questions`/`state.answers` as it promotes, so those copies are

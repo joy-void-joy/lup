@@ -1,12 +1,16 @@
 """Immutable, schema-versioned semantic resolver records."""
 
+from abc import abstractmethod
+from collections.abc import Awaitable, Callable
 from enum import StrEnum
 from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from lup.codescan.symbols import DefinedSymbol
 from lup.harness.models import ResolveSpec
+from lup.policy.identity import ConcernAllowance
 
 FROZEN = ConfigDict(frozen=True)
 FROZEN_STRICT = ConfigDict(frozen=True, extra="forbid")
@@ -25,7 +29,6 @@ class ResolvePhase(StrEnum):
     REVIEW = "review"
     INTEGRATION = "integration"
     VERIFICATION = "verification"
-    ACCEPTANCE = "acceptance"
     CLEANUP = "cleanup"
     COMPLETE = "complete"
     ABORTED = "aborted"
@@ -52,6 +55,13 @@ class ConcernStatus(StrEnum):
     FAILED = "failed"
 
 
+class ConcernOrigin(StrEnum):
+    """How one concern entered the run that owns it."""
+
+    INVENTORY = "inventory"
+    ADMITTED = "admitted"
+
+
 class SourceSnapshot(BaseModel):
     model_config = FROZEN
 
@@ -65,28 +75,6 @@ class ReviewNote(BaseModel):
     file: Path
     line: int = Field(ge=1)
     text: str
-
-
-class ConcernAllowance(StrEnum):
-    """One edit gate a concern's plan needs, granted with the concern itself.
-
-    These gates exist because the decision is a human's. Naming them at plan
-    time moves that decision to where the human is already deciding, instead
-    of parking the run to ask again for work they just approved.
-    """
-
-    # lup: defer[when the resolver review loop is next revised]: these are
-    # granted when a concern is PLANNED, on the reasoning that the decision is
-    # a human's and naming it upfront beats parking the run to re-ask. A
-    # semantic merge breaks that assumption: a rule one branch adds can first
-    # meet a constant another branch adds only when the two are joined, so the
-    # suppression is newly required by work nobody could have foreseen. A merge
-    # session holds no plan-time allowance and has no channel to satisfy an ask,
-    # so the refusal is terminal — observed here on a library-default marker
-    # that only existed because of the merge. Either let a join carry
-    # allowances, or give the merger a route to request one.
-    NEW_DEVTOOLS_MODULE = "new-devtools-module"
-    ANTIPATTERN_SUPPRESSION = "antipattern-suppression"
 
 
 class NoteClearance(BaseModel):
@@ -128,6 +116,14 @@ class MaterialQuestion(BaseModel):
     concern_id: str
     prompt: str
     choices: list[str] = Field(default_factory=list)
+    allowances: list[ConcernAllowance] = Field(
+        default_factory=list,
+        description=(
+            "Every edit gate some choice here would need. An option the "
+            "concern has no grant for is an option whose worker is denied, "
+            "so naming the gate here is what makes the concern carry it."
+        ),
+    )
     recommendation: str | None = None
     closed_choices: bool = Field(
         default=False,
@@ -136,6 +132,14 @@ class MaterialQuestion(BaseModel):
             "questions must leave this false: their choices are suggestions, and "
             "the human may answer in their own words. Only the reserved "
             "integration gates, whose domain really is two words, close it."
+        ),
+    )
+    criteria: list[str] = Field(
+        default_factory=list,
+        description=(
+            "The lost criterion ids a re-check question is about, carried as "
+            "data so an identical standing finding is recognized across "
+            "occasions instead of re-asked per join."
         ),
     )
 
@@ -157,6 +161,16 @@ class MaterialQuestion(BaseModel):
                 f"question {self.id!r} recommendation is not one of its choices"
             )
         return self
+
+
+def allowance_question_id(concern_id: str, allowance: ConcernAllowance) -> str:
+    """The composed id a `request_allowance` question is recorded under.
+
+    The worker's tool asks with the bare `allow-<gate>` id and the binding
+    prefixes its concern, so this spelling is the contract between the ask
+    and the run-side reader that turns a "grant" answer into authority.
+    """
+    return f"{concern_id}-allow-{allowance}"
 
 
 class QuestionBatch(BaseModel):
@@ -194,26 +208,7 @@ class AnswerBatch(BaseModel):
         return self
 
 
-ACCEPTANCE_QUESTION_ID = "integration-acceptance"
-ACCEPTANCE_CONCERN_ID = "integration"
-ACCEPT = "accept"
-REJECT = "reject"
-
-
-def acceptance_question() -> MaterialQuestion:
-    """The reserved question every acceptance door answers through.
-
-    Making the review decision an ordinary mailbox question is what lets the
-    page, the CLI, and ``--accept``/``--reject`` share one form instead of
-    each carrying its own path into :meth:`record_human_acceptance`.
-    """
-    return MaterialQuestion(
-        id=ACCEPTANCE_QUESTION_ID,
-        concern_id=ACCEPTANCE_CONCERN_ID,
-        prompt="Accept the review branch for manual integration?",
-        choices=[ACCEPT, REJECT],
-        closed_choices=True,
-    )
+INTEGRATION_CONCERN_ID = "integration"
 
 
 class ConcernShape(BaseModel):
@@ -229,6 +224,15 @@ class ConcernShape(BaseModel):
     dependencies: list[str] = Field(default_factory=list)
     questions: list[MaterialQuestion] = Field(default_factory=list)
     allowances: list[ConcernAllowance] = Field(default_factory=list)
+    supersedes: str = Field(
+        default="",
+        description=(
+            "The concern this one replaces, when a plan is corrected mid-run. "
+            "The predecessor stays in the record — a run is evidence of what "
+            "was tried, and editing it in place would erase the correction "
+            "along with what prompted it."
+        ),
+    )
 
     @model_validator(mode="after")
     def references_are_local_and_unique(self) -> "ConcernShape":
@@ -247,30 +251,72 @@ class ConcernShape(BaseModel):
             raise ValueError(f"concern {self.id!r} cannot depend on itself")
         return self
 
+    @model_validator(mode="after")
+    def offered_choices_carry_their_gates(self) -> "ConcernShape":
+        """A question cannot offer what this concern was not granted.
+
+        The answer to a material question becomes a worker's assignment, so
+        an option needing a gate the concern lacks dispatches a worker that
+        is denied on arrival. Prose inside the choice text disclosing that
+        is not a gate — the human still picks it, and the run still spends a
+        lease finding out. Requiring the concern to carry the grant makes
+        the unapprovable option unplannable instead.
+        """
+        for question in self.questions:
+            ungranted = [
+                allowance
+                for allowance in dict.fromkeys(question.allowances)
+                if allowance not in self.allowances
+            ]
+            if ungranted:
+                raise ValueError(
+                    f"question {question.id!r} offers a choice needing "
+                    f"{', '.join(sorted(ungranted))}, which concern "
+                    f"{self.id!r} does not request"
+                )
+        return self
+
 
 class Concern(ConcernShape):
     """One generalized concern and its complete dependency/acceptance inputs."""
 
     notes: list[ReviewNote] = Field(default_factory=list)
+    evidence: str = Field(
+        default="",
+        description=(
+            "What a human said that no note in the tree carries. Recorded "
+            "beside `notes` rather than in place of them, so a reviewer can "
+            "tell a concern traceable to code from one traceable only to a "
+            "statement someone made."
+        ),
+    )
+    origin: ConcernOrigin = ConcernOrigin.INVENTORY
     eligible: bool = True
     integration_approved: bool = False
 
+    @model_validator(mode="after")
+    def admission_is_grounded(self) -> "Concern":
+        """An admitted concern names the evidence that raised it mid-run."""
+        if self.origin is ConcernOrigin.ADMITTED and not (self.notes or self.evidence):
+            raise ValueError(f"admitted concern {self.id!r} cites no evidence")
+        return self
+
 
 class PlannedConcern(ConcernShape):
-    """One planned concern referencing review notes by zero-based position.
+    """One planned concern referencing its evidence by zero-based position.
 
-    The planner never echoes note content — positional references make copy
-    fidelity a mechanical property instead of a model obligation. References
-    are shared rather than exclusive: a note raising several issues is
-    referenced by each concern that answers one of them.
+    The planner never echoes evidence content — positional references make
+    copy fidelity a mechanical property instead of a model obligation.
+    References are shared rather than exclusive: a note raising several
+    issues is referenced by each concern that answers one of them.
     """
 
-    note_indexes: list[int] = Field(min_length=1)
+    evidence_indexes: list[int] = Field(min_length=1)
 
     @model_validator(mode="after")
     def references_are_distinct(self) -> "PlannedConcern":
-        if len(self.note_indexes) != len(dict.fromkeys(self.note_indexes)):
-            raise ValueError("a concern may reference each note only once")
+        if len(self.evidence_indexes) != len(dict.fromkeys(self.evidence_indexes)):
+            raise ValueError("a concern may reference each piece of evidence once")
         return self
 
 
@@ -357,6 +403,16 @@ class WorkerReport(BaseModel):
     summary: str
     files_changed: list[Path] = Field(default_factory=list)
     swept_beyond_scope: list[Path] = Field(default_factory=list)
+    merge_notes: list[str] = Field(
+        default_factory=list,
+        description=(
+            "What anyone joining this work needs to know that the diff does "
+            "not say — a changed signature whose callers live elsewhere, an "
+            "invariant now enforced in one place. This is not a message to a "
+            "sibling worker, which could not act on it anyway since the "
+            "changed code is not in its worktree; it reaches whoever merges."
+        ),
+    )
 
 
 class DiffValidation(BaseModel):
@@ -379,12 +435,90 @@ class ReviewReport(BaseModel):
     criteria_met: list[str] = Field(default_factory=list)
 
 
-class MergeReport(BaseModel):
+class DropCandidate(BaseModel):
+    """Content one parent contributed that the joined tree does not hold.
+
+    A candidate is an obligation, never a verdict. A legitimate resolution
+    rewrites what it merges, so a line going missing is exactly as likely to
+    be correct as to be a loss — which is why the merger has to say which,
+    and why nothing here decides on its own.
+    """
+
     model_config = FROZEN
+
+    parent: str
+    path: Path
+    missing: list[str]
+    lost_symbols: list[DefinedSymbol] = Field(default_factory=list)
+    """Definitions the parent introduced that the joined tree no longer holds.
+
+    A separate finding from the missing lines, and a sharper one. Lines go
+    missing whenever a resolution rewrites them, so the list is long and
+    mostly benign; a function that was defined and now is not is the shape a
+    silent regression actually takes.
+    """
+
+
+type HunkFate = Literal["kept", "rewritten", "superseded", "dropped"]
+
+
+class HunkDisposition(BaseModel):
+    """What became of one candidate hunk, and why.
+
+    Containment rather than equality is the gate: a legitimate resolution
+    rewrites hunks, so requiring the result to hold exactly the candidates
+    would reject the correct answer. What must not happen is a candidate
+    disappearing with nothing said about it.
+    """
+
+    model_config = FROZEN
+
+    path: Path
+    parent: str
+    fate: HunkFate
+    rationale: str
+
+
+class DeclaredEdit(BaseModel):
+    """One edit made outside the conflict set, and the reason for it.
+
+    A hard subset rule — changed files within conflicted files — is wrong,
+    because the canonical joint failure is fixed in a file that never
+    conflicted: one branch changes a signature, another adds a caller, and
+    the caller's file merges clean and still needs updating. So edits
+    outside the conflict set are permitted and undeclared ones are the
+    rejection.
+    """
+
+    model_config = FROZEN
+
+    path: Path
+    rationale: str
+
+
+class MergeReport(BaseModel):
+    """What one join did, declared in a form the orchestrator can check.
+
+    Strict for the same reason ``WorkerReport`` is: a retired field must
+    fail loudly rather than vanish, and the whole point of this report is
+    that a semantic choice cannot go unrecorded.
+    """
+
+    model_config = FROZEN_STRICT
 
     completed: bool
     summary: str
     unresolved_paths: list[Path] = Field(default_factory=list)
+    dispositions: list[HunkDisposition] = Field(default_factory=list)
+    out_of_conflict_edits: list[DeclaredEdit] = Field(default_factory=list)
+    blocked: str = Field(
+        default="",
+        description=(
+            "Why a resolution that is complete in the working tree could not "
+            "be staged. An incompletion with a cause attached is answerable; "
+            "one without a cause was read as an unexplained failure."
+        ),
+    )
 
 
 class AgentRound(BaseModel):
@@ -428,6 +562,26 @@ class IntegrationRecord(BaseModel):
     completed: bool = False
 
 
+class JoinProgress(BaseModel):
+    """How far integration has got, recorded as each parent lands.
+
+    :class:`IntegrationRecord` is written once every join is done, so until
+    then there was nowhere to say "six of twelve" — and writing a partial one
+    would make ``integrate`` skip the join block and verify a half-merged
+    tree. A resume therefore fell back to the run's source commit and hard
+    reset the worktree, discarding every join already built and re-deriving
+    the same questions under fresh ids, which a human then answered twice.
+
+    Recording it separately keeps the two facts apart: this says where the
+    join sequence got to, the record says the sequence finished.
+    """
+
+    model_config = FROZEN
+
+    joined: list[str]
+    commit: str
+
+
 class VerificationRecord(BaseModel):
     model_config = FROZEN
 
@@ -437,12 +591,13 @@ class VerificationRecord(BaseModel):
     exit_code: int
 
 
-class FinalReview(BaseModel):
+class WorktreeRemoval(BaseModel):
+    """Whether a lease's worktree is gone, and what stands in the way if not."""
+
     model_config = FROZEN
 
-    accepted: bool
-    reason: str
-    residual: list[str] = Field(default_factory=list)
+    freed: bool
+    detail: str = ""
 
 
 class CleanupRecord(BaseModel):
@@ -454,11 +609,32 @@ class CleanupRecord(BaseModel):
     reason: str
 
 
-class ResolveInventory(BaseModel):
+type InventoryPlanner = Callable[["ResolveRequest"], Awaitable["ResolveInventory"]]
+"""How a source carrying raw evidence has it organized into concerns."""
+
+
+class ResolverSource(BaseModel):
+    """What a resolver run starts from, able to yield the inventory it runs.
+
+    A run begins either from concerns already organized or from the review
+    evidence that has yet to be organized into them. Asking the source for its
+    inventory keeps the entry point free of both spellings, so a further kind
+    of starting point is one class rather than an edit to the entry point.
+    """
+
     model_config = FROZEN
 
+    @abstractmethod
+    async def inventory(self, planner: InventoryPlanner) -> "ResolveInventory":
+        """The concerns this run executes, planned first if they are not yet."""
+
+
+class ResolveInventory(ResolverSource):
     source: SourceSnapshot
     concerns: list[Concern]
+
+    async def inventory(self, planner: InventoryPlanner) -> "ResolveInventory":
+        return self
 
     @model_validator(mode="after")
     def unique_concerns(self) -> "ResolveInventory":
@@ -468,13 +644,35 @@ class ResolveInventory(BaseModel):
         return self
 
 
-class ResolveRequest(BaseModel):
-    """Unorganized review evidence supplied to the shared inventory phase."""
+class ResolveRequest(ResolverSource):
+    """Unorganized review evidence supplied to the shared inventory phase.
 
-    model_config = FROZEN
+    Evidence is positional across both lists: notes occupy indexes ``0`` to
+    ``len(notes) - 1`` and statements continue from there, so one planning
+    turn references either kind the same way.
+    """
 
     source: SourceSnapshot
-    notes: list[InventoryNote] = Field(min_length=1)
+    notes: list[InventoryNote] = Field(default_factory=list)
+    statements: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Evidence a human gave in their own words, for work nothing in "
+            "the tree carries a note for."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def evidence_is_present(self) -> "ResolveRequest":
+        if not self.notes and not self.statements:
+            raise ValueError("a resolve request needs at least one piece of evidence")
+        return self
+
+    def evidence_count(self) -> int:
+        return len(self.notes) + len(self.statements)
+
+    async def inventory(self, planner: InventoryPlanner) -> ResolveInventory:
+        return await planner(self)
 
 
 class ConcernInventory(BaseModel):
@@ -495,6 +693,40 @@ class ConcernInventory(BaseModel):
         if len(identifiers) != len(dict.fromkeys(identifiers)):
             raise ValueError("planned concern ids must be unique")
         return self
+
+
+class AdmissionRequest(BaseModel):
+    """Evidence discovered while a run was already moving.
+
+    Only this evidence is planned; the run's existing concerns, recorded
+    answers, and completed work are carried forward untouched, because the
+    moment a run is most informative about what else needs doing is the
+    moment it can least afford to be re-derived.
+    """
+
+    model_config = FROZEN
+
+    notes: list[InventoryNote] = Field(default_factory=list)
+    statements: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def evidence_is_present(self) -> "AdmissionRequest":
+        if not self.notes and not self.statements:
+            raise ValueError("an admission needs at least one piece of evidence")
+        return self
+
+
+class ConcernAdmission(BaseModel):
+    """What one mid-run admission added to a live run."""
+
+    model_config = FROZEN
+
+    run_id: str
+    phase: ResolvePhase
+    concerns: list[Concern]
+    questions: list[MaterialQuestion]
+    outstanding: list[MaterialQuestion] = Field(default_factory=list)
+    rejected: list[str] = Field(default_factory=list)
 
 
 class ResolverConfig(BaseModel):
@@ -562,9 +794,8 @@ class ResolveState(BaseModel):
     bases: list[DependencyBase] = Field(default_factory=list)
     outcomes: list[ConcernOutcome] = Field(default_factory=list)
     integration: IntegrationRecord | None = None
+    join_progress: JoinProgress | None = None
     verification: list[VerificationRecord] = Field(default_factory=list)
-    final_review: FinalReview | None = None
-    accepted: bool | None = None
     cleanup: list[CleanupRecord] = Field(default_factory=list)
     failures: list[str] = Field(default_factory=list)
     resume_from: ResolvePhase | None = None
@@ -586,6 +817,51 @@ class ResolveState(BaseModel):
         return self
 
 
+class RunTally(BaseModel):
+    """Aggregate progress a watcher reads at a glance.
+
+    Reconstructing "how far along is this run" took a full read of the
+    record and the worktrees; every piece is already in state, so the
+    aggregation lives beside it and every surface prints the same one.
+    """
+
+    model_config = FROZEN
+
+    phase: ResolvePhase
+    total: int
+    by_status: dict[ConcernStatus, int]
+    joined: int
+    join_total: int
+
+    def concerns_line(self) -> str:
+        """The tally as one compact human line."""
+        counted = " · ".join(
+            f"{status} {count}" for status, count in self.by_status.items() if count
+        )
+        line = f"{counted or 'no concerns'} of {self.total}"
+        if self.join_total:
+            line += f" · joins {self.joined}/{self.join_total}"
+        return line
+
+
+def run_tally(state: ResolveState) -> RunTally:
+    """Fold one persisted state into the aggregate a watcher wants."""
+    statuses = [item.status for item in state.progress]
+    return RunTally(
+        phase=state.phase,
+        total=len(statuses),
+        by_status={
+            status: statuses.count(status) for status in dict.fromkeys(statuses)
+        },
+        joined=len(state.join_progress.joined) if state.join_progress else 0,
+        join_total=(
+            len([outcome for outcome in state.outcomes if outcome.commit is not None])
+            if state.join_progress
+            else 0
+        ),
+    )
+
+
 class ResolveManifest(BaseModel):
     model_config = FROZEN
 
@@ -595,6 +871,4 @@ class ResolveManifest(BaseModel):
     review_branch: str
     outcomes: list[ConcernOutcome]
     verification: list[VerificationRecord]
-    final_review: FinalReview | None = None
-    accepted: bool | None = None
     cleanup: list[CleanupRecord] = Field(default_factory=list)

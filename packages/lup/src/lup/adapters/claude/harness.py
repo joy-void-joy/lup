@@ -2,8 +2,9 @@
 
 import json
 import shlex
-from importlib import resources
+from collections.abc import Sequence
 from pathlib import Path
+from lup.harness.banner import PROMPT_TEXT, VERBATIM_COPY
 from lup.harness.contracts import (
     ArtifactRenderer,
     Atom,
@@ -12,6 +13,7 @@ from lup.harness.contracts import (
     PromptRenderer,
 )
 from lup.harness.generation import argument_text
+from lup.harness.prompts import guidance_banner
 from lup.harness.models import (
     Agent,
     Artifact,
@@ -27,10 +29,17 @@ from lup.harness.models import (
     TreeLocation,
 )
 from lup.policy.bundle import (
+    POLICY_DATA_BANNER,
     policy_kernel_modules,
     render_policy_data,
     runtime_url_scope,
 )
+from lup.policy.dispatcher import (
+    DispatcherDeclaration,
+    compile_dispatcher,
+    dispatcher_banner,
+)
+from lup.policy.kernel.rows import PathRoleRow
 
 
 CLAUDE_MODEL_ALIASES: dict[ModelTier, str] = {
@@ -100,15 +109,13 @@ class ClaudeSpellings(NativeSpellings):
             "The command accepts optional flags: `--run-id <id>` resumes "
             "a persisted run and `--accept`/`--reject` records the human "
             "decision on its review branch. It waits zero seconds by "
-            "default and parks on material questions — relay them to "
-            "the user verbatim, never answer them yourself, then rerun "
-            "with the repeatable `--answer <question-id>=<value>` flag. "
-            "Relay each question with everything printed alongside it — the "
-            "`# lup:` notes it was raised from, the concern's spec, and its "
-            "acceptance criteria — because a bare prompt reads as a decision "
-            "with no stakes and cannot be judged. Choices are the planner's "
-            "suggestions, not a menu: say so, and pass an answer in the "
-            "user's own words when they give one. "
+            "default and parks on material questions, printing each one "
+            "beside the `# lup:` notes it was raised from, the concern's "
+            "spec, and its acceptance criteria; rerun with the repeatable "
+            "`--answer <question-id>=<value>` flag to answer them. "
+            "`--admit <text>` admits work discovered mid-run in the human's "
+            "own words and `--admit-note <file>:<line>` admits a note you "
+            "wrote in the tree, both repeatable. "
             "Never pass `--wait` or `--supervise`; both hold a run open "
             "for a human instead of parking — `--wait` at the mailbox, "
             "`--supervise` at the page it opens."
@@ -122,6 +129,13 @@ class ClaudeSpellings(NativeSpellings):
             "the Claude Code and Agent SDK documentation at "
             "https://docs.claude.com/ and https://code.claude.com/"
         )
+
+    def project_root(self) -> str:
+        # Claude Code substitutes this into a plugin-provided MCP command
+        # without needing a default, so a server reaches the repository it
+        # serves from whichever scope the plugin was installed in — the local
+        # directory a launch verifies in place, or the marketplace cache.
+        return "${CLAUDE_PROJECT_DIR}"
 
     def model_alias(self, tier: ModelTier) -> str | None:
         return CLAUDE_MODEL_ALIASES[tier]
@@ -160,6 +174,24 @@ class ClaudeSpellings(NativeSpellings):
                 return Atom(f"{root}/TEMPLATE_CLAUDE.md")
 
 
+CLAUDE_ABSENT_TOOLS = ("Glob", "Grep")
+"""Built-ins the portable vocabulary names that Claude Code does not ship.
+
+The vocabulary is deliberately a superset — adapters translate their own
+tool identities onto it — so a name in it is a request, not a promise. A
+granted name the runtime has no tool for grants nothing while reading as a
+capability the agent has, and an agent that believes it spends a turn per
+attempt discovering otherwise. Filtered where the runtime is known, so a
+declaration keeps naming the portable set and a runtime that ships these
+again needs one edit here rather than one per declaration.
+"""
+
+
+def claude_granted_tools(tools: Sequence[str]) -> list[str]:
+    """Keep only the grants this runtime can actually honor."""
+    return [tool for tool in tools if tool not in CLAUDE_ABSENT_TOOLS]
+
+
 class ClaudeSkillRenderer(ArtifactRenderer[Skill]):
     """Render one portable skill as a Claude command Markdown artifact."""
 
@@ -169,8 +201,9 @@ class ClaudeSkillRenderer(ArtifactRenderer[Skill]):
 
     def render(self, source: Skill) -> ArtifactTree:
         frontmatter = [f"description: {json.dumps(source.description)}"]
-        if source.tools:
-            frontmatter.append("allowed-tools: " + ", ".join(source.tools))
+        granted = claude_granted_tools(source.tools)
+        if granted:
+            frontmatter.append("allowed-tools: " + ", ".join(granted))
         if source.argument_hint is not None:
             frontmatter.append(f"argument-hint: {json.dumps(source.argument_hint)}")
         elif source.arguments:
@@ -194,6 +227,7 @@ class ClaudeSkillRenderer(ArtifactRenderer[Skill]):
                     ),
                     content=content,
                     semantic_id=source.id,
+                    banner=PROMPT_TEXT,
                 )
             ]
         )
@@ -210,7 +244,7 @@ class ClaudeAgentRenderer(ArtifactRenderer[Agent]):
         self.spellings = spellings
 
     def render(self, source: Agent) -> ArtifactTree:
-        tools = ", ".join(source.tools)
+        tools = ", ".join(claude_granted_tools(source.tools))
         alias = (
             None if source.model is None else self.spellings.model_alias(source.model)
         )
@@ -234,6 +268,7 @@ class ClaudeAgentRenderer(ArtifactRenderer[Agent]):
                     ),
                     content=content,
                     semantic_id=source.id,
+                    banner=PROMPT_TEXT,
                 )
             ]
         )
@@ -249,7 +284,7 @@ class ClaudePluginManifestRenderer(ArtifactRenderer[Plugin]):
             "description": source.description,
         }
         marketplace = {
-            "name": "lup-template",
+            "name": source.marketplace,
             "owner": {"name": "Lup"},
             "plugins": [
                 {
@@ -277,6 +312,38 @@ class ClaudePluginManifestRenderer(ArtifactRenderer[Plugin]):
         )
 
 
+class ClaudeMcpRenderer(ArtifactRenderer[Plugin]):
+    """Render a plugin's tool servers where Claude Code reads a plugin's own.
+
+    A plugin-provided configuration is the scope that follows the plugin: it
+    starts with the plugin rather than asking the project to enable it, and it
+    is the one scope whose commands substitute the project root.
+    """
+
+    def __init__(self, spellings: NativeSpellings) -> None:
+        self.spellings = spellings
+
+    def render(self, source: Plugin) -> ArtifactTree:
+        servers = {
+            server.name: {
+                "command": server.command,
+                "args": server.command_line(self.spellings),
+            }
+            for server in source.mcp_servers
+        }
+        return ArtifactTree(
+            artifacts=[
+                Artifact(
+                    path=Path(f".claude/plugins/{source.name}/.mcp.json"),
+                    content=json.dumps(
+                        {"mcpServers": servers}, indent=2, sort_keys=True
+                    ),
+                    semantic_id=source.id,
+                )
+            ]
+        )
+
+
 class ClaudeGuidanceRenderer(ArtifactRenderer[Harness]):
     """Render project guidance at Claude's adapter-owned repository location."""
 
@@ -286,21 +353,31 @@ class ClaudeGuidanceRenderer(ArtifactRenderer[Harness]):
     def render(self, source: Harness) -> ArtifactTree:
         return ArtifactTree(
             artifacts=[
-                Artifact(
+                Artifact.generated(
                     path=Path(".claude/CLAUDE.md"),
-                    content=self.prompts.render(source.guidance),
+                    body=self.prompts.render(source.guidance),
                     semantic_id="harness.guidance",
+                    banner=guidance_banner(self.prompts, source.guidance),
                 )
             ]
         )
 
 
-CLAUDE_POLICY_DISPATCHER = (
-    resources.files("lup.adapters.claude")
-    .joinpath("assets/policy_dispatcher.py")
-    .read_text("utf-8")
+CLAUDE_DISPATCHER = DispatcherDeclaration(
+    runtime_name="Claude Code",
+    package="lup.adapters.claude",
+    managed_root_env="CLAUDE_CONFIG_DIR",
+    routed_tools=["Bash", "WebFetch", "Edit", "Write"],
+    hook_events=["PreToolUse"],
+    failure="conservative_ask",
+    runtime_modules=["policy_data"],
 )
-"""Hermetic hook dispatcher script, shipped verbatim into the plugin tree."""
+"""Everything Claude Code spells differently from every other runtime.
+
+The tools named here are both what the plugin registers the hook for and
+what the compiler proves the dispatcher routes, so a tool cannot be handed
+to the hook without a branch that decides it.
+"""
 
 
 class ClaudeHookRenderer(ArtifactRenderer[HookSet]):
@@ -311,24 +388,23 @@ class ClaudeHookRenderer(ArtifactRenderer[HookSet]):
         self.worker_identity = worker_identity
 
     def render(self, source: HookSet) -> ArtifactTree:
+        registration = [
+            {
+                "matcher": "|".join(CLAUDE_DISPATCHER.routed_tools),
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": (
+                            'python3 "$CLAUDE_PLUGIN_ROOT/hooks/scripts/policy.py"'
+                        ),
+                        "timeout": 30,
+                    }
+                ],
+            }
+        ]
         hooks = {
             "description": "Lup semantic permission policy",
-            "hooks": {
-                "PreToolUse": [
-                    {
-                        "matcher": "WebFetch|Bash|Edit|Write",
-                        "hooks": [
-                            {
-                                "type": "command",
-                                "command": (
-                                    'python3 "$CLAUDE_PLUGIN_ROOT/hooks/scripts/policy.py"'
-                                ),
-                                "timeout": 30,
-                            }
-                        ],
-                    }
-                ]
-            },
+            "hooks": {event: registration for event in CLAUDE_DISPATCHER.hook_events},
         }
         evidence = {"schemaVersion": 1, "policyIds": source.policy_ids}
         return ArtifactTree(
@@ -342,9 +418,10 @@ class ClaudeHookRenderer(ArtifactRenderer[HookSet]):
                     path=Path(
                         f".claude/plugins/{self.plugin_name}/hooks/scripts/policy.py"
                     ),
-                    content=CLAUDE_POLICY_DISPATCHER,
+                    content=compile_dispatcher(CLAUDE_DISPATCHER),
                     semantic_id=source.id,
                     executable=True,
+                    banner=dispatcher_banner(CLAUDE_DISPATCHER),
                 ),
                 *[
                     Artifact(
@@ -354,15 +431,17 @@ class ClaudeHookRenderer(ArtifactRenderer[HookSet]):
                         ),
                         content=module.source,
                         semantic_id=source.id,
+                        banner=VERBATIM_COPY,
                     )
                     for module in policy_kernel_modules()
                 ],
-                Artifact(
+                Artifact.generated(
                     path=Path(
                         f".claude/plugins/{self.plugin_name}/hooks/runtime/"
                         "policy_data.py"
                     ),
-                    content=render_policy_data(
+                    banner=POLICY_DATA_BANNER,
+                    body=render_policy_data(
                         allowed_fetch_scopes=[
                             runtime_url_scope(
                                 str(scope.origin),
@@ -389,7 +468,13 @@ class ClaudeHookRenderer(ArtifactRenderer[HookSet]):
                             self.worker_identity,
                             f"{self.plugin_name}:{self.worker_identity}",
                         ],
-                        shell_rule_extension=list(source.shell_rules),
+                        path_roles=[
+                            PathRoleRow(root=role.root.as_posix(), role=role.role)
+                            for role in source.path_roles
+                        ],
+                        shell_rules=list(source.shell_rules),
+                        recoverable_target_limit=source.recoverable_target_limit,
+                        runner_targets=list(source.runner_targets),
                     ),
                     semantic_id=source.id,
                 ),

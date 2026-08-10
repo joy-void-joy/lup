@@ -127,7 +127,7 @@ def commit_results() -> None:
     try:
         git.add("notes/")
         # --quiet exits 1 exactly when something is staged — git's own probe.
-        staged = git.diff("--cached", "--quiet", _ok_code=[0, 1])
+        staged = git.diff("--cached", "--quiet", _ok_code=[0, 1], _return_cmd=True)
         if staged.exit_code == 1:
             git.commit("-m", "data(sessions): auto-commit session results")
             typer.echo("Committed session results.")
@@ -167,7 +167,7 @@ def run(
             "--persistent",
             help="Persistent (sleep/wake) session via the file relay — "
             "AGENT_SDK=codex/openai; replies print to stdout "
-            "(see PATTERNS.md, Persistent Agent)",
+            "(see docs/orchestration.md, Persistent Agent)",
         ),
     ] = False,
     verbose: Annotated[

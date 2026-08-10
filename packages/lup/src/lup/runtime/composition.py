@@ -24,7 +24,7 @@ from lup.runtime.errors import (
     TurnFailure,
 )
 from lup.runtime.models import (
-    TurnBlock,
+    AnyTurnBlock,
     TurnHandle,
     TurnIdentifiers,
     TurnMessage,
@@ -45,9 +45,17 @@ class CompletedTurn(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     messages: list[TurnMessage] = Field(default_factory=list)
-    blocks: list[TurnBlock] = Field(default_factory=list)
+    blocks: list[AnyTurnBlock] = Field(default_factory=list)
     usage: Usage = Field(default_factory=Usage)
     duration: timedelta = timedelta()
+    identifiers: TurnIdentifiers | None = Field(
+        default=None,
+        description=(
+            "Identifiers as the provider settled them during the turn — a "
+            "runtime that adopts the persisted session id reports it here; "
+            "None means the accepted identifiers stand"
+        ),
+    )
 
 
 type CompleteTurn = Callable[[], Awaitable[CompletedTurn]]
@@ -84,6 +92,30 @@ def is_output_model(
     return output_type is not None and issubclass(output_type, BaseModel)
 
 
+def refusal_of(blocks: list[AnyTurnBlock], tool: str) -> str | None:
+    """Why *tool* was refused this turn, if it was called and refused.
+
+    An empty output store reads the same whether the model never submitted
+    or was blocked from submitting, and only the first is worth another
+    prompt. The refusal's own text is the reason to report, because the
+    generic message sends whoever reads it looking for a model mistake.
+    """
+    calls = {
+        block.invoked_call_id
+        for block in blocks
+        if block.tool_call_name == tool and block.invoked_call_id is not None
+    }
+    refusals = (block.refusal for block in blocks)
+    return next(
+        (
+            refusal.detail
+            for refusal in refusals
+            if refusal is not None and refusal.call_id in calls
+        ),
+        None,
+    )
+
+
 class ComposedTurn[T: BaseModel | None](Turn[T]):
     """Assemble native completion and the turn-local validated submission."""
 
@@ -94,12 +126,14 @@ class ComposedTurn[T: BaseModel | None](Turn[T]):
         store: SubmittedOutputStore | None,
         finished: TurnFinished,
         lifecycle: TurnLifecycle,
+        submission_tool: str,
     ) -> None:
         self.accepted = accepted
         self.request = request
         self.store = store
         self.finished = finished
         self.lifecycle = lifecycle
+        self.submission_tool = submission_tool
         self.resolved = False
 
     async def result(self) -> TurnResult[T]:
@@ -134,14 +168,20 @@ class ComposedTurn[T: BaseModel | None](Turn[T]):
                     raise RuntimeError("required output turn has no binding")
                 submitted = self.store.read(output_type)
                 if submitted is None:
+                    refused = refusal_of(completed.blocks, self.submission_tool)
                     raise StructuredOutputError(
                         TurnFailure(
-                            message="turn completed without a valid submit_output call",
+                            message=(
+                                "turn completed without a valid submit_output call"
+                                if refused is None
+                                else f"{self.submission_tool} was refused: {refused}"
+                            ),
                             blocks=completed.blocks,
                             usage=completed.usage,
                             duration=completed.duration,
                             identifiers=self.accepted.identifiers,
                             validation_history=submission_history(self.store),
+                            correctable=refused is None,
                         )
                     )
                 output = submitted
@@ -152,7 +192,7 @@ class ComposedTurn[T: BaseModel | None](Turn[T]):
                     "blocks": completed.blocks,
                     "usage": completed.usage,
                     "duration": completed.duration,
-                    "identifiers": self.accepted.identifiers,
+                    "identifiers": completed.identifiers or self.accepted.identifiers,
                 }
             )
         except TurnError:
@@ -185,9 +225,11 @@ class ComposedSession(Session):
         binder: TurnToolBinder,
         store_factory: OutputStoreFactory | None = None,
         gate_resolver: SubmissionGateResolver | None = None,
+        submission_tool: str = "submit_output",
     ) -> None:
         self.starter = starter
         self.binder = binder
+        self.submission_tool = submission_tool
         self.store_factory = store_factory or InMemorySubmittedOutputStore
         self.gate_resolver = gate_resolver
         self.active = False
@@ -230,7 +272,9 @@ class ComposedSession(Session):
             self.active_lifecycle = None
             self.active_interrupt = None
 
-        turn = ComposedTurn[T](accepted, request, store, finished, lifecycle)
+        turn = ComposedTurn[T](
+            accepted, request, store, finished, lifecycle, self.submission_tool
+        )
         return TurnHandle[T](
             turn=turn,
             events=accepted.events,
@@ -260,13 +304,9 @@ async def bind_output[T: BaseModel](
 ) -> SubmittedOutputStore:
     """Create a fresh store and preserve T through the generic binder call."""
     store = store_factory()
-    erased_gate = gate_resolver(output_type) if gate_resolver is not None else None
-
-    async def gate(value: T) -> SubmissionDecision:
-        if erased_gate is None:
-            return SubmissionDecision(accepted=True)
-        return await erased_gate(value)
-
+    # A gate that accepts the base accepts this turn's T, so the resolved one
+    # is installed as it is rather than wrapped in a closure that only forwards.
+    gate = gate_resolver(output_type) if gate_resolver is not None else None
     binding = TurnToolBinding[T](output_type=output_type, store=store, gate=gate)
     await binder.bind(binding)
     return store
@@ -275,14 +315,21 @@ async def bind_output[T: BaseModel](
 def submission_gate_resolver[T: BaseModel](
     output_type: type[T], gate: SubmissionGate[T]
 ) -> SubmissionGateResolver:
-    """Resolve one typed submission gate without putting it on turn input."""
+    """Resolve one typed submission gate without putting it on turn input.
+
+    The erasure below is the cost of that choice, not a necessity: a session
+    is configured before any turn names an output type, so the lookup is
+    dynamic and `candidate is output_type` refines nothing for the checker.
+    Revalidating earns the narrowing a `cast` would merely assert. Moving the
+    gate onto `TurnRequest` beside `output_type` would remove it entirely.
+    """
 
     def resolve(candidate: type[BaseModel]) -> SubmissionGate[BaseModel] | None:
         if candidate is not output_type:
             return None
 
         async def erased(
-            value: BaseModel,  # lup: ignore[bare-basemodel] — typed erasure boundary
+            value: BaseModel,  # lup: ignore[bare-basemodel] — the dynamic lookup above
         ) -> SubmissionDecision:
             typed = output_type.model_validate(value.model_dump(mode="json"))
             return await gate(typed)

@@ -9,11 +9,11 @@ import json
 from pathlib import Path
 
 import pytest
-import sh
 from typer.testing import CliRunner
 
-from lup_template.devtools.feedback import commits
+from lup.devtools.feedback import commits
 from lup_template.devtools.main import app
+from tests.unit.repos import initialized_repo
 
 from tests.unit.conftest import LUP_PROJECT_VERSION
 
@@ -60,13 +60,7 @@ def test_uncommitted_session_ids_handle_spaces_and_renames(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     repo = tmp_path / "repo"
-    repo.mkdir()
-    git = sh.Command("git").bake(
-        "-C", str(repo), "-c", "commit.gpgsign=false", _tty_out=False
-    )
-    git("init", "-b", "main")
-    git("config", "user.email", "test@example.com")
-    git("config", "user.name", "Test")
+    git = initialized_repo(repo, tmp_path / "no-hooks")
 
     committed = session_path(repo, "old-name")
     committed.mkdir(parents=True)

@@ -35,7 +35,7 @@ def collect_tools_by_server(
         return {EXAMPLE_GROUP: list(EXAMPLE_TOOLS)}
 
     from lup.reflect import ReviewGate
-    from lup.runtime.contracts import SessionFactory
+    from lup.runtime.factory import SessionFactory
     from lup.subagents import create_run_subagent_tool
     from lup.types import SubagentSpec
     from lup_template.agent.core import build_auxiliary_factory
@@ -97,13 +97,39 @@ def collect_registry_tools() -> dict[ServerGroup, list[LupMcpTool]]:
     return toolset["groups"]
 
 
-def serve_tools(list_only: bool, server_group: ServerGroup | None) -> None:
+def harness_session_context(name: str) -> SessionContext:
+    """Open the session a natively launched tool server serves.
+
+    An adapter-launched server is handed a session that already exists; a
+    server a native runtime starts is the first thing in that session to run,
+    so it opens one under the name it was given. The name is the whole
+    identity, and every group of one runtime's session is started with the
+    same name, so those processes agree on where session state lives without
+    a channel between them.
+    """
+    from lup.workspace.notes import session_gate_flag, setup_notes
+
+    notes = setup_notes(session_id=name, task_id=name, type="harness")
+    return SessionContext(
+        session_dir=notes.session,
+        outputs_dir=notes.output.parent,
+        gate_flag=session_gate_flag(name),
+        session_id=name,
+        task_id=name,
+    )
+
+
+def serve_tools(
+    list_only: bool, server_group: ServerGroup | None, session: str | None = None
+) -> None:
     """Serve the collected tools over MCP stdio (see the ``serve-tools`` command)."""
     from lup.workspace.context import read_session_context
     from lup.mcp import create_mcp_server, serve_stdio
     from lup.telemetry.metrics import configure_metrics, metrics_path
 
     context = read_session_context()
+    if context is None and session is not None:
+        context = harness_session_context(session)
     if context is not None:
         configure_metrics(metrics_path(context.session_dir))
 

@@ -1,6 +1,6 @@
 ---
 description: "Import a specific pattern from a tracked downstream repo"
-allowed-tools: Bash(git:*, uv run lup-devtools:*), Read, Grep, Glob, Edit, Write, AskUserQuestion, Skill(lup:commit)
+allowed-tools: Bash(git:*, uv run lup-devtools:*), Read, Edit, Write, AskUserQuestion, Skill(lup:commit)
 argument-hint: "<project> <pattern description>"
 ---
 
@@ -56,8 +56,8 @@ Use the pattern description to locate relevant code. The downstream repo is acce
 
 Search strategy:
 
-- **Grep** for keywords from the pattern description across the downstream repo
-- **Glob** for file paths if the description mentions specific files or directories
+- **`grep`** through `Bash` for keywords from the pattern description across the downstream repo
+- **`find`** through `Bash` for file paths if the description mentions specific files or directories
 - **Read** promising matches to understand the full implementation
 
 Cast a wide net — search file names, function names, class names, commit messages, and comments. The user's description may not match the exact naming in the downstream repo.

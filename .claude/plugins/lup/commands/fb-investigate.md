@@ -1,6 +1,6 @@
 ---
 description: "Deep trace reading and error classification for selected sessions"
-allowed-tools: Bash(uv run lup-devtools:*), Read, Grep, Glob, Task, AskUserQuestion
+allowed-tools: Bash(uv run lup-devtools:*), Read, Task, AskUserQuestion
 argument-hint: "<session_id1> [session_id2 ...]"
 ---
 

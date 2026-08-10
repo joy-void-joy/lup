@@ -19,6 +19,10 @@ class UrlScopeRow(TypedDict):
 
     ``include_subdomains`` widens ``host`` to cover names beneath it, so a
     scope can name a documentation site once instead of every subdomain.
+    ``any_port`` widens it the other way, for a host whose port is the
+    caller's to choose — a local service started with ``--port`` is the same
+    service at every one of them, and a scope pinned to one would put the
+    question back the first time somebody moved it.
     """
 
     scheme: str
@@ -27,6 +31,7 @@ class UrlScopeRow(TypedDict):
     path_prefix: str
     reason: str
     include_subdomains: bool
+    any_port: bool
 
 
 class PathRuleRow(TypedDict):
@@ -42,6 +47,23 @@ class PathRuleRow(TypedDict):
     allow_autonomous: bool
 
 
+type PathRoleName = Literal["production", "test", "scratch"]
+
+
+class PathRoleRow(TypedDict):
+    """One erased declaration of what a repository root is for.
+
+    A role names the purpose a tree serves, which is what decides how much of
+    the lattice applies to it. ``test`` code is judged by whether it exercises
+    production, not by production's own conventions; ``scratch`` is disposable
+    by construction, so the verbs that ask before destroying something have
+    nothing to protect there.
+    """
+
+    root: str
+    role: PathRoleName
+
+
 class AntiPatternRow(TypedDict):
     """One erased anti-pattern rule and the syntactic context it inspects."""
 
@@ -49,6 +71,12 @@ class AntiPatternRow(TypedDict):
     pattern: str
     message: str
     context: str
+    strength: str
+    """"strong" when no directive may silence this rule, "soft" when one may.
+
+    The audit refuses a directive on a strong rule; the hook has to refuse the
+    same one, or an edit the hook admits is an edit `dev check` then rejects.
+    """
 
 
 class ShellRuleRow(TypedDict):

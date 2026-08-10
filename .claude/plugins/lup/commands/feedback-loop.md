@@ -1,6 +1,6 @@
 ---
 description: "Full feedback loop \u2014 orchestrates status, investigation, analysis, reflection, and implementation"
-allowed-tools: Bash(git:*, uv run lup-devtools:*, uv run lup:*), Read, Grep, Glob, Edit, Write, Agent, WebSearch, WebFetch, AskUserQuestion, Skill(lup:fb-status), Skill(lup:fb-investigate), Skill(lup:fb-analyze), Skill(lup:fb-reflect), Skill(lup:fb-implement)
+allowed-tools: Bash(git:*, uv run lup-devtools:*, uv run lup:*), Read, Edit, Write, Agent, WebSearch, WebFetch, AskUserQuestion, Skill(lup:fb-status), Skill(lup:fb-investigate), Skill(lup:fb-analyze), Skill(lup:fb-reflect), Skill(lup:fb-implement)
 argument-hint: "[optional: paste a trace, reflection, or output for single-trace analysis]"
 ---
 

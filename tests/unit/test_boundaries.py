@@ -1,8 +1,13 @@
-"""Seam-boundary scan behavior: what breaches, what is sanctioned, what escapes.
+"""Boundary scan behavior: what breaches, what is sanctioned, what escapes.
 
-The scan (:mod:`lup.codescan.boundaries`) is the regression guard that keeps
-per-engine adapter imports from creeping outside ``lup.adapters``; the final
-test pins the live tree at zero breaches.
+The scan (:mod:`lup.codescan.boundaries`) guards two directions. Inward, it is
+the regression guard that keeps per-engine adapter imports from creeping
+outside ``lup.adapters``, and the live tree is pinned at zero breaches.
+Outward, the placement rule judges whether a library data table reaches its
+adopters as an overridable default; the live tree still carries known
+violations, so those tests work from fixtures rather than pinning a count.
+The shell vocabulary is the exception: it has moved out of the library, and
+two tests hold it there against the live tree.
 """
 
 from pathlib import Path
@@ -10,14 +15,29 @@ from pathlib import Path
 from lup.codescan.boundaries import (
     audit_boundaries,
     audit_kernel_imports,
+    audit_library_defaults,
     audit_path_boundaries,
+    default_position_names,
     find_boundary_breaches,
+    find_library_default_breaches,
     find_native_spelling_breaches,
+    generated_tree_paths,
+    library_placement_path_is_audited,
     native_spelling_path_is_sanctioned,
     path_is_sanctioned,
 )
 
-from lup_template.devtools.dev.boundaries import scan_boundaries
+from lup_template.devtools.harness.catalog import (
+    NATIVE_RUNTIMES,
+    application_roots,
+    dev_project,
+)
+from lup.devtools.dev.boundaries import (
+    library_sources,
+    overridable_names,
+    scan_boundaries,
+    scan_library_placement,
+)
 
 BREACHING = "from lup.adapters.claude.runtime import ClaudeSessionFactory\n"
 
@@ -107,10 +127,26 @@ def test_native_spelling_suppression_is_audited() -> None:
 
 
 def test_sanctioned_paths() -> None:
+    roots = application_roots()
     assert path_is_sanctioned(Path("packages/lup/src/lup/adapters/claude/runtime.py"))
-    assert path_is_sanctioned(Path("tests/unit/test_adapter_transforms.py"))
-    assert path_is_sanctioned(Path("src/lup_template/agent/core.py"))
-    assert not path_is_sanctioned(Path("packages/lup/src/lup/subagents.py"))
+    assert path_is_sanctioned(Path("tests/unit/test_adapter_transforms.py"), roots)
+    assert path_is_sanctioned(Path("src/lup_template/agent/core.py"), roots)
+    assert not path_is_sanctioned(Path("packages/lup/src/lup/subagents.py"), roots)
+
+
+def test_an_application_that_says_nothing_sanctions_nothing_of_its_own() -> None:
+    """The library guards its own package and can name no adopter's."""
+    assert not path_is_sanctioned(Path("src/lup_template/agent/core.py"))
+    assert path_is_sanctioned(Path("packages/lup/src/lup/adapters/codex/harness.py"))
+
+
+def test_a_generated_tree_is_sanctioned_by_the_runtime_that_spells_it() -> None:
+    """Asked of the runtimes, so a location they learn sanctions its own tree."""
+    roots = application_roots()
+    for spelled in generated_tree_paths(NATIVE_RUNTIMES, ["lup"]):
+        assert path_is_sanctioned(
+            Path(spelled) / "any.py", roots
+        ) or path_is_sanctioned(Path(spelled), roots)
 
 
 def test_portable_content_is_scanned_for_native_spellings() -> None:
@@ -119,10 +155,11 @@ def test_portable_content_is_scanned_for_native_spellings() -> None:
         "from lup.adapters.claude.runtime import ClaudeSessionFactory\n"
         'method = "turn/start"\n'
     )
+    roots = application_roots()
 
-    assert path_is_sanctioned(path)
-    assert not native_spelling_path_is_sanctioned(path)
-    findings = audit_path_boundaries(path, text)
+    assert path_is_sanctioned(path, roots)
+    assert not native_spelling_path_is_sanctioned(path, roots)
+    findings = audit_path_boundaries(path, text, roots)
     assert [(item.rule_id, item.line) for item in findings] == [("native-spelling", 2)]
 
 
@@ -136,4 +173,132 @@ def test_policy_kernel_imports_are_pinned_to_hermetic_stdlib() -> None:
 
 
 def test_live_tree_has_zero_breaches() -> None:
-    assert scan_boundaries() == []
+    assert scan_boundaries(dev_project()) == []
+
+
+TABLE = 'READ_ONLY_COMMANDS = ("ls", "cat", "grep")\n'
+NOTHING_OVERRIDABLE = ()
+"""A library where no caller can replace anything."""
+
+
+def test_a_library_table_no_caller_can_replace_breaches() -> None:
+    breaches = find_library_default_breaches(TABLE, NOTHING_OVERRIDABLE)
+
+    assert [(item.line, item.module) for item in breaches] == [
+        (1, "READ_ONLY_COMMANDS")
+    ]
+
+
+def test_only_declared_multi_entry_tables_are_judged() -> None:
+    text = (
+        'PREAMBLE = "one long prompt contract"\n'
+        'SINGLETON = ("only",)\n'
+        "DERIVED = [name.upper() for name in OTHER]\n"
+        "lowercase = (1, 2)\n"
+    )
+
+    assert find_library_default_breaches(text, NOTHING_OVERRIDABLE) == []
+
+
+def test_every_admitted_default_spelling_clears_a_table() -> None:
+    reached = {
+        "SIGNATURE": "def build(rules: list[str] = SIGNATURE) -> None: ...\n",
+        "FIELD": "class Set(BaseModel):\n    rules: list[str] = Field(default=FIELD)\n",
+        "FACTORY": (
+            "class Set(BaseModel):\n"
+            "    rules: list[str] = Field(default_factory=lambda: FACTORY)\n"
+        ),
+        "SENTINEL": "def build(rules=None):\n    return SENTINEL if rules is None else rules\n",
+        "FALLBACK": "def build(rules=None):\n    return rules or FALLBACK\n",
+    }
+
+    for name, consumer in reached.items():
+        declaration = f'{name} = ("a", "b")\n'
+        overridable = default_position_names(consumer)
+
+        assert name in overridable, name
+        assert find_library_default_breaches(declaration, overridable) == [], name
+
+
+# A directive inside the first ten lines governs the whole file, so proximity
+# is only observable below that window.
+BELOW_FILE_WINDOW = "\n" * 10
+
+
+def test_a_directive_heading_a_multi_line_table_suppresses_it() -> None:
+    heading = BELOW_FILE_WINDOW + "# lup: ignore[library-default] — canonical\n" + TABLE
+    assert find_library_default_breaches(heading, NOTHING_OVERRIDABLE) == []
+
+    spread = (
+        BELOW_FILE_WINDOW + "# lup: ignore[library-default] — canonical\n"
+        "READ_ONLY_COMMANDS = (\n"
+        '    "ls",\n'
+        '    "cat",\n'
+        ")\n"
+    )
+    assert find_library_default_breaches(spread, NOTHING_OVERRIDABLE) == []
+    assert audit_library_defaults(spread, NOTHING_OVERRIDABLE) == []
+
+
+def test_a_directive_two_lines_above_a_table_stays_spurious() -> None:
+    detached = (
+        BELOW_FILE_WINDOW + "# lup: ignore[library-default] — canonical\n\n" + TABLE
+    )
+    findings = audit_library_defaults(detached, NOTHING_OVERRIDABLE)
+
+    assert sorted(item.kind for item in findings) == ["missing", "spurious"]
+
+
+SHELL_VOCABULARY = Path("src/lup_template/devtools/harness/content/shell_vocabulary.py")
+"""Where this project's shell command tables live, outside the library."""
+
+MOVED_TABLES = ["SHELL_RULES"]
+"""What still could not move, now that the words themselves have.
+
+The five word tables this once listed reached the library as parameter
+defaults on the groups in ``lup.policy.vocabulary``, so an adopter replaces a
+vocabulary by calling a group differently instead of editing lup. What is
+left is the composition — which groups this project takes and what it passes
+them — and that is the one thing that is genuinely its own judgement, so the
+rule naming it here is the rule working rather than a breach to clear.
+"""
+
+
+def test_the_shell_rule_models_declare_no_vocabulary_of_their_own() -> None:
+    """The library module keeps the models and the erasure, and no table."""
+    breaches = [
+        breach
+        for breach in scan_library_placement()
+        if breach.file == "packages/lup/src/lup/policy/shell_rules.py"
+    ]
+
+    assert breaches == []
+
+
+def test_the_rule_names_every_table_if_the_vocabulary_returns_to_the_library() -> None:
+    """Judge the remaining source against the real library, as if it moved back.
+
+    This once named six tables, and the answer was that the vocabulary could
+    not move. Five of them since did, as parameter defaults an adopter passes
+    over. The composition is what the rule still stops, correctly: it is the
+    one thing in the file that a second project with the same intent would
+    write differently.
+    """
+    breaches = find_library_default_breaches(
+        SHELL_VOCABULARY.read_text(encoding="utf-8"),
+        overridable_names(library_sources()),
+    )
+
+    assert [breach.module for breach in breaches] == MOVED_TABLES
+
+
+def test_adapter_packages_are_exempt_from_the_placement_rule() -> None:
+    assert library_placement_path_is_audited(
+        Path("packages/lup/src/lup/policy/shell_rules.py")
+    )
+    assert not library_placement_path_is_audited(
+        Path("packages/lup/src/lup/adapters/codex/harness.py")
+    )
+    assert not library_placement_path_is_audited(
+        Path("src/lup_template/devtools/harness/catalog.py")
+    )

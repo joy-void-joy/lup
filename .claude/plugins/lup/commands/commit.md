@@ -1,6 +1,6 @@
 ---
 description: "Review all diffs and create atomic commits"
-allowed-tools: Bash(git:*), Read, Glob, Grep
+allowed-tools: Bash(git:*), Read
 ---
 
 # Create Commits

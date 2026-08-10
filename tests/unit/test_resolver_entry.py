@@ -8,10 +8,14 @@ import typer
 from lup.codescan.markers import NoteKind
 from lup.resolver.mailbox import AnswerDoor, QuestionMailbox
 from lup.resolver.models import MaterialQuestion, QuestionBatch
-from lup_template.devtools.dev.comments import FoundComment
-from lup_template.devtools.harness.resolve import (
+from lup.devtools.dev.comments import FoundComment
+from lup.devtools.harness.resolve import (
+    NoteTargetRef,
+    admission_notes,
+    admission_request,
     offer_flag_answers,
     parse_answer_flags,
+    parse_note_targets,
     resolver_intake,
 )
 
@@ -90,8 +94,57 @@ def intake_note(kind: NoteKind = "note", condition: str | None = None) -> FoundC
 def test_resolver_intake_excludes_deferred_notes_from_the_inventory() -> None:
     open_note = intake_note()
     parked = intake_note(kind="defer", condition="until v2 lands")
+    bare = intake_note(kind="defer")
 
-    intake = resolver_intake([open_note, parked])
+    intake = resolver_intake([open_note, parked, bare])
 
     assert intake.actionable == [open_note]
-    assert intake.carried == ["carrying deferred[until v2 lands] parked.py:2-2"]
+    assert intake.carried == [
+        "carrying deferred[until v2 lands] parked.py:2-2",
+        "carrying deferred parked.py:2-2",
+    ]
+
+
+def test_note_targets_parse_a_path_and_a_line() -> None:
+    assert parse_note_targets(["src/module.py:42"]) == [
+        NoteTargetRef(file=Path("src/module.py"), line=42)
+    ]
+    with pytest.raises(typer.BadParameter):
+        parse_note_targets(["src/module.py"])
+    with pytest.raises(typer.BadParameter):
+        parse_note_targets([":42"])
+
+
+def test_an_invocation_without_admission_evidence_asks_for_nothing() -> None:
+    """Every other resolver invocation must stay an ordinary drive."""
+    assert admission_request([], []) is None
+
+
+def test_admitted_statements_become_the_evidence_a_run_plans_from() -> None:
+    request = admission_request(["the relay must investigate first"], [])
+
+    assert request is not None
+    assert request.statements == ["the relay must investigate first"]
+    assert request.notes == []
+
+
+def test_an_admitted_note_carries_the_text_and_context_the_tree_holds() -> None:
+    """An admitted note is the note itself, not a retyped paraphrase."""
+    scanned = intake_note()
+
+    notes = admission_notes([NoteTargetRef(file=Path("parked.py"), line=2)], [scanned])
+
+    assert [(note.file, note.line, note.text) for note in notes] == [
+        (Path("parked.py"), 2, "body")
+    ]
+
+
+def test_an_admitted_note_target_that_names_no_open_note_is_refused() -> None:
+    """A deferred note never reaches the actionable set, so it is refused."""
+    with pytest.raises(typer.BadParameter, match="no actionable"):
+        admission_notes(
+            [NoteTargetRef(file=Path("parked.py"), line=2)],
+            resolver_intake(
+                [intake_note(kind="defer", condition="until v2 lands")]
+            ).actionable,
+        )

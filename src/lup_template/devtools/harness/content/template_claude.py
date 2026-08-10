@@ -17,11 +17,10 @@ from lup_template.devtools.harness.content.template_sections import (
 )
 
 DOCUMENT = models.PromptDocument(
+    source=__name__,
     parts=[
         models.TextPart(
-            text=r"""<!-- Generated from src/lup_template/devtools/harness/content/template_claude.py via `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/generated-artifacts.md. -->
-
-# CLAUDE.md Template
+            text=r"""# CLAUDE.md Template
 
 This file exports portable sections from the upstream CLAUDE.md as a scaffold for downstream projects. It contains conventions, workflow patterns, and coding standards that apply to any project using lup.
 
@@ -54,7 +53,7 @@ This file provides guidance to Claude Code when working with code in this reposi
             text=r""""Lup" is the framework's name for the inner agent, not a project-specific term. Use "Claude" when referring to the outer development agent and "Lup" when referring to the inner SDK agent, regardless of the project's package name."""
         ),
         *PRINCIPLES_THROUGH_PATTERN_MENU,
-        models.TextPart(text=r""" `.claude/PATTERNS.md` carries the full catalog."""),
+        models.TextPart(text=r""" `docs/orchestration.md` carries the full catalog."""),
         *PATTERN_MENU_TAIL_THROUGH_WORKTREE_STEP,
         models.TextPart(
             text=r"""`lup-devtools harness claude` regenerates and launches the verified local plugin"""
@@ -101,8 +100,8 @@ The `pyright-lsp` plugin provides code intelligence. **Use these actively** -- t
 | Find where a function is defined | `go-to-definition` |                  |
 | Find all callers of a function   | `find-references`  |                  |
 | Rename a variable/function/class | `rename-symbol`    |                  |
-| Search for a string literal      |                    | `Grep`           |
-| Search across non-Python files   |                    | `Grep`           |
+| Search for a string literal      |                    | `Bash` + `grep`  |
+| Search across non-Python files   |                    | `Bash` + `grep`  |
 | Change logic within a function   |                    | `Edit`           |
 | Add new code                     |                    | `Edit` / `Write` |
 
@@ -115,7 +114,11 @@ the local Lup plugin and the active profile's account (`CLAUDE_CONFIG_DIR`).
 `lup-devtools usage claude` reports usage for the chosen profile. Profiles are managed
 with `lup-devtools setup profile`.
 
-Each repo names its plugin **marketplace** after the project — the plugin entry stays `lup`, so `/lup:*` is identical everywhere. Marketplace names share one global namespace (`~/.claude/plugins/known_marketplaces.json`), so a shared name like `lup`/`local` collides across repos and an install from one shadows the others; `lup-devtools dev plugin name` (run by `"""
+Each repo names its plugin **marketplace** after the project — the plugin entry stays `lup`, so `"""
+        ),
+        models.SkillPattern(plugin="lup", placeholder="*"),
+        models.TextPart(
+            text=r"""` is identical everywhere. Marketplace names share one global namespace (`~/.claude/plugins/known_marketplaces.json`), so a shared name like `lup`/`local` collides across repos and an install from one shadows the others; `lup-devtools dev plugin name` (run by `"""
         ),
         models.SkillInvocation(plugin="lup", skill="init"),
         models.TextPart(text=r"""` and `"""),
@@ -191,5 +194,5 @@ When the user provides documentation links, incorporate that knowledge into CLAU
 """
         ),
         *SELF_IMPROVEMENT_THROUGH_END,
-    ]
+    ],
 )

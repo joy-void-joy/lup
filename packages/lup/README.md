@@ -13,7 +13,6 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
-from lup import TurnInput, query, turn_request
 from lup.adapters.codex.runtime import (
     CodexSessionConfig,
     create_codex_session_factory,
@@ -28,14 +27,18 @@ class Summary(BaseModel):
 factory = create_codex_session_factory(
     CodexSessionConfig(model="gpt-5.5", cwd=Path.cwd())
 )
-result = await query(
-    factory,
-    turn_request(TurnInput(text="Summarize the findings"), Summary),
-)
+result = await factory.query("Summarize the findings", Summary)
 summary = result.output
 ```
 
-`SessionFactory.open()` yields a transparent `SessionHandle`. Await
+`SessionFactory` is a concrete class over one typed `SessionOpener` callable;
+`query()` is a member of it, and `lup.query` is that same function reached as a
+free alias, so `lup.query(factory, "Summarize the findings", Summary)` accepts
+everything the method does. Both take a prompt string, a `TurnInput`, or a
+prepared `turn_request(...)`, and each spelling infers one exact
+`TurnResult[T]`. `turn_request()` builds the request when a caller needs to hold
+one — a background agent mapping state to requests, or a session started by
+hand. `SessionFactory.open()` yields a transparent `SessionHandle`. Await
 `handle.session.start(request)` to receive a `TurnHandle`, then await
 `turn.turn.result()`. Live events, interruption, steering, and forking are
 optional capabilities on those handles; absence is represented by `None`.
@@ -50,7 +53,9 @@ Other modules provide independently composable runtime decorators, semantic
 policy, deterministic harness generation/reconciliation, the persisted
 resolver, MCP helpers, workspace/history support, scheduling, telemetry, and
 sandboxing. See the repository's
-[architecture guide](../../docs/architecture.md) and
-[0.2 migration guide](../../docs/migration-0.2.md). Runnable factory,
-wrapper, background, profile, endpoint, route, and policy compositions live in
-the repository [examples](../../examples/README.md).
+[library guide](https://github.com/joy-void-joy/lup/blob/main/docs/library.md)
+and
+[architecture guide](https://github.com/joy-void-joy/lup/blob/main/docs/architecture.md).
+Runnable factory, wrapper, background, profile, endpoint, route, and policy
+compositions live in the repository
+[examples](https://github.com/joy-void-joy/lup/tree/main/examples).

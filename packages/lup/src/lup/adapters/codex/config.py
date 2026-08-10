@@ -4,8 +4,11 @@ from pathlib import Path
 
 from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, SecretStr
 
-from lup.adapters.codex.runtime import CodexSessionConfig
-from lup.runtime.config import ConfigTransform, ProfileResolver
+from lup.adapters.codex.runtime import (
+    CodexSessionConfig,
+    create_codex_session_factory,
+)
+from lup.runtime.config import ConfigTransform, ProfileResolver, ProfileSelector
 from lup.types import JsonObject
 
 OPENAI_COMPAT_API_KEY_ENV = "LUP_OPENAI_COMPAT_API_KEY"
@@ -63,6 +66,13 @@ class CodexProfileResolver(ProfileResolver[CodexSessionConfig]):
         except KeyError as error:
             raise KeyError(f"unknown Codex profile {selected!r}") from error
         return CodexProfileTransform(profile)
+
+
+def codex_profile_selector(
+    registry: CodexProfileRegistry,
+) -> ProfileSelector[CodexSessionConfig]:
+    """The surface a consumer holds over Codex profile selection."""
+    return ProfileSelector(CodexProfileResolver(registry), create_codex_session_factory)
 
 
 class CodexCompatibleEndpoint(BaseModel):

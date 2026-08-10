@@ -5,6 +5,8 @@
 
 import lup.harness.models as models
 
+import lup.devtools.harness.content.conventions as conventions
+
 SETUP_THROUGH_NAMING: list[models.PromptPart] = [
     models.TextPart(
         text=r"""<!-- section: First Setup -->
@@ -452,31 +454,12 @@ WORKFLOW_THROUGH_COMMIT_FORMAT: list[models.PromptPart] = [
     models.TextPart(
         text=r"""`** -- Once the PR is approved, merges it and cleans up the branch.
 
-### Merge Conflict Resolution
-
-**Never silently drop code during conflict resolution.** The bias is toward inclusion — keeping both sides is always safer than losing features. A rename on one side must not swallow an addition on the other.
-
-Before completing any merge, **audit for deletions**: compare the result against both parents and verify that every removed function, parameter, or command was intentionally removed, not lost as a side effect of choosing one conflict side.
-
-Use `"""
+"""
     ),
-    models.SkillInvocation(plugin="lup", skill="merge"),
+    *conventions.MERGE_CONFLICT_RESOLUTION,
+    *conventions.COMMIT_GUIDELINES,
     models.TextPart(
-        text=r"""` (with no argument) for guided conflict resolution. See the command for the full decision tree.
-
-### Commit Guidelines
-
-- **Commit before responding** -- Always commit your work before responding to the user. Don't accumulate multiple changes across responses.
-- **Commit early, commit often** -- Frequent commits provide checkpoints and make rebasing easier.
-- **Keep commits atomic** -- Each commit should do one thing. If you need "and" in your message, it should be two commits.
-- **History will be rebased** -- Don't worry about perfect messages during development. The history will be cleaned up before merge.
-- **Meaningful final commits** -- After rebasing, each commit should tell a story: what changed and why.
-
-### Commit Message Format
-
-Use conventional commit syntax: `type(scope): description`
-
-**Types:**
+        text=r"""**Types:**
 
 - `feat` -- New feature or capability
 - `fix` -- Bug fix
@@ -771,7 +754,9 @@ TOOLING_INTRO: list[models.PromptPart] = [
 
 All development tooling lives in `src/<project>/devtools/` and is exposed as the `lup-devtools` CLI entry point. **Always use `lup-devtools` instead of ad-hoc commands.** Never use `uv run python -c "..."` or bare `python`/`python3` -- these are denied by the Bash permission hook.
 
-If you find yourself running the same command repeatedly, **add a command** to `src/<project>/devtools/`. Use `tmp/*.py` for one-off scripts.
+If you find yourself running the same command repeatedly, **add a command** to `src/<project>/devtools/`.
+
+`tmp/` is scratch: gitignored, so nothing written there reaches a diff, a reviewer, or the human — which is why it does not execute. For one-off work, in order: run it in the sandbox where the work allows; add a `lup-devtools` command, which is reviewable because `devtools/` lands in the diff; or, as a last resort, `python3 <<<EOF` behind a `# lup: escalate: <why>` marker. The argument is reviewability, not power — an agent may already edit `devtools/` and run it.
 
 **Write scripts in Python using [typer](https://typer.tiangolo.com/)** for CLI interfaces. Use **[sh](https://sh.readthedocs.io/)** for shell commands instead of `subprocess`.
 
@@ -781,7 +766,7 @@ Run `uv run lup-devtools --help` for the full command tree.
     ),
 ]
 
-CLAUDE_POLICY_SCOPE = r"""The policy classifies each shell command against the `lup.policy.shell_rules` vocabulary, every URL scope, and each edit in a batch. Ask is
+CLAUDE_POLICY_SCOPE = r"""The policy classifies each shell command against the vocabulary declared in `devtools/harness/content/shell_vocabulary.py`, every URL scope, and each edit in a batch. Ask is
 reserved for judged risk; an unjudged command or unparsed construct denies with
 a hint naming the `# lup: escalate: <why>` marker, and that leading marker
 promotes the classified decision to an approval question carrying the agent's
@@ -803,7 +788,7 @@ pass read-only script screens, `curl` is screened to read methods within the
 declared URL scopes, and edit decisions include protected
 paths, marker changes, size, and the canonical anti-pattern audit."""
 
-CODEX_POLICY_SCOPE = r"""The policy classifies each shell command against the `lup.policy.shell_rules` vocabulary and every URL scope in a batch. Ask is
+CODEX_POLICY_SCOPE = r"""The policy classifies each shell command against the vocabulary declared in `devtools/harness/content/shell_vocabulary.py` and every URL scope in a batch. Ask is
 reserved for judged risk; an unjudged command or unparsed construct denies with
 a hint naming the `# lup: escalate: <why>` marker, and that leading marker
 promotes the classified decision to an approval question carrying the agent's
@@ -869,11 +854,11 @@ SELF_IMPROVEMENT_THROUGH_END: list[models.PromptPart] = [
 
 See [The Bitter Lesson](#the-bitter-lesson) and [Tool Design Philosophy](#tool-design-philosophy) above — these are the governing principles for all agent improvements.
 
-**When analyzing failures:** Ask "what general principle would have prevented this?" not "what specific rule would catch this case?" If the agent made one bad decision, the fix is almost never a prompt line about that specific decision. Instead: does the agent have enough context? Does it have the right tools? Is the model strong enough?
-
-When the principle points to a workflow failure, fix the workflow at the exact juncture where the failure enters — don't add a warning about it. A step named "Classify each commit" invites whole-commit thinking regardless of how many times the text says "decompose." Renaming the step to "Extract portable pieces" and separating reading from judging makes the failure structurally impossible. Warnings coexist peacefully with the workflows they warn against; structural changes don't.
-
-### Diagnosing Failures
+"""
+    ),
+    *conventions.FAILURE_ANALYSIS,
+    models.TextPart(
+        text=r"""### Diagnosing Failures
 
 When the agent fails, trace the failure through the pipeline before changing anything:
 

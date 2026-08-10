@@ -14,7 +14,7 @@ from collections.abc import Mapping
 
 from lup.types import EnvVars
 
-NON_INTERACTIVE_SHELL_ENV: EnvVars = {
+NON_INTERACTIVE_SHELL_ENV: EnvVars = {  # lup: ignore[library-default] — each pair is the variable and off-value git, ssh, gh, and keyring document
     "GIT_TERMINAL_PROMPT": "0",
     "GIT_SSH_COMMAND": "ssh -o BatchMode=yes",
     "SSH_ASKPASS_REQUIRE": "never",

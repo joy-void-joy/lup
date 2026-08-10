@@ -10,32 +10,12 @@ from collections.abc import Sequence
 
 from pydantic import BaseModel
 
-from lup.types import (
-    LupContentBlock,
-    LupTextBlock,
-    LupThinkingBlock,
-    LupToolResultBlock,
-    LupToolUseBlock,
-)
+from lup.types import LupContentBlock, normalize_content
 
 # JSON-like recursive type for truncation functions
 type JsonValue = (
     str | int | float | bool | None | list[JsonValue] | dict[str, JsonValue]
 )
-
-
-def normalize_content(content: str | Sequence[object] | None) -> str:
-    """Convert MCP content blocks to a plain string."""
-    if content is None:
-        return "(empty)"
-    if isinstance(content, list):
-        texts: list[str] = []  # lup: ignore[empty-collection] — block fold
-        for item in content:
-            match item:
-                case {"type": "text", "text": text}:
-                    texts.append(str(text))
-        return "\n".join(texts)
-    return str(content)
 
 
 def truncate_str(value: str, max_len: int = 500) -> str:
@@ -91,18 +71,8 @@ class BlockInfo(BaseModel):
 
 def extract_block_info(block: LupContentBlock) -> BlockInfo:
     """Extract display information from a content block."""
-    match block:
-        case LupThinkingBlock():
-            content = "[redacted]" if block.redacted else block.thinking
-            return BlockInfo(emoji="💭", label="Thinking", content=content)
-        case LupTextBlock():
-            return BlockInfo(emoji="💬", label="Response", content=block.text)
-        case LupToolUseBlock():
-            content = json.dumps(block.input, indent=2) if block.input else ""
-            return BlockInfo(emoji="🔧", label=f"Tool: {block.name}", content=content)
-        case LupToolResultBlock():
-            return BlockInfo(
-                emoji="📋", label="Result", content=normalize_content(block.content)
-            )
-        case _:
-            return BlockInfo(emoji="❓", label="Unknown", content=str(block))
+    return BlockInfo(
+        emoji=block.display_emoji,
+        label=block.display_label,
+        content=block.display_body,
+    )
