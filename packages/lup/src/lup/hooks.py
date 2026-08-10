@@ -113,6 +113,16 @@ class LupHookOutput(BaseModel):
     decision: LupHookDecision | None = None
     reason: str = ""
     system_message: str | None = None
+    updated_input: JsonObject | None = Field(
+        default=None,
+        description=(
+            "Tool arguments to run in place of the ones the agent supplied. "
+            "This is the correcting route rather than the refusing one: a "
+            "hook that knows the right call can make it, instead of denying "
+            "and spending a turn explaining. PreToolUse only — no other "
+            "event has an input left to rewrite."
+        ),
+    )
     additional_context: str = Field(
         default="",
         description=(
@@ -388,6 +398,47 @@ def create_tool_allowlist_hook(
 
     return LupHooksConfig(
         pre_tool_use=[LupHookMatcher(hook=allowlist_hook, tag="allowlist")],
+    )
+
+
+def create_large_read_hook(default_limit: int = 2000) -> LupHooksConfig:
+    """Create a PreToolUse hook that bounds a Read that named no bound.
+
+    **What:** A ``Read`` call carrying no ``limit`` is rewritten to carry
+    *default_limit*, so a call the agent meant as "open this file" cannot
+    come back as an entire one.
+
+    **When:** Use in any session where the agent reads files it did not
+    write — logs, fetched pages, spilled tool output — and therefore cannot
+    know a file's size before asking for it.
+
+    **Why:** An unbounded Read is the one call that can exhaust a context
+    window in a single step, and no amount of care lets the agent avoid it,
+    because the size it needed to know is what the call returns. Correcting
+    the arguments keeps the read working; denying it would spend a turn
+    teaching a parameter that the next unfamiliar file omits again.
+
+    Args:
+        default_limit: Line count injected into a Read that omits one.
+
+    Returns:
+        Hooks configuration with a PreToolUse read-limit hook.
+    """
+
+    async def read_limit_hook(event: LupHookInput) -> LupHookOutput:
+        if event.event != "PreToolUse":
+            return LupHookOutput()
+
+        if event.tool_name != "Read":
+            return LupHookOutput()
+
+        if "limit" in event.tool_input:
+            return LupHookOutput()
+
+        return LupHookOutput(updated_input={**event.tool_input, "limit": default_limit})
+
+    return LupHooksConfig(
+        pre_tool_use=[LupHookMatcher(hook=read_limit_hook, tag="read-limit")],
     )
 
 

@@ -138,10 +138,21 @@ def lup_hook_output_to_claude(
     block reaches the agent as a refusal carrying its corrective message.
     Every other event answers on the top-level decision channel, where a
     verdict that cannot be represented fails closed as a block.
+
+    A rewrite rides the undecided path: it carries corrected arguments while
+    leaving the verdict to the ambient permission flow, so fixing a call
+    never doubles as granting it.
     """
     from claude_agent_sdk import types as claude_types
 
     match event, output.decision:
+        case "PreToolUse", None if output.updated_input is not None:
+            return claude_types.SyncHookJSONOutput(
+                hookSpecificOutput=claude_types.PreToolUseHookSpecificOutput(
+                    hookEventName="PreToolUse",
+                    updatedInput=output.updated_input,
+                )
+            )
         case "PreToolUse", "allow" if output.additional_context:
             return claude_types.SyncHookJSONOutput(
                 hookSpecificOutput=claude_types.PreToolUseHookSpecificOutput(

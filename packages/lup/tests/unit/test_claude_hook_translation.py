@@ -219,6 +219,50 @@ def test_output_rendering_covers_every_decision_shape() -> None:
     assert passthrough == {}
 
 
+def test_rewrite_carries_corrected_arguments_without_granting_the_call() -> None:
+    corrected: JsonObject = {"file_path": "/a/b.txt", "limit": 2000}
+
+    rewrite = lup_hook_output_to_claude(
+        LupHookOutput(updated_input=corrected), event="PreToolUse"
+    )
+
+    # No permissionDecision in the rendered output: the arguments are fixed,
+    # and the verdict is still the ambient flow's to make.
+    assert rewrite == {
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "updatedInput": corrected,
+        }
+    }
+
+
+def test_refusal_outranks_a_rewrite_riding_along_with_it() -> None:
+    refused = lup_hook_output_to_claude(
+        LupHookOutput(
+            decision="deny",
+            reason="outside the workspace",
+            updated_input={"file_path": "/etc/passwd", "limit": 10},
+        ),
+        event="PreToolUse",
+    )
+
+    assert refused == {
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "deny",
+            "permissionDecisionReason": "outside the workspace",
+        }
+    }
+
+
+def test_only_pre_tool_use_can_rewrite_an_input_that_has_not_run_yet() -> None:
+    for event in ("PostToolUse", "Stop"):
+        after = lup_hook_output_to_claude(
+            LupHookOutput(updated_input={"limit": 2000}), event=event
+        )
+        assert after == {}
+
+
 def test_registration_maps_events_and_matchers_without_inventing_entries() -> None:
     async def hook(data: LupHookInput) -> LupHookOutput:
         del data
