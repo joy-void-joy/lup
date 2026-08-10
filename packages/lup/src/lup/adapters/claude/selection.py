@@ -22,25 +22,33 @@ CLAUDE_AUTONOMY: dict[SessionAutonomy, ClaudePermissionMode] = {
 """What Claude Code calls each degree of autonomy a caller can ask for."""
 
 
+def claude_config(request: SessionRequest) -> ClaudeSessionConfig:
+    """Render a portable request into Claude's own session configuration.
+
+    Rendering is separate from building so an application can stack a
+    :class:`~lup.runtime.config.ConfigTransform` — a compatible endpoint, a
+    profile — onto what a request asked for, before any session exists.
+    """
+    return ClaudeSessionConfig(
+        model=request.model,
+        system_prompt=request.instructions,
+        tools=request.tools,
+        allowed_tools=request.allowed_tools,
+        tool_servers=request.tool_servers,
+        permission_mode=(
+            None if request.autonomy is None else CLAUDE_AUTONOMY[request.autonomy]
+        ),
+        max_turns=request.max_turns,
+        max_thinking_tokens=request.max_thinking_tokens,
+        cwd=request.cwd,
+        environment=request.environment,
+        hooks=request.hooks,
+    )
+
+
 def claude_session(request: SessionRequest) -> SessionFactory:
     """Render a portable request into a configured Claude session factory."""
-    return create_claude_session_factory(
-        ClaudeSessionConfig(
-            model=request.model,
-            system_prompt=request.instructions,
-            tools=request.tools,
-            allowed_tools=request.allowed_tools,
-            tool_servers=request.tool_servers,
-            permission_mode=(
-                None if request.autonomy is None else CLAUDE_AUTONOMY[request.autonomy]
-            ),
-            max_turns=request.max_turns,
-            max_thinking_tokens=request.max_thinking_tokens,
-            cwd=request.cwd,
-            environment=request.environment,
-            hooks=request.hooks,
-        )
-    )
+    return create_claude_session_factory(claude_config(request))
 
 
 CLAUDE_RUNTIME = Runtime(
