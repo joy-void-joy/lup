@@ -347,6 +347,7 @@ def lup_tool[I: BaseModel, O: BaseModel](
         A decorator that wraps the async handler into a ``LupMcpTool``.
     """
     from lup.telemetry.metrics import collector
+    from lup.workspace.content_safety import guard_result
 
     def decorator(
         handler: ToolHandler[I, O],
@@ -407,7 +408,8 @@ def lup_tool[I: BaseModel, O: BaseModel](
                         f"lup_tool '{tool_name}': expected {resolved_output.__name__}, "
                         f"got {type(result).__name__}"
                     )
-                return mcp_response(json.dumps(result.model_dump(), default=str))
+                guarded = guard_result(tool_name, params, result)
+                return mcp_response(json.dumps(guarded.model_dump(), default=str))
             except Exception:
                 is_error = True
                 raise
