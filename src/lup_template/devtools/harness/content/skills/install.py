@@ -431,11 +431,11 @@ Steps 1-4, 6 and 7 repeat per selected tree; step 5 is tree-independent.
             models.TextPart(
                 text=r""" — section-level merge from that tree's template flavor (read template → use `<!-- section: ... -->` markers to identify merge units → adapt for target → compare sections → add missing ones → leave existing untouched)
 8. **Hand off to generation**: everything written in steps 1-4, 6 and 7 becomes a generated artifact once the target's harness runs. From here on, the target edits its declarations under `src/<project>/devtools/harness/content/` and regenerates with `uv run lup-devtools harness generate all`; the installed files are outputs, and a hand edit to one is reverted the next time generation runs. Say so explicitly in the Phase 7 report.
-9. **Initialize upstream sync**: Run `uv run --directory <target> lup-devtools sync mark-synced lup` — `--directory` is what makes it baseline the *target's* sync state instead of this repository's — so `"""
+9. **Initialize upstream sync**: baseline the target at *the commit you ported from*, not at whatever the remote's default branch points to. Run `uv run --directory <target> lup-devtools sync setup lup <source> --branch <source-branch> --synced` — `setup` records the source checkout, the branch settled before Phase 1, and that checkout's HEAD as the checkpoint, so `"""
             ),
             models.SkillInvocation(plugin="lup", skill="update"),
             models.TextPart(
-                text=r"""` only shows commits after installation
+                text=r"""` only shows commits after installation. Plain `sync mark-synced lup` is wrong here: the shipped `sync.json` entry carries a URL and no branch, so it clones the remote's default branch and checkpoints *that* HEAD — every commit you just installed comes back as unported work once your branch merges.
 
 ## Phase 7: Verify & Report
 
