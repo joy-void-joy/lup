@@ -119,6 +119,33 @@ def library_use_cmd(
     library.use_library(mode, version, keep_vendored, force, dry_run)
 
 
+@library_app.command("git")
+def library_git_cmd(
+    url: Annotated[
+        str, typer.Option("--url", help="Repository serving the lup package")
+    ] = library.REPOSITORY_URL,
+    branch: Annotated[
+        str | None, typer.Option("--branch", help="Branch to resolve lup at")
+    ] = None,
+    tag: Annotated[
+        str | None, typer.Option("--tag", help="Tag to resolve lup at")
+    ] = None,
+    rev: Annotated[
+        str | None, typer.Option("--rev", help="Commit to pin lup at")
+    ] = None,
+    keep_vendored: KeepVendored = False,
+    force: Force = False,
+    dry_run: DryRun = False,
+) -> None:
+    """Resolve lup from its repository, for use before a release is published."""
+    library.git_library(
+        library.git_source(url, branch=branch, tag=tag, rev=rev),
+        keep_vendored,
+        force,
+        dry_run,
+    )
+
+
 @library_app.command("link")
 def library_link_cmd(
     checkout: Annotated[

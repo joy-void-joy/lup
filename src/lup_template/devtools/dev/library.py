@@ -1,12 +1,16 @@
 """How this project obtains the ``lup`` library.
 
-A project built on this template reaches ``lup`` one of three ways, and the
+A project built on this template reaches ``lup`` one of four ways, and the
 mode is a property of ``pyproject.toml`` that can be changed at any time:
 
 ``published``
-    The release from PyPI. The default for a new project: upgrading is
-    ``uv lock --upgrade-package lup`` plus a harness regeneration, rather than
-    a merge against a vendored fork.
+    The release from PyPI. Upgrading is ``uv lock --upgrade-package lup``
+    plus a harness regeneration, rather than a merge against a vendored fork.
+``git``
+    The repository itself, resolved at a branch, tag, or commit. The default
+    for a new project while no release is published: it gives an adopter the
+    same package a release would, from the only place the library exists yet,
+    so nothing has to be vendored to get it.
 ``local``
     A copy under ``packages/lup``, wired as a uv workspace member. What the
     template ships, and what a project that genuinely needs to modify library
@@ -27,16 +31,19 @@ Examples::
 
     $ uv run lup-devtools dev library status
     $ uv run lup-devtools dev library use published --version 0.3.0
+    $ uv run lup-devtools dev library git --branch dev
     $ uv run lup-devtools dev library link ../lup.git/tree/dev
 """
 
 import tomllib
 from enum import StrEnum
 from pathlib import Path
-from typing import TypedDict
+from typing import Literal, TypedDict
 
 import tomlkit
+import tomlkit.items
 import typer
+from pydantic import BaseModel, ConfigDict
 from importlib.metadata import version as installed_version
 from packaging.requirements import Requirement
 
@@ -45,8 +52,19 @@ from lup.devtools.utils import git
 
 VENDORED_ROOT = "packages/lup"
 VENDORED_SRC = "packages/lup/src"
+VENDORED_SIBLINGS = {"src": VENDORED_SRC, "tests": f"{VENDORED_ROOT}/tests"}
+"""Each plain search root and the vendored one that shadows it. A search path
+naming the plain root wants its vendored twin exactly while the package is
+there, and wants it gone the moment the package is not."""
 DISTRIBUTION = "lup"
 WORKSPACE_MEMBERS = ["packages/*"]
+REPOSITORY_URL = "https://github.com/joy-void-joy/lup"
+"""Where the library is published as source. Overridable: a fork, a mirror, or
+a private host serves the same package from the same layout."""
+
+PACKAGE_SUBDIRECTORY = VENDORED_ROOT
+"""Where the distribution sits inside that repository — a fixed fact about
+lup's own layout, not a choice an adopter makes."""
 
 
 class ExecutionEnvironment(TypedDict):
@@ -76,8 +94,82 @@ class LibraryMode(StrEnum):
     """Where the ``lup`` distribution is resolved from."""
 
     PUBLISHED = "published"
+    GIT = "git"
     LOCAL = "local"
     LINKED = "linked"
+
+
+type GitRefKind = Literal["branch", "tag", "rev"]
+"""Which kind of ref a git source pins, spelled as uv spells it."""
+
+
+class GitSource(BaseModel):
+    """A repository and the single ref of it a project resolves ``lup`` at.
+
+    The ref is one field pair rather than three optional ones, so a source
+    naming both a branch and a tag cannot be constructed — uv accepts only
+    one, and a model that can hold two only moves the error later.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    url: str = REPOSITORY_URL
+    ref_kind: GitRefKind = "branch"
+    ref: str = "main"
+
+    def entry(self) -> tomlkit.items.InlineTable:
+        """Render the ``[tool.uv.sources]`` value this source declares."""
+        entry = tomlkit.inline_table()
+        entry.update(
+            {
+                "git": self.url,
+                self.ref_kind: self.ref,
+                "subdirectory": PACKAGE_SUBDIRECTORY,
+            }
+        )
+        return entry
+
+
+class RefFlag(BaseModel):
+    """One ref-kind flag, and the ref a command line gave it — or nothing."""
+
+    model_config = ConfigDict(frozen=True)
+
+    kind: GitRefKind
+    ref: str | None = None
+
+
+def git_source(
+    url: str,
+    *,
+    branch: str | None = None,
+    tag: str | None = None,
+    rev: str | None = None,
+) -> GitSource:
+    """Collapse the three ref flags into the one ref a git source may carry.
+
+    A command line can spell all three; uv accepts one. Rejecting the excess
+    here is what keeps :class:`GitSource` unable to represent the conflict.
+    """
+    named = [
+        flag
+        for flag in (
+            RefFlag(kind="branch", ref=branch),
+            RefFlag(kind="tag", ref=tag),
+            RefFlag(kind="rev", ref=rev),
+        )
+        if flag.ref is not None
+    ]
+    match named:
+        case []:
+            return GitSource(url=url)
+        case [only] if only.ref is not None:
+            return GitSource(url=url, ref_kind=only.kind, ref=only.ref)
+        case _:
+            raise typer.BadParameter(
+                "name one of --branch, --tag, or --rev, not "
+                + " and ".join(f"--{flag.kind}" for flag in named)
+            )
 
 
 def read_mode(root: Path) -> LibraryMode:
@@ -89,8 +181,32 @@ def read_mode(root: Path) -> LibraryMode:
             return LibraryMode.LOCAL
         case {"tool": {"uv": {"sources": {"lup": {"path": str()}}}}}:
             return LibraryMode.LINKED
+        case {"tool": {"uv": {"sources": {"lup": {"git": str()}}}}}:
+            return LibraryMode.GIT
         case _:
             return LibraryMode.PUBLISHED
+
+
+def read_git_source(root: Path) -> GitSource | None:
+    """Return the repository and the ref it is pinned at, when git."""
+    with (root / "pyproject.toml").open("rb") as handle:
+        data = tomllib.load(handle)
+    match data:
+        case {"tool": {"uv": {"sources": {"lup": dict(source)}}}}:
+            declared = source
+        case _:
+            return None
+    match declared:
+        case {"git": str(url), "branch": str(ref)}:
+            return GitSource(url=url, ref_kind="branch", ref=ref)
+        case {"git": str(url), "tag": str(ref)}:
+            return GitSource(url=url, ref_kind="tag", ref=ref)
+        case {"git": str(url), "rev": str(ref)}:
+            return GitSource(url=url, ref_kind="rev", ref=ref)
+        case {"git": str(url)}:
+            return GitSource(url=url)
+        case _:
+            return None
 
 
 def read_linked_path(root: Path) -> Path | None:
@@ -132,7 +248,10 @@ def apply_dependency(document: tomlkit.TOMLDocument, version: str | None) -> lis
 
 
 def apply_source(
-    document: tomlkit.TOMLDocument, mode: LibraryMode, checkout: Path | None
+    document: tomlkit.TOMLDocument,
+    mode: LibraryMode,
+    checkout: Path | None,
+    git: GitSource | None = None,
 ) -> list[str]:
     """Declare, or clear, the ``[tool.uv.sources]`` override for ``lup``."""
     sources = document["tool"]["uv"]["sources"]
@@ -142,6 +261,10 @@ def apply_source(
                 return []
             del sources[DISTRIBUTION]
             return ["source: resolved from the package index"]
+        case LibraryMode.GIT:
+            if git is None:
+                raise ValueError("git mode needs a repository and ref")
+            entry = git.entry()
         case LibraryMode.LOCAL:
             entry = tomlkit.inline_table()
             entry.update({"workspace": True})
@@ -175,7 +298,12 @@ def apply_workspace(document: tomlkit.TOMLDocument, vendored: bool) -> list[str]
 def apply_search_path(
     document: tomlkit.TOMLDocument, table: list[str], key: str, vendored: bool
 ) -> list[str]:
-    """Add or drop the vendored source root in one path list."""
+    """Add or drop every root under the vendored package in one path list.
+
+    Each vendored root is placed directly after the plain one it shadows, so
+    a project that leaves the vendored mode and returns to it gets the list it
+    started with rather than a reshuffled diff.
+    """
     holder = document
     for step in table:
         if step not in holder:
@@ -184,10 +312,11 @@ def apply_search_path(
     if key not in holder:
         return []
     paths = [str(entry) for entry in holder[key]]
-    wanted = [path for path in paths if path != VENDORED_SRC]
+    wanted = [path for path in paths if not path.startswith(f"{VENDORED_ROOT}/")]
     if vendored:
-        anchor = wanted.index("src") + 1 if "src" in wanted else len(wanted)
-        wanted.insert(anchor, VENDORED_SRC)
+        for plain, shadowed in VENDORED_SIBLINGS.items():
+            if plain in wanted:
+                wanted.insert(wanted.index(plain) + 1, shadowed)
     if wanted == paths:
         return []
     holder[key] = wanted
@@ -273,6 +402,7 @@ def set_mode(
     *,
     version: str | None = None,
     checkout: Path | None = None,
+    git: GitSource | None = None,
     dry_run: bool = False,
 ) -> list[str]:
     """Rewrite ``pyproject.toml`` so ``lup`` resolves the way ``mode`` says."""
@@ -286,7 +416,7 @@ def set_mode(
     document = tomlkit.parse(pyproject.read_text(encoding="utf-8"))
     changes = [
         *apply_dependency(document, version if mode is LibraryMode.PUBLISHED else None),
-        *apply_source(document, mode, checkout),
+        *apply_source(document, mode, checkout, git),
         *apply_workspace(document, vendored),
         *apply_search_path(
             document, ["tool", "pytest", "ini_options"], "pythonpath", vendored
@@ -337,6 +467,23 @@ def use_library(
     report(changes, dry_run, f"Already resolving {DISTRIBUTION} as {mode}.")
 
 
+def git_library(
+    source: GitSource, keep_vendored: bool, force: bool, dry_run: bool
+) -> None:
+    """CLI entry for ``lup-devtools dev library git`` (see module docstring)."""
+    root = find_project_root()
+    guard_leaving_local(root, force)
+    changes = set_mode(root, LibraryMode.GIT, git=source, dry_run=dry_run)
+    if not keep_vendored:
+        changes.extend(drop_vendored(root, dry_run))
+    report(
+        changes,
+        dry_run,
+        f"Already resolving {DISTRIBUTION} from {source.url} "
+        f"at {source.ref_kind} {source.ref}.",
+    )
+
+
 def link_library(
     checkout: Path, keep_vendored: bool, force: bool, dry_run: bool
 ) -> None:
@@ -362,5 +509,10 @@ def library_status() -> None:
             typer.echo(f"checkout: {read_linked_path(root)}")
         case LibraryMode.LOCAL:
             typer.echo(f"vendored: {root / VENDORED_ROOT}")
+        case LibraryMode.GIT:
+            source = read_git_source(root)
+            if source is not None:
+                typer.echo(f"repository: {source.url}")
+                typer.echo(f"{source.ref_kind}: {source.ref}")
         case LibraryMode.PUBLISHED:
             typer.echo(f"version: {installed_version(DISTRIBUTION)}")
