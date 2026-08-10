@@ -6,6 +6,7 @@ from importlib import resources
 from pathlib import Path
 
 import tomlkit
+from lup.adapters.codex.login import CODEX_LOGIN
 from lup.harness.banner import (
     PROMPT_TEXT,
     REGENERATE_COMMAND,
@@ -373,7 +374,7 @@ class CodexGuidanceRenderer(ArtifactRenderer[Harness]):
 CODEX_DISPATCHER = DispatcherDeclaration(
     runtime_name="Codex",
     package="lup.adapters.codex",
-    managed_root_env="CODEX_HOME",
+    managed_root_env=CODEX_LOGIN.config_home_env,
     routed_tools=["Bash", "web_fetch", "apply_patch"],
     hook_events=["PermissionRequest", "PreToolUse"],
     failure="stderr_exit",

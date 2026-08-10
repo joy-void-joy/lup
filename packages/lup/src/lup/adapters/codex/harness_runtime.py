@@ -8,6 +8,7 @@ from pathlib import Path
 import sh
 from pydantic import BaseModel, ConfigDict, Field
 
+from lup.adapters.codex.login import CODEX_LOGIN
 from lup.harness.contracts import CapabilityProbe
 from lup.harness.models import CapabilityEvidence
 
@@ -188,7 +189,7 @@ class CodexPluginInstaller:
         self.config.codex_home.mkdir(parents=True, exist_ok=True)
         environment = {
             **os.environ,  # lup: ignore[os-environ] — exact child-process inheritance
-            "CODEX_HOME": str(self.config.codex_home),
+            **CODEX_LOGIN.environment(self.config.codex_home),
         }
         # The marketplace definition lives in the repository
         # (`.agents/plugins/marketplace.json`). The CLI refuses a name already

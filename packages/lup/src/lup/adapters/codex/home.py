@@ -10,6 +10,7 @@ import jwt
 import tomlkit
 from pydantic import BaseModel, ConfigDict, ValidationError
 
+from lup.adapters.codex.login import CODEX_LOGIN
 from lup.types import EnvVars
 
 
@@ -173,7 +174,7 @@ class CodexLoginState(BaseModel):
 
 def login_state(home: Path) -> CodexLoginState:
     """Read the login one Codex home would start a session with."""
-    credential = read_credential(home / "auth.json")
+    credential = read_credential(home / CODEX_LOGIN.credentials_file)
     if credential is None:
         return CodexLoginState(present=False)
     return CodexLoginState(present=True, expires_at=credential.expires_at())
@@ -209,7 +210,10 @@ class CodexWorktreeHomeStore:
         scoped_home = self.home_for(worktree)
         scoped_home.mkdir(mode=0o700, parents=True, exist_ok=True)
         scoped_home.chmod(0o700)
-        sync_credential(self.account_home / "auth.json", scoped_home / "auth.json")
+        sync_credential(
+            self.account_home / CODEX_LOGIN.credentials_file,
+            scoped_home / CODEX_LOGIN.credentials_file,
+        )
         seed_config(self.account_home / "config.toml", scoped_home / "config.toml")
         if profile is not None:
             filename = profile_config_filename(profile)
@@ -220,7 +224,8 @@ class CodexWorktreeHomeStore:
         """Return a credential the session rotated back to the account home."""
         scoped_home = self.home_for(worktree)
         return sync_credential(
-            scoped_home / "auth.json", self.account_home / "auth.json"
+            scoped_home / CODEX_LOGIN.credentials_file,
+            self.account_home / CODEX_LOGIN.credentials_file,
         )
 
 
@@ -234,9 +239,9 @@ def select_codex_home(
     """Prefer explicit homes, otherwise prepare the worktree-scoped default."""
     if explicit_home is not None:
         return CodexHomeSelection(path=explicit_home, isolated=False)
-    if "CODEX_HOME" in environment:
+    if CODEX_LOGIN.config_home_env in environment:
         return CodexHomeSelection(
-            path=Path(environment["CODEX_HOME"]),
+            path=Path(environment[CODEX_LOGIN.config_home_env]),
             isolated=False,
         )
     active_store = store or CodexWorktreeHomeStore()

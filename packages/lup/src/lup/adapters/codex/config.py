@@ -4,6 +4,7 @@ from pathlib import Path
 
 from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, SecretStr
 
+from lup.adapters.codex.login import CODEX_LOGIN
 from lup.adapters.codex.runtime import (
     CodexSessionConfig,
     create_codex_session_factory,
@@ -42,7 +43,7 @@ class CodexProfileTransform(ConfigTransform[CodexSessionConfig]):
     def apply(self, config: CodexSessionConfig) -> CodexSessionConfig:
         environment = dict(config.environment)
         if self.selection.codex_home is not None:
-            environment["CODEX_HOME"] = str(self.selection.codex_home)
+            environment.update(CODEX_LOGIN.environment(self.selection.codex_home))
         return config.model_copy(
             update={
                 "environment": environment,

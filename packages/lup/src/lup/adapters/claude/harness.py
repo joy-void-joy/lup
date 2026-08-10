@@ -4,6 +4,7 @@ import json
 import shlex
 from collections.abc import Sequence
 from pathlib import Path
+from lup.adapters.claude.login import CLAUDE_LOGIN
 from lup.harness.banner import PROMPT_TEXT, VERBATIM_COPY
 from lup.harness.contracts import (
     ArtifactRenderer,
@@ -366,7 +367,7 @@ class ClaudeGuidanceRenderer(ArtifactRenderer[Harness]):
 CLAUDE_DISPATCHER = DispatcherDeclaration(
     runtime_name="Claude Code",
     package="lup.adapters.claude",
-    managed_root_env="CLAUDE_CONFIG_DIR",
+    managed_root_env=CLAUDE_LOGIN.config_home_env,
     routed_tools=["Bash", "WebFetch", "Edit", "Write"],
     hook_events=["PreToolUse"],
     failure="conservative_ask",

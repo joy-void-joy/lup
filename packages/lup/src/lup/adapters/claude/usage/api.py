@@ -12,12 +12,14 @@ from typing import TypedDict
 import httpx
 from pydantic import BaseModel, ConfigDict, Field
 
+from lup.adapters.claude.login import CLAUDE_LOGIN
+
 # ── constants ──────────────────────────────────────────────
 
 
 def creds_path(config_dir: Path) -> Path:
     """OAuth credentials file inside a Claude config dir."""
-    return config_dir / ".credentials.json"
+    return CLAUDE_LOGIN.credentials_path(config_dir)
 
 
 def stats_path(config_dir: Path) -> Path:

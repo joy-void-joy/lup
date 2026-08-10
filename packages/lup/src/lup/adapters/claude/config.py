@@ -9,9 +9,9 @@ from lup.adapters.claude.runtime import (
     ClaudeSessionConfig,
     create_claude_session_factory,
 )
+from lup.adapters.claude.login import CLAUDE_LOGIN
 from lup.runtime.config import ConfigTransform, ProfileResolver, ProfileSelector
 
-CLAUDE_CONFIG_DIR = "CLAUDE_CONFIG_DIR"
 PLACEHOLDER_CREDENTIAL = "dummy"
 
 
@@ -45,7 +45,7 @@ class ClaudeConfigDirectoryTransform(ConfigTransform[ClaudeSessionConfig]):
 
     def apply(self, config: ClaudeSessionConfig) -> ClaudeSessionConfig:
         environment = dict(config.environment)
-        environment[CLAUDE_CONFIG_DIR] = str(self.selection.config_directory)
+        environment.update(CLAUDE_LOGIN.environment(self.selection.config_directory))
         return config.model_copy(update={"environment": environment})
 
 
