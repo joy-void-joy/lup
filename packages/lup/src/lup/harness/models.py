@@ -399,6 +399,23 @@ class PromptDocument(BaseModel):
         return self.source
 
 
+class Document(BaseModel):
+    """One generated repository document and where it renders.
+
+    Separate from the roster that lists them: which documents a project
+    publishes is its own decision, but that each is a prompt document with a
+    path, an identity, and a declaring module is what makes the roster
+    renderable by machinery no project writes.
+    """
+
+    model_config = FROZEN
+
+    path: Path
+    semantic_id: str
+    source: str
+    document: PromptDocument
+
+
 GUIDANCE_BYTE_BUDGET = 32_768
 """Default ceiling, in UTF-8 bytes, on the always-loaded guidance document.
 
@@ -753,6 +770,16 @@ class Harness(BaseModel):
     guidance: PromptDocument
     resolver: ResolveSpec
 
+    @property
+    def declared_hooks(self) -> HookSet:
+        """The hook set this harness enforces, wherever a plugin declares it.
+
+        A session composed in process reaches the same declaration the
+        generated plugins are compiled from, so what a launched tree enforces
+        and what an in-process session enforces cannot come apart.
+        """
+        return next(plugin.hooks for plugin in self.plugins if plugin.hooks is not None)
+
     @model_validator(mode="after")
     def unique_semantic_ids(self) -> "Harness":
         ids = [
@@ -961,10 +988,24 @@ class ArtifactTree(BaseModel):
         return self
 
 
-class CapabilityEvidence[C](BaseModel):
+class CapabilityReport(BaseModel):
+    """A runtime probe's verdict, without the payload that proves it.
+
+    Split from the evidence because the commands that report readiness read
+    only the verdict — which capability, whether it is there, at what
+    version. The proof is the adapter's own shape, so a command typed
+    against this stays free of every runtime it reports on, and one that
+    genuinely needs the proof asks for :class:`CapabilityEvidence` instead.
+    """
+
     model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
 
     capability: str
     supported: bool
-    evidence: C
     version: str
+
+
+class CapabilityEvidence[C](CapabilityReport):
+    """One probe's verdict together with the adapter-shaped proof of it."""
+
+    evidence: C

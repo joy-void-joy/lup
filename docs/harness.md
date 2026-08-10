@@ -1,4 +1,4 @@
-<!-- Generated from lup_template.devtools.harness.content.docs.harness by `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/harness.md. -->
+<!-- Generated from lup.devtools.harness.content.docs.harness by `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/harness.md. -->
 
 # The harness
 
@@ -67,15 +67,16 @@ prove which bytes it owns, so it would refuse to replace anything.
 
 ### Every generated path and its source
 
-Canonical sources live in `src/lup_template/devtools/harness/content/`
-(application content), `src/lup_template/devtools/harness/catalog.py`
+Canonical sources live in `packages/lup/src/lup/devtools/harness/content/`
+(the declarations lup ships), `src/lup_template/devtools/harness/content/`
+(the ones only this repository has), `src/lup_template/devtools/harness/catalog.py`
 (plugin, hook, and resolver composition), and `packages/lup/src/lup/`
-(adapter renderers and the policy bundle).
+(adapter renderers and the policy bundle). Below, `content/` names whichever
+of the two halves owns the declaration's subject.
 
 | Generated path | Canonical source |
 | --- | --- |
 | `.claude/CLAUDE.md`, `AGENTS.md` | `content/guidance.py` |
-| `.claude/PATTERNS.md` | `content/patterns.py` |
 | `.claude/plugins/lup/TEMPLATE_CLAUDE.md` | `content/template_claude.py` |
 | `.codex/plugins/lup/TEMPLATE_AGENTS.md` | `content/template_codex.py` |
 | `.claude/settings.json` | `content/settings.py` |
@@ -135,12 +136,15 @@ the CLI composition root maps a user-facing target name to a concrete recipe:
 adding a third target supplies another recipe rather than a branch in
 reconciliation or materialization.
 
-Each module under `src/lup_template/devtools/harness/` owns one concern:
+Each harness module owns one concern. Everything but the declaration root
+lives in `packages/lup/src/lup/devtools/harness/`; `catalog.py` is this
+repository's, because its whole job is to be this project's own harness:
 
 - `app.py` — Typer wiring only; every command body lives elsewhere
 - `catalog.py` — declaration-graph root assembling `content/` into a `Harness`
 - `content/` — the declaration leaves (skills, agents, documents, assets)
-- `composition.py` — composition roots wiring concrete capabilities
+- `composition.py` — builders wiring concrete adapter capabilities, and the
+  target roster a CLI selector names
 - `generate.py` — recipes, drift inspection, and atomic materialization
 - `drift.py` — console drift reporting for `generate` and `check`
 - `reconcile.py` — drift classification and the source-patch flow
@@ -150,9 +154,12 @@ Each module under `src/lup_template/devtools/harness/` owns one concern:
 
 ## What the plugin ships
 
-Both rosters are rendered from the typed declarations in
-`src/lup_template/devtools/harness/content/catalog.py` — change the catalog,
-then regenerate.
+Both rosters are rendered from the typed declarations: the ones about agent
+work in `packages/lup/src/lup/devtools/harness/content/catalog.py`, the ones
+about being a template in
+`src/lup_template/devtools/harness/content/catalog.py`, which composes both
+into what the plugin ships. Change the catalog that owns the subject, then
+regenerate.
 
 **Skills:**
 
@@ -199,9 +206,10 @@ then regenerate.
 
 ### Add a skill
 
-Create one module beneath
-`src/lup_template/devtools/harness/content/skills/`. The declaration is
-ordinary typed Python and the prompt stays readable prose:
+Create one module beneath `content/skills/` — the library's half when the
+skill automates work inside a project, this repository's when its subject is
+standing one up. The declaration is ordinary typed Python and the prompt
+stays readable prose:
 
 ```python
 """The project-triage skill."""
@@ -243,7 +251,7 @@ Then run the authoring loop:
 ```bash
 uv run lup-devtools harness generate all
 uv run lup-devtools harness check all
-uv run ruff check src/lup_template/devtools/harness/content
+uv run ruff check packages/lup/src/lup src/lup_template
 uv run pyright
 uv run pytest tests/unit/test_harness_compilation.py -q
 ```
@@ -257,9 +265,13 @@ may and may not name.
 
 ### Add a document
 
-Documentation is generated the same way. Add a module under
-`content/docs/`, list it in `content/docs/catalog.py`, and regenerate. The
-banner is applied from the roster, so a document module holds prose only.
+Documentation is generated the same way. Add a module under `content/docs/`
+in the half whose subject it is, list it in that half's
+`content/docs/catalog.py`, and regenerate. The banner is applied from the
+roster, so a document module holds prose only. The index builds its rows from
+the documents both halves declare, so a page appears there by being declared
+— and a page it lists that stops being published fails generation rather than
+leaving a link that resolves to nothing.
 
 ### Change the fetch allowlist
 

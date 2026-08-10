@@ -3,7 +3,7 @@
 from pathlib import Path
 
 from lup.harness.process import LaunchRequest, LocalProcessLauncher
-from lup_template.devtools.harness.resolve import resolver_source_snapshot
+from lup.devtools.harness.resolve import resolver_source_snapshot
 
 
 def test_captured_stdout_is_not_a_terminal(tmp_path: Path) -> None:

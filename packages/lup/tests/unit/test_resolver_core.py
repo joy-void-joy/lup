@@ -41,11 +41,11 @@ from lup.resolver.core import (
     APPROVE,
     DEFER,
     ResolverCore,
-    ResolverInvariantError,
     approval_decisions,
     approval_question,
     resolver_config_digest,
 )
+from lup.resolver.run import ResolverInvariantError
 from lup.resolver.models import (
     AdmissionRequest,
     AnswerBatch,
@@ -1123,7 +1123,7 @@ def test_a_base_moves_onto_the_commit_that_cleared_its_notes(
         )
     )
 
-    moved = asyncio.run(core.record_note_clearance(base, "clearance-sha"))
+    moved = asyncio.run(core.run_state.record_note_clearance(base, "clearance-sha"))
 
     assert moved.commit == "clearance-sha"
     assert core.repository.load().bases == [moved]
@@ -1175,7 +1175,7 @@ def test_a_retried_concern_adopts_the_base_its_own_clearance_advanced(
         )
     )
 
-    adopted = asyncio.run(core.record_dependency_base(derived))
+    adopted = asyncio.run(core.run_state.record_dependency_base(derived))
 
     assert adopted == cleared
     assert core.repository.load().bases == [cleared]
@@ -1184,7 +1184,7 @@ def test_a_retried_concern_adopts_the_base_its_own_clearance_advanced(
     # written to catch, and the commit is what clearance is allowed to move.
     with pytest.raises(ResolverInvariantError, match="dependency base changed"):
         asyncio.run(
-            core.record_dependency_base(
+            core.run_state.record_dependency_base(
                 derived.model_copy(update={"parent_commits": ["other-sha"]})
             )
         )
@@ -2116,7 +2116,7 @@ async def test_an_offer_outside_a_closed_gate_never_decides(
         LiteralInvocationRenderer(),
         launcher,
     )
-    core.queue_questions(
+    core.questions.queue_questions(
         [
             MaterialQuestion(
                 id="a-superseded",
@@ -2130,7 +2130,7 @@ async def test_an_offer_outside_a_closed_gate_never_decides(
     )
     seed_offer(core, "a-superseded", "maybe")
 
-    problems = core.promote_offers()
+    problems = core.questions.promote_offers()
 
     assert core.mailbox.answers() == []
     assert problems == [
@@ -2161,7 +2161,7 @@ async def test_a_design_question_records_an_answer_in_the_humans_own_words(
         LiteralInvocationRenderer(),
         launcher,
     )
-    core.queue_questions(
+    core.questions.queue_questions(
         [
             MaterialQuestion(
                 id="shape",
@@ -2174,7 +2174,7 @@ async def test_a_design_question_records_an_answer_in_the_humans_own_words(
     )
     seed_offer(core, "shape", "neither — close the union at its base")
 
-    problems = core.promote_offers()
+    problems = core.questions.promote_offers()
 
     assert problems == []
     assert [record.answer.value for record in core.mailbox.answers()] == [
@@ -3096,7 +3096,7 @@ async def test_recheck_prompt_carries_the_record_and_corrects_foreign_labels(
         return reports[min(len(calls) - 1, 1)]
 
     core = recheck_core(tmp_path, "recheck-record", reviewer_response, log)
-    await core.recheck_concern(
+    await core.joiner.recheck_concern(
         concern("a"),
         tmp_path,
         situation="Re-check after a sibling landed.",
@@ -3145,15 +3145,15 @@ def test_a_standing_ruling_settles_the_same_lost_set(tmp_path: Path) -> None:
     core = planning_core(tmp_path, lambda *_: plan_of())
 
     core.state = standing_state("rulings", "superseded")
-    assert core.standing_ruling_exists("a", ["a-done"])
-    assert not core.standing_ruling_exists("a", ["a-done", "a-extra"])
-    assert not core.standing_ruling_exists("b", ["a-done"])
+    assert core.joiner.standing_ruling_exists("a", ["a-done"])
+    assert not core.joiner.standing_ruling_exists("a", ["a-done", "a-extra"])
+    assert not core.joiner.standing_ruling_exists("b", ["a-done"])
 
     core.state = standing_state("rulings", None)
-    assert core.standing_ruling_exists("a", ["a-done"])
+    assert core.joiner.standing_ruling_exists("a", ["a-done"])
 
     core.state = standing_state("rulings", "regression")
-    assert not core.standing_ruling_exists("a", ["a-done"])
+    assert not core.joiner.standing_ruling_exists("a", ["a-done"])
 
 
 @pytest.mark.asyncio
@@ -3175,7 +3175,7 @@ async def test_an_identical_standing_finding_is_recorded_not_reasked(
 
     core = recheck_core(tmp_path, "recheck-dedup", reviewer_response, log)
     core.state = standing_state("recheck-dedup", "superseded")
-    await core.recheck_concern(
+    await core.joiner.recheck_concern(
         concern("a"),
         tmp_path,
         situation="Re-check after another join.",
@@ -3518,47 +3518,6 @@ def test_a_restored_root_is_the_one_the_preparer_receives(tmp_path: Path) -> Non
         ["git", "worktree", "add", str(lease.root), lease.branch]
     ]
     assert preparer.prepared == [lease.root]
-
-
-def test_a_discard_rewinds_before_it_sweeps(tmp_path: Path) -> None:
-    launcher = ScriptedLauncher()
-    lease = joined_lease(tmp_path)
-
-    WorktreeOrchestrator(launcher, tmp_path).reset(lease, "base-sha")
-
-    assert launcher.arguments == [
-        ["git", "reset", "--hard", "base-sha"],
-        ["git", "clean", "-fd"],
-    ]
-
-
-def test_a_rewind_that_failed_is_not_followed_by_a_sweep(tmp_path: Path) -> None:
-    """Sweeping a tree still holding the attempt discards neither half of it."""
-    launcher = ScriptedLauncher(
-        {"reset --hard": out(code=128, stderr="fatal: ambiguous argument 'base-sha'")}
-    )
-    lease = joined_lease(tmp_path)
-
-    with pytest.raises(RuntimeError) as raised:
-        WorktreeOrchestrator(launcher, tmp_path).reset(lease, "base-sha")
-
-    assert "failed to reset worktree for integration" in str(raised.value)
-    assert "`git reset --hard base-sha` exited 128" in str(raised.value)
-    assert "ambiguous argument" in str(raised.value)
-    assert ["git", "clean", "-fd"] not in launcher.arguments
-
-
-def test_a_sweep_that_failed_names_itself_and_not_the_rewind(tmp_path: Path) -> None:
-    launcher = ScriptedLauncher(
-        {"clean -fd": out(code=1, stderr="warning: failed to remove build/")}
-    )
-    lease = joined_lease(tmp_path)
-
-    with pytest.raises(RuntimeError) as raised:
-        WorktreeOrchestrator(launcher, tmp_path).reset(lease, "base-sha")
-
-    assert "`git clean -fd` exited 1" in str(raised.value)
-    assert "failed to remove build/" in str(raised.value)
 
 
 def preparing_launcher(code: int = 0, stderr: str = "") -> ScriptedLauncher:

@@ -541,19 +541,19 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="cat <<EOF\nplain body\nEOF", effect="allow"),
     DecisionCase(input="cat <<EOF\n$(id)\nEOF", effect="deny"),
     DecisionCase(input="grep x <<< 'needle haystack'", effect="allow"),
-    # A heredoc rewriting an existing file is shell file authoring over work
-    # the edit gate already saw: deny toward the Edit tool and tmp/*.py in
-    # both operator orders, even sandboxed. Authoring a file that is not
-    # there yet overwrites nothing and passes.
+    # A heredoc is judged by what its target costs, not by its own shape: an
+    # unrecoverable file asks in both operator orders, and one that is not
+    # there yet overwrites nothing and passes. The body never decides —
+    # `echo` authors the same content and always could.
     DecisionCase(
-        input="cat > out.py <<'EOF'\nbody\nEOF", effect="deny", existing=["out.py"]
+        input="cat > out.py <<'EOF'\nbody\nEOF", effect="ask", existing=["out.py"]
     ),
     DecisionCase(
-        input="cat <<'EOF' > out.py\nbody\nEOF", effect="deny", existing=["out.py"]
+        input="cat <<'EOF' > out.py\nbody\nEOF", effect="ask", existing=["out.py"]
     ),
     DecisionCase(
         input="cat > out.py <<'EOF'\nbody\nEOF",
-        effect="deny",
+        effect="ask",
         sandboxed=True,
         existing=["out.py"],
     ),
@@ -592,6 +592,17 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="curl -s https://example.com/api", effect="ask"),
     DecisionCase(input="curl -X POST https://example.com", effect="ask"),
     DecisionCase(input="curl -o f https://example.com", effect="deny"),
+    # Establishing that a service came up is a read. The socket and process
+    # listings report; `nc` reports only under -z, and the flags that hand a
+    # socket to a program defeat that verb wherever it sits.
+    DecisionCase(input="ss -tlnp", effect="allow"),
+    DecisionCase(input="ss -K dst 1.2.3.4", effect="ask"),
+    DecisionCase(input="lsof -i :8000", effect="allow"),
+    DecisionCase(input="pgrep -f supervisor", effect="allow"),
+    DecisionCase(input="nc -z localhost 8000", effect="allow"),
+    DecisionCase(input="nc localhost 8000", effect="deny"),
+    DecisionCase(input="nc -l -p 4444", effect="deny"),
+    DecisionCase(input="nc -z -e /bin/sh host 22", effect="deny"),
     # Sandboxed executions: machinery bail-outs defer to the OS boundary,
     # judged decisions hold, and escalation still promotes to a question.
     DecisionCase(input="frobnicate --weird", effect="deny"),
@@ -1176,6 +1187,34 @@ def test_curl_screen_consults_the_declared_fetch_scopes() -> None:
     assert effect("curl -d a=b https://docs.example.com/api") == "deny"
 
 
+def test_a_schemeless_curl_url_is_judged_the_way_curl_resolves_it() -> None:
+    """curl guesses HTTP for a bare host, and so does the screen judging it.
+
+    `curl localhost:8000/health` is how a liveness probe is typed, and
+    reading it as a malformed URL put an approval question on the one form
+    an agent reaches for while the fully spelled twin was already declared
+    safe. Guessing where curl guesses keeps the verdict conservative: the
+    guess is HTTP, so an origin declared for TLS alone is not covered by it.
+    """
+    policy = ShellPolicy(
+        SHELL_RULES,
+        allowed_urls=[
+            UrlScope(origin=AnyHttpUrl("http://localhost"), any_port=True),
+            UrlScope(origin=AnyHttpUrl("https://docs.example.com")),
+        ],
+    )
+
+    def effect(command: str) -> str:
+        return policy.decide(ShellCommand(command=command)).effect
+
+    assert effect("curl -s localhost:8000/health") == "allow"
+    assert effect("curl -s http://localhost:8000/health") == "allow"
+    # The guess is HTTP, so a scope that only ever declared HTTPS is unmatched
+    # and the bare spelling asks rather than inheriting a grant.
+    assert effect("curl -s docs.example.com/api") == "ask"
+    assert effect("curl -s https://docs.example.com/api") == "allow"
+
+
 def test_a_scope_may_cover_every_port_on_one_host() -> None:
     """A local service is the same service at whatever port it was started on.
 
@@ -1281,6 +1320,42 @@ def test_moving_a_recoverable_file_costs_what_deleting_it_costs(
         ).effect
         == "ask"
     )
+
+
+def test_redirecting_over_a_file_costs_what_deleting_it_costs(
+    tmp_path: Path,
+) -> None:
+    """The three writing forms answer one question about the same path.
+
+    A redirection's target was resolved for existence but never for
+    recoverability, so `rm notes.md` and `cp x notes.md` were granted while
+    `echo x > notes.md` asked about the identical clean, tracked file. The
+    heredoc form carried a further deny, justified by an edit gate a
+    redirection into a *new* file already bypasses — so it drew the line
+    where the cost was lowest rather than where the risk was.
+    """
+    committed_tree(tmp_path, "notes.md")
+    policy = ShellPolicy(
+        SHELL_RULES,
+        path_rules=[human_owned_path_rule("README.md")],
+        runner_targets=FIXTURE_RUNNER_TARGETS,
+    )
+
+    def effect(command: str) -> str:
+        return policy.decide(ShellCommand(command=command, cwd=tmp_path)).effect
+
+    # Every form writing a tracked, clean file costs one checkout.
+    assert effect("rm notes.md") == "allow"
+    assert effect("echo x > notes.md") == "allow"
+    assert effect("echo x >> notes.md") == "allow"
+    assert effect("cat > notes.md <<'EOF'\nbody\nEOF") == "allow"
+    # A file the host cannot vouch for keeps its ask, whatever the shape.
+    (tmp_path / "dirty.md").write_text("uncommitted\n", encoding="utf-8")
+    assert effect("echo x > dirty.md") == "ask"
+    assert effect("cat > dirty.md <<'EOF'\nbody\nEOF") == "ask"
+    # Ownership is a different question from cost, and still answers first.
+    (tmp_path / "README.md").write_text("human\n", encoding="utf-8")
+    assert effect("echo x > README.md") == "ask"
 
 
 def test_shell_policy_checks_every_segment_and_deny_wins() -> None:
@@ -1969,7 +2044,7 @@ def test_edit_policy_bundle_embeds_canonical_ast_refinement(tmp_path: Path) -> N
 
 
 def test_content_prose_examples_do_not_trip_code_or_marker_gates() -> None:
-    path = Path("src/lup_template/devtools/harness/content/skills/commit.py")
+    path = Path("packages/lup/src/lup/devtools/harness/content/skills/commit.py")
     before = path.read_text(encoding="utf-8")
     after = before + (
         '\nPROSE_GATE_EXAMPLE = """Any and # lup: examples remain prose."""\n'

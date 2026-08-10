@@ -15,9 +15,9 @@ import pytest
 import sh
 import typer
 
-from lup.codescan.markers import NoteKind
-from lup_template.devtools.dev import comments
-from lup_template.devtools.dev.check import inline_notes_lines
+from lup.codescan.markers import NoteKind, find_feedback
+from lup.devtools.dev import comments
+from lup.devtools.dev.check import inline_notes_lines
 from tests.unit.repos import commit_file, initialized_repo
 
 PY_SOURCE = """\
@@ -40,7 +40,7 @@ def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 def test_scan_reports_notes_with_read_context(repo: Path) -> None:
-    found = comments.scan_tracked(comments.find_feedback)
+    found = comments.scan_tracked(find_feedback)
 
     assert [(c.file, c.start_line, c.end_line) for c in found] == [
         ("code.py", 3, 4),
@@ -58,7 +58,7 @@ def test_scan_reports_notes_with_read_context(repo: Path) -> None:
 
 def test_scan_ignores_untracked_files(repo: Path) -> None:
     (repo / "scratch.py").write_text("# lup: never committed\n", encoding="utf-8")
-    found = comments.scan_tracked(comments.find_feedback)
+    found = comments.scan_tracked(find_feedback)
     assert all(c.file != "scratch.py" for c in found)
 
 

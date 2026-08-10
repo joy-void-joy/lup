@@ -45,7 +45,7 @@ import logging
 import os
 import tarfile
 import time
-from collections.abc import Generator, Sequence
+from collections.abc import Generator, Mapping, Sequence
 from contextlib import contextmanager
 from pathlib import Path
 from types import TracebackType
@@ -71,6 +71,7 @@ from lup.mcp import (
 from lup.sandbox.models import (
     DEFAULT_PRE_INSTALL,
     CodeExecutionTimeoutError,
+    DockerUnreachableError,
     ExecuteCodeInput,
     ExecuteCodeResult,
     InstallPackageInput,
@@ -84,6 +85,24 @@ from lup.sandbox.process import decode_output, process_is_alive, process_start_t
 from lup.sandbox.repl import REPL_SERVER_SCRIPT, ReplSession
 
 logger = logging.getLogger(__name__)
+
+
+def connected_docker_client() -> docker.DockerClient:
+    """Connect to the Docker daemon, naming what to check when it is absent.
+
+    A stopped daemon, a socket this user cannot open, and a sandbox that
+    denies that socket all arrive as one opaque connection error. The sandbox
+    is reached through documented tooling, so the caller is usually reading a
+    traceback for a machine they did not know was part of the story.
+    """
+    try:
+        return docker.from_env()
+    except DockerException as exc:
+        raise DockerUnreachableError(
+            "Cannot reach the Docker daemon. Check that it is running, that "
+            "this user may open its socket, and that no sandbox is denying "
+            f"that socket: {exc}"
+        ) from exc
 
 
 class Sandbox:
@@ -106,9 +125,16 @@ class Sandbox:
         network_mode: Network access level ("bridge" or "none").
         timeout_seconds: Default timeout for code execution.
         pre_install: Packages to pre-install on start. Pass ``None`` to skip.
+        source_roots: Host import roots to bind read-only and put on
+            ``PYTHONPATH``. Name the source directories themselves, never a
+            repository root: a checkout carries its `.env` files too, and the
+            default network mode would carry them back out.
     """
 
-    DEFAULT_DOCKER_IMAGE = "ghcr.io/astral-sh/uv:python3.12-bookworm-slim"
+    DEFAULT_DOCKER_IMAGE = "ghcr.io/astral-sh/uv:python3.14-bookworm-slim"
+
+    SOURCE_ROOT = "/sources"
+    """Where read-only host source trees are mounted, one directory each."""
 
     def __init__(
         self,
@@ -119,6 +145,7 @@ class Sandbox:
         network_mode: NetworkMode = "bridge",
         timeout_seconds: int = 30,
         pre_install: Sequence[str] | None = DEFAULT_PRE_INSTALL,
+        source_roots: Mapping[str, Path] | None = None,
     ) -> None:
         suffix = session_id.replace("/", "-")  # lup: ignore[string-replace] — slug
         self.container_name = f"lup-sandbox-{suffix}"
@@ -128,6 +155,9 @@ class Sandbox:
         self.network_mode = network_mode
         self.timeout_seconds = timeout_seconds
         self.pre_install = list(pre_install) if pre_install is not None else None
+        self.source_roots = {
+            name: Path(root).resolve() for name, root in (source_roots or {}).items()
+        }
         self.active_container: Container | None = None
         self.docker_client: docker.DockerClient | None = None
         self.repl: ReplSession | None = None
@@ -171,7 +201,32 @@ class Sandbox:
                     "read host inputs and write host outputs here."
                 ),
             ),
+            *[
+                Mount(
+                    container_path=f"{self.SOURCE_ROOT}/{name}",
+                    source=str(root),
+                    kind="bind",
+                    mode="ro",
+                    purpose=(
+                        f"Read-only import root from the host directory {root}; "
+                        "on PYTHONPATH, so this project's code imports here."
+                    ),
+                )
+                for name, root in sorted(self.source_roots.items())
+            ],
         ]
+
+    def source_path(self) -> str:
+        """The container-side ``PYTHONPATH`` for every mounted source root.
+
+        Import roots are mounted rather than installed, and only the roots a
+        caller names: a project's checkout also holds its `.env` files, and
+        this sandbox reaches the network by default, so the repository root
+        is a path out rather than a convenience.
+        """
+        return ":".join(
+            f"{self.SOURCE_ROOT}/{name}" for name in sorted(self.source_roots)
+        )
 
     @property
     def is_active(self) -> bool:
@@ -319,7 +374,7 @@ class Sandbox:
         Creates a new Docker container for code execution. Removes any
         stale container with the same name first.
         """
-        self.docker_client = docker.from_env()
+        self.docker_client = connected_docker_client()
         try:
             self.start_container()
         except (APIError, DockerException, OSError, RuntimeError):
@@ -353,6 +408,7 @@ class Sandbox:
             working_dir="/workspace",
             mem_limit="1g",
             network_mode=self.network_mode,
+            environment={"PYTHONPATH": self.source_path()} if self.source_roots else {},
             labels={
                 self.SANDBOX_LABEL: "1",
                 self.CREATED_AT_LABEL: str(time.time()),
@@ -634,14 +690,20 @@ def sandbox_cleanup(session_id: str, shared_dir: Path) -> Generator[None]:
         yield
     finally:
         sandbox = Sandbox(session_id=session_id, shared_dir=shared_dir)
-        client = docker.from_env()
-        sandbox.docker_client = client
+        # Connecting here can fail on the way out of a failed session, and
+        # raising would replace whatever the session was already raising.
         try:
-            sandbox.remove_stale_container()
-            client.volumes.get(sandbox.volume_name).remove()
-        except NotFound:
-            pass
-        except (APIError, DockerException) as e:
-            logger.warning("Post-session sandbox cleanup failed: %s", e)
-        finally:
-            client.close()
+            client = connected_docker_client()
+        except DockerUnreachableError as e:
+            logger.warning("Skipping post-session sandbox cleanup: %s", e)
+        else:
+            sandbox.docker_client = client
+            try:
+                sandbox.remove_stale_container()
+                client.volumes.get(sandbox.volume_name).remove()
+            except NotFound:
+                pass
+            except (APIError, DockerException) as e:
+                logger.warning("Post-session sandbox cleanup failed: %s", e)
+            finally:
+                client.close()

@@ -1,4 +1,4 @@
-<!-- Generated from lup_template.devtools.harness.content.docs.quality_pipeline by `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/harness.md. -->
+<!-- Generated from lup.devtools.harness.content.docs.quality_pipeline by `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/harness.md. -->
 
 # Quality pipeline
 
@@ -12,8 +12,8 @@ catches a class of problem the others cannot.
 generation changes tracked files.
 
 The hook triggers only when the staged commit touches generation inputs or
-generated output: the harness devtools (`src/lup_template/devtools/harness/`,
-including the typed content catalog), the `lup` library they compile
+generated output: the harness devtools and the typed content catalogs on both
+sides (`src/lup_template/devtools/harness/`), the `lup` library they compile
 (`packages/lup/src/lup/` — the adapters, harness, and policy packages plus
 the runtime modules the compiled artifacts embed), or the owned native trees
 that reconciliation reads (`.claude/`, `.codex/`, `.agents/`, `AGENTS.md`).

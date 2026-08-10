@@ -12,7 +12,7 @@ import pytest
 import sh
 import typer
 
-from lup_template.devtools.dev import branches
+from lup.devtools.dev import branches
 from tests.unit.repos import commit_file, initialized_repo
 
 

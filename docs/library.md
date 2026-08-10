@@ -1,4 +1,4 @@
-<!-- Generated from lup_template.devtools.harness.content.docs.library by `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/harness.md. -->
+<!-- Generated from lup.devtools.harness.content.docs.library by `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/harness.md. -->
 
 # The lup library
 
@@ -121,11 +121,17 @@ full lattice.
 
 A persisted state machine over concerns. `models.py` holds schema-versioned
 records; `dag.py` validates and orders the concern graph; `state.py` persists
-it atomically under a file lock; `orchestrator.py` owns every git side effect
-(leases, worktrees, commits, dependency bases); `mailbox.py` carries questions
-and answers as files so any door can write while the run holds its lease;
-`core.py` is the only module that composes the others.
-[resolver.md](resolver.md) covers the lifecycle.
+it atomically under a file lock; `run.py` names the one live state a run
+holds, with the lock and the observer that guard it; `orchestrator.py` owns
+every git side effect (leases, worktrees, commits, dependency bases);
+`mailbox.py` carries questions and answers as files so any door can write
+while the run holds its lease. Each phase is a collaborator over those rather
+than a method on one class: `questions.py` publishes and promotes,
+`actors.py` holds one durable session per actor, `turns.py` puts the prompts
+to them, `joins.py` brings branches together and settles what that breaks,
+`verification.py` runs one tree through the verification set, and
+`execution.py` drives one concern's revision loop. `core.py` composes them
+and owns only the sequence. [resolver.md](resolver.md) covers the lifecycle.
 
 ### `codescan` — the executable conventions
 

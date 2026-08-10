@@ -1,143 +1,53 @@
-"""Explicit aggregation of canonical harness content declarations."""
+"""This repository's harness content: what it inherits, and what only it has.
+
+The skills automating agent work come from the library. Declared here are the
+six whose subject is a lup-based project rather than the work inside one —
+standing one up, installing the plugin into it, importing from a downstream
+repo, and keeping the whole thing in step with upstream — plus the composed
+rosters every document and the compiled plugin read.
+"""
 
 import lup.harness.models as models
-
-from lup_template.devtools.harness.content.skills.add_command import (
-    SKILL as SKILL_ADD_COMMAND,
-)
+from lup.devtools.harness.content.catalog import LIBRARY_AGENTS, LIBRARY_SKILLS
 from lup_template.devtools.harness.content.skills.brainstorm import (
     SKILL as SKILL_BRAINSTORM,
 )
-from lup_template.devtools.harness.content.skills.bump import SKILL as SKILL_BUMP
-from lup_template.devtools.harness.content.skills.close import SKILL as SKILL_CLOSE
-from lup_template.devtools.harness.content.skills.commit import SKILL as SKILL_COMMIT
-from lup_template.devtools.harness.content.skills.create_investigator import (
-    SKILL as SKILL_CREATE_INVESTIGATOR,
-)
-from lup_template.devtools.harness.content.skills.debug import SKILL as SKILL_DEBUG
-from lup_template.devtools.harness.content.skills.fb_analyze import (
-    SKILL as SKILL_FB_ANALYZE,
-)
-from lup_template.devtools.harness.content.skills.fb_implement import (
-    SKILL as SKILL_FB_IMPLEMENT,
-)
-from lup_template.devtools.harness.content.skills.fb_investigate import (
-    SKILL as SKILL_FB_INVESTIGATE,
-)
-from lup_template.devtools.harness.content.skills.fb_reflect import (
-    SKILL as SKILL_FB_REFLECT,
-)
-from lup_template.devtools.harness.content.skills.fb_status import (
-    SKILL as SKILL_FB_STATUS,
-)
-from lup_template.devtools.harness.content.skills.feedback_loop import (
-    SKILL as SKILL_FEEDBACK_LOOP,
-)
-from lup_template.devtools.harness.content.skills.hooks import SKILL as SKILL_HOOKS
 from lup_template.devtools.harness.content.skills.import_skill import (
     SKILL as SKILL_IMPORT,
 )
 from lup_template.devtools.harness.content.skills.init import SKILL as SKILL_INIT
 from lup_template.devtools.harness.content.skills.install import SKILL as SKILL_INSTALL
-from lup_template.devtools.harness.content.skills.land import SKILL as SKILL_LAND
-from lup_template.devtools.harness.content.skills.merge import SKILL as SKILL_MERGE
 from lup_template.devtools.harness.content.skills.meta import SKILL as SKILL_META
-from lup_template.devtools.harness.content.skills.modify_command import (
-    SKILL as SKILL_MODIFY_COMMAND,
-)
-from lup_template.devtools.harness.content.skills.principle import (
-    SKILL as SKILL_PRINCIPLE,
-)
-from lup_template.devtools.harness.content.skills.rebase import SKILL as SKILL_REBASE
-from lup_template.devtools.harness.content.skills.refactor import (
-    SKILL as SKILL_REFACTOR,
-)
-from lup_template.devtools.harness.content.skills.refactor_tools import (
-    SKILL as SKILL_REFACTOR_TOOLS,
-)
-from lup_template.devtools.harness.content.skills.resolve import SKILL as SKILL_RESOLVE
-from lup_template.devtools.harness.content.skills.review import SKILL as SKILL_REVIEW
 from lup_template.devtools.harness.content.skills.update import SKILL as SKILL_UPDATE
-from lup_template.devtools.harness.content.skills.verify_solved import (
-    SKILL as SKILL_VERIFY_SOLVED,
-)
-from lup_template.devtools.harness.content.skills.implementer import (
-    SKILL as SKILL_IMPLEMENTER,
-)
-from lup_template.devtools.harness.content.skills.resolve_reviewer import (
-    SKILL as SKILL_RESOLVE_REVIEWER,
-)
-from lup_template.devtools.harness.content.agents.implementer import (
-    AGENT as AGENT_IMPLEMENTER,
-)
-from lup_template.devtools.harness.content.agents.trace_explorer import (
-    AGENT as AGENT_TRACE_EXPLORER,
-)
-from lup_template.devtools.harness.content.agents.version_explorer import (
-    AGENT as AGENT_VERSION_EXPLORER,
-)
-from lup_template.devtools.harness.content.agents.version_reviewer import (
-    AGENT as AGENT_VERSION_REVIEWER,
-)
 
-SKILLS = [
-    SKILL_ADD_COMMAND,
+PROJECT_SKILLS = [
     SKILL_BRAINSTORM,
-    SKILL_BUMP,
-    SKILL_CLOSE,
-    SKILL_COMMIT,
-    SKILL_CREATE_INVESTIGATOR,
-    SKILL_DEBUG,
-    SKILL_FB_ANALYZE,
-    SKILL_FB_IMPLEMENT,
-    SKILL_FB_INVESTIGATE,
-    SKILL_FB_REFLECT,
-    SKILL_FB_STATUS,
-    SKILL_FEEDBACK_LOOP,
-    SKILL_HOOKS,
     SKILL_IMPORT,
     SKILL_INIT,
     SKILL_INSTALL,
-    SKILL_LAND,
-    SKILL_MERGE,
     SKILL_META,
-    SKILL_MODIFY_COMMAND,
-    SKILL_PRINCIPLE,
-    SKILL_REBASE,
-    SKILL_REFACTOR,
-    SKILL_REFACTOR_TOOLS,
-    SKILL_RESOLVE,
-    SKILL_REVIEW,
     SKILL_UPDATE,
-    SKILL_VERIFY_SOLVED,
-    SKILL_IMPLEMENTER,
-    SKILL_RESOLVE_REVIEWER,
 ]
+"""The skills only this repository has, because only it is a template.
 
-AGENTS = [
-    AGENT_IMPLEMENTER,
-    AGENT_TRACE_EXPLORER,
-    AGENT_VERSION_EXPLORER,
-    AGENT_VERSION_REVIEWER,
-]
+Each one's subject is standing up or maintaining a lup-based project — they
+have nothing to say inside one, which is why they stay behind when the rest
+of the roster becomes the library's.
+"""
 
+PROJECT_AGENTS: list[models.Agent] = []
+"""No agent here is about being a template; the whole roster is the library's."""
 
-def skill_roster_parts() -> list[models.PromptPart]:
-    """Format the declared skills as portable bullet-list document parts."""
-    return [
-        part
-        for skill in sorted(SKILLS, key=lambda skill: skill.name)
-        for part in (
-            models.TextPart(text="- "),
-            models.SkillInvocation(plugin="lup", skill=skill.name),
-            models.TextPart(text=f" — {skill.description}\n"),
-        )
-    ]
+SKILLS = [*LIBRARY_SKILLS, *PROJECT_SKILLS]
+"""Every skill this repository's plugin ships, inherited half first."""
 
+AGENTS = [*LIBRARY_AGENTS, *PROJECT_AGENTS]
+"""Every agent this repository's plugin ships."""
 
-def agent_roster_text() -> str:
-    """Format the declared agents as Markdown bullet lines."""
-    return "".join(
-        f"- `{agent.name}` — {agent.description}\n"
-        for agent in sorted(AGENTS, key=lambda agent: agent.name)
-    )
+PLUGIN_NAME: models.NativeName = "lup"
+"""The plugin every declared skill is invoked through.
+
+Named here rather than read off the harness because the roster documents are
+compiled into that harness: reading it back to render them would close the
+loop between what is declared and what describes the declaration.
+"""

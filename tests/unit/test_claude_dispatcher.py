@@ -94,7 +94,7 @@ def test_a_declared_test_root_is_not_judged_against_production_conventions() -> 
     shared = "from lup.policy.kernel.roles import path_role"
     production = decide(
         edit_payload(
-            "src/lup_template/devtools/dev/antipatterns.py",
+            "packages/lup/src/lup/devtools/dev/antipatterns.py",
             shared,
             "from typing import Any",
             False,

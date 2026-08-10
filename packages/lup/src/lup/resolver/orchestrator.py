@@ -431,32 +431,10 @@ class WorktreeOrchestrator:
             raise RuntimeError(f"worktree branch changed for {lease.concern_id}")
         return lines[0]
 
-    # lup: reset lost its production caller when restore_worktree chose to
+    # lup: solved: reset lost its production caller when restore_worktree chose to
     # preserve the interrupted turn (a park is a pause, not an abandonment);
     # decide whether any retry path still owes a hard discard, or remove
     # this method and the three tests that exercise it.
-    def reset(self, lease: WritableRootLease, commit: str) -> None:
-        """Discard an uncommitted attempt before safely retrying a concern.
-
-        The rewind runs alone before the sweep, because sweeping a tree that
-        `git reset --hard` failed to rewind destroys untracked work without
-        achieving the discard that removal was part of.
-        """
-        self.require(
-            LaunchRequest(
-                arguments=["git", "reset", "--hard", commit],
-                cwd=lease.root,
-            ),
-            f"failed to reset worktree for {lease.concern_id}",
-        )
-        self.require(
-            LaunchRequest(
-                arguments=["git", "clean", "-fd"],
-                cwd=lease.root,
-            ),
-            f"failed to reset worktree for {lease.concern_id}",
-        )
-
     def head(self, lease: WritableRootLease) -> str:
         """Read the exact current commit identity for an orchestrated worktree."""
         identified = self.require(

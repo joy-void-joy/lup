@@ -23,9 +23,10 @@ import pytest
 from docker.errors import APIError, DockerException, NotFound
 from docker.models.containers import Container, ExecResult
 
-from lup.sandbox.container import Sandbox, sandbox_cleanup
+from lup.sandbox.container import Sandbox, connected_docker_client, sandbox_cleanup
 from lup.sandbox.models import (
     CodeExecutionTimeoutError,
+    DockerUnreachableError,
     ReplCrashedError,
     SandboxNotInitializedError,
 )
@@ -117,6 +118,7 @@ class FakeContainers:
         working_dir: str,
         mem_limit: str,
         network_mode: str,
+        environment: dict[str, str],  # lup: ignore[dict-str-payload]
         labels: dict[str, str],  # lup: ignore[dict-str-payload]
     ) -> FakeContainer:
         if self.run_error is not None:
@@ -540,3 +542,31 @@ class TestOrphanAgeFallback:
         labels = {Sandbox.CREATED_AT_LABEL: str(time.time())}
 
         assert sandbox.container_is_orphaned(labels) is False
+
+
+class TestDockerReachability:
+    @staticmethod
+    def refuse_connections(monkeypatch: pytest.MonkeyPatch) -> None:
+        """Make the daemon unreachable the way a denied socket reads."""
+
+        def refuse_client() -> docker.DockerClient:
+            raise DockerException("Operation not permitted")
+
+        monkeypatch.setattr(docker, "from_env", refuse_client)
+
+    def test_an_unreachable_daemon_names_what_to_check(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self.refuse_connections(monkeypatch)
+
+        with pytest.raises(DockerUnreachableError, match="sandbox is denying"):
+            connected_docker_client()
+
+    def test_cleanup_leaves_the_session_failure_to_propagate(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        self.refuse_connections(monkeypatch)
+
+        with pytest.raises(ValueError, match="what the session raised"):
+            with sandbox_cleanup(session_id="masked", shared_dir=tmp_path):
+                raise ValueError("what the session raised")

@@ -18,7 +18,7 @@ from lup.codeintel.tools import (
     create_codeintel_tools,
 )
 from lup.workspace.paths import project_root
-from lup_template.devtools.dev.pyright_oracle import langserver_path
+from lup.devtools.dev.pyright_oracle import langserver_path
 
 pytestmark = pytest.mark.skipif(
     langserver_path() is None, reason="pyright-langserver is not installed"

@@ -76,6 +76,9 @@ class ShellCommandRule(BaseModel):
     pre-subcommand position (``git -c``). ``allow_flags`` declare the pure
     read-only form of a non-allow command: the row de-escalates to allow only
     when every argument is exactly one of the named flags (``ssh-add -l``).
+    ``read_verbs`` do the same for a command whose read-only form still takes
+    operands, so no all-flags test can recognize it (``nc -z host port``): a
+    declared verb among otherwise literal, unguarded words pins the action.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -84,6 +87,7 @@ class ShellCommandRule(BaseModel):
     default_effect: CommandEffect = "allow"
     ask_flags: list[str] = Field(default_factory=list)
     allow_flags: list[str] = Field(default_factory=list)
+    read_verbs: list[str] = Field(default_factory=list)
     value_flags: list[str] = Field(default_factory=list)
     subcommands: list[ShellSubcommandRule] = Field(default_factory=list)
     reason: str = ""
@@ -136,7 +140,7 @@ def erase_shell_rules(rules: list[ShellCommandRule]) -> list[ShellRuleRow]:
             effect=command.default_effect,
             ask_flags=list(command.ask_flags),
             allow_flags=list(command.allow_flags),
-            read_verbs=[],
+            read_verbs=list(command.read_verbs),
             value_flags=list(command.value_flags),
             reason=command.reason,
         )

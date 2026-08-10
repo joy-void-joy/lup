@@ -1,4 +1,4 @@
-<!-- Generated from lup_template.devtools.harness.content.docs.contributing by `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/harness.md. -->
+<!-- Generated from lup.devtools.harness.content.docs.contributing by `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/harness.md. -->
 
 # Contributing
 
@@ -34,7 +34,7 @@ uv run lup-devtools harness codex
 | --- | --- | --- |
 | Anything another project built on lup would want | `packages/lup/` | [library.md](library.md) |
 | Anything only this application needs | `src/lup_template/` | [template.md](template.md) |
-| A skill, agent, guidance, permission policy, or a page under `docs/` | `src/lup_template/devtools/harness/content/` | [harness.md](harness.md) |
+| A skill, agent, guidance, permission policy, or a page under `docs/` | the `devtools/harness/content/` of whichever half owns its subject | [harness.md](harness.md) |
 | Repeated shell incantations | a new `lup-devtools` command | [template.md](template.md) |
 | A one-off computation | `lup-devtools py eval`, or a new command | below |
 
@@ -49,11 +49,16 @@ later.
 reviewer, or a human — which is why it does not execute. One-off work takes
 the first of these that fits:
 
-1. `uv run lup-devtools py eval '<expression>'`, which auto-imports and needs
-   no file, for anything expressible as one expression.
-2. The sandbox, where the work allows it.
-3. A new `lup-devtools` command — reviewable, because `devtools/` lands in
-   the diff.
+1. To read code rather than run it: `py info`, `py source`, `py search`,
+   `py imports`, and the codeintel tools, which resolve names through a
+   language server and answer without executing anything.
+2. To compute something: `uv run lup-devtools py eval '<expression>'`, which
+   auto-imports and needs no file. It evaluates inside the sandbox container
+   with this checkout's source mounted read-only, so `lup.*` and the
+   application package import exactly as they do here while the expression
+   itself reaches the container rather than the checkout.
+3. Where no sandbox is available: a new `lup-devtools` command — reviewable,
+   because `devtools/` lands in the diff.
 4. As a last resort, an inline heredoc behind an escalation marker
    ([permissions.md](permissions.md)).
 

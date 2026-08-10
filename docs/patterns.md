@@ -1,4 +1,4 @@
-<!-- Generated from lup_template.devtools.harness.content.docs.patterns by `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/harness.md. -->
+<!-- Generated from lup.devtools.harness.content.docs.patterns by `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/harness.md. -->
 
 # Design Patterns
 
@@ -191,8 +191,9 @@ separately before the shape was named.
 The rule is one line: **read the current value from its own source at the
 moment you compare, and never carry a copy across a boundary that can also
 move it.** `execute_concern_inner`
-(`packages/lup/src/lup/resolver/core.py`) reads `worktrees.head(lease)` at
-the top of each round; `join_commits` beside it was already written this way.
+(`packages/lup/src/lup/resolver/execution.py`) reads `worktrees.head(lease)`
+at the top of each round; `join_commits` in `joins.py` was already written
+this way.
 
 Two things follow. A value that must be captured *before* an operation — a
 pre-turn head, a pre-edit digest — is captured as close to that operation as

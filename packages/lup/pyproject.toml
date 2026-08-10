@@ -22,6 +22,7 @@ dependencies = [
     "packaging>=26.2",
     "pydantic>=2.12.5",
     "pydantic-settings>=2.14.1",
+    "pyjwt>=2.13.0",
     "rich>=14.3.1",
     "sh>=2.2.2",
     "tenacity>=9.0.0",
@@ -58,6 +59,7 @@ lup = ["py.typed"]
 "lup.adapters.codex" = ["assets/*.py"]
 "lup.policy" = ["assets/*.py"]
 "lup.devtools.supervisor" = ["assets/*.html"]
+"lup.devtools.dev" = ["*.css"]
 
 # Independent of the workspace-root selection, and deliberately so: run from
 # this directory the suite sees `src` alone, so a library test that reached

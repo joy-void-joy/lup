@@ -26,6 +26,13 @@ from lup.harness.models import (
     ResolveSpec,
     SkillInvocation,
 )
+from lup.adapters.claude.harness import ClaudeSpellings
+from lup.adapters.codex.harness import CodexSpellings
+from lup.codescan.boundaries import ApplicationRoots, generated_tree_paths
+from lup.devtools.dev.workflow import WorkflowSpec
+from lup.devtools.project import DevProject
+from lup.harness.contracts import NativeSpellings
+from lup.policy.kernel.rows import PathRoleRow
 from lup.workspace.paths import project_root, read_project_name
 from lup_template.agent.toolsets import tool_group_names
 from lup_template.devtools.harness.content.catalog import AGENTS, SKILLS
@@ -71,6 +78,15 @@ def agent_tool_servers() -> list[McpServer]:
     ]
 
 
+def declared_plugin() -> Plugin:
+    """The one plugin this project publishes, as generation renders it.
+
+    Its name and marketplace are decided once, here, so a command that has
+    to spell either reads the declaration rather than repeating it.
+    """
+    return portable_harness().plugins[0]
+
+
 def declared_hook_set() -> HookSet:
     """The hook set this project declares, for a session composed in process.
 
@@ -78,10 +94,65 @@ def declared_hook_set() -> HookSet:
     session this program builds itself has to reach the same declaration, or
     it enforces something the generated tree does not.
     """
-    return next(
-        plugin.hooks
-        for plugin in portable_harness().plugins
-        if plugin.hooks is not None
+    return portable_harness().declared_hooks
+
+
+WORKFLOW = WorkflowSpec(branches=["main", "dev"])
+"""This project's gate: the two-tier model, where `dev` integrates and `main`
+carries what has landed, so both deserve a run of their own."""
+
+
+NATIVE_RUNTIMES: list[NativeSpellings] = [ClaudeSpellings(), CodexSpellings()]
+"""Every runtime this project generates a tree for."""
+
+
+def application_roots() -> ApplicationRoots:
+    """Where this project composes concrete native implementations.
+
+    The generated trees are asked of the runtimes rather than written down, so
+    a location a runtime learns sanctions its own tree. The rest are this
+    project's own homes, derived from where this package actually sits, so
+    renaming it during initialization moves them instead of leaving the rule
+    pointing at a package that is gone.
+    """
+    package = Path(__file__).resolve().parents[2].relative_to(project_root()).as_posix()
+    harness = f"{package}/devtools/harness/"
+    plugins = [plugin.name for plugin in portable_harness().plugins]
+    return ApplicationRoots(
+        composition=[
+            *generated_tree_paths(NATIVE_RUNTIMES, plugins),
+            "tests/",
+            "packages/lup/tests/",
+            "examples/",
+            f"{package}/agent/core.py",
+            # Which backend's sub-apps this project takes is a composition
+            # decision like any other: `usage` reads Claude Code's own
+            # credentials, and a project on another backend leaves it out.
+            f"{package}/devtools/subapps.py",
+            harness,
+            f"{package}/devtools/setup.py",
+        ],
+        portable_prose=[f"{harness}content/"],
+    )
+
+
+def dev_project() -> DevProject:
+    """What this project tells the shared development tooling about itself.
+
+    The package name is derived from where this file actually sits rather
+    than written down, so initialization renaming the package moves the
+    scans with it instead of leaving them resolving against a name that is
+    gone. The roles come from the same hook set the generated trees enforce,
+    so a scan and a hook cannot disagree about what a path is for.
+    """
+    hooks = declared_hook_set()
+    return DevProject(
+        package=Path(__file__).resolve().parents[2].name,
+        roots=application_roots(),
+        path_roles=[
+            PathRoleRow(root=role.root.as_posix(), role=role.role)
+            for role in hooks.path_roles
+        ],
     )
 
 
@@ -119,6 +190,10 @@ def portable_harness(version: str = "0.2.0", root: Path | None = None) -> Harnes
                 # declared scopes one hop in.
                 HookUrlScope(origin=AnyHttpUrl("https://platform.claude.com")),
                 HookUrlScope(origin=AnyHttpUrl("http://platform.claude.com")),
+                # Where a session publishes a settled classification for a
+                # later one to read back, so a briefing can cite the artifact
+                # rather than restate it.
+                HookUrlScope(origin=AnyHttpUrl("https://claude.ai")),
                 HookUrlScope(origin=AnyHttpUrl("https://ai.pydantic.dev")),
                 HookUrlScope(origin=AnyHttpUrl("http://ai.pydantic.dev")),
                 HookUrlScope(origin=AnyHttpUrl("https://learn.chatgpt.com")),

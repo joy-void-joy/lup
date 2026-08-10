@@ -1,4 +1,4 @@
-<!-- Generated from lup_template.devtools.harness.content.docs.architecture by `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/harness.md. -->
+<!-- Generated from lup.devtools.harness.content.docs.architecture by `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/harness.md. -->
 
 # Capability-composition architecture
 

@@ -10,15 +10,12 @@ entire life, so a door that wanted it could only ever serve dead runs.
 """
 
 import asyncio
-import webbrowser
-from importlib import resources
 from pathlib import Path
 from typing import Annotated
 
 import typer
-import uvicorn
 from fastapi import FastAPI, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.responses import StreamingResponse
 
 from lup.channels.models import utc_now
 from lup.resolver.journal import Journal, JournalEntry
@@ -32,7 +29,7 @@ from lup.resolver.mailbox import (
 from lup.resolver.models import QuestionAnswer
 from lup.resolver.state import ResolverStateRepository, StateCorruptionError
 from lup.types import StringMap
-from lup.web.loopback import guard_loopback_host, refuse_non_loopback
+from lup.web.serve import local_page_app, serve_local_page
 from lup.workspace.paths import project_root
 from lup.devtools.supervisor.events import FRESH_CATCHUP_ENTRIES, stream
 from lup.devtools.supervisor.projection import (
@@ -157,13 +154,9 @@ def create_supervisor(
     sse_headers: StringMap = DEFAULT_SSE_HEADERS,
 ) -> FastAPI:
     """Build the supervisor app over every run under the state root."""
-    supervisor = FastAPI(title="Lup resolver supervisor", docs_url=None, redoc_url=None)
-    html = (
-        resources.files("lup.devtools.supervisor")
-        .joinpath("assets/index.html")
-        .read_text("utf-8")
+    supervisor = local_page_app(
+        "Lup resolver supervisor", "lup.devtools.supervisor", url
     )
-    guard_loopback_host(supervisor, url)
 
     def selected_run() -> str:
         if run_id is None:
@@ -172,10 +165,6 @@ def create_supervisor(
                 detail="no run selected; pass --run-id or use /api/runs",
             )
         return run_id
-
-    @supervisor.get("/", response_class=HTMLResponse)
-    async def supervisor_home() -> HTMLResponse:
-        return HTMLResponse(html)
 
     @supervisor.get("/api/state")
     async def read_state() -> SupervisorState:
@@ -313,15 +302,14 @@ def serve_supervisor(
     ] = True,
 ) -> None:
     """Answer any run under ``.lup/resolve``, live or parked."""
+    state_root = project_root() / ".lup" / "resolve"
     try:
-        refuse_non_loopback(host, "supervisor")
+        serve_local_page(
+            lambda url: create_supervisor(state_root, url, run_id, adapter),
+            "Resolver supervisor",
+            host,
+            port,
+            open_page,
+        )
     except ValueError as error:
         raise typer.BadParameter(str(error)) from error
-    url = f"http://{host}:{port}"
-    state_root = project_root() / ".lup" / "resolve"
-    typer.echo(f"Resolver supervisor: {url}")
-    if open_page:
-        webbrowser.open(url)
-    uvicorn.run(
-        create_supervisor(state_root, url, run_id, adapter), host=host, port=port
-    )

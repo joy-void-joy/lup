@@ -441,6 +441,23 @@ CURL_VALUE_FLAGS = (  # lup: ignore[library-default] — curl's own value-taking
 )
 
 
+def curl_url(word: str) -> str:
+    """Spell one curl operand the way curl itself resolves it.
+
+    curl accepts a URL with no ``scheme://`` and guesses one, defaulting to
+    HTTP — which is how a liveness probe is actually typed, and how its own
+    manual documents it. Reading the bare form as malformed put an approval
+    question on ``curl localhost:8000/health`` while the identical request
+    spelled in full was already declared safe.
+
+    Guessing HTTP where curl guesses HTTP keeps the verdict conservative on
+    its own terms: a scope declared for ``https`` alone does not match the
+    guess, so an origin reachable only over TLS still asks rather than
+    inheriting a grant its scheme never gave.
+    """
+    return word if "://" in word else f"http://{word}"
+
+
 def decide_curl_words(
     words: list[str],
     allowed_scopes: list[UrlScopeRow],
@@ -493,7 +510,7 @@ def decide_curl_words(
     if not urls:
         return unjudged("curl has no URL")
     for url in urls:
-        verdict = decide_fetch(url, allowed_scopes, denied_scopes)
+        verdict = decide_fetch(curl_url(url), allowed_scopes, denied_scopes)
         if verdict.effect != "allow":
             return verdict
     return KernelDecision("allow", "read-only curl within declared scopes")

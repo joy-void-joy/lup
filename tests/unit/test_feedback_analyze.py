@@ -8,11 +8,11 @@ surface only failing sessions, ranked by error count.
 import pytest
 
 from lup.telemetry.metrics import MetricsSummary, ToolMetricsDict
-from lup_template.devtools.feedback.analyze import (
+from lup.devtools.feedback.analyze import (
     gather_error_patterns,
     gather_tool_health,
 )
-from lup_template.devtools.feedback.models import LoadedSession
+from lup.devtools.feedback.models import LoadedSession
 
 
 def tool_metrics(call_count: int, error_count: int) -> ToolMetricsDict:

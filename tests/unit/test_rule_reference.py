@@ -4,7 +4,7 @@ from pathlib import Path
 
 from lup.codescan.antipatterns import PYTHON_ANTI_PATTERNS, TS_ANTI_PATTERNS
 from lup.codescan.registry import STRUCTURAL_RULES, all_rules
-from lup_template.devtools.dev.rules import rule_reference_artifact
+from lup.devtools.dev.rules import rule_reference_artifact
 
 
 def test_checked_in_rule_reference_matches_canonical_objects() -> None:

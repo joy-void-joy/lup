@@ -11,7 +11,8 @@ from pathlib import Path
 
 from lup.codescan.dispatch import audit_own_model_dispatch
 from lup.codescan.common import PythonSource, module_name
-from lup_template.devtools.dev.antipatterns import scanned_roots
+from lup.devtools.dev.antipatterns import scanned_roots
+from lup.devtools.project import DevProject
 
 MODEL_MODULE = """
 from pydantic import BaseModel
@@ -51,7 +52,10 @@ def test_module_name_uses_the_import_root_src_introduces() -> None:
         == "lup.harness.models"
     )
     assert (
-        module_name(Path("src/lup_template/devtools/dev/check.py"), scanned_roots())
+        module_name(
+            Path("src/lup_template/devtools/dev/check.py"),
+            scanned_roots(DevProject(package="lup_template")),
+        )
         == "lup_template.devtools.dev.check"
     )
     assert module_name(Path("packages/lup/src/lup/__init__.py")) == "lup"

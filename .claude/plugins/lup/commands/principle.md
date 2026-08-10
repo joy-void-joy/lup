@@ -39,8 +39,13 @@ Read every relevant file and categorize findings into three buckets:
 
 ### Layer A: Documentation & Meta
 
-1. **Guidance** (`src/lup_template/devtools/harness/content/guidance.py`)
+1. **Guidance** (`src/lup_template/devtools/harness/content/guidance.py`, plus
+   the portable blocks it composes from
+   `packages/lup/src/lup/devtools/harness/content/conventions.py`)
    - Check every section: does it align with or contradict the principle?
+   - A convention every reader needs identically belongs in the shared
+     blocks, so fixing one there fixes the guidance, the downstream template,
+     and the reference page at once
    - Look for existing principles that overlap or conflict
    - .claude/CLAUDE.md under Claude Code, AGENTS.md under Codex are generated from this module — read them for the rendered result, never edit them
 
@@ -49,7 +54,9 @@ Read every relevant file and categorize findings into three buckets:
 
 ### Layer B: Commands & Workflows
 
-3. **All skill modules** (`src/lup_template/devtools/harness/content/skills/*.py`)
+3. **All skill modules** (`packages/lup/src/lup/devtools/harness/content/skills/*.py`
+   and `src/lup_template/devtools/harness/content/skills/*.py` — both halves,
+   or the sweep misses the twenty-five the library holds)
    - Read each skill's instructions, guidelines, and anti-patterns
    - Check if a skill encodes a workflow that violates the principle
    - .claude/plugins/lup/commands/*.md under Claude Code, .codex/plugins/lup/skills/*/SKILL.md under Codex are generated from these — never edit them
@@ -81,8 +88,9 @@ The `src/` directory IS the template — when someone forks this repo, this code
    - CLI structure, how the agent is invoked
    - Any scaffolding patterns
 
-8. **Devtools** (`src/lup_template/devtools/`)
-   - CLI commands for development and analysis
+8. **Devtools** (`packages/lup/src/lup/devtools/` and
+   `src/lup_template/devtools/`)
+   - CLI commands for development and analysis, most of them the library's
    - Patterns encoded in automation
 
 ## Phase 3: Propose Changes (Grouped by Layer)
@@ -124,7 +132,7 @@ Present findings and proposed changes one layer at a time. For each layer:
 - If an existing hook contradicts the principle, propose modifications.
 - Not every principle needs a hook — only propose one if mechanical enforcement makes sense.
 
-**Group 5: Devtools & automation** (`src/lup_template/devtools/`)
+**Group 5: Devtools & automation** (`packages/lup/src/lup/devtools/` and `src/lup_template/devtools/`)
 
 - Do the devtools commands (agent, py, dev, feedback, setup, sync, trace, usage, version) reflect the principle?
 - Are there devtools commands that should exist to support the principle but don't?

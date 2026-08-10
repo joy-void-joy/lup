@@ -5,12 +5,13 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field
 import yaml
 
-from lup_template.devtools.dev.workflow import (
+from lup.devtools.dev.workflow import (
     CHECK_COMMAND,
     WORKFLOW_PATH,
     write_workflow,
 )
-from lup_template.devtools.harness.evidence import (
+from lup_template.devtools.harness.catalog import WORKFLOW
+from lup.devtools.harness.evidence import (
     EVIDENCE_LEDGER,
     EvidenceEntry,
     evidence_drift,
@@ -132,4 +133,4 @@ def test_pull_request_workflow_runs_the_same_gate_a_checkout_runs() -> None:
 
 def test_the_workflow_on_disk_is_the_one_the_declaration_renders() -> None:
     """Generated rather than scaffolded, so `dev check` reports it when it drifts."""
-    write_workflow(check=True)
+    write_workflow(WORKFLOW, check=True)

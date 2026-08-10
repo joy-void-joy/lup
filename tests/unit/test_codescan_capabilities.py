@@ -7,7 +7,8 @@ reports fewer findings, which reads exactly like a clean repository.
 from pathlib import Path
 
 from lup.codescan.common import module_name
-from lup_template.devtools.dev.antipatterns import scanned_roots
+from lup.devtools.dev.antipatterns import scanned_roots
+from lup.devtools.project import DevProject
 
 
 def test_a_package_under_a_distribution_directory_resolves_to_the_package() -> None:
@@ -23,9 +24,10 @@ def test_a_package_under_a_distribution_directory_resolves_to_the_package() -> N
 
 def test_an_application_module_resolves_from_its_own_root() -> None:
     """The library knows only its own root; the application supplies the rest."""
-    assert module_name(Path("src/lup_template/devtools/app.py"), scanned_roots()) == (
-        "lup_template.devtools.app"
-    )
+    application = DevProject(package="lup_template")
+    assert module_name(
+        Path("src/lup_template/devtools/app.py"), scanned_roots(application)
+    ) == ("lup_template.devtools.app")
     assert module_name(Path("src/lup_template/devtools/app.py")) == (
         "src.lup_template.devtools.app"
     )

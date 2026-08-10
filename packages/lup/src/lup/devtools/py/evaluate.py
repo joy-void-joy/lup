@@ -1,78 +1,26 @@
-"""Helpers for ``py eval`` — safe expression evaluation.
+"""Helpers for ``py eval`` — expression evaluation inside the sandbox.
 
 Named ``evaluate`` rather than ``eval`` to avoid shadowing the builtin.
+
+There is no denylist here. One stood between the expression and the
+interpreter for a while, refusing ``os``, ``open``, ``getattr`` and a few
+dozen more — and it was escapable three ways in one line
+(``importlib.import_module("os")``, ``zipfile.os``,
+``importlib.import_module("pathlib").Path(...).read_text()``), so it stopped
+nothing an agent could not already reach through the tools it is handed
+anyway. What it did do was refuse ordinary introspection with a message that
+read like a security verdict. The isolation that was being approximated is
+the container's, and that is where the expression now runs.
 """
 
 import ast
 import importlib
 import json
 
-from lup.types import Namespace, StringMap
+from lup.types import Namespace
 from pprint import pformat
 
-# ---------------------------------------------------------------------------
-# py eval — safe expression evaluation
-# ---------------------------------------------------------------------------
-
-# Each blocked name maps to the reason shown when it is refused, so a
-# deny message explains itself instead of just naming the offender.
-DEFAULT_BLOCKED_CALLS: StringMap = {
-    "exec": "executes arbitrary code",
-    "eval": "evaluates arbitrary code",
-    "compile": "builds executable code objects",
-    "open": "touches the filesystem",
-    "breakpoint": "drops into a debugger",
-    "exit": "kills the process",
-    "quit": "kills the process",
-    "input": "blocks on stdin",
-    "__import__": "imports arbitrary modules",
-    "getattr": "reaches attributes dynamically, dodging the attribute blocklist",
-    "hasattr": "probes attributes dynamically",
-    "vars": "exposes raw namespaces",
-}
-
-DEFAULT_BLOCKED_ATTRS: StringMap = {
-    "__builtins__": "exposes the full builtin namespace",
-    "__class__": "walks the type graph toward arbitrary code",
-    "__subclasses__": "enumerates every loaded class",
-    "__globals__": "exposes a function's module namespace",
-    "__code__": "exposes raw code objects",
-    "__func__": "unwraps bound methods",
-    "__self__": "unwraps bound receivers",
-    "__dict__": "exposes raw namespaces",
-    "__bases__": "walks the type graph",
-    "__mro__": "walks the type graph",
-    "__import__": "imports arbitrary modules",
-    "__loader__": "reaches the import machinery",
-    "__spec__": "reaches the import machinery",
-}
-
-DEFAULT_DANGEROUS_MODULES: StringMap = {
-    "os": "process and filesystem control",
-    "sys": "interpreter internals",
-    "subprocess": "spawns processes",
-    "shutil": "filesystem surgery",
-    "signal": "process signal control",
-    "ctypes": "raw memory and C calls",
-    "socket": "network access",
-    "http": "network access",
-    "urllib": "network access",
-    "pathlib": "filesystem access",
-    "multiprocessing": "spawns processes",
-    "threading": "spawns threads",
-    "pickle": "deserializes into arbitrary code",
-    "shelve": "pickle-backed storage",
-    "marshal": "loads raw code objects",
-    "code": "interactive interpreter access",
-    "codeop": "compiles code",
-    "webbrowser": "launches external programs",
-    "tempfile": "filesystem access",
-    "glob": "filesystem enumeration",
-    "io": "filesystem access",
-    "builtins": "exposes the full builtin namespace",
-}
-
-DEFAULT_SAFE_BUILTINS: Namespace = {
+DEFAULT_BUILTINS: Namespace = {
     "True": True,
     "False": False,
     "None": None,
@@ -120,28 +68,9 @@ DEFAULT_SAFE_BUILTINS: Namespace = {
 }
 
 
-def check_eval_safety(
-    tree: ast.Expression,
-    blocked_calls: StringMap = DEFAULT_BLOCKED_CALLS,
-    blocked_attrs: StringMap = DEFAULT_BLOCKED_ATTRS,
-) -> str | None:
-    """Return an error message if the expression contains blocked patterns."""
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Attribute) and node.attr in blocked_attrs:
-            return f"Blocked attribute .{node.attr}: {blocked_attrs[node.attr]}"
-        if isinstance(node, ast.Call):
-            func = node.func
-            if isinstance(func, ast.Name) and func.id in blocked_calls:
-                return f"Blocked call {func.id}(): {blocked_calls[func.id]}"
-            if isinstance(func, ast.Attribute) and func.attr in blocked_calls:
-                return f"Blocked call .{func.attr}(): {blocked_calls[func.attr]}"
-    return None
-
-
 def auto_import_namespace(
     tree: ast.Expression,
-    builtins: Namespace = DEFAULT_SAFE_BUILTINS,
-    dangerous: StringMap = DEFAULT_DANGEROUS_MODULES,
+    builtins: Namespace = DEFAULT_BUILTINS,
 ) -> Namespace:
     """Build a namespace by importing modules referenced in the expression."""
     namespace = dict(builtins)
@@ -155,8 +84,6 @@ def auto_import_namespace(
     attr_nodes = [node for node in walked if isinstance(node, ast.Attribute)]
 
     for name in dict.fromkeys(root_names):
-        if name in dangerous:
-            continue
         try:
             namespace[name] = importlib.import_module(name)
         except ImportError:
@@ -176,15 +103,30 @@ def auto_import_namespace(
                 dotted_paths.append(".".join(chain[:i]))
 
     for dotted in sorted(dict.fromkeys(dotted_paths)):
-        root, _, _ = dotted.partition(".")  # lup: ignore[string-split] — dotted path
-        if root in dangerous:
-            continue
         try:
             importlib.import_module(dotted)
         except ImportError:
             pass
 
     return namespace
+
+
+def sandbox_program(expression: str) -> str:
+    """The cell that evaluates one expression inside the container.
+
+    It reaches the same auto-import and formatting the command has always
+    used, through the read-only source mount rather than by reimplementing
+    them, so an expression cannot mean one thing here and another there. The
+    expression travels as a literal because a REPL cell has no argv.
+    """
+    return (
+        "import ast\n"
+        "from lup.devtools.py.evaluate import ("
+        "auto_import_namespace, format_eval_result)\n"
+        f"tree = ast.parse({expression!r}, mode='eval')\n"
+        "print(format_eval_result("
+        "eval(compile(tree, '<py eval>', 'eval'), auto_import_namespace(tree))))\n"
+    )
 
 
 def format_eval_result(result: object) -> str:  # lup: ignore[bare-object] — eval result
