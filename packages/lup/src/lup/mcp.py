@@ -71,6 +71,17 @@ class ToolResponse(TypedDict, total=False):
     is_error: bool
 
 
+def response_text(response: ToolResponse) -> str:
+    """Every text block a tool result carries, joined in reading order.
+
+    The content key is optional and its blocks are a union, so reading a
+    result's text means two narrowings no caller should repeat — and one that
+    skips them reads an image block's absent ``text``.
+    """
+    content = response.get("content", [])  # lup: ignore[dict-get] — optional key
+    return "\n".join(block["text"] for block in content if block["type"] == "text")
+
+
 def mcp_response(text: str, *, is_error: bool = False) -> ToolResponse:
     """Create an MCP response with text content."""
     response = ToolResponse(content=[{"type": "text", "text": text}])

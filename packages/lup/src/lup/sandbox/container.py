@@ -162,7 +162,8 @@ class Sandbox:
             name: Path(root).resolve() for name, root in (source_roots or {}).items()
         }
         self.read_only_mounts = {
-            Path(host).resolve(): path for host, path in (read_only_mounts or {}).items()
+            Path(host).resolve(): path
+            for host, path in (read_only_mounts or {}).items()
         }
         self.rw_mounts = {
             Path(host).resolve(): path for host, path in (rw_mounts or {}).items()
@@ -605,27 +606,25 @@ class Sandbox:
             ),
         )
 
-    def run_shell(
-        self, command: Sequence[str], workdir: str | None = None
-    ) -> ExecuteCodeResult:
-        """Run one command in the container, outside the Python REPL.
+    def run_shell(self, command: str, workdir: str | None = None) -> ExecuteCodeResult:
+        """Run one shell command in the container, outside the Python REPL.
 
         The REPL is a Python process and holds the session's state; a
         toolchain the image ships — a compiler, a converter — is a process of
-        its own, and running it here leaves that state untouched. A dead
-        container is rebuilt and the command retried, the way installing is.
+        its own, and running it here leaves that state untouched. Through a
+        shell, so a caller writes the pipeline and redirection it would type.
+        A dead container is rebuilt and the command retried, as installing is.
         """
+        argv = ["sh", "-c", command]
         started = time.time()
         try:
             result: ExecResult = self.container.exec_run(
-                list(command), workdir=workdir, demux=False
+                argv, workdir=workdir, demux=False
             )
         except NotFound:
             logger.warning("Container gone during shell command, rebuilding")
             self.rebuild_container()
-            result = self.container.exec_run(
-                list(command), workdir=workdir, demux=False
-            )
+            result = self.container.exec_run(argv, workdir=workdir, demux=False)
         return ExecuteCodeResult(
             exit_code=result.exit_code if result.exit_code is not None else -1,
             stdout=decode_output(result.output),

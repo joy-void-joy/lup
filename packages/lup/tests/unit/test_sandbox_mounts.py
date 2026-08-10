@@ -55,6 +55,60 @@ class TestMountTopology:
         assert volumes[sandbox.volume_name]["bind"] == "/workspace"
 
 
+class TestDeclaredMounts:
+    """A caller's own mounts land at the container path the caller named."""
+
+    def test_a_read_only_mount_goes_where_it_was_asked_to(self, tmp_path: Path) -> None:
+        notes = tmp_path / "notes"
+        sandbox = Sandbox(
+            session_id="declared",
+            shared_dir=tmp_path / "shared",
+            read_only_mounts={notes: "/notes"},
+        )
+        by_path = {mount.container_path: mount for mount in sandbox.mount_topology()}
+
+        assert by_path["/notes"].source == str(notes.resolve())
+        assert by_path["/notes"].mode == "ro"
+        assert by_path["/notes"].kind == "bind"
+
+    def test_a_writable_mount_can_keep_its_host_path(self, tmp_path: Path) -> None:
+        """The case the parameter exists for: one path names the file on
+        both sides, so a prompt naming it stays true inside the container."""
+        out = tmp_path / "out"
+        sandbox = Sandbox(
+            session_id="declared",
+            shared_dir=tmp_path / "shared",
+            rw_mounts={out: str(out)},
+        )
+        by_path = {mount.container_path: mount for mount in sandbox.mount_topology()}
+
+        assert by_path[str(out)].source == str(out.resolve())
+        assert by_path[str(out)].mode == "rw"
+
+    def test_declared_mounts_reach_the_docker_volume_mapping(
+        self, tmp_path: Path
+    ) -> None:
+        notes = tmp_path / "notes"
+        sandbox = Sandbox(
+            session_id="declared",
+            shared_dir=tmp_path / "shared",
+            read_only_mounts={notes: "/notes"},
+        )
+        volumes = {
+            mount.source: {"bind": mount.container_path, "mode": mount.mode}
+            for mount in sandbox.mount_topology()
+        }
+
+        assert volumes[str(notes.resolve())] == {"bind": "/notes", "mode": "ro"}
+
+    def test_a_sandbox_declaring_none_mounts_only_its_own(self, tmp_path: Path) -> None:
+        paths = {
+            mount.container_path for mount in make_sandbox(tmp_path).mount_topology()
+        }
+
+        assert paths == {"/workspace", "/shared"}
+
+
 class TestExecuteCodeDescription:
     """The tool description must name the mounted paths so the in-sandbox
     agent never has to guess where host files live."""
@@ -76,3 +130,17 @@ class TestExecuteCodeDescription:
         )
 
         assert "no network access" in execute_code.description
+
+    def test_a_usage_note_reaches_the_agent_reading_the_tool(
+        self, tmp_path: Path
+    ) -> None:
+        """What the mounted files are *for* is the caller's to say."""
+        execute_code = next(
+            t
+            for t in make_sandbox(tmp_path).create_tools(
+                usage_notes="The plan is at /notes/plan.json."
+            )
+            if t.name == "execute_code"
+        )
+
+        assert "The plan is at /notes/plan.json." in execute_code.description
