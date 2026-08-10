@@ -3,6 +3,16 @@
 The table describes capabilities supplied in ``SessionHandle`` and
 ``TurnHandle`` values. Unsupported capabilities are absent; diagnostics never
 invoke operations and catch an unsupported-operation exception.
+
+It sits beside the adapters rather than in an application because that is
+what it is evidence *about*: each column is one native contract at the
+version this library supports, so a release that moves an adapter moves the
+row describing it. Held downstream instead, the matrix would keep describing
+whichever SDK the adopter first vendored while the code beneath it changed.
+
+Distinct from :mod:`lup.harness.evidence`, which records the CLI versions
+installed on one machine to trigger the doctor's drift check. This records
+what a contract can do; that records what is currently sitting on disk.
 """
 
 from pydantic import BaseModel, ConfigDict
