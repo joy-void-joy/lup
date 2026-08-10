@@ -364,14 +364,22 @@ def create_dev_app(
                 "tree that holds work it is not answerable for",
             ),
         ] = None,
+        path: Annotated[
+            list[str] | None,
+            typer.Option(
+                "--path",
+                help="With --antipatterns: audit only files under these paths, for "
+                "the fix-one-file loop. Repeatable",
+            ),
+        ] = None,
     ) -> None:
         """Run ruff format, ruff check, pyright, and pytest. Read-only by default."""
         declarations = declared()
         if antipatterns:
             if stats:
-                antipatterns_mod.summarize(declarations.project, as_json)
+                antipatterns_mod.summarize(declarations.project, as_json, path or ())
             else:
-                antipatterns_mod.report(declarations.project, as_json)
+                antipatterns_mod.report(declarations.project, as_json, path or ())
             return
         if boundaries:
             boundaries_mod.report(declarations.project, as_json)

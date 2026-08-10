@@ -23,7 +23,7 @@ guard it turns up as spurious on the next line of the report.
 """
 
 from collections import Counter, defaultdict
-from collections.abc import Set as AbstractSet
+from collections.abc import Sequence, Set as AbstractSet
 from pathlib import Path
 
 import typer
@@ -98,8 +98,16 @@ class AntiPatternScan(BaseModel):
     refuted: list[FoundRefutation]
 
 
-def scan_antipatterns(project: DevProject) -> AntiPatternScan:
+def scan_antipatterns(
+    project: DevProject, paths: Sequence[str] = ()
+) -> AntiPatternScan:
     """Every missing/spurious marker across tracked production `.py`/TS files.
+
+    ``paths`` narrows the sweep to the files under the given repository-relative
+    prefixes, for the fix-one-file loop where a whole-repository resolve is the
+    dominant cost. It only decides which files are read: each one still audits
+    against the same tables, and the oracle still resolves them against the
+    whole project, so a scoped verdict matches the sweep's verdict for that file.
 
     The audit reads the same declared path roles the edit hook does, so a rule
     the hook never enforces in a test or scratch tree is not reported there
@@ -120,6 +128,8 @@ def scan_antipatterns(project: DevProject) -> AntiPatternScan:
         path = Path(rel)
         patterns = patterns_for_suffix(path.suffix.lower())
         if patterns is None or path_role(rel, roles) != "production":
+            continue
+        if paths and not any(rel == p or rel.startswith(f"{p}/") for p in paths):
             continue
         try:
             text = path.read_text(encoding="utf-8")
@@ -203,7 +213,7 @@ def scan_antipatterns(project: DevProject) -> AntiPatternScan:
 ADVISORY_KINDS = {"untyped"}
 
 
-def summarize(project: DevProject, as_json: bool) -> None:
+def summarize(project: DevProject, as_json: bool, paths: Sequence[str] = ()) -> None:
     """Tally anti-pattern findings by rule and kind — the sweep triage view.
 
     A per-rule count (most-frequent first, with how many files each spans) and
@@ -211,7 +221,7 @@ def summarize(project: DevProject, as_json: bool) -> None:
     reading the whole listing, plus how many findings the typed grammar
     refuted. ``--json`` emits the same tally for tooling.
     """
-    scan = scan_antipatterns(project)
+    scan = scan_antipatterns(project, paths)
     found = scan.findings
     by_rule: Counter[str] = Counter()
     by_kind: Counter[str] = Counter()
@@ -257,7 +267,7 @@ def summarize(project: DevProject, as_json: bool) -> None:
     typer.echo(f"Rule reference: {RULE_REFERENCE} (`uv run lup-devtools dev rules`)")
 
 
-def report(project: DevProject, as_json: bool) -> None:
+def report(project: DevProject, as_json: bool, paths: Sequence[str] = ()) -> None:
     """List anti-pattern findings; exit non-zero when a blocking one remains.
 
     "untyped" findings are advisory (a bare `# lup: ignore` to migrate to a
@@ -265,7 +275,7 @@ def report(project: DevProject, as_json: bool) -> None:
     finding the typed grammar refuted is listed with the declaration that
     settled it, so a dropped verdict is accountable rather than invisible.
     """
-    scan = scan_antipatterns(project)
+    scan = scan_antipatterns(project, paths)
     found = scan.findings
     blocking = [finding for finding in found if finding.kind not in ADVISORY_KINDS]
     if as_json:
