@@ -9,12 +9,6 @@ import typer
 
 from lup.workspace.paths import find_nearest_pyproject
 from lup.devtools.py.common import fail, find_module_path, resolve_object
-from lup.devtools.py.evaluate import (
-    DEFAULT_DANGEROUS_MODULES,
-    auto_import_namespace,
-    check_eval_safety,
-    format_eval_result,
-)
 from lup.devtools.py.imports import (
     ImportEntry,
     collect_imports_from_source,
@@ -33,6 +27,7 @@ from lup.devtools.py.search import (
 )
 from lup.devtools.py.source import format_tree
 from lup.devtools.subapps import subapp
+from lup.sandbox.models import DockerUnreachableError
 
 app = typer.Typer(no_args_is_help=True)
 SUBAPP = subapp("py", "Python module introspection", app)
@@ -168,47 +163,35 @@ def source_cmd(
 def eval_cmd(
     expression: Annotated[str, typer.Argument(help="Python expression to evaluate")],
 ) -> None:
-    """Evaluate a Python expression with auto-imported modules.
+    """Evaluate a Python expression in the sandbox, with modules auto-imported.
 
-    Only expressions are allowed (no statements). Dangerous calls like
-    exec/eval/open are blocked. Modules referenced in the expression are
-    imported automatically.
+    Only expressions are allowed (no statements). This project's source is
+    mounted read-only, so `lup.*` and the application package import here
+    exactly as they do on the host — but the expression runs in a container,
+    so what it can reach is the container's, not this checkout's.
     """
     try:
-        tree = ast.parse(expression, mode="eval")
+        ast.parse(expression, mode="eval")
     except SyntaxError as e:
         fail(f"Invalid expression: {e}")
 
-    problem = check_eval_safety(tree)
-    if problem:
-        fail(problem)
-
-    namespace = auto_import_namespace(tree)
+    try:
+        from lup.devtools.py.sandbox_eval import evaluate_in_sandbox
+    except ImportError:
+        fail(
+            "`py eval` runs in the sandbox, which needs the docker extra: "
+            "`uv sync --extra docker`. For reading code rather than running "
+            "it, `py info` and `py source` need nothing extra; for anything "
+            "you will want twice, add a devtools command."
+        )
 
     try:
-        code = compile(tree, "<eval>", "eval")
-        # The `py eval` command's whole job, with builtins stripped and the
-        # expression pre-screened by check_eval_safety.
-        result = eval(code, {"__builtins__": {}}, namespace)  # lup: ignore[eval-exec]
-    except (
-        NameError,
-        AttributeError,
-        TypeError,
-        ValueError,
-        KeyError,
-        IndexError,
-        ArithmeticError,
-        RuntimeError,
-        StopIteration,
-        ImportError,
-    ) as e:
-        if isinstance(e, NameError) and e.name in DEFAULT_DANGEROUS_MODULES:
-            fail(
-                f"Module {e.name!r} is not auto-imported: {DEFAULT_DANGEROUS_MODULES[e.name]}"
-            )
-        fail(f"{type(e).__name__}: {e}")
-
-    typer.echo(format_eval_result(result))
+        typer.echo(evaluate_in_sandbox(expression))
+    except DockerUnreachableError as e:
+        fail(
+            f"{e}\n\nFor reading code rather than running it, `py info`, "
+            "`py source`, and `py search` need no daemon at all."
+        )
 
 
 @app.command("imports")

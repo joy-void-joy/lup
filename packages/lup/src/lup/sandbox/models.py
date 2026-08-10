@@ -93,6 +93,10 @@ class SandboxNotInitializedError(RuntimeError):
     """Raised when sandbox operations are called on an inactive sandbox."""
 
 
+class DockerUnreachableError(RuntimeError):
+    """Raised when the Docker daemon cannot be reached at all."""
+
+
 class CodeExecutionTimeoutError(RuntimeError):
     """Raised when code execution exceeds the timeout."""
 
