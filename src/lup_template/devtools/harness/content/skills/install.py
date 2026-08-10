@@ -150,6 +150,41 @@ capability below exists once per tree:
 - `packages/lup/src/lup/` — utilities (trace, hooks, metrics, mcp, retry, notes, history, paths)
 - `lup.workspace.paths.agent_version()` — version tracking pattern (reads `[tool.lup] agent_version` from pyproject.toml)
 
+### How the Target Obtains Lup
+
+A Python target depends on `lup` as a package; it does not receive a copy of
+the library's source. Which acquisition mode to declare is a fact you look up,
+not a preference — check whether a release exists before deciding:
+
+```
+curl -s -o /dev/null -w '%{http_code}\n' https://pypi.org/pypi/lup/json
+```
+
+| Look-up | Mode | Command |
+| --- | --- | --- |
+| `200` — a release exists | published | `dev library use published --version <release>` |
+| `404` — nothing published yet | **git** | `dev library git --branch <source-branch>` |
+| The user is developing both repos at once | linked | `dev library link <source>` |
+
+Prefer the index the moment it can answer, and the repository until it can:
+both hand the target a real package, so its `packages/lup/` stays absent and
+nothing has to be merged later. Vendoring is not on this list — a vendored copy
+is a fork with all the reconciliation that implies, and is only right for a
+target that genuinely intends to modify library source.
+
+The git mode resolves `subdirectory = "packages/lup"`, because the distribution
+sits inside the repository rather than at its root, and pins whichever ref you
+name. **The ref must be reachable on the remote**: a branch that exists only in
+the source checkout resolves to whatever the remote last saw, so the target
+silently installs an older library. Before declaring a git source, confirm the
+commit you settled on before Phase 1 is actually pushed —
+`git -C <source> ls-remote origin <branch>` — and stop and say so if it is not,
+rather than installing a dependency that cannot see the work being installed.
+
+The extras the target needs come from what it runs: `claude` and/or `codex` for
+the adapters it drives, `docker` for the code-execution sandbox, `web` for the
+session API. Name them in the requirement (`lup[claude,codex,docker]`).
+
 ### DevTools CLI
 
 The `lup-devtools` CLI (`src/lup_template/devtools/`) gives the meta-agent structured commands for development tasks that would otherwise require ad-hoc bash one-liners. Without it, an agent resorts to `python -c "..."` snippets or manual shell pipelines for trace analysis, feedback collection, and session management — which are fragile and unrepeatable. The devtools encode these workflows as proper CLI commands with argument parsing, output formatting, and error handling.
@@ -192,12 +227,12 @@ and for a vendored `packages/lup/`.
 | What the target has | Do this instead of installing |
 | --- | --- |
 | Nothing | Continue with the phases below — this is a first install. |
-| A published or linked `lup` dependency | Nothing to port. Update the release it resolves (`dev library use published`), regenerate its harness, and report. The library arrives as a package; only the target's own declarations are its business. |
+| A `lup` dependency resolved from an index, a repository, or a checkout | Nothing to port. Move the release it resolves forward, regenerate its harness, and report. The library arrives as a package; only the target's own declarations are its business. |
 | A vendored `packages/lup/` copy | Do **not** overwrite it. Port the upstream commits through """
             ),
             models.SkillInvocation(plugin="lup", skill="update"),
             models.TextPart(
-                text=r""", which reviews them one at a time against a tree that has diverged on purpose. Read the fork the other way too, before porting anything: run the library placement test over what it *added*, because a downstream that solved a framework problem is holding library code, and that folds back into lup rather than staying forked forever. Then offer to end the fork — `dev library use published` where a release exists, `dev library link` where it does not — saying plainly that it is one-way and worth reviewing. |
+                text=r""", which reviews them one at a time against a tree that has diverged on purpose. Read the fork the other way too, before porting anything: run the library placement test over what it *added*, because a downstream that solved a framework problem is holding library code, and that folds back into lup rather than staying forked forever. Then offer to end the fork, saying plainly that it is one-way and worth reviewing: pick the acquisition mode by the § How the Target Obtains Lup table below rather than defaulting to a vendored copy, which is what the fork already is. |
 | An old install with no sync baseline | Baseline it first (step 9 below, against the target), so the next review lists commits rather than the entire history. |
 
 A target that already has lup is the common case after the first year, and
@@ -427,7 +462,7 @@ Steps 1-4, 6 and 7 repeat per selected tree; step 5 is tree-independent.
             models.PluginPath(plugin="lup", location="skills", scope="every_tree"),
             models.TextPart(
                 text=r"""
-5. `src/<project>/devtools/` — devtools CLI skeleton (if Python target, adapt import paths but keep `lup-devtools` as the CLI entry point name)
+5. `src/<project>/devtools/` — devtools CLI skeleton (if Python target, adapt import paths but keep `lup-devtools` as the CLI entry point name), and the `lup` requirement itself in the target's `pyproject.toml`, declared through the mode § How the Target Obtains Lup settled on
 6. Project configuration — """
             ),
             models.NativePath(location="project_settings", scope="every_tree"),
