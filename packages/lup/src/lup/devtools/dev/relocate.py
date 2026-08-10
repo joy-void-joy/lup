@@ -5,14 +5,17 @@ one-line judgement and a hundred-line consequence: the module moves, and
 every site that named it has to say the new name. Doing that by hand is
 where the judgement gets abandoned, so the mechanical half is a command.
 
-The rewrite is token surgery, not text surgery. ``tokenize`` reports every
-token with its exact position and ``untokenize`` puts the untouched ones back
-byte for byte, so a dotted module path in an import statement is replaced
-while the spacing, the parenthesized continuation, and the comment beside it
-survive unexamined. A module path appearing anywhere else — a log line, a
-docstring naming the old home, a path in a comment — is not a token run in an
-import statement and is never matched; :func:`surviving_mentions` reports
-those for a human to read instead.
+Tokens decide, text applies. ``tokenize`` reports every token with its exact
+position, so a dotted module path in an import statement is located by
+grammar rather than by pattern; the replacement is then spliced over that one
+span, leaving the spacing, the parenthesized continuation, and the comment
+beside it byte for byte untouched. Splicing a span rather than swapping token
+for token is what lets a path change depth — a flat module moving under a
+subpackage is the ordinary relocation, and three names do not fit where two
+were. A module path appearing anywhere else — a log line, a docstring naming
+the old home, a path in a comment — is not a module run in an import
+statement and is never matched; :func:`surviving_mentions` reports those for
+a human to read instead.
 
 One form is deliberately left alone: ``from package import submodule`` is the
 same tokens as importing a name from that package, and rewriting it would
@@ -89,6 +92,17 @@ class ModuleRun(BaseModel):
     end: int
 
 
+class ModuleEdit(BaseModel):
+    """One module path to respell, as a span on one line of the source."""
+
+    model_config = ConfigDict(frozen=True)
+
+    row: int
+    start: int
+    end: int
+    text: str
+
+
 class RelocationEdit(BaseModel):
     """One file the rewrite changed, and how many imports it repointed."""
 
@@ -115,25 +129,33 @@ def module_runs(tokens: list[tokenize.TokenInfo]) -> list[ModuleRun]:
     """Every token span naming a module in an import statement.
 
     A module path is named in exactly two places: after ``from``, and after
-    ``import`` where no ``from`` preceded it on that logical line. Names after
-    an ``import`` that follows a ``from`` are the imported symbols, which are
-    not module paths and must not be rewritten.
+    ``import`` where no ``from`` preceded it on that logical line — including
+    after each comma in that form, because ``import a.b, c.d`` names two.
+    Names after an ``import`` that follows a ``from`` are the imported
+    symbols, which are not module paths and must not be rewritten.
     """
+
+    def run_at(index: int) -> Iterator[ModuleRun]:
+        """The module run starting just past ``index``, if a name is there."""
+        if index + 1 < len(tokens) and tokens[index + 1].type == tokenize.NAME:
+            yield ModuleRun(start=index + 1, end=dotted_run(tokens, index + 1))
 
     def found() -> Iterator[ModuleRun]:
         from_seen = False
+        listing = False
         for index, token in enumerate(tokens):
             if token.type in (tokenize.NEWLINE, tokenize.NL):
-                from_seen = False
+                from_seen = listing = False
+            elif listing and token.type == tokenize.OP and token.string == ",":
+                yield from run_at(index)
+            elif token.type != tokenize.NAME:
                 continue
-            if token.type != tokenize.NAME:
-                continue
-            if token.string == "from":
+            elif token.string == "from":
                 from_seen = True
-            elif token.string != "import" or from_seen:
-                continue
-            if index + 1 < len(tokens) and tokens[index + 1].type == tokenize.NAME:
-                yield ModuleRun(start=index + 1, end=dotted_run(tokens, index + 1))
+                yield from run_at(index)
+            elif token.string == "import" and not from_seen:
+                listing = True
+                yield from run_at(index)
 
     return list(found())
 
@@ -145,6 +167,8 @@ def renamed_run(
 
     A move matches the module it names and every module beneath it, so
     relocating a package carries its submodules without each being declared.
+    The result may be longer or shorter than what it replaces — a move into or
+    out of a subpackage changes the path's depth.
     """
     named = [
         token.string for token in tokens[run.start : run.end + 1] if token.string != "."
@@ -155,30 +179,51 @@ def renamed_run(
     return None
 
 
+def module_edits(
+    tokens: list[tokenize.TokenInfo], moves: list[Relocation]
+) -> list[ModuleEdit]:
+    """Every module path in an import statement that one of the moves renames.
+
+    A run continued across lines is declined rather than half-applied: the
+    splice is a span on one line, and a path broken over two is rare enough
+    that reporting it as a surviving mention beats guessing at the join.
+    """
+
+    def found() -> Iterator[ModuleEdit]:
+        for run in module_runs(tokens):
+            renamed = renamed_run(tokens, run, moves)
+            start, end = tokens[run.start].start, tokens[run.end].end
+            if renamed is None or start[0] != end[0]:
+                continue
+            yield ModuleEdit(
+                row=start[0], start=start[1], end=end[1], text=".".join(renamed)
+            )
+
+    return list(found())
+
+
+def apply_edits(text: str, edits: list[ModuleEdit]) -> str:
+    """Splice every respelled module path into the source that named it.
+
+    Rightmost first, so an edit's recorded columns still address the line it
+    was read from when two imports share one.
+    """
+    lines = text.splitlines(keepends=True)
+    for edit in sorted(edits, key=lambda edit: edit.start, reverse=True):
+        line = lines[edit.row - 1]
+        lines[edit.row - 1] = f"{line[: edit.start]}{edit.text}{line[edit.end :]}"
+    return "".join(lines)
+
+
 def relocate_in_file(path: Path, moves: list[Relocation]) -> RelocationEdit | None:
     """Repoint every import in one file, or report that none named a mover."""
     text = path.read_text(encoding="utf-8")
     tokens = list(tokenize.generate_tokens(io.StringIO(text).readline))
-    rewritten = list(tokens)
-    repointed = 0
-    for run in module_runs(tokens):
-        renamed = renamed_run(tokens, run, moves)
-        names = [
-            index
-            for index in range(run.start, run.end + 1)
-            if tokens[index].type == tokenize.NAME
-        ]
-        # A rename that changes the path's depth cannot be spliced token for
-        # token, so it is declined rather than half-applied.
-        if renamed is None or len(renamed) != len(names):
-            continue
-        for index, replacement in zip(names, renamed, strict=True):
-            rewritten[index] = rewritten[index]._replace(string=replacement)
-        repointed += 1
-    if not repointed:
+    edits = module_edits(tokens, moves)
+    if not edits:
         return None
-    path.write_text(tokenize.untokenize(rewritten), encoding="utf-8")
-    return RelocationEdit(path=path, imports=repointed)
+    path.write_text(apply_edits(text, edits), encoding="utf-8")
+    return RelocationEdit(path=path, imports=len(edits))
 
 
 def source_files(
