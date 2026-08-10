@@ -4,7 +4,8 @@ import json
 import logging
 from collections import defaultdict
 from collections.abc import Set as AbstractSet
-from typing import Literal, Required, TypedDict
+from pathlib import Path
+from typing import Literal, NoReturn, Required, TypedDict
 
 import sh
 import typer
@@ -721,6 +722,215 @@ def survey(as_json: bool) -> None:
         typer.echo(format_table(headers, [display_row(bi) for bi in branches_list]))
 
 
+type ActionVerdict = Literal["ok", "forced", "blocked"]
+
+
+class WorktreeChanges(BaseModel):
+    """What a worktree holds that removing it would discard."""
+
+    modified: int = 0
+    untracked: int = 0
+
+    def dirty(self) -> bool:
+        return bool(self.modified or self.untracked)
+
+    def summary(self) -> str:
+        return f"{self.modified} modified, {self.untracked} untracked"
+
+
+class PlannedAction(BaseModel):
+    """One step of a deletion, carrying the verdict a preflight probe gave it.
+
+    ``detail`` says what forcing would discard, or why the step cannot run —
+    the annotation is a probe result, never a restatement of the flag.
+    """
+
+    description: str
+    verdict: ActionVerdict = "ok"
+    detail: str = ""
+
+    def render(self) -> str:
+        match self.verdict:
+            case "ok":
+                return f"{self.description} (ok)"
+            case "forced":
+                return f"{self.description} (force: {self.detail})"
+            case "blocked":
+                return f"{self.description} (blocked: {self.detail})"
+
+
+class DeletionPlan(BaseModel):
+    """Every step a deletion would take, evaluated without mutating anything."""
+
+    branch: str
+    worktree: str | None = None
+    stranded: bool = False
+    has_remote: bool = False
+    actions: list[PlannedAction] = Field(default_factory=list)
+
+    def blocked(self) -> list[PlannedAction]:
+        return [action for action in self.actions if action.verdict == "blocked"]
+
+
+def worktree_changes(path: str) -> WorktreeChanges:
+    """Count what a worktree holds, so a report can say what force discards."""
+    modified = 0
+    untracked = 0
+    for line in git.lines("-C", path, "status", "--porcelain"):
+        if line.startswith("??"):
+            untracked += 1
+        else:
+            modified += 1
+    return WorktreeChanges(modified=modified, untracked=untracked)
+
+
+def remote_branch_exists(name: str) -> bool:
+    """Report whether ``origin`` still carries the branch."""
+    try:
+        git("rev-parse", "--verify", f"refs/remotes/origin/{name}")
+        return True
+    except sh.ErrorReturnCode:
+        return False
+
+
+def plan_worktree_step(path: str, stranded: bool, force: bool) -> PlannedAction:
+    """Judge the worktree removal — the one irreversible step."""
+    if stranded:
+        return PlannedAction(
+            description=f"Prune stranded worktree: {path}",
+            detail="checkout already gone",
+        )
+
+    changes = worktree_changes(path)
+    description = f"Remove worktree: {path}"
+    if not changes.dirty():
+        return PlannedAction(description=description)
+
+    if force:
+        return PlannedAction(
+            description=description,
+            verdict="forced",
+            detail=f"discards {changes.summary()}",
+        )
+    return PlannedAction(
+        description=description,
+        verdict="blocked",
+        detail=f"holds {changes.summary()}; --force discards them",
+    )
+
+
+def plan_branch_step(name: str, force: bool) -> PlannedAction:
+    """Judge the branch deletion the way ``git branch -d`` would."""
+    description = f"Delete local branch: {name}"
+    if is_ancestor(name, "HEAD"):
+        return PlannedAction(description=description)
+    if force:
+        return PlannedAction(
+            description=description, verdict="forced", detail="branch is unmerged"
+        )
+    return PlannedAction(
+        description=description,
+        verdict="blocked",
+        detail="branch is unmerged; --force deletes it anyway",
+    )
+
+
+def plan_deletion(name: str, force: bool) -> DeletionPlan:
+    """Evaluate every precondition a deletion depends on, changing nothing.
+
+    A dry run and the real path both read this, so what the dry run promises
+    is what the real path went on to check.
+    """
+    worktree = parse_worktrees().get(name)  # lup: ignore[dict-get] — open branch map
+    stranded = worktree is not None and not Path(worktree).exists()
+    actions: list[PlannedAction] = []
+
+    if worktree is not None:
+        actions.append(plan_worktree_step(worktree, stranded=stranded, force=force))
+
+    actions.append(plan_branch_step(name, force=force))
+
+    has_remote = remote_branch_exists(name)
+    if has_remote:
+        actions.append(
+            PlannedAction(description=f"Delete remote branch: origin/{name}")
+        )
+
+    return DeletionPlan(
+        branch=name,
+        worktree=worktree,
+        stranded=stranded,
+        has_remote=has_remote,
+        actions=actions,
+    )
+
+
+def abort_deletion(plan: DeletionPlan, completed: list[str], failure: str) -> NoReturn:
+    """Report a mid-deletion failure, repairing a stranded registration first.
+
+    ``git worktree remove`` clears the checkout before it unregisters, so a
+    failure here can leave a worktree git still believes in. Pruning is the
+    repair, and the caller cannot be expected to know that.
+    """
+    typer.echo(f"Failed to delete {plan.branch}: {failure}", err=True)
+
+    if plan.worktree is not None and not Path(plan.worktree).exists():
+        try:
+            git("worktree", "prune")
+            typer.echo(
+                f"Pruned the stranded registration for {plan.worktree}", err=True
+            )
+        except sh.ErrorReturnCode as error:
+            typer.echo(
+                f"The checkout at {plan.worktree} is gone but still registered. "
+                f"Recover with `git worktree prune`: {decode_stderr(error)}",
+                err=True,
+            )
+
+    typer.echo(f"Completed first: {', '.join(completed) or 'nothing'}", err=True)
+    raise typer.Exit(1)
+
+
+def run_deletion(plan: DeletionPlan, force: bool) -> None:
+    """Carry out a plan whose preflight passed, reporting what actually ran."""
+    completed: list[str] = []
+
+    if plan.stranded:
+        try:
+            git("worktree", "prune")
+            typer.echo(f"Pruned stranded worktree: {plan.worktree}")
+            completed.append("pruned worktree")
+        except sh.ErrorReturnCode as error:
+            abort_deletion(plan, completed, f"prune failed: {decode_stderr(error)}")
+    elif plan.worktree is not None:
+        try:
+            git("worktree", "remove", *(["--force"] if force else []), plan.worktree)
+            typer.echo(f"Removed worktree: {plan.worktree}")
+            completed.append("removed worktree")
+        except sh.ErrorReturnCode as error:
+            abort_deletion(
+                plan, completed, f"worktree removal failed: {decode_stderr(error)}"
+            )
+
+    try:
+        git("branch", "-D" if force else "-d", plan.branch)
+        typer.echo(f"Deleted branch: {plan.branch}")
+        completed.append("deleted branch")
+    except sh.ErrorReturnCode as error:
+        abort_deletion(
+            plan, completed, f"branch deletion failed: {decode_stderr(error)}"
+        )
+
+    if plan.has_remote:
+        try:
+            git("push", "origin", "--delete", plan.branch)
+            typer.echo(f"Deleted remote branch: origin/{plan.branch}")
+        except sh.ErrorReturnCode as error:
+            typer.echo(
+                f"Warning: remote deletion failed: {decode_stderr(error)}", err=True
+            )
+
+
 def delete_branch(
     name: str,
     dry_run: bool,
@@ -732,57 +942,23 @@ def delete_branch(
         typer.echo(f"Error: cannot delete the current branch ({name})", err=True)
         raise typer.Exit(1)
 
-    worktree_path = parse_worktrees().get(name)  # lup: ignore[dict-get] — open map
-
-    actions = [
-        *(
-            [f"Remove worktree: {worktree_path} ({'force' if force else 'safe'})"]
-            if worktree_path
-            else []
-        ),
-        f"Delete local branch: {name} ({'force' if force else 'safe'})",
-    ]
-
-    has_remote = False
-    try:
-        git("rev-parse", "--verify", f"refs/remotes/origin/{name}")
-        has_remote = True
-        actions.append(f"Delete remote branch: origin/{name}")
-    except sh.ErrorReturnCode:
-        pass
+    plan = plan_deletion(name, force)
 
     if dry_run:
-        typer.echo(f"Would perform {len(actions)} action(s):")
-        for action in actions:
-            typer.echo(f"  {action}")
+        typer.echo(f"Would perform {len(plan.actions)} action(s):")
+        for action in plan.actions:
+            typer.echo(f"  {action.render()}")
         return
 
-    if worktree_path:
-        try:
-            git("worktree", "remove", *(["--force"] if force else []), worktree_path)
-            typer.echo(f"Removed worktree: {worktree_path}")
-        except sh.ErrorReturnCode as e:
-            typer.echo(
-                f"Warning: worktree removal failed: {decode_stderr(e)}", err=True
-            )
-
-    try:
-        if force:
-            git("branch", "-D", name)
-        else:
-            git("branch", "-d", name)
-        typer.echo(f"Deleted branch: {name}")
-    except sh.ErrorReturnCode as e:
-        typer.echo(f"Failed to delete branch: {decode_stderr(e)}", err=True)
-        typer.echo("Use --force to force delete", err=True)
+    blocked = plan.blocked()
+    if blocked:
+        typer.echo(f"Refusing to delete {name} — nothing was changed:", err=True)
+        for action in blocked:
+            typer.echo(f"  {action.render()}", err=True)
+        typer.echo("Use --force to override.", err=True)
         raise typer.Exit(1)
 
-    if has_remote:
-        try:
-            git("push", "origin", "--delete", name)
-            typer.echo(f"Deleted remote branch: origin/{name}")
-        except sh.ErrorReturnCode as e:
-            typer.echo(f"Warning: remote deletion failed: {decode_stderr(e)}", err=True)
+    run_deletion(plan, force)
 
 
 def create_resolve_branch(concern_id: str) -> None:
