@@ -38,6 +38,22 @@ is clean. If the source changed, say so in the report rather than reverting
 silently — something wrote where it should not have, and which command did it
 is the useful part.
 
+### The source branch is part of what you install
+
+Every phase below reads the source checkout as it stands, so the branch you are
+standing on *is* the release you are about to install — a feature branch ports
+unmerged work, and nothing downstream announces that. Resolve both before
+Phase 1:
+
+- `git -C <source> rev-parse --abbrev-ref HEAD` — the branch you would port
+- `git -C <source> symbolic-ref --short refs/remotes/origin/HEAD` — what the
+  remote treats as stable
+
+When they differ, Ask the user directly, offering concrete options, and wait for the answer: whether to install the source's current branch, which carries work the stable branch has not reviewed, or to port from the stable branch instead
+
+Record the branch and commit the answer settles on: every later phase reads
+that checkout, and step 9 baselines the target's sync checkpoint at it.
+
 If `the arguments supplied with this skill invocation` is empty, use defaults: target=`..`, non-interactive.
 
 ## Phase 1: Analyze Source Repo (Lup Template)
