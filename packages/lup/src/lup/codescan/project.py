@@ -293,6 +293,18 @@ def audit_suppressions(
     untyped_reported: set[int] = set()
     findings: list[RuleFinding] = []
     refusal = " (no suppression: write the replacement)" if strength == "strong" else ""
+    # lup: Where a directive may sit is decided per rule, and that inconsistency
+    # is the bug. This match accepts a directive on the violation's own line or
+    # any line the rule listed in `suppression_lines` — and rules disagree:
+    # dispatch and narrowing declare whole spans, capabilities declares one extra
+    # line, and a rule that declares nothing is inline-only. So the same marker
+    # shape is valid against one rule and spurious against another, which is
+    # exactly the reported "my marker on its own line went spurious while the real
+    # line stayed missing". The human settled it: make the accepted placement
+    # uniform across every rule and have the refusal name the line it expected,
+    # rather than adopting one global policy. Note a strict same-line rule is not
+    # the status quo — 62 markers in the tree use the line-above form today,
+    # including the scanner's own — so that choice would invalidate all of them.
     for violation in violations:
         covering = [
             (index, directive)
