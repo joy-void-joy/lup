@@ -32,7 +32,6 @@ from lup.resolver.state import ResolverStateRepository, StateCorruptionError
 from lup.types import StringMap
 from lup.web.serve import local_page_app, serve_local_page
 from lup.workspace.paths import project_root
-from lup.devtools.layout import SUPERVISOR_PORT
 from lup.devtools.supervisor.events import FRESH_CATCHUP_ENTRIES, stream
 from lup.devtools.supervisor.projection import (
     ActorIndex,
@@ -46,6 +45,14 @@ from lup.devtools.supervisor.projection import (
     supervisor_state,
     unanswered_questions,
 )
+
+SUPERVISOR_PORT = 8766
+"""Where this page listens when nothing says otherwise.
+
+A port is this library's judgement rather than anyone's convention, so it is
+the default the ``--port`` flag replaces, never a value an adopter has to
+fork to change.
+"""
 
 DEFAULT_SSE_HEADERS: StringMap = {
     "Cache-Control": "no-cache",

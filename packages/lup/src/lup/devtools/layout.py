@@ -10,16 +10,6 @@ from pathlib import Path
 
 import typer
 
-DASHBOARD_PORT = 8765
-SUPERVISOR_PORT = 8766
-"""Where this project's two local pages listen by default.
-
-Both are this project's judgement rather than anything's convention, so each
-serving command takes them as an option. They live here because the fetch
-scopes in ``harness/catalog.py`` name the same ports — a page reachable at
-one port and readable at another is the kind of drift a shared value cannot
-have."""
-
 
 def get_tree_dir() -> Path:
     """Locate the ``tree/`` directory that holds sibling worktrees.

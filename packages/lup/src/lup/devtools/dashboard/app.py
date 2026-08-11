@@ -17,6 +17,14 @@ from lup.devtools.setup import Integration, read_env_local, write_env_local
 from lup.types import EnvVars
 from lup.web.serve import local_page_app, serve_local_page
 
+DASHBOARD_PORT = 8765
+"""Where this page listens when nothing says otherwise.
+
+A port is this library's judgement rather than anyone's convention, so it is
+the default the ``--port`` flag replaces and the factory parameter an
+application overrides — never a value an adopter has to fork to change.
+"""
+
 
 class DashboardField(BaseModel):
     """One declarative setup field safe to expose in the browser."""
@@ -143,7 +151,7 @@ def create_dashboard(url: str, integrations: list[Integration]) -> FastAPI:
 
 
 def create_dashboard_app(
-    integrations: list[Integration], default_port: int = 8765
+    integrations: list[Integration], default_port: int = DASHBOARD_PORT
 ) -> typer.Typer:
     """Build the dashboard command over a project's declared integrations."""
     app = typer.Typer(
