@@ -37,7 +37,10 @@ lattice reserves ask for judged risk; unjudged work denies, hinting the
 escalation recipe. Under a launcher-verified OS sandbox
 (`LUP_SANDBOX_ACTIVE`), unjudged work defers to that boundary, and a
 `dangerouslyDisableSandbox` escape re-enters the deny lattice; the sandbox
-block derives from the same `HookSet` declaration.
+block derives from the same `HookSet` declaration. A command the sandbox's
+`excluded_commands` takes out of isolation re-enters it too, without the
+escape: the boundary was told to leave that command alone, so there is
+nothing for unjudged work to defer to.
 
 Segments join deny > ask > defer > allow — unjudged rides into a judged
 prompt, a judged deny wins the batch. Malformed input fails conservatively.
@@ -61,7 +64,10 @@ scope may opt into its subdomains, which also contributes the `*.host`
 wildcard to the OS sandbox network allowlist, so both boundaries admit the
 same set. Declare any origin an agent should be able to read as a fetch
 scope; reserve the sandbox's `extra_domains` for hosts that need egress
-without being readable sources.
+without being readable sources. Egress the proxy cannot carry at all — SSH
+under a git remote, a daemon socket — is not a scope question: the sandbox's
+only lever there is `excluded_commands`, which drops the command out of
+isolation rather than widening anything.
 
 ## Edit decisions
 

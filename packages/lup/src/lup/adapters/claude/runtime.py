@@ -82,6 +82,15 @@ class ClaudeSandboxConfig(BaseModel):
     enabled: bool = True
     auto_allow_bash_if_sandboxed: bool = True
     allow_unsandboxed_commands: bool = False
+    excluded_commands: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Command prefixes this session runs outside the boundary. A "
+            "spawned session inherits none of the launching shell's settings "
+            "files, so a requirement stated there reaches it only by being "
+            "passed here too"
+        ),
+    )
 
 
 type ClaudePermissionMode = Literal[
@@ -706,6 +715,7 @@ def build_claude_options(
             enabled=config.sandbox.enabled,
             autoAllowBashIfSandboxed=config.sandbox.auto_allow_bash_if_sandboxed,
             allowUnsandboxedCommands=config.sandbox.allow_unsandboxed_commands,
+            excludedCommands=list(config.sandbox.excluded_commands),
         )
         if config.sandbox is not None
         else None

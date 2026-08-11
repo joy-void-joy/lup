@@ -115,6 +115,13 @@ Shared by the shell and edit fixtures rather than restated for each, because
 a table the two gates could be given differently is the drift these cases
 exist to catch."""
 
+FIXTURE_EXCLUDED_COMMANDS = ["quuxify *"]
+"""One command the fixtures treat as taken out of the OS sandbox.
+
+Unjudged exactly like `frobnicate` beside it, so the pair says the whole
+rule between them: unjudged work defers to a boundary that covers it, and
+denies where the declaration removed the cover."""
+
 FIXTURE_RECOVERABLE_LIMIT = 5
 FIXTURE_RUNNER_TARGETS = ["pyright", "pytest", "ruff", "lup-devtools"]
 """What this project declares `uv run <target>` may reach, which is what the
@@ -642,6 +649,12 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="ssh-add -D", effect="deny", sandboxed=True),
     DecisionCase(input="frobnicate; ssh host", effect="ask", sandboxed=True),
     DecisionCase(input="python -c 'x'", effect="deny", sandboxed=True),
+    # An excluded command runs with no OS boundary beneath it, so unjudged
+    # work in it has nothing to defer to and returns to the deny lattice —
+    # including when it rides in beside a command the boundary would confine.
+    DecisionCase(input="quuxify --weird", effect="deny", sandboxed=True),
+    DecisionCase(input="frobnicate; quuxify now", effect="deny", sandboxed=True),
+    DecisionCase(input="quuxifyer --weird", effect="defer", sandboxed=True),
     # A help probe only prints usage, so it reads an unclassified command
     # without judging it. Bare -h counts alone; carrying a value it is an
     # ordinary argument (mysql -h host) and classifies normally.
@@ -994,6 +1007,7 @@ def test_assembled_kernel_runs_without_site_packages(tmp_path: Path) -> None:
             shell_rules=SHELL_RULES,
             recoverable_target_limit=FIXTURE_RECOVERABLE_LIMIT,
             runner_targets=FIXTURE_RUNNER_TARGETS,
+            sandbox_excluded_commands=FIXTURE_EXCLUDED_COMMANDS,
         ),
         encoding="utf-8",
     )
@@ -1020,7 +1034,7 @@ def test_assembled_kernel_runs_without_site_packages(tmp_path: Path) -> None:
         "from policy_data import (\n"
         "    ALLOWED_FETCH_SCOPES, ANTI_PATTERN_ROWS, DENIED_FETCH_SCOPES,\n"
         "    MAXIMUM_ADDED_LINES, PATH_ROLES, PATH_RULES, RUNNER_TARGETS,\n"
-        "    SHELL_RULES,\n"
+        "    SANDBOX_EXCLUDED_COMMANDS, SHELL_RULES,\n"
         ")\n"
         "fixtures = json.loads(\n"
         "    (Path(__file__).parent / 'fixtures.json').read_text(encoding='utf-8')\n"
@@ -1028,6 +1042,7 @@ def test_assembled_kernel_runs_without_site_packages(tmp_path: Path) -> None:
         "for case in fixtures['shell']:\n"
         "    result = decide_shell(\n"
         "        case['input'], SHELL_RULES, sandboxed=case['sandboxed'],\n"
+        "        excluded_commands=SANDBOX_EXCLUDED_COMMANDS,\n"
         "        interactive=case['interactive'],\n"
         "        path_roles=PATH_ROLES,\n"
         "        path_rules=PATH_RULES,\n"
@@ -1434,6 +1449,7 @@ def test_shell_policy_preserves_golden_compound_and_wrapper_outcomes(
     sandboxed_policy = ShellPolicy(
         SHELL_RULES,
         sandbox_active=True,
+        sandbox_excluded_commands=FIXTURE_EXCLUDED_COMMANDS,
         path_roles=FIXTURE_PATH_ROLES,
         path_rules=FIXTURE_PATH_RULES,
         runner_targets=FIXTURE_RUNNER_TARGETS,
@@ -1446,6 +1462,7 @@ def test_shell_policy_preserves_golden_compound_and_wrapper_outcomes(
             active = ShellPolicy(
                 SHELL_RULES,
                 sandbox_active=case.sandboxed,
+                sandbox_excluded_commands=FIXTURE_EXCLUDED_COMMANDS,
                 interactive=False,
                 path_roles=FIXTURE_PATH_ROLES,
                 path_rules=FIXTURE_PATH_RULES,
@@ -1465,6 +1482,7 @@ def test_shell_policy_preserves_golden_compound_and_wrapper_outcomes(
             case.input,
             policy.rules,
             sandboxed=case.sandboxed,
+            excluded_commands=FIXTURE_EXCLUDED_COMMANDS,
             interactive=case.interactive,
             path_roles=FIXTURE_PATH_ROLES,
             path_rules=policy.path_rules,

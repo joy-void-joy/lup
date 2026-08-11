@@ -266,6 +266,7 @@ def render_policy_data(
     shell_rules: list[ShellCommandRule],
     recoverable_target_limit: int,
     runner_targets: list[str],
+    sandbox_excluded_commands: list[str],
 ) -> str:
     """Render one plugin's canonical policy rows without executable logic."""
     body = "\n\n".join(
@@ -292,6 +293,8 @@ def render_policy_data(
             "MAXIMUM_ADDED_LINES = 3",
             "RECOVERABLE_TARGET_LIMIT = " + json.dumps(recoverable_target_limit),
             "RUNNER_TARGETS: list[str] = " + string_rows_literal(runner_targets),
+            "SANDBOX_EXCLUDED_COMMANDS: list[str] = "
+            + string_rows_literal(sandbox_excluded_commands),
         ]
     )
     return (

@@ -751,6 +751,18 @@ def run_resolve(
                 for path in (declared.writable_paths if declared is not None else [])
             ]
 
+        def worker_sandbox() -> ClaudeSandboxConfig:
+            """The boundary a worker session runs behind.
+
+            A spawned session inherits none of the settings files a launched
+            one reads, so the exclusions the declaration states have to be
+            handed over here as well. Without them a worker is confined by a
+            boundary its own toolchain does not fit through, and every
+            failure it meets names something other than the boundary.
+            """
+            excluded = plugin.hooks.excluded_commands() if plugin.hooks else []
+            return ClaudeSandboxConfig(excluded_commands=excluded)
+
         # lup: Every session opened here loses Bash entirely. A session launched
         # from inside sandboxed Bash cannot create its own
         # `~/.claude/session-env/<id>`, so each shell call dies on `EROFS:
@@ -801,7 +813,7 @@ def run_resolve(
                         cwd=cwd,
                         add_dirs=[cwd, *toolchain_writable_paths()],
                         plugin_dirs=[lease_plugin_dir(cwd, plugin.name)],
-                        sandbox=ClaudeSandboxConfig(),
+                        sandbox=worker_sandbox(),
                         environment=concern_environment,
                         tool_servers={"resolver": server},
                         allowed_tools=[

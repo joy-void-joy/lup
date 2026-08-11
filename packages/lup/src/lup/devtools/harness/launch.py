@@ -5,6 +5,7 @@ native requirement against a live probe, and hands the terminal to the
 native CLI with the non-interactive environment applied.
 """
 
+import json
 import os
 import shutil
 from datetime import UTC, datetime
@@ -138,8 +139,12 @@ def codex_sandbox_arguments(
     The launcher establishes the boundary it announces: an explicit
     workspace-write sandbox on the Codex command line, mirroring how the
     Claude settings artifact compiles the same declaration into an OS wall.
-    Path-level write and credential denials have no Codex equivalent, so the
-    envelope is the declaration's strict subset (network stays off). When the
+    Path-level write and credential denials have no Codex equivalent, and
+    neither does taking one command out of the envelope, so the envelope is
+    the declaration's strict subset (network stays off). The dispatcher still
+    reads the exclusions, judging those commands as though nothing confined
+    them — which is the strict direction here too, since an envelope with no
+    network is not a boundary they would have survived either. When the
     caller supplies its own sandbox flag the launcher vouches for nothing:
     the flag stays unset and the deny lattice keeps the escalation recipe.
     """
@@ -170,14 +175,42 @@ def writable_root_arguments() -> list[str]:
 
     Codex roots writes at the launch directory, so a feature worktree this
     project's own workflow prescribes creating lands outside the boundary
-    and cannot be edited from the session that created it. Claude resolves
-    its workspace to the repository and never had the split.
+    and cannot be edited from the session that created it.
     """
     try:
         tree = get_tree_dir()
     except (typer.Exit, SystemExit):
         return []
     return ["-c", f'sandbox_workspace_write.writable_roots=["{tree}"]']
+
+
+def claude_sandbox_arguments(plugin: Plugin) -> list[str]:
+    """Widen the Claude sandbox's writable set over the same sibling tree/.
+
+    Claude roots writes at the working directory just as Codex does, so a
+    second checkout is read-only to every command a session runs — and
+    running the toolchain over one is ordinary work here, which is why the
+    symptom arrives as pytest failing to write a cache and `ruff format`
+    refusing to save. Neither error names a sandbox.
+
+    The path is this machine's, so it is resolved at launch and passed as
+    settings rather than declared: an artifact carrying an absolute path
+    would be drift in every other checkout. The declared writable paths ride
+    along rather than being left to the generated file, because the two
+    surfaces document this key differently — arrays that merge across
+    scopes, values that override per session — and a list carrying both is
+    the same list under either reading.
+    """
+    hooks = plugin.hooks
+    if hooks is None or hooks.sandbox is None:
+        return []
+    try:
+        tree = get_tree_dir()
+    except (typer.Exit, SystemExit):
+        return []
+    allowed = [*hooks.sandbox.writable_paths, str(tree)]
+    widened = {"sandbox": {"filesystem": {"allowWrite": allowed}}}
+    return ["--settings", json.dumps(widened)]
 
 
 # lup: Both launches should check the checkout is current before opening a
@@ -211,6 +244,7 @@ def launch_claude(
         [
             "--plugin-dir",
             str(project_root() / ".claude" / "plugins" / plugin.name),
+            *claude_sandbox_arguments(plugin),
             *extra_args,
         ]
     )

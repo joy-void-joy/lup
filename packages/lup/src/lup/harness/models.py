@@ -645,7 +645,9 @@ class HookSandbox(BaseModel):
     human-owned files become OS-level write denials, and writable_paths become
     the grants that let a sandboxed toolchain reach its caches, so one
     declaration feeds both the semantic policy and the kernel-enforced
-    boundary.
+    boundary. excluded_commands travels the same pair in the other direction:
+    it widens the settings and narrows what the policy will hand to the OS,
+    because work the boundary never confined cannot be deferred to it.
 
     That makes allowed_fetch the home for any origin an agent should be able
     to read: declaring it there grants both the fetch and the egress. Reserve
@@ -659,6 +661,19 @@ class HookSandbox(BaseModel):
 
     extra_domains: list[str] = Field(default_factory=list)
     credential_paths: list[str] = Field(default_factory=list)
+    excluded_commands: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Commands the OS boundary does not confine at all. This is the "
+            "only per-command lever a sandbox offers: it takes the command "
+            "out of isolation rather than lifting one rule, so it is what a "
+            "requirement no path or domain can express has to be stated as — "
+            "a daemon socket the isolation blocks outright, or egress over a "
+            "protocol an HTTP proxy cannot carry. Each entry is a command "
+            "prefix written with a trailing ``*``, matching that word run "
+            "alone or followed by arguments."
+        ),
+    )
     writable_paths: list[str] = Field(
         default_factory=list,
         description=(
@@ -721,6 +736,15 @@ class HookSet(BaseModel):
         ),
     )
     sandbox: HookSandbox | None = None
+
+    def excluded_commands(self) -> list[str]:
+        """Commands no OS boundary confines, declared sandbox or not.
+
+        Undeclared reads the same as declared-with-nothing-excluded here,
+        which is what lets every compiled dispatcher take the answer without
+        first asking whether a sandbox exists to have an opinion.
+        """
+        return list(self.sandbox.excluded_commands) if self.sandbox else []
 
 
 class ResolveSpec(BaseModel):

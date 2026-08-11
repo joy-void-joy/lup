@@ -1,6 +1,7 @@
 """Canonical declaration, native rendering, and reconciliation tests."""
 
 import ast
+import errno
 import json
 import os
 import sys
@@ -12,6 +13,7 @@ from typing import Literal, get_args
 import pytest
 import sh
 import typer
+from claude_agent_sdk.types import SandboxNetworkConfig, SandboxSettings
 from pydantic import BaseModel, ConfigDict, Field
 
 from lup.policy.identity import AGENT_IDENTITY_ENV
@@ -36,7 +38,12 @@ from lup.harness.banner import (
     GeneratedBanner,
 )
 from lup.harness.generation import ArtifactValidationError
-from lup.harness.materialization import AtomicMaterializer, MaterializationConflictError
+from lup.harness.materialization import (
+    AtomicMaterializer,
+    MaterializationConflictError,
+    discard_staged_write,
+    refused_write,
+)
 from lup.harness.validation import validated_tree
 from lup.harness.models import (
     GUIDANCE_BYTE_BUDGET,
@@ -109,7 +116,11 @@ from lup_template.devtools.harness.content.docs.catalog import DOCUMENTS
 from lup_template.devtools.harness.content.guidance import DOCUMENT as GUIDANCE
 from lup_template.devtools.harness.content.settings import project_settings
 from lup.devtools.harness import launch
-from lup.devtools.harness.launch import codex_sandbox_arguments
+from lup.devtools.harness.launch import (
+    claude_sandbox_arguments,
+    codex_sandbox_arguments,
+)
+from lup.policy.kernel.shell import sandbox_excluded
 from lup_template.devtools.harness.content.template_claude import (
     DOCUMENT as TEMPLATE_CLAUDE,
 )
@@ -1075,6 +1086,28 @@ def test_materialization_rejects_stale_base(tmp_path: Path) -> None:
         AtomicMaterializer().apply(proposal)
 
 
+def test_a_refused_write_names_the_boundary_and_drops_its_staging(
+    tmp_path: Path,
+) -> None:
+    """A runtime protects its own configuration by mounting it, not by mode.
+
+    So a sandboxed session replacing one of those paths is refused with a
+    busy device — an errno about hardware, which sends a reader looking at
+    the disk instead of at the boundary that actually decided.
+    """
+    staged = tmp_path / ".settings.json.abc123.tmp"
+    staged.write_text("staged\n", encoding="utf-8")
+    error = OSError(errno.EBUSY, "Device or resource busy", str(staged))
+    error.filename2 = str(tmp_path / "settings.json")
+
+    discard_staged_write(error)
+    refusal = str(refused_write(error))
+
+    assert not staged.exists()
+    assert "settings.json" in refusal and ".tmp" not in refusal
+    assert "sandbox" in refusal
+
+
 def test_materialization_rejects_symlink_path_escape(tmp_path: Path) -> None:
     root = tmp_path / "root"
     outside = tmp_path / "outside"
@@ -2037,6 +2070,7 @@ def test_project_settings_derive_sandbox_from_hook_declaration() -> None:
     assert "code.claude.com" in domains
     assert "github.com" in domains
     assert "sandbox" not in project_settings(None)
+    assert sandbox["excludedCommands"] == hooks.excluded_commands()
 
 
 def test_a_declared_tool_server_is_granted_rather_than_asked_about() -> None:
@@ -2053,6 +2087,74 @@ def test_a_declared_tool_server_is_granted_rather_than_asked_about() -> None:
     for server in plugin.mcp_servers:
         assert f"mcp__plugin_{plugin.name}_{server.name}" in allowed
     assert "WebSearch" in allowed
+
+
+def test_rendered_sandbox_keys_are_the_runtime_documented_ones() -> None:
+    """The block is checked against the runtime's shape rather than assumed.
+
+    A misspelled sandbox key changes nothing and reports nothing, so every
+    key is drawn from the SDK's published shape. Two are settings-file-only,
+    because the SDK routes filesystem and credential limits through
+    permission rules instead — named here so the split reads as a fact about
+    the two surfaces rather than as a mismatch nobody checked.
+    """
+    sandbox = project_settings(portable_harness().plugins[0])["sandbox"]
+    assert isinstance(sandbox, dict)
+    network = sandbox["network"]
+    assert isinstance(network, dict)
+    session_keys = SandboxSettings.__annotations__
+    network_keys = SandboxNetworkConfig.__annotations__
+
+    assert "excludedCommands" in session_keys
+    assert sorted(key for key in sandbox if key not in session_keys) == [
+        "credentials",
+        "filesystem",
+    ]
+    assert [key for key in network if key not in network_keys] == []
+
+
+def test_declared_exclusions_cover_the_commands_the_boundary_cannot_carry() -> None:
+    """Each pattern is checked against the command as the toolchain spells it.
+
+    A pattern matches on a literal prefix, so one that reads convincingly
+    beside the declaration and misses the invocation as typed excludes
+    nothing — and it fails as whatever the boundary blocks, naming neither
+    the pattern nor the sandbox.
+    """
+    hooks = portable_harness().plugins[0].hooks
+    assert hooks is not None
+    excluded = hooks.excluded_commands()
+    for command in (
+        "uv run lup-devtools py eval 'lup.harness.models.HookSandbox'",
+        "git push origin HEAD",
+        "git fetch --all",
+        "gh pr view 47",
+        "ssh -T git@github.com",
+    ):
+        assert sandbox_excluded(command, excluded), command
+    assert not sandbox_excluded("uv run pytest -q", excluded)
+    assert not sandbox_excluded("uv run lup-devtools py info lup.hooks", excluded)
+
+
+def test_claude_sandbox_widens_the_writable_set_to_sibling_worktrees(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Claude roots writes at the launch cwd, so a second checkout is outside.
+
+    The declared paths ride along with the resolved tree: this key is
+    documented as merging across scopes and as overriding per session, and a
+    list carrying both is the same list under either reading.
+    """
+    monkeypatch.setattr(launch, "get_tree_dir", lambda: tmp_path)
+    plugin = portable_harness().plugins[0]
+    assert plugin.hooks is not None and plugin.hooks.sandbox is not None
+    arguments = claude_sandbox_arguments(plugin)
+    widened = json.loads(arguments[arguments.index("--settings") + 1])
+
+    assert widened["sandbox"]["filesystem"]["allowWrite"] == [
+        *plugin.hooks.sandbox.writable_paths,
+        str(tmp_path),
+    ]
 
 
 def test_codex_sandbox_arguments_establish_the_envelope() -> None:

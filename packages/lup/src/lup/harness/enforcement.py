@@ -113,6 +113,7 @@ def semantic_policy_for(
             allowed_urls=allowed,
             denied_urls=denied,
             sandbox_active=sandbox_active,
+            sandbox_excluded_commands=hooks.excluded_commands(),
             trusted_script_roots=trusted_script_roots,
             interactive=interactive,
             path_roles=roles,

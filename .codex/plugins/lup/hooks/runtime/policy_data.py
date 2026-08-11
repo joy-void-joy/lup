@@ -5398,3 +5398,10 @@ RUNNER_TARGETS: list[str] = [
     "ruff",
     "lup-devtools",
 ]
+
+SANDBOX_EXCLUDED_COMMANDS: list[str] = [
+    "uv run lup-devtools py eval *",
+    "ssh *",
+    "git *",
+    "gh *",
+]

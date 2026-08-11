@@ -38,6 +38,7 @@ from policy_data import (
     PATH_RULES,
     RECOVERABLE_TARGET_LIMIT,
     RUNNER_TARGETS,
+    SANDBOX_EXCLUDED_COMMANDS,
     SHELL_RULES,
 )
 
@@ -201,6 +202,7 @@ def bash_decision(
         ALLOWED_FETCH_SCOPES,
         DENIED_FETCH_SCOPES,
         sandboxed=sandboxed,
+        excluded_commands=SANDBOX_EXCLUDED_COMMANDS,
         trusted_script_roots=managed_script_roots(managed_root),
         path_roles=PATH_ROLES,
         path_rules=PATH_RULES,

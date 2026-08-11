@@ -25,7 +25,11 @@ from lup.harness.banner import (
     VERBATIM_COPY,
     GeneratedBanner,
 )
-from lup.harness.materialization import AtomicMaterializer
+from lup.harness.materialization import (
+    AtomicMaterializer,
+    discard_staged_write,
+    refused_write,
+)
 from lup.harness.models import (
     Artifact,
     ArtifactTree,
@@ -338,7 +342,11 @@ def generate(recipe: GenerationRecipe) -> GenerationReport:
     proposal = drift.proposal
     if proposal.conflicts:
         raise HarnessGenerationConflict(proposal.conflicts)
-    result = AtomicMaterializer().apply(proposal)
+    try:
+        result = AtomicMaterializer().apply(proposal)
+    except OSError as error:
+        discard_staged_write(error)
+        raise refused_write(error) from error
     manifest = build_manifest(
         recipe.source,
         recipe.desired,
