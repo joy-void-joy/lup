@@ -106,6 +106,15 @@ class ResolverIntake(BaseModel):
     generated: list[str]
 
 
+# lup: There is no way to see what a run would plan without starting one. Every
+# resolve subcommand — supervise, questions, answer, actors, say, redirect, park
+# — operates on a run that already exists, so discovering an inventory means
+# committing to a run that leases a worktree per concern. Add `harness resolve
+# intake`, printing all three buckets this returns with file, line, and for a
+# generated note the owning `semantic_id`. Reported from downstream: answering
+# "is this good to clean and restart from scratch?" took a dozen calls of
+# reading this function, `scan_tracked`, and cross-referencing ownership by
+# hand — and that reconstruction is what found the bug fixed in #47.
 def resolver_intake(
     comments: list[FoundComment], owned: GeneratedArtifacts
 ) -> ResolverIntake:
@@ -692,6 +701,18 @@ def run_resolve(
             typer.echo(f"Verified installed Codex plugin: {cache.installed_root}")
             return {"CODEX_HOME": str(home.path)}
 
+        # lup: Selecting a profile must reach every lup invocation, not just a
+        # native launch. `profile use X` should decide the account for anything
+        # lup runs — agents, subagents, resolver planners, workers, reviewers —
+        # and today it decides only what `harness claude`/`codex` opens. This
+        # site is one instance: it inherits the launching shell's identity, and
+        # `select_codex_home(None, environment, root)` above drops the profile
+        # and store that launch.py passes. The seam already exists in
+        # `lup.runtime.profiles.ProfileDirectory`; this entry point simply never
+        # reaches it. Fix it generally rather than per call site: building a
+        # session environment should require naming the profile it runs under,
+        # so a new entry point cannot inherit an operator's account by omission
+        # the way this one does.
         session_environment = non_interactive_environment(
             os.environ  # lup: ignore[os-environ] — sessions inherit the console
         )

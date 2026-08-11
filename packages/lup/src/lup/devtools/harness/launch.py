@@ -180,6 +180,16 @@ def writable_root_arguments() -> list[str]:
     return ["-c", f'sandbox_workspace_write.writable_roots=["{tree}"]']
 
 
+# lup: Both launches should check the checkout is current before opening a
+# session, and say so when it is not. A session started on a stale base plans and
+# edits against code that already moved: this cost a full resolver planning pass
+# over 13 concerns, where the tree was ten commits behind its remote, two merged
+# PRs had already done part of the planned work, and a merged intake fix would
+# have excluded 16 of the 53 notes as generated copies no worker could edit. The
+# agent cannot see any of that — the tree looks self-consistent. A fetch and a
+# behind-count at launch, reported and refusable, costs one round trip. Put it
+# here rather than in the resolve skill, so every session gets it and not only
+# the one workflow that noticed.
 def launch_claude(
     composition: NativeHarnessComposition,
     extra_args: list[str],

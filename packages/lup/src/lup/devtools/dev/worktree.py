@@ -66,6 +66,15 @@ def copy_gitignored_extras(
 
 def sync_dependencies(worktree_path: Path) -> None:
     """Sync one worktree's environment; warn instead of failing the caller."""
+    # lup: A fresh worktree is not usable on creation, in two ways reported from
+    # downstream. This sync takes no extras, so the environment lacks what the
+    # source tree has and pyright reports errors in files nobody touched — an
+    # agent then cannot tell an environmental failure from its own, and reasons
+    # about a bug that is not there. Sync the extras the source tree declares,
+    # or have `dev check` label environment-caused failures distinctly from code
+    # ones. Second, every `uv run` from a worktree prints `VIRTUAL_ENV=... does
+    # not match the project environment path`, dozens of times per session, in
+    # front of the output that was actually wanted.
     try:
         uv("sync", _cwd=str(worktree_path))
     except sh.ErrorReturnCode as e:
@@ -158,6 +167,17 @@ def create(
 
     register_merge_driver()
 
+    # lup: The mechanism behind the note below, measured downstream: the sandbox
+    # bind-mounts `/dev/null` over `.git/config.lock` and `.git/config.worktree`
+    # (device 1:3, read-only devtmpfs) and mounts `.git/config` read-only, so git
+    # cannot take its lock and every config write fails. This function does three
+    # of them. It reaches far past `worktree create`: the resolver leases a
+    # worktree per concern through this same path, so a sandboxed run dies at the
+    # first lease with a message naming nothing about the sandbox. Detect it —
+    # `.git/config` read-only, or `.git/config.lock` a device node — and say "git
+    # config writes are blocked by the sandbox, rerun outside it" instead of
+    # letting `File exists` send a reader after a stale lock that does not exist.
+    #
     # lup: This config write is what fails under the sandbox, and the reported
     # cause is wrong. Sibling worktrees are *not* read-only — writing into
     # `tree/main/` succeeds, because the allowlist covers the whole repository
