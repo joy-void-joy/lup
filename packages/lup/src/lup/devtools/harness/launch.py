@@ -13,7 +13,7 @@ from pathlib import Path
 import sh
 import typer
 
-from lup.adapters.claude.profile_store import ClaudeProfileStore
+from lup.runtime.profiles import ProfileDirectory
 from lup.adapters.codex.harness_runtime import (
     CodexPluginInstaller,
     PluginCacheConfig,
@@ -183,6 +183,7 @@ def writable_root_arguments() -> list[str]:
 def launch_claude(
     composition: NativeHarnessComposition,
     extra_args: list[str],
+    profiles: ProfileDirectory,
     profile: str | None,
     model: str | None,
     generate_only: bool,
@@ -205,10 +206,9 @@ def launch_claude(
     )
     environment = non_interactive_environment(os.environ)  # lup: ignore[os-environ]
     apply_sandbox_environment(plugin, environment, "claude", ["bwrap", "socat"])
-    if profile is not None:
-        environment["CLAUDE_CONFIG_DIR"] = str(
-            ClaudeProfileStore().resolve_config_dir(profile)
-        )
+    home = profiles.launch_home(profile)
+    if home is not None:
+        environment.update(profiles.login.environment(home))
     try:
         sh.Command("claude")(*arguments, _fg=True, _env=environment)
     except sh.CommandNotFound as error:
