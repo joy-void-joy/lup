@@ -14,6 +14,7 @@ from lup.devtools.utils import (
     decode_stderr,
     format_table,
     git,
+    refuse_blocked_config_writes,
     short_sha,
     uv,
 )
@@ -125,6 +126,11 @@ def create(
     extras: list[str] = GITIGNORED_EXTRAS,
 ) -> None:
     """Create or re-attach a git worktree."""
+    # Three config writes follow — the two merge-driver settings and the
+    # recorded base — and `worktree add` takes the same lock before any of
+    # them, so a confinement that owns `config.lock` is said once here rather
+    # than discovered as `File exists` against a half-created worktree.
+    refuse_blocked_config_writes()
     current_dir = Path.cwd()
 
     tree_dir = get_tree_dir()
@@ -286,6 +292,9 @@ def list_worktrees() -> None:
 
 def remove(name: str, force: bool) -> None:
     """Remove a git worktree."""
+    # `worktree remove` rewrites the admin directory the same lock guards, so
+    # it fails exactly as `create` does and gets the same diagnosis.
+    refuse_blocked_config_writes()
     path = Path(name)
 
     if not path.is_absolute():

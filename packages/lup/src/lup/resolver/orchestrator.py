@@ -3,6 +3,7 @@
 from pathlib import Path
 
 from lup.codescan.symbols import DefinedSymbol, defined_symbols, symbols_lost
+from lup.gitlocks import admin_dirs, diagnose_git_admin
 from lup.harness.process import ExitStatus, LaunchRequest, ProcessLauncher
 from lup.resolver.contracts import WorktreePreparer
 from lup.resolver.declaration import declaration_delta, inspect_changes
@@ -103,6 +104,27 @@ class WorktreeOrchestrator:
         self.workspace = workspace
         self.preparer = preparer
 
+    def config_lock_note(self, root: Path) -> str:
+        """What a failed step's mount state says that git's words cannot.
+
+        A run leases a worktree per concern, and every lease writes config, so
+        a confinement that owns `config.lock` kills the run at its first one
+        with `File exists` — the wording of a stale lock, which is the search
+        this sends nobody on. Read only after a step has already failed, and
+        appended rather than substituted, because git's own refusal stays the
+        record of what it refused.
+        """
+        located = self.launcher.launch(
+            LaunchRequest(
+                arguments=["git", "rev-parse", "--git-dir", "--git-common-dir"],
+                cwd=root,
+            )
+        )
+        if located.code != 0:
+            return ""
+        diagnosis = diagnose_git_admin(admin_dirs(root, located.stdout.splitlines()))
+        return f" — {diagnosis}" if diagnosis else ""
+
     def require(self, request: LaunchRequest, failure: str) -> ExitStatus:
         """Launch one step whose failure refuses the run, in git's own words.
 
@@ -116,6 +138,7 @@ class WorktreeOrchestrator:
             raise RuntimeError(
                 f"{failure}: `{' '.join(request.arguments)}` exited "
                 f"{status.code}: {status.stderr.strip()}"
+                f"{self.config_lock_note(request.cwd)}"
             )
         return status
 
@@ -306,7 +329,10 @@ class WorktreeOrchestrator:
         refusal as uncommitted work sent a human to directories that did not
         exist and described work that was not being held. What remains on
         disk is observable, so it is observed rather than inferred, and the
-        refusal git gave is carried instead of a guess at it.
+        refusal git gave is carried instead of a guess at it. A prune that
+        cannot run leaves the registration standing, so it is retained rather
+        than reported freed — a lease recorded as cleaned by a step that
+        failed is the same mislabel one layer up.
         """
         status = self.launcher.launch(
             LaunchRequest(
@@ -317,12 +343,21 @@ class WorktreeOrchestrator:
         notes: list[str] = []
         if status.code != 0:
             if lease.root.exists():
-                return WorktreeRemoval(freed=False, detail=status.stderr.strip())
-            self.launcher.launch(
+                return WorktreeRemoval(
+                    freed=False,
+                    detail=status.stderr.strip() + self.config_lock_note(lease.root),
+                )
+            pruned = self.launcher.launch(
                 LaunchRequest(
                     arguments=["git", "worktree", "prune"], cwd=self.workspace
                 )
             )
+            if pruned.code != 0:
+                return WorktreeRemoval(
+                    freed=False,
+                    detail=f"prune failed: {pruned.stderr.strip()}"
+                    + self.config_lock_note(self.workspace),
+                )
             notes.append("worktree was already gone")
         deleted = self.launcher.launch(
             LaunchRequest(
@@ -331,7 +366,10 @@ class WorktreeOrchestrator:
             )
         )
         if deleted.code != 0:
-            notes.append(f"branch retained: {deleted.stderr.strip()}")
+            notes.append(
+                f"branch retained: {deleted.stderr.strip()}"
+                + self.config_lock_note(self.workspace)
+            )
         return WorktreeRemoval(freed=True, detail="; ".join(notes))
 
     def restore(self, lease: WritableRootLease) -> None:
