@@ -103,6 +103,25 @@ def resolver_config_digest(config: ResolverConfig) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
+def moved_config_fields(
+    persisted: ResolverConfig, current: ResolverConfig
+) -> list[str]:
+    """Which fields of the composition a run was persisted under now differ.
+
+    Empty while the digest still disagrees means no recorded value moved and
+    the composition's shape did: a field absent from the persisted document
+    parses as its default, so growing the model changes the serialization
+    every digest is taken over without changing anything a run was decided
+    on. Naming that case is the difference between adopting a schema
+    addition and adopting a changed verification gate.
+    """
+    return sorted(
+        name
+        for name in type(current).model_fields
+        if getattr(persisted, name) != getattr(current, name)
+    )
+
+
 def failure_messages(error: BaseException) -> list[str]:
     """Flatten parallel failures so no sibling evidence is discarded."""
     if isinstance(error, BaseExceptionGroup):
@@ -236,7 +255,9 @@ class ResolverCore:
         worktree_preparer: WorktreePreparer | None = None,
         answer_wait_seconds: float = 0.0,
         poll_interval_seconds: float = ANSWER_POLL_SECONDS,
+        adopt_config: bool = False,
     ) -> None:
+        self.adopt_config = adopt_config
         self.config = config
         self.spec = spec
         self.answer_wait_seconds = answer_wait_seconds
@@ -429,6 +450,7 @@ class ResolverCore:
         state = ResolveState(
             run_id=self.config.run_id,
             config_digest=resolver_config_digest(self.config),
+            config=self.config,
             phase=ResolvePhase.INVENTORY,
             source=inventory.source,
             spec=self.spec,
@@ -451,6 +473,43 @@ class ResolverCore:
         with self.repository.exclusive():
             return await self.resume_exclusive()
 
+    def composition_delta(self, state: ResolveState) -> str:
+        """Which composition fields moved, for a refusal that must be judged.
+
+        A run persisted before the composition was recorded can only say
+        that something moved. One that recorded it names the fields, and
+        names their absence too: no field differing while the digest does is
+        the signature of a field added to the model rather than a decision
+        this run was made under, which is the one move that is safe to adopt
+        without re-deriving anything.
+        """
+        if state.config is None:
+            return " (persisted before the composition itself was recorded)"
+        fields = moved_config_fields(state.config, self.config)
+        if not fields:
+            return (
+                " (every recorded field matches, so the model gained or lost one"
+                " rather than this run's inputs changing)"
+            )
+        return f" (moved: {', '.join(fields)})"
+
+    def adopted(self, state: ResolveState) -> ResolveState:
+        """Re-stamp a run onto the current composition, on the human's word.
+
+        Adoption is recorded rather than silent: the digest is what a later
+        resume checks, so a run that adopted one composition and reports the
+        old one would refuse itself again for a move nobody made.
+        """
+        adopted = state.model_copy(
+            update={
+                "config": self.config,
+                "config_digest": resolver_config_digest(self.config),
+            }
+        )
+        self.repository.save(adopted)
+        self.state = adopted
+        return adopted
+
     async def resume_exclusive(self) -> ResolveManifest:
         """Resume while holding the run's inter-process lease."""
         if not self.repository.exists():
@@ -472,7 +531,9 @@ class ResolverCore:
             )
             if persisted != current
         ]
-        if moved:
+        if moved == ["configuration"] and self.adopt_config:
+            state = self.adopted(state)
+        elif moved:
             # Naming neither what moved nor the way out left one recovery to
             # guess at, and the run holding the most answers is the one that
             # hits this: parking exposes a defect, and fixing the defect is
@@ -480,7 +541,9 @@ class ResolverCore:
             raise ResolverInvariantError(
                 f"resolver run {state.run_id!r} was persisted under a different "
                 + " and ".join(moved)
-                + "; resume it from the same tree and gate, or abort it with "
+                + self.composition_delta(state)
+                + "; resume it from the same tree and gate, adopt the move with "
+                "--adopt-config once it reads as compatible, or abort it with "
                 "--abort <reason> to start a run that matches"
             )
         if state.phase == ResolvePhase.ABORTED:

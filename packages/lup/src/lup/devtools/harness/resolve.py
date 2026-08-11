@@ -661,6 +661,7 @@ def run_resolve(
     supervisor: SupervisorSpawn | None = None,
     admission: AdmissionRequest | None = None,
     model: ConfiguredModel | None = None,
+    adopt_config: bool = False,
 ) -> None:
     """Drive the shared persisted resolver through one explicit native adapter."""
     provided = parse_answer_flags(answers)
@@ -1084,6 +1085,7 @@ def run_resolve(
             observer=ConsoleResolverObserver(),
             worktree_preparer=FeatureWorktreePreparer(root),
             answer_wait_seconds=wait_seconds,
+            adopt_config=adopt_config,
         )
 
         async def drive() -> None:

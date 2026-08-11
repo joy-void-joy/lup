@@ -170,6 +170,16 @@ def create_harness_app(
                 "recorded evidence. Requires the run's process to have exited.",
             ),
         ] = None,
+        adopt_config: Annotated[
+            bool,
+            typer.Option(
+                "--adopt-config",
+                help="Resume a run whose composition moved, re-stamping it onto "
+                "the current one. The refusal names which fields moved; adopt "
+                "once they read as compatible, rather than aborting and losing "
+                "every answer the run has collected.",
+            ),
+        ] = False,
         admit: Annotated[
             list[str] | None,
             typer.Option(
@@ -257,6 +267,7 @@ def create_harness_app(
             ),
             resolve.admission_request(admit or [], admit_note or []),
             model,
+            adopt_config,
         )
 
     claude_target = targets.builder("claude")
