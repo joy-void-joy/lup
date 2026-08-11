@@ -51,6 +51,7 @@ from lup.channels.models import utc_now
 from lup.resolver.mailbox import (
     AnswerDoor,
     AnswerOffer,
+    MailboxConflictError,
     QuestionMailbox,
 )
 from lup.resolver.tools import (
@@ -284,17 +285,50 @@ def offer_flag_answers(
     Offers may precede their questions, so a flag answers a question this
     run has not asked yet — which is why a fresh run no longer has to park
     once before its answers can count.
+
+    Every flag is put to the mailbox before any refusal is raised, so one
+    rerun is told about all of its stale corrections rather than finding the
+    next one only after it has dropped the last.
     """
+    refused: list[str] = []  # lup: ignore[empty-collection] — refusal fold
     for identifier, value in provided.items():
-        mailbox.offer(
-            AnswerOffer(
-                run_id=run_id,
-                question_id=identifier,
-                value=value,
-                door=AnswerDoor.FLAG,
-                offered_at=utc_now(),
+        try:
+            mailbox.offer(
+                AnswerOffer(
+                    run_id=run_id,
+                    question_id=identifier,
+                    value=value,
+                    door=AnswerDoor.FLAG,
+                    offered_at=utc_now(),
+                )
             )
+        except MailboxConflictError as error:
+            refused.append(str(error))
+    if refused:
+        raise typer.BadParameter(
+            "\n  ".join(["", *refused])
+            + "\nDrop those --answer flags to resume on the settled values, or "
+            "end this run with --abort and start one answerable afresh."
         )
+
+
+def inert_offers(mailbox: QuestionMailbox) -> list[str]:
+    """Every offer left on disk that a promoted answer has already outrun.
+
+    Nothing under ``.lup/resolve`` is ever unlinked, so an offer written
+    before a promoter took a different value stays there reading like a
+    pending correction while being none. A run that says what it found
+    cannot be mistaken for one holding the newer value.
+    """
+    settled = {
+        record.answer.question_id: record.answer.value for record in mailbox.answers()
+    }
+    return [
+        f"offer {offer.question_id}={offer.value!r} through the {offer.door} door "
+        f"never took: the question settled as {settled[offer.question_id]!r}"
+        for offer in mailbox.offers()
+        if offer.question_id in settled and settled[offer.question_id] != offer.value
+    ]
 
 
 def run_resolver_tool_server() -> None:
@@ -954,9 +988,10 @@ def run_resolve(
                 )
             )
 
-        offer_flag_answers(
-            QuestionMailbox(state_root / resolved_run_id), resolved_run_id, provided
-        )
+        mailbox = QuestionMailbox(state_root / resolved_run_id)
+        offer_flag_answers(mailbox, resolved_run_id, provided)
+        for stale in inert_offers(mailbox):
+            typer.echo(stale, err=True)
         core = ResolverCore(
             ResolverConfig(
                 state_root=state_root,

@@ -176,11 +176,35 @@ class QuestionMailbox:
             return
         slot.declare(MailboxSlotRecord(pending=pending))
 
+    def settled_answer(self, question_id: str) -> RecordedAnswer | None:
+        """The promoted answer to one question, where a promoter took one."""
+        record = self.slots.slot(question_id).settled()
+        return None if record is None else record.answer
+
     def offer(self, offer: AnswerOffer) -> None:
-        """Propose an answer, replacing any earlier proposal for that question."""
-        self.slots.slot(offer.question_id).offer(
-            MailboxSlotRecord(offer=offer), offer.door
-        )
+        """Propose an answer, replacing any earlier proposal for that question.
+
+        A promoted answer is never revised, so an offer reaching a settled
+        question cannot take. Re-offering the value that settled is how a
+        rerun recipe resumes, and passes as the no-op it already is. A
+        *different* value is a correction, and recording one silently left
+        the run advancing under exactly the value its author meant to
+        replace — a concern the human had rejected was leased for work. It
+        is refused at the one point every door writes through, so no door
+        can be the one that still does this quietly.
+        """
+        settled = self.settled_answer(offer.question_id)
+        if settled is None:
+            self.slots.slot(offer.question_id).offer(
+                MailboxSlotRecord(offer=offer), offer.door
+            )
+            return
+        if settled.answer.value != offer.value:
+            raise MailboxConflictError(
+                f"question {offer.question_id!r} is already settled as "
+                f"{settled.answer.value!r}, a promoted answer is not revisable, "
+                f"so the offered {offer.value!r} would not take"
+            )
 
     def record(self, answer: RecordedAnswer) -> bool:
         """Promote one answer, or report that another door already won."""

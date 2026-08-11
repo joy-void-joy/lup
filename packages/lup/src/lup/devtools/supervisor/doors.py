@@ -19,6 +19,7 @@ from lup.resolver.journal import Journal
 from lup.resolver.mailbox import (
     AnswerDoor,
     AnswerOffer,
+    MailboxConflictError,
     ParkRequest,
     QuestionMailbox,
     new_message,
@@ -124,15 +125,18 @@ def answer_questions(
             raise typer.BadParameter(
                 f"{identifier!r} accepts only: " + ", ".join(question.choices)
             )
-        mailbox.offer(
-            AnswerOffer(
-                run_id=run_id,
-                question_id=identifier,
-                value=value,
-                door=AnswerDoor.CONSOLE,
-                offered_at=utc_now(),
+        try:
+            mailbox.offer(
+                AnswerOffer(
+                    run_id=run_id,
+                    question_id=identifier,
+                    value=value,
+                    door=AnswerDoor.CONSOLE,
+                    offered_at=utc_now(),
+                )
             )
-        )
+        except MailboxConflictError as error:
+            raise typer.BadParameter(str(error)) from error
         typer.echo(f"offered {identifier}={value}")
 
 
