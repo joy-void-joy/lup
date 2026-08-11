@@ -23,6 +23,8 @@ from pydantic import BaseModel, Field
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
+from lup.devtools.harness.profile_app import create_profile_app
+from lup.runtime.profiles import ProfileDirectory
 from lup.types import EnvVars
 from lup.workspace.paths import project_root
 
@@ -262,26 +264,29 @@ def make_setup_command(integration: Integration) -> Callable[[], None]:
 
 def create_setup_app(
     integrations: list[Integration],
-    profile_app: typer.Typer | None = None,
-    active_profile: Callable[[], str | None] | None = None,
+    profiles: ProfileDirectory | None = None,
 ) -> typer.Typer:
-    """Build the setup command tree over a project's declared integrations."""
+    """Build the setup command tree over a project's declared integrations.
+
+    A project that keeps Claude accounts supplies the directory over its own
+    origin, and setup curates exactly the roster its launches select from.
+    """
     app = typer.Typer(
         help="Interactive setup wizard",
         pretty_exceptions_show_locals=False,
         invoke_without_command=True,
     )
-    if profile_app is not None:
-        app.add_typer(profile_app, name="profile")
+    if profiles is not None:
+        app.add_typer(create_profile_app(profiles), name="profile")
 
     @app.command("status")
     def status() -> None:
         """Show current integration status."""
         console.print()
         console.print(build_status_table(integrations))
-        active = active_profile() if active_profile is not None else None
-        if active:
-            console.print(f"  Active profile: [bold]{active}[/]")
+        active = profiles.active() if profiles is not None else None
+        if active is not None:
+            console.print(f"  Active profile: [bold]{active.name}[/]")
         console.print()
 
     for integration in integrations:
