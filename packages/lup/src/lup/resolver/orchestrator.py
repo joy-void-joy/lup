@@ -284,6 +284,7 @@ class WorktreeOrchestrator:
                 concern_id=concern.id,
                 valid=False,
                 reason=report_mismatch(undeclared, unswept),
+                declaration=True,
             )
         if not changed:
             return DiffValidation(

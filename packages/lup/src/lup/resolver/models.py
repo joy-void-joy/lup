@@ -422,6 +422,12 @@ class DiffValidation(BaseModel):
     valid: bool
     commit: str | None = None
     reason: str = ""
+    declaration: bool = False
+    """Whether the only thing wrong was the file-declaration contract.
+
+    Bookkeeping, and mechanically checkable — which is why a caller spends a
+    different allowance on it than on the reviewer's judgement of the work.
+    """
 
 
 class ReviewReport(BaseModel):
@@ -738,6 +744,15 @@ class ResolverConfig(BaseModel):
     run_id: str
     integration_branch: str
     max_revision_rounds: int = Field(default=2, ge=0)
+    max_declaration_attempts: int = Field(default=2, ge=0)
+    """Rounds a worker may spend reconciling its file declaration for free.
+
+    Separate from the revision budget because the two are not the same
+    scarce thing: a declaration mismatch is mechanical and cheap to check,
+    while a revision round is a reviewer's judgement of the work. Charging
+    both to one allowance let a concern oscillate between under-declaring
+    and over-declaring until it failed with its criteria never evaluated.
+    """
     verification_commands: list["VerificationCommand"] = Field(default_factory=list)
 
     @model_validator(mode="after")
