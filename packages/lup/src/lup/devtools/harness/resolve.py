@@ -703,6 +703,7 @@ def run_resolve(
             create_codex_session_factory,
         )
         from lup.adapters.claude.config_home import (
+            configuration_fault,
             selected_config_home,
             untrusted_degradation,
             workspace_config_environment,
@@ -810,6 +811,20 @@ def run_resolve(
                     f"repository under {worktree_root}, and to nothing else."
                 )
             return {**environment, **derived}
+
+        # Once, before anything is leased. Every private home this run derives
+        # is seeded from the one document this reads, so a run that cannot
+        # read it opens no session anywhere — a fact about the environment
+        # rather than about any concern. Discovering it per worker instead
+        # turned one environmental fault into an exception group of concern
+        # failures and burned every lease the run had taken.
+        fault = (
+            configuration_fault(selected_config_home(session_environment))
+            if adapter == "claude"
+            else None
+        )
+        if fault is not None:
+            raise typer.BadParameter(fault)
 
         def toolchain_writable_paths() -> list[Path]:
             """Absolute paths a sandboxed worker's toolchain must be able to write.
