@@ -168,6 +168,22 @@ class RecheckRepeatedEvent(BaseModel):
     criteria: list[str]
 
 
+class LeaseDriftEvent(BaseModel):
+    """An abandoned concern's tree does not hold the commit last recorded.
+
+    Recorded at restore rather than raised. The concern failed, so nothing
+    in this run reads that tree again — but the work is still on its branch,
+    and a reader salvaging it wants both commits named.
+    """
+
+    model_config = FROZEN
+
+    type: Literal["lease_drift"] = "lease_drift"
+    concern_id: str
+    expected: str
+    found: str
+
+
 class RunFailedEvent(BaseModel):
     """The run reached a terminal failure."""
 
@@ -187,6 +203,7 @@ type RunEvent = (
     | JoinAuditEvent
     | ReviewResidualEvent
     | RecheckRepeatedEvent
+    | LeaseDriftEvent
     | RunFailedEvent
 )
 """What the run did, as opposed to what one actor's session did.

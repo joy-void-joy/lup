@@ -543,6 +543,15 @@ class ConcernOutcome(BaseModel):
     concern_id: str
     branch: str
     commit: str | None = None
+    head: str | None = None
+    """Where the lease's branch actually ended, accepted or not.
+
+    Distinct from ``commit``, which is the commit an accepted round
+    produced. A concern that exhausts its rounds has no accepted commit and
+    still has a branch, because it can only exhaust them by committing work
+    across several — so reading ``commit=None`` as "no commit exists" is
+    what made a restore expect the base and refuse the tree.
+    """
     verified: bool = False
     integrated: bool = False
     rounds: list[AgentRound] = Field(default_factory=list)

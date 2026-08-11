@@ -46,6 +46,7 @@ from lup.resolver.core import (
     resolver_config_digest,
 )
 from lup.resolver.run import ResolverInvariantError
+from lup.resolver.journal import LeaseDriftEvent
 from lup.resolver.models import (
     AdmissionRequest,
     AnswerBatch,
@@ -1639,6 +1640,94 @@ async def test_worker_crash_persists_the_failure_and_raises_a_group(
     assert progress["a"].status == ConcernStatus.FAILED
     assert progress["a"].reason == "worker exploded"
     assert any("worker exploded" in failure for failure in persisted.failures)
+
+
+def test_a_failed_concern_does_not_strand_the_leases_beside_it(
+    tmp_path: Path,
+) -> None:
+    """One stale pointer must not cost a resume every healthy concern.
+
+    A concern can only exhaust its rounds by committing work across several,
+    so its tree legitimately sits ahead of the base while no commit was ever
+    accepted. Restoring read that as the branch having moved under the run
+    and raised before any other lease was reached, which left four verified
+    concerns and five newly eligible ones unreachable through every resume.
+    """
+    launcher = LocalProcessLauncher()
+    workspace = failure_leg_workspace(tmp_path, launcher)
+    source = snapshot(workspace, launcher)
+    core = failure_leg_core(
+        tmp_path,
+        workspace,
+        launcher,
+        "stranded",
+        lambda _root, _name: {},
+        lambda _root, _name: {},
+    )
+    failed = WritableRootLease(
+        concern_id="a",
+        root=tmp_path / "resolver-worktrees" / "a",
+        branch="resolve/stranded/a",
+    )
+    healthy = WritableRootLease(
+        concern_id="b",
+        root=tmp_path / "resolver-worktrees" / "b",
+        branch="resolve/stranded/b",
+    )
+    core.worktrees.create(failed, source.commit)
+    core.worktrees.create(healthy, source.commit)
+    (failed.root / "work.txt").write_text("salvageable\n", encoding="utf-8")
+    for arguments in (["add", "-A"], ["commit", "-m", "work the worker committed"]):
+        status = launcher.launch(
+            LaunchRequest(arguments=["git", *arguments], cwd=failed.root)
+        )
+        assert status.code == 0, status.stderr
+    moved = core.worktrees.head(failed)
+
+    def base(identifier: str) -> DependencyBase:
+        return DependencyBase(
+            concern_id=identifier,
+            parent_concerns=[],
+            parent_commits=[],
+            commit=source.commit,
+        )
+
+    state = ResolveState(
+        config_digest="config-sha",
+        run_id="stranded",
+        phase=ResolvePhase.WORKERS,
+        source=source,
+        spec=resolve_spec(),
+        concerns=[concern("a"), concern("b")],
+        progress=[
+            ConcernProgress(concern_id="a", status=ConcernStatus.FAILED),
+            ConcernProgress(concern_id="b", status=ConcernStatus.RUNNING),
+        ],
+        leases=[failed, healthy],
+        bases=[base("a"), base("b")],
+        outcomes=[
+            # The shape a run persisted before an outcome carried its head:
+            # no accepted commit, and nothing recording where the tree ended.
+            ConcernOutcome(
+                concern_id="a",
+                branch=failed.branch,
+                verified=False,
+                failure="revision limit exhausted",
+            )
+        ],
+    )
+    core.persist(state)
+
+    core.restore_leases(state)
+
+    assert moved != source.commit
+    assert LeaseDriftEvent(concern_id="a", expected=source.commit, found=moved) in [
+        entry.event for entry in core.journal.read()
+    ]
+    persisted = core.repository.load()
+    progress = {item.concern_id: item.status for item in persisted.progress}
+    assert progress["b"] == ConcernStatus.LEASED
+    assert core.worktrees.head(failed) == moved
 
 
 @pytest.mark.asyncio
