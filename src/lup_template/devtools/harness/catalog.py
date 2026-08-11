@@ -179,6 +179,19 @@ def portable_harness(version: str = "0.2.0", root: Path | None = None) -> Harnes
         mcp_servers=agent_tool_servers(),
         hooks=HookSet(
             id="hooks.lup-policy",
+            # lup: Deny `Artifact` and `Skill(artifact-design)` unless escalated,
+            # carrying redirecting guidance the way GENERATED_PLUGIN_REFUSAL does
+            # for a generated tree. Publishing a page is the wrong reflex here:
+            # it leaves the repository, and this project already owns surfaces
+            # that do not. The deny needs somewhere to point, though — measured
+            # while writing this, no general report surface exists. The command
+            # tree is agent, dashboard, dev, feedback, harness, hooks, py, setup,
+            # sync, trace, usage, version; `dashboard` hosts setup integration
+            # status only, and `harness resolve supervise` answers one resolver
+            # run. So add that general surface with the deny, reconciled with the
+            # `/lup:report` skill, which writes `tmp/` markdown rather than
+            # rendering — two report mechanisms that never met would be worse
+            # than the reflex being blocked.
             policy_ids=["fetch", "shell", "edit", "unknown-tool"],
             allowed_fetch=[
                 HookUrlScope(origin=AnyHttpUrl("https://docs.claude.com")),

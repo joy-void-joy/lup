@@ -3,6 +3,16 @@
 # (`lup.devtools.harness.resolve`) lives — and `web/` reads the same way. I would
 # like the folder hierarchy to make sense in general, so audit the whole layout
 # rather than moving just these two.
+#
+# lup: Two things the human settled on this. The destination is
+# `lup/harness/resolver/`: the resolver is provider-neutral library code, and
+# following its driver into `devtools` would move library code into the tooling
+# layer. And the audit lands in full while the move waits on anything another
+# concern is editing — a resolver run that relocates this package while other
+# concerns edit `resolver/models.py`, `resolver/run.py` and the driver whose
+# imports the move rewrites is a three-way merge nobody needs. That is
+# sequencing, not deferral by tracking file: the audit is produced and every
+# uncontested placement lands, and only the contested move follows after.
 """Provider-neutral resolution of reviewed code concerns, split by concern.
 
 Drives worker, review, and merge skill runs over a DAG of concerns, each on
