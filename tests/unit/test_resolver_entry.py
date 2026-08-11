@@ -26,6 +26,7 @@ from lup.devtools.harness.resolve import (
     parse_answer_flags,
     parse_note_targets,
     resolver_intake,
+    run_owned,
 )
 
 
@@ -297,3 +298,24 @@ def test_an_admitted_note_target_that_names_no_open_note_is_refused() -> None:
                 GeneratedArtifacts(by_path={}),
             ).actionable,
         )
+
+
+def test_a_run_trusts_the_repository_it_was_invoked_against(tmp_path: Path) -> None:
+    """The planner reads here, and an untrusted read drops the repo's grants."""
+    root = tmp_path / "repo"
+    root.mkdir()
+
+    assert run_owned(root, root, tmp_path / "repo-resolve-a-run")
+
+
+def test_a_run_trusts_the_checkouts_it_made(tmp_path: Path) -> None:
+    worktree_root = tmp_path / "repo-resolve-a-run"
+
+    assert run_owned(worktree_root / "a-concern", tmp_path / "repo", worktree_root)
+
+
+def test_a_run_trusts_nothing_it_merely_opens_a_session_in(tmp_path: Path) -> None:
+    """Trust follows the invocation, not wherever a session happens to land."""
+    elsewhere = tmp_path / "somebody-elses-checkout"
+
+    assert not run_owned(elsewhere, tmp_path / "repo", tmp_path / "repo-resolve-a-run")
