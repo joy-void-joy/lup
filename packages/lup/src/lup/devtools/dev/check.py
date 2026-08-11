@@ -194,7 +194,13 @@ def run_checks(
     for line in inline_notes_lines(found) if found else ["inline notes: none"]:
         typer.echo(line)
 
-    scan = scan_antipatterns(project)
+    # Scoped for the reason the note gate above is: a lease holds the whole
+    # repository and has authority over the paths it changed, so judging it
+    # against every finding already standing in the tree fails it for a
+    # condition it did not cause and no revision round can converge on. A
+    # resolver run rejected otherwise-green work over one such finding, in a
+    # file no lease had touched and every lease carried.
+    scan = scan_antipatterns(project, scope)
     blocking = [f for f in scan.findings if f.kind != "untyped"]
     refined = f", {len(scan.refuted)} refuted" if scan.refuted else ""
     if blocking:
