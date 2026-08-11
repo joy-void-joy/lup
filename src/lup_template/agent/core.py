@@ -258,10 +258,13 @@ def provider_factory(
                 normalize_codex_sandbox(settings.codex_sandbox)
                 or ("workspace-write" if session_defaults else None)
             ),
+            # Hooks are what the app-server puts its approval requests to, so
+            # a session carrying them asks and a session without them cannot.
             approval_policy=(
                 normalize_codex_approval(settings.codex_approval_policy)
-                or ("never" if session_defaults else None)
+                or ("onRequest" if hooks is not None else "never")
             ),
+            hooks=hooks,
             effort=normalize_codex_effort(
                 settings.codex_effort or settings.reasoning_effort
             ),
@@ -324,13 +327,19 @@ def normalize_codex_sandbox(
 
 def normalize_codex_approval(
     value: str | None,
-) -> Literal["never"] | None:
-    """Validate the Codex approval policy before model construction."""
-    if value in (None, "never"):
+) -> Literal["unlessTrusted", "onRequest", "never"] | None:
+    """Validate the Codex approval policy before model construction.
+
+    The asking policies are answerable now that the adapter replies to the
+    app-server's approval requests from a session's declared hooks, so they
+    are settings rather than refusals — but only the app-server's own
+    spellings, since the value is passed to it verbatim.
+    """
+    if value in (None, "unlessTrusted", "onRequest", "never"):
         return value
     raise ValueError(
-        f"Codex approval policy {value!r} is not supported by the app-server "
-        "adapter; use 'never' with Lup's policy boundary"
+        f"Codex approval policy {value!r} is not one the app-server accepts; "
+        "use 'never', 'onRequest', or 'unlessTrusted'"
     )
 
 

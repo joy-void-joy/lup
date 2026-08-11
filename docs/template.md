@@ -85,6 +85,7 @@ backend simply leaves it out of the roster.
 - `dev` — Worktrees, branches, and pre-flight checks
 - `feedback` — Feedback state, metrics, and commits
 - `harness` — Generate and launch the native harnesses
+- `hooks` — Query the permission policy
 - `py` — Python module introspection
 - `setup` — Interactive setup wizard
 - `sync` — Track sync.json repos and review their commits

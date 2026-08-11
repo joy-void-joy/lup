@@ -17,6 +17,7 @@ import typer
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 
+from lup.adapters.harness import AdapterName
 from lup.channels.models import utc_now
 from lup.resolver.journal import Journal, JournalEntry
 from lup.resolver.mailbox import (
@@ -31,6 +32,7 @@ from lup.resolver.state import ResolverStateRepository, StateCorruptionError
 from lup.types import StringMap
 from lup.web.serve import local_page_app, serve_local_page
 from lup.workspace.paths import project_root
+from lup.devtools.layout import SUPERVISOR_PORT
 from lup.devtools.supervisor.events import FRESH_CATCHUP_ENTRIES, stream
 from lup.devtools.supervisor.projection import (
     ActorIndex,
@@ -82,7 +84,7 @@ def last_seq(header: str) -> int:
         return -1
 
 
-def read_run(state_root: Path, run_id: str, adapter: str) -> SupervisorState:
+def read_run(state_root: Path, run_id: str, adapter: AdapterName) -> SupervisorState:
     """Project one persisted run, reporting absence and corruption distinctly."""
     repository = ResolverStateRepository(state_root, run_id)
     if not repository.exists():
@@ -94,11 +96,18 @@ def read_run(state_root: Path, run_id: str, adapter: str) -> SupervisorState:
     return supervisor_state(state, run_mailbox(state_root, run_id), adapter)
 
 
-def run_summary(state_root: Path, run_id: str, adapter: str) -> RunSummary:
-    """One index row, reporting an unreadable run rather than hiding it."""
+def run_summary(state_root: Path, run_id: str, adapter: AdapterName) -> RunSummary:
+    """One index row, reporting an unreadable run rather than hiding it.
+
+    The catch is deliberately total, which is what a boundary this shape
+    needs. Every other row depends on this one not raising, so a state file
+    in a shape nobody anticipated has to degrade to a row that says so — a
+    rail that 500s whole because one run is malformed takes the page away
+    exactly when it is wanted.
+    """
     try:
         projected = read_run(state_root, run_id, adapter)
-    except (HTTPException, ValueError) as error:
+    except Exception as error:
         return RunSummary(
             run_id=run_id,
             phase=None,
@@ -113,20 +122,27 @@ def run_summary(state_root: Path, run_id: str, adapter: str) -> RunSummary:
         concerns=len(projected.concerns),
         pending_questions=len(unanswered_questions(projected.pending)),
         live=projected.live,
+        last_activity=projected.last_activity,
     )
 
 
-def run_index(state_root: Path, adapter: str) -> RunIndex:
-    """Every run directory holding persisted state, newest name last."""
+def run_index(state_root: Path, adapter: AdapterName) -> RunIndex:
+    """Every run directory holding persisted state, most recently active first.
+
+    A run id is a commit digest, so directory order is hash order — which is
+    arbitrary with respect to when anything happened. The rail is what an
+    operator scans to find the run they were just working on, so it is
+    ordered by when each run last wrote. An unreadable run has no stamp and
+    sorts last, which is also where it belongs.
+    """
     if not state_root.is_dir():
         return RunIndex(runs=[])
-    return RunIndex(
-        runs=[
-            run_summary(state_root, entry.name, adapter)
-            for entry in sorted(state_root.iterdir())
-            if (entry / "state.json").is_file()
-        ]
-    )
+    rows = [
+        run_summary(state_root, entry.name, adapter)
+        for entry in sorted(state_root.iterdir())
+        if (entry / "state.json").is_file()
+    ]
+    return RunIndex(runs=sorted(rows, key=lambda row: -row.last_activity))
 
 
 def offer_answers(
@@ -150,7 +166,7 @@ def create_supervisor(
     state_root: Path,
     url: str,
     run_id: str | None = None,
-    adapter: str = "claude",
+    adapter: AdapterName = AdapterName.CLAUDE,
     sse_headers: StringMap = DEFAULT_SSE_HEADERS,
 ) -> FastAPI:
     """Build the supervisor app over every run under the state root."""
@@ -293,10 +309,10 @@ def serve_supervisor(
         str | None, typer.Option("--run-id", help="Run to open on load")
     ] = None,
     adapter: Annotated[
-        str, typer.Option("--adapter", help="Adapter named in the rerun recipe")
-    ] = "claude",
+        AdapterName, typer.Option("--adapter", help="Adapter named in the rerun recipe")
+    ] = AdapterName.CLAUDE,
     host: Annotated[str, typer.Option(help="Interface to bind")] = "127.0.0.1",
-    port: Annotated[int, typer.Option(help="TCP port to bind")] = 8766,
+    port: Annotated[int, typer.Option(help="TCP port to bind")] = SUPERVISOR_PORT,
     open_page: Annotated[
         bool, typer.Option("--open/--no-open", help="Open the page in a browser")
     ] = True,

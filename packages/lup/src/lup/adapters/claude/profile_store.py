@@ -4,6 +4,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from lup.channels.models import publish_atomic
 from lup.adapters.claude.config import (
     ClaudeProfileRegistry,
     ClaudeProfileSelection,
@@ -41,12 +42,7 @@ class ClaudeProfileStore:
         )
 
     def save_registry(self, registry: Registry) -> None:
-        self.registry_path.parent.mkdir(parents=True, exist_ok=True)
-        temporary = self.registry_path.with_name(f".{self.registry_path.name}.tmp")
-        temporary.write_text(
-            registry.model_dump_json(indent=2) + "\n", encoding="utf-8"
-        )
-        temporary.replace(self.registry_path)  # lup: ignore[string-replace]
+        publish_atomic(self.registry_path, registry)
 
     def config_dir_for(self, name: str) -> Path:
         return Path(self.load_registry().profiles[name].config_dir).expanduser()

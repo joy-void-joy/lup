@@ -9,6 +9,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from lup.channels.models import publish_atomic
 from lup.runtime.composition import is_output_model
 from lup.runtime.contracts import (
     EventStream,
@@ -403,14 +404,7 @@ class PersistingTurn[T: BaseModel | None](Turn[T]):
                 f"{result.identifiers.session.value}\0{result.identifiers.turn.value}"
             )
             name = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:24] + ".json"
-            path = self.config.directory / name
-            temporary = path.with_name(f".{path.name}.tmp")
-            temporary.write_text(
-                result.model_dump_json(indent=2) + "\n",
-                encoding="utf-8",
-                newline="\n",
-            )
-            temporary.replace(path)  # lup: ignore[string-replace] — atomic Path rename
+            publish_atomic(self.config.directory / name, result)
         except Exception as error:
             raise ProviderTurnError(failure_from_result(result, str(error))) from error
         return result

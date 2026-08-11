@@ -118,6 +118,10 @@ class AtomicMaterializer(Materializer):
         for write in proposal.writes:
             artifact = write.artifact
             path = safe_target(proposal.root, artifact.path)
+            # Not `write_atomic`: the mode has to be set on the temporary
+            # before the rename, or the artifact is briefly readable at its
+            # final path without it, and the name carries the proposal id so
+            # two materializations of the same tree cannot collide on it.
             path.parent.mkdir(parents=True, exist_ok=True)
             temporary = path.with_name(f".{path.name}.{proposal.id}.tmp")
             temporary.write_text(artifact.content, encoding="utf-8", newline="\n")

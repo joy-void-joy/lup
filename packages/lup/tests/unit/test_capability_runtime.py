@@ -16,6 +16,16 @@ from lup.adapters.codex.runtime import (
     CodexSessionConfig,
     CodexTurnChannel,
 )
+from lup.adapters.codex.hooks import (
+    CODEX_SEMANTICS,
+    COMMAND_APPROVAL,
+    FILE_CHANGE_APPROVAL,
+    CodexApprovalResponder,
+)
+from lup.hooks import create_permission_hooks
+from lup.policy.enforcement import SemanticToolPolicy, create_policy_hooks
+from lup.policy.rules import ShellPolicy
+from lup.policy.shell_rules import ShellCommandRule
 from lup.runtime.composition import (
     AcceptedTurn,
     CompletedTurn,
@@ -413,11 +423,60 @@ async def test_app_server_eof_fails_current_turn_with_partial_evidence(
     assert raised.value.failure.blocks == [TurnTextBlock(text="partial")]
 
 
-def test_codex_config_rejects_unhandled_native_approval_requests(
-    tmp_path: Path,
-) -> None:
-    with pytest.raises(ValueError, match="approval_policy must be 'never'"):
-        CodexSessionConfig(model="gpt", cwd=tmp_path, approval_policy="on-request")
+def test_codex_config_rejects_approvals_nothing_would_answer(tmp_path: Path) -> None:
+    """An asking policy with no hooks stalls the turn on its first command."""
+    with pytest.raises(ValueError, match="supply hooks to answer them"):
+        CodexSessionConfig(model="gpt", cwd=tmp_path, approval_policy="onRequest")
+
+
+def test_codex_config_accepts_approvals_its_hooks_can_answer(tmp_path: Path) -> None:
+    """Declared hooks are what makes an asking policy answerable."""
+    config = CodexSessionConfig(
+        model="gpt",
+        cwd=tmp_path,
+        approval_policy="onRequest",
+        hooks=create_permission_hooks([tmp_path], []),
+    )
+
+    assert config.approval_policy == "onRequest"
+
+
+async def test_a_command_approval_is_judged_on_the_command_it_carries() -> None:
+    """The exec approval carries command and cwd, so a shell rule reads them."""
+    policy = SemanticToolPolicy(
+        shell=ShellPolicy(
+            [
+                ShellCommandRule(name="ls"),
+                ShellCommandRule(name="curl", default_effect="deny", reason="egress"),
+            ]
+        )
+    )
+    responder = CodexApprovalResponder(
+        hooks=create_policy_hooks(policy, CODEX_SEMANTICS)
+    )
+
+    allowed = await responder.decide(COMMAND_APPROVAL, {"command": "ls -la"})
+    refused = await responder.decide(COMMAND_APPROVAL, {"command": "curl http://x"})
+
+    assert allowed == "accept"
+    assert refused == "decline"
+
+
+async def test_a_file_change_approval_carries_no_content_so_it_is_refused() -> None:
+    """Codex sends an item id and a reason — never the patch itself.
+
+    An edit rule reads before-and-after text, so approving here would be
+    approving something nothing inspected.
+    """
+    responder = CodexApprovalResponder(
+        hooks=create_policy_hooks(SemanticToolPolicy(), CODEX_SEMANTICS)
+    )
+
+    decision = await responder.decide(
+        FILE_CHANGE_APPROVAL, {"itemId": "item-1", "reason": "edit a file"}
+    )
+
+    assert decision == "decline"
 
 
 @pytest.mark.asyncio

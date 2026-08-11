@@ -30,6 +30,7 @@ APPLICATION_SPECS = [
     SubAppSpec(name="dev", help="Worktrees, branches, and pre-flight checks"),
     SubAppSpec(name="feedback", help="Feedback state, metrics, and commits"),
     SubAppSpec(name="harness", help="Generate and launch the native harnesses"),
+    SubAppSpec(name="hooks", help="Query the permission policy"),
     SubAppSpec(name="setup", help="Interactive setup wizard"),
 ]
 """The sub-apps only this application has, because only it has their subject."""

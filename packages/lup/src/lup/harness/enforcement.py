@@ -32,6 +32,7 @@ def declared_scope(scope: HookUrlScope) -> UrlScope:
     return UrlScope(
         origin=scope.origin,
         path_prefix=scope.path_prefix,
+        reason=scope.reason,
         include_subdomains=scope.include_subdomains,
         any_port=scope.any_port,
     )

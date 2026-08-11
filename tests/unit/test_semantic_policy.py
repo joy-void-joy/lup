@@ -103,6 +103,9 @@ class EditDecisionCase(BaseModel):
 FIXTURE_PATH_ROLES = [
     PathRoleRow(root="tests", role="test"),
     PathRoleRow(root="tmp", role="scratch"),
+    PathRoleRow(root=".venv", role="scratch"),
+    PathRoleRow(root="build", role="scratch"),
+    PathRoleRow(root="node_modules", role="scratch"),
 ]
 
 FIXTURE_PATH_RULES = declared_path_rules(declared_hook_set())
@@ -142,6 +145,25 @@ SHELL_POLICY_CASES = [
         effect="ask",
         existing=["src/generated.py"],
     ),
+    # `gh api` is the read path for everything the typed subcommands cannot
+    # express, so it is screened by method and body the way curl is rather
+    # than asked about wholesale.
+    DecisionCase(input="gh api /repos/o/r/pulls/1", effect="allow"),
+    DecisionCase(input="gh api --jq .state /repos/o/r/pulls/1", effect="allow"),
+    DecisionCase(input="gh api -X DELETE /repos/o/r/x", effect="ask"),
+    DecisionCase(input="gh api -f title=x /repos/o/r/issues", effect="ask"),
+    DecisionCase(input="gh api --method PATCH /repos/o/r", effect="ask"),
+    # A read-only form of a writing command allows; the writing form asks.
+    DecisionCase(input="tar -tzf archive.tgz", effect="allow"),
+    DecisionCase(input="tar -xzf archive.tgz", effect="ask"),
+    DecisionCase(input="gzip -l archive.gz", effect="allow"),
+    DecisionCase(input="gzip archive.txt", effect="ask"),
+    DecisionCase(input="make -n", effect="allow"),
+    DecisionCase(input="make test", effect="ask"),
+    DecisionCase(input="npm ls", effect="allow"),
+    DecisionCase(input="npm install", effect="ask"),
+    DecisionCase(input="ss -ltnp", effect="allow"),
+    DecisionCase(input="ss -K dst 1.2.3.4", effect="ask"),
     DecisionCase(input="gh pr view 123", effect="allow"),
     DecisionCase(input="gh pr list --state open", effect="allow"),
     DecisionCase(input="gh pr diff 123", effect="allow"),
@@ -492,7 +514,11 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="ssh host; frobnicate", effect="ask"),
     DecisionCase(input="pip install x; ssh host", effect="deny"),
     DecisionCase(input="ssh-add -D; ssh host", effect="deny"),
-    DecisionCase(input="rm -rf build", effect="ask"),
+    # A build root is disposable by declaration, so emptying one is one act
+    # whatever it holds — the same grant `tmp/` has. A production directory
+    # keeps the ask, because nothing in the command bounds what is inside it.
+    DecisionCase(input="rm -rf build", effect="allow"),
+    DecisionCase(input="rm -rf src", effect="ask"),
     DecisionCase(input="make test", effect="ask"),
     DecisionCase(input="wget https://x.test/f", effect="ask"),
     # Docker: the read-only query surface is judged allow; every form that

@@ -142,7 +142,9 @@ def create_dashboard(url: str, integrations: list[Integration]) -> FastAPI:
     return dashboard
 
 
-def create_dashboard_app(integrations: list[Integration]) -> typer.Typer:
+def create_dashboard_app(
+    integrations: list[Integration], default_port: int = 8765
+) -> typer.Typer:
     """Build the dashboard command over a project's declared integrations."""
     app = typer.Typer(
         help="Host the local setup dashboard",
@@ -154,7 +156,7 @@ def create_dashboard_app(integrations: list[Integration]) -> typer.Typer:
     def serve_dashboard(
         context: typer.Context,
         host: Annotated[str, typer.Option(help="Interface to bind")] = "127.0.0.1",
-        port: Annotated[int, typer.Option(help="TCP port to bind")] = 8765,
+        port: Annotated[int, typer.Option(help="TCP port to bind")] = default_port,
         open_page: Annotated[
             bool,
             typer.Option("--open/--no-open", help="Open the dashboard in a browser"),

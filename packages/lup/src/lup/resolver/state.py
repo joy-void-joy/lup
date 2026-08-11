@@ -7,6 +7,7 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
+from lup.channels.models import publish_atomic
 from lup.resolver.models import (
     AgentRound,
     AnswerBatch,
@@ -316,12 +317,4 @@ class ResolverStateRepository:
         )
 
     def write_model(self, relative: str, value: PersistedResolverModel) -> None:
-        path = self.root / relative
-        path.parent.mkdir(parents=True, exist_ok=True)
-        temporary = path.with_name(f".{path.name}.tmp")
-        temporary.write_text(
-            value.model_dump_json(indent=2) + "\n",
-            encoding="utf-8",
-            newline="\n",
-        )
-        temporary.replace(path)  # lup: ignore[string-replace] — atomic Path rename
+        publish_atomic(self.root / relative, value)

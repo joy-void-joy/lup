@@ -73,22 +73,32 @@ class Offset[T](BaseModel):
     commit_offset: int
 
 
+def write_atomic(path: Path, content: bytes) -> None:
+    """Write one file so no reader can ever observe it half-written.
+
+    The rename is the whole guarantee, because a reader holds no lock. Every
+    write in this library that a concurrent reader may catch goes through
+    here — a channel record, a state file, a rendered artifact, a metrics
+    flush — so the temporary name, the parent creation, and the rename are
+    decided once. The temporary is dot-prefixed so a lister that catches one
+    mid-write does not offer it as an ordinary file.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.tmp")
+    temporary.write_bytes(content)
+    temporary.replace(path)  # lup: ignore[string-replace] — atomic Path rename
+
+
 def publish_atomic(
     path: Path,
     record: BaseModel,  # lup: ignore[bare-basemodel] — any model to disk
 ) -> None:
-    """Write one record so no reader can ever observe it half-written.
+    """Write one record as indented JSON, atomically.
 
     Every channel publishes this way, and so does anything else in a run
-    directory that a door may read while the run is writing it. A reader
-    holds no lock, so the rename is the whole guarantee.
+    directory that a door may read while the run is writing it.
     """
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(f".{path.name}.tmp")
-    temporary.write_text(
-        record.model_dump_json(indent=2) + "\n", encoding="utf-8", newline="\n"
-    )
-    temporary.replace(path)  # lup: ignore[string-replace] — atomic Path rename
+    write_atomic(path, (record.model_dump_json(indent=2) + "\n").encode("utf-8"))
 
 
 def utc_now() -> datetime:

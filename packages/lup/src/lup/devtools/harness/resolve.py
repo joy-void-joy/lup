@@ -70,6 +70,7 @@ from lup.devtools.dev.worktree import (
     sync_dependencies,
 )
 from lup.devtools.harness.generate import NativeHarnessComposition
+from lup.devtools.supervisor.projection import answer_recipe as rerun_recipe
 
 
 class ConfiguredModel(BaseModel):
@@ -382,18 +383,6 @@ def report_questions(
                 typer.echo("  (choices are suggestions; any answer is accepted)")
 
 
-def rerun_recipe(adapter: str, run_id: str, questions: list[MaterialQuestion]) -> str:
-    """The exact command that answers these questions and drives the run on."""
-    return " ".join(
-        [
-            "uv run lup-devtools harness resolve",
-            f"--adapter {adapter}",
-            f"--run-id {run_id}",
-            *(f"--answer {question.id}=<value>" for question in questions),
-        ]
-    )
-
-
 def report_awaiting(
     parked: ResolverAwaitingAnswers,
     adapter: str,
@@ -633,6 +622,7 @@ def run_resolve(
             create_codex_session_factory,
         )
         from lup.adapters.claude.hooks import CLAUDE_SEMANTICS
+        from lup.adapters.codex.hooks import CODEX_SEMANTICS
         from lup.harness.enforcement import semantic_policy_for
         from lup.hooks import (
             LupHooksConfig,
@@ -640,7 +630,7 @@ def run_resolve(
             create_permission_hooks,
             merge_hooks,
         )
-        from lup.policy.enforcement import create_policy_hooks
+        from lup.policy.enforcement import NativeSemantics, create_policy_hooks
 
         from lup.adapters.codex.harness_runtime import (
             CodexPluginInstaller,
@@ -759,7 +749,7 @@ def run_resolve(
                             merge_hooks(
                                 merge_hooks(
                                     create_permission_hooks([cwd], []),
-                                    worker_policy_hooks(granted),
+                                    worker_policy_hooks(granted, CLAUDE_SEMANTICS),
                                 ),
                                 create_git_inspection_hook(),
                             ),
@@ -778,7 +768,18 @@ def run_resolve(
                     ),
                     cwd=cwd,
                     sandbox="workspace-write",
-                    approval_policy="never",
+                    # An asking policy is what makes the app-server put this
+                    # worker's commands to the hooks below. Left at "never" a
+                    # Codex worker ran with the OS sandbox as its only floor,
+                    # because its generated plugin hook is not reached either.
+                    approval_policy="onRequest",
+                    hooks=merge_hooks(
+                        worker_policy_hooks(granted, CODEX_SEMANTICS),
+                        create_inbox_hooks(
+                            QuestionMailbox(tool_context.run_dir),
+                            context.concern_id,
+                        ),
+                    ),
                     environment=concern_environment,
                     mcp_servers={
                         "resolver": CodexMcpServerConfig(
@@ -796,7 +797,9 @@ def run_resolve(
                 )
             )
 
-        def worker_policy_hooks(granted: list[str]) -> LupHooksConfig:
+        def worker_policy_hooks(
+            granted: list[str], semantics: NativeSemantics
+        ) -> LupHooksConfig:
             """Judge a worker's calls by the policy every plugin enforces.
 
             The directory ACL beside this bounds the worker's filesystem
@@ -814,6 +817,11 @@ def run_resolve(
             ``granted`` carries the concern's approved allowances, the same
             list the session environment declares — so this judge and the
             lease's deployed dispatcher release exactly the same gates.
+
+            ``semantics`` is how one runtime's calls become the vocabulary
+            this policy judges. It is a parameter rather than a constant
+            because both runtimes have that decode now, and hardcoding one
+            was what left the other's workers judged by nothing.
             """
             return create_policy_hooks(
                 semantic_policy_for(
@@ -822,7 +830,7 @@ def run_resolve(
                     interactive=False,
                     allowances=granted,
                 ),
-                CLAUDE_SEMANTICS,
+                semantics,
             )
 
         def reviewer_factory(cwd: Path) -> SessionFactory:
@@ -843,12 +851,13 @@ def run_resolve(
             return create_codex_session_factory(
                 CodexSessionConfig(
                     model=session_model,
+                    approval_policy="onRequest",
+                    hooks=create_permission_hooks([], [cwd]),
                     developer_instructions=(
                         "Independently review the persisted resolver change."
                     ),
                     cwd=cwd,
                     sandbox="read-only",
-                    approval_policy="never",
                     environment=reviewer_environment,
                 )
             )

@@ -2,6 +2,7 @@
 
 import asyncio
 import hashlib
+import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
@@ -70,6 +71,8 @@ from lup.resolver.turns import (
 from lup.resolver.verification import Verifier
 from lup.runtime.models import TurnInput, turn_request
 
+
+logger = logging.getLogger(__name__)
 
 APPROVE = "approve"
 DEFER = "defer"
@@ -301,6 +304,11 @@ class ResolverCore:
         return self.run_state.lock
 
     @property
+    def promoter_problems(self) -> list[str]:
+        """What the answer promoter could not do, as the desk recorded it."""
+        return self.questions.problems
+
+    @property
     def wake(self) -> asyncio.Event:
         """Set whenever recorded answers change, to end a poll early."""
         return self.run_state.wake
@@ -519,16 +527,41 @@ class ResolverCore:
         Every actor's session is released here too. A park is an exit like
         any other: the session ids are persisted on the way out, so resuming
         reattaches to the conversations rather than starting new ones.
+
+        The promoter is awaited for its exceptions rather than by re-raising
+        them, because this runs while the body's own exception is propagating:
+        raising here would replace the reason the operation ended with a
+        symptom of it ending. What the promoter could not do is already on
+        ``promoter_problems``, which every park report carries.
         """
         self.mailbox.clear_park()
+        self.promoter_problems.clear()
         stop = asyncio.Event()
         promoter = asyncio.create_task(self.questions.promote_until(stop))
         try:
             yield
         finally:
             stop.set()
-            await promoter
+            outcome = await asyncio.gather(promoter, return_exceptions=True)
+            self.record_promoter_exit(outcome[0])
             await self.actors.close()
+
+    def record_promoter_exit(self, outcome: None | BaseException) -> None:
+        """Record a promoter that ended by raising rather than by being stopped.
+
+        ``promote_until`` handles its own errors, so anything arriving here
+        escaped that net — a cancellation, or a failure of the handling
+        itself. Either way the doors stopped being served at that moment, so
+        it is recorded as a problem the next park report carries rather than
+        discarded.
+        """
+        if outcome is None:
+            return
+        logger.exception("resolver promoter ended early", exc_info=outcome)
+        self.promoter_problems.append(
+            f"the answer promoter stopped early ({outcome!r}), so offers made "
+            "after that point were never taken"
+        )
 
     async def advance_exclusive(self, state: ResolveState) -> ResolveManifest:
         """Advance while a promoter is folding every door's answers in.

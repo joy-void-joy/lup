@@ -215,8 +215,14 @@ def portable_harness(version: str = "0.2.0", root: Path | None = None) -> Harnes
                 # process the same session just started. No port is named
                 # because every one of these surfaces takes `--port`, and a
                 # scope that went stale on a flag would put the question back.
-                HookUrlScope(origin=AnyHttpUrl("http://127.0.0.1"), any_port=True),
-                HookUrlScope(origin=AnyHttpUrl("http://localhost"), any_port=True),
+                *(
+                    HookUrlScope(
+                        origin=AnyHttpUrl(f"http://{host}"),
+                        any_port=True,
+                        reason="this machine's own pages, on whatever port they took",
+                    )
+                    for host in ("127.0.0.1", "localhost")
+                ),
             ],
             protected_edit_roots=[
                 Path(".claude"),
@@ -227,7 +233,21 @@ def portable_harness(version: str = "0.2.0", root: Path | None = None) -> Harnes
             path_roles=[
                 HookPathRole(root=Path("tests"), role="test"),
                 HookPathRole(root=Path("packages/lup/tests"), role="test"),
+                # Scratch is "disposable by construction", and a build product
+                # qualifies as squarely as a scratchpad does: every one of
+                # these is reproduced by a command, so destroying one costs
+                # the command rather than any information. Leaving them
+                # production made `rm` and `cp` ask about caches and virtual
+                # environments, which is an approval that teaches nobody
+                # anything.
                 HookPathRole(root=Path("tmp"), role="scratch"),
+                HookPathRole(root=Path(".venv"), role="scratch"),
+                HookPathRole(root=Path(".ruff_cache"), role="scratch"),
+                HookPathRole(root=Path(".pytest_cache"), role="scratch"),
+                HookPathRole(root=Path("build"), role="scratch"),
+                HookPathRole(root=Path("dist"), role="scratch"),
+                HookPathRole(root=Path("htmlcov"), role="scratch"),
+                HookPathRole(root=Path("node_modules"), role="scratch"),
             ],
             human_owned_files=[Path("README.md")],
             shell_rules=SHELL_RULES,

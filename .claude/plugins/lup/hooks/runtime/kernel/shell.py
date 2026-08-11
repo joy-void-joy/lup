@@ -32,6 +32,7 @@ from .commands import (
     decide_awk_words,
     decide_command_rows,
     decide_curl_words,
+    decide_gh_api_words,
     decide_sed_words,
     decide_uv,
     git_checkout_pathspec,
@@ -142,6 +143,11 @@ def decide_find_words(words: list[str], context: ShellContext) -> KernelDecision
     return decide_command_rows(remaining, context["rows"])
 
 
+# lup: The shell auto-allow asks for permission far too often, and in general it
+# feels very incomplete. Things that keep poking for acceptance and should not:
+# `git restore`; EnterWorktree and ExitWorktree; removing tracked files;
+# removing a directory; and anything carrying `--dry-run`, `--help` or `-v`.
+# Take example from Codex' own allowlist — https://github.com/openai/codex.
 def decide_shell_segment(segment: list[str], context: ShellContext) -> KernelDecision:
     """Classify one parsed shell segment against the vocabulary and handlers."""
     while segment and segment[0] == "!":
@@ -216,6 +222,8 @@ def decide_shell_segment(segment: list[str], context: ShellContext) -> KernelDec
         return decide_curl_words(
             words, context["allowed_scopes"], context["denied_scopes"]
         )
+    if executable == "gh" and len(words) > 1 and words[1] == "api":
+        return decide_gh_api_words(words)
     if executable == "find":
         return decide_find_words(words, context)
     if executable == "sed":

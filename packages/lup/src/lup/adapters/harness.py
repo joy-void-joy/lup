@@ -1,5 +1,7 @@
 """Named native harness composition roots over canonical declarations."""
 
+from enum import StrEnum
+
 from lup.adapters.claude.harness import (
     ClaudeAgentRenderer,
     ClaudeGuidanceRenderer,
@@ -28,6 +30,20 @@ from lup.harness.models import (
     Harness,
 )
 from lup.harness.validation import validated_tree
+
+
+class AdapterName(StrEnum):
+    """Which native runtime a caller means, as a closed set.
+
+    The library ships exactly these adapter packages, so naming them is a
+    fact about this library rather than a judgement an adopter could make
+    differently — which is why it is a type and not a table of strings.
+    Carrying it as one keeps a mistyped selector from resolving to whichever
+    branch a chain of string comparisons happened to end in.
+    """
+
+    CLAUDE = "claude"
+    CODEX = "codex"
 
 
 def prompt_renderer(own: NativeSpellings) -> SpelledPromptRenderer:

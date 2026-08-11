@@ -12,6 +12,11 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from lup.adapters.codex.app_server import CodexAppServer, RpcMessage, RpcNotification
+from lup.adapters.codex.hooks import (
+    APPROVAL_METHODS,
+    CodexApprovalResponder,
+)
+from lup.hooks import LupHooksConfig
 from lup.runtime.composition import AcceptedTurn, CompletedTurn, ComposedSession
 from lup.runtime.contracts import (
     EventStream,
@@ -58,7 +63,11 @@ class CodexSessionConfig(BaseModel):
     model_provider: str | None = None
     provider_config: JsonObject | None = None
     sandbox: Literal["read-only", "workspace-write", "danger-full-access"] | None = None
-    approval_policy: Literal["untrusted", "on-request", "never"] | None = None
+    # The app-server's own spellings. The earlier "untrusted"/"on-request"
+    # pair was never sent, because the validator below refused every value but
+    # "never" — so the mismatch could not surface until approvals were wired.
+    approval_policy: Literal["unlessTrusted", "onRequest", "never"] | None = None
+    hooks: LupHooksConfig | None = None
     effort: Literal["none", "minimal", "low", "medium", "high", "xhigh"] | None = None
     environment: EnvVars = Field(default_factory=dict)
     submission_gate_resolver: SubmissionGateResolver | None = None
@@ -66,12 +75,20 @@ class CodexSessionConfig(BaseModel):
     writable_roots: list[Path] = Field(default_factory=list)
 
     @model_validator(mode="after")
-    def reject_unhandled_approvals(self) -> "CodexSessionConfig":
-        if self.approval_policy not in {None, "never"}:
+    def reject_unanswerable_approvals(self) -> "CodexSessionConfig":
+        """Refuse a thread that would ask questions this session cannot answer.
+
+        An approval policy that asks makes the app-server send approval
+        requests back here, and only declared hooks answer them. Without
+        those the transport refuses every request as unhandled, which stalls
+        the turn on its first command — so the combination is rejected at
+        construction instead of at the first act.
+        """
+        if self.approval_policy not in {None, "never"} and self.hooks is None:
             raise ValueError(
-                "this app-server adapter handles dynamic-tool calls and MCP "
-                "elicitations only; approval_policy must be 'never' until "
-                "exec/patch approval requests are implemented"
+                f"approval_policy {self.approval_policy!r} makes the app-server "
+                "ask this session for decisions; supply hooks to answer them, "
+                "or use 'never'"
             )
         return self
 
@@ -459,6 +476,8 @@ class CodexConversationState:
         )
 
     async def handle_server_request(self, message: RpcMessage) -> JsonValue:
+        if message.method in APPROVAL_METHODS:
+            return await self.resolve_approval(message)
         if message.method == "mcpServer/elicitation/request":
             return self.resolve_mcp_elicitation(message)
         if message.method != "item/tool/call":
@@ -487,6 +506,21 @@ class CodexConversationState:
             "contentItems": [{"type": "inputText", "text": response.message}],
             "success": response.accepted,
         }
+
+    async def resolve_approval(self, message: RpcMessage) -> JsonValue:
+        """Answer one approval request from this session's declared hooks.
+
+        A session with no hooks declines rather than accepting. Reaching here
+        at all means the thread was started under a policy that asks, and the
+        constructor refuses that combination — so this is the belt to that
+        validator's braces, and the safe answer to a question nobody can
+        answer is no.
+        """
+        if self.config.hooks is None:
+            return {"decision": "decline"}
+        responder = CodexApprovalResponder(hooks=self.config.hooks)
+        method = message.method or ""
+        return {"decision": await responder.decide(method, message.params)}
 
     def resolve_mcp_elicitation(self, message: RpcMessage) -> JsonValue:
         """Accept tool-call elicitations for servers this session composed.

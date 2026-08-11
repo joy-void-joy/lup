@@ -66,7 +66,7 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 
-from lup.channels.models import ChannelOverflowError
+from lup.channels.models import ChannelOverflowError, write_atomic
 from lup.channels.stream import Stream
 from lup.mcp import LupMcpTool, ToolError, lup_tool
 from lup.realtime.models import (
@@ -400,10 +400,7 @@ class RealtimeMailbox:
 
     def write_state(self, state: RelayState) -> None:
         """Publish a state snapshot atomically (write-then-rename)."""
-        self.root.mkdir(parents=True, exist_ok=True)
-        tmp_path = self.state_path.with_suffix(".tmp")
-        tmp_path.write_text(state.model_dump_json(), encoding="utf-8")
-        tmp_path.replace(self.state_path)
+        write_atomic(self.state_path, state.model_dump_json().encode("utf-8"))
 
     def reset_for_new_run(self) -> None:
         """Clear leftover protocol files so a fresh run starts clean.

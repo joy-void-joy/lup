@@ -90,6 +90,59 @@ def scan_library_placement() -> list[FoundBreach]:
     ]
 
 
+class PortableModule(BaseModel):
+    """One application module whose imports never reach the application."""
+
+    file: str
+    imports: int
+
+
+def application_imports(text: str, package: str) -> list[str]:
+    """Every import in one module that names the application package."""
+    return [
+        line
+        for line in text.splitlines()
+        if line.startswith((f"from {package}", f"import {package}"))
+    ]
+
+
+def scan_application_placement(project: DevProject) -> list[PortableModule]:
+    """Every devtools module that could be library code as it stands.
+
+    The library row asks whether a library module baked in a choice an
+    adopter cannot replace. This asks the mirror question, and it is the one
+    that decides what a downstream project keeps receiving: this template is
+    copied and renamed, so a module living here is frozen for every adopter
+    at the moment they copy it, while one in ``packages/lup`` reaches them
+    through an ordinary dependency bump.
+
+    A module that imports nothing from the application is, by the placement
+    test the conventions already state, library code sitting in the
+    application. Reported rather than failed, because moving one is a change
+    with its own review — this row names the debt and shrinks.
+
+    The declared prose roots are exempt, and not as a concession: a content
+    module is this project's own judgement written as data, so importing
+    nothing is what it looks like when it is exactly where it belongs. The
+    same holds for the declaration this project compiles its harness from.
+    """
+    package = project.package
+    root = f"src/{package}/devtools/"
+    exempt = (
+        f"{root}harness/content/",
+        f"{root}harness/catalog.py",
+        f"{root}subapps.py",
+    )
+    return [
+        PortableModule(file=source.rel, imports=0)
+        for source in tracked_python_sources()
+        if source.rel.startswith(root)
+        and not source.rel.startswith(exempt)
+        and source.path.name != "__init__.py"
+        and not application_imports(source.text, package)
+    ]
+
+
 def scan_boundaries(project: DevProject) -> list[FoundBreach]:
     """Every native import, spelling, and kernel-import breach in the tree."""
     found: list[FoundBreach] = []  # lup: ignore[empty-collection]

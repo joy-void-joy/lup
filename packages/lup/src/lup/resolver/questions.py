@@ -11,6 +11,7 @@ what it can reach is exactly the state, the mailbox, and the journal.
 """
 
 import asyncio
+import logging
 
 from lup.channels.models import utc_now
 from lup.resolver.contracts import ResolverAwaitingAnswers
@@ -35,6 +36,8 @@ from lup.resolver.models import (
 )
 from lup.resolver.run import ResolveRun
 
+logger = logging.getLogger(__name__)
+
 
 class QuestionBroker:
     """The run's question desk: publish, promote, wait, and read back."""
@@ -54,6 +57,7 @@ class QuestionBroker:
         self.journal = journal
         self.answer_wait_seconds = answer_wait_seconds
         self.poll_interval_seconds = poll_interval_seconds
+        self.problems: list[str] = []
 
     async def unanswered_for(self, concern_id: str) -> list[MaterialQuestion]:
         """Questions this concern asked that no door has answered yet.
@@ -152,15 +156,34 @@ class QuestionBroker:
         return problems
 
     async def promote_until(self, stop: asyncio.Event) -> None:
-        """Keep promoting for the lifetime of one advance."""
+        """Keep promoting for the lifetime of one advance.
+
+        This is the only writer of ``answers/``, so an unhandled failure here
+        would leave every later wait unsatisfiable by any door — parking the
+        run on questions a human had already answered, with nothing saying
+        why. One round failing is therefore recorded and retried rather than
+        ending the promoter: a malformed offer file, a full disk, or a state
+        read that lost a race are all conditions the next round may not meet.
+        """
         while not stop.is_set():
-            await self.apply_mailbox()
+            await self.promote_round()
             try:
                 async with asyncio.timeout(self.poll_interval_seconds):
                     await stop.wait()
             except TimeoutError:
                 continue
-        await self.apply_mailbox()
+        await self.promote_round()
+
+    async def promote_round(self) -> None:
+        """Fold the mailbox in once, recording rather than raising a failure."""
+        try:
+            await self.apply_mailbox()
+        except Exception:
+            logger.exception("resolver answer promotion failed")
+            self.problems.append(
+                "an answer-promotion round failed; offers are being retried "
+                "and the run log carries the reason"
+            )
 
     async def await_questions(self, questions: list[MaterialQuestion]) -> AnswerBatch:
         """Wait for every named question, or park the run on what is missing."""
@@ -182,7 +205,7 @@ class QuestionBroker:
                     for question in questions
                     if question.id in result.unanswered
                 ],
-                problems,
+                [*problems, *self.problems],
             )
         return AnswerBatch(
             run_id=self.config.run_id,

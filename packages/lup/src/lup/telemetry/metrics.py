@@ -40,6 +40,8 @@ from typing import TypedDict
 
 from pydantic import BaseModel, TypeAdapter, ValidationError
 
+from lup.channels.models import write_atomic
+
 logger = logging.getLogger(__name__)
 
 METRICS_FILENAME = "metrics.json"
@@ -158,12 +160,10 @@ class MetricsCollector:
         if self.flush_path is None:
             return
         try:
-            self.flush_path.parent.mkdir(parents=True, exist_ok=True)
-            tmp_path = self.flush_path.with_suffix(".tmp")
-            tmp_path.write_text(
-                json.dumps(self.get_summary(), indent=2), encoding="utf-8"
+            write_atomic(
+                self.flush_path,
+                json.dumps(self.get_summary(), indent=2).encode("utf-8"),
             )
-            tmp_path.replace(self.flush_path)
         except OSError:
             logger.exception("Failed to flush metrics to %s", self.flush_path)
 

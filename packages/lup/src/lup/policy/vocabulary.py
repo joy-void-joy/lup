@@ -55,6 +55,11 @@ class JudgedCommand(BaseModel):
 
     name: str
     reason: str
+    read_verbs: list[str] = []
+    """This command's own spellings of its query action, which de-escalate it.
+
+    Without somewhere to say "except this verb", listing an archive is as
+    much an approval as extracting one."""
 
 
 def read_only_rules(
@@ -157,20 +162,31 @@ def judged_ask_rules(
         JudgedCommand(name="kill", reason="terminating processes requires approval"),
         JudgedCommand(name="pkill", reason="terminating processes requires approval"),
         JudgedCommand(
-            name="tar", reason="archive operations write files — requires approval"
+            name="tar",
+            # Named whole rather than scanned for a `t`, which a bundled
+            # `-xzf` also contains: these are tar's own list-mode spellings.
+            read_verbs=["-t", "--list", "-tf", "-tvf", "-tzf", "-tzvf", "-tjf", "-tJf"],
+            reason="archive operations write files — requires approval",
         ),
         JudgedCommand(
             name="unzip",
+            read_verbs=["-l", "-t", "-v", "-z"],
             reason="archive extraction writes files — requires approval",
         ),
         JudgedCommand(
-            name="zip", reason="archive creation writes files — requires approval"
+            name="zip",
+            read_verbs=["-sf", "--show-files"],
+            reason="archive creation writes files — requires approval",
         ),
         JudgedCommand(
-            name="gzip", reason="compression rewrites files — requires approval"
+            name="gzip",
+            read_verbs=["-l", "--list", "-t", "--test"],
+            reason="compression rewrites files — requires approval",
         ),
         JudgedCommand(
-            name="gunzip", reason="decompression rewrites files — requires approval"
+            name="gunzip",
+            read_verbs=["-l", "--list", "-t", "--test"],
+            reason="decompression rewrites files — requires approval",
         ),
         JudgedCommand(name="sudo", reason="privilege escalation requires approval"),
         JudgedCommand(name="doas", reason="privilege escalation requires approval"),
@@ -182,10 +198,13 @@ def judged_ask_rules(
             reason="downloading files requires approval — prefer curl or WebFetch",
         ),
         JudgedCommand(
-            name="make", reason="make executes arbitrary recipes — requires approval"
+            name="make",
+            read_verbs=["-n", "--dry-run", "--just-print", "-q", "--question"],
+            reason="make executes arbitrary recipes — requires approval",
         ),
         JudgedCommand(
             name="npm",
+            read_verbs=["ls", "list", "view", "outdated", "why", "explain"],
             reason="package tools fetch and execute code — requires approval",
         ),
         # lup: A full verify line — ruff format, ruff check, pyright, pytest,
@@ -220,7 +239,12 @@ def judged_ask_rules(
     work rather than on a disposable tree.
     """
     return [
-        ShellCommandRule(name=command.name, default_effect="ask", reason=command.reason)
+        ShellCommandRule(
+            name=command.name,
+            default_effect="ask",
+            read_verbs=command.read_verbs,
+            reason=command.reason,
+        )
         for command in commands
     ]
 

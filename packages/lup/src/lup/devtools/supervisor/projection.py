@@ -33,6 +33,12 @@ from lup.resolver.models import (
 )
 
 LIVENESS_WINDOW_SECONDS = 90.0
+"""How long after its last write a run still reads as moving.
+
+A judgement, not a fact about the resolver: it trades how quickly a killed
+run stops claiming to be live against how long a slow phase may go quiet
+without being called parked. Callers that know their own runs' rhythm pass
+their own."""
 STATE_FILE = "state.json"
 
 
@@ -119,6 +125,7 @@ class SupervisorState(BaseModel):
     failures: list[str]
     rerun_recipe: str
     progress_line: str
+    last_activity: float = 0.0
 
 
 class RunSummary(BaseModel):
@@ -133,6 +140,12 @@ class RunSummary(BaseModel):
     live: bool = False
     unreadable: bool = False
     detail: str = ""
+    last_activity: float = 0.0
+    """When this run last wrote, as an epoch seconds stamp.
+
+    A run id is a commit digest, so sorting the rail by name is sorting by
+    hash — arbitrary with respect to time, which is the only order an
+    operator scanning their runs actually wants."""
 
 
 class RunIndex(BaseModel):
@@ -189,7 +202,13 @@ class MessageSubmission(BaseModel):
 
 
 def answer_recipe(adapter: str, run_id: str, questions: list[MaterialQuestion]) -> str:
-    """Build the flag-carrying rerun that answers exactly these questions."""
+    """Build the flag-carrying rerun that answers exactly these questions.
+
+    One definition, because this is the CLI's own interface restated as
+    text: the page prints it and the parked run prints it, and a change to
+    `harness resolve`'s flags that reached only one of them would have the
+    other teaching a command that no longer exists.
+    """
     return " ".join(
         [
             "uv run lup-devtools harness resolve",
@@ -241,21 +260,28 @@ def review_branch_name(state: ResolveState) -> str:
 
 
 def concern_views(state: ResolveState) -> list[ConcernView]:
-    """Join every concern with its progress, eligibility, and outcome."""
+    """Join every concern with its progress, eligibility, and outcome.
+
+    Every join here tolerates a missing right-hand side, progress included.
+    A run persists its six state files in sequence, so a reader can arrive
+    between a concern being written and its progress row landing — and a
+    page whose whole job is to report a run that went wrong is the last
+    place that should require the run to have gone right.
+    """
     progress = {item.concern_id: item for item in state.progress}
     eligibility = {item.concern_id: item for item in state.eligibility}
     outcomes = {item.concern_id: item for item in state.outcomes}
     views: list[ConcernView] = []  # lup: ignore[empty-collection]
     for concern in state.concerns:
-        status = progress[concern.id]
+        status = progress[concern.id] if concern.id in progress else None
         verdict = eligibility[concern.id] if concern.id in eligibility else None
         outcome = outcomes[concern.id] if concern.id in outcomes else None
         views.append(
             ConcernView(
                 id=concern.id,
                 title=concern.title,
-                status=status.status,
-                reason=status.reason,
+                status=status.status if status else ConcernStatus.DISCOVERED,
+                reason=status.reason if status else "no progress recorded yet",
                 eligible=verdict.eligible if verdict else concern.eligible,
                 integration_approved=(
                     verdict.integration_approved
@@ -338,7 +364,12 @@ def last_activity(run_root: Path) -> float:
     return max(stamps) if stamps else 0.0
 
 
-def run_is_live(state: ResolveState, activity: float, now: float) -> bool:
+def run_is_live(
+    state: ResolveState,
+    activity: float,
+    now: float,
+    window_seconds: float = LIVENESS_WINDOW_SECONDS,
+) -> bool:
     """Whether this run is still moving.
 
     Liveness is never probed from ``.run.lock``. Asking for even a shared
@@ -352,7 +383,7 @@ def run_is_live(state: ResolveState, activity: float, now: float) -> bool:
         ResolvePhase.FAILED,
     }:
         return False
-    return now - activity <= LIVENESS_WINDOW_SECONDS
+    return now - activity <= window_seconds
 
 
 def persisted_status(
@@ -385,9 +416,8 @@ def supervisor_state(
 ) -> SupervisorState:
     """Project one run on disk into a complete page render."""
     views = question_views(state, mailbox)
-    live = run_is_live(
-        state, last_activity(mailbox.root), time.time() if now is None else now
-    )
+    activity = last_activity(mailbox.root)
+    live = run_is_live(state, activity, time.time() if now is None else now)
     review = (
         ReviewView(
             review_branch=review_branch_name(state),
@@ -409,4 +439,5 @@ def supervisor_state(
         failures=state.failures,
         rerun_recipe=answer_recipe(adapter, state.run_id, unanswered_questions(views)),
         progress_line=run_tally(state).concerns_line(),
+        last_activity=activity,
     )

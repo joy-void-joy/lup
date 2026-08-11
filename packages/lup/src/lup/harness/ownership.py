@@ -13,6 +13,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
+from lup.channels.models import publish_atomic
 from lup.harness.models import ArtifactTree, Harness
 
 type OwnershipCategory = Literal[
@@ -104,11 +105,4 @@ def save_manifest(path: Path, manifest: OwnershipManifest) -> None:
     content = manifest.model_dump_json(indent=2) + "\n"
     if path.is_file() and path.read_text(encoding="utf-8") == content:
         return
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(f".{path.name}.tmp")
-    temporary.write_text(
-        content,
-        encoding="utf-8",
-        newline="\n",
-    )
-    temporary.replace(path)  # lup: ignore[string-replace] — atomic Path rename
+    publish_atomic(path, manifest)
