@@ -14,10 +14,11 @@ overrides the display when env-key presence isn't the whole story.
 """
 
 import webbrowser
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
+from pathlib import Path
 
 import typer
-from dotenv import dotenv_values, set_key
+from dotenv import dotenv_values, set_key, unset_key
 from pydantic import BaseModel, Field
 from rich.console import Console
 from rich.panel import Panel
@@ -68,6 +69,26 @@ def write_env_local(values: EnvVars) -> None:
     ENV_LOCAL.touch()
     for key, value in values.items():
         set_key(ENV_LOCAL, key, value, quote_mode="never")
+
+
+def clear_env_file(path: Path, keys: Iterable[str]) -> None:
+    """Drop keys from an env file. Idempotent — a no-op for keys it does not hold.
+
+    The inverse of :func:`write_env_local`, preserving what that preserves:
+    ``dotenv.unset_key`` removes one ``KEY=...`` line and leaves the comments,
+    blank lines, and ordering around it alone. The path is a parameter because
+    an application may keep more than one env file — one per profile, say — and
+    only it knows which of them a reset is aimed at.
+    """
+    if not path.exists():
+        return
+    for key in keys:
+        unset_key(path, key)
+
+
+def clear_env_local(keys: Iterable[str]) -> None:
+    """Drop keys from .env.local, the file :func:`write_env_local` writes."""
+    clear_env_file(ENV_LOCAL, keys)
 
 
 def save_and_confirm(values: EnvVars) -> None:
