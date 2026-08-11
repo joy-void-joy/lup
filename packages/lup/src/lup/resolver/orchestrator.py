@@ -5,6 +5,7 @@ from pathlib import Path
 from lup.codescan.symbols import DefinedSymbol, defined_symbols, symbols_lost
 from lup.harness.process import ExitStatus, LaunchRequest, ProcessLauncher
 from lup.resolver.contracts import WorktreePreparer
+from lup.resolver.declaration import declaration_delta, inspect_changes
 from lup.resolver.notes import clear_concern_notes
 from lup.resolver.models import (
     Concern,
@@ -17,29 +18,6 @@ from lup.resolver.models import (
     WorktreeRemoval,
     WritableRootLease,
 )
-
-
-def report_mismatch(undeclared: list[str], unswept: list[str]) -> str:
-    """Name exactly which paths a worker must reconcile to pass this gate.
-
-    A revision round can only converge on something it can read. The prior
-    wording named no path at all, so a worker re-derived the same report and
-    failed identically until the round budget ran out.
-    """
-    return "; ".join(
-        [
-            *(
-                [f"changed but not declared: {', '.join(undeclared)}"]
-                if undeclared
-                else []
-            ),
-            *(
-                [f"declared swept but not changed: {', '.join(unswept)}"]
-                if unswept
-                else []
-            ),
-        ]
-    )
 
 
 class LeaseViolationError(RuntimeError):
@@ -236,14 +214,10 @@ class WorktreeOrchestrator:
                 valid=False,
                 reason="worker changed commit or branch authority",
             )
-        intent = self.launcher.launch(
-            LaunchRequest(arguments=["git", "add", "-N", "."], cwd=lease.root)
-        )
-        if intent.code != 0:
+        inspected = inspect_changes(self.launcher, lease.root, base_commit)
+        if inspected.failure:
             return DiffValidation(
-                concern_id=concern.id,
-                valid=False,
-                reason="new paths could not be inspected",
+                concern_id=concern.id, valid=False, reason=inspected.failure
             )
         checked = self.launcher.launch(
             LaunchRequest(
@@ -257,19 +231,7 @@ class WorktreeOrchestrator:
                 valid=False,
                 reason="diff validation failed",
             )
-        named = self.launcher.launch(
-            LaunchRequest(
-                arguments=["git", "diff", "--name-only", base_commit],
-                cwd=lease.root,
-            )
-        )
-        if named.code != 0:
-            return DiffValidation(
-                concern_id=concern.id,
-                valid=False,
-                reason="changed paths could not be inspected",
-            )
-        changed = [Path(line) for line in named.stdout.splitlines() if line]
+        changed = inspected.paths
         for path in changed:
             if path.is_absolute() or ".." in path.parts:
                 return DiffValidation(
@@ -278,23 +240,14 @@ class WorktreeOrchestrator:
                     reason=f"changed path escapes the worktree: {path}",
                 )
             leases.assert_path(concern.id, lease.root / path)
-        actual = {path.as_posix() for path in changed}
-        reported = {path.as_posix() for path in report.files_changed}
-        swept = {path.as_posix() for path in report.swept_beyond_scope}
-        # The safety property is that nothing changes undeclared, which is
-        # containment and not equality. Requiring equality also punished a
-        # worker for a stale path it believed it had touched, and cost 71
-        # files of correct work over two such entries — nothing was hidden in
-        # either. Over-reporting is named back rather than rejected, because a
-        # reason that names no path cannot converge: every retry re-derives
-        # the same report and fails identically until the budget is spent.
-        undeclared = sorted(actual - reported)
-        unswept = sorted(swept - actual)
-        if undeclared or unswept:
+        delta = declaration_delta(
+            changed, report.files_changed, report.swept_beyond_scope
+        )
+        if not delta.settled:
             return DiffValidation(
                 concern_id=concern.id,
                 valid=False,
-                reason=report_mismatch(undeclared, unswept),
+                reason=delta.reason,
                 declaration=True,
             )
         if not changed:

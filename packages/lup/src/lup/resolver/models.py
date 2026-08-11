@@ -805,6 +805,14 @@ class ResolveState(BaseModel):
 
     schema_version: int = 2
     config_digest: str
+    config: ResolverConfig | None = None
+    """The composition this run was persisted under, for naming what moved.
+
+    Optional because a run persisted before this was recorded has only the
+    digest, which says that something differs and never which field: the
+    resume that hits a moved configuration is exactly when a reader needs
+    the difference, and a hash cannot be subtracted back into one.
+    """
     run_id: str
     phase: ResolvePhase
     source: SourceSnapshot
