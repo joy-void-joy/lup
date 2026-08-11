@@ -126,8 +126,8 @@ def application_roots() -> ApplicationRoots:
             "examples/",
             f"{package}/agent/core.py",
             # Which backend's sub-apps this project takes is a composition
-            # decision like any other: `usage` reads Claude Code's own
-            # credentials, and a project on another backend leaves it out.
+            # decision like any other: `usage` reads each backend's own
+            # account, and a project runs on the backends it names here.
             f"{package}/devtools/subapps.py",
             harness,
             f"{package}/devtools/setup.py",

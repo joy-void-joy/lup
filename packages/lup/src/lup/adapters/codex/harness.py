@@ -19,9 +19,15 @@ from lup.harness.contracts import (
     Instruction,
     NativeSpellings,
     PromptRenderer,
+    Spelling,
+    Unsupported,
 )
 from lup.harness.generation import argument_text
-from lup.harness.prompts import guidance_banner
+from lup.harness.prompts import (
+    SPAWNED_SESSION_LOSES_SHELL,
+    guidance_banner,
+    sentences,
+)
 from lup.harness.models import (
     GUIDANCE_BYTE_BUDGET,
     Agent,
@@ -63,6 +69,12 @@ class CodexSpellings(NativeSpellings):
     plugin name is deliberately unused there. The model tier is declined
     outright: recorded evidence for Codex custom agents covers TOML parsing
     only, so there is no proven alias to spell a tier in.
+
+    Two portable ideas are declined outright rather than approximated, each
+    saying why: escaping the sandbox, whose Codex overrides exist only as
+    session-level flags, and reading a document whole, which nothing in this
+    roster does. An approximation of either would read as an instruction the
+    agent can follow, and cost it a turn to find out otherwise.
     """
 
     @property
@@ -107,22 +119,46 @@ class CodexSpellings(NativeSpellings):
             "carried on here would land in the checkout it started from"
         )
 
+    def escape_sandbox(self, reason: str) -> Spelling:
+        return Unsupported(
+            reason=(
+                "the sandbox overrides Codex documents are session-level flags "
+                "on its binary — `--sandbox` and "
+                "`--dangerously-bypass-approvals-and-sandbox` — so a session "
+                "already inside one has no per-call escape to reach for, and "
+                "naming a flag it cannot pass would read as an instruction"
+            )
+        )
+
+    def read_document(self, path: str) -> Spelling:
+        return Unsupported(
+            reason=(
+                "Codex's tool roster reads a document only by running a shell "
+                "command over it, and `view_image` — the one tool that takes a "
+                "file whole — accepts images alone, so nothing here can be "
+                "handed a PDF or an office document"
+            )
+        )
+
     def resolver_entry(self) -> Instruction:
         return Instruction(
-            "Run `uv run lup-devtools harness resolve --adapter codex`. "
-            "The command accepts optional flags: `--run-id <id>` resumes "
-            "a persisted run and `--accept`/`--reject` records the human "
-            "decision on its review branch. It waits zero seconds by "
-            "default and parks on material questions, printing each one "
-            "beside the `# lup:` notes it was raised from, the concern's "
-            "spec, and its acceptance criteria; rerun with the repeatable "
-            "`--answer <question-id>=<value>` flag to answer them. "
-            "`--admit <text>` admits work discovered mid-run in the human's "
-            "own words and `--admit-note <file>:<line>` admits a note you "
-            "wrote in the tree, both repeatable. "
-            "Never pass `--wait` or `--supervise`; both hold a run open "
-            "for a human instead of parking — `--wait` at the mailbox, "
-            "`--supervise` at the page it opens."
+            sentences(
+                "Run `uv run lup-devtools harness resolve --adapter codex`. "
+                "The command accepts optional flags: `--run-id <id>` resumes "
+                "a persisted run and `--accept`/`--reject` records the human "
+                "decision on its review branch. It waits zero seconds by "
+                "default and parks on material questions, printing each one "
+                "beside the `# lup:` notes it was raised from, the concern's "
+                "spec, and its acceptance criteria; rerun with the repeatable "
+                "`--answer <question-id>=<value>` flag to answer them. "
+                "`--admit <text>` admits work discovered mid-run in the human's "
+                "own words and `--admit-note <file>:<line>` admits a note you "
+                "wrote in the tree, both repeatable. "
+                "Never pass `--wait` or `--supervise`; both hold a run open "
+                "for a human instead of parking — `--wait` at the mailbox, "
+                "`--supervise` at the page it opens.",
+                self.escape_sandbox(SPAWNED_SESSION_LOSES_SHELL).in_prose(),
+            )
         )
 
     def arguments_ref(self) -> Atom:

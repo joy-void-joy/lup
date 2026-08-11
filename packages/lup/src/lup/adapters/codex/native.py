@@ -8,7 +8,6 @@
 # added.
 """Codex-private native event parsing and capability-aware decisions."""
 
-
 from pathlib import Path
 from typing import Literal
 

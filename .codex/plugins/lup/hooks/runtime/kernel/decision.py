@@ -13,6 +13,20 @@ from typing import Literal
 # earns its place: Claude renders `escalate` as an ask whose reason says to
 # re-run unsandboxed, and a runtime that cannot escalate degrades to the plain
 # effect instead of silently doing nothing.
+#
+# lup: The human settled the composition the note above asks for. The sandbox
+# field takes three values and composes with the effect:
+#
+#   ask   + out    -> ask, warning that this will run out of the sandbox
+#   deny           -> deny, whatever the sandbox says
+#   allow + in     -> run inside the sandbox
+#   allow + defer  -> run, deferring to the ambient sandbox status
+#   allow + out    -> run outside the sandbox, unprompted
+#
+# Deny short-circuits, so the axis never softens a refusal. Vocabulary is ours to
+# pick; the shape is what was decided. This subsumes any read-only-versus-write
+# rule: express that by assigning allow+out to reads and ask+out to writes in the
+# policy, rather than teaching a renderer to tell them apart.
 type DecisionEffect = Literal["allow", "ask", "deny", "defer"]
 
 

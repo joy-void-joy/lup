@@ -58,7 +58,7 @@
     {
       "path": ".codex/plugins/lup/TEMPLATE_AGENTS.md",
       "category": "generated",
-      "sha256": "b81462460dbc66e1cf169700373fc30307594a777a31ad4d5812893883372808",
+      "sha256": "a3185ad489622e6195e63a89250cdb0e7025eab370fb3337289446fbbe9ce5dd",
       "semantic_id": "harness.template-guidance",
       "executable": false
     },
@@ -100,7 +100,7 @@
     {
       "path": ".codex/plugins/lup/hooks/runtime/kernel/decision.py",
       "category": "generated",
-      "sha256": "cbfca05d43777241f5825f81b35ba8e8e93e928a11ee13dc1fc1bff9eb5e9c42",
+      "sha256": "f1fa7461e795dee3a13011ed185f6206148f253acb473252633d1a898a84399e",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
