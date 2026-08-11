@@ -316,6 +316,44 @@ def test_dependency_bases_cover_root_single_and_semantic_join() -> None:
     )
 
 
+def test_state_repository_adopts_a_moved_composition(tmp_path: Path) -> None:
+    """Adoption writes the one field every other save path holds immutable."""
+    state = ResolveState(
+        config_digest="config-sha",
+        run_id="run-1",
+        phase=ResolvePhase.INVENTORY,
+        source=SourceSnapshot(branch="feature", commit="source-sha"),
+        spec=resolve_spec(),
+        concerns=[concern("a")],
+        progress=[ConcernProgress(concern_id="a")],
+    )
+    repository = ResolverStateRepository(tmp_path, "run-1")
+    repository.save(state)
+    moved = ResolverConfig(
+        state_root=tmp_path / "state",
+        workspace=tmp_path,
+        worktree_root=tmp_path / "worktrees",
+        run_id="run-1",
+        integration_branch="resolve/run-1/review",
+        verification_commands=[
+            VerificationCommand(name="verify", arguments=["git", "diff"])
+        ],
+    )
+
+    # save refuses the same change, which is what adoption exists to get past.
+    with pytest.raises(StateTransitionError):
+        repository.save(state.model_copy(update={"config_digest": "moved-sha"}))
+
+    adopted = repository.adopt(moved, "moved-sha")
+
+    assert adopted.config_digest == "moved-sha"
+    assert adopted.config == moved
+    assert repository.load().config_digest == "moved-sha"
+    # Adoption re-stamps the composition and nothing else about the run.
+    assert repository.load().concerns == state.concerns
+    assert repository.load().source == state.source
+
+
 def test_state_repository_writes_atomic_typed_projection_tree(tmp_path: Path) -> None:
     state = ResolveState(
         config_digest="config-sha",

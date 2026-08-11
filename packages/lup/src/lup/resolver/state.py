@@ -17,6 +17,7 @@ from lup.resolver.models import (
     ConcernsDocument,
     LeasesDocument,
     QuestionBatch,
+    ResolverConfig,
     ReviewReport,
     ResolveState,
     ResolvePhase,
@@ -239,6 +240,21 @@ class ResolverStateRepository:
                 f"resolver state at {path} cannot be decoded; restore the file "
                 "or remove the run directory to start over"
             ) from error
+
+    def adopt(self, config: ResolverConfig, digest: str) -> ResolveState:
+        """Re-stamp a persisted run onto a composition a human accepted.
+
+        `save` holds the composition immutable, which is what stops a run
+        drifting under itself between resumes. Adoption is the one change to
+        it anybody sanctions, so it is written through its own door rather
+        than by loosening that guard for every path that saves — including
+        the ones a run takes while work is in flight.
+        """
+        adopted = self.load().model_copy(
+            update={"config": config, "config_digest": digest}
+        )
+        self.write_model("state.json", adopted)
+        return adopted
 
     def save(self, state: ResolveState) -> None:
         if state.run_id != self.root.name:
