@@ -312,6 +312,22 @@ def offer_flag_answers(
         )
 
 
+def run_owned(workspace: Path, root: Path, worktree_root: Path) -> bool:
+    """Whether one run's own invocation already covers a workspace.
+
+    Pointing a run at a repository is an explicit act of trust by whoever
+    ran it, and a more deliberate one than accepting a dialog — so trust
+    reaches that repository, where the planner reads, and the checkouts the
+    run makes of it, where every worker and reviewer works. Those all land
+    under ``worktree_root``, which is what keeps "a checkout this run
+    created" a structural test rather than a judgement, and what stops trust
+    from reaching anywhere a session merely happens to be opened.
+    """
+    return workspace.resolve() == root.resolve() or workspace.is_relative_to(
+        worktree_root
+    )
+
+
 def inert_offers(mailbox: QuestionMailbox) -> list[str]:
     """Every offer left on disk that a promoted answer has already outrun.
 
@@ -771,30 +787,29 @@ def run_resolve(
             removes the shared file the race needs, which is why neither a
             lock nor a cap on how many run at once appears anywhere here.
 
-            Trust rides along because it is written into that same document,
-            and only for a checkout this run created — invoking the resolver
-            against a repository is an explicit act of trust by whoever ran
-            it, and lup extends it no further than its own worktrees of that
-            same repository.
+            Trust rides along because it is written into that same document.
+            An untrusted workspace does not fail a session — Claude drops the
+            repository's declared permissions, warns into that session's own
+            stderr and carries on — so a run without this establishes nothing
+            and reports the loss only as noise between progress lines. A run
+            that cannot establish it stops here instead, before the session
+            that would have run under a posture the repository never declared.
             """
-            return {
-                **environment,
-                **workspace_config_environment(
-                    environment,
-                    workspace,
-                    trust=workspace.is_relative_to(worktree_root),
-                ),
-            }
-
-        degraded = (
-            untrusted_degradation(
-                root, selected_config_home(session_environment).document
+            derived = workspace_config_environment(
+                environment,
+                workspace,
+                trust=run_owned(workspace, root, worktree_root),
             )
-            if adapter == "claude"
-            else None
-        )
-        if degraded is not None:
-            typer.echo(degraded, err=True)
+            degradation = untrusted_degradation(
+                workspace, selected_config_home(derived).document
+            )
+            if degradation is not None:
+                raise typer.BadParameter(
+                    f"{degradation} This run extends trust to the repository it "
+                    "was invoked against and to the checkouts it made of that "
+                    f"repository under {worktree_root}, and to nothing else."
+                )
+            return {**environment, **derived}
 
         def toolchain_writable_paths() -> list[Path]:
             """Absolute paths a sandboxed worker's toolchain must be able to write.

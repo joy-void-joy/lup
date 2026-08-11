@@ -234,7 +234,7 @@ def untrusted_degradation(workspace: Path, document: Path) -> str | None:
     declared permissions, warns once into that session's own stderr, and
     carries on. A run made of many sessions therefore reports a changed
     permission posture only as noise interleaved with progress, so the fact
-    is derived here for a caller that can state it once, up front.
+    is derived here for a caller that can refuse to open the session at all.
     """
     declared = declared_allowances(workspace)
     if declared == 0 or trusts(load_document(document), workspace):
