@@ -657,6 +657,14 @@ class HookSandbox(BaseModel):
 
     model_config = FROZEN
 
+    # lup: This cannot declare `excludedCommands`, which is the only per-command
+    # lever the sandbox has — it takes a command out of isolation entirely
+    # rather than lifting one rule. Two things here need it and neither can say
+    # so: docker, which the harness documents as incompatible with the sandbox
+    # ("add `docker *` to excludedCommands"), so `py eval` fails on a blocked
+    # socket for a documented reason rather than a wiring bug; and ssh/git/gh,
+    # whose egress the HTTP proxy cannot carry. It is an array key merged across
+    # scopes, so project settings can declare it.
     extra_domains: list[str] = Field(default_factory=list)
     credential_paths: list[str] = Field(default_factory=list)
     writable_paths: list[str] = Field(
