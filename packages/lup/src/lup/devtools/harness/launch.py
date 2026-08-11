@@ -206,7 +206,13 @@ def launch_claude(
     )
     environment = non_interactive_environment(os.environ)  # lup: ignore[os-environ]
     apply_sandbox_environment(plugin, environment, "claude", ["bwrap", "socat"])
-    home = profiles.launch_home(profile)
+    # A name no origin answers to reaches here from an explicit --profile, and
+    # from an active selection whose profile has since gone; both are the
+    # caller's to fix, so neither should arrive as a traceback.
+    try:
+        home = profiles.launch_home(profile)
+    except KeyError as error:
+        raise typer.BadParameter(str(error)) from error
     if home is not None:
         environment.update(profiles.login.environment(home))
     try:
