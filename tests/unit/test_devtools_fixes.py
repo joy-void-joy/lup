@@ -13,13 +13,15 @@ from pathlib import Path
 
 import pytest
 import sh
+import typer
 
 from lup.devtools.dev.antipatterns import scan_antipatterns
+from lup.devtools.dev.check import changed_paths
 from lup.devtools.project import DevProject
 from lup.telemetry.trace import TraceLogger
 from lup.workspace.paths import configure, project_root
 from lup.types import LupTextBlock, LupToolResultBlock, LupToolUseBlock
-from tests.unit.repos import initialized_repo
+from tests.unit.repos import commit_file, git_in, initialized_repo
 
 ORIGINAL_ROOT = project_root()
 
@@ -429,3 +431,26 @@ class TestTheAntiPatternSweepIsScopedToWhatATreeChanged:
         scan = scan_antipatterns(project, [])
 
         assert scan.findings == []
+
+    def test_a_ref_git_cannot_resolve_refuses_instead_of_scoping_to_nothing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Dropping the exit status made a mistyped ref read as "changed nothing".
+
+        That scoped the blocking gates to zero files and reported ok, which
+        is the one answer a gate must never give by accident.
+        """
+        self.two_files_that_trip_a_rule(tmp_path, monkeypatch)
+
+        with pytest.raises(typer.BadParameter, match="does not name a commit"):
+            changed_paths("deadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
+
+    def test_a_ref_that_resolves_names_what_changed_since_it(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self.two_files_that_trip_a_rule(tmp_path, monkeypatch)
+        git = git_in(tmp_path / "repo", tmp_path / "no-hooks")
+        commit_file(git, tmp_path / "repo", "later.py", "x = 1\n", "feat: later")
+
+        assert changed_paths("HEAD~1") == ["later.py"]
+        assert changed_paths("HEAD") == []

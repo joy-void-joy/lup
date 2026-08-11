@@ -124,6 +124,23 @@ class LedgerEntry(BaseModel):
     merge: MergeReport
 
 
+def criteria_recital(concern: Concern) -> str:
+    """The ids and descriptions an acceptance is checked against.
+
+    `criteria_met` is compared to these ids exactly, so they are what a
+    reviewer must be able to name — not a summary of them, and not the whole
+    concern, which is what a later round deliberately leaves out.
+    """
+    return (
+        "Acceptance criteria, by the ids `criteria_met` is checked against:\n"
+        + "".join(
+            f"- {criterion.id}: {criterion.description}\n"
+            for criterion in concern.criteria
+        )
+        + "\n"
+    )
+
+
 class TurnRunner:
     """Every actor this run addresses, and the prompts it puts to them."""
 
@@ -231,13 +248,21 @@ class TurnRunner:
             f"{span}{answered}"
         )
         if round_number > 1:
-            # This reviewer wrote the criticism the worker was revising, so
-            # it knows what it asked for. Re-reading its own concern cold on
-            # every round was one of the costs of a one-shot session.
+            # This reviewer wrote the criticism the worker was revising, so it
+            # knows what it asked for, and re-reading its whole concern cold on
+            # every round was one of the costs of a one-shot session. The
+            # criteria are the exception, carried every round: the acceptance
+            # guard checks `criteria_met` against these exact ids, and a
+            # reviewer whose session did not survive a resumed run has nowhere
+            # to read them — one reconstructed the ids from the concern's
+            # answered questions, and the guard refused an acceptance it had
+            # already argued for. A round that cannot name what it is judged
+            # against fails identically however often it is retried.
             prompt = (
                 "The worker revised in response to your review. Review the "
                 "updated work against the same acceptance criteria, and say "
                 "explicitly whether each point you raised was addressed.\n\n"
+                f"{criteria_recital(concern)}"
                 f"Worker report:\n{worker.model_dump_json(indent=2)}\n\n"
                 f"{span}{answered}"
             )
