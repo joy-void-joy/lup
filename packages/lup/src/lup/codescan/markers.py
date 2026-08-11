@@ -46,6 +46,21 @@ from lup.policy.kernel.edit import IGNORE_RE
 
 MARKER_RE = re.compile(r"(#|//)\s*lup\s*:", re.IGNORECASE)
 
+# lup: A note is truncated when one of its own continuation lines quotes the
+# marker spelling — writing about a suppression directive, or about this scanner
+# at all, ends the note there and starts a phantom one. MARKER_RE matches
+# anywhere in the line, so backticks and prose context buy nothing. The scanner
+# already skips notes quoted in Markdown code spans; a continuation line needs
+# the same treatment, or a marker must be required at the comment's start.
+
+# lup: Claude will often write the `# lup: ignore` on the line *above* the one it
+# is trying to ignore. Two things there. Why is the Edit asking rather than
+# denying outright? And should we accept the above-line form, or keep the strict
+# same-line policy pyright has? From another agent, the failure demonstrated
+# live: "my marker on its own line went spurious while the real line stayed
+# missing. It has to be inline, which means it fights the column limit.
+# Shortening the name buys the room."
+
 # `# lup: defer: <text>` parks work; a `defer[<gate>]: <text>` head parks it
 # behind a gate somebody other than this note can check ("until the v2 API
 # ships"). The bare spelling is the default, because nothing evaluates a

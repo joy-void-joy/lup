@@ -236,6 +236,14 @@ def portable_harness(version: str = "0.2.0", root: Path | None = None) -> Harnes
             runner_targets=["pyright", "pytest", "ruff", "lup-devtools"],
             sandbox=HookSandbox(
                 extra_domains=["api.anthropic.com"],
+                # lup: This `~/.ssh` entry compiles to a read *deny* in the
+                # generated settings, which is what breaks SSH git: ssh cannot
+                # read its own config, so a host alias never resolves and no key
+                # or agent socket is reachable. Every `git push`, `git fetch` and
+                # `gh` call then needs the sandbox disabled, and the error names
+                # nothing about it. Decide: allow the remote host plus a read of
+                # `~/.ssh/config` and `known_hosts`, or keep the deny and have
+                # the tooling recognize the signature and say so.
                 credential_paths=["~/.ssh", "~/.aws/credentials"],
                 # Every command in this project reaches its toolchain through
                 # `uv`, which locks its cache whenever it resolves dependencies

@@ -1,3 +1,8 @@
+# lup: Check that the files are well placed. This `resolver/` sits at the
+# library's top level rather than under `harness/`, where its only driver
+# (`lup.devtools.harness.resolve`) lives — and `web/` reads the same way. I would
+# like the folder hierarchy to make sense in general, so audit the whole layout
+# rather than moving just these two.
 """Provider-neutral resolution of reviewed code concerns, split by concern.
 
 Drives worker, review, and merge skill runs over a DAG of concerns, each on

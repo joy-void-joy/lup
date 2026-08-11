@@ -36,6 +36,9 @@ type NativeCapabilityEvidence = (
 )
 
 
+# lup: `claude_composition` and `codex_composition` should probably be ABC
+# implementations instead — one declared seam each runtime fills, rather than
+# two parallel free functions a caller picks between by name.
 def claude_composition(
     root: Path, content: ProjectContent, guidance: PromptDocument | None = None
 ) -> NativeHarnessComposition:

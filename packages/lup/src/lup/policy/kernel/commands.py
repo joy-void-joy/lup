@@ -287,6 +287,12 @@ def decide_sed_words(words: list[str]) -> KernelDecision:
             continue
         if word.startswith("--"):
             name, separator, value = word.partition("=")
+            # lup: Seems counterproductive not to just accept sed here. A real
+            # denial read: "escalated (renaming one keyword argument at 38
+            # identical call sites across 9 files; the substitution is
+            # exact-string and the result is verified by pyright plus the
+            # suite): in-place sed bypasses the edit policy — use Edit". An
+            # escalation carrying that reason should get through.
             if name in ("--in-place", "--inplace"):
                 return KernelDecision(
                     "deny", "in-place sed bypasses the edit policy — use Edit"
@@ -516,6 +522,11 @@ def decide_curl_words(
     return KernelDecision("allow", "read-only curl within declared scopes")
 
 
+# lup: (Re)-installing lup, or clearing the cache, should be auto-allowed.
+# `uv cache clean lup && uv lock --upgrade-package lup && uv sync --all-extras`
+# needed a leading escalate marker and *still* asked, on "dependency changes
+# fetch and execute external code" — for a refresh of a dependency the project
+# already declares.
 def decide_uv(words: list[str], runner_targets: list[str]) -> KernelDecision:
     """Classify a uv invocation, gating dependency and inline-code forms."""
     subcommand = words[1]

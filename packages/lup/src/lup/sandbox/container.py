@@ -1,3 +1,14 @@
+# lup: We seem to have a lot of problems around the sandbox, and this one reads
+# as the sandbox simply not being wired: "Docker's socket is blocked, so py eval
+# can't run. A test is the better artifact anyway — it leaves a regression guard
+# for the correctness claim." `py eval` is the rung the guidance points at for
+# computing anything, so it failing sends every session up to a heavier one.
+#
+# lup: The full sandbox friction report is `tmp/dev-delete-preflight-briefing.md`
+# — Part 1. Writes to a second checkout need the sandbox disabled (the allowlist
+# covers this repo only, so pytest's `__pycache__` and `ruff format` both fail
+# `Read-only file system`), and every `git push`/`fetch`/`gh` needs it disabled
+# too, with an error that never mentions the sandbox.
 """Docker container lifecycle for the Python sandbox.
 
 The ``Sandbox`` context manager owns one session's container and volume:

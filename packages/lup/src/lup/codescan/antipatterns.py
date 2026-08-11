@@ -230,6 +230,10 @@ PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         message="Bare `object` says nothing about the value — use a concrete type, "
         "TypedDict, or BaseModel, and narrow at untyped boundaries",
     ),
+    # lup: Add a rule against `def` under a BaseModel. The model will often reach
+    # for `def parse_model(a: BaseModel)` and friends instead of ABC plus
+    # ABC-wrapper styles, which makes the result more sprawling and harder to
+    # compose or to see everything there is in one place.
     AntiPattern(
         id="bare-basemodel",
         pattern=re.compile(r"(?:(?<!\[)\b\w+\s*:|->)\s*BaseModel\b(?!\s*[\]|])"),
@@ -255,6 +259,10 @@ PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         # or constructed constant. A fixed name set constant wants a dict or a
         # purpose-built structure; an immutable-default-argument use is the one
         # legitimate site — `# lup: ignore[frozenset-shape]` marks it.
+        # lup: This is the wrong justification. The reason not to use `frozenset`
+        # and `set` is not that they are overkill — it is that they collapse
+        # structure over `dict[...]` (and `frozendict` when 3.15 lands). Say
+        # that, here and in set-shape below.
         id="frozenset-shape",
         pattern=re.compile(r"\bfrozenset\b"),
         message="A declared `frozenset[...]` shape or constant is usually overkill — use "
@@ -277,6 +285,10 @@ PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         "instead of declaring the set as the interface. For a genuinely "
         "set-shaped value add `# lup: ignore[set-shape]`",
     ),
+    # lup: Add a rule against `Field(default_factory=...)`, as in `mylist =
+    # Field(default_factory=list[B])` where `mylist: list[B] = []` says the same
+    # thing with the type declared. Reconcile it with empty-collection below,
+    # whose refiner already has to decide which `= []` is a deliberate default.
     AntiPattern(
         # The refiner exempts deliberate defaults — __init__ state, call
         # kwargs, annotated module and class declarations — so what reaches a

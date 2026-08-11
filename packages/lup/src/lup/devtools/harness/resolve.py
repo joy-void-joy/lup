@@ -919,6 +919,13 @@ def run_resolve(
                 if core.repository.exists():
                     manifest = await core.resume()
                 else:
+                    # lup: A fresh run can only be seeded from notes already in
+                    # the tree — `--admit` refuses with "no resolver run ... to
+                    # admit into" until one exists. But `/lup:resolve <concerns>`
+                    # is how a human actually arrives, with the concerns in their
+                    # own words and nothing yet written down, so the agent has to
+                    # invent note sites before it can start. Let statements seed
+                    # a run the way they can join one.
                     intake = resolver_intake(scan_tracked(find_feedback))
                     for carried in intake.carried:
                         typer.echo(carried)

@@ -188,6 +188,11 @@ def judged_ask_rules(
             name="npm",
             reason="package tools fetch and execute code — requires approval",
         ),
+        # lup: A full verify line — ruff format, ruff check, pyright, pytest,
+        # then `cd frontend && npx tsc --noEmit` — was refused here with
+        # "package tools fetch and execute code". It should probably have been
+        # auto-allowed, and so should the `command tsc isn't recognized` probe
+        # the same line falls back to.
         JudgedCommand(
             name="npx",
             reason="package tools fetch and execute code — requires approval",
@@ -339,6 +344,11 @@ GIT_READ_ONLY_SUBCOMMANDS = (  # lup: ignore[library-default] — git's own quer
     "rev-list",
     "name-rev",
     "merge-base",
+    # lup: `git merge-tree` belongs on this list and is missing, so probing
+    # whether a branch still merges is refused as "not classified as read-only
+    # or reversible". Even with `--write-tree` it only adds objects to the
+    # store: no ref, no index, no working tree. Sweep the rest of git's query
+    # verbs the same way rather than adding this one word.
     "show-ref",
     "symbolic-ref",
     "for-each-ref",

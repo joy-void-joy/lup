@@ -823,6 +823,16 @@ def path_rule_matches(path: str, path_exists: bool, row: PathRuleRow) -> bool:
             raise ValueError(f"invalid path rule kind {kind!r}")
 
 
+# lup: Editing `.claude/` or `.codex/` should be auto-deny here, carrying the
+# redirecting guidance that the `.py` generating it is what to modify instead.
+# `GENERATED_PLUGIN_REFUSAL` in the kernel's words module already says exactly
+# that, but only the shell path reaches it — an Edit or Write to the same file
+# is judged by the ordinary lattice.
+#
+# lup: It is also hard to tell whether a new file the agent writes carries any
+# suppression directives at all. I like reviewing the full Write, so I get the
+# gist of the folder hierarchy and so on — surface the ignores a creation
+# introduces rather than letting the full-write gate wave the file through.
 def decide_edit(
     path: str,
     before: str | None,

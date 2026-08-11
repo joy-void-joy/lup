@@ -158,6 +158,12 @@ def create(
 
     register_merge_driver()
 
+    # lup: `lup-devtools sync base` often reports "Base guessed", because this is
+    # where the record fails to happen: the fallback reads the *cwd's* current
+    # branch, which is not the branch being worked in once EnterWorktree has
+    # moved the session, and records nothing at all when the read comes back
+    # empty. Make `worktree create` refuse without `--branch` when it cannot know
+    # what base to record, with a `--no-record` to suppress that deliberately.
     if not already_exists:
         origin = base_branch or git.out("branch", "--show-current")
         if origin and origin != name:

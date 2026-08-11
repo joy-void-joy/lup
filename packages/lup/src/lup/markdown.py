@@ -32,6 +32,11 @@ def link(text: str, target: str) -> str:
     return f"[{cell(text)}]({target})"
 
 
+# lup: The markdown utils seem wrong. This should instead be a `TextPart`
+# subclass (or whatever the more general of that class is) that takes the table
+# to render as a param in list-of-list form, and then renders it — so a
+# generated table is a document part like any other rather than a string a
+# caller has to remember to escape into and splice by hand.
 class MarkdownTable(BaseModel):
     """A header row and the finished cells beneath it.
 
@@ -39,6 +44,9 @@ class MarkdownTable(BaseModel):
     out of the pieces above and this only decides the layout.
     """
 
+    # lup: Add an anti-pattern on `model_config =` and instruct the agent to use
+    # the modern `class A(BaseModel, frozen=True, ...)` notation instead, then
+    # convert the ones we already have — this line is one of them.
     model_config = ConfigDict(frozen=True)
 
     headers: list[str]
