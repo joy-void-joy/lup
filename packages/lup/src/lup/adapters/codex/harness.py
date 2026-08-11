@@ -107,15 +107,6 @@ class CodexSpellings(NativeSpellings):
             "carried on here would land in the checkout it started from"
         )
 
-    # lup: The Claude entry now tells the agent to launch the run outside the
-    # sandbox, because a session spawned inside it loses every shell call. This
-    # one says nothing, and inventing a flag would be worse than the silence:
-    # the Codex overrides this repository knows are session-level flags on the
-    # binary, not a per-call escape a skill can ask for. "Run this outside the
-    # sandbox" is a portable idea with a per-runtime spelling, so it wants a
-    # `NativeSpellings` method beside `ask_user` — and if Codex has no per-call
-    # escape, the explicit unsupported declaration the adapter-parity concern
-    # asks for, carrying the reason.
     def resolver_entry(self) -> Instruction:
         return Instruction(
             "Run `uv run lup-devtools harness resolve --adapter codex`. "
