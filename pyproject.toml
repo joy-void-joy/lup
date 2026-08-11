@@ -26,7 +26,7 @@ classifiers = [
 ]
 dependencies = [
     "fastapi>=0.139.0",
-    "lup[claude,codex,docker]",
+    "lup[claude,codex,docker,web]",
     "packaging>=26.2",
     "prompt-toolkit>=3.0.52",
     "pydantic-settings>=2.12.0",

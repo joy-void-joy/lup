@@ -503,7 +503,7 @@ version = "0.2.0"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
-    { name = "lup", extra = ["claude", "docker"] },
+    { name = "lup", extra = ["claude", "docker", "web"] },
     { name = "packaging" },
     { name = "prompt-toolkit" },
     { name = "pydantic-settings" },
@@ -528,7 +528,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "fastapi", specifier = ">=0.139.0" },
-    { name = "lup", extras = ["claude", "codex", "docker"], editable = "packages/lup" },
+    { name = "lup", extras = ["claude", "codex", "docker", "web"], editable = "packages/lup" },
     { name = "packaging", specifier = ">=26.2" },
     { name = "prompt-toolkit", specifier = ">=3.0.52" },
     { name = "pydantic-settings", specifier = ">=2.12.0" },
