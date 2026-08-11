@@ -290,7 +290,7 @@ def offer_flag_answers(
     rerun is told about all of its stale corrections rather than finding the
     next one only after it has dropped the last.
     """
-    refused: list[str] = []  # lup: ignore[empty-collection] — refusal fold
+    refused: list[str] = []
     for identifier, value in provided.items():
         try:
             mailbox.offer(

@@ -159,7 +159,9 @@ def test_an_untrusted_workspace_names_what_it_is_dropping(tmp_path: Path) -> Non
     workspace = tmp_path / "repo"
     (workspace / ".claude").mkdir(parents=True)
     (workspace / ".claude" / "settings.json").write_text(
-        json.dumps({"permissions": {"allow": ["Bash(git status:*)", "Read(//tmp/**)"]}}),
+        json.dumps(
+            {"permissions": {"allow": ["Bash(git status:*)", "Read(//tmp/**)"]}}
+        ),
         encoding="utf-8",
     )
     document = tmp_path / CLAUDE_CONFIG_FILE
