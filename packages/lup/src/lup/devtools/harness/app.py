@@ -21,7 +21,9 @@ import lup.devtools.harness.drift as drift
 import lup.devtools.harness.launch as launch
 import lup.devtools.harness.reconcile as reconcile
 import lup.devtools.harness.resolve as resolve
-from lup.devtools.harness.composition import NativeTargets
+from lup.devtools.harness.composition import NativeTargets, claude_profile_directory
+from lup.devtools.harness.profile_app import create_profile_app
+from lup.runtime.profiles import ProfileDirectory
 from lup.devtools.harness.drift import RepositoryWriter
 from lup.devtools.supervisor.app import serve_supervisor
 from lup.devtools.supervisor.doors import (
@@ -39,8 +41,16 @@ def create_harness_app(
     targets: NativeTargets,
     repository_writers: list[RepositoryWriter],
     model: resolve.ConfiguredModel | None = None,
+    profiles: ProfileDirectory | None = None,
 ) -> typer.Typer:
-    """Wire the harness command tree over the targets one project declares."""
+    """Wire the harness command tree over the targets one project declares.
+
+    A project that keeps Claude accounts of its own supplies ``profiles``
+    over that origin, so one name selects the same account for a launch here
+    as it does everywhere else in that project. Supplying none falls back to
+    the personal registry, which is the answer for a project keeping none.
+    """
+    directory = profiles or claude_profile_directory()
     app = typer.Typer(no_args_is_help=True, help="Generate and launch a native harness")
     selector = f"{', '.join(targets.builders)}, or {targets.every}"
 
@@ -251,6 +261,7 @@ def create_harness_app(
 
     claude_target = targets.builder("claude")
     if claude_target is not None:
+        app.add_typer(create_profile_app(directory), name="profile")
 
         @app.command(
             "claude",
@@ -273,7 +284,12 @@ def create_harness_app(
         ) -> None:
             """Generate/reconcile Claude artifacts and launch the verified plugin."""
             launch.launch_claude(
-                claude_target(project_root()), ctx.args, profile, model, generate_only
+                claude_target(project_root()),
+                ctx.args,
+                directory,
+                profile,
+                model,
+                generate_only,
             )
 
     codex_target = targets.builder("codex")

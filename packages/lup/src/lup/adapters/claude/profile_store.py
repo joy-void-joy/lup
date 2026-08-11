@@ -9,6 +9,7 @@ from lup.adapters.claude.config import (
     ClaudeProfileRegistry,
     ClaudeProfileSelection,
 )
+from lup.runtime.profiles import ProfileStore
 
 REGISTRY_PATH = Path.home() / ".lup" / "profiles.json"
 
@@ -28,11 +29,23 @@ class Registry(BaseModel):
     active: str | None = None
 
 
-class ClaudeProfileStore:
-    """Read and atomically update personal profile selections."""
+class ClaudeProfileStore(ProfileStore):
+    """Read and atomically update personal profile selections.
+
+    The origin for a project that keeps no accounts of its own: names are
+    registered by hand and each carries wherever its home happens to live.
+    """
 
     def __init__(self, registry_path: Path = REGISTRY_PATH) -> None:
         self.registry_path = registry_path
+
+    def homes_root(self) -> Path:
+        """Where a profile registered without a home of its own is put.
+
+        Beside the registry rather than under a fixed absolute path, so a
+        store pointed at a scratch registry keeps its homes there too.
+        """
+        return self.registry_path.parent / "homes"
 
     def load_registry(self) -> Registry:
         if not self.registry_path.exists():
@@ -44,16 +57,20 @@ class ClaudeProfileStore:
     def save_registry(self, registry: Registry) -> None:
         publish_atomic(self.registry_path, registry)
 
+    def names(self) -> list[str]:
+        return sorted(self.load_registry().profiles)
+
     def config_dir_for(self, name: str) -> Path:
         return Path(self.load_registry().profiles[name].config_dir).expanduser()
 
     def active_profile(self) -> str | None:
         return self.load_registry().active
 
-    def add_profile(self, name: str, config_dir: Path) -> None:
+    def add_profile(self, name: str, config_dir: Path | None = None) -> Path:
+        home = config_dir if config_dir is not None else self.homes_root() / name
         registry = self.load_registry()
         profiles = dict(registry.profiles)
-        profiles[name] = Account(config_dir=str(config_dir))
+        profiles[name] = Account(config_dir=str(home))
         self.save_registry(
             registry.model_copy(
                 update={
@@ -62,6 +79,7 @@ class ClaudeProfileStore:
                 }
             )
         )
+        return home.expanduser()
 
     def set_active(self, name: str) -> None:
         registry = self.load_registry()

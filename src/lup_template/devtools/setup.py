@@ -28,14 +28,12 @@ Customization:
 
 import shutil
 from pathlib import Path
-from typing import Annotated
 from zoneinfo import ZoneInfoNotFoundError
 
 import typer
-from rich.table import Table
 from tzlocal import get_localzone_name
 
-from lup.adapters.claude.profile_store import ClaudeProfileStore
+from lup.devtools.harness.composition import claude_profile_directory
 from lup.devtools.setup import (
     Integration,
     IntegrationStatus,
@@ -50,10 +48,6 @@ from lup.types import EnvVars
 from lup.workspace.paths import project_root
 
 CREDENTIALS_DIR = project_root() / "credentials"
-
-profile_app = typer.Typer(no_args_is_help=True, help="Manage Claude account profiles")
-
-claude_profiles = ClaudeProfileStore()
 
 
 def detect_system_timezone() -> str:
@@ -316,76 +310,4 @@ INTEGRATIONS: list[Integration] = [
 ]
 
 
-# =====================================================================
-# Claude profiles
-#
-# A profile maps a name to a Claude config dir (CLAUDE_CONFIG_DIR) — its
-# own login and usage data. The `claude` runner launches under the active
-# profile and `claude usage` reports on it. The registry is machine-wide.
-# =====================================================================
-
-
-@profile_app.command("list")
-def profile_list_cmd() -> None:
-    """List Claude profiles; the active one is marked."""
-    registry = claude_profiles.load_registry()
-    active = registry.active
-    profs = registry.profiles
-    if not profs:
-        console.print(
-            "[dim]No profiles. Add one: "
-            "lup-devtools setup profile add <name> --config-dir <path>[/dim]"
-        )
-        return
-    table = Table(show_header=False, box=None, padding=(0, 2))
-    table.add_column("", width=2)
-    table.add_column("Profile", min_width=16)
-    table.add_column("Config dir", style="dim")
-    for name, prof in profs.items():
-        marker = "[green]●[/]" if name == active else " "
-        table.add_row(marker, name, prof.config_dir)
-    console.print()
-    console.print(table)
-    console.print()
-
-
-@profile_app.command("add")
-def profile_add_cmd(
-    name: Annotated[str, typer.Argument(help="Profile name")],
-    config_dir: Annotated[
-        Path | None,
-        typer.Option(
-            "--config-dir", help="Claude config dir (default: ~/.claude-<name>)"
-        ),
-    ] = None,
-) -> None:
-    """Register a Claude profile pointing at its own config dir."""
-    target = (config_dir or Path.home() / f".claude-{name}").expanduser()
-    claude_profiles.add_profile(name, target)
-    console.print(f"[green]Added profile {name!r}[/] -> {target}")
-    console.print(f"[dim]Log in to it: CLAUDE_CONFIG_DIR={target} claude /login[/dim]")
-
-
-@profile_app.command("use")
-def profile_use_cmd(
-    name: Annotated[str, typer.Argument(help="Profile name")],
-) -> None:
-    """Set the active profile."""
-    try:
-        claude_profiles.set_active(name)
-    except KeyError as e:
-        console.print(f"[red]No such profile: {name}[/red]")
-        raise typer.Exit(1) from e
-    console.print(f"[green]Active profile: {name}[/]")
-
-
-@profile_app.command("remove")
-def profile_remove_cmd(
-    name: Annotated[str, typer.Argument(help="Profile name")],
-) -> None:
-    """Remove a profile from the registry (leaves its config dir on disk)."""
-    claude_profiles.remove_profile(name)
-    console.print(f"Removed profile {name!r}")
-
-
-app = create_setup_app(INTEGRATIONS, profile_app, claude_profiles.active_profile)
+app = create_setup_app(INTEGRATIONS, claude_profile_directory())
