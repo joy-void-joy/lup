@@ -72,6 +72,15 @@ ASK_PREAMBLE = (
     "guessing or ending your turn to report it. " + WAIT_CONTRACT
 )
 
+DECLARATION_PREAMBLE = (
+    "Before you submit, put the file account you are about to report through "
+    "check_declaration and act on what it says. It runs the same reading that "
+    "judges the account, so one it settles is one that passes. Declaring is "
+    "the only part of your turn you cannot verify by looking — you have no "
+    "git of your own here — and an account the gate rejects costs a whole "
+    "session to correct."
+)
+
 
 def format_paths(paths: list[Path]) -> str:
     return "\n".join(f"- {path.as_posix()}" for path in paths) or "- (none)"
@@ -181,6 +190,7 @@ class TurnRunner:
             "means deleting or moving code that carries one, do so and name it in "
             "your summary.\n\n"
             f"{ASK_PREAMBLE}\n\n"
+            f"{DECLARATION_PREAMBLE}\n\n"
             f"{assignment.rendered_skill_invocation}\n\n"
             f"Assignment:\n{assignment.model_dump_json(indent=2)}"
         )

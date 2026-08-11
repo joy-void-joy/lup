@@ -375,6 +375,7 @@ def run_resolver_tool_server() -> None:
                 QuestionMailbox(context.run_dir),
                 context.concern_id,
                 run_id=context.run_dir.name,
+                lease_root=context.lease_root,
             ),
         )
     )
@@ -885,7 +886,9 @@ def run_resolve(
             """
             cwd = context.root
             tool_context = ResolverToolContext(
-                run_dir=state_root / resolved_run_id, concern_id=context.concern_id
+                run_dir=state_root / resolved_run_id,
+                concern_id=context.concern_id,
+                lease_root=cwd,
             )
             # Grants are per-concern: a lease carries only what the human
             # approved with the concern it was leased for.
@@ -901,6 +904,7 @@ def run_resolve(
                         QuestionMailbox(tool_context.run_dir),
                         context.concern_id,
                         run_id=resolved_run_id,
+                        lease_root=tool_context.lease_root,
                         wake=core.wake,
                     ),
                 )
