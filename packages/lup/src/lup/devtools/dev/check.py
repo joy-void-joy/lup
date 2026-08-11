@@ -237,6 +237,12 @@ def run_checks(
         typer.echo("application placement: ok")
     results.append(CheckOutcome(name="application placement", passed=True))
 
+    # lup: This guard is written and correct, and still let two artifact-stale
+    # commits land, because nothing forces it to run before history is written.
+    # The kernel sources are copied verbatim into both plugin trees, so editing
+    # only a comment in canon drifts them — which is exactly how it happened.
+    # Put it on the path a commit must cross, pre-commit or CI, so skipping
+    # `dev check` cannot skip it.
     stale = [report for report in drift_reports(compositions) if not report.clean]
     repository_is_current = clean_repository_artifacts(repository_writers)
     if stale or not repository_is_current:

@@ -158,6 +158,16 @@ def create(
 
     register_merge_driver()
 
+    # lup: This config write is what fails under the sandbox, and the reported
+    # cause is wrong. Sibling worktrees are *not* read-only — writing into
+    # `tree/main/` succeeds, because the allowlist covers the whole repository
+    # root. What fails is git's lock protocol: `config.lock` sits on a read-only
+    # mount, so no config write can acquire it and git reports `File exists`,
+    # which reads like a stale lock somebody forgot to delete. It is not one, and
+    # deleting it does nothing. `git worktree prune`/`remove` fail the same way
+    # on the admin dirs. Any fix deriving writable paths from the worktree set
+    # misses this entirely.
+    #
     # lup: `lup-devtools sync base` often reports "Base guessed", because this is
     # where the record fails to happen: the fallback reads the *cwd's* current
     # branch, which is not the branch being worked in once EnterWorktree has

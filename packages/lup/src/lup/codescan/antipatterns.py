@@ -312,6 +312,20 @@ PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         message="`cast(...)` is a code smell — narrow with isinstance or a type guard, "
         "or fix the annotation so the cast is unnecessary",
     ),
+    # lup: Add a rule against PDF text-extraction libraries — PyMuPDF/`fitz`,
+    # pypdf/PyPDF2, pdfplumber, pdfminer and the rest. Hand the path to the
+    # runtime's own document-reading tool instead, which takes the PDF directly
+    # and carries fewer failure modes: an extractor silently returns nothing on
+    # a scanned or image-only page, and the empty string then reads as an empty
+    # document rather than as a failed extraction.
+    #
+    # The message must not name that tool literally. Claude spells it `Read`;
+    # Codex has no equivalent among `shell`/`apply_patch`/`web_fetch`, so this
+    # rule ships into both plugin trees and would tell one of them to use a tool
+    # it does not have. The spelling belongs on `NativeSpellings` beside
+    # `ask_user` and `runtime_docs` — and if Codex genuinely cannot read a PDF,
+    # that is the explicit unsupported declaration the adapter-parity concern
+    # asks for, carrying the reason rather than being silently absent.
     AntiPattern(
         id="import-re",
         pattern=re.compile(r"\bimport\s+re\b|\bfrom\s+re\s+import\b"),

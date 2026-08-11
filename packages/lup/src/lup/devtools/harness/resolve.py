@@ -8,7 +8,7 @@ it with work discovered while it ran.
 
 import asyncio
 import os
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Iterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -23,6 +23,7 @@ from lup.policy.identity import (
     concern_allowances_environment,
 )
 from lup.harness.environment import non_interactive_environment
+from lup.harness.ownership import GeneratedArtifacts, generated_artifacts
 from lup.harness.process import LaunchRequest, LocalProcessLauncher, ProcessLauncher
 from lup.resolver.contracts import (
     ResolverAwaitingAnswers,
@@ -96,17 +97,41 @@ class ResolverIntake(BaseModel):
 
     Deferred notes never enter the resolver inventory — waking one is an
     explicit edit that removes its `defer` head — so an editor can never be
-    assigned parked work. ``carried`` reports each parked note.
+    assigned parked work. ``carried`` reports each parked note, and
+    ``generated`` each note a generator answers for rather than this tree.
     """
 
     actionable: list[FoundComment]
     carried: list[str]
+    generated: list[str]
 
 
-def resolver_intake(comments: list[FoundComment]) -> ResolverIntake:
-    """Partition scanned notes into resolver work and carried deferrals."""
+def resolver_intake(
+    comments: list[FoundComment], owned: GeneratedArtifacts
+) -> ResolverIntake:
+    """Partition scanned notes into resolver work, deferrals, and generated ones.
+
+    A note inside a generated artifact was written against the generator's own
+    source and copied here when the harness materialized. This tree can neither
+    resolve it nor park it: editing the artifact is refused, and the next
+    generation restores whatever an edit changed. Assigning one spends a concern
+    that can only fail, so it is reported and left to whoever owns the source.
+    """
+    notes = [comment for comment in comments if comment.kind == "note"]
+
+    def generated() -> Iterator[str]:
+        """Each note a generated artifact holds, named by the artifact."""
+        for comment in notes:
+            artifact = owned.owning(comment.file)
+            if artifact is not None:
+                yield (
+                    f"{artifact.semantic_id} owns "
+                    f"{comment.file}:{comment.start_line}-{comment.end_line}"
+                )
+
     return ResolverIntake(
-        actionable=[comment for comment in comments if comment.kind == "note"],
+        actionable=[note for note in notes if owned.owning(note.file) is None],
+        generated=list(generated()),
         carried=[
             f"carrying {comment.deferral_label()} "
             f"{comment.file}:{comment.start_line}-{comment.end_line}"
@@ -558,7 +583,10 @@ def admission_request(
     if not statements and not note_targets:
         return None
     targets = parse_note_targets(note_targets)
-    scanned = resolver_intake(scan_tracked(find_feedback)).actionable if targets else []
+    intake = resolver_intake(
+        scan_tracked(find_feedback), generated_artifacts(project_root())
+    )
+    scanned = intake.actionable if targets else []
     return AdmissionRequest(
         notes=admission_notes(targets, scanned), statements=statements
     )
@@ -702,6 +730,20 @@ def run_resolve(
                 for path in (declared.writable_paths if declared is not None else [])
             ]
 
+        # lup: Every session opened here loses Bash entirely. A session launched
+        # from inside sandboxed Bash cannot create its own
+        # `~/.claude/session-env/<id>`, so each shell call dies on `EROFS:
+        # read-only file system, mkdir`. The directory holds 508 entries, all
+        # made at startup *outside* the sandbox, which is why an interactive
+        # session never sees this and a spawned one always does. The planner
+        # that produced this run's inventory ran read-only on it: its own audit
+        # records losing grep and the drift checker, and an explorer reporting
+        # absence as fact after silently narrowing its scope. Workers will hit
+        # exactly the same wall, so this blocks the implementation phase, not
+        # just planning. Fix it with the session launcher outside the sandbox or
+        # that path made writable — the deny looks like the runtime's own
+        # protection of its config directory, so test that a grant can override
+        # it rather than assuming.
         def worker_factory(context: WorkerContext) -> SessionFactory:
             """Open one worker session that can ask its own questions.
 
@@ -935,9 +977,13 @@ def run_resolve(
                     # own words and nothing yet written down, so the agent has to
                     # invent note sites before it can start. Let statements seed
                     # a run the way they can join one.
-                    intake = resolver_intake(scan_tracked(find_feedback))
+                    intake = resolver_intake(
+                        scan_tracked(find_feedback), generated_artifacts(root)
+                    )
                     for carried in intake.carried:
                         typer.echo(carried)
+                    for owned in intake.generated:
+                        typer.echo(f"leaving to its generator: {owned}")
                     comments = intake.actionable
                     if not comments:
                         typer.echo("No unresolved # lup: comments.")
