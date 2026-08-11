@@ -743,6 +743,18 @@ def run_resolve(
             typer.echo(f"Verified installed Codex plugin: {cache.installed_root}")
             return {"CODEX_HOME": str(home.path)}
 
+        # lup: Selecting a profile must reach every lup invocation, not just a
+        # native launch. `profile use X` should decide the account for anything
+        # lup runs — agents, subagents, resolver planners, workers, reviewers —
+        # and today it decides only what `harness claude`/`codex` opens. This
+        # site is one instance: it inherits the launching shell's identity, and
+        # `select_codex_home(None, environment, root)` above drops the profile
+        # and store that launch.py passes. The seam already exists in
+        # `lup.runtime.profiles.ProfileDirectory`; this entry point simply never
+        # reaches it. Fix it generally rather than per call site: building a
+        # session environment should require naming the profile it runs under,
+        # so a new entry point cannot inherit an operator's account by omission
+        # the way this one does.
         session_environment = non_interactive_environment(
             os.environ  # lup: ignore[os-environ] — sessions inherit the console
         )
