@@ -2,11 +2,6 @@
 
 import lup.harness.models as models
 
-# lup: Is init on par with install? Especially about using the github target
-# with a branch until we are published on PyPI — install carries "the source
-# branch is part of what you install", the question about porting from a feature
-# branch, and the `dev library git --branch <source-branch>` recipe, and none of
-# that has an equivalent here.
 SKILL = models.Skill(
     id="skill.init",
     name="init",
