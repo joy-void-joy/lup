@@ -774,6 +774,9 @@ stated reason. Under a launcher-verified OS sandbox (`LUP_SANDBOX_ACTIVE`),
 unjudged work defers to that boundary instead of denying and a
 `dangerouslyDisableSandbox` escape re-enters the deny lattice; the sandbox
 block in `.claude/settings.json` derives from the same `HookSet` declaration.
+Where a command runs is a second axis a rule declares beside its effect, so
+the verbs that reach a remote already run outside the sandbox without being
+asked for, and a runtime that cannot place a call renders the plain effect.
 Segments join deny > ask > defer > allow — unjudged rides into a judged
 prompt, a judged deny wins the batch. Malformed input fails conservatively,
 a `$(...)` substitution classifies recursively (the inner command joins the

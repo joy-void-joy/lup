@@ -2,7 +2,7 @@
 
 from typing import Literal, TypedDict
 
-from .decision import DecisionEffect
+from .decision import DecisionEffect, SandboxPlacement
 
 type PathRuleKind = Literal[
     "exact",
@@ -97,12 +97,18 @@ class ShellRuleRow(TypedDict):
     allow when a declared verb appears among words that are all literal and
     free of guarded flags, because the verb pins the invocation to its query
     action regardless of the other words.
+
+    ``sandbox`` says where this command has to run, independently of who
+    decides it: a verb that reaches a remote is unusable confined however the
+    effect reads, and a verb whose blast radius wants the OS boundary keeps it
+    however ordinary the effect reads.
     """
 
     command: str
     subcommand: str
     operation: str
     effect: DecisionEffect
+    sandbox: SandboxPlacement
     ask_flags: list[str]
     allow_flags: list[str]
     read_verbs: list[str]

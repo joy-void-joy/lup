@@ -42,6 +42,16 @@ block derives from the same `HookSet` declaration.
 Segments join deny > ask > defer > allow — unjudged rides into a judged
 prompt, a judged deny wins the batch. Malformed input fails conservatively.
 
+Where a command runs is a second axis beside that verdict, declared per rule
+rather than inferred: the verbs that reach a remote (`git push`, `fetch`,
+`pull`, `ls-remote`, `clone`) are placed outside the sandbox, because one
+confined away from its transport fails however freely it was allowed. An
+allow placed outside runs there unprompted; an ask placed outside says so in
+the question it asks; a deny short-circuits the axis entirely, and so does a
+defer, which hands the sandbox status over with the rest of the decision.
+Confinement wins a join, so one segment that must stay inside keeps the whole
+line inside. A runtime with no per-call sandbox renders the plain effect.
+
 `$(...)` classifies recursively — the inner command joins the batch and its
 opaque result rides only argument-safe commands; command position, deep
 nesting, and backticks stay conservative. File writes (redirection, `rm`)

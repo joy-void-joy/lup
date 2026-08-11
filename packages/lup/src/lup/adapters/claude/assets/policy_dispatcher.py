@@ -105,21 +105,54 @@ def dispatch(payload):
     return KernelDecision("ask", "tool is not classified")
 
 
-def rendered(decision):
-    if decision.effect == "defer":
+def rendered(decision, payload):
+    """Answer one call on the permission channel, and place it on the other.
+
+    Claude Code takes a call's sandbox as an argument of the call rather than
+    as part of the verdict, so a placed decision goes out as the permission
+    decision plus a rewrite of the arguments — which is what makes an
+    unprompted placement reachable at all. Three things in the runtime make
+    that rewrite carry the flag rather than swallow it: the PreToolUse hook
+    schema types `updatedInput` as an open record of arbitrary keys;
+    `dangerouslyDisableSandbox` is a declared field of the shell tool's own
+    input schema, so it is not an unknown key for the schema validation a
+    returned `updatedInput` has to pass; and the one per-tool key filter
+    applied to it before execution is keyed by a table naming a different
+    tool, so for the shell tool the object arrives whole and the sandbox is
+    chosen from it. What remains outside this file's reach is the session
+    itself: a host that forbids unsandboxed commands ignores the flag, and
+    the call runs confined with the verdict unchanged.
+
+    The rewrite replaces the arguments rather than merging into them, so the
+    whole input is carried through. A deferral is placed nowhere, which is
+    also why nothing here reads a payload a deferral may not have parsed.
+    """
+    settled = decision.placed(True)
+    if settled.effect == "defer":
         return {}
+    answer = {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": settled.effect,
+        "permissionDecisionReason": settled.reason,
+    }
+    if settled.sandbox == "ambient" or payload["tool_name"] != "Bash":
+        return {"hookSpecificOutput": answer}
     return {
         "hookSpecificOutput": {
-            "hookEventName": "PreToolUse",
-            "permissionDecision": decision.effect,
-            "permissionDecisionReason": decision.reason,
+            **answer,
+            "updatedInput": {
+                **payload["tool_input"],
+                "dangerouslyDisableSandbox": settled.sandbox == "outside",
+            },
         }
     }
 
 
 def main():
+    payload = {}
     try:
-        decision = dispatch(json.load(sys.stdin))
+        payload = json.load(sys.stdin)
+        decision = dispatch(payload)
     # Every way this can fail means one thing — the call went unjudged — and
     # one answer is right for all of them. Naming the exceptions instead is
     # what let a plain unreadable file escape, and the traceback exit reaches
@@ -130,4 +163,4 @@ def main():
         decision = KernelDecision(
             "ask", f"Malformed hook input requires approval: {error}"
         )
-    json.dump(rendered(decision), sys.stdout)
+    json.dump(rendered(decision, payload), sys.stdout)

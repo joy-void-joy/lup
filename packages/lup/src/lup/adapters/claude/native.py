@@ -24,6 +24,7 @@ from lup.policy.models import (
     ToolIdentity,
     UnknownTool,
 )
+from lup.policy.kernel.decision import SandboxPlacement
 from lup.policy.native import NativeDecisionRenderer, NativeEventDecoder
 from lup.types import JsonObject
 
@@ -182,6 +183,21 @@ class ClaudeEventDecoder(NativeEventDecoder[ClaudeBeforeToolEvent]):
         return BeforeTool(tool=tool, identity=identity)
 
 
+def claude_sandbox_input(
+    tool_input: JsonObject | None, sandbox: SandboxPlacement
+) -> JsonObject | None:
+    """The call's own arguments, rewritten to run where the verdict placed it.
+
+    Claude Code's one spelling of the sandbox axis, and the only place it is
+    written. The rewrite replaces the arguments outright rather than merging
+    into them, which is why the whole input is carried through; an unplaced
+    verdict rewrites nothing at all.
+    """
+    if tool_input is None or sandbox == "ambient":
+        return None
+    return {**tool_input, "dangerouslyDisableSandbox": sandbox == "outside"}
+
+
 class ClaudeDecisionOutput(BaseModel):
     """Claude PreToolUse hook-specific decision payload."""
 
@@ -194,15 +210,30 @@ class ClaudeDecisionOutput(BaseModel):
         default=None, alias="permissionDecision"
     )
     reason: str = Field(default="", alias="permissionDecisionReason")
+    updated_input: JsonObject | None = Field(default=None, alias="updatedInput")
 
 
 class ClaudeDecisionRenderer(NativeDecisionRenderer[ClaudeDecisionOutput]):
-    """Render semantic effects; defer omits the decision so the client mode applies."""
+    """Render semantic effects; defer omits the decision so the client mode applies.
 
-    def render(self, decision: Decision) -> ClaudeDecisionOutput:
-        if decision.effect == "defer":
-            return ClaudeDecisionOutput(permissionDecisionReason=decision.reason)
+    Claude Code takes a call's sandbox as an argument of the call, so a placed
+    verdict goes out as the permission decision plus a rewrite of the
+    arguments. That rewrite is what makes an unprompted placement reachable at
+    all, and the rewrite channel carries it: the hook schema types it as an
+    open record, the flag is a declared field of the shell tool's own input
+    schema rather than an unknown key the validation would reject, and the one
+    per-tool key filter applied before execution names a different tool
+    entirely — so the object arrives whole and the sandbox is chosen from it.
+    """
+
+    def render(
+        self, decision: Decision, tool_input: JsonObject | None = None
+    ) -> ClaudeDecisionOutput:
+        settled = decision.placed(escapable=True)
+        if settled.effect == "defer":
+            return ClaudeDecisionOutput(permissionDecisionReason=settled.reason)
         return ClaudeDecisionOutput(
-            permissionDecision=decision.effect,
-            permissionDecisionReason=decision.reason,
+            permissionDecision=settled.effect,
+            permissionDecisionReason=settled.reason,
+            updatedInput=claude_sandbox_input(tool_input, settled.sandbox),
         )

@@ -41,7 +41,9 @@ def apply_command_row(row: ShellRuleRow, arguments: list[str]) -> KernelDecision
     if row["effect"] != "allow" and row["allow_flags"] and arguments:
         if all(word in row["allow_flags"] for word in arguments):
             return KernelDecision(
-                "allow", "every argument is a declared read-only flag"
+                "allow",
+                "every argument is a declared read-only flag",
+                row["sandbox"],
             )
     if row["effect"] != "allow" and row["read_verbs"] and arguments:
         clean = not any(
@@ -50,7 +52,9 @@ def apply_command_row(row: ShellRuleRow, arguments: list[str]) -> KernelDecision
         )
         if clean and any(word in row["read_verbs"] for word in arguments):
             return KernelDecision(
-                "allow", "a declared read-only verb pins the query action"
+                "allow",
+                "a declared read-only verb pins the query action",
+                row["sandbox"],
             )
     if row["effect"] == "allow" and row["ask_flags"]:
         opaque = next(
@@ -68,9 +72,11 @@ def apply_command_row(row: ShellRuleRow, arguments: list[str]) -> KernelDecision
         )
         if guarded is not None:
             return KernelDecision(
-                "ask", row["reason"] or f"{guarded} requires approval"
+                "ask",
+                row["reason"] or f"{guarded} requires approval",
+                row["sandbox"],
             )
-    return KernelDecision(row["effect"], row["reason"])
+    return KernelDecision(row["effect"], row["reason"], row["sandbox"])
 
 
 class Subcommand(TypedDict):

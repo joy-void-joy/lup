@@ -33,6 +33,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from lup.policy.kernel.decision import SandboxPlacement
 from lup.policy.kernel.rows import ShellRuleRow
 
 type CommandEffect = Literal["allow", "ask", "deny"]
@@ -46,6 +47,7 @@ class ShellOperationRule(BaseModel):
     name: str
     effect: CommandEffect
     ask_flags: list[str] = Field(default_factory=list)
+    sandbox: SandboxPlacement = "ambient"
     reason: str = ""
 
 
@@ -64,6 +66,7 @@ class ShellSubcommandRule(BaseModel):
     ask_flags: list[str] = Field(default_factory=list)
     read_verbs: list[str] = Field(default_factory=list)
     operations: list[ShellOperationRule] = Field(default_factory=list)
+    sandbox: SandboxPlacement = "ambient"
     reason: str = ""
 
 
@@ -79,6 +82,12 @@ class ShellCommandRule(BaseModel):
     ``read_verbs`` do the same for a command whose read-only form still takes
     operands, so no all-flags test can recognize it (``nc -z host port``): a
     declared verb among otherwise literal, unguarded words pins the action.
+
+    ``sandbox`` is the other axis, declared here rather than inferred by a
+    renderer: it says where an invocation matched by this rule has to run,
+    whatever effect the rule reaches. Reads that need a remote take
+    ``outside`` and run unprompted; writes that need one take ``outside``
+    beside an ``ask``, so the approval says both things at once.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -90,14 +99,16 @@ class ShellCommandRule(BaseModel):
     read_verbs: list[str] = Field(default_factory=list)
     value_flags: list[str] = Field(default_factory=list)
     subcommands: list[ShellSubcommandRule] = Field(default_factory=list)
+    sandbox: SandboxPlacement = "ambient"
     reason: str = ""
 
 
 def erase_shell_rules(rules: list[ShellCommandRule]) -> list[ShellRuleRow]:
     """Flatten the nested table into the kernel's primitive command rows.
 
-    Each row is ``(command, subcommand, operation, effect, ask_flags, reason)``;
-    an empty string at a level means "the default at that level". A command
+    Each row carries its match levels, its effect, its flag lists, its sandbox
+    placement, and its reason; an empty string at a level means "the default
+    at that level", and each level's placement is its own. A command
     contributes one default row plus, per subcommand, one row per operation and
     a subcommand-default row for the bare form.
     """
@@ -115,6 +126,7 @@ def erase_shell_rules(rules: list[ShellCommandRule]) -> list[ShellRuleRow]:
                 allow_flags=[],
                 read_verbs=[],
                 value_flags=[],
+                sandbox=operation.sandbox,
                 reason=operation.reason,
             )
             for operation in subcommand.operations
@@ -128,6 +140,7 @@ def erase_shell_rules(rules: list[ShellCommandRule]) -> list[ShellRuleRow]:
             allow_flags=[],
             read_verbs=list(subcommand.read_verbs),
             value_flags=[],
+            sandbox=subcommand.sandbox,
             reason=subcommand.reason,
         )
         return [*operations, default]
@@ -142,6 +155,7 @@ def erase_shell_rules(rules: list[ShellCommandRule]) -> list[ShellRuleRow]:
             allow_flags=list(command.allow_flags),
             read_verbs=list(command.read_verbs),
             value_flags=list(command.value_flags),
+            sandbox=command.sandbox,
             reason=command.reason,
         )
         nested = [

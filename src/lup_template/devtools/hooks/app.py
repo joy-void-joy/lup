@@ -51,6 +51,8 @@ def report(subject: str, decision: Decision, as_json: bool) -> None:
         output_json({"subject": subject, **decision.model_dump()})
     else:
         typer.echo(f"{decision.effect:>5}  {subject}")
+        if decision.sandbox != "ambient":
+            typer.echo(f"       runs {decision.sandbox} the sandbox")
         if decision.reason:
             typer.echo(f"       {decision.reason}")
     if decision.effect != "allow":

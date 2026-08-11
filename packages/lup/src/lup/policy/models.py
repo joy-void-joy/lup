@@ -10,9 +10,21 @@ from abc import abstractmethod
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Literal, Self
 
-from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import (
+    AnyHttpUrl,
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    ValidationInfo,
+    field_validator,
+)
 
-from lup.policy.kernel.decision import DecisionEffect
+from lup.policy.kernel.decision import (
+    DecisionEffect,
+    KernelDecision,
+    SandboxPlacement,
+)
 from lup.types import JsonObject, JsonValue
 
 if TYPE_CHECKING:
@@ -254,12 +266,40 @@ type SemanticEvent = (
 
 
 class Decision(BaseModel):
-    """One conservative policy verdict."""
+    """One conservative policy verdict, and where the call it judges runs.
+
+    The two fields are separate axes: :attr:`effect` answers who decides,
+    :attr:`sandbox` answers where it runs. :data:`SandboxPlacement` carries
+    what each pair means and :meth:`placed` renders one for a given runtime.
+    """
 
     model_config = ConfigDict(frozen=True)
 
     effect: DecisionEffect
     reason: str = ""
+    sandbox: SandboxPlacement = "ambient"
+
+    @field_validator("sandbox")
+    @classmethod
+    def reached(
+        cls, sandbox: SandboxPlacement, info: ValidationInfo
+    ) -> SandboxPlacement:
+        """Hold the kernel's own invariant rather than restating it here.
+
+        ``effect`` is declared first, so it is already validated and readable
+        while this field is: a deny or a defer collapses the placement here
+        exactly as it does in the kernel, from the same line of code.
+        """
+        return KernelDecision(info.data["effect"], sandbox=sandbox).sandbox
+
+    def placed(self, escapable: bool) -> "Decision":
+        """This verdict as a runtime that can, or cannot, place a call sees it."""
+        kernel = KernelDecision(self.effect, self.reason, self.sandbox).placed(
+            escapable
+        )
+        return Decision(
+            effect=kernel.effect, reason=kernel.reason, sandbox=kernel.sandbox
+        )
 
 
 class ObservationFailure(BaseModel):

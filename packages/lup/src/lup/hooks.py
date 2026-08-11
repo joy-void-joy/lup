@@ -65,6 +65,7 @@ from typing import Literal, TypedDict
 
 from pydantic import BaseModel, Field
 
+from lup.policy.kernel.decision import SandboxPlacement
 from lup.workspace.paths import path_is_under
 from lup.types import JsonObject, ToolName
 
@@ -112,6 +113,12 @@ class LupHookOutput(BaseModel):
 
     decision: LupHookDecision | None = None
     reason: str = ""
+    sandbox: SandboxPlacement = "ambient"
+    """Where the call runs, which is a separate answer from whether it may.
+
+    Neutral here on purpose: an adapter whose runtime can place one call
+    spells the placement in its own words, and one whose runtime cannot
+    renders the decision alone rather than a placement nothing honours."""
     system_message: str | None = None
     updated_input: JsonObject | None = Field(
         default=None,
@@ -185,14 +192,14 @@ class LupHooksConfig(BaseModel):
         return {event: matchers for event, matchers in events.items() if matchers}
 
 
-def allow_hook() -> LupHookOutput:
-    """Create a generic allow decision."""
-    return LupHookOutput(decision="allow")
+def allow_hook(sandbox: SandboxPlacement = "ambient") -> LupHookOutput:
+    """Create a generic allow decision, optionally placed."""
+    return LupHookOutput(decision="allow", sandbox=sandbox)
 
 
-def ask_hook(reason: str) -> LupHookOutput:
+def ask_hook(reason: str, sandbox: SandboxPlacement = "ambient") -> LupHookOutput:
     """Create a decision that defers to whoever is entitled to make it."""
-    return LupHookOutput(decision="ask", reason=reason)
+    return LupHookOutput(decision="ask", reason=reason, sandbox=sandbox)
 
 
 def deny_hook(reason: str) -> LupHookOutput:

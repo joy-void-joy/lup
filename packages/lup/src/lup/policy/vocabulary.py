@@ -41,6 +41,7 @@ from collections.abc import Sequence
 
 from pydantic import BaseModel, ConfigDict
 
+from lup.policy.kernel.decision import SandboxPlacement
 from lup.policy.shell_rules import (
     ShellCommandRule,
     ShellOperationRule,
@@ -421,6 +422,14 @@ GIT_REVERSIBLE_SUBCOMMANDS = (  # lup: ignore[library-default] — git subcomman
 def git_rule(
     guard_force_push: bool = True,
     redirect_checkout: bool = False,
+    remote_subcommands: Sequence[str] = (
+        "ls-remote",
+        "fetch",
+        "pull",
+        "push",
+        "clone",
+    ),
+    remote_sandbox: SandboxPlacement = "outside",
 ) -> ShellCommandRule:
     """Compile the git surface: reads and reversible work allow, losses ask.
 
@@ -441,9 +450,20 @@ def git_rule(
     ref-sourced ``checkout <ref> -- <path>`` form is recognized by the kernel
     ahead of this row either way, because committed content stays
     recoverable.
+
+    ``remote_subcommands`` are the verbs that open a transport, and
+    ``remote_sandbox`` is where they run. They are the other axis rather than
+    another effect: a fetch confined to a sandbox with no route to the remote
+    fails however freely it was allowed, and asking about that every time
+    teaches an agent to escalate rather than to read the verdict.
     """
+
+    def placement(name: str) -> SandboxPlacement:
+        """Where one git subcommand runs — outside, for the ones needing a remote."""
+        return remote_sandbox if name in remote_subcommands else "ambient"
+
     leaf = [
-        ShellSubcommandRule(name=name)
+        ShellSubcommandRule(name=name, sandbox=placement(name))
         for name in (*GIT_READ_ONLY_SUBCOMMANDS, *GIT_REVERSIBLE_SUBCOMMANDS)
     ]
     push_flags = ["--delete", "--mirror", "--prune"]
@@ -469,11 +489,13 @@ def git_rule(
         ShellSubcommandRule(
             name="fetch",
             ask_flags=["--upload-pack"],
+            sandbox=placement("fetch"),
             reason="overriding the transport program requires approval",
         ),
         ShellSubcommandRule(
             name="pull",
             ask_flags=["--upload-pack"],
+            sandbox=placement("pull"),
             reason="overriding the transport program requires approval",
         ),
         ShellSubcommandRule(
@@ -483,6 +505,7 @@ def git_rule(
                 if guard_force_push
                 else push_flags
             ),
+            sandbox=placement("push"),
             reason=(
                 "rewriting or removing a remote ref requires approval"
                 if guard_force_push
@@ -492,6 +515,7 @@ def git_rule(
         ShellSubcommandRule(
             name="clone",
             effect="ask",
+            sandbox=placement("clone"),
             reason="cloning fetches external code — requires approval",
         ),
         ShellSubcommandRule(
