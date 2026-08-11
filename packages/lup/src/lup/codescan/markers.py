@@ -46,12 +46,6 @@ from lup.policy.kernel.edit import IGNORE_RE
 
 MARKER_RE = re.compile(r"(#|//)\s*lup\s*:", re.IGNORECASE)
 
-# lup: A note is truncated when one of its own continuation lines quotes the
-# marker spelling — writing about a suppression directive, or about this scanner
-# at all, ends the note there and starts a phantom one. MARKER_RE matches
-# anywhere in the line, so backticks and prose context buy nothing. The scanner
-# already skips notes quoted in Markdown code spans; a continuation line needs
-# the same treatment, or a marker must be required at the comment's start.
 
 # lup: Claude will often write the `# lup: ignore` on the line *above* the one it
 # is trying to ignore. Two things there. Why is the Edit asking rather than
