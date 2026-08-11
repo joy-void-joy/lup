@@ -631,6 +631,9 @@ def run_resolve(
     # commit refuse to resume the run that was parked before it — including
     # the commit fixing the defect that parked it.
     state_root = root / ".lup" / "resolve"
+    # Every worktree this run leases lands under here, which is what makes
+    # "a checkout lup created" a structural test rather than a judgement.
+    worktree_root = root.parent / f"{root.name}-resolve-{resolved_run_id}"
     persisted = ResolverStateRepository(state_root, resolved_run_id)
     base_commit = (
         persisted.load().source.commit
@@ -648,6 +651,11 @@ def run_resolve(
             CodexMcpServerConfig,
             CodexSessionConfig,
             create_codex_session_factory,
+        )
+        from lup.adapters.claude.config_home import (
+            selected_config_home,
+            untrusted_degradation,
+            workspace_config_environment,
         )
         from lup.adapters.claude.hooks import CLAUDE_SEMANTICS
         from lup.adapters.codex.hooks import CODEX_SEMANTICS
@@ -716,6 +724,44 @@ def run_resolve(
                 f"{adapter!r}; sessions use the adapter's native default model."
             )
 
+        def isolated_claude_environment(
+            environment: EnvVars, workspace: Path
+        ) -> EnvVars:
+            """One workspace's sessions, on a configuration document of their own.
+
+            Every worker starts by reading Claude's configuration document and
+            writing it back, so a phase that opens them together has each one
+            reading what the others are still writing: a run of eleven lost
+            six to a truncated parse and the remaining five never started,
+            with no concern having produced code. A document per workspace
+            removes the shared file the race needs, which is why neither a
+            lock nor a cap on how many run at once appears anywhere here.
+
+            Trust rides along because it is written into that same document,
+            and only for a checkout this run created — invoking the resolver
+            against a repository is an explicit act of trust by whoever ran
+            it, and lup extends it no further than its own worktrees of that
+            same repository.
+            """
+            return {
+                **environment,
+                **workspace_config_environment(
+                    environment,
+                    workspace,
+                    trust=workspace.is_relative_to(worktree_root),
+                ),
+            }
+
+        degraded = (
+            untrusted_degradation(
+                root, selected_config_home(session_environment).document
+            )
+            if adapter == "claude"
+            else None
+        )
+        if degraded is not None:
+            typer.echo(degraded, err=True)
+
         def toolchain_writable_paths() -> list[Path]:
             """Absolute paths a sandboxed worker's toolchain must be able to write.
 
@@ -781,7 +827,9 @@ def run_resolve(
                         add_dirs=[cwd, *toolchain_writable_paths()],
                         plugin_dirs=[lease_plugin_dir(cwd, plugin.name)],
                         sandbox=ClaudeSandboxConfig(),
-                        environment=concern_environment,
+                        environment=isolated_claude_environment(
+                            concern_environment, cwd
+                        ),
                         tool_servers={"resolver": server},
                         allowed_tools=[
                             f"mcp__resolver__{name}"
@@ -886,7 +934,9 @@ def run_resolve(
                         cwd=cwd,
                         add_dirs=[cwd],
                         plugin_dirs=[lease_plugin_dir(cwd, plugin.name)],
-                        environment=reviewer_environment,
+                        environment=isolated_claude_environment(
+                            reviewer_environment, cwd
+                        ),
                         hooks=create_permission_hooks([], [cwd]),
                     )
                 )
@@ -911,7 +961,7 @@ def run_resolve(
             ResolverConfig(
                 state_root=state_root,
                 workspace=root,
-                worktree_root=(root.parent / f"{root.name}-resolve-{resolved_run_id}"),
+                worktree_root=worktree_root,
                 run_id=resolved_run_id,
                 integration_branch=integration_branch(launcher, root, resolved_run_id),
                 # The whole gate rather than part of it restated. Naming three
