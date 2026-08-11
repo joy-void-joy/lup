@@ -219,6 +219,17 @@ class WorktreeOrchestrator:
                 reason="worker changed branch authority",
             )
         current = self.head(lease)
+        # lup: A run cannot follow a base that moved under it. `base_commit` is
+        # captured once when the run starts, the run id defaults to it, and this
+        # check invalidates a concern outright when a lease's HEAD differs — so a
+        # `git pull` mid-run makes every remaining concern fail rather than
+        # rebase. This bit for real: a run planned 13 concerns against a tree ten
+        # commits stale, where a merged upstream fix had already changed intake
+        # and 16 of its 53 notes were generated copies no worker could edit.
+        # Following a moved base means re-basing every lease, re-deriving each
+        # diff against the new base, and re-running intake, which can add or drop
+        # concerns while work is in flight — so decide whether a run should
+        # refuse to start when the base is behind its remote instead.
         if current != base_commit:
             return DiffValidation(
                 concern_id=concern.id,

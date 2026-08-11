@@ -107,6 +107,15 @@ class ResolverIntake(BaseModel):
     generated: list[str]
 
 
+# lup: There is no way to see what a run would plan without starting one. Every
+# resolve subcommand — supervise, questions, answer, actors, say, redirect, park
+# — operates on a run that already exists, so discovering an inventory means
+# committing to a run that leases a worktree per concern. Add `harness resolve
+# intake`, printing all three buckets this returns with file, line, and for a
+# generated note the owning `semantic_id`. Reported from downstream: answering
+# "is this good to clean and restart from scratch?" took a dozen calls of
+# reading this function, `scan_tracked`, and cross-referencing ownership by
+# hand — and that reconstruction is what found the bug fixed in #47.
 def resolver_intake(
     comments: list[FoundComment], owned: GeneratedArtifacts
 ) -> ResolverIntake:
@@ -310,6 +319,22 @@ def offer_flag_answers(
             + "\nDrop those --answer flags to resume on the settled values, or "
             "end this run with --abort and start one answerable afresh."
         )
+
+
+def run_owned(workspace: Path, root: Path, worktree_root: Path) -> bool:
+    """Whether one run's own invocation already covers a workspace.
+
+    Pointing a run at a repository is an explicit act of trust by whoever
+    ran it, and a more deliberate one than accepting a dialog — so trust
+    reaches that repository, where the planner reads, and the checkouts the
+    run makes of it, where every worker and reviewer works. Those all land
+    under ``worktree_root``, which is what keeps "a checkout this run
+    created" a structural test rather than a judgement, and what stops trust
+    from reaching anywhere a session merely happens to be opened.
+    """
+    return workspace.resolve() == root.resolve() or workspace.is_relative_to(
+        worktree_root
+    )
 
 
 def inert_offers(mailbox: QuestionMailbox) -> list[str]:
@@ -687,6 +712,7 @@ def run_resolve(
             create_codex_session_factory,
         )
         from lup.adapters.claude.config_home import (
+            configuration_fault,
             selected_config_home,
             untrusted_degradation,
             workspace_config_environment,
@@ -734,6 +760,18 @@ def run_resolve(
             typer.echo(f"Verified installed Codex plugin: {cache.installed_root}")
             return {"CODEX_HOME": str(home.path)}
 
+        # lup: Selecting a profile must reach every lup invocation, not just a
+        # native launch. `profile use X` should decide the account for anything
+        # lup runs — agents, subagents, resolver planners, workers, reviewers —
+        # and today it decides only what `harness claude`/`codex` opens. This
+        # site is one instance: it inherits the launching shell's identity, and
+        # `select_codex_home(None, environment, root)` above drops the profile
+        # and store that launch.py passes. The seam already exists in
+        # `lup.runtime.profiles.ProfileDirectory`; this entry point simply never
+        # reaches it. Fix it generally rather than per call site: building a
+        # session environment should require naming the profile it runs under,
+        # so a new entry point cannot inherit an operator's account by omission
+        # the way this one does.
         session_environment = non_interactive_environment(
             os.environ  # lup: ignore[os-environ] — sessions inherit the console
         )
@@ -771,30 +809,43 @@ def run_resolve(
             removes the shared file the race needs, which is why neither a
             lock nor a cap on how many run at once appears anywhere here.
 
-            Trust rides along because it is written into that same document,
-            and only for a checkout this run created — invoking the resolver
-            against a repository is an explicit act of trust by whoever ran
-            it, and lup extends it no further than its own worktrees of that
-            same repository.
+            Trust rides along because it is written into that same document.
+            An untrusted workspace does not fail a session — Claude drops the
+            repository's declared permissions, warns into that session's own
+            stderr and carries on — so a run without this establishes nothing
+            and reports the loss only as noise between progress lines. A run
+            that cannot establish it stops here instead, before the session
+            that would have run under a posture the repository never declared.
             """
-            return {
-                **environment,
-                **workspace_config_environment(
-                    environment,
-                    workspace,
-                    trust=workspace.is_relative_to(worktree_root),
-                ),
-            }
-
-        degraded = (
-            untrusted_degradation(
-                root, selected_config_home(session_environment).document
+            derived = workspace_config_environment(
+                environment,
+                workspace,
+                trust=run_owned(workspace, root, worktree_root),
             )
+            degradation = untrusted_degradation(
+                workspace, selected_config_home(derived).document
+            )
+            if degradation is not None:
+                raise typer.BadParameter(
+                    f"{degradation} This run extends trust to the repository it "
+                    "was invoked against and to the checkouts it made of that "
+                    f"repository under {worktree_root}, and to nothing else."
+                )
+            return {**environment, **derived}
+
+        # Once, before anything is leased. Every private home this run derives
+        # is seeded from the one document this reads, so a run that cannot
+        # read it opens no session anywhere — a fact about the environment
+        # rather than about any concern. Discovering it per worker instead
+        # turned one environmental fault into an exception group of concern
+        # failures and burned every lease the run had taken.
+        fault = (
+            configuration_fault(selected_config_home(session_environment))
             if adapter == "claude"
             else None
         )
-        if degraded is not None:
-            typer.echo(degraded, err=True)
+        if fault is not None:
+            raise typer.BadParameter(fault)
 
         def toolchain_writable_paths() -> list[Path]:
             """Absolute paths a sandboxed worker's toolchain must be able to write.
