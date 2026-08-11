@@ -702,6 +702,20 @@ def run_resolve(
                 for path in (declared.writable_paths if declared is not None else [])
             ]
 
+        # lup: Every session opened here loses Bash entirely. A session launched
+        # from inside sandboxed Bash cannot create its own
+        # `~/.claude/session-env/<id>`, so each shell call dies on `EROFS:
+        # read-only file system, mkdir`. The directory holds 508 entries, all
+        # made at startup *outside* the sandbox, which is why an interactive
+        # session never sees this and a spawned one always does. The planner
+        # that produced this run's inventory ran read-only on it: its own audit
+        # records losing grep and the drift checker, and an explorer reporting
+        # absence as fact after silently narrowing its scope. Workers will hit
+        # exactly the same wall, so this blocks the implementation phase, not
+        # just planning. Fix it with the session launcher outside the sandbox or
+        # that path made writable — the deny looks like the runtime's own
+        # protection of its config directory, so test that a grant can override
+        # it rather than assuming.
         def worker_factory(context: WorkerContext) -> SessionFactory:
             """Open one worker session that can ask its own questions.
 
