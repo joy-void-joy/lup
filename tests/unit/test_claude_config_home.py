@@ -1,17 +1,22 @@
 """Per-session Claude configuration homes, and the trust they record."""
 
 import json
+import os
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
 
 from lup.adapters.claude.config_home import (
+    CLAUDE_BACKUP_DIR,
     CLAUDE_CONFIG_FILE,
     CLAUDE_HOME_LAYOUT,
     ClaudeConfigUnreadable,
+    configuration_fault,
     load_document,
     record_trust,
+    restorable_backups,
+    restoration_advice,
     save_document,
     selected_config_home,
     trusts,
@@ -193,3 +198,55 @@ def test_a_truncated_document_is_refused_rather_than_emptied(tmp_path: Path) -> 
 
 def test_an_absent_document_is_not_an_error(tmp_path: Path) -> None:
     assert load_document(tmp_path / CLAUDE_CONFIG_FILE) == {}
+
+
+def backup(home: Path, name: str, content: str) -> Path:
+    """One file where Claude Code copies a document it could not read."""
+    written = home / CLAUDE_BACKUP_DIR / f"{CLAUDE_CONFIG_FILE}.backup.{name}"
+    written.parent.mkdir(parents=True, exist_ok=True)
+    written.write_text(content, encoding="utf-8")
+    return written
+
+
+def test_a_backup_that_cannot_restore_is_not_offered(tmp_path: Path) -> None:
+    """The hint named a zero-byte file, and following it emptied a healed one."""
+    backup(tmp_path, "empty", "")
+    backup(tmp_path, "flags", json.dumps({"migrationVersion": 13}))
+
+    assert restorable_backups(tmp_path) == []
+    assert "No backup under" in restoration_advice(tmp_path)
+
+
+def test_the_newest_backup_carrying_projects_is_the_one_named(
+    tmp_path: Path,
+) -> None:
+    """Newest by when it was written, so restoring loses the least."""
+    older = backup(tmp_path, "older", json.dumps({"projects": {"/a": {}}}))
+    newer = backup(tmp_path, "newer", json.dumps({"projects": {"/b": {}}}))
+    backup(tmp_path, "truncated", '{"projects": {')
+    os.utime(older, (1, 1))
+    os.utime(newer, (2, 2))
+
+    assert restorable_backups(tmp_path) == [newer, older]
+    assert str(newer) in restoration_advice(tmp_path)
+
+
+def test_an_unreadable_document_stops_a_run_before_it_leases(
+    tmp_path: Path,
+) -> None:
+    """Every derived home is seeded from this one, so nothing can start."""
+    home = selected_config_home({CLAUDE_CONFIG_DIR: str(tmp_path)})
+    home.document.write_text('{"projects": {', encoding="utf-8")
+    restorable = backup(tmp_path, "whole", json.dumps({"projects": {"/a": {}}}))
+
+    fault = configuration_fault(home)
+    assert fault is not None
+    assert "does not parse" in fault
+    assert str(restorable) in fault
+
+
+def test_a_readable_document_is_no_fault(tmp_path: Path) -> None:
+    home = selected_config_home({CLAUDE_CONFIG_DIR: str(tmp_path)})
+    save_document(home.document, {})
+
+    assert configuration_fault(home) is None

@@ -37,6 +37,9 @@ CLAUDE_HOME_DIR = ".claude"
 WORKSPACE_SETTINGS = "settings.json"
 """A workspace's own settings, inside the directory Claude reads it from."""
 
+CLAUDE_BACKUP_DIR = "backups"
+"""Where Claude Code copies a document it could not read, beside the home."""
+
 TRUST_FIELD = "hasTrustDialogAccepted"
 """The field a project entry carries once its workspace has been trusted."""
 
@@ -120,6 +123,69 @@ def project_entry(document: JsonObject, workspace: Path) -> JsonObject:
         str(workspace.resolve())
     )
     return dict(found) if isinstance(found, dict) else {}
+
+
+def restorable_backups(directory: Path) -> list[Path]:
+    """Every backup of one home's document that could actually restore it.
+
+    Claude Code answers a document it cannot parse with a hint naming the
+    backup it just wrote, and the backup it wrote for a truncated document
+    was zero bytes — so following the hint replaces a since-healed
+    configuration with an empty one. What makes a backup worth restoring is
+    not that it exists but that it parses and still carries the project
+    entries trust and permissions live in, which is what is answered here.
+
+    Newest first, by the time the file was written rather than by the
+    timestamp in its name, so a caller naming one names the least lost.
+    """
+
+    def restores(path: Path) -> bool:
+        """Whether one backup parses and carries what a restore would need."""
+        try:
+            return bool(project_entries(load_document(path)))
+        except ClaudeConfigUnreadable:
+            return False
+
+    backups = directory / CLAUDE_BACKUP_DIR
+    if not backups.is_dir():
+        return []
+    return sorted(
+        (path for path in backups.iterdir() if path.is_file() and restores(path)),
+        key=lambda path: path.stat().st_mtime,
+        reverse=True,
+    )
+
+
+def configuration_fault(home: ClaudeConfigHome) -> str | None:
+    """Why no session can be opened under this home yet, if anything.
+
+    Every private home a run derives is seeded from this one document, so a
+    run that cannot read it cannot open a session anywhere — a fact about
+    the environment rather than about any one piece of work. Answered once
+    and up front, it is a single message before anything is leased, instead
+    of the same fault rediscovered by every session that races to start.
+    """
+    try:
+        load_document(home.document)
+    except ClaudeConfigUnreadable as error:
+        return f"{error}. {restoration_advice(home.directory)}"
+    return None
+
+
+def restoration_advice(directory: Path) -> str:
+    """How to get one unreadable configuration home back, in this state."""
+    restorable = restorable_backups(directory)
+    if not restorable:
+        return (
+            f"No backup under {directory / CLAUDE_BACKUP_DIR} both parses and "
+            "carries project entries, so none of them can restore it: move the "
+            "document aside and open one session to write a fresh one, which "
+            "starts out trusting nothing and knowing no projects"
+        )
+    return (
+        f"Restore it from {restorable[0]}, the most recently written backup "
+        "that both parses and carries project entries"
+    )
 
 
 def trusts(document: JsonObject, workspace: Path) -> bool:
