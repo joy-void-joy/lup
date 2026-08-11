@@ -8,6 +8,7 @@ proof, and the devtools generation flow persists it.
 """
 
 import hashlib
+from collections.abc import Collection, Iterator
 from pathlib import Path
 from typing import Literal
 
@@ -98,6 +99,50 @@ def load_manifest(path: Path) -> OwnershipManifest | None:
             f"ownership manifest at {path} cannot be decoded; repair or remove "
             "it, then regenerate"
         ) from error
+
+
+OWNERSHIP_FILENAME = ".lup-ownership.json"
+"""What proof is called inside whichever tree a native adapter materializes."""
+
+ADAPTER_HOMES: tuple[str, ...] = (".claude", ".codex")
+"""The trees proof is kept in, as a default an adopter naming its own replaces."""
+
+
+class GeneratedArtifacts(BaseModel):
+    """Which files in a tree the generator owns rather than the repository.
+
+    Keyed the way a repository scan names files — relative to the root the
+    proof was read from — so a scanned path can be asked about directly, and
+    answered with the artifact rather than a bare yes.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    by_path: dict[str, OwnedArtifact]
+
+    def owning(self, path: str) -> OwnedArtifact | None:
+        """The artifact generated at ``path``, where the generator owns one."""
+        return self.by_path.get(path)  # lup: ignore[dict-get] — open registry
+
+
+def generated_artifacts(
+    root: Path, homes: Collection[str] = ADAPTER_HOMES
+) -> GeneratedArtifacts:
+    """What every manifest under ``root`` records the generator as owning."""
+
+    def owned() -> Iterator[OwnedArtifact]:
+        """Each generated artifact, across every tree that kept proof."""
+        for home in homes:
+            manifest = load_manifest(root / home / OWNERSHIP_FILENAME)
+            if manifest is None:
+                continue
+            for artifact in manifest.files:
+                if artifact.category == "generated":
+                    yield artifact
+
+    return GeneratedArtifacts(
+        by_path={str(artifact.path): artifact for artifact in owned()}
+    )
 
 
 def save_manifest(path: Path, manifest: OwnershipManifest) -> None:

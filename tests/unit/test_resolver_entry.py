@@ -9,6 +9,7 @@ from lup.codescan.markers import NoteKind
 from lup.resolver.mailbox import AnswerDoor, QuestionMailbox
 from lup.resolver.models import MaterialQuestion, QuestionBatch
 from lup.devtools.dev.comments import FoundComment
+from lup.harness.ownership import GeneratedArtifacts, OwnedArtifact
 from lup.devtools.harness.resolve import (
     NoteTargetRef,
     admission_notes,
@@ -77,9 +78,13 @@ def test_a_flag_may_answer_a_question_the_run_has_not_asked_yet(
     assert mailbox.answers() == []
 
 
-def intake_note(kind: NoteKind = "note", condition: str | None = None) -> FoundComment:
+def intake_note(
+    kind: NoteKind = "note",
+    condition: str | None = None,
+    file: str = "parked.py",
+) -> FoundComment:
     return FoundComment(
-        file="parked.py",
+        file=file,
         start_line=2,
         end_line=2,
         read_start=1,
@@ -96,12 +101,37 @@ def test_resolver_intake_excludes_deferred_notes_from_the_inventory() -> None:
     parked = intake_note(kind="defer", condition="until v2 lands")
     bare = intake_note(kind="defer")
 
-    intake = resolver_intake([open_note, parked, bare])
+    intake = resolver_intake([open_note, parked, bare], GeneratedArtifacts(by_path={}))
 
     assert intake.actionable == [open_note]
+    assert intake.generated == []
     assert intake.carried == [
         "carrying deferred[until v2 lands] parked.py:2-2",
         "carrying deferred parked.py:2-2",
+    ]
+
+
+def test_resolver_intake_leaves_a_note_in_a_generated_artifact_to_its_generator() -> (
+    None
+):
+    own = intake_note(file="src/mine.py")
+    theirs = intake_note(file=".claude/plugins/lup/hooks/runtime/kernel/edit.py")
+    owned = GeneratedArtifacts(
+        by_path={
+            theirs.file: OwnedArtifact(
+                path=Path(theirs.file),
+                category="generated",
+                sha256="0" * 64,
+                semantic_id="harness.kernel.edit",
+            )
+        }
+    )
+
+    intake = resolver_intake([own, theirs], owned)
+
+    assert intake.actionable == [own]
+    assert intake.generated == [
+        "harness.kernel.edit owns .claude/plugins/lup/hooks/runtime/kernel/edit.py:2-2"
     ]
 
 
@@ -145,6 +175,7 @@ def test_an_admitted_note_target_that_names_no_open_note_is_refused() -> None:
         admission_notes(
             [NoteTargetRef(file=Path("parked.py"), line=2)],
             resolver_intake(
-                [intake_note(kind="defer", condition="until v2 lands")]
+                [intake_note(kind="defer", condition="until v2 lands")],
+                GeneratedArtifacts(by_path={}),
             ).actionable,
         )
