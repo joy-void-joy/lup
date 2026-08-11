@@ -107,6 +107,15 @@ class ResolverIntake(BaseModel):
     generated: list[str]
 
 
+# lup: There is no way to see what a run would plan without starting one. Every
+# resolve subcommand — supervise, questions, answer, actors, say, redirect, park
+# — operates on a run that already exists, so discovering an inventory means
+# committing to a run that leases a worktree per concern. Add `harness resolve
+# intake`, printing all three buckets this returns with file, line, and for a
+# generated note the owning `semantic_id`. Reported from downstream: answering
+# "is this good to clean and restart from scratch?" took a dozen calls of
+# reading this function, `scan_tracked`, and cross-referencing ownership by
+# hand — and that reconstruction is what found the bug fixed in #47.
 def resolver_intake(
     comments: list[FoundComment], owned: GeneratedArtifacts
 ) -> ResolverIntake:
