@@ -18,6 +18,8 @@ from lup.adapters.claude.harness_runtime import (
     ClaudeCliEvidence,
     claude_capability_probes,
 )
+from lup.adapters.claude.login import CLAUDE_LOGIN
+from lup.adapters.claude.profile_store import ClaudeProfileStore
 from lup.adapters.codex.harness import CodexSpellings
 from lup.adapters.codex.harness_runtime import (
     CodexCliEvidence,
@@ -30,6 +32,17 @@ from lup.devtools.harness.generate import (
     codex_generation_recipe,
 )
 from lup.harness.models import CapabilityEvidence, PromptDocument
+from lup.runtime.profiles import ProfileDirectory
+
+
+def claude_profile_directory() -> ProfileDirectory:
+    """The personal Claude account registry, as a directory to curate.
+
+    What a project falls back to when it keeps no accounts of its own: names
+    registered by hand, resolved against the login Claude Code itself writes.
+    """
+    return ProfileDirectory(ClaudeProfileStore(), CLAUDE_LOGIN)
+
 
 type NativeCapabilityEvidence = (
     CapabilityEvidence[ClaudeCliEvidence] | CapabilityEvidence[CodexCliEvidence]
