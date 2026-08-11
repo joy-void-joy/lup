@@ -317,7 +317,7 @@
     {
       "path": ".claude/plugins/lup/hooks/runtime/kernel/decision.py",
       "category": "generated",
-      "sha256": "72561aa5ecbfbc30236986b15b5cb4b8d41705c092f39652074276716fe5c037",
+      "sha256": "cbfca05d43777241f5825f81b35ba8e8e93e928a11ee13dc1fc1bff9eb5e9c42",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
