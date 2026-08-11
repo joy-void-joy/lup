@@ -317,7 +317,7 @@
     {
       "path": ".claude/plugins/lup/hooks/runtime/kernel/decision.py",
       "category": "generated",
-      "sha256": "cbfca05d43777241f5825f81b35ba8e8e93e928a11ee13dc1fc1bff9eb5e9c42",
+      "sha256": "f1fa7461e795dee3a13011ed185f6206148f253acb473252633d1a898a84399e",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -415,7 +415,7 @@
     {
       "path": "docs/contributing.md",
       "category": "generated",
-      "sha256": "c9640d4a8a613e89d31d9f1d0c510aca6be44de90c85a71a2fadbad9abb84923",
+      "sha256": "71265fa1d8e7cd599eaba86089eab1a1702c6ea545fc977ccc70049b90fe2442",
       "semantic_id": "docs.contributing",
       "executable": false
     },
@@ -429,14 +429,14 @@
     {
       "path": "docs/dev-tooling-decisions.md",
       "category": "generated",
-      "sha256": "055f9b342cc35c392d295575084364086e33ce9335fdc3937054ac5eeed3657c",
+      "sha256": "048953dd052c30341b842f3ab4f61b4e88d79d21c85fc8ddb72efe8a34c97719",
       "semantic_id": "docs.dev-tooling-decisions",
       "executable": false
     },
     {
       "path": "docs/harness.md",
       "category": "generated",
-      "sha256": "2d437878261b1778fd66ad974eb4a2a712b8e0cf7184272e1cdf0f69b84c9739",
+      "sha256": "96bded6173a0ea21a06274f949afc53cd12a6063df767f64e165b941641ac13a",
       "semantic_id": "docs.harness",
       "executable": false
     },
@@ -485,7 +485,7 @@
     {
       "path": "docs/quality-pipeline.md",
       "category": "generated",
-      "sha256": "1b134d24c16482d67f19581fef2529ed08f8678d96c53c357ed4a876d20402b5",
+      "sha256": "4c6998d6340ab4a8013bdcb4adbbed0c63c852d20adb028e1ac7fef55641a502",
       "semantic_id": "docs.quality-pipeline",
       "executable": false
     },

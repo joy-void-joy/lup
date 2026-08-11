@@ -21,9 +21,8 @@ from lup.devtools.dev.branches import unlanded_siblings
 from lup.devtools.dev.comments import FoundComment, scan_tracked
 from lup.devtools.harness.drift import (
     RepositoryWriter,
-    clean_repository_artifacts,
-    drift_reports,
-    report_drift,
+    inspect_drift,
+    report_stale,
 )
 from lup.devtools.harness.generate import NativeHarnessComposition
 from lup.devtools.utils import git, uv
@@ -237,16 +236,16 @@ def run_checks(
         typer.echo("application placement: ok")
     results.append(CheckOutcome(name="application placement", passed=True))
 
-    stale = [report for report in drift_reports(compositions) if not report.clean]
-    repository_is_current = clean_repository_artifacts(repository_writers)
-    if stale or not repository_is_current:
-        typer.echo(f"harness drift: FAIL ({len(stale)} tree(s))")
-        for report in stale:
-            report_drift(report, paths=True)
-        results.append(CheckOutcome(name="harness drift", passed=False))
-    else:
+    # The same reading the commit hook and the pipeline refuse on, asked here
+    # rather than recomposed, so a tree cannot be stale at one gate and current
+    # at another.
+    drift = inspect_drift(compositions, repository_writers)
+    if drift.clean:
         typer.echo("harness drift: ok")
-        results.append(CheckOutcome(name="harness drift", passed=True))
+    else:
+        typer.echo(f"harness drift: FAIL ({len(drift.stale_trees)} tree(s))")
+        report_stale(drift)
+    results.append(CheckOutcome(name="harness drift", passed=drift.clean))
 
     used = max(
         document_byte_size(claude_prompt_renderer().render(guidance)),

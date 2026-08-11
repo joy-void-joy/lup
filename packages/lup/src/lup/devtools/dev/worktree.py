@@ -8,6 +8,7 @@ import sh
 import typer
 from pydantic import BaseModel
 
+from lup.devtools.dev.commit_guard import CommitGuard, arm
 from lup.devtools.layout import get_tree_dir
 from lup.devtools.utils import (
     copy_to_clipboard,
@@ -166,6 +167,7 @@ def create(
         raise typer.Exit(1)
 
     register_merge_driver()
+    typer.echo(arm(CommitGuard(), worktree_path))
 
     # lup: The mechanism behind the note below, measured downstream: the sandbox
     # bind-mounts `/dev/null` over `.git/config.lock` and `.git/config.worktree`

@@ -5,12 +5,17 @@ nothing in a checkout says so until something asks. ``dev check`` asks, so what
 CI owes the project is to run it — one job, not a second list of gates that
 drifts from the first. Generated rather than scaffolded for the same reason:
 a copy handed over once is a list nobody updates.
+
+The drift check runs as its own step ahead of the gate, spelled with the same
+constant the commit hook installs, so a contributor who never armed the hook is
+refused here by the identical command rather than by a second rule about it.
 """
 
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict
 
+from lup.devtools.dev.commit_guard import DRIFT_COMMAND
 from lup.harness.banner import GeneratedBanner
 from lup.harness.materialization import write_generated_file
 from lup.harness.models import Artifact
@@ -61,6 +66,8 @@ jobs:
         with:
           enable-cache: true
       - run: uv sync {" ".join(spec.sync_flags)}
+      - name: Generated artifact drift
+        run: {DRIFT_COMMAND}
       - name: Quality gate
         run: {CHECK_COMMAND}
 """
