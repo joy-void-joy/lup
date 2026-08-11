@@ -269,22 +269,6 @@ def portable_harness(version: str = "0.2.0", root: Path | None = None) -> Harnes
             runner_targets=["pyright", "pytest", "ruff", "lup-devtools"],
             sandbox=HookSandbox(
                 extra_domains=["api.anthropic.com"],
-                # lup: This `~/.ssh` entry compiles to a read *deny* in the
-                # generated settings, which is what breaks SSH git: ssh cannot
-                # read its own config, so a host alias never resolves and no key
-                # or agent socket is reachable. Every `git push`, `git fetch` and
-                # `gh` call then needs the sandbox disabled, and the error names
-                # nothing about it. Per-command scoping is not available here:
-                # `credentials.files` takes a path and a mode only, and `mask`
-                # is doubly unavailable — a directory falls back to deny, and
-                # mask is ignored from a repository's settings, which is the
-                # only scope this generates. Narrowing the path does not fix it
-                # either, since ssh must read the key it authenticates with,
-                # and egress is blocked independently: the sandbox proxy
-                # allowlists by hostname over HTTP, and port 22 is not HTTP.
-                # So the real choices are `excludedCommands` for ssh/git/gh,
-                # HTTPS remotes through the proxy, or keeping the escalation
-                # and having the tooling recognize the signature and say so.
                 credential_paths=["~/.ssh", "~/.aws/credentials"],
                 # Every command in this project reaches its toolchain through
                 # `uv`, which locks its cache whenever it resolves dependencies
