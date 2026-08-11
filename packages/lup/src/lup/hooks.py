@@ -113,18 +113,6 @@ class LupHookOutput(BaseModel):
     decision: LupHookDecision | None = None
     reason: str = ""
     system_message: str | None = None
-    # lup: We want a sandbox decision on top of the permission one —
-    # `Decision(effect="allow", sandbox="escalate")` for git push — so the agent
-    # stops asking for sandbox escalation every time. `tmp/sandbox-escalation-
-    # briefing.md` reports the obvious rendering is impossible: for Bash this
-    # field is a per-tool whitelist applying only `command`, dropping unknown
-    # keys after validation, so `dangerouslyDisableSandbox` would render and do
-    # nothing. That is a prior session's finding, not reproduced: the hooks
-    # reference documents no whitelist either way, our tests only prove we emit
-    # the field, and the runtime is not readable from here. Settle it by
-    # injecting the key for one command and running `git ls-remote origin HEAD`,
-    # which fails sandboxed and succeeds outside — it needs a restart, since the
-    # runtime has already loaded the plugin.
     updated_input: JsonObject | None = Field(
         default=None,
         description=(
