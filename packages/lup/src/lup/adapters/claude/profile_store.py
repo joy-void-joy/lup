@@ -1,4 +1,11 @@
-"""Personal Claude account registry used by concrete CLI composition roots."""
+"""Personal Claude account registry used by concrete CLI composition roots.
+
+The registry file is a plain collaborator rather than a base class both
+capabilities extend: an implementation that inherited its reading would be
+inheriting behavior alongside a capability, and the two implementations here
+would then be one class answering for two powers. Composing it instead lets
+them share every byte of the format and stay separately constructible.
+"""
 
 from pathlib import Path
 
@@ -9,7 +16,7 @@ from lup.adapters.claude.config import (
     ClaudeProfileRegistry,
     ClaudeProfileSelection,
 )
-from lup.runtime.profiles import ProfileStore
+from lup.runtime.profiles import ProfileNames, ProfileRegistrar
 
 REGISTRY_PATH = Path.home() / ".lup" / "profiles.json"
 
@@ -29,8 +36,8 @@ class Registry(BaseModel):
     active: str | None = None
 
 
-class ClaudeProfileStore(ProfileStore):
-    """Read and atomically update personal profile selections.
+class AccountFile:
+    """The personal registry file, read and written whole.
 
     The origin for a project that keeps no accounts of its own: names are
     registered by hand and each carries wherever its home happens to live.
@@ -57,49 +64,6 @@ class ClaudeProfileStore(ProfileStore):
     def save_registry(self, registry: Registry) -> None:
         publish_atomic(self.registry_path, registry)
 
-    def names(self) -> list[str]:
-        return sorted(self.load_registry().profiles)
-
-    def config_dir_for(self, name: str) -> Path:
-        return Path(self.load_registry().profiles[name].config_dir).expanduser()
-
-    def active_profile(self) -> str | None:
-        return self.load_registry().active
-
-    def add_profile(self, name: str, config_dir: Path | None = None) -> Path:
-        home = config_dir if config_dir is not None else self.homes_root() / name
-        registry = self.load_registry()
-        profiles = dict(registry.profiles)
-        profiles[name] = Account(config_dir=str(home))
-        self.save_registry(
-            registry.model_copy(
-                update={
-                    "profiles": profiles,
-                    "active": registry.active or name,
-                }
-            )
-        )
-        return home.expanduser()
-
-    def set_active(self, name: str) -> None:
-        registry = self.load_registry()
-        if name not in registry.profiles:
-            raise KeyError(name)
-        self.save_registry(registry.model_copy(update={"active": name}))
-
-    def remove_profile(self, name: str) -> None:
-        registry = self.load_registry()
-        profiles = dict(registry.profiles)
-        profiles.pop(name, None)
-        self.save_registry(
-            registry.model_copy(
-                update={
-                    "profiles": profiles,
-                    "active": None if registry.active == name else registry.active,
-                }
-            )
-        )
-
     def resolver_registry(self) -> ClaudeProfileRegistry:
         """Project personal storage into immutable runtime selection data."""
         registry = self.load_registry()
@@ -123,3 +87,63 @@ class ClaudeProfileStore(ProfileStore):
             return registry.profiles[selected].config_directory
         except KeyError as error:
             raise KeyError(f"unknown Claude profile {selected!r}") from error
+
+
+class ClaudeProfileNames(ProfileNames):
+    """Read which accounts the personal registry holds, and what each selects."""
+
+    def __init__(self, accounts: AccountFile | None = None) -> None:
+        self.accounts = accounts or AccountFile()
+
+    def names(self) -> list[str]:
+        return sorted(self.accounts.load_registry().profiles)
+
+    def config_dir_for(self, name: str) -> Path:
+        registry = self.accounts.load_registry()
+        return Path(registry.profiles[name].config_dir).expanduser()
+
+    def active_profile(self) -> str | None:
+        return self.accounts.load_registry().active
+
+
+class ClaudeProfileRegistrar(ProfileRegistrar):
+    """Atomically add, select, and forget accounts in the personal registry."""
+
+    def __init__(self, accounts: AccountFile | None = None) -> None:
+        self.accounts = accounts or AccountFile()
+
+    def add_profile(self, name: str, config_dir: Path | None = None) -> Path:
+        home = (
+            config_dir if config_dir is not None else self.accounts.homes_root() / name
+        )
+        registry = self.accounts.load_registry()
+        profiles = dict(registry.profiles)
+        profiles[name] = Account(config_dir=str(home))
+        self.accounts.save_registry(
+            registry.model_copy(
+                update={
+                    "profiles": profiles,
+                    "active": registry.active or name,
+                }
+            )
+        )
+        return home.expanduser()
+
+    def set_active(self, name: str) -> None:
+        registry = self.accounts.load_registry()
+        if name not in registry.profiles:
+            raise KeyError(name)
+        self.accounts.save_registry(registry.model_copy(update={"active": name}))
+
+    def remove_profile(self, name: str) -> None:
+        registry = self.accounts.load_registry()
+        profiles = dict(registry.profiles)
+        profiles.pop(name, None)
+        self.accounts.save_registry(
+            registry.model_copy(
+                update={
+                    "profiles": profiles,
+                    "active": None if registry.active == name else registry.active,
+                }
+            )
+        )
