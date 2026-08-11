@@ -493,20 +493,16 @@ class ResolverCore:
             )
         return f" (moved: {', '.join(fields)})"
 
-    def adopted(self, state: ResolveState) -> ResolveState:
+    def adopted(self) -> ResolveState:
         """Re-stamp a run onto the current composition, on the human's word.
 
         Adoption is recorded rather than silent: the digest is what a later
         resume checks, so a run that adopted one composition and reports the
         old one would refuse itself again for a move nobody made.
         """
-        adopted = state.model_copy(
-            update={
-                "config": self.config,
-                "config_digest": resolver_config_digest(self.config),
-            }
+        adopted = self.repository.adopt(
+            self.config, resolver_config_digest(self.config)
         )
-        self.repository.save(adopted)
         self.state = adopted
         return adopted
 
@@ -532,7 +528,7 @@ class ResolverCore:
             if persisted != current
         ]
         if moved == ["configuration"] and self.adopt_config:
-            state = self.adopted(state)
+            state = self.adopted()
         elif moved:
             # Naming neither what moved nor the way out left one recovery to
             # guess at, and the run holding the most answers is the one that
