@@ -64,6 +64,7 @@ from lup.resolver.tools import (
 from lup.runtime.factory import SessionFactory
 from lup.types import EnvVars
 from lup.workspace.paths import project_root
+from lup.devtools.dev.branches import probe_base_freshness, require_fresh_base
 from lup.devtools.dev.comments import FoundComment, scan_tracked
 from lup.devtools.dev.remote_auth import check_remote_auth
 from lup.devtools.dev.worktree import (
@@ -542,6 +543,26 @@ def integration_branch(launcher: ProcessLauncher, root: Path, run_id: str) -> st
     return f"resolve/{run_id}{REVIEW_BRANCH_SUFFIX}"
 
 
+def fresh_run_base(launcher: ProcessLauncher, root: Path, starting: bool) -> str:
+    """The commit a new run pins, refused when the remote has already moved past it.
+
+    A run captures one base and cuts every lease from it, so a base that is
+    already behind is planned against code that moved: the pass this refusal
+    exists for planned thirteen concerns on a tree ten commits stale, where
+    merged work had already done part of them. Following the move instead
+    would mean re-basing every lease, re-deriving each diff, and re-running
+    intake mid-flight, which can add or drop concerns while work is leased.
+
+    Only starting is refused. A run already recorded keeps the base it
+    recorded, so a pull mid-run never strands it, and an invocation that can
+    only act on an existing run is left to its own refusal for naming one
+    that is not there.
+    """
+    if starting:
+        require_fresh_base(probe_base_freshness(launcher, root))
+    return resolver_git(launcher, root, ["rev-parse", "HEAD"])
+
+
 def detach_resolve(adapter: str, run_id: str | None, answers: list[str]) -> None:
     """Start a run that outlives this command, and say where to reach it.
 
@@ -644,7 +665,7 @@ def run_resolve(
     base_commit = (
         persisted.load().source.commit
         if persisted.exists()
-        else resolver_git(launcher, root, ["rev-parse", "HEAD"])
+        else fresh_run_base(launcher, root, abort_reason is None and admission is None)
     )
 
     async def execute() -> None:

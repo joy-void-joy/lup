@@ -148,7 +148,7 @@ class Joiner:
             # cannot tell "already joined" from "something upstream is wrong",
             # so it reasonably asks rather than reporting success, and every
             # such round costs a question and a resume. Skip what is already in.
-            if self.worktrees.already_joined(lease, parent):
+            if self.worktrees.contains(lease, parent):
                 joined.append(parent)
                 continue
             before = current

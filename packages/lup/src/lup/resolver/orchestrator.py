@@ -218,12 +218,23 @@ class WorktreeOrchestrator:
                 valid=False,
                 reason="worker changed branch authority",
             )
+        # A HEAD that moved is two different events sharing one symptom. One is
+        # a worker rewriting the lease's history out from under the base it was
+        # given, which invalidates everything measured from it. The other is a
+        # base this check carried while the lease's own branch advanced past it
+        # — a commit the run made, or one the turn made on top of the base —
+        # which changes nothing about what the diff below measures, because it
+        # measures from the base and the base is still in the history. Blaming
+        # the worker for both failed a concern for the run's own bookkeeping.
         current = self.head(lease)
-        if current != base_commit:
+        if current != base_commit and not self.contains(lease, base_commit):
             return DiffValidation(
                 concern_id=concern.id,
                 valid=False,
-                reason="worker changed commit or branch authority",
+                reason=(
+                    f"worker changed commit authority: {base_commit} is no longer "
+                    "in the lease's history"
+                ),
             )
         intent = self.launcher.launch(
             LaunchRequest(arguments=["git", "add", "-N", "."], cwd=lease.root)
@@ -305,6 +316,18 @@ class WorktreeOrchestrator:
         added = self.launcher.launch(
             LaunchRequest(arguments=["git", "add", "-A"], cwd=lease.root)
         )
+        # The change this diff measured can already be in the lease's history:
+        # the base advanced and the working tree is clean. Nothing is left to
+        # commit, and `git commit` refuses an empty one, so committing anyway
+        # would fail a concern whose work is present and fully accounted for.
+        staged = self.launcher.launch(
+            LaunchRequest(
+                arguments=["git", "diff", "--cached", "--quiet", "HEAD"],
+                cwd=lease.root,
+            )
+        )
+        if added.code == 0 and staged.code == 0:
+            return DiffValidation(concern_id=concern.id, valid=True, commit=current)
         committed = self.launcher.launch(
             LaunchRequest(
                 arguments=["git", "commit", "-m", f"resolve: {concern.title}"],
@@ -408,8 +431,8 @@ class WorktreeOrchestrator:
         lines = status.stdout.splitlines()
         return lines[0] if status.code == 0 and lines else None
 
-    def already_joined(self, lease: WritableRootLease, commit: str) -> bool:
-        """Report whether a parent is already contained in the worktree's HEAD."""
+    def contains(self, lease: WritableRootLease, commit: str) -> bool:
+        """Report whether a commit is already contained in the worktree's HEAD."""
         status = self.launcher.launch(
             LaunchRequest(
                 arguments=["git", "merge-base", "--is-ancestor", commit, "HEAD"],
