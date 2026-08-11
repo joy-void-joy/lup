@@ -21,9 +21,10 @@ auditor.
 
 Detection is deliberately liberal — `#` or `//`, any case, optional spaces — so
 the same note reads naturally in Python, shell, TypeScript, JSON, or Markdown.
-A colon is required so prose like a `## Notes` heading does not match. A marker
-is a feedback note unless its keyword is `ignore`, which stays the anti-pattern
-escape hatch.
+A colon is required so prose like a `## Notes` heading does not match, and the
+marker has to sit where its comment opens, so a note may spell out the syntax
+it is about without splitting itself in two. A marker is a feedback note unless
+its keyword is `ignore`, which stays the anti-pattern escape hatch.
 
 How a file is scanned depends on its language, because where a note can live
 does. Python source is parsed so a marker counts only where prose belongs — in a
@@ -84,6 +85,9 @@ SOLVED_HEAD_RE = re.compile(r"^solved\s*:\s*", re.IGNORECASE)
 TEMPLATE_MARKER_RE = re.compile(r"(?:(#|//)\s*)?TEMPLATE\s*:")
 FENCE_RE = re.compile(r"^\s*(```|~~~)")
 COMMENT_PREFIX_RE = re.compile(r"^\s*(#|//)")
+# The whole run a line opens its comment with, so a marker written `## lup:`
+# or `/// lup:` is read as sitting on that opener rather than inside its prose.
+COMMENT_OPENER_RE = re.compile(r"^\s*(#+|//+)")
 
 # lup: ignore[library-default] — Python's own source suffixes
 PYTHON_SUFFIXES = {".py", ".pyi"}
@@ -193,8 +197,10 @@ class MarkerScan:
 
     A note is a marker line plus the contiguous same-style comment lines below
     it, merged into one item; the run ends at a decoration line (no letters or
-    digits, e.g. the edge of a `# ====` banner), a foreign comment style, a new
-    marker, or prose outside a comment. Lines whose marker also matches
+    digits, e.g. the edge of a `# ====` banner), a foreign comment style, a
+    marker opening its own comment, or prose outside a comment. A marker
+    quoted inside a comment's prose ends no run, so a note is free to write
+    out the spelling it is about. Lines whose marker also matches
     `ignore`, fenced code, and backtick spans are skipped. In Python mode a
     marker counts only inside a comment or docstring, so marker text in an
     ordinary string literal is left alone.
@@ -221,6 +227,33 @@ class MarkerScan:
     def in_note_context(self, line_no: int, col: int) -> bool:
         return self.context is None or self.context.is_note_context(line_no, col)
 
+    def on_comment_opener(self, line: str, match: re.Match[str]) -> bool:
+        """Whether the marker sits on the run of `#` or `/` that opens the line.
+
+        Exact wherever a line opens with a comment at all, which is every
+        continuation line and most notes. A marker trailing anything else is
+        taken at its word: nothing here can tell a comment's `//` from the one
+        in `https://`, and reading a real note as a mention loses it silently.
+        """
+        opener = COMMENT_OPENER_RE.match(line)
+        return opener is None or match.start() < opener.end()
+
+    def at_comment_start(self, line_no: int, line: str, match: re.Match[str]) -> bool:
+        """Whether the marker at `match` is where its own comment begins.
+
+        A marker written into a comment's prose — a note quoting the `ignore`
+        hatch, or writing about this scanner at all — mentions the spelling
+        rather than using it, and opens nothing. Python's tokenizer says
+        exactly where a comment opens, and says yes everywhere in a file it
+        could not parse, keeping :class:`PythonContext`'s promise that a note
+        is never missed. Without one, the marker's own position against the
+        line's comment opener is the whole reading.
+        """
+        context = self.context
+        if context is not None and context.comment_at(line_no, match.start()):
+            return True
+        return self.on_comment_opener(line, match)
+
     def opens_note(self, line_no: int, line: str, match: re.Match[str]) -> bool:
         """Whether a marker at `match` starts a real note under the active mode."""
         if self.in_fence:
@@ -230,6 +263,8 @@ class MarkerScan:
         if self.mode == ScanMode.JS and match.group(1) == "#":
             return False
         if inside_inline_code(line, match.start()):
+            return False
+        if not self.at_comment_start(line_no, line, match):
             return False
         return self.in_note_context(line_no, match.start())
 
@@ -242,7 +277,8 @@ class MarkerScan:
                 return None
             if not self.in_note_context(line_no, prefix.start(1)):
                 return None
-            if self.marker.search(line) is not None:
+            marker = self.marker.search(line)
+            if marker is not None and self.on_comment_opener(line, marker):
                 return None
             content = line[prefix.end() :].strip()
             if content and not any(ch.isalnum() for ch in content):
