@@ -47,6 +47,17 @@ class MarkdownTable(BaseModel):
     # lup: Add an anti-pattern on `model_config =` and instruct the agent to use
     # the modern `class A(BaseModel, frozen=True, ...)` notation instead, then
     # convert the ones we already have — this line is one of them.
+    #
+    # lup: The human settled the scope: convert every site, library and
+    # application alike, knowing the cost. Measured at the time: 305 in source
+    # (301 library, 4 application) plus 35 in tests, of which ~201 are literal
+    # `ConfigDict(...)` and ~97 are alias-bound `model_config = FROZEN`, where
+    # `FROZEN = ConfigDict(frozen=True)` is declared once per module in
+    # resolver/models.py, runtime/models.py and harness/models.py. Converting the
+    # alias sites inlines `frozen=True` into ~97 class headers and removes those
+    # shared declarations. That DRY reversal was chosen deliberately, against the
+    # recommendation to exempt them — so do not treat an alias-bound site as
+    # exempt, and delete the aliases rather than leaving them unreferenced.
     model_config = ConfigDict(frozen=True)
 
     headers: list[str]
