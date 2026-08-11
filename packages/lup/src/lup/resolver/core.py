@@ -23,6 +23,7 @@ from lup.resolver.joins import Joiner
 from lup.resolver.journal import (
     ActorRef,
     Journal,
+    LeaseDriftEvent,
     RunFailedEvent,
 )
 from lup.resolver.mailbox import (
@@ -849,7 +850,12 @@ class ResolverCore:
                 ]
                 expected = parent_commits[0] if parent_commits else state.source.commit
             if outcome is not None:
-                self.restore_worktree(lease, outcome.commit or expected, True)
+                self.restore_worktree(
+                    lease,
+                    outcome.head or outcome.commit or expected,
+                    True,
+                    abandoned=not outcome.verified,
+                )
                 continue
             if not lease.root.exists() and not self.worktrees.branch_exists(lease):
                 self.restore_concern_progress(lease.concern_id)
@@ -858,9 +864,21 @@ class ResolverCore:
             self.restore_concern_progress(lease.concern_id)
 
     def restore_worktree(
-        self, lease: WritableRootLease, expected: str, terminal: bool
+        self,
+        lease: WritableRootLease,
+        expected: str,
+        terminal: bool,
+        *,
+        abandoned: bool = False,
     ) -> None:
-        """Restore one persisted branch and validate or reset its exact commit."""
+        """Restore one persisted branch and validate or reset its exact commit.
+
+        An abandoned tree is one no actor will open again in this run: the
+        concern failed, so nothing reads it and nothing merges from it. Its
+        drift is recorded rather than raised, because a resume that refuses
+        the whole run over it strands every healthy concern beside it — four
+        verified and five newly eligible, in the run that reported this.
+        """
         if not lease.root.exists():
             if self.worktrees.branch_exists(lease):
                 self.worktrees.restore(lease)
@@ -868,10 +886,19 @@ class ResolverCore:
                 self.worktrees.create(lease, expected)
         self.worktrees.branch(lease)
         if terminal:
-            if self.worktrees.head(lease) != expected:
+            found = self.worktrees.head(lease)
+            if found == expected:
+                return
+            if not abandoned:
                 raise ResolverInvariantError(
-                    f"persisted commit changed for {lease.concern_id}"
+                    f"persisted commit changed for {lease.concern_id}: expected "
+                    f"{expected}, found {found}"
                 )
+            self.journal.record(
+                LeaseDriftEvent(
+                    concern_id=lease.concern_id, expected=expected, found=found
+                )
+            )
             return
         # A park is a pause, not an abandonment. What sits in the working tree
         # is the turn a question interrupted — the join being resolved, or the

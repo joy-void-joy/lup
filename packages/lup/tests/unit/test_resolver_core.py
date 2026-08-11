@@ -46,6 +46,7 @@ from lup.resolver.core import (
     resolver_config_digest,
 )
 from lup.resolver.run import ResolverInvariantError
+from lup.resolver.journal import LeaseDriftEvent
 from lup.resolver.models import (
     AdmissionRequest,
     AnswerBatch,
@@ -1565,6 +1566,7 @@ def failure_leg_core(
     worker_response: Callable[[Path, str], JsonObject],
     reviewer_response: Callable[[Path, str], JsonObject],
     max_revision_rounds: int = 2,
+    max_declaration_attempts: int = 2,
 ) -> ResolverCore:
     return ResolverCore(
         ResolverConfig(
@@ -1579,6 +1581,7 @@ def failure_leg_core(
                 )
             ],
             max_revision_rounds=max_revision_rounds,
+            max_declaration_attempts=max_declaration_attempts,
         ),
         resolve_spec(),
         lambda context: resolver_test_factory(context.root, worker_response),
@@ -1637,6 +1640,227 @@ async def test_worker_crash_persists_the_failure_and_raises_a_group(
     assert progress["a"].status == ConcernStatus.FAILED
     assert progress["a"].reason == "worker exploded"
     assert any("worker exploded" in failure for failure in persisted.failures)
+
+
+def test_a_failed_concern_does_not_strand_the_leases_beside_it(
+    tmp_path: Path,
+) -> None:
+    """One stale pointer must not cost a resume every healthy concern.
+
+    A concern can only exhaust its rounds by committing work across several,
+    so its tree legitimately sits ahead of the base while no commit was ever
+    accepted. Restoring read that as the branch having moved under the run
+    and raised before any other lease was reached, which left four verified
+    concerns and five newly eligible ones unreachable through every resume.
+    """
+    launcher = LocalProcessLauncher()
+    workspace = failure_leg_workspace(tmp_path, launcher)
+    source = snapshot(workspace, launcher)
+    core = failure_leg_core(
+        tmp_path,
+        workspace,
+        launcher,
+        "stranded",
+        lambda _root, _name: {},
+        lambda _root, _name: {},
+    )
+    failed = WritableRootLease(
+        concern_id="a",
+        root=tmp_path / "resolver-worktrees" / "a",
+        branch="resolve/stranded/a",
+    )
+    healthy = WritableRootLease(
+        concern_id="b",
+        root=tmp_path / "resolver-worktrees" / "b",
+        branch="resolve/stranded/b",
+    )
+    core.worktrees.create(failed, source.commit)
+    core.worktrees.create(healthy, source.commit)
+    (failed.root / "work.txt").write_text("salvageable\n", encoding="utf-8")
+    for arguments in (["add", "-A"], ["commit", "-m", "work the worker committed"]):
+        status = launcher.launch(
+            LaunchRequest(arguments=["git", *arguments], cwd=failed.root)
+        )
+        assert status.code == 0, status.stderr
+    moved = core.worktrees.head(failed)
+
+    def base(identifier: str) -> DependencyBase:
+        return DependencyBase(
+            concern_id=identifier,
+            parent_concerns=[],
+            parent_commits=[],
+            commit=source.commit,
+        )
+
+    state = ResolveState(
+        config_digest="config-sha",
+        run_id="stranded",
+        phase=ResolvePhase.WORKERS,
+        source=source,
+        spec=resolve_spec(),
+        concerns=[concern("a"), concern("b")],
+        progress=[
+            ConcernProgress(concern_id="a", status=ConcernStatus.FAILED),
+            ConcernProgress(concern_id="b", status=ConcernStatus.RUNNING),
+        ],
+        leases=[failed, healthy],
+        bases=[base("a"), base("b")],
+        outcomes=[
+            # The shape a run persisted before an outcome carried its head:
+            # no accepted commit, and nothing recording where the tree ended.
+            ConcernOutcome(
+                concern_id="a",
+                branch=failed.branch,
+                verified=False,
+                failure="revision limit exhausted",
+            )
+        ],
+    )
+    core.persist(state)
+
+    core.restore_leases(state)
+
+    assert moved != source.commit
+    assert LeaseDriftEvent(concern_id="a", expected=source.commit, found=moved) in [
+        entry.event for entry in core.journal.read()
+    ]
+    persisted = core.repository.load()
+    progress = {item.concern_id: item.status for item in persisted.progress}
+    assert progress["b"] == ConcernStatus.LEASED
+    assert core.worktrees.head(failed) == moved
+
+
+@pytest.mark.asyncio
+async def test_a_declaration_mismatch_does_not_spend_a_revision_round(
+    tmp_path: Path,
+) -> None:
+    """The contract is bookkeeping, and it is not what the budget is for.
+
+    A worker learns where the declaration boundary is by crossing it, and
+    the two directions are reported one at a time: correcting an
+    under-declaration by declaring the whole expected set is what produces
+    an over-declaration. Charging both to the revision budget let a concern
+    fail on the third crossing with its six criteria never once evaluated.
+    """
+    launcher = LocalProcessLauncher()
+    workspace = failure_leg_workspace(tmp_path, launcher)
+    worker_calls: Counter[str] = Counter()
+
+    def worker_response(root: Path, output_name: str) -> JsonObject:
+        if output_name == MergeReport.__name__:
+            return {"completed": True, "summary": "integration join reviewed"}
+        assert output_name == WorkerReport.__name__
+        identifier = root.name
+        worker_calls[identifier] += 1
+        attempt = worker_calls[identifier]
+        (root / "a.txt").write_text(f"round {attempt}\n", encoding="utf-8")
+        report = {
+            "concern_id": identifier,
+            "changed": True,
+            "summary": f"implemented {identifier}",
+            "files_changed": ["a.txt"],
+        }
+        if attempt == 1:
+            # Changed a file it did not declare.
+            (root / "stray.txt").write_text("undeclared\n", encoding="utf-8")
+            return report
+        if attempt == 2:
+            # Corrected by declaring more, which crosses the other way.
+            (root / "stray.txt").unlink()
+            return {**report, "swept_beyond_scope": ["ghost.txt"]}
+        return report
+
+    def reviewer_response(root: Path, output_name: str) -> JsonObject:
+        assert output_name == ReviewReport.__name__
+        return {
+            "concern_id": root.name,
+            "accepted": True,
+            "generalized": True,
+            "reason": "criteria met",
+            "criteria_met": [f"{root.name}-done"],
+        }
+
+    core = failure_leg_core(
+        tmp_path,
+        workspace,
+        launcher,
+        "declaration-budget",
+        worker_response,
+        reviewer_response,
+        max_revision_rounds=0,
+    )
+
+    seed_approvals(core, [concern("a")])
+    manifest = await core.run(
+        ResolveInventory(
+            source=snapshot(workspace, launcher),
+            concerns=[concern("a")],
+        )
+    )
+
+    outcomes = {outcome.concern_id: outcome for outcome in manifest.outcomes}
+    assert outcomes["a"].verified is True
+    assert worker_calls == {"a": 3}
+
+
+@pytest.mark.asyncio
+async def test_a_concern_that_never_reached_its_criteria_says_so(
+    tmp_path: Path,
+) -> None:
+    """`revision limit exhausted` reads as "the work was not good enough".
+
+    A concern that spent every attempt on the declaration contract never had
+    its work judged at all, and reporting that as the same failure hides a
+    harness problem inside a work-quality verdict.
+    """
+    launcher = LocalProcessLauncher()
+    workspace = failure_leg_workspace(tmp_path, launcher)
+    worker_calls: Counter[str] = Counter()
+
+    def worker_response(root: Path, output_name: str) -> JsonObject:
+        if output_name == MergeReport.__name__:
+            return {"completed": True, "summary": "integration join reviewed"}
+        assert output_name == WorkerReport.__name__
+        worker_calls[root.name] += 1
+        (root / "a.txt").write_text(
+            f"round {worker_calls[root.name]}\n", encoding="utf-8"
+        )
+        return {
+            "concern_id": root.name,
+            "changed": True,
+            "summary": "implemented a",
+            "files_changed": ["a.txt"],
+            "swept_beyond_scope": ["ghost.txt"],
+        }
+
+    def reviewer_response(_root: Path, _output_name: str) -> JsonObject:
+        raise AssertionError("no round should have reached the reviewer")
+
+    core = failure_leg_core(
+        tmp_path,
+        workspace,
+        launcher,
+        "never-judged",
+        worker_response,
+        reviewer_response,
+        max_revision_rounds=1,
+        max_declaration_attempts=1,
+    )
+
+    seed_approvals(core, [concern("a")])
+    manifest = await core.run(
+        ResolveInventory(
+            source=snapshot(workspace, launcher),
+            concerns=[concern("a")],
+        )
+    )
+
+    outcomes = {outcome.concern_id: outcome for outcome in manifest.outcomes}
+    assert outcomes["a"].verified is False
+    assert outcomes["a"].failure == (
+        "declaration contract unmet: no round reached the criteria"
+    )
+    assert worker_calls == {"a": 3}
 
 
 @pytest.mark.asyncio

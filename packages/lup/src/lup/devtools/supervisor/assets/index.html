@@ -791,6 +791,8 @@
             return `<div class="entry note">${head}<div>residual beside round ${event.round}'s acceptance: ${escapeHtml(event.residual.join("; "))}</div></div>`;
           case "recheck_repeated":
             return `<div class="entry note">${head}<div><strong>${escapeHtml(event.concern_id)}</strong> reproduced a settled finding (${escapeHtml(event.criteria.join(", "))}) at ${escapeHtml(event.occasion)}</div></div>`;
+          case "lease_drift":
+            return `<div class="entry note">${head}<div><strong>${escapeHtml(event.concern_id)}</strong> left work on its branch: recorded <span class="mono">${escapeHtml(event.expected.slice(0, 12))}</span>, found <span class="mono">${escapeHtml(event.found.slice(0, 12))}</span></div></div>`;
           case "run_failed":
             return `<div class="entry note">${head}<div class="error">${escapeHtml(event.reason)}</div></div>`;
           default:
