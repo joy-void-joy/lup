@@ -74,10 +74,14 @@ would have nothing to do.
 
 ``codex/home.py`` versus ``claude/profile_store.py`` — the same concern
 answered differently, not a gap. Claude keeps several accounts as several
-config directories, so its store is a registry of named profiles. Codex
-keeps one rotating credential the runtime refreshes in place, so its store is
-per-worktree homes converging on one account home; copying that credential
-and diverging would strand every stale copy.
+config directories, so its side is a personal registry file with a naming
+and a registering capability composed over it. Codex keeps one rotating
+credential the runtime refreshes in place, so its side is per-worktree homes
+converging on one account home; copying that credential and diverging would
+strand every stale copy. The asymmetry left is that only Claude's origin is
+split into named capabilities — Codex reaches its home through one class and
+a selector — which follows from the same difference and is not a gap this
+sweep leaves open.
 
 Declined rather than absent
 ---------------------------
