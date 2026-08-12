@@ -38,7 +38,7 @@ from typing import Literal, NotRequired, TypedDict, cast, get_type_hints
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import CallToolResult, ContentBlock, ImageContent, TextContent, Tool
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, ValidationError
 
 from lup.types import Decorator, EnvVars, JsonObject
 
@@ -122,7 +122,7 @@ class LupMcpServerConfig(BaseModel):
 
     name: str
     server: Server
-    tool_names: list[str] = Field(default_factory=list)
+    tool_names: list[str] = []
 
 
 class RawStdioServerConfig(TypedDict):
@@ -254,6 +254,7 @@ def server_tool_names(server: McpServerEntry) -> list[str]:
             return []
 
 
+# lup: ignore[model-free-function] — a process entrypoint owning signals and transport
 def serve_stdio(config: LupMcpServerConfig) -> None:
     """Serve an in-process MCP server over stdio (blocking).
 

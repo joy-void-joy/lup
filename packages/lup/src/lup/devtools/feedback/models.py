@@ -8,7 +8,7 @@ The loaders live in ``state``, aggregation in ``metrics``, presentation in
 from pathlib import Path
 from typing import TypedDict
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict
 
 from lup.telemetry.metrics import MetricsSummary, ToolMetricsDict
 from lup.types import JsonValue
@@ -100,10 +100,8 @@ class FeedbackMetrics(BaseModel):
     total_sessions: int
     sessions_with_outcomes: int
     # Open per-backend tally, keyed by whatever sdk ids appear.
-    sessions_by_sdk: dict[str, int] = Field(  # lup: ignore[dict-str-payload]
-        default_factory=dict
-    )
-    results: list[SessionResult] = Field(default_factory=list)
+    sessions_by_sdk: dict[str, int] = {}  # lup: ignore[dict-str-payload]
+    results: list[SessionResult] = []
 
 
 # =============================================================================

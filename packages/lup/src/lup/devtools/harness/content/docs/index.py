@@ -36,6 +36,18 @@ class IndexGroup(BaseModel):
     blurb: str = ""
     """Prose between the heading and the table, for a group that needs it."""
 
+    def render(self) -> str:
+        """This heading, its blurb, and its rows as a Markdown table."""
+        table = MarkdownTable(
+            headers=["Page", "Answers"],
+            rows=[
+                [link(item.link, item.link), cell(item.answers)]
+                for item in self.entries
+            ],
+        )
+        blurb = f"{self.blurb}\n\n" if self.blurb else ""
+        return f"## {self.title}\n\n{blurb}{table.render()}\n"
+
 
 def entry(document: models.Document, answers: str) -> IndexEntry:
     """An index row for a declared document, linked by where it renders.
@@ -44,18 +56,6 @@ def entry(document: models.Document, answers: str) -> IndexEntry:
     outliving a rename: a page that moved moves its own row.
     """
     return IndexEntry(link=document.path.name, answers=answers)
-
-
-def group_text(group: IndexGroup) -> str:
-    """One heading, its blurb, and its rows as a Markdown table."""
-    table = MarkdownTable(
-        headers=["Page", "Answers"],
-        rows=[
-            [link(item.link, item.link), cell(item.answers)] for item in group.entries
-        ],
-    )
-    blurb = f"{group.blurb}\n\n" if group.blurb else ""
-    return f"## {group.title}\n\n{blurb}{table.render()}\n"
 
 
 def document_index(
@@ -68,7 +68,7 @@ def document_index(
         source=__name__,
         parts=[
             *preamble,
-            models.TextPart(text="".join(group_text(group) for group in groups)),
+            models.TextPart(text="".join(group.render() for group in groups)),
             *epilogue,
         ],
     )

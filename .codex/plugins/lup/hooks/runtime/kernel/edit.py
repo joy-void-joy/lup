@@ -263,20 +263,29 @@ def marker_decision(
     return None
 
 
+def empty_collection_literal(node: ast.expr | None) -> bool:
+    """Whether an expression builds an empty dict, list, or set on the spot.
+
+    The one question two rules ask: `empty-collection` to tell a deliberate
+    default from a build-then-append seed, and `default-factory` to tell a
+    factory an annotated literal could replace from one that does real work.
+    Answering it in one place is what keeps the two from disagreeing about the
+    same line.
+    """
+    match node:
+        case ast.Dict(keys=[]) | ast.List(elts=[]):
+            return True
+        case ast.Call(func=ast.Name(id="set"), args=[], keywords=[]):
+            return True
+    return False
+
+
 def empty_collection_exempt_lines(source: str) -> set[int]:
     """Return empty-collection lines whose AST context makes the seed deliberate."""
     try:
         tree = ast.parse(source)
     except SyntaxError:
         return set()
-
-    def is_empty_literal(node: ast.expr | None) -> bool:
-        match node:
-            case ast.Dict(keys=[]) | ast.List(elts=[]):
-                return True
-            case ast.Call(func=ast.Name(id="set"), args=[], keywords=[]):
-                return True
-        return False
 
     def is_self_attribute(node: ast.expr) -> bool:
         return (
@@ -288,7 +297,7 @@ def empty_collection_exempt_lines(source: str) -> set[int]:
     exempt: set[int] = set()
 
     def mark(value: ast.expr | None) -> None:
-        if value is not None and is_empty_literal(value):
+        if value is not None and empty_collection_literal(value):
             exempt.add(value.lineno)
 
     def is_loop(node: ast.AST) -> bool:
@@ -341,7 +350,7 @@ def empty_collection_exempt_lines(source: str) -> set[int]:
                     case (
                         ast.Assign(targets=[ast.Name(id=name)], value=value)
                         | ast.AnnAssign(target=ast.Name(id=name), value=value)
-                    ) if is_empty_literal(value):
+                    ) if empty_collection_literal(value):
                         loops = feeding[name] if name in feeding else None
                         if in_loop:
                             if loops is not None:
@@ -380,6 +389,44 @@ def empty_collection_exempt_lines(source: str) -> set[int]:
                                 mark(value)
                 exempt_scope_seeds(node)
     return exempt
+
+
+def empty_collection_factory(node: ast.expr) -> bool:
+    """Whether a ``default_factory=`` argument only ever returns an empty collection.
+
+    ``list``/``dict``/``set`` named as the factory, and the lambda spellings of
+    the same thing, are what an annotated literal default says instead. The
+    literal question is :func:`empty_collection_literal`'s, asked once.
+    """
+    match node:
+        case ast.Name(id="list" | "dict" | "set"):
+            return True
+        case ast.Lambda(body=body):
+            return empty_collection_literal(body)
+    return False
+
+
+def default_factory_exempt_lines(source: str) -> set[int]:
+    """Return ``default_factory=`` lines an annotated literal could not replace.
+
+    The rule's replacement is ``items: list[B] = []``: the annotation carries
+    the type and pydantic copies the literal per instance. That says the same
+    thing only where the factory builds an empty collection — a factory that
+    reads another declaration, stamps a value, or constructs a model does work
+    no literal expresses, so its line is cleared rather than suppressed.
+    """
+    try:
+        tree = ast.parse(source)
+    except (SyntaxError, ValueError):
+        return set()
+    return {
+        keyword.lineno
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        for keyword in node.keywords
+        if keyword.arg == "default_factory"
+        and not empty_collection_factory(keyword.value)
+    }
 
 
 def dict_get_exempt_lines(source: str) -> set[int]:
@@ -457,6 +504,8 @@ def refiner_for(rule_id: str) -> Callable[[str], set[int]] | None:
     holds the same function directly, and a test pins the two together.
     """
     match rule_id:
+        case "default-factory":
+            return default_factory_exempt_lines
         case "empty-collection":
             return empty_collection_exempt_lines
         case "dict-get":

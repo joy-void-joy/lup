@@ -165,7 +165,7 @@ class UnknownTool(SemanticToolBase):
     """An unclassified native tool invocation retained for audit."""
 
     identity: ToolIdentity
-    input: JsonObject = Field(default_factory=dict)
+    input: JsonObject = {}
 
     def decide_under(self, policies: "DeclaredPolicies") -> "Decision":
         return policies.unknown.decide(self)
@@ -277,4 +277,4 @@ class PolicyEvaluation(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     decision: Decision
-    observation_failures: list[ObservationFailure] = Field(default_factory=list)
+    observation_failures: list[ObservationFailure] = []

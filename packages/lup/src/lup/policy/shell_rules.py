@@ -31,7 +31,7 @@ Three nesting levels mirror how real tools are shaped:
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict
 
 from lup.policy.kernel.rows import ShellRuleRow
 
@@ -45,7 +45,7 @@ class ShellOperationRule(BaseModel):
 
     name: str
     effect: CommandEffect
-    ask_flags: list[str] = Field(default_factory=list)
+    ask_flags: list[str] = []
     reason: str = ""
 
 
@@ -61,9 +61,9 @@ class ShellSubcommandRule(BaseModel):
 
     name: str
     effect: CommandEffect = "allow"
-    ask_flags: list[str] = Field(default_factory=list)
-    read_verbs: list[str] = Field(default_factory=list)
-    operations: list[ShellOperationRule] = Field(default_factory=list)
+    ask_flags: list[str] = []
+    read_verbs: list[str] = []
+    operations: list[ShellOperationRule] = []
     reason: str = ""
 
 
@@ -85,11 +85,11 @@ class ShellCommandRule(BaseModel):
 
     name: str
     default_effect: CommandEffect = "allow"
-    ask_flags: list[str] = Field(default_factory=list)
-    allow_flags: list[str] = Field(default_factory=list)
-    read_verbs: list[str] = Field(default_factory=list)
-    value_flags: list[str] = Field(default_factory=list)
-    subcommands: list[ShellSubcommandRule] = Field(default_factory=list)
+    ask_flags: list[str] = []
+    allow_flags: list[str] = []
+    read_verbs: list[str] = []
+    value_flags: list[str] = []
+    subcommands: list[ShellSubcommandRule] = []
     reason: str = ""
 
 

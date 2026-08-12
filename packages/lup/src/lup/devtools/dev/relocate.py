@@ -91,6 +91,26 @@ class ModuleRun(BaseModel):
     start: int
     end: int
 
+    def renamed(
+        self, tokens: list[tokenize.TokenInfo], moves: list[Relocation]
+    ) -> list[str] | None:
+        """The replacement name tokens for this run, if it moved.
+
+        A move matches the module it names and every module beneath it, so
+        relocating a package carries its submodules without each being
+        declared. The result may be longer or shorter than what it replaces —
+        a move into or out of a subpackage changes the path's depth.
+        """
+        named = [
+            token.string
+            for token in tokens[self.start : self.end + 1]
+            if token.string != "."
+        ]
+        for move in moves:
+            if named[: len(move.old)] == move.old:
+                return [*move.new, *named[len(move.old) :]]
+        return None
+
 
 class ModuleEdit(BaseModel):
     """One module path to respell, as a span on one line of the source."""
@@ -160,25 +180,6 @@ def module_runs(tokens: list[tokenize.TokenInfo]) -> list[ModuleRun]:
     return list(found())
 
 
-def renamed_run(
-    tokens: list[tokenize.TokenInfo], run: ModuleRun, moves: list[Relocation]
-) -> list[str] | None:
-    """The replacement name tokens for one module run, if it moved.
-
-    A move matches the module it names and every module beneath it, so
-    relocating a package carries its submodules without each being declared.
-    The result may be longer or shorter than what it replaces — a move into or
-    out of a subpackage changes the path's depth.
-    """
-    named = [
-        token.string for token in tokens[run.start : run.end + 1] if token.string != "."
-    ]
-    for move in moves:
-        if named[: len(move.old)] == move.old:
-            return [*move.new, *named[len(move.old) :]]
-    return None
-
-
 def module_edits(
     tokens: list[tokenize.TokenInfo], moves: list[Relocation]
 ) -> list[ModuleEdit]:
@@ -191,7 +192,7 @@ def module_edits(
 
     def found() -> Iterator[ModuleEdit]:
         for run in module_runs(tokens):
-            renamed = renamed_run(tokens, run, moves)
+            renamed = run.renamed(tokens, moves)
             start, end = tokens[run.start].start, tokens[run.end].end
             if renamed is None or start[0] != end[0]:
                 continue

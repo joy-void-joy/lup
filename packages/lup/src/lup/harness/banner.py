@@ -189,7 +189,7 @@ class GeneratedBanner(BaseModel):
     command: str = Field(min_length=1)
     """The command a reader runs to rebuild this artifact, exactly as typed."""
 
-    notes: list[str] = Field(default_factory=list)
+    notes: list[str] = []
     """Anything else a reader of this one target needs, such as where the
     personal half of a generated configuration lives."""
 

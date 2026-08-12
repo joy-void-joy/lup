@@ -26,7 +26,6 @@ from lup.resolver.models import (
     DependencyBase,
     ResolvePhase,
     ResolveState,
-    run_tally,
 )
 from lup.resolver.state import PHASE_ORDER, ResolverStateRepository
 
@@ -98,8 +97,8 @@ class ResolveRun:
             if self.observer is not None:
                 self.observer.concern_changed(item)
         if self.observer is not None:
-            tally = run_tally(state)
-            if previous is None or run_tally(previous) != tally:
+            tally = state.tally()
+            if previous is None or previous.tally() != tally:
                 self.observer.tally_changed(tally)
 
     def progress_state(

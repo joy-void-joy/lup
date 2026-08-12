@@ -89,9 +89,7 @@ class IdeasInput(BaseModel):
     action: str = Field(description="One of: add, list, remove, set.")
     content: str = Field(default="", description="Idea text (for add).")
     index: int = Field(default=0, description="Index to remove (for remove).")
-    ideas: list[str] = Field(
-        default_factory=list, description="Full replacement list (for set)."
-    )
+    ideas: list[str] = Field(default=[], description="Full replacement list (for set).")
 
 
 # =====================================================================
@@ -109,7 +107,7 @@ class IdeasOutput(BaseModel):
     """Output for the ideas tool."""
 
     message: str
-    ideas: list[str] = Field(default_factory=list)
+    ideas: list[str] = []
 
 
 class ObserverNotesOutput(BaseModel):

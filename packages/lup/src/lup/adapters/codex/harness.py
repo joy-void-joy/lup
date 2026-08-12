@@ -7,6 +7,7 @@ from pathlib import Path
 
 import tomlkit
 from lup.adapters.codex.login import CODEX_LOGIN
+from lup.codescan.antipatterns import DOCUMENT_IN_HAND, antipattern_set_for
 from lup.harness.banner import (
     PROMPT_TEXT,
     REGENERATE_COMMAND,
@@ -500,9 +501,12 @@ def render_codex_rules(source: HookSet) -> str:
 class CodexHookRenderer(ArtifactRenderer[HookSet]):
     """Render Codex hooks, canonical kernel, and application policy rows."""
 
-    def __init__(self, plugin_name: str, worker_identity: str) -> None:
+    def __init__(
+        self, plugin_name: str, worker_identity: str, spellings: NativeSpellings
+    ) -> None:
         self.plugin_name = plugin_name
         self.worker_identity = worker_identity
+        self.spellings = spellings
 
     def render(self, source: HookSet) -> ArtifactTree:
         policy_hook = {
@@ -610,6 +614,9 @@ class CodexHookRenderer(ArtifactRenderer[HookSet]):
                         shell_rules=list(source.shell_rules),
                         recoverable_target_limit=source.recoverable_target_limit,
                         runner_targets=list(source.runner_targets),
+                        rules=antipattern_set_for(
+                            self.spellings.read_document(DOCUMENT_IN_HAND)
+                        ),
                     ),
                     semantic_id=source.id,
                 ),

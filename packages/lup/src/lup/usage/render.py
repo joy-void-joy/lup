@@ -10,7 +10,7 @@ from collections import Counter
 from datetime import date, datetime, timedelta
 from itertools import accumulate
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from rich.panel import Panel
 from rich.text import Text
 
@@ -80,7 +80,7 @@ class SpendSnapshot(BaseModel):
 class DaySnapshot(BaseModel):
     date: str
     total_tokens: int
-    by_model: list[ModelTokens] = Field(default_factory=list)
+    by_model: list[ModelTokens] = []
     message_count: int
 
 
@@ -119,6 +119,9 @@ def fmt_countdown(dt: datetime) -> str:
     return f"{m}m"
 
 
+# `beyond` is what the lookup answers with past the last threshold, so the
+# PaceLabel here is a result the caller supplies rather than a value acted on.
+# lup: ignore[model-free-function] — the ratio is the subject, PaceLabel the answer
 def pace_label(
     ratio: float,
     thresholds: list[PaceThreshold] = PACE_LABEL_THRESHOLDS,

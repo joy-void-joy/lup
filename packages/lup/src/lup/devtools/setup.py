@@ -165,7 +165,7 @@ class Integration(BaseModel):
         default=None, description="URL to open while the user follows the intro"
     )
     fields: list[PromptField] = Field(
-        default_factory=list, description="Env vars to prompt for, in order"
+        default=[], description="Env vars to prompt for, in order"
     )
     setup_func: Callable[[], EnvVars] | None = Field(
         default=None,
@@ -253,6 +253,7 @@ def build_status_table(integrations: list[Integration]) -> Table:
     return table
 
 
+# lup: ignore[model-free-function] — typer command factory; typer registers it
 def make_setup_command(integration: Integration) -> Callable[[], None]:
     """Build a zero-argument command that runs one integration's setup."""
 

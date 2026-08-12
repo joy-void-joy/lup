@@ -239,7 +239,7 @@ class Settings(BaseSettings):
     )
 
     extra_dirs: Annotated[list[Path], NoDecode] = Field(
-        default_factory=list,
+        default=[],
         validation_alias="AGENT_EXTRA_DIRS",
         description=(
             "Additional directories the agent may read beyond the session "

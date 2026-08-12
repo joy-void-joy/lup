@@ -20,7 +20,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, Field, TypeAdapter
+from pydantic import BaseModel, TypeAdapter
 
 from lup.channels.models import utc_now
 from lup.channels.stream import Stream
@@ -120,7 +120,7 @@ class JoinCompletedEvent(BaseModel):
     parent: str
     commit: str
     conflicted: bool
-    broke: list[str] = Field(default_factory=list)
+    broke: list[str] = []
 
 
 class JoinAuditEvent(BaseModel):
@@ -184,7 +184,7 @@ class BaseRefreshedEvent(BaseModel):
     branch: str
     was: str
     commit: str
-    conflicts: list[str] = Field(default_factory=list)
+    conflicts: list[str] = []
     reason: str = ""
 
 

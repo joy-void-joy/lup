@@ -76,8 +76,8 @@ class GhCheck(BaseModel):
 class GhPrDetail(BaseModel):
     """The `gh pr view --json` payload (aliases are gh's camelCase names)."""
 
-    reviews: list[GhReview] = Field(default_factory=list)
-    checks: list[GhCheck] = Field(default_factory=list, alias="statusCheckRollup")
+    reviews: list[GhReview] = []
+    checks: list[GhCheck] = Field(default=[], alias="statusCheckRollup")
     review_decision: str = Field(default="", alias="reviewDecision")
     mergeable: str = ""
 
@@ -200,6 +200,8 @@ class CreateResult(PRResult):
     url: str
 
 
+# The result already answers how to print itself; what is left is the flag.
+# lup: ignore[model-free-function] — subject is the CLI's --json choice
 def output_result(result: PRResult, as_json: bool) -> None:
     if as_json:
         output_json(result)

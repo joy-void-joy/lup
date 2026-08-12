@@ -42,46 +42,45 @@ class WorkflowSpec(BaseModel):
     sync_flags: list[str] = ["--all-extras"]
     """What `uv sync` is given before the gate runs."""
 
-
-def workflow_body(spec: WorkflowSpec) -> str:
-    """Render the workflow YAML from one project's declared choices."""
-    return f"""name: Quality
+    def body(self) -> str:
+        """Render the workflow YAML from these declared choices."""
+        return f"""name: Quality
 
 on:
   pull_request:
   push:
-    branches: [{", ".join(spec.branches)}]
+    branches: [{", ".join(self.branches)}]
 
 jobs:
   check:
-    runs-on: {spec.runner}
+    runs-on: {self.runner}
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
-      - run: uv sync {" ".join(spec.sync_flags)}
+      - run: uv sync {" ".join(self.sync_flags)}
       - name: Quality gate
         run: {CHECK_COMMAND}
 """
 
+    def artifact(self) -> Artifact:
+        """This workflow as one artifact, gated like any other generated file."""
+        return Artifact.generated(
+            path=WORKFLOW_PATH,
+            body=self.body(),
+            semantic_id="ci.quality",
+            banner=GeneratedBanner(source=__name__, command=WORKFLOW_COMMAND),
+        )
 
-def workflow_artifact(spec: WorkflowSpec) -> Artifact:
-    """The workflow as one artifact, gated like any other generated file."""
-    return Artifact.generated(
-        path=WORKFLOW_PATH,
-        body=workflow_body(spec),
-        semantic_id="ci.quality",
-        banner=GeneratedBanner(source=__name__, command=WORKFLOW_COMMAND),
-    )
 
-
+# lup: ignore[model-free-function] — driver writing the artifact into a tree
 def write_workflow(
     spec: WorkflowSpec, root: Path | None = None, *, check: bool = False
 ) -> Path:
     """Write or verify the generated continuous-integration workflow."""
     return write_generated_file(
-        workflow_artifact(spec),
+        spec.artifact(),
         root or project_root(),
         WORKFLOW_COMMAND,
         check=check,

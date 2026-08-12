@@ -166,6 +166,42 @@ class MarkerComment(BaseModel):
             case _:
                 return self
 
+    def classify_deferral(self) -> Self:
+        """Split a `defer:` or `solved:` head off this review note, if present.
+
+        A matching note comes back with the head's kind, the gate a bracketed
+        deferral stated parsed out, and ``text`` reduced to the message after
+        the head. Any other note — including prose that merely starts with the
+        word "defer", a bracket left empty, or a bracket that never closes with
+        `]:` — is returned unchanged as an ordinary ``note``, so a malformed
+        head degrades to visible open feedback instead of a silently mangled
+        condition or a claim nobody made. A bracket opened is a bracket that
+        has to say something; writing none at all is the ordinary way to park
+        work.
+        """
+        solved = SOLVED_HEAD_RE.match(self.text)
+        if solved is not None:
+            return self.model_copy(
+                update={"kind": "solved", "text": self.text[solved.end() :]}
+            )
+        head = DEFER_HEAD_RE.match(self.text)
+        if head is None:
+            return self
+        match head.group("condition"):
+            case None:
+                condition = None
+            case stated if stated.strip():
+                condition = stated.strip()
+            case _:
+                return self
+        return self.model_copy(
+            update={
+                "kind": "defer",
+                "condition": condition,
+                "text": self.text[head.end() :],
+            }
+        )
+
     def deferral_label(self) -> str:
         """How a parked note is labelled in a listing, gate included if stated."""
         return f"deferred[{self.condition}]" if self.condition else "deferred"
@@ -303,42 +339,6 @@ def find_markers(
     return MarkerScan(text, mode, marker=marker, ignore=ignore).notes()
 
 
-def classify_deferral(note: MarkerComment) -> MarkerComment:
-    """Split a `defer:` or `solved:` head off one review note, if present.
-
-    A matching note comes back with the head's kind, the gate a bracketed
-    deferral stated parsed out, and ``text`` reduced to the message after the
-    head. Any other note — including prose that merely starts with the word
-    "defer", a bracket left empty, or a bracket that never closes with `]:` —
-    is returned unchanged as an ordinary ``note``, so a malformed head
-    degrades to visible open feedback instead of a silently mangled condition
-    or a claim nobody made. A bracket opened is a bracket that has to say
-    something; writing none at all is the ordinary way to park work.
-    """
-    solved = SOLVED_HEAD_RE.match(note.text)
-    if solved is not None:
-        return note.model_copy(
-            update={"kind": "solved", "text": note.text[solved.end() :]}
-        )
-    head = DEFER_HEAD_RE.match(note.text)
-    if head is None:
-        return note
-    match head.group("condition"):
-        case None:
-            condition = None
-        case stated if stated.strip():
-            condition = stated.strip()
-        case _:
-            return note
-    return note.model_copy(
-        update={
-            "kind": "defer",
-            "condition": condition,
-            "text": note.text[head.end() :],
-        }
-    )
-
-
 def find_feedback(text: str, mode: str = ScanMode.TEXT) -> list[MarkerComment]:
     """Extract `# lup:` review notes from a file's text.
 
@@ -347,11 +347,11 @@ def find_feedback(text: str, mode: str = ScanMode.TEXT) -> list[MarkerComment]:
     covers the standalone file-level `# lup: ignore` too: it disables
     anti-pattern checks (see `lup.codescan.antipatterns`), never note gathering,
     so feedback in an opted-out file still surfaces. Each surviving note is
-    then classified through :func:`classify_deferral`, so parked work is
-    parked in the data rather than only in the prose.
+    then classified through :meth:`MarkerComment.classify_deferral`, so parked
+    work is parked in the data rather than only in the prose.
     """
     notes = find_markers(text, mode, marker=MARKER_RE, ignore=IGNORE_RE)
-    return [classify_deferral(note) for note in notes]
+    return [note.classify_deferral() for note in notes]
 
 
 class NoteTarget(BaseModel):
@@ -367,6 +367,23 @@ class NoteTarget(BaseModel):
     line: int
     text: str | None = None
 
+    def resolve(self, candidates: list[MarkerComment]) -> MarkerComment | None:
+        """Find the note this target names, tolerating drift when it carries text.
+
+        A text-bearing target picks the nearest candidate whose body matches
+        exactly, so an unchanged line scores zero and wins outright while a note
+        pushed up or down by an earlier edit is still found.
+        """
+        if self.text is None:
+            return next(
+                (note for note in candidates if note.start_line == self.line), None
+            )
+        return min(
+            [note for note in candidates if note.marker_text() == self.text],
+            key=lambda note: abs(note.start_line - self.line),
+            default=None,
+        )
+
 
 class NoteRemoval(BaseModel):
     """Rewritten text, the notes actually removed, and the targets not found."""
@@ -376,6 +393,7 @@ class NoteRemoval(BaseModel):
     missing: list[NoteTarget]
 
 
+# lup: ignore[model-free-function] — the line buffer is the subject, the note a span
 def without_note(lines: list[str], note: MarkerComment) -> None:
     """Drop a standalone note whole; leave an inline note's code behind."""
     head = lines[note.start_line - 1]
@@ -385,26 +403,6 @@ def without_note(lines: list[str], note: MarkerComment) -> None:
         lines[note.start_line - 1] = head_code.rstrip()
     else:
         del lines[note.start_line - 1 : note.end_line]
-
-
-def resolve_note(
-    candidates: list[MarkerComment], target: NoteTarget
-) -> MarkerComment | None:
-    """Find the note a target names, tolerating drift when it carries text.
-
-    A text-bearing target picks the nearest candidate whose body matches
-    exactly, so an unchanged line scores zero and wins outright while a note
-    pushed up or down by an earlier edit is still found.
-    """
-    if target.text is None:
-        return next(
-            (note for note in candidates if note.start_line == target.line), None
-        )
-    return min(
-        [note for note in candidates if note.marker_text() == target.text],
-        key=lambda note: abs(note.start_line - target.line),
-        default=None,
-    )
 
 
 def remove_notes(
@@ -423,9 +421,7 @@ def remove_notes(
     claimed: list[MarkerComment] = []
     missing: list[NoteTarget] = []
     for target in targets:
-        note = resolve_note(
-            [note for note in candidates if note not in claimed], target
-        )
+        note = target.resolve([note for note in candidates if note not in claimed])
         if note is None or (note.kind == "defer" and not wake):
             missing.append(target)
             continue
@@ -473,9 +469,7 @@ def solved_claims_only(
     missing: list[NoteTarget] = []
     refused: list[MarkerComment] = []
     for target in targets:
-        note = resolve_note(
-            [note for note in candidates if note not in claimed], target
-        )
+        note = target.resolve([note for note in candidates if note not in claimed])
         if note is None:
             missing.append(target)
             continue

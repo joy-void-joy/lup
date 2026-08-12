@@ -35,9 +35,16 @@ surviving directives for. Regex alone remains where a rule is text-shaped. The
 `lup.codescan.registry` index and the generated `docs/rules.md` reference list
 this family beside the boundary, spelling, and architecture rules.
 
+Most messages read the same to everyone, so most of the table is a literal. A
+rule that has to name a native tool asks the runtime for the words instead:
+`pdf-extraction` reaches `NativeSpellings.read_document`, and
+:func:`antipattern_set_for` compiles the table once per plugin so a runtime
+with no such tool ships the rule without one named.
+
 Each entry pairs a stable id and a compiled regex with the message the hook and
-auditor show. This module imports only the standard library and `pydantic`
-(directly and through `lup.codescan.common`) so the auditor can load it cheaply;
+auditor show. Beyond `pydantic` and the harness seam that spells those words,
+this module imports only the standard library (directly and through
+`lup.codescan.common`) so the auditor can load it cheaply;
 `# lup:` marker detection stays in `lup.codescan.markers`, and the shared scan
 core — ignore matching, comment-column tokenization, the masked line
 projections, the line cursor — in `lup.codescan.common`, which this set's
@@ -49,6 +56,7 @@ from collections.abc import Callable
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from lup.codescan.behaviour import RULE_ID as MODEL_FREE_FUNCTION_RULE_ID
 from lup.codescan.boundaries import (
     LIBRARY_DEFAULT_RULE_ID,
     NATIVE_SPELLING_RULE_ID,
@@ -65,8 +73,10 @@ from lup.codescan.common import (
     file_level_ignore,
     ignore_rule_ids,
 )
+from lup.harness.contracts import Spelling, Unsupported
 from lup.policy.kernel.edit import (
     IGNORE_RE,
+    default_factory_exempt_lines,
     dict_get_exempt_lines,
     empty_collection_exempt_lines,
     tuple_shape_exempt_lines,
@@ -134,7 +144,7 @@ class AntiPattern(BaseModel):
     """
 
 
-PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
+PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
     AntiPattern(
         id="any-type",
         pattern=re.compile(r"\bAny\b"),
@@ -257,9 +267,11 @@ PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         # legitimate site — `# lup: ignore[frozenset-shape]` marks it.
         id="frozenset-shape",
         pattern=re.compile(r"\bfrozenset\b"),
-        message="A declared `frozenset[...]` shape or constant is usually overkill — use "
-        "a dict or a purpose-built structure. For a genuinely immutable default argument "
-        "add `# lup: ignore[frozenset-shape]`",
+        message="A declared `frozenset[...]` shape or constant collapses structure a "
+        "`dict[...]` keeps — each member is a bare name, and whatever it keyed has nowhere "
+        "left to live. Use a dict, frozen once 3.15 ships `frozendict`, or a purpose-built "
+        "structure. For a genuinely immutable default argument add "
+        "`# lup: ignore[frozenset-shape]`",
     ),
     AntiPattern(
         # A declared or constructed set — `set(...)`/`set[...]` (no space
@@ -270,18 +282,38 @@ PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         # its "set" is not a standalone word.
         id="set-shape",
         pattern=re.compile(r"(?<!\.)\bset[\[(]|(?::|->)\s*set\b"),
-        message="A declared `set` is usually better as a dict, when the members "
-        "key something, or as a `list[BaseModel]`, when each member carries more "
-        "than its own name — a bare set of strings is often a record that lost "
-        "its other fields. Reach for membership on a local set comprehension "
+        message="A declared `set` collapses structure a `dict[...]` keeps — a bare set "
+        "of strings is a record that lost its other fields, so whatever each member "
+        "keyed has nowhere left to live. Use a dict when the members key something, or "
+        "a `list[BaseModel]` when each carries more than its own name. Reach for "
+        "membership on a local set comprehension "
         "instead of declaring the set as the interface. For a genuinely "
         "set-shaped value add `# lup: ignore[set-shape]`",
     ),
     AntiPattern(
+        # The refiner clears every factory that does work a literal cannot say,
+        # so what reaches a verdict is the empty collection the annotation
+        # already names. A pydantic field is an annotated class declaration,
+        # which empty-collection's refiner exempts, so no line trips both:
+        # this rule owns the factory spelling and that one owns the seed.
+        id="default-factory",
+        pattern=re.compile(r"\bdefault_factory\s*="),
+        refiner=Refiner(
+            exempt=default_factory_exempt_lines,
+            evidence="a factory doing work no annotated literal expresses",
+        ),
+        message="`Field(default_factory=list)` states in a factory what the annotation "
+        "already declares — write the default as a literal, `items: list[B] = []`, which "
+        "pydantic copies per instance. A factory that does real work (reads another "
+        "declaration, stamps a value, builds a model) is cleared by both gates on its "
+        "own, and a marker there is reported spurious",
+    ),
+    AntiPattern(
         # The refiner exempts deliberate defaults — __init__ state, call
         # kwargs, annotated module and class declarations — so what reaches a
-        # verdict is the build-then-append seed. The lookbehind keeps
-        # `==`/`!=`/`<=`/`>=` comparisons out.
+        # verdict is the build-then-append seed. The annotated class
+        # declaration among those is a pydantic field, whose factory spelling
+        # default-factory owns. The lookbehind keeps `==`/`!=`/`<=`/`>=` out.
         id="empty-collection",
         pattern=re.compile(r"(?<![=!<>])=\s*(?:\{\}|\[\]|set\(\))"),
         refiner=Refiner(
@@ -467,6 +499,73 @@ PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         "(unused `_` function parameters are exempt)",
     ),
 ]
+"""Python rules whose message reads the same whatever runtime is shown it."""
+
+
+DOCUMENT_IN_HAND = "the file"
+"""How the document rule names the file for a runtime to place in its sentence.
+
+A rule speaks about no particular path, so what a runtime interpolates here is
+the bare noun; whatever it says about handing a document over whole is the
+runtime's own sentence to make.
+"""
+
+NO_RUNTIME_READER = Unsupported(
+    reason="this table was compiled for no runtime, so none of them is speaking here"
+)
+"""The reader the neutral table carries: the repository audit and the rule
+reference are read by people rather than by a runtime, and inventing a tool
+name for them would be the platform leak the seam exists to prevent."""
+
+
+def pdf_extraction_rule(document_reader: Spelling) -> AntiPattern:
+    """The rule against PDF text extractors, completed by one runtime's reader.
+
+    The extractor's failure is silent: a scanned or image-only page yields an
+    empty string, which reads downstream as an empty document rather than as
+    an extraction that did not happen. Handing the file whole to the runtime's
+    own reader has no such mode.
+
+    Which tool that is belongs to the runtime, and this rule ships into every
+    plugin tree — so the sentence is asked for rather than written here, and a
+    runtime with nothing that takes a document contributes none, leaving the
+    failure mode stated and no tool named.
+    """
+    return AntiPattern(
+        id="pdf-extraction",
+        pattern=re.compile(
+            r"\b(?:import|from)\s+"
+            r"(?:fitz|pymupdf|pypdf|PyPDF2|PyPDF4|pdfplumber|pdfminer|pypdfium2)\b"
+        ),
+        message=" ".join(
+            words
+            for words in (
+                "A PDF text extractor comes back empty from a scanned or image-only "
+                "page, and an empty string reads as an empty document rather than as "
+                "an extraction that failed — read the document whole instead of "
+                "pulling text out of it.",
+                document_reader.in_prose(),
+            )
+            if words
+        ),
+    )
+
+
+def python_anti_patterns(
+    document_reader: Spelling,
+    portable: list[AntiPattern] = PORTABLE_PYTHON_ANTI_PATTERNS,
+) -> list[AntiPattern]:
+    """The Python table one runtime is shown, in its own words where it has them.
+
+    The portable rows are this library's reading of the conventions rather than
+    anything Python settles, so a project holding itself to a different set
+    passes its own — the same reason :class:`AntiPatternSet` takes its tables
+    instead of naming them.
+    """
+    return [*portable, pdf_extraction_rule(document_reader)]
+
+
+PYTHON_ANTI_PATTERNS: list[AntiPattern] = python_anti_patterns(NO_RUNTIME_READER)
 """Anti-patterns checked against added lines of `.py` files (mirrors the hook)."""
 
 
@@ -563,6 +662,7 @@ FOREIGN_RULE_IDS: frozenset[str] = frozenset(  # lup: ignore[frozenset-shape]
     {
         ABC_CAPABILITY_RULE_ID,
         LIBRARY_DEFAULT_RULE_ID,
+        MODEL_FREE_FUNCTION_RULE_ID,
         NATIVE_SPELLING_RULE_ID,
         OWN_MODEL_DISPATCH_RULE_ID,
         SEAM_BOUNDARY_RULE_ID,
@@ -631,6 +731,18 @@ class AntiPatternSet(BaseModel):
         return None
 
 
+def antipattern_set_for(document_reader: Spelling) -> AntiPatternSet:
+    """The tables one native plugin ships, its own reader spelled into them.
+
+    Generation reaches this once per runtime, so the rows compiled into a
+    plugin say what that runtime can actually do — and a runtime that declines
+    ships the rule with its reason stated and no tool it does not have named.
+    """
+    return AntiPatternSet(python=python_anti_patterns(document_reader))
+
+
+# `AntiPatternSet.for_suffix` is the operation; this binds the default table to it.
+# lup: ignore[model-free-function] — the suffix is the subject, the set its table
 def patterns_for_suffix(
     suffix: str, rules: AntiPatternSet | None = None
 ) -> list[AntiPattern] | None:

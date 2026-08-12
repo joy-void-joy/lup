@@ -99,8 +99,8 @@ class ClaudeSessionConfig(BaseModel):
     system_prompt: str = ""
     coding_harness_preset: bool = True
     tools: list[str] | None = None
-    allowed_tools: list[str] = Field(default_factory=list)
-    tool_servers: dict[str, McpServerEntry] = Field(default_factory=dict)
+    allowed_tools: list[str] = []
+    tool_servers: dict[str, McpServerEntry] = {}
     permission_mode: ClaudePermissionMode | None = "bypassPermissions"
     max_turns: int | None = None
     delta_streaming: bool = True
@@ -109,8 +109,8 @@ class ClaudeSessionConfig(BaseModel):
     max_thinking_tokens: int | None = SESSION_THINKING_TOKENS
     effort: Literal["low", "medium", "high", "xhigh", "max"] | None = None
     cwd: Path | None = None
-    add_dirs: list[Path] = Field(default_factory=list)
-    plugin_dirs: list[Path] = Field(default_factory=list)
+    add_dirs: list[Path] = []
+    plugin_dirs: list[Path] = []
     """Plugin directories this session loads, the way `--plugin-dir` does.
 
     A session given none of these resolves plugins through the project
@@ -119,11 +119,11 @@ class ClaudeSessionConfig(BaseModel):
     worktree can be judged by a plugin generated from another's commit.
     Naming the directory is what makes a session load the tree it is in.
     """
-    environment: EnvVars = Field(default_factory=dict)
+    environment: EnvVars = {}
     sandbox: ClaudeSandboxConfig | None = None
     hooks: LupHooksConfig | None = None
     submission_gate_resolver: SubmissionGateResolver | None = None
-    subagents: list[SubagentSpec] = Field(default_factory=list)
+    subagents: list[SubagentSpec] = []
     max_buffer_size: int | None = None
     stderr_tail_lines: int = Field(
         default=50,
@@ -134,9 +134,7 @@ class ClaudeSessionConfig(BaseModel):
         ),
     )
     setting_sources: list[ClaudeSettingSource] | None = None
-    extra_args: dict[str, str | None] = Field(  # lup: ignore[dict-str-payload]
-        default_factory=dict
-    )
+    extra_args: dict[str, str | None] = {}  # lup: ignore[dict-str-payload]
 
 
 type SubmissionBindingSource = Callable[[], TurnSubmission | None]
@@ -613,6 +611,7 @@ class ClaudeSessionOpener:
                 await state.disconnect()
 
 
+# lup: ignore[model-free-function] — composition root over the session config
 def create_claude_session_factory(
     config: ClaudeSessionConfig,
 ) -> SessionFactory:
@@ -680,6 +679,7 @@ def build_submission_server(
     )
 
 
+# lup: ignore[model-free-function] — renders the declaration into the SDK's shape
 def build_claude_options(
     config: ClaudeSessionConfig,
     *,

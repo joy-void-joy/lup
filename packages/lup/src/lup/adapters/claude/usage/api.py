@@ -99,7 +99,7 @@ class DailyModelTokens(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
     date: str
     tokens_by_model: dict[str, int] = Field(  # lup: ignore[dict-str-payload] — tally
-        alias="tokensByModel", default_factory=dict
+        alias="tokensByModel", default={}
     )
 
 
@@ -129,21 +129,17 @@ class StatsCache(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
     version: int = 0
     last_computed_date: str = Field(alias="lastComputedDate", default="")
-    daily_activity: list[DailyActivity] = Field(
-        alias="dailyActivity", default_factory=list
-    )
+    daily_activity: list[DailyActivity] = Field(alias="dailyActivity", default=[])
     daily_model_tokens: list[DailyModelTokens] = Field(
-        alias="dailyModelTokens", default_factory=list
+        alias="dailyModelTokens", default=[]
     )
-    model_usage: dict[str, ModelUsageEntry] = Field(
-        alias="modelUsage", default_factory=dict
-    )
+    model_usage: dict[str, ModelUsageEntry] = Field(alias="modelUsage", default={})
     total_sessions: int = Field(alias="totalSessions", default=0)
     total_messages: int = Field(alias="totalMessages", default=0)
     longest_session: LongestSession | None = Field(alias="longestSession", default=None)
     first_session_date: str = Field(alias="firstSessionDate", default="")
     hour_counts: dict[str, int] = Field(  # lup: ignore[dict-str-payload] — tally
-        alias="hourCounts", default_factory=dict
+        alias="hourCounts", default={}
     )
     total_speculation_time_saved_ms: int = Field(
         alias="totalSpeculationTimeSavedMs", default=0
@@ -161,6 +157,30 @@ class StatsCache(BaseModel):
             return date.fromisoformat(self.last_computed_date)
         except ValueError:
             return None
+
+    def daily_breakdown(
+        self, window_start: datetime, window_end: datetime
+    ) -> list["DailyBreakdown"]:
+        """Per-day token and activity breakdown for a time window."""
+        tokens_by_date = {
+            entry.date: entry.tokens_by_model for entry in self.daily_model_tokens
+        }
+        activity_by_date = {entry.date: entry for entry in self.daily_activity}
+
+        def day_breakdown(ds: str) -> DailyBreakdown:
+            by_model = tokens_by_date.get(ds, {})  # lup: ignore[dict-get] — date map
+            return DailyBreakdown(
+                date=ds,
+                total_tokens=sum(by_model.values()),
+                tokens_by_model=by_model,
+                activity=activity_by_date.get(ds),  # lup: ignore[dict-get] — date map
+            )
+
+        span = (window_end.date() - window_start.date()).days
+        return [
+            day_breakdown((window_start.date() + timedelta(days=offset)).isoformat())
+            for offset in range(span + 1)
+        ]
 
 
 # ── derived data ───────────────────────────────────────────
@@ -211,30 +231,3 @@ def load_stats(config_dir: Path) -> StatsCache | None:
         return StatsCache.model_validate_json(path.read_bytes())
     except (ValueError, OSError):
         return None
-
-
-def get_daily_breakdown(
-    stats: StatsCache,
-    window_start: datetime,
-    window_end: datetime,
-) -> list[DailyBreakdown]:
-    """Get per-day token and activity breakdown for a time window."""
-    tokens_by_date = {
-        entry.date: entry.tokens_by_model for entry in stats.daily_model_tokens
-    }
-    activity_by_date = {entry.date: entry for entry in stats.daily_activity}
-
-    def day_breakdown(ds: str) -> DailyBreakdown:
-        by_model = tokens_by_date.get(ds, {})  # lup: ignore[dict-get] — date map
-        return DailyBreakdown(
-            date=ds,
-            total_tokens=sum(by_model.values()),
-            tokens_by_model=by_model,
-            activity=activity_by_date.get(ds),  # lup: ignore[dict-get] — date map
-        )
-
-    span = (window_end.date() - window_start.date()).days
-    return [
-        day_breakdown((window_start.date() + timedelta(days=offset)).isoformat())
-        for offset in range(span + 1)
-    ]

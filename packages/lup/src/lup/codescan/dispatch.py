@@ -31,6 +31,7 @@ from lup.codescan.project import (
     descendants_of,
     dotted_name,
     imported_names,
+    named_types,
     resolve_name,
 )
 
@@ -50,21 +51,6 @@ REMEDY = (
     "declare the operation on the union's base and let each variant answer or "
     "decline it"
 )
-
-
-def named_types(node: ast.expr) -> list[str]:
-    """Every type name a narrowing call's second argument names.
-
-    Handles the tuple and ``|`` spellings of "any of these types" so a
-    multi-type check reports each project model it branches on.
-    """
-    match node:
-        case ast.Tuple(elts=elements):
-            return [name for element in elements for name in named_types(element)]
-        case ast.BinOp(left=left, op=ast.BitOr(), right=right):
-            return [*named_types(left), *named_types(right)]
-    name = dotted_name(node)
-    return [] if name is None else [name]
 
 
 def dispatch_violations(

@@ -16,7 +16,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict
 
 from lup.hooks import LupHooksConfig
 from lup.mcp import McpServerEntry
@@ -46,11 +46,11 @@ class SessionRequest(BaseModel):
     cwd: Path | None = None
     autonomy: SessionAutonomy | None = None
     tools: list[str] | None = None
-    allowed_tools: list[str] = Field(default_factory=list)
-    tool_servers: dict[str, McpServerEntry] = Field(default_factory=dict)
+    allowed_tools: list[str] = []
+    tool_servers: dict[str, McpServerEntry] = {}
     max_turns: int | None = None
     max_thinking_tokens: int | None = None
-    environment: EnvVars = Field(default_factory=dict)
+    environment: EnvVars = {}
     hooks: LupHooksConfig | None = None
 
 

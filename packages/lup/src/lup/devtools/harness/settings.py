@@ -25,7 +25,7 @@ class Settings(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     base: JsonObject = Field(
-        default_factory=dict,
+        default={},
         description=(
             "Runtime settings that are neither derived from the declaration "
             "nor permissions — the editor integrations and session defaults a "
@@ -33,15 +33,15 @@ class Settings(BaseModel):
         ),
     )
     official_plugins: JsonObject = Field(
-        default_factory=dict,
+        default={},
         description="Vendor-published plugins this project enables by name.",
     )
     allowed: list[JsonValue] = Field(
-        default_factory=list,
+        default=[],
         description="Tool patterns granted outright, before the served-tool grants.",
     )
     denied: list[JsonValue] = Field(
-        default_factory=list,
+        default=[],
         description="Tool patterns refused regardless of what else allows them.",
     )
 
@@ -83,6 +83,7 @@ def allowed_network_domains(hooks: HookSet) -> list[str]:
     return list(dict.fromkeys(merged))
 
 
+# lup: ignore[model-free-function] — renderer over a declaration and a plugin
 def project_settings(declared: Settings, plugin: Plugin | None) -> JsonObject:
     """Render the settings artifact, deriving every block it can.
 

@@ -126,7 +126,9 @@ def compile_claude(source: Harness) -> ArtifactTree:
         artifacts.extend(mcp_renderer.render(plugin).artifacts)
         if plugin.hooks is not None:
             artifacts.extend(
-                ClaudeHookRenderer(plugin.name, source.resolver.worker_identity)
+                ClaudeHookRenderer(
+                    plugin.name, source.resolver.worker_identity, spellings
+                )
                 .render(plugin.hooks)
                 .artifacts
             )
@@ -154,7 +156,9 @@ def compile_codex(source: Harness) -> ArtifactTree:
         artifacts.extend(manifest_renderer.render(plugin).artifacts)
         if plugin.hooks is not None:
             artifacts.extend(
-                CodexHookRenderer(plugin.name, source.resolver.worker_identity)
+                CodexHookRenderer(
+                    plugin.name, source.resolver.worker_identity, spellings
+                )
                 .render(plugin.hooks)
                 .artifacts
             )

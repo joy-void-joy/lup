@@ -402,6 +402,7 @@ class SupervisorSpawn(BaseModel):
     linger: bool = False
 
 
+# lup: ignore[model-free-function] — driver: it spawns the supervisor process
 @asynccontextmanager
 async def spawned_supervisor(
     spawn: SupervisorSpawn, run_id: str, adapter: str
@@ -789,6 +790,7 @@ def admitted_issues(numbers: list[int]) -> list[IssueEvidence]:
     return [open_issues[number] for number in numbers]
 
 
+# lup: ignore[model-free-function] — driver: it leases worktrees and runs sessions
 def run_resolve(
     composition: NativeHarnessComposition,
     run_id: str | None,
@@ -840,7 +842,6 @@ def run_resolve(
             create_codex_session_factory,
         )
         from lup.adapters.claude.config_home import (
-            configuration_fault,
             selected_config_home,
             untrusted_degradation,
             workspace_config_environment,
@@ -968,7 +969,7 @@ def run_resolve(
         # turned one environmental fault into an exception group of concern
         # failures and burned every lease the run had taken.
         fault = (
-            configuration_fault(selected_config_home(session_environment))
+            selected_config_home(session_environment).configuration_fault()
             if adapter == "claude"
             else None
         )

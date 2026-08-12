@@ -29,7 +29,7 @@ class ClaudeProfileRegistry(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    profiles: dict[str, ClaudeProfileSelection] = Field(default_factory=dict)
+    profiles: dict[str, ClaudeProfileSelection] = {}
     active: str | None = None
     default: ClaudeProfileSelection = Field(
         default_factory=lambda: ClaudeProfileSelection(
@@ -67,6 +67,9 @@ class ClaudeProfileResolver(ProfileResolver[ClaudeSessionConfig]):
         return ClaudeConfigDirectoryTransform(profile)
 
 
+# The registry declares which account is selected; naming the resolver and the
+# session factory that act on it would put both inside the declaration.
+# lup: ignore[model-free-function] — composition root over the registry
 def claude_profile_selector(
     registry: ClaudeProfileRegistry,
 ) -> ProfileSelector[ClaudeSessionConfig]:

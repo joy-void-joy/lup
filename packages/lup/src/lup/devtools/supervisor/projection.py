@@ -29,7 +29,6 @@ from lup.resolver.models import (
     ResolvePhase,
     ResolveState,
     VerificationRecord,
-    run_tally,
 )
 
 LIVENESS_WINDOW_SECONDS = 90.0
@@ -434,6 +433,6 @@ def supervisor_state(
         review=review,
         failures=state.failures,
         rerun_recipe=answer_recipe(adapter, state.run_id, unanswered_questions(views)),
-        progress_line=run_tally(state).concerns_line(),
+        progress_line=state.tally().concerns_line(),
         last_activity=activity,
     )

@@ -54,7 +54,7 @@ class SleepInput(BaseModel):
         ),
     )
     follow_ups: list[SleepFollowUp] = Field(
-        default_factory=list,
+        default=[],
         description=(
             "Messages to send at intervals during sleep. "
             "Cancelled (saved as ideas) if the user speaks before they fire."
@@ -161,7 +161,7 @@ class SleepOutput(BaseModel):
 
     reason: str = Field(default="timer")
     time: str = Field(default="")
-    fired_reminders: list[str] = Field(default_factory=list)
+    fired_reminders: list[str] = []
 
 
 class RemindOutput(BaseModel):

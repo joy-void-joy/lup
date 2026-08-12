@@ -5,7 +5,7 @@ import json
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 from lup.channels.models import publish_atomic
 from lup.runtime.contracts import SubmittedOutputStore
@@ -64,7 +64,7 @@ class FileSubmittedOutputStore(SubmittedOutputStore):
 class AttemptDocument(BaseModel):
     model_config = ConfigDict(frozen=True)
 
-    attempts: list[ValidationAttempt] = Field(default_factory=list)
+    attempts: list[ValidationAttempt] = []
 
 
 def record_attempt(store: SubmittedOutputStore, message: str) -> None:

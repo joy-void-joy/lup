@@ -22,11 +22,11 @@ class TurnFailure(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     message: str
-    blocks: list[AnyTurnBlock] = Field(default_factory=list)
+    blocks: list[AnyTurnBlock] = []
     usage: Usage = Field(default_factory=Usage)
     duration: timedelta = timedelta()
     identifiers: TurnIdentifiers | None = None
-    validation_history: list[ValidationAttempt] = Field(default_factory=list)
+    validation_history: list[ValidationAttempt] = []
 
     correctable: bool = True
     """Whether re-prompting could produce a different outcome.

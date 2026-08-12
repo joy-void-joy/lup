@@ -177,7 +177,7 @@ class SkillInvocation(SemanticPart):
     type: Literal["skill_invocation"] = "skill_invocation"
     plugin: NativeName
     skill: NativeName
-    arguments: list[InvocationArgument] = Field(default_factory=list)
+    arguments: list[InvocationArgument] = []
 
     def spell(self, renderer: "PromptRenderer") -> str:
         return renderer.own.render(self)
@@ -398,6 +398,19 @@ class PromptDocument(BaseModel):
             raise ValueError("a document rendered to its own artifact needs a source")
         return self.source
 
+    def prose(self) -> list[str]:
+        """Every literal prose payload this document carries, in reading order."""
+        return [text for part in self.parts if (text := part.text_payload) is not None]
+
+    def text_size(self) -> int:
+        """Lower bound on what this document costs a session, in UTF-8 bytes.
+
+        Every part renders to something, so the rendered document is never
+        smaller. This is the share a neutral module can measure without
+        reaching for an adapter to spell the rest.
+        """
+        return sum(document_byte_size(text) for text in self.prose())
+
 
 class Document(BaseModel):
     """One generated repository document and where it renders.
@@ -447,21 +460,6 @@ def document_byte_size(text: str) -> int:
     return len(text.encode("utf-8"))
 
 
-def document_prose(document: PromptDocument) -> list[str]:
-    """Every literal prose payload a document carries, in reading order."""
-    return [text for part in document.parts if (text := part.text_payload) is not None]
-
-
-def document_text_size(document: PromptDocument) -> int:
-    """Lower bound on what a document costs a session, in UTF-8 bytes.
-
-    Every part renders to something, so the rendered document is never smaller.
-    This is the share a neutral module can measure without reaching for an
-    adapter to spell the rest.
-    """
-    return sum(document_byte_size(text) for text in document_prose(document))
-
-
 class Argument(BaseModel):
     model_config = FROZEN
 
@@ -476,8 +474,8 @@ class Skill(BaseModel):
     id: str
     name: NativeName
     description: PortableText = Field(min_length=1, max_length=1024)
-    arguments: list[Argument] = Field(default_factory=list)
-    tools: list[ToolGrant] = Field(default_factory=list)
+    arguments: list[Argument] = []
+    tools: list[ToolGrant] = []
     argument_hint: PortableText | None = None
     prompt: PromptDocument
 
@@ -525,7 +523,7 @@ class Agent(BaseModel):
     name: NativeName
     description: PortableText = Field(min_length=1, max_length=1024)
     prompt: PromptDocument
-    tools: list[ToolName] = Field(default_factory=list)
+    tools: list[ToolName] = []
     model: ModelTier | None = None
     color: AgentColor | None = None
 
@@ -584,7 +582,7 @@ class McpServer(BaseModel):
     name: NativeName
     description: PortableText = Field(min_length=1, max_length=1024)
     command: str = Field(min_length=1)
-    arguments: list[McpCommandWord] = Field(default_factory=list)
+    arguments: list[McpCommandWord] = []
 
     def command_line(self, runtime: "NativeSpellings") -> list[str]:
         """Spell every argument for the runtime that will spawn this server."""
@@ -665,10 +663,10 @@ class HookSandbox(BaseModel):
     # socket for a documented reason rather than a wiring bug; and ssh/git/gh,
     # whose egress the HTTP proxy cannot carry. It is an array key merged across
     # scopes, so project settings can declare it.
-    extra_domains: list[str] = Field(default_factory=list)
-    credential_paths: list[str] = Field(default_factory=list)
+    extra_domains: list[str] = []
+    credential_paths: list[str] = []
     writable_paths: list[str] = Field(
-        default_factory=list,
+        default=[],
         description=(
             "Paths outside the workspace a sandboxed toolchain must write. "
             "A tool that cannot reach its cache fails only when the cache is "
@@ -684,11 +682,11 @@ class HookSet(BaseModel):
 
     id: str
     policy_ids: list[PolicyId]
-    allowed_fetch: list[HookUrlScope] = Field(default_factory=list)
-    denied_fetch: list[HookUrlScope] = Field(default_factory=list)
-    protected_edit_roots: list[Path] = Field(default_factory=list)
+    allowed_fetch: list[HookUrlScope] = []
+    denied_fetch: list[HookUrlScope] = []
+    protected_edit_roots: list[Path] = []
     path_roles: list[HookPathRole] = Field(
-        default_factory=list,
+        default=[],
         description=(
             "What each repository root is for. The lattice judges an action by "
             "what it does; a role supplies what the thing acted upon is for, "
@@ -696,21 +694,21 @@ class HookSet(BaseModel):
         ),
     )
     human_owned_files: list[Path] = Field(
-        default_factory=list,
+        default=[],
         description=(
             "Files whose content the human author owns; every edit is surfaced "
             "as Ask so agents propose changes instead of applying them"
         ),
     )
     shell_rules: list[ShellCommandRule] = Field(
-        default_factory=list,
+        default=[],
         description=(
             "The whole shell vocabulary this project judges safe, asked, or "
             "denied; declare a downstream toolchain here, not in the kernel"
         ),
     )
     runner_targets: list[str] = Field(
-        default_factory=list,
+        default=[],
         description=(
             "Which bare targets `uv run <target>` may reach without a question. "
             "A project's own toolchain, so the library holds no opinion: an "
@@ -757,7 +755,7 @@ class Plugin(BaseModel):
     description: PortableText = Field(min_length=1, max_length=1024)
     skills: list[Skill]
     agents: list[Agent]
-    mcp_servers: list[McpServer] = Field(default_factory=list)
+    mcp_servers: list[McpServer] = []
     hooks: HookSet | None = None
 
     @model_validator(mode="after")
@@ -779,9 +777,7 @@ class Harness(BaseModel):
 
     schema_version: int = 1
     generator_version: str
-    source_evidence: dict[str, str] = Field(  # lup: ignore[dict-str-payload]
-        default_factory=dict
-    )
+    source_evidence: dict[str, str] = {}  # lup: ignore[dict-str-payload]
     plugins: list[Plugin]
     guidance: PromptDocument
     resolver: ResolveSpec
@@ -910,7 +906,7 @@ class Harness(BaseModel):
         if unknown_agents:
             raise ValueError(f"delegations name unknown agents: {unknown_agents}")
 
-        used = document_text_size(self.guidance)
+        used = self.guidance.text_size()
         if used > GUIDANCE_BYTE_BUDGET:
             raise ValueError(
                 f"always-loaded guidance is {used} bytes, over the "

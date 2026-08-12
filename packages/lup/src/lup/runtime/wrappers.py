@@ -626,6 +626,10 @@ class SerializedSession(Session):
         )
 
 
+# Each config is one decorator's own settings, and no one of them is the
+# subject: what this does is compose them into a session, which belongs to
+# neither the configs nor the factory alone.
+# lup: ignore[model-free-function] — composition root wiring configs into a factory
 def decorated_session_factory(
     inner: SessionFactory,
     *,

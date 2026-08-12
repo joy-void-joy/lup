@@ -6,7 +6,7 @@ from collections.abc import Awaitable, Callable
 from datetime import timedelta
 from typing import Annotated, Literal, Self, overload
 
-from pydantic import BaseModel, ConfigDict, Discriminator, Field
+from pydantic import BaseModel, ConfigDict, Discriminator
 
 from lup.runtime.contracts import (
     EventStream,
@@ -148,7 +148,7 @@ class TurnToolCallBlock(TurnBlock):
     type: Literal["tool_call"] = "tool_call"
     id: str
     name: str
-    arguments: JsonObject = Field(default_factory=dict)
+    arguments: JsonObject = {}
 
     @property
     def telemetry_block(self) -> LupContentBlock:
@@ -359,10 +359,16 @@ class TurnRequest[T: BaseModel | None](BaseModel):
     output_type: type[T] | None = None
 
 
+# The overload pair and the implementation are one constructor, so each `def`
+# answers for itself: `input` is the value being packaged, in either of the two
+# spellings a caller may hand it, and the operation is building the request
+# around it rather than anything a TurnInput does to itself.
+# lup: ignore[model-free-function] — a constructor; TurnInput is what it packages
 @overload
 def turn_request(input: str | TurnInput) -> TurnRequest[None]: ...
 
 
+# lup: ignore[model-free-function] — a constructor; TurnInput is what it packages
 @overload
 def turn_request[T: BaseModel](
     input: str | TurnInput,
@@ -370,6 +376,7 @@ def turn_request[T: BaseModel](
 ) -> TurnRequest[T]: ...
 
 
+# lup: ignore[model-free-function] — a constructor; TurnInput is what it packages
 def turn_request[T: BaseModel](
     input: str | TurnInput,
     output_type: type[T] | None = None,

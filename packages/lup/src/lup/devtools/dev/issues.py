@@ -14,7 +14,7 @@ from pathlib import PurePosixPath
 from urllib.parse import urlsplit
 
 import sh
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from lup.devtools.utils import decode_stderr, gh, git
 from lup.resolver.models import IssueEvidence
@@ -45,7 +45,7 @@ class IssueRow(BaseModel):
     url: str
     title: str
     body: str = ""
-    labels: list[IssueLabel] = Field(default_factory=list)
+    labels: list[IssueLabel] = []
 
     def excluded_by(self, label: str) -> bool:
         return any(applied.name == label for applied in self.labels)

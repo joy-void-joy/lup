@@ -29,7 +29,7 @@ class CodexProfileRegistry(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    profiles: dict[str, CodexProfileSelection] = Field(default_factory=dict)
+    profiles: dict[str, CodexProfileSelection] = {}
     active: str | None = None
     default: CodexProfileSelection = Field(default_factory=CodexProfileSelection)
 
@@ -69,6 +69,9 @@ class CodexProfileResolver(ProfileResolver[CodexSessionConfig]):
         return CodexProfileTransform(profile)
 
 
+# The registry declares which profile is selected; naming the resolver and the
+# session factory that act on it would put both inside the declaration.
+# lup: ignore[model-free-function] — composition root over the registry
 def codex_profile_selector(
     registry: CodexProfileRegistry,
 ) -> ProfileSelector[CodexSessionConfig]:

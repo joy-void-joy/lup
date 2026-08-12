@@ -93,7 +93,7 @@ class AskedQuestion(BaseModel):
         description="The decision, stated so a human can answer it cold"
     )
     choices: list[str] = Field(
-        default_factory=list,
+        default=[],
         description="The allowed answers. Leave empty for free text.",
     )
     recommendation: str | None = Field(
@@ -117,7 +117,7 @@ class QueueQuestionsOutput(BaseModel):
 
 class AwaitAnswersInput(BaseModel):
     question_ids: list[str] = Field(
-        default_factory=list,
+        default=[],
         description="Ids from queue_questions. Empty waits for every one you queued.",
     )
 
@@ -137,11 +137,11 @@ class AwaitAnswersOutput(BaseModel):
 
 class CheckDeclarationInput(BaseModel):
     files_changed: list[Path] = Field(
-        default_factory=list,
+        default=[],
         description="Every path you believe you changed, as you would report it",
     )
     swept_beyond_scope: list[Path] = Field(
-        default_factory=list,
+        default=[],
         description="Paths you would report as swept beyond your concern's scope",
     )
 

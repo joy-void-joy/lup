@@ -11,7 +11,7 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 
 import sh
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict
 
 from lup.types import EnvVars
 
@@ -21,7 +21,7 @@ class LaunchRequest(BaseModel):
 
     arguments: list[str]
     cwd: Path
-    environment: EnvVars = Field(default_factory=dict)
+    environment: EnvVars = {}
 
 
 class ExitStatus(BaseModel):

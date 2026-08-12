@@ -44,8 +44,8 @@ class CompletedTurn(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    messages: list[TurnMessage] = Field(default_factory=list)
-    blocks: list[AnyTurnBlock] = Field(default_factory=list)
+    messages: list[TurnMessage] = []
+    blocks: list[AnyTurnBlock] = []
     usage: Usage = Field(default_factory=Usage)
     duration: timedelta = timedelta()
     identifiers: TurnIdentifiers | None = Field(

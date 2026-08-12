@@ -10,7 +10,7 @@ rather than by growing a second display that drifts from the first.
 from abc import ABC, abstractmethod
 from datetime import date, datetime
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict
 
 FROZEN = ConfigDict(frozen=True)
 
@@ -80,7 +80,7 @@ class DayUsage(BaseModel):
     day: date
     total_tokens: int
     weight: float
-    by_model: list[ModelTokens] = Field(default_factory=list)
+    by_model: list[ModelTokens] = []
     message_count: int = 0
 
 
@@ -90,10 +90,10 @@ class UsageReport(BaseModel):
     model_config = FROZEN
 
     runtime_name: str
-    windows: list[PacingWindow] = Field(default_factory=list)
+    windows: list[PacingWindow] = []
     spend: SpendWindow | None = None
-    daily: list[DayUsage] = Field(default_factory=list)
-    legend: list[ModelShare] = Field(default_factory=list)
+    daily: list[DayUsage] = []
+    legend: list[ModelShare] = []
     fresh_through: date | None = None
     """The last day the daily figures actually cover, where that is knowable.
 

@@ -153,7 +153,7 @@ class BaseRefresh(BaseModel):
     base rather than a branch — a lease combining what it inherited."""
     was: str
     commit: str
-    conflicts: list[Path] = Field(default_factory=list)
+    conflicts: list[Path] = []
     reason: str = ""
 
     def moved(self) -> bool:
@@ -166,7 +166,7 @@ class LeaseRefresh(BaseModel):
     model_config = FROZEN
 
     concern_id: str
-    conflicts: list[Path] = Field(default_factory=list)
+    conflicts: list[Path] = []
     applied: bool = False
     reason: str = ""
 
@@ -182,7 +182,7 @@ class RefreshReport(BaseModel):
     model_config = FROZEN
 
     base: BaseRefresh
-    leases: list[LeaseRefresh] = Field(default_factory=list)
+    leases: list[LeaseRefresh] = []
     applied: bool = False
 
 
@@ -200,8 +200,8 @@ class NoteClearance(BaseModel):
     model_config = FROZEN
 
     concern_id: str
-    cleared: list[ReviewNote] = Field(default_factory=list)
-    missing: list[ReviewNote] = Field(default_factory=list)
+    cleared: list[ReviewNote] = []
+    missing: list[ReviewNote] = []
 
 
 class NoteClearanceCommit(BaseModel):
@@ -256,9 +256,9 @@ class MaterialQuestion(BaseModel):
     id: str
     concern_id: str
     prompt: str
-    choices: list[str] = Field(default_factory=list)
+    choices: list[str] = []
     allowances: list[ConcernAllowance] = Field(
-        default_factory=list,
+        default=[],
         description=(
             "Every edit gate some choice here would need. An option the "
             "concern has no grant for is an option whose worker is denied, "
@@ -276,7 +276,7 @@ class MaterialQuestion(BaseModel):
         ),
     )
     criteria: list[str] = Field(
-        default_factory=list,
+        default=[],
         description=(
             "The lost criterion ids a re-check question is about, carried as "
             "data so an identical standing finding is recognized across "
@@ -360,11 +360,11 @@ class ConcernShape(BaseModel):
     id: str = Field(min_length=1)
     title: str
     spec: str
-    files: list[Path] = Field(default_factory=list)
+    files: list[Path] = []
     criteria: list[AcceptanceCriterion] = Field(min_length=1)
-    dependencies: list[str] = Field(default_factory=list)
-    questions: list[MaterialQuestion] = Field(default_factory=list)
-    allowances: list[ConcernAllowance] = Field(default_factory=list)
+    dependencies: list[str] = []
+    questions: list[MaterialQuestion] = []
+    allowances: list[ConcernAllowance] = []
     supersedes: str = Field(
         default="",
         description=(
@@ -421,7 +421,7 @@ class ConcernShape(BaseModel):
 class Concern(ConcernShape):
     """One generalized concern and its complete dependency/acceptance inputs."""
 
-    notes: list[ReviewNote] = Field(default_factory=list)
+    notes: list[ReviewNote] = []
     evidence: str = Field(
         default="",
         description=(
@@ -432,7 +432,7 @@ class Concern(ConcernShape):
         ),
     )
     issues: list[IssueEvidence] = Field(
-        default_factory=list,
+        default=[],
         description=(
             "The tracker issues this concern answers. Carried so a landing "
             "can say so where the issue is read, and so a reviewer can tell "
@@ -535,7 +535,7 @@ class WorkAssignment(BaseModel):
     lease: WritableRootLease
     dependency_base: DependencyBase
     rendered_skill_invocation: str
-    answers: list[QuestionAnswer] = Field(default_factory=list)
+    answers: list[QuestionAnswer] = []
 
 
 class WorkerContext(BaseModel):
@@ -555,7 +555,7 @@ class WorkerContext(BaseModel):
     """Whose session this is, which is not derivable from the concern: one
     recipe opens both a concern's worker and the merger that joins into it,
     and mail addressed to either must reach that one and not the other."""
-    allowances: list[ConcernAllowance] = Field(default_factory=list)
+    allowances: list[ConcernAllowance] = []
     """Edit gates a human granted with this concern. The merge and
     integration leases carry none: no concern approved them."""
 
@@ -574,10 +574,10 @@ class WorkerReport(BaseModel):
     concern_id: str
     changed: bool
     summary: str
-    files_changed: list[Path] = Field(default_factory=list)
-    swept_beyond_scope: list[Path] = Field(default_factory=list)
+    files_changed: list[Path] = []
+    swept_beyond_scope: list[Path] = []
     merge_notes: list[str] = Field(
-        default_factory=list,
+        default=[],
         description=(
             "What anyone joining this work needs to know that the diff does "
             "not say — a changed signature whose callers live elsewhere, an "
@@ -610,8 +610,8 @@ class ReviewReport(BaseModel):
     accepted: bool
     generalized: bool
     reason: str
-    residual: list[str] = Field(default_factory=list)
-    criteria_met: list[str] = Field(default_factory=list)
+    residual: list[str] = []
+    criteria_met: list[str] = []
 
 
 class DropCandidate(BaseModel):
@@ -628,7 +628,7 @@ class DropCandidate(BaseModel):
     parent: str
     path: Path
     missing: list[str]
-    lost_symbols: list[DefinedSymbol] = Field(default_factory=list)
+    lost_symbols: list[DefinedSymbol] = []
     """Definitions the parent introduced that the joined tree no longer holds.
 
     A separate finding from the missing lines, and a sharper one. Lines go
@@ -687,9 +687,9 @@ class MergeReport(BaseModel):
 
     completed: bool
     summary: str
-    unresolved_paths: list[Path] = Field(default_factory=list)
-    dispositions: list[HunkDisposition] = Field(default_factory=list)
-    out_of_conflict_edits: list[DeclaredEdit] = Field(default_factory=list)
+    unresolved_paths: list[Path] = []
+    dispositions: list[HunkDisposition] = []
+    out_of_conflict_edits: list[DeclaredEdit] = []
     blocked: str = Field(
         default="",
         description=(
@@ -727,10 +727,10 @@ class ConcernOutcome(BaseModel):
     """
     verified: bool = False
     integrated: bool = False
-    rounds: list[AgentRound] = Field(default_factory=list)
+    rounds: list[AgentRound] = []
     failure: str | None = None
-    notes_cleared: list[ReviewNote] = Field(default_factory=list)
-    notes_missing: list[ReviewNote] = Field(default_factory=list)
+    notes_cleared: list[ReviewNote] = []
+    notes_missing: list[ReviewNote] = []
 
 
 class ConcernExecution(BaseModel):
@@ -866,16 +866,16 @@ class ResolveRequest(ResolverSource):
     """
 
     source: SourceSnapshot
-    notes: list[InventoryNote] = Field(default_factory=list)
+    notes: list[InventoryNote] = []
     statements: list[str] = Field(
-        default_factory=list,
+        default=[],
         description=(
             "Evidence a human gave in their own words, for work nothing in "
             "the tree carries a note for."
         ),
     )
     issues: list[IssueEvidence] = Field(
-        default_factory=list,
+        default=[],
         description=(
             "Evidence the project's tracker already holds, so an issue does "
             "not have to be transcribed into a note before a run can act on "
@@ -927,9 +927,9 @@ class AdmissionRequest(BaseModel):
 
     model_config = FROZEN
 
-    notes: list[InventoryNote] = Field(default_factory=list)
-    statements: list[str] = Field(default_factory=list)
-    issues: list[IssueEvidence] = Field(default_factory=list)
+    notes: list[InventoryNote] = []
+    statements: list[str] = []
+    issues: list[IssueEvidence] = []
 
     @model_validator(mode="after")
     def evidence_is_present(self) -> "AdmissionRequest":
@@ -947,8 +947,8 @@ class ConcernAdmission(BaseModel):
     phase: ResolvePhase
     concerns: list[Concern]
     questions: list[MaterialQuestion]
-    outstanding: list[MaterialQuestion] = Field(default_factory=list)
-    rejected: list[str] = Field(default_factory=list)
+    outstanding: list[MaterialQuestion] = []
+    rejected: list[str] = []
 
 
 class ResolverConfig(BaseModel):
@@ -969,7 +969,7 @@ class ResolverConfig(BaseModel):
     both to one allowance let a concern oscillate between under-declaring
     and over-declaring until it failed with its criteria never evaluated.
     """
-    verification_commands: list["VerificationCommand"] = Field(default_factory=list)
+    verification_commands: list["VerificationCommand"] = []
 
     @model_validator(mode="after")
     def run_identity_is_path_safe(self) -> "ResolverConfig":
@@ -1057,16 +1057,16 @@ class ResolveState(BaseModel):
     progress: list[ConcernProgress]
     questions: QuestionBatch | None = None
     answers: AnswerBatch | None = None
-    eligibility: list[ConcernEligibility] = Field(default_factory=list)
-    leases: list[WritableRootLease] = Field(default_factory=list)
-    bases: list[DependencyBase] = Field(default_factory=list)
-    outcomes: list[ConcernOutcome] = Field(default_factory=list)
+    eligibility: list[ConcernEligibility] = []
+    leases: list[WritableRootLease] = []
+    bases: list[DependencyBase] = []
+    outcomes: list[ConcernOutcome] = []
     integration: IntegrationRecord | None = None
     join_progress: JoinProgress | None = None
-    verification: list[VerificationRecord] = Field(default_factory=list)
-    acceptances: list[VerificationAcceptance] = Field(default_factory=list)
-    cleanup: list[CleanupRecord] = Field(default_factory=list)
-    failures: list[str] = Field(default_factory=list)
+    verification: list[VerificationRecord] = []
+    acceptances: list[VerificationAcceptance] = []
+    cleanup: list[CleanupRecord] = []
+    failures: list[str] = []
     resume_from: ResolvePhase | None = None
     abort_reason: str = Field(
         default="",
@@ -1080,6 +1080,25 @@ class ResolveState(BaseModel):
     def root_base(self) -> SourceSnapshot:
         """What a concern with no dependency in this run is cut from."""
         return self.base if self.base is not None else self.source
+
+    def tally(self) -> "RunTally":
+        """Fold this persisted state into the aggregate a watcher wants."""
+        statuses = [item.status for item in self.progress]
+        return RunTally(
+            phase=self.phase,
+            total=len(statuses),
+            by_status={
+                status: statuses.count(status) for status in dict.fromkeys(statuses)
+            },
+            joined=len(self.join_progress.joined) if self.join_progress else 0,
+            join_total=(
+                len(
+                    [outcome for outcome in self.outcomes if outcome.commit is not None]
+                )
+                if self.join_progress
+                else 0
+            ),
+        )
 
     @model_validator(mode="after")
     def complete_progress_projection(self) -> "ResolveState":
@@ -1117,24 +1136,6 @@ class RunTally(BaseModel):
         return line
 
 
-def run_tally(state: ResolveState) -> RunTally:
-    """Fold one persisted state into the aggregate a watcher wants."""
-    statuses = [item.status for item in state.progress]
-    return RunTally(
-        phase=state.phase,
-        total=len(statuses),
-        by_status={
-            status: statuses.count(status) for status in dict.fromkeys(statuses)
-        },
-        joined=len(state.join_progress.joined) if state.join_progress else 0,
-        join_total=(
-            len([outcome for outcome in state.outcomes if outcome.commit is not None])
-            if state.join_progress
-            else 0
-        ),
-    )
-
-
 class ResolveManifest(BaseModel):
     model_config = FROZEN
 
@@ -1144,4 +1145,4 @@ class ResolveManifest(BaseModel):
     review_branch: str
     outcomes: list[ConcernOutcome]
     verification: list[VerificationRecord]
-    cleanup: list[CleanupRecord] = Field(default_factory=list)
+    cleanup: list[CleanupRecord] = []

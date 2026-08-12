@@ -266,8 +266,14 @@ def render_policy_data(
     shell_rules: list[ShellCommandRule],
     recoverable_target_limit: int,
     runner_targets: list[str],
+    rules: AntiPatternSet | None = None,
 ) -> str:
-    """Render one plugin's canonical policy rows without executable logic."""
+    """Render one plugin's canonical policy rows without executable logic.
+
+    ``rules`` is the table compiled for the runtime this plugin belongs to, so
+    a rule whose message names a native tool ships each tree the words that
+    tree can act on. Omitting it renders the runtime-neutral table.
+    """
     body = "\n\n".join(
         [
             "ALLOWED_FETCH_SCOPES: list[UrlScopeRow] = "
@@ -279,7 +285,7 @@ def render_policy_data(
                 runtime_path_rules(protected_roots, human_owned_files)
             ),
             "ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = "
-            + antipattern_rows_literal(bundled_antipattern_rows()),
+            + antipattern_rows_literal(bundled_antipattern_rows(rules)),
             "PATH_ROLES: list[PathRoleRow] = " + path_role_rows_literal(path_roles),
             "SHELL_RULES: list[ShellRuleRow] = "
             + shell_rule_rows_literal(erase_shell_rules(shell_rules)),

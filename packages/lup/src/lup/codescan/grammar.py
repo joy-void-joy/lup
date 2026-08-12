@@ -115,6 +115,12 @@ class ClassOrigin(BaseModel):
     path: Path
     line: int
 
+    def in_family(self, family: TypeFamily) -> bool:
+        """Whether this declaring class is the family, or directly inherits it."""
+        return self.name in family.classes or any(
+            base in family.classes for base in self.bases
+        )
+
 
 def base_name(node: ast.expr) -> str | None:
     """The declared name of one base class, unqualified and unsubscripted."""
@@ -228,13 +234,6 @@ def origin_of(
     )
 
 
-def in_family(origin: ClassOrigin, family: TypeFamily) -> bool:
-    """Whether a declaring class is the family, or directly inherits it."""
-    return origin.name in family.classes or any(
-        base in family.classes for base in origin.bases
-    )
-
-
 class SelectedSite(BaseModel):
     """One site a rule selected, tagged with the file and rule it came from."""
 
@@ -307,7 +306,7 @@ def refute(
             if (origin := origin_of(definition, trees)) is not None
         ]
         if not origins or any(
-            in_family(origin, chosen.rule.family) for origin in origins
+            origin.in_family(chosen.rule.family) for origin in origins
         ):
             return None
         foreign = origins[0]

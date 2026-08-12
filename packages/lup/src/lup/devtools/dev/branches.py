@@ -271,6 +271,7 @@ forking the functions that consult this one.
 """
 
 
+# lup: ignore[model-free-function] — subject is the branch; the PR is one signal
 def disposition_for(
     name: str,
     *,
@@ -779,7 +780,7 @@ class DeletionPlan(BaseModel):
     worktree: str | None = None
     stranded: bool = False
     has_remote: bool = False
-    actions: list[PlannedAction] = Field(default_factory=list)
+    actions: list[PlannedAction] = []
 
     def blocked(self) -> list[PlannedAction]:
         return [action for action in self.actions if action.verdict == "blocked"]
@@ -878,6 +879,7 @@ def plan_deletion(name: str, force: bool) -> DeletionPlan:
     )
 
 
+# lup: ignore[model-free-function] — driver: it prunes, reports, and exits
 def abort_deletion(plan: DeletionPlan, completed: list[str], failure: str) -> NoReturn:
     """Report a mid-deletion failure, repairing a stranded registration first.
 
@@ -912,6 +914,7 @@ def abort_deletion(plan: DeletionPlan, completed: list[str], failure: str) -> No
     raise typer.Exit(1)
 
 
+# lup: ignore[model-free-function] — driver: the plan describes, this runs git
 def run_deletion(plan: DeletionPlan, force: bool) -> None:
     """Carry out a plan whose preflight passed, reporting what actually ran."""
     completed: list[str] = []

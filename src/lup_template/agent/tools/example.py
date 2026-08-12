@@ -227,6 +227,13 @@ async def extract_answer(content: str, question: str) -> str:
 # --- Tool Implementations ---
 
 
+# A handler is a free function by construction: `lup_tool` reads the tool's
+# input schema off this first parameter, so SearchInput is the tool's call
+# signature rather than a subject. The behaviour — reaching a search API and
+# enriching what comes back — is the tool's, and a schema that only names
+# arguments has no operation to carry. Put behaviour on a model when the model
+# is what the operation is about, not when it is how the agent calls in.
+# lup: ignore[model-free-function] — MCP tool handler; SearchInput is its input schema
 @lup_tool(
     "Search for information using keyword queries. "
     "Use this when the agent needs to find data that isn't available in local notes "
@@ -267,6 +274,10 @@ async def search_example(params: SearchInput) -> SearchOutput:
     return SearchOutput(query=params.query, results=results, count=len(results))
 
 
+# FetchInput is what the agent fills in to call this tool, not a thing fetching
+# is done to: dispatching on the host and distilling the page are the tool's
+# work, and the helpers it calls carry the parts that are anyone's to reuse.
+# lup: ignore[model-free-function] — MCP tool handler; FetchInput is its input schema
 @lup_tool(
     "Fetch the content of a web page by URL, upgraded to structured data before "
     "it is returned: known hosts are routed to specialized API handlers instead "

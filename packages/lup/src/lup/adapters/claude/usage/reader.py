@@ -23,7 +23,6 @@ from lup.adapters.claude.usage.api import (
     UsageResponse,
     creds_path,
     fetch_usage,
-    get_daily_breakdown,
     load_stats,
 )
 from lup.usage.app import UsageEntry
@@ -180,6 +179,7 @@ def priced(rates: list[ModelRate], model_id: str, tokens: int) -> float:
     return tokens * rate
 
 
+# lup: ignore[model-free-function] — the bucket is the subject; the spec names it
 def pacing_window(spec: BucketSpec, bucket: UsageBucket | None) -> PacingWindow | None:
     """One published window, dropped where it does not say when it clears."""
     if bucket is None:
@@ -222,8 +222,8 @@ def days_from(stats: StatsCache, window_end: datetime) -> list[DayUsage]:
     A cache with no prices in it weighs a day by its raw tokens: the bars
     still rank the days against each other, which is most of what they say.
     """
-    breakdown = get_daily_breakdown(
-        stats, window_end - timedelta(days=TRAILING_DAYS), window_end
+    breakdown = stats.daily_breakdown(
+        window_end - timedelta(days=TRAILING_DAYS), window_end
     )
     # A 168-hour window can span eight calendar dates; keep the most recent.
     recent = breakdown[-TRAILING_DAYS:]

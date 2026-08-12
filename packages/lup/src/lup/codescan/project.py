@@ -20,7 +20,7 @@ import ast
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict
 
 from lup.codescan.common import (
     PythonContext,
@@ -46,10 +46,10 @@ class ClassSymbol(BaseModel):
     path: Path
     line: int
     bases: list[str]
-    abstract_methods: list[str] = Field(default_factory=list)
-    abstract_properties: list[str] = Field(default_factory=list)
-    concrete_callables: list[str] = Field(default_factory=list)
-    member_lines: dict[str, int] = Field(default_factory=dict)
+    abstract_methods: list[str] = []
+    abstract_properties: list[str] = []
+    concrete_callables: list[str] = []
+    member_lines: dict[str, int] = {}
 
 
 class RuleViolation(BaseModel):
@@ -65,7 +65,7 @@ class RuleViolation(BaseModel):
     path: Path
     line: int
     message: str
-    suppression_lines: list[int] = Field(default_factory=list)
+    suppression_lines: list[int] = []
 
 
 class RuleFinding(BaseModel):
@@ -102,6 +102,23 @@ def dotted_name(node: ast.expr) -> str | None:
         case ast.Subscript(value=value):
             return dotted_name(value)
     return None
+
+
+def named_types(node: ast.expr) -> list[str]:
+    """Every type name one expression names, without evaluating it.
+
+    Handles the tuple and ``|`` spellings of "any of these types", so a
+    narrowing call that checks several and an annotation that unions several
+    both report each one. A subscript reports the container it names rather
+    than its members: `list[TextPart]` is a list.
+    """
+    match node:
+        case ast.Tuple(elts=elements):
+            return [name for element in elements for name in named_types(element)]
+        case ast.BinOp(left=left, op=ast.BitOr(), right=right):
+            return [*named_types(left), *named_types(right)]
+    name = dotted_name(node)
+    return [] if name is None else [name]
 
 
 def imported_names(tree: ast.Module, module: str) -> dict[str, str]:
