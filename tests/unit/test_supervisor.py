@@ -36,6 +36,7 @@ from lup.resolver.mailbox import (
 )
 from lup.resolver.models import (
     AcceptanceCriterion,
+    ActorRef,
     AnswerBatch,
     Concern,
     ConcernProgress,
@@ -307,7 +308,8 @@ async def test_a_message_reaches_an_actor_without_parking_the_run(
         )
 
     assert sent.status_code == 200
-    assert [message.text for message in mailbox.messages_for("worker:a#1")] == [
+    waiting = mailbox.waiting(ActorRef(kind="worker", id="a"))
+    assert [message.text for message in waiting.messages] == [
         "the sibling already renamed that"
     ]
     assert sent.json()["status"] != "awaiting_answers"
@@ -319,8 +321,10 @@ async def test_a_broadcast_reaches_every_actor(tmp_path: Path) -> None:
     async with client_for(tmp_path) as client:
         await client.post("/api/runs/run-1/messages", json={"text": "stop rewriting"})
 
-    assert len(mailbox.messages_for("merger:integration#1")) == 1
-    assert len(mailbox.messages_for("reviewer:b#2")) == 1
+    merger = ActorRef(kind="merger", id="integration")
+    reviewer = ActorRef(kind="reviewer", id="b", round=2)
+    assert len(mailbox.waiting(merger).messages) == 1
+    assert len(mailbox.waiting(reviewer).messages) == 1
 
 
 async def test_the_review_branch_is_reported_with_no_decision_to_take(
@@ -459,6 +463,50 @@ def test_a_console_answer_may_reject_every_choice_a_design_question_offered(
     assert [(offer.question_id, offer.value) for offer in mailbox.offers()] == [
         ("q1", "neither, split it in two")
     ]
+
+
+def test_a_redirect_reports_who_it_is_queued_for_rather_than_that_it_sent(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`redirected <actor>` was printed on the strength of writing a file.
+
+    Nothing between writing the stream and the actor reading it said which
+    had happened, so a redirect that reached nobody read exactly like one
+    that stopped a worker mid-design.
+    """
+    build_run(tmp_path)
+    journal = Journal(tmp_path / "run-1")
+    journal.append(
+        ActorRef(kind="worker", id="alpha", round=2),
+        PhaseChangedEvent(phase=ResolvePhase.WORKERS),
+    )
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(doors, "resolve_state_root", lambda: tmp_path)
+        doors.redirect_actor(
+            text="superseded, stop", run_id="run-1", to="worker:alpha#1"
+        )
+        queued = capsys.readouterr().out
+        doors.list_actors(run_id="run-1")
+        listed = capsys.readouterr().out
+
+    assert "queued for worker:alpha#2" in queued
+    assert "undelivered redirect from agent: superseded, stop" in listed
+
+
+def test_a_message_for_an_actor_nobody_recorded_says_so(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Not a refusal: a concern that has not started reads this at its first turn."""
+    build_run(tmp_path)
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(doors, "resolve_state_root", lambda: tmp_path)
+        doors.say_to_actor(
+            text="the file moved", run_id="run-1", to="worker:ghost#1", in_reply_to=""
+        )
+
+    assert "names no actor this run has recorded yet" in capsys.readouterr().out
 
 
 def test_a_console_door_refuses_a_run_that_was_never_recorded(tmp_path: Path) -> None:

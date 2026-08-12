@@ -129,7 +129,13 @@ class ConcernExecutor:
         rounds: list[AgentRound] = []  # lup: ignore[empty-collection]
         feedback = ""
         maximum_round = self.config.max_revision_rounds + 1
-        for round_number in range(1, maximum_round + 1):
+        # Every attempt is a round on disk, because each one is a real worker
+        # turn and its record is keyed by that number. What differs is which
+        # allowance it spends: only a round the reviewer could have judged
+        # counts against the revision budget.
+        charged = 0
+        attempts = maximum_round + self.config.max_declaration_attempts
+        for round_number in range(1, attempts + 1):
             await self.run.transition_concern(concern.id, ConcernStatus.RUNNING)
             # The commit a turn is measured from is the lease's own head at the
             # moment the turn opens, read rather than carried. A carried value
@@ -145,7 +151,7 @@ class ConcernExecutor:
                 raise ResolverAwaitingAnswers(outstanding, [])
             await self.run.transition_concern(concern.id, ConcernStatus.VALIDATING)
             diff = self.worktrees.validate_and_commit(
-                concern, worker, lease, round_base, self.leases
+                concern, worker, lease, round_base, self.leases, base.commit
             )
             if not diff.valid or diff.commit is None:
                 review = ReviewReport(
@@ -160,10 +166,20 @@ class ConcernExecutor:
                 # integrated tree, so a concern could reach VERIFIED with a
                 # red suite and the breakage surfaced after every join with
                 # nothing to attribute it to.
+                # A failure a human has accepted for this concern is not a
+                # verdict the worker can act on: it accepted one it had
+                # already judged unfixable from inside the lease, and
+                # rejecting again would spend a revision round to reach the
+                # same place.
+                accepted = [
+                    acceptance.verification
+                    for acceptance in self.run.require().acceptances
+                    if acceptance.concern_id == concern.id
+                ]
                 broke = [
                     record.name
-                    for record in self.verifier.verify(lease.root)
-                    if not record.passed
+                    for record in self.verifier.verify(lease.root, base.commit)
+                    if not record.passed and record.name not in accepted
                 ]
                 review = (
                     ReviewReport(
@@ -237,6 +253,7 @@ class ConcernExecutor:
                         concern_id=concern.id,
                         branch=lease.branch,
                         commit=diff.commit,
+                        head=diff.commit,
                         verified=True,
                         rounds=rounds,
                         notes_cleared=cleared.clearance.cleared,
@@ -247,18 +264,29 @@ class ConcernExecutor:
                 concern.id, ConcernStatus.REVISING, review.reason
             )
             feedback = review.reason + "\n" + "\n".join(review.residual)
-        await self.run.transition_concern(
-            concern.id, ConcernStatus.FAILED, "revision limit exhausted"
+            charged += 0 if diff.declaration else 1
+            if charged == maximum_round:
+                break
+        # A concern that never spent a revision round never had its work
+        # judged at all: every attempt died on the declaration contract. That
+        # is the harness failing to let the work be evaluated rather than the
+        # work failing to hold up, and the two should not read alike.
+        failure = (
+            "revision limit exhausted"
+            if charged
+            else "declaration contract unmet: no round reached the criteria"
         )
+        await self.run.transition_concern(concern.id, ConcernStatus.FAILED, failure)
         return ConcernExecution(
             base=base,
             outcome=ConcernOutcome(
                 concern_id=concern.id,
                 branch=lease.branch,
                 commit=rounds[-1].diff.commit if rounds else None,
+                head=self.worktrees.head(lease),
                 verified=False,
                 rounds=rounds,
-                failure="revision limit exhausted",
+                failure=failure,
                 notes_cleared=cleared.clearance.cleared,
                 notes_missing=cleared.clearance.missing,
             ),

@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "e9d19c3f56e43b82f0fbebe6a02d9c22d51be09eaebd2c4d4848819319d3dee5",
+  "source_digest": "1242db848fe894421a15fd3d5c577cb46ece6e9907bfabc90455ffc4e521f28c",
   "target_requirements": [
     "claude-code"
   ],
@@ -9,7 +9,7 @@
     {
       "path": ".claude/CLAUDE.md",
       "category": "generated",
-      "sha256": "a141c9292f476385c8570173d91f9b3060c59e3406af34124f733a08894355e6",
+      "sha256": "5d999617336e7172ad1d4efdbd13561ba6e4e492b9ec08ebd169c08247633e8c",
       "semantic_id": "harness.guidance",
       "executable": false
     },
@@ -261,7 +261,7 @@
     {
       "path": ".claude/plugins/lup/commands/resolve.md",
       "category": "generated",
-      "sha256": "cc44e51869a21713ab3b4fd07dd6d8eb883b2b5059d1b496ec726cb953ef1613",
+      "sha256": "c175d753182300d71abebb792239c89b04879ec69304bbe6cee4b4d626ce7149",
       "semantic_id": "skill.resolve",
       "executable": false
     },
@@ -317,7 +317,7 @@
     {
       "path": ".claude/plugins/lup/hooks/runtime/kernel/decision.py",
       "category": "generated",
-      "sha256": "cbfca05d43777241f5825f81b35ba8e8e93e928a11ee13dc1fc1bff9eb5e9c42",
+      "sha256": "f1fa7461e795dee3a13011ed185f6206148f253acb473252633d1a898a84399e",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -436,7 +436,7 @@
     {
       "path": "docs/harness.md",
       "category": "generated",
-      "sha256": "2d437878261b1778fd66ad974eb4a2a712b8e0cf7184272e1cdf0f69b84c9739",
+      "sha256": "63165f7eb493c4b25ed3ad94d6f59251b9189af9b0d95af1debcfb5f6e14a498",
       "semantic_id": "docs.harness",
       "executable": false
     },
@@ -492,7 +492,7 @@
     {
       "path": "docs/resolver.md",
       "category": "generated",
-      "sha256": "33860675a0db00e31dce0cfd2e78329197ec9a87fe3ecc2b11e1daa911963766",
+      "sha256": "fed071af0515deb03e93ec9099da4e174d80527cee8d0b06c887131023fefe85",
       "semantic_id": "docs.resolver",
       "executable": false
     },
