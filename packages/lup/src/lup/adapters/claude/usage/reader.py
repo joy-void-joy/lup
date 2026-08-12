@@ -15,7 +15,7 @@ import httpx
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from lup.adapters.claude.harness import ClaudeSpellings
-from lup.adapters.claude.profile_store import ClaudeProfileStore
+from lup.adapters.claude.profile_store import AccountFile
 from lup.adapters.claude.usage.api import (
     ModelUsageEntry,
     StatsCache,
@@ -310,6 +310,6 @@ def claude_usage_entry() -> UsageEntry:
         runtime_name=ClaudeSpellings().runtime_name,
         help="Show live Claude Code usage with pacing bars (Anthropic OAuth).",
         open=lambda profile: ClaudeUsageReader(
-            ClaudeProfileStore().resolve_config_dir(profile)
+            AccountFile().resolve_config_dir(profile)
         ),
     )

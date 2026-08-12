@@ -13,7 +13,11 @@ import pytest
 from typer.testing import CliRunner
 
 from lup.adapters.claude.login import CLAUDE_LOGIN
-from lup.adapters.claude.profile_store import ClaudeProfileStore
+from lup.adapters.claude.profile_store import (
+    AccountFile,
+    ClaudeProfileNames,
+    ClaudeProfileRegistrar,
+)
 from lup.devtools.harness.profile_app import create_profile_app
 from lup.runtime.profiles import ProfileDirectory
 
@@ -24,8 +28,9 @@ runner = CliRunner(env=PLAIN_CONSOLE)
 
 @pytest.fixture
 def directory(tmp_path: Path) -> ProfileDirectory:
+    accounts = AccountFile(tmp_path / "profiles.json")
     return ProfileDirectory(
-        ClaudeProfileStore(tmp_path / "profiles.json"), CLAUDE_LOGIN
+        ClaudeProfileNames(accounts), ClaudeProfileRegistrar(accounts), CLAUDE_LOGIN
     )
 
 

@@ -30,7 +30,12 @@ from lup.resolver.contracts import (
     ResolverObserver,
     WorktreePreparer,
 )
+from lup.resolver.actors import create_inbox_hooks
 from lup.resolver.core import ResolverCore
+from lup.resolver.journal import Journal
+from lup.resolver.orchestrator import WorktreeOrchestrator
+from lup.resolver.rebase import BaseRefresher
+from lup.resolver.run import ResolveRun
 from lup.resolver.state import ResolverStateRepository
 from lup.resolver.models import (
     AdmissionRequest,
@@ -38,7 +43,10 @@ from lup.resolver.models import (
     ConcernAdmission,
     ConcernProgress,
     InventoryNote,
+    IssueEvidence,
+    ResolveManifest,
     MaterialQuestion,
+    RefreshReport,
     ResolvePhase,
     ResolveRequest,
     ResolverConfig,
@@ -51,13 +59,13 @@ from lup.channels.models import utc_now
 from lup.resolver.mailbox import (
     AnswerDoor,
     AnswerOffer,
+    MailboxConflictError,
     QuestionMailbox,
 )
 from lup.resolver.tools import (
     RESOLVER_CONCERN_ENV,
     RESOLVER_RUN_DIR_ENV,
     ResolverToolContext,
-    create_inbox_hooks,
     create_question_tools,
     read_resolver_tool_context,
 )
@@ -65,6 +73,7 @@ from lup.runtime.factory import SessionFactory
 from lup.types import EnvVars
 from lup.workspace.paths import project_root
 from lup.devtools.dev.comments import FoundComment, scan_tracked
+from lup.devtools.dev.issues import comment_on_issues, fetch_open_issues
 from lup.devtools.dev.remote_auth import check_remote_auth
 from lup.devtools.dev.worktree import (
     copy_gitignored_extras,
@@ -293,17 +302,66 @@ def offer_flag_answers(
     Offers may precede their questions, so a flag answers a question this
     run has not asked yet — which is why a fresh run no longer has to park
     once before its answers can count.
+
+    Every flag is put to the mailbox before any refusal is raised, so one
+    rerun is told about all of its stale corrections rather than finding the
+    next one only after it has dropped the last.
     """
+    refused: list[str] = []
     for identifier, value in provided.items():
-        mailbox.offer(
-            AnswerOffer(
-                run_id=run_id,
-                question_id=identifier,
-                value=value,
-                door=AnswerDoor.FLAG,
-                offered_at=utc_now(),
+        try:
+            mailbox.offer(
+                AnswerOffer(
+                    run_id=run_id,
+                    question_id=identifier,
+                    value=value,
+                    door=AnswerDoor.FLAG,
+                    offered_at=utc_now(),
+                )
             )
+        except MailboxConflictError as error:
+            refused.append(str(error))
+    if refused:
+        raise typer.BadParameter(
+            "\n  ".join(["", *refused])
+            + "\nDrop those --answer flags to resume on the settled values, or "
+            "end this run with --abort and start one answerable afresh."
         )
+
+
+def run_owned(workspace: Path, root: Path, worktree_root: Path) -> bool:
+    """Whether one run's own invocation already covers a workspace.
+
+    Pointing a run at a repository is an explicit act of trust by whoever
+    ran it, and a more deliberate one than accepting a dialog — so trust
+    reaches that repository, where the planner reads, and the checkouts the
+    run makes of it, where every worker and reviewer works. Those all land
+    under ``worktree_root``, which is what keeps "a checkout this run
+    created" a structural test rather than a judgement, and what stops trust
+    from reaching anywhere a session merely happens to be opened.
+    """
+    return workspace.resolve() == root.resolve() or workspace.is_relative_to(
+        worktree_root
+    )
+
+
+def inert_offers(mailbox: QuestionMailbox) -> list[str]:
+    """Every offer left on disk that a promoted answer has already outrun.
+
+    Nothing under ``.lup/resolve`` is ever unlinked, so an offer written
+    before a promoter took a different value stays there reading like a
+    pending correction while being none. A run that says what it found
+    cannot be mistaken for one holding the newer value.
+    """
+    settled = {
+        record.answer.question_id: record.answer.value for record in mailbox.answers()
+    }
+    return [
+        f"offer {offer.question_id}={offer.value!r} through the {offer.door} door "
+        f"never took: the question settled as {settled[offer.question_id]!r}"
+        for offer in mailbox.offers()
+        if offer.question_id in settled and settled[offer.question_id] != offer.value
+    ]
 
 
 def run_resolver_tool_server() -> None:
@@ -325,6 +383,7 @@ def run_resolver_tool_server() -> None:
                 QuestionMailbox(context.run_dir),
                 context.concern_id,
                 run_id=context.run_dir.name,
+                lease_root=context.lease_root,
             ),
         )
     )
@@ -542,6 +601,92 @@ def integration_branch(launcher: ProcessLauncher, root: Path, run_id: str) -> st
     return f"resolve/{run_id}{REVIEW_BRANCH_SUFFIX}"
 
 
+def refresh_run(
+    run_id: str = typer.Option(..., "--run-id", help="Run whose base to refresh"),
+    apply: bool = typer.Option(
+        False,
+        "--apply",
+        help="Take the refresh, instead of only reporting what it would do",
+    ),
+    base: str = typer.Option(
+        "",
+        "--base",
+        help="Adopt a base you resolved by hand, where the combine conflicts. "
+        "It must contain both the run's base and the branch, so a resolution "
+        "that dropped one side is refused rather than taken",
+    ),
+) -> None:
+    """Bring a run's base, and the leases holding work, up to its branch.
+
+    A run's leases are cut from the commit it was created at, so a fix made
+    on the integration branch to unblock that very run is the one thing it
+    cannot see. A lease made after this reads the branch as it stands; a
+    lease already holding work is merged only with `--apply`, and only where
+    this has already reported that it would not conflict.
+
+    Where combining the two bases conflicts, this reports the paths and
+    stops: the fix that unblocks a run touches what that run's notes are
+    about, so conflicting is ordinary. Resolve it once in a worktree and
+    hand the commit back with `--base`, rather than meeting the same
+    conflict again in every lease at land.
+
+    This takes the run's own lock, so the run's process must have exited —
+    which is exactly when a parked run is waiting for the fix to land.
+    """
+    root = project_root()
+    state_root = root / ".lup" / "resolve"
+    repository = ResolverStateRepository(state_root, run_id)
+    if not repository.exists():
+        raise typer.BadParameter(f"no resolver run {run_id!r} under {state_root}")
+    launcher = LocalProcessLauncher()
+    journal = Journal(repository.root)
+    run = ResolveRun(repository, journal)
+    run.state = repository.load()
+    report = BaseRefresher(run, WorktreeOrchestrator(launcher, root), journal).report(
+        run.require(), apply, base
+    )
+    for line in describe_refresh(report):
+        typer.echo(line)
+
+
+def describe_refresh(report: RefreshReport) -> list[str]:
+    """Render a refresh the way somebody deciding whether to take it reads it."""
+    base = report.base
+    if base.reason:
+        opening = f"base unchanged: {base.reason}"
+    elif not base.moved():
+        opening = f"base is current with {base.branch}"
+    else:
+        opening = (
+            f"base {'moved' if report.applied else 'would move'} onto {base.branch}: "
+            f"{base.was[:12]} → {base.commit[:12]}"
+        )
+    lines = [opening]
+    lines.extend(f"  {path.as_posix()}" for path in base.conflicts)
+    if base.conflicts:
+        lines.append(
+            f"Merge {base.was[:12]} with {base.branch} in a worktree, resolve it "
+            "there, then adopt the result: --base <commit> --apply."
+        )
+    if not base.moved():
+        return lines
+    for lease in report.leases:
+        if lease.conflicts:
+            lines.append(
+                f"  {lease.concern_id}: conflicts on "
+                + ", ".join(path.as_posix() for path in lease.conflicts)
+            )
+        elif lease.applied:
+            lines.append(f"  {lease.concern_id}: merged")
+        elif lease.reason:
+            lines.append(f"  {lease.concern_id}: {lease.reason}")
+        else:
+            lines.append(f"  {lease.concern_id}: merges cleanly")
+    if not report.applied and any(not lease.conflicts for lease in report.leases):
+        lines.append("Re-run with --apply to take it.")
+    return lines
+
+
 def detach_resolve(adapter: str, run_id: str | None, answers: list[str]) -> None:
     """Start a run that outlives this command, and say where to reach it.
 
@@ -586,10 +731,10 @@ def detach_resolve(adapter: str, run_id: str | None, answers: list[str]) -> None
 
 
 def admission_request(
-    statements: list[str], note_targets: list[str]
+    statements: list[str], note_targets: list[str], issue_numbers: list[int]
 ) -> AdmissionRequest | None:
     """Build the evidence one invocation asked to admit, if it asked at all."""
-    if not statements and not note_targets:
+    if not statements and not note_targets and not issue_numbers:
         return None
     targets = parse_note_targets(note_targets)
     intake = resolver_intake(
@@ -597,8 +742,51 @@ def admission_request(
     )
     scanned = intake.actionable if targets else []
     return AdmissionRequest(
-        notes=admission_notes(targets, scanned), statements=statements
+        notes=admission_notes(targets, scanned),
+        statements=statements,
+        issues=admitted_issues(issue_numbers),
     )
+
+
+def answer_issues(concerns: list[Concern], manifest: ResolveManifest) -> list[int]:
+    """Say on each answered issue where the work that answers it now sits.
+
+    Only issues whose concern reached the review branch, because a concern
+    that failed has nothing to point at and an issue told about work that
+    does not exist is worse than an issue told nothing. Commented, never
+    closed: a run's reviewer passing is not a human having read the code.
+    """
+    landed = {outcome.concern_id for outcome in manifest.outcomes if outcome.integrated}
+    answered = {
+        issue.number: issue
+        for concern in concerns
+        if concern.id in landed
+        for issue in concern.issues
+    }
+    if not answered:
+        return []
+    return comment_on_issues(
+        sorted(answered.values(), key=lambda issue: issue.number),
+        f"Addressed on review branch `{manifest.review_branch}` by resolver run "
+        f"`{manifest.run_id}`. Left open: the branch still wants a human review.",
+    )
+
+
+def admitted_issues(numbers: list[int]) -> list[IssueEvidence]:
+    """Locate each named issue among the open ones, refusing any it cannot.
+
+    Read from the tracker rather than retyped, so a concern admitted from an
+    issue is grounded in exactly what intake would have planned from — and a
+    number that names nothing open is a typo worth refusing at the flag
+    rather than a concern planned from silence.
+    """
+    if not numbers:
+        return []
+    open_issues = {issue.number: issue for issue in fetch_open_issues()}
+    missing = [str(number) for number in numbers if number not in open_issues]
+    if missing:
+        raise typer.BadParameter("no open issue numbered: " + ", ".join(missing))
+    return [open_issues[number] for number in numbers]
 
 
 def run_resolve(
@@ -610,6 +798,8 @@ def run_resolve(
     supervisor: SupervisorSpawn | None = None,
     admission: AdmissionRequest | None = None,
     model: ConfiguredModel | None = None,
+    adopt_config: bool = False,
+    take_issues: bool = True,
 ) -> None:
     """Drive the shared persisted resolver through one explicit native adapter."""
     provided = parse_answer_flags(answers)
@@ -633,19 +823,10 @@ def run_resolve(
     resolved_run_id = run_id or (
         "resolve-" + resolver_git(launcher, root, ["rev-parse", "--short=12", "HEAD"])
     )
-    # Every concern worktree is created from here, so it is what a worker's
-    # own diff is measured against when scoping the note gate. A run that
-    # already exists takes its own recorded base rather than today's HEAD:
-    # this value reaches the config digest, so re-deriving it made every
-    # commit refuse to resume the run that was parked before it — including
-    # the commit fixing the defect that parked it.
     state_root = root / ".lup" / "resolve"
-    persisted = ResolverStateRepository(state_root, resolved_run_id)
-    base_commit = (
-        persisted.load().source.commit
-        if persisted.exists()
-        else resolver_git(launcher, root, ["rev-parse", "HEAD"])
-    )
+    # Every worktree this run leases lands under here, which is what makes
+    # "a checkout lup created" a structural test rather than a judgement.
+    worktree_root = root.parent / f"{root.name}-resolve-{resolved_run_id}"
 
     async def execute() -> None:
         from lup.adapters.claude.runtime import (
@@ -657,6 +838,12 @@ def run_resolve(
             CodexMcpServerConfig,
             CodexSessionConfig,
             create_codex_session_factory,
+        )
+        from lup.adapters.claude.config_home import (
+            configuration_fault,
+            selected_config_home,
+            untrusted_degradation,
+            workspace_config_environment,
         )
         from lup.adapters.claude.hooks import CLAUDE_SEMANTICS
         from lup.adapters.codex.hooks import CODEX_SEMANTICS
@@ -737,6 +924,57 @@ def run_resolve(
                 f"{adapter!r}; sessions use the adapter's native default model."
             )
 
+        def isolated_claude_environment(
+            environment: EnvVars, workspace: Path
+        ) -> EnvVars:
+            """One workspace's sessions, on a configuration document of their own.
+
+            Every worker starts by reading Claude's configuration document and
+            writing it back, so a phase that opens them together has each one
+            reading what the others are still writing: a run of eleven lost
+            six to a truncated parse and the remaining five never started,
+            with no concern having produced code. A document per workspace
+            removes the shared file the race needs, which is why neither a
+            lock nor a cap on how many run at once appears anywhere here.
+
+            Trust rides along because it is written into that same document.
+            An untrusted workspace does not fail a session — Claude drops the
+            repository's declared permissions, warns into that session's own
+            stderr and carries on — so a run without this establishes nothing
+            and reports the loss only as noise between progress lines. A run
+            that cannot establish it stops here instead, before the session
+            that would have run under a posture the repository never declared.
+            """
+            derived = workspace_config_environment(
+                environment,
+                workspace,
+                trust=run_owned(workspace, root, worktree_root),
+            )
+            degradation = untrusted_degradation(
+                workspace, selected_config_home(derived).document
+            )
+            if degradation is not None:
+                raise typer.BadParameter(
+                    f"{degradation} This run extends trust to the repository it "
+                    "was invoked against and to the checkouts it made of that "
+                    f"repository under {worktree_root}, and to nothing else."
+                )
+            return {**environment, **derived}
+
+        # Once, before anything is leased. Every private home this run derives
+        # is seeded from the one document this reads, so a run that cannot
+        # read it opens no session anywhere — a fact about the environment
+        # rather than about any concern. Discovering it per worker instead
+        # turned one environmental fault into an exception group of concern
+        # failures and burned every lease the run had taken.
+        fault = (
+            configuration_fault(selected_config_home(session_environment))
+            if adapter == "claude"
+            else None
+        )
+        if fault is not None:
+            raise typer.BadParameter(fault)
+
         def toolchain_writable_paths() -> list[Path]:
             """Absolute paths a sandboxed worker's toolchain must be able to write.
 
@@ -772,10 +1010,18 @@ def run_resolve(
             id as an argument, so a worker structurally cannot post against
             a sibling. ``core`` is read at call time, which is after it is
             built — the wake event only exists once the core does.
+
+            The inbox is the run's own for this actor, not a second reader
+            opened here. Two readers over one message stream each began at
+            whatever its head was when they were made, so a message posted
+            while a turn was in flight sat behind both of them.
             """
             cwd = context.root
+            inbox = core.actors.inbox(context.actor)
             tool_context = ResolverToolContext(
-                run_dir=state_root / resolved_run_id, concern_id=context.concern_id
+                run_dir=state_root / resolved_run_id,
+                concern_id=context.concern_id,
+                lease_root=cwd,
             )
             # Grants are per-concern: a lease carries only what the human
             # approved with the concern it was leased for.
@@ -791,6 +1037,7 @@ def run_resolve(
                         QuestionMailbox(tool_context.run_dir),
                         context.concern_id,
                         run_id=resolved_run_id,
+                        lease_root=tool_context.lease_root,
                         wake=core.wake,
                     ),
                 )
@@ -802,7 +1049,9 @@ def run_resolve(
                         add_dirs=[cwd, *toolchain_writable_paths()],
                         plugin_dirs=[lease_plugin_dir(cwd, plugin.name)],
                         sandbox=ClaudeSandboxConfig(),
-                        environment=concern_environment,
+                        environment=isolated_claude_environment(
+                            concern_environment, cwd
+                        ),
                         tool_servers={"resolver": server},
                         allowed_tools=[
                             f"mcp__resolver__{name}"
@@ -816,10 +1065,7 @@ def run_resolve(
                                 ),
                                 create_git_inspection_hook(),
                             ),
-                            create_inbox_hooks(
-                                QuestionMailbox(tool_context.run_dir),
-                                context.concern_id,
-                            ),
+                            create_inbox_hooks(inbox),
                         ),
                     )
                 )
@@ -838,10 +1084,7 @@ def run_resolve(
                     approval_policy="onRequest",
                     hooks=merge_hooks(
                         worker_policy_hooks(granted, CODEX_SEMANTICS),
-                        create_inbox_hooks(
-                            QuestionMailbox(tool_context.run_dir),
-                            context.concern_id,
-                        ),
+                        create_inbox_hooks(inbox),
                     ),
                     environment=concern_environment,
                     mcp_servers={
@@ -907,7 +1150,9 @@ def run_resolve(
                         cwd=cwd,
                         add_dirs=[cwd],
                         plugin_dirs=[lease_plugin_dir(cwd, plugin.name)],
-                        environment=reviewer_environment,
+                        environment=isolated_claude_environment(
+                            reviewer_environment, cwd
+                        ),
                         hooks=create_permission_hooks([], [cwd]),
                     )
                 )
@@ -925,14 +1170,15 @@ def run_resolve(
                 )
             )
 
-        offer_flag_answers(
-            QuestionMailbox(state_root / resolved_run_id), resolved_run_id, provided
-        )
+        mailbox = QuestionMailbox(state_root / resolved_run_id)
+        offer_flag_answers(mailbox, resolved_run_id, provided)
+        for stale in inert_offers(mailbox):
+            typer.echo(stale, err=True)
         core = ResolverCore(
             ResolverConfig(
                 state_root=state_root,
                 workspace=root,
-                worktree_root=(root.parent / f"{root.name}-resolve-{resolved_run_id}"),
+                worktree_root=worktree_root,
                 run_id=resolved_run_id,
                 integration_branch=integration_branch(launcher, root, resolved_run_id),
                 # The whole gate rather than part of it restated. Naming three
@@ -942,18 +1188,16 @@ def run_resolve(
                 # output was not held to. `--since` scopes the note gate to
                 # what this tree changed, because a concern's worktree holds
                 # every sibling's notes and it has no lease on any of them.
+                # The commit is named per verified tree rather than here: a
+                # base written into this list is part of the composition every
+                # resume is checked against, so a run could not resume itself
+                # once its base moved, and leases cut from different commits
+                # have no one answer to give it.
                 verification_commands=[
                     VerificationCommand(
                         name="dev check",
-                        arguments=[
-                            "uv",
-                            "run",
-                            "lup-devtools",
-                            "dev",
-                            "check",
-                            "--since",
-                            base_commit,
-                        ],
+                        arguments=["uv", "run", "lup-devtools", "dev", "check"],
+                        base_option="--since",
                     ),
                 ],
             ),
@@ -965,6 +1209,7 @@ def run_resolve(
             observer=ConsoleResolverObserver(),
             worktree_preparer=FeatureWorktreePreparer(root),
             answer_wait_seconds=wait_seconds,
+            adopt_config=adopt_config,
         )
 
         async def drive() -> None:
@@ -1006,8 +1251,13 @@ def run_resolve(
                     for owned in intake.generated:
                         typer.echo(f"leaving to its generator: {owned}")
                     comments = intake.actionable
-                    if not comments:
-                        typer.echo("No unresolved # lup: comments.")
+                    open_issues = fetch_open_issues() if take_issues else []
+                    for issue in open_issues:
+                        typer.echo(
+                            f"taking as evidence: {issue.reference()} {issue.title}"
+                        )
+                    if not comments and not open_issues:
+                        typer.echo("No unresolved # lup: comments, and no open issues.")
                         return
                     note_paths = sorted({Path(comment.file) for comment in comments})
                     source = resolver_source_snapshot(
@@ -1028,6 +1278,7 @@ def run_resolve(
                                 )
                                 for comment in comments
                             ],
+                            issues=open_issues,
                         )
                     )
             except ResolverAwaitingAnswers as parked:
@@ -1037,6 +1288,8 @@ def run_resolve(
                 report_awaiting(parked, adapter, resolved_run_id, planned)
                 return
             typer.echo(f"Review branch: {manifest.review_branch}")
+            for number in answer_issues(core.repository.load().concerns, manifest):
+                typer.echo(f"commented on #{number}")
             typer.echo(manifest.model_dump_json(indent=2))
 
         async with spawned_supervisor(

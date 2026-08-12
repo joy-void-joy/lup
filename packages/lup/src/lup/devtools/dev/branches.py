@@ -12,11 +12,14 @@ import typer
 from pydantic import BaseModel, Field
 
 from lup.devtools.dev.remote_auth import check_remote_auth
+from lup.resolver.state import live_lease_branches
 from lup.types import StringMap
+from lup.workspace.paths import project_root
 from lup.devtools.utils import (
     format_table,
     git,
     gh,
+    config_lock_diagnosis,
     decode_stderr,
     output_json,
     short_sha,
@@ -277,6 +280,7 @@ def disposition_for(
     pr: PRStatus | None,
     unique_commits: int,
     protected: AbstractSet[str] = PROTECTED_BRANCHES,
+    held: str = "",
 ) -> Disposition:
     """Resolve a branch to its single disposition.
 
@@ -285,11 +289,18 @@ def disposition_for(
     with no open PR driving it, is ``LAND`` rather than ``KEEP``. Containment
     counts as landed only against the integration branch — sitting inside a
     sibling that has not landed either is no reason to drop work.
+
+    ``held`` is why something else is already answerable for this branch, and
+    outranks every disposition but the current and protected ones. A resolver
+    lease is the case: it reads as abandoned work by every other signal here,
+    and both verbs a sweep would offer for it destroy something.
     """
     if name == current:
         return Disposition(status="CURRENT", reason="current branch")
     if name in protected:
         return Disposition(status="KEEP", reason="protected branch")
+    if held:
+        return Disposition(status="KEEP", reason=held)
     if integration in contained_in:
         return Disposition(status="DELETE", reason=f"merged into {integration}")
     if pr is not None and pr.state == "MERGED":
@@ -657,6 +668,7 @@ def survey(as_json: bool) -> None:
     if has_remote and not as_json:
         typer.echo("Querying PR status...", err=True)
     pr_map: dict[str, PRStatus] = fetch_pr_status(branch_names) if has_remote else {}
+    leased = live_lease_branches(project_root() / ".lup" / "resolve")
 
     def info(b: ParsedBranch) -> BranchInfo:
         name = b["name"]
@@ -677,6 +689,7 @@ def survey(as_json: bool) -> None:
             contained_in=contained_in,
             pr=pr_map.get(name),  # lup: ignore[dict-get] — open map
             unique_commits=unique,
+            held=leased[name].reason() if name in leased else "",
         )
 
         return BranchInfo(
@@ -871,10 +884,18 @@ def abort_deletion(plan: DeletionPlan, completed: list[str], failure: str) -> No
     ``git worktree remove`` clears the checkout before it unregisters, so a
     failure here can leave a worktree git still believes in. Pruning is the
     repair, and the caller cannot be expected to know that.
+
+    Prune, removal, and the branch deletion itself all take the config lock,
+    so all three fail alike where the sandbox holds it — and there the repair
+    is not a repair, because the prune it prescribes fails the same way. The
+    mount state is what says which of the two failures this is.
     """
     typer.echo(f"Failed to delete {plan.branch}: {failure}", err=True)
 
-    if plan.worktree is not None and not Path(plan.worktree).exists():
+    diagnosis = config_lock_diagnosis()
+    if diagnosis:
+        typer.echo(diagnosis, err=True)
+    elif plan.worktree is not None and not Path(plan.worktree).exists():
         try:
             git("worktree", "prune")
             typer.echo(

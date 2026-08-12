@@ -399,5 +399,29 @@ for the cache. Personal trust state, credentials, active run state, and cache
 contents are never generated and never committed. Review hook trust with the
 native hooks surface after generation.
 
+### Workspace trust, and the profile it is recorded against
+
+Claude Code keeps workspace trust in its user-level configuration document,
+and offers nowhere else to put it — so an untrusted workspace is not a
+project-level fact a repository can declare for itself. An untrusted one does
+not fail: the session drops every `permissions.allow` entry
+`.claude/settings.json` declares, warns into its own stderr, and runs on under
+a permission posture the repository never declared.
+
+A headless run cannot accept a dialog, so it establishes trust itself. Each
+workspace's sessions are pointed at a private configuration home derived under
+the selected profile, and trust is recorded there — never in the operator's own
+document — for the repository the run was invoked against and the checkouts the
+run made of it, and nothing else a session happens to open in. Pointing a run at
+a repository is the act of trust; a workspace outside that stops the run rather
+than degrading it.
+
+`CLAUDE_CONFIG_DIR` selects which profile all of this reads and writes. Where it
+is set, the document is `.config.json` inside the named directory; where it is
+unset, the document is `~/.claude.json` beside the home rather than in it, and
+the derived homes still land under `~/.claude`. Both spellings matter for an
+interactive fix: accepting a trust dialog in a shell that does not export the
+same variable writes to a different profile and appears to do nothing.
+
 Commit generated artifacts together with the catalog changes that produced
 them. [contributing.md](contributing.md) covers what review looks for.

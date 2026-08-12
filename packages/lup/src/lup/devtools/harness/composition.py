@@ -19,7 +19,11 @@ from lup.adapters.claude.harness_runtime import (
     claude_capability_probes,
 )
 from lup.adapters.claude.login import CLAUDE_LOGIN
-from lup.adapters.claude.profile_store import ClaudeProfileStore
+from lup.adapters.claude.profile_store import (
+    AccountFile,
+    ClaudeProfileNames,
+    ClaudeProfileRegistrar,
+)
 from lup.adapters.codex.harness import CodexSpellings
 from lup.adapters.codex.harness_runtime import (
     CodexCliEvidence,
@@ -41,7 +45,10 @@ def claude_profile_directory() -> ProfileDirectory:
     What a project falls back to when it keeps no accounts of its own: names
     registered by hand, resolved against the login Claude Code itself writes.
     """
-    return ProfileDirectory(ClaudeProfileStore(), CLAUDE_LOGIN)
+    accounts = AccountFile()
+    return ProfileDirectory(
+        ClaudeProfileNames(accounts), ClaudeProfileRegistrar(accounts), CLAUDE_LOGIN
+    )
 
 
 type NativeCapabilityEvidence = (
