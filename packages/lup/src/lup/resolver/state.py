@@ -18,6 +18,7 @@ from lup.resolver.models import (
     LeasesDocument,
     QuestionBatch,
     ResolverConfig,
+    VerificationAcceptance,
     ReviewReport,
     ResolveState,
     ResolvePhase,
@@ -240,6 +241,26 @@ class ResolverStateRepository:
                 f"resolver state at {path} cannot be decoded; restore the file "
                 "or remove the run directory to start over"
             ) from error
+
+    def accept(self, acceptance: VerificationAcceptance) -> ResolveState:
+        """Record that a human accepts one concern over one failing check.
+
+        Written through its own door for the same reason adoption is: a run
+        that is parked has no process to route this through, and `save`
+        guards transitions this is not one of. Re-accepting the same pair
+        replaces the reason rather than accumulating, so a corrected reason
+        reads as the decision rather than beside it.
+        """
+        current = self.load()
+        kept = [
+            recorded
+            for recorded in current.acceptances
+            if (recorded.concern_id, recorded.verification)
+            != (acceptance.concern_id, acceptance.verification)
+        ]
+        accepted = current.model_copy(update={"acceptances": [*kept, acceptance]})
+        self.write_model("state.json", accepted)
+        return accepted
 
     def adopt(self, config: ResolverConfig, digest: str) -> ResolveState:
         """Re-stamp a persisted run onto a composition a human accepted.

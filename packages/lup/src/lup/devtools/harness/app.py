@@ -27,6 +27,7 @@ from lup.runtime.profiles import ProfileDirectory
 from lup.devtools.harness.drift import RepositoryWriter
 from lup.devtools.supervisor.app import serve_supervisor
 from lup.devtools.supervisor.doors import (
+    accept_verification,
     answer_questions,
     list_actors,
     list_questions,
@@ -136,6 +137,7 @@ def create_harness_app(
     resolve_app.command("answer")(answer_questions)
     resolve_app.command("actors")(list_actors)
     resolve_app.command("say")(say_to_actor)
+    resolve_app.command("accept")(accept_verification)
     resolve_app.command("redirect")(redirect_actor)
     resolve_app.command("park")(park_run)
     app.add_typer(resolve_app, name="resolve")
