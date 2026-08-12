@@ -92,6 +92,14 @@ class ResolvePhase(StrEnum):
     ABORTED = "aborted"
     FAILED = "failed"
 
+    def terminal(self) -> bool:
+        """Whether a run in this phase holds nothing and reads nothing."""
+        return self in {
+            ResolvePhase.COMPLETE,
+            ResolvePhase.ABORTED,
+            ResolvePhase.FAILED,
+        }
+
 
 class ConcernStatus(StrEnum):
     """Persisted lifecycle of one independently scheduled concern."""
@@ -455,6 +463,25 @@ class WritableRootLease(BaseModel):
     root: Path
     branch: str
     active: bool = True
+
+
+class HeldLease(BaseModel):
+    """One branch a run that has not finished is still holding.
+
+    What a branch survey needs in order to leave it alone: which run, and
+    where that run had got to, so the reason it reports is checkable against
+    the run directory rather than being a bare assertion that something is
+    using this.
+    """
+
+    model_config = FROZEN
+
+    branch: str
+    run_id: str
+    standing: str
+
+    def reason(self) -> str:
+        return f"lease of run {self.run_id} ({self.standing})"
 
 
 class DependencyBase(BaseModel):
