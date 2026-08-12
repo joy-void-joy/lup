@@ -22,24 +22,27 @@ class Verifier:
         self.commands = commands
         self.launcher = launcher
 
-    def verify(self, root: Path) -> list[VerificationRecord]:
-        """Run the whole verification set against one tree.
+    def verify(self, root: Path, base: str = "") -> list[VerificationRecord]:
+        """Run the whole verification set against one tree, from its own base.
 
         The full set every time, never a fast subset. Per-join verification
         is the only mechanical detector of a clean merge that is jointly
         wrong — one branch changes a signature, another adds a caller, and
         the type error exists in neither parent alone — and a subset chosen
         for speed is exactly the one that misses it.
+
+        The base is the tree's, not the run's. A gate scoped to what changed
+        has to be told where this tree started, and a run whose leases start
+        from different commits has no single answer to give it once.
         """
         records: list[VerificationRecord] = []  # lup: ignore[empty-collection]
         for command in self.commands:
-            status = self.launcher.launch(
-                LaunchRequest(arguments=command.arguments, cwd=root)
-            )
+            arguments = command.against(base)
+            status = self.launcher.launch(LaunchRequest(arguments=arguments, cwd=root))
             records.append(
                 VerificationRecord(
                     name=command.name,
-                    arguments=command.arguments,
+                    arguments=arguments,
                     passed=status.code == 0,
                     exit_code=status.code,
                 )
