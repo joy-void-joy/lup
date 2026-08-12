@@ -230,10 +230,6 @@ PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         message="Bare `object` says nothing about the value — use a concrete type, "
         "TypedDict, or BaseModel, and narrow at untyped boundaries",
     ),
-    # lup: Add a rule against `def` under a BaseModel. The model will often reach
-    # for `def parse_model(a: BaseModel)` and friends instead of ABC plus
-    # ABC-wrapper styles, which makes the result more sprawling and harder to
-    # compose or to see everything there is in one place.
     AntiPattern(
         id="bare-basemodel",
         pattern=re.compile(r"(?:(?<!\[)\b\w+\s*:|->)\s*BaseModel\b(?!\s*[\]|])"),
@@ -259,10 +255,6 @@ PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         # or constructed constant. A fixed name set constant wants a dict or a
         # purpose-built structure; an immutable-default-argument use is the one
         # legitimate site — `# lup: ignore[frozenset-shape]` marks it.
-        # lup: This is the wrong justification. The reason not to use `frozenset`
-        # and `set` is not that they are overkill — it is that they collapse
-        # structure over `dict[...]` (and `frozendict` when 3.15 lands). Say
-        # that, here and in set-shape below.
         id="frozenset-shape",
         pattern=re.compile(r"\bfrozenset\b"),
         message="A declared `frozenset[...]` shape or constant is usually overkill — use "
@@ -285,10 +277,6 @@ PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         "instead of declaring the set as the interface. For a genuinely "
         "set-shaped value add `# lup: ignore[set-shape]`",
     ),
-    # lup: Add a rule against `Field(default_factory=...)`, as in `mylist =
-    # Field(default_factory=list[B])` where `mylist: list[B] = []` says the same
-    # thing with the type declared. Reconcile it with empty-collection below,
-    # whose refiner already has to decide which `= []` is a deliberate default.
     AntiPattern(
         # The refiner exempts deliberate defaults — __init__ state, call
         # kwargs, annotated module and class declarations — so what reaches a
@@ -312,20 +300,6 @@ PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         message="`cast(...)` is a code smell — narrow with isinstance or a type guard, "
         "or fix the annotation so the cast is unnecessary",
     ),
-    # lup: Add a rule against PDF text-extraction libraries — PyMuPDF/`fitz`,
-    # pypdf/PyPDF2, pdfplumber, pdfminer and the rest. Hand the path to the
-    # runtime's own document-reading tool instead, which takes the PDF directly
-    # and carries fewer failure modes: an extractor silently returns nothing on
-    # a scanned or image-only page, and the empty string then reads as an empty
-    # document rather than as a failed extraction.
-    #
-    # The message must not name that tool literally. Claude spells it `Read`;
-    # Codex has no equivalent among `shell`/`apply_patch`/`web_fetch`, so this
-    # rule ships into both plugin trees and would tell one of them to use a tool
-    # it does not have. The spelling belongs on `NativeSpellings` beside
-    # `ask_user` and `runtime_docs` — and if Codex genuinely cannot read a PDF,
-    # that is the explicit unsupported declaration the adapter-parity concern
-    # asks for, carrying the reason rather than being silently absent.
     AntiPattern(
         id="import-re",
         pattern=re.compile(r"\bimport\s+re\b|\bfrom\s+re\s+import\b"),
