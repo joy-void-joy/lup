@@ -178,7 +178,7 @@ class ConcernExecutor:
                 ]
                 broke = [
                     record.name
-                    for record in self.verifier.verify(lease.root)
+                    for record in self.verifier.verify(lease.root, base.commit)
                     if not record.passed and record.name not in accepted
                 ]
                 review = (

@@ -17,6 +17,7 @@ from lup.devtools.utils import (
     format_table,
     git,
     gh,
+    config_lock_diagnosis,
     decode_stderr,
     output_json,
     short_sha,
@@ -871,10 +872,18 @@ def abort_deletion(plan: DeletionPlan, completed: list[str], failure: str) -> No
     ``git worktree remove`` clears the checkout before it unregisters, so a
     failure here can leave a worktree git still believes in. Pruning is the
     repair, and the caller cannot be expected to know that.
+
+    Prune, removal, and the branch deletion itself all take the config lock,
+    so all three fail alike where the sandbox holds it — and there the repair
+    is not a repair, because the prune it prescribes fails the same way. The
+    mount state is what says which of the two failures this is.
     """
     typer.echo(f"Failed to delete {plan.branch}: {failure}", err=True)
 
-    if plan.worktree is not None and not Path(plan.worktree).exists():
+    diagnosis = config_lock_diagnosis()
+    if diagnosis:
+        typer.echo(diagnosis, err=True)
+    elif plan.worktree is not None and not Path(plan.worktree).exists():
         try:
             git("worktree", "prune")
             typer.echo(

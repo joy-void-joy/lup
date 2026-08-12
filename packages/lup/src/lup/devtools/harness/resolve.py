@@ -30,7 +30,12 @@ from lup.resolver.contracts import (
     ResolverObserver,
     WorktreePreparer,
 )
+from lup.resolver.actors import create_inbox_hooks
 from lup.resolver.core import ResolverCore
+from lup.resolver.journal import Journal
+from lup.resolver.orchestrator import WorktreeOrchestrator
+from lup.resolver.rebase import BaseRefresher
+from lup.resolver.run import ResolveRun
 from lup.resolver.state import ResolverStateRepository
 from lup.resolver.models import (
     AdmissionRequest,
@@ -39,6 +44,7 @@ from lup.resolver.models import (
     ConcernProgress,
     InventoryNote,
     MaterialQuestion,
+    RefreshReport,
     ResolvePhase,
     ResolveRequest,
     ResolverConfig,
@@ -58,7 +64,6 @@ from lup.resolver.tools import (
     RESOLVER_CONCERN_ENV,
     RESOLVER_RUN_DIR_ENV,
     ResolverToolContext,
-    create_inbox_hooks,
     create_question_tools,
     read_resolver_tool_context,
 )
@@ -593,6 +598,73 @@ def integration_branch(launcher: ProcessLauncher, root: Path, run_id: str) -> st
     return f"resolve/{run_id}{REVIEW_BRANCH_SUFFIX}"
 
 
+def refresh_run(
+    run_id: str = typer.Option(..., "--run-id", help="Run whose base to refresh"),
+    apply: bool = typer.Option(
+        False,
+        "--apply",
+        help="Take the refresh, instead of only reporting what it would do",
+    ),
+) -> None:
+    """Bring a run's base, and the leases holding work, up to its branch.
+
+    A run's leases are cut from the commit it was created at, so a fix made
+    on the integration branch to unblock that very run is the one thing it
+    cannot see. A lease made after this reads the branch as it stands; a
+    lease already holding work is merged only with `--apply`, and only where
+    this has already reported that it would not conflict.
+
+    This takes the run's own lock, so the run's process must have exited —
+    which is exactly when a parked run is waiting for the fix to land.
+    """
+    root = project_root()
+    state_root = root / ".lup" / "resolve"
+    repository = ResolverStateRepository(state_root, run_id)
+    if not repository.exists():
+        raise typer.BadParameter(f"no resolver run {run_id!r} under {state_root}")
+    launcher = LocalProcessLauncher()
+    journal = Journal(repository.root)
+    run = ResolveRun(repository, journal)
+    run.state = repository.load()
+    report = BaseRefresher(run, WorktreeOrchestrator(launcher, root), journal).report(
+        run.require(), apply
+    )
+    for line in describe_refresh(report):
+        typer.echo(line)
+
+
+def describe_refresh(report: RefreshReport) -> list[str]:
+    """Render a refresh the way somebody deciding whether to take it reads it."""
+    base = report.base
+    if base.reason:
+        opening = f"base unchanged: {base.reason}"
+    elif not base.moved():
+        opening = f"base is current with {base.branch}"
+    else:
+        opening = (
+            f"base {'moved' if report.applied else 'would move'} onto {base.branch}: "
+            f"{base.was[:12]} → {base.commit[:12]}"
+        )
+    lines = [opening]
+    if not base.moved():
+        return lines
+    for lease in report.leases:
+        if lease.conflicts:
+            lines.append(
+                f"  {lease.concern_id}: conflicts on "
+                + ", ".join(path.as_posix() for path in lease.conflicts)
+            )
+        elif lease.applied:
+            lines.append(f"  {lease.concern_id}: merged")
+        elif lease.reason:
+            lines.append(f"  {lease.concern_id}: {lease.reason}")
+        else:
+            lines.append(f"  {lease.concern_id}: merges cleanly")
+    if not report.applied and any(not lease.conflicts for lease in report.leases):
+        lines.append("Re-run with --apply to take it.")
+    return lines
+
+
 def detach_resolve(adapter: str, run_id: str | None, answers: list[str]) -> None:
     """Start a run that outlives this command, and say where to reach it.
 
@@ -685,22 +757,10 @@ def run_resolve(
     resolved_run_id = run_id or (
         "resolve-" + resolver_git(launcher, root, ["rev-parse", "--short=12", "HEAD"])
     )
-    # Every concern worktree is created from here, so it is what a worker's
-    # own diff is measured against when scoping the note gate. A run that
-    # already exists takes its own recorded base rather than today's HEAD:
-    # this value reaches the config digest, so re-deriving it made every
-    # commit refuse to resume the run that was parked before it — including
-    # the commit fixing the defect that parked it.
     state_root = root / ".lup" / "resolve"
     # Every worktree this run leases lands under here, which is what makes
     # "a checkout lup created" a structural test rather than a judgement.
     worktree_root = root.parent / f"{root.name}-resolve-{resolved_run_id}"
-    persisted = ResolverStateRepository(state_root, resolved_run_id)
-    base_commit = (
-        persisted.load().source.commit
-        if persisted.exists()
-        else resolver_git(launcher, root, ["rev-parse", "HEAD"])
-    )
 
     async def execute() -> None:
         from lup.adapters.claude.runtime import (
@@ -884,8 +944,14 @@ def run_resolve(
             id as an argument, so a worker structurally cannot post against
             a sibling. ``core`` is read at call time, which is after it is
             built — the wake event only exists once the core does.
+
+            The inbox is the run's own for this actor, not a second reader
+            opened here. Two readers over one message stream each began at
+            whatever its head was when they were made, so a message posted
+            while a turn was in flight sat behind both of them.
             """
             cwd = context.root
+            inbox = core.actors.inbox(context.actor)
             tool_context = ResolverToolContext(
                 run_dir=state_root / resolved_run_id,
                 concern_id=context.concern_id,
@@ -933,10 +999,7 @@ def run_resolve(
                                 ),
                                 create_git_inspection_hook(),
                             ),
-                            create_inbox_hooks(
-                                QuestionMailbox(tool_context.run_dir),
-                                context.concern_id,
-                            ),
+                            create_inbox_hooks(inbox),
                         ),
                     )
                 )
@@ -955,10 +1018,7 @@ def run_resolve(
                     approval_policy="onRequest",
                     hooks=merge_hooks(
                         worker_policy_hooks(granted, CODEX_SEMANTICS),
-                        create_inbox_hooks(
-                            QuestionMailbox(tool_context.run_dir),
-                            context.concern_id,
-                        ),
+                        create_inbox_hooks(inbox),
                     ),
                     environment=concern_environment,
                     mcp_servers={
@@ -1062,18 +1122,16 @@ def run_resolve(
                 # output was not held to. `--since` scopes the note gate to
                 # what this tree changed, because a concern's worktree holds
                 # every sibling's notes and it has no lease on any of them.
+                # The commit is named per verified tree rather than here: a
+                # base written into this list is part of the composition every
+                # resume is checked against, so a run could not resume itself
+                # once its base moved, and leases cut from different commits
+                # have no one answer to give it.
                 verification_commands=[
                     VerificationCommand(
                         name="dev check",
-                        arguments=[
-                            "uv",
-                            "run",
-                            "lup-devtools",
-                            "dev",
-                            "check",
-                            "--since",
-                            base_commit,
-                        ],
+                        arguments=["uv", "run", "lup-devtools", "dev", "check"],
+                        base_option="--since",
                     ),
                 ],
             ),

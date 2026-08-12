@@ -3804,6 +3804,78 @@ def test_a_restore_git_refused_prepares_no_root(tmp_path: Path) -> None:
     assert preparer.prepared == []
 
 
+def shadowed_admin(tmp_path: Path, shadow: bool) -> ScriptedLauncher:
+    """A launcher whose `rev-parse` names an admin directory, optionally shadowed.
+
+    Bind-mounting `/dev/null` over `config.lock` is what the sandbox does and
+    what a test may not do, so a symlink stands in for it: `stat` reports the
+    same device node either way. `rev-parse` names the same directory twice
+    because that is what a checkout whose worktree is its own reports.
+    """
+    admin = tmp_path / ("shadowed" if shadow else "healthy")
+    admin.mkdir()
+    (admin / "config").write_text("[core]\n", encoding="utf-8")
+    if shadow:
+        (admin / "config.lock").symlink_to(Path("/dev/null"))
+    return ScriptedLauncher(
+        {
+            "worktree add": out(code=128, stderr="fatal: config.lock: File exists"),
+            "rev-parse --git-dir": out(stdout=f"{admin}\n{admin}\n"),
+        }
+    )
+
+
+def test_a_lease_git_refused_names_the_sandbox_holding_the_lock(
+    tmp_path: Path,
+) -> None:
+    """A run leases a worktree per concern and dies at the first one.
+
+    `File exists` is also what a stale lock reports, so the bare refusal sends
+    a reader after a file that is not there. What the admin directory is says
+    which of the two this is, and git never had that to say.
+    """
+    with pytest.raises(RuntimeError) as raised:
+        WorktreeOrchestrator(shadowed_admin(tmp_path, True), tmp_path).create(
+            joined_lease(tmp_path), "9e060ad"
+        )
+
+    assert "git config writes are blocked by the sandbox" in str(raised.value)
+    assert "Rerun outside the sandbox" in str(raised.value)
+
+
+def test_a_prune_the_sandbox_blocked_retains_the_lease_rather_than_cleaning_it(
+    tmp_path: Path,
+) -> None:
+    """A step that could not run must not be recorded as one that did.
+
+    `remove` reaches prune only where the checkout is already gone, and a
+    prune the lock refuses leaves the registration standing — so reporting
+    the lease freed would tell a reviewer it was cleaned by the very command
+    that failed, which is this concern's mislabel one layer up.
+    """
+    launcher = shadowed_admin(tmp_path, True)
+    launcher.script["worktree remove"] = out(code=128, stderr="fatal: not found")
+    launcher.script["worktree prune"] = out(code=128, stderr="fatal: config.lock")
+
+    removal = WorktreeOrchestrator(launcher, tmp_path).remove(joined_lease(tmp_path))
+
+    assert not removal.freed
+    assert "prune failed" in removal.detail
+    assert "blocked by the sandbox" in removal.detail
+
+
+def test_a_lease_git_refused_on_a_normal_tree_stays_gits_own_words(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(RuntimeError) as raised:
+        WorktreeOrchestrator(shadowed_admin(tmp_path, False), tmp_path).create(
+            joined_lease(tmp_path), "9e060ad"
+        )
+
+    assert "File exists" in str(raised.value)
+    assert "sandbox" not in str(raised.value)
+
+
 def test_a_restored_root_is_the_one_the_preparer_receives(tmp_path: Path) -> None:
     lease = joined_lease(tmp_path)
     preparer = RecordingPreparer()

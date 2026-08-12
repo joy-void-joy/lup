@@ -18,12 +18,6 @@ from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings
 
 from lup.harness.process import LocalProcessLauncher, ProcessLauncher
-from lup.hooks import (
-    LupHookInput,
-    LupHookMatcher,
-    LupHookOutput,
-    LupHooksConfig,
-)
 from lup.mcp import LupMcpTool, ToolError, lup_tool
 from lup.policy.assets.host import recoverable_write_targets
 from lup.channels.models import utc_now
@@ -195,50 +189,6 @@ def agent_may_approve(command: str, root: Path) -> bool:
         return True
     targets = [word for word in words[1:] if not word.startswith("-")]
     return bool(targets) and recoverable_write_targets(targets, root) == targets
-
-
-def create_inbox_hooks(mailbox: QuestionMailbox, actor: str) -> LupHooksConfig:
-    """Put anything said to this actor in front of it, mid-turn.
-
-    Non-cooperative by construction. The actor calls any tool at all and the
-    message is in its context — it never chooses to check, so it cannot fail
-    to. Waiting for the next turn would mean a directive sits unread for as
-    long as the current one runs, which on a resolver turn is most of the
-    run.
-
-    Telling and stopping are different acts and get different verdicts. A
-    message rides alongside the call and the actor keeps going. A redirect
-    denies the call and hands back the text as the reason, so an actor going
-    the wrong way cannot take one more step down it — which is the whole
-    difference between being informed and being redirected. Nothing here
-    spends an interrupt: a turn that ends mid-report is a turn whose typed
-    submission never arrives, and the actor is answering a refused tool call
-    either way.
-    """
-    offset = [mailbox.stream_offset()]
-
-    async def deliver(_input: LupHookInput) -> LupHookOutput:
-        arrived = mailbox.messages_for(actor, offset[0])
-        offset[0] = mailbox.stream_offset()
-        if not arrived:
-            return LupHookOutput(decision="allow")
-        # Everything that arrived is carried either way. The offset has already
-        # moved past all of it, so a message batched alongside a redirect has
-        # this one delivery and no other.
-        delivered = "\n".join(
-            f"[{'redirected' if message.redirect else 'message'} by {message.door}] "
-            f"{message.text}"
-            for message in arrived
-        )
-        if any(message.redirect for message in arrived):
-            return LupHookOutput(
-                decision="deny",
-                reason=delivered
-                + "\n\nStop what this call was part of and act on the above.",
-            )
-        return LupHookOutput(decision="allow", additional_context=delivered)
-
-    return LupHooksConfig(pre_tool_use=[LupHookMatcher(hook=deliver, tag="inbox")])
 
 
 class RequestAllowanceInput(BaseModel):

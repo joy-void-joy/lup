@@ -26,6 +26,7 @@ from lup.channels.models import utc_now
 from lup.channels.stream import Stream
 from lup.resolver.models import (
     FROZEN,
+    ActorRef,
     ConcernProgress,
     MaterialQuestion,
     QuestionAnswer,
@@ -34,26 +35,6 @@ from lup.resolver.models import (
 from lup.runtime.models import TurnEvent
 
 JOURNAL_FILE = "journal.jsonl"
-
-type ActorKind = Literal["worker", "reviewer", "merger", "planner", "run"]
-
-
-class ActorRef(BaseModel):
-    """Which actor an entry belongs to.
-
-    A round is part of the identity because the same concern's worker is a
-    different actor on round two: it holds a different session, and a reader
-    tracing a decision needs to know which attempt they are looking at.
-    """
-
-    model_config = FROZEN
-
-    kind: ActorKind
-    id: str
-    round: int = Field(default=1, ge=1)
-
-    def label(self) -> str:
-        return f"{self.kind}:{self.id}#{self.round}"
 
 
 class PhaseChangedEvent(BaseModel):
@@ -109,6 +90,24 @@ class MessagePostedEvent(BaseModel):
     text: str
     door: str
     in_reply_to: str | None = None
+    redirect: bool = False
+
+
+class MessageOutstandingEvent(BaseModel):
+    """A message still queued for an actor whose session is being closed.
+
+    Recorded because the sender was told the message was sent, and the
+    stream alone cannot say whether anyone read it. On a park this is a
+    message that will land at the head of the resumed turn; on a run that
+    ended it is one that reached nobody, and a redirect nobody read is the
+    failure of an operation somebody performed to stop something.
+    """
+
+    model_config = FROZEN
+
+    type: Literal["message_outstanding"] = "message_outstanding"
+    text: str
+    door: str
     redirect: bool = False
 
 
@@ -168,6 +167,27 @@ class RecheckRepeatedEvent(BaseModel):
     criteria: list[str]
 
 
+class BaseRefreshedEvent(BaseModel):
+    """A lease made from here starts from the branch as it stands now.
+
+    A run pinned to the commit it was created at cannot see a fix made to
+    unblock it, and its workers reason about code that has already been
+    replaced — reaching careful conclusions that contradict decisions the
+    repository has already taken. Recorded whether it moved or not: a
+    refresh that could not be made cleanly is the reason the leases beside
+    it are still where they were.
+    """
+
+    model_config = FROZEN
+
+    type: Literal["base_refreshed"] = "base_refreshed"
+    branch: str
+    was: str
+    commit: str
+    conflicts: list[str] = Field(default_factory=list)
+    reason: str = ""
+
+
 class LeaseDriftEvent(BaseModel):
     """An abandoned concern's tree does not hold the commit last recorded.
 
@@ -199,10 +219,12 @@ type RunEvent = (
     | QuestionAskedEvent
     | AnswerSettledEvent
     | MessagePostedEvent
+    | MessageOutstandingEvent
     | JoinCompletedEvent
     | JoinAuditEvent
     | ReviewResidualEvent
     | RecheckRepeatedEvent
+    | BaseRefreshedEvent
     | LeaseDriftEvent
     | RunFailedEvent
 )
