@@ -111,6 +111,13 @@ what merging would conflict on and takes it only with `--apply`. A concern
 whose work is already verified is never moved: its commit is what the run
 records and joins.
 
+Combining the two bases can itself conflict, and ordinarily does: the fix
+that unblocks a parked run touches the files that run's notes are about. So
+the refusal names the paths, and `--base <commit>` adopts a combine somebody
+resolved by hand — checked to contain both the run's base and the branch, so
+a resolution that dropped one side is refused rather than taken. One
+resolution there replaces the same conflict met again in every lease.
+
 Verification is scoped by the tree it runs on rather than by the run. A
 command declares the flag it takes a base through — `--since` for `dev
 check` — and the run supplies the commit of whatever tree is being verified.

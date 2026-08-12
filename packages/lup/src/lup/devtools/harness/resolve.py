@@ -605,6 +605,13 @@ def refresh_run(
         "--apply",
         help="Take the refresh, instead of only reporting what it would do",
     ),
+    base: str = typer.Option(
+        "",
+        "--base",
+        help="Adopt a base you resolved by hand, where the combine conflicts. "
+        "It must contain both the run's base and the branch, so a resolution "
+        "that dropped one side is refused rather than taken",
+    ),
 ) -> None:
     """Bring a run's base, and the leases holding work, up to its branch.
 
@@ -613,6 +620,12 @@ def refresh_run(
     cannot see. A lease made after this reads the branch as it stands; a
     lease already holding work is merged only with `--apply`, and only where
     this has already reported that it would not conflict.
+
+    Where combining the two bases conflicts, this reports the paths and
+    stops: the fix that unblocks a run touches what that run's notes are
+    about, so conflicting is ordinary. Resolve it once in a worktree and
+    hand the commit back with `--base`, rather than meeting the same
+    conflict again in every lease at land.
 
     This takes the run's own lock, so the run's process must have exited —
     which is exactly when a parked run is waiting for the fix to land.
@@ -627,7 +640,7 @@ def refresh_run(
     run = ResolveRun(repository, journal)
     run.state = repository.load()
     report = BaseRefresher(run, WorktreeOrchestrator(launcher, root), journal).report(
-        run.require(), apply
+        run.require(), apply, base
     )
     for line in describe_refresh(report):
         typer.echo(line)
@@ -647,6 +660,11 @@ def describe_refresh(report: RefreshReport) -> list[str]:
         )
     lines = [opening]
     lines.extend(f"  {path.as_posix()}" for path in base.conflicts)
+    if base.conflicts:
+        lines.append(
+            f"Merge {base.was[:12]} with {base.branch} in a worktree, resolve it "
+            "there, then adopt the result: --base <commit> --apply."
+        )
     if not base.moved():
         return lines
     for lease in report.leases:

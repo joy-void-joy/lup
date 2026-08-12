@@ -429,6 +429,50 @@ class WorktreeOrchestrator:
         )
         return combined.model_copy(update={"branch": source.branch})
 
+    def adopted_base(self, source: SourceSnapshot, commit: str) -> BaseRefresh:
+        """Take a base somebody resolved by hand, once it holds both sides.
+
+        `merged_base` predicts the combine and declines to guess at a
+        conflict, which leaves the case a refresh exists for with no route
+        at all: a fix landed on the branch to unblock this very run touches
+        the files that run's notes are about, so conflicting is the ordinary
+        outcome rather than the exceptional one. Resolving it belongs where
+        conflicts are resolved — a worktree, with both sides visible — and
+        this adopts the commit that came out.
+
+        Containment is what is checked, because it is the half of "nothing
+        was dropped" a machine can answer: a resolution reachable from
+        neither the base nor the branch settled something else entirely.
+        Whether every hunk survived is the reviewer's question, and the
+        merge guidance is what asks it.
+        """
+        resolved = self.resolved(commit)
+        if not resolved:
+            return BaseRefresh(
+                branch=source.branch,
+                was=source.commit,
+                commit=source.commit,
+                reason=f"no commit {commit!r} in this repository to adopt",
+            )
+        tip = self.resolved(source.branch)
+        dropped = [
+            name
+            for name, side in (("the run's base", source.commit), (source.branch, tip))
+            if side and not self.contains(resolved, side)
+        ]
+        if dropped:
+            return BaseRefresh(
+                branch=source.branch,
+                was=source.commit,
+                commit=source.commit,
+                reason=(
+                    f"{resolved[:12]} does not contain "
+                    + " or ".join(dropped)
+                    + "; a resolved base has to hold both sides"
+                ),
+            )
+        return BaseRefresh(branch=source.branch, was=source.commit, commit=resolved)
+
     def commit_tree(self, tree: str, parents: list[str], message: str) -> str:
         """Record one prepared tree as a commit, without touching a worktree."""
         arguments = ["git", "commit-tree", tree]

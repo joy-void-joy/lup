@@ -18,6 +18,7 @@ editing the files it touched.
 from lup.resolver.journal import BaseRefreshedEvent, Journal
 from lup.resolver.models import (
     INTEGRATION_CONCERN_ID,
+    BaseRefresh,
     LeaseRefresh,
     RefreshReport,
     ResolveState,
@@ -38,7 +39,14 @@ class BaseRefresher:
         self.worktrees = worktrees
         self.journal = journal
 
-    def refreshed(self, state: ResolveState) -> ResolveState:
+    def moved_base(self, state: ResolveState, adopt: str = "") -> BaseRefresh:
+        """Where this run's base stands, predicted or handed over resolved."""
+        source = state.root_base()
+        if adopt:
+            return self.worktrees.adopted_base(source, adopt)
+        return self.worktrees.refreshed_base(source)
+
+    def refreshed(self, state: ResolveState, adopt: str = "") -> ResolveState:
         """Bring what a new lease is cut from up to the branch it came from.
 
         At lease creation, because that is the one moment a base can move
@@ -50,7 +58,7 @@ class BaseRefresher:
         were, and that is worth more in the record than the silence a
         no-op would leave.
         """
-        refresh = self.worktrees.refreshed_base(state.root_base())
+        refresh = self.moved_base(state, adopt)
         self.journal.record(
             BaseRefreshedEvent(
                 branch=refresh.branch,
@@ -70,7 +78,9 @@ class BaseRefresher:
         self.run.persist(moved)
         return self.run.require()
 
-    def report(self, state: ResolveState, apply: bool = False) -> RefreshReport:
+    def report(
+        self, state: ResolveState, apply: bool = False, adopt: str = ""
+    ) -> RefreshReport:
         """Say what refreshing every live lease would do, and optionally do it.
 
         A concern whose work is already verified is left alone. Its commit
@@ -79,7 +89,7 @@ class BaseRefresher:
         itself. What it produced reaches the refreshed tree at integration,
         where merging is the work rather than a side effect.
         """
-        refresh = self.worktrees.refreshed_base(state.root_base())
+        refresh = self.moved_base(state, adopt)
         settled = {outcome.concern_id for outcome in state.outcomes}
         report = RefreshReport(
             base=refresh,
@@ -93,7 +103,7 @@ class BaseRefresher:
             applied=apply,
         )
         if apply:
-            self.refreshed(state)
+            self.refreshed(state, adopt)
             self.inherit(report, refresh.commit)
         return report
 
