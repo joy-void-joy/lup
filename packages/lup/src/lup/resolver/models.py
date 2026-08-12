@@ -15,6 +15,64 @@ from lup.policy.identity import ConcernAllowance
 FROZEN = ConfigDict(frozen=True)
 FROZEN_STRICT = ConfigDict(frozen=True, extra="forbid")
 
+type ActorKind = Literal["worker", "reviewer", "merger", "planner", "run"]
+
+
+class ActorRef(BaseModel):
+    """Which actor something belongs to.
+
+    A round is part of the identity because the same concern's worker is a
+    different actor on round two: it holds a different session, and a reader
+    tracing a decision needs to know which attempt they are looking at.
+
+    Here rather than with the record it attributes, because addressing an
+    actor is not the journal's business alone: the mailbox routes mail by
+    the same identity, and the two disagreeing about what named an actor is
+    what made a redirect reach nobody.
+    """
+
+    model_config = FROZEN
+
+    kind: ActorKind
+    id: str
+    round: int = Field(default=1, ge=1)
+
+    def label(self) -> str:
+        return f"{self.kind}:{self.id}#{self.round}"
+
+    def conversation(self) -> str:
+        """Which session this actor speaks through, which outlives its round.
+
+        Deliberately not the label. A worker on round two is the agent that
+        wrote round one's code and was told what was wrong with it, so the
+        round attributes what happened without forking the conversation —
+        and anything held per conversation, an open session or a delivery
+        position, is keyed by this rather than by the round it is on.
+        """
+        return f"{self.kind}-{self.id}"
+
+    def addresses(self) -> list[str]:
+        """Every spelling a door may use that reaches this actor.
+
+        Recognizing rather than parsing, because the two delivery paths
+        disagreed about what an address was: the console prints and accepts
+        ``worker:some-concern#1`` while the mid-turn hook matched the bare
+        concern id, so a redirect sent to the address the console itself
+        printed reached nobody.
+
+        Earlier rounds are included because they name the same conversation.
+        A worker's second round is the session that took its first, so an
+        operator addressing the label ``actors`` printed a round ago is not
+        addressing a different agent, and nothing they could read would tell
+        them the label had moved on.
+        """
+        return [
+            "",
+            self.id,
+            f"{self.kind}:{self.id}",
+            *(f"{self.kind}:{self.id}#{taken}" for taken in range(1, self.round + 1)),
+        ]
+
 
 class ResolvePhase(StrEnum):
     """Persisted resolver phase names in their only valid forward order."""
@@ -382,6 +440,10 @@ class WorkerContext(BaseModel):
 
     root: Path
     concern_id: str
+    actor: ActorRef
+    """Whose session this is, which is not derivable from the concern: one
+    recipe opens both a concern's worker and the merger that joins into it,
+    and mail addressed to either must reach that one and not the other."""
     allowances: list[ConcernAllowance] = Field(default_factory=list)
     """Edit gates a human granted with this concern. The merge and
     integration leases carry none: no concern approved them."""

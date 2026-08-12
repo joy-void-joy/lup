@@ -16,7 +16,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from lup.resolver.journal import ActorRef
+from lup.resolver.models import ActorRef
 from lup.resolver.mailbox import (
     MESSAGE_FILE,
     QUESTION_DIR,

@@ -21,7 +21,6 @@ from lup.resolver.dag import ConcernGraph
 from lup.resolver.execution import ConcernExecutor
 from lup.resolver.joins import Joiner
 from lup.resolver.journal import (
-    ActorRef,
     Journal,
     LeaseDriftEvent,
     RunFailedEvent,
@@ -32,6 +31,7 @@ from lup.resolver.mailbox import (
 )
 from lup.resolver.models import (
     INTEGRATION_CONCERN_ID,
+    ActorRef,
     AdmissionRequest,
     AnswerBatch,
     CleanupRecord,

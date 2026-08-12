@@ -20,13 +20,13 @@ from pathlib import Path
 
 from lup.resolver.dag import ConcernGraph
 from lup.resolver.journal import (
-    ActorRef,
     JoinAuditEvent,
     JoinCompletedEvent,
     Journal,
     RecheckRepeatedEvent,
 )
 from lup.resolver.models import (
+    ActorRef,
     Concern,
     DropCandidate,
     IntegrationRecord,

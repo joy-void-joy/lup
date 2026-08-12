@@ -25,9 +25,9 @@ from lup.harness.contracts import SkillInvocationRenderer
 from lup.harness.models import ResolveSpec
 from lup.policy.identity import ConcernAllowance
 from lup.resolver.actors import ActorSession, ActorSessions
-from lup.resolver.journal import ActorRef
 from lup.resolver.mailbox import QuestionMailbox
 from lup.resolver.models import (
+    ActorRef,
     Concern,
     DropCandidate,
     MergeReport,
@@ -162,7 +162,12 @@ class TurnRunner:
         return self.actors.session(
             actor,
             self.worker_factory(
-                WorkerContext(root=root, concern_id=actor.id, allowances=allowances)
+                WorkerContext(
+                    root=root,
+                    concern_id=actor.id,
+                    actor=actor,
+                    allowances=allowances,
+                )
             ),
         )
 
