@@ -190,13 +190,15 @@ is the map of every difference.
 ### The rest
 
 Every remaining top-level entry, and what makes it one. `types` is tier 1
-above; the rest each answer a question no sibling answers.
+above and `__init__` is the front door; the rest each answer a question no
+sibling answers.
 
 | Package | Solves |
 | --- | --- |
 | `devtools` | The development CLI an adopter inherits rather than forks: worktrees and branches, trace and Python introspection, the resolver supervisor, the sync registry, version bookkeeping. Ships no roster — each sub-app declares itself beside its Typer app and an application composes the ones it wants. Requires the `web` extra for the supervisor. |
 | `channels` | File-backed channels — a value that settles, an ordered log, and the atomic publish under both. The widest dependency here: `harness`, `resolver`, `runtime`, `realtime`, `telemetry`, and `adapters` all write through it, which is what makes it a package rather than a helper inside any one of them. |
 | `codeintel` | An LSP client and the tools built on it, so a name is resolved rather than grepped. Serves an agent's toolset and the pyright oracle behind `dev check` — two consumers on opposite sides of the library, neither of which owns it. |
+| `gitlocks` | Why git cannot take the lock its config writes need. A confinement owning the path and a lock some git left behind when it died both surface as `File exists`, and the remedies are opposite, so telling them apart reads the mount state and the lock's age rather than the message. The same two-consumers shape as `codeintel`: the resolver's orchestrator and `devtools/utils` both diagnose it, and neither owns it. |
 | `subagents` | Spec-driven delegation for engines with no native subagents, dispatching the same `SubagentSpec` roster the native path uses. |
 | `tool_policy` | Tool-availability filtering: the mechanism, not the policy. A project subclasses `BaseToolPolicy` and maps its own settings onto it, which is the placement rule in miniature — the machinery is the library's, every exclusion is the adopter's. |
 | `markdown` | Rendering Markdown that is generated rather than authored, escaping at the leaf where data enters the document. Only `devtools` renders such tables today, but nothing in it is about development tooling. |
