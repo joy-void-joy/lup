@@ -28,13 +28,20 @@ from lup.channels.models import (
     DoorPolicy,
     utc_now,
 )
+from lup.channels.cursor import StreamCursors
 from lup.channels.slot import Slot, SlotSet
 from lup.channels.stream import Stream
 from lup.channels.wait import POLL_SECONDS, wait_until
-from lup.resolver.models import FROZEN, MaterialQuestion, QuestionAnswer
+from lup.resolver.models import (
+    FROZEN,
+    ActorRef,
+    MaterialQuestion,
+    QuestionAnswer,
+)
 
 QUESTION_DIR = "questions"
 MESSAGE_FILE = "messages.jsonl"
+DELIVERY_DIR = "delivery"
 PARK_DIR = "park"
 RESUME_DIR = "resume"
 ANSWER_POLL_SECONDS = POLL_SECONDS
@@ -116,6 +123,23 @@ class ActorMessage(BaseModel):
     redirect: bool = False
 
 
+class ActorDelivery(BaseModel):
+    """What one actor has waiting, and the position that consumes exactly it.
+
+    The position is carried rather than taken again at the moment of
+    delivery, because a message posted between reading and handing over
+    would otherwise be committed past without ever being read.
+    """
+
+    model_config = FROZEN
+
+    messages: list[ActorMessage]
+    through: int
+
+    def redirects(self) -> list[ActorMessage]:
+        return [message for message in self.messages if message.redirect]
+
+
 class MailboxWait(BaseModel):
     """How one wait ended. ``reason`` is empty only on a complete answer."""
 
@@ -156,6 +180,7 @@ class QuestionMailbox:
         self.stream: Stream[ActorMessage] = Stream(
             root / MESSAGE_FILE, TypeAdapter(ActorMessage)
         )
+        self.cursors = StreamCursors(root / DELIVERY_DIR)
         self.park_slot: Slot[ParkRequest] = Slot(root / PARK_DIR, ParkRequest)
         # Pause and resume are asymmetric on purpose. Pausing is a directive
         # any door may issue; resuming is a decision, and excluding AGENT
@@ -238,23 +263,34 @@ class QuestionMailbox:
         """Tell an actor something. This never settles and never parks a run."""
         self.stream.append(message)
 
-    def messages_for(self, actor: str, offset: int = 0) -> list[ActorMessage]:
-        """Every message addressed to one actor, or broadcast to all of them."""
-        return [
-            pair.item
-            for pair in self.stream.read_from(offset)
-            if pair.item.to_actor in (actor, "")
-        ]
+    def waiting(self, actor: ActorRef) -> ActorDelivery:
+        """Everything queued for one actor, consuming none of it.
 
-    def stream_offset(self) -> int:
-        """Where a reader that has consumed everything should resume.
+        From the position that actor was last *delivered* to, which is a
+        file rather than a number some session happens to hold. Starting
+        each session at the stream head instead meant a message posted while
+        the previous turn was in flight was skipped rather than queued: the
+        window a turn opened began after it, in every round, so it reached
+        nobody ever. Reading is separated from consuming so that asking what
+        an actor has waiting — which is how a sender learns whether anything
+        was read — cannot itself be what makes it disappear.
+        """
+        position = self.cursors.offset(actor.conversation())
+        found = self.stream.read_from(position)
+        reaching = actor.addresses()
+        return ActorDelivery(
+            messages=[pair.item for pair in found if pair.item.to_actor in reaching],
+            through=found[-1].commit_offset if found else position,
+        )
 
-        Taken rather than derived from the last message read, because a
+    def delivered(self, actor: ActorRef, through: int) -> None:
+        """Record that one actor has been handed everything through ``through``.
+
+        The whole region rather than the last matching message, because a
         reader filtering by actor must still skip past the ones addressed
         elsewhere or it re-reads them on every turn.
         """
-        found = self.stream.read_from(0)
-        return found[-1].commit_offset if found else 0
+        self.cursors.commit(actor.conversation(), through)
 
     def park(self, request: ParkRequest) -> None:
         self.park_slot.clear()

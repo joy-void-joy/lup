@@ -29,14 +29,20 @@ from pathlib import Path
 from pydantic import BaseModel, TypeAdapter
 
 from lup.channels.models import publish_atomic
+from lup.hooks import (
+    LupHookInput,
+    LupHookMatcher,
+    LupHookOutput,
+    LupHooksConfig,
+)
 from lup.resolver.journal import (
-    ActorRef,
     Journal,
+    MessageOutstandingEvent,
     MessagePostedEvent,
     record_turn,
 )
-from lup.resolver.mailbox import QuestionMailbox
-from lup.resolver.models import FROZEN
+from lup.resolver.mailbox import ActorDelivery, ActorMessage, QuestionMailbox
+from lup.resolver.models import FROZEN, ActorRef
 from lup.runtime.errors import ProviderTurnError
 from lup.runtime.factory import SessionFactory
 from lup.runtime.models import (
@@ -84,6 +90,123 @@ def schema_digest(output_type: type[BaseModel] | type[None] | None) -> str | Non
     return hashlib.sha256(schema.encode("utf-8")).hexdigest()
 
 
+class ActorInbox:
+    """One conversation's mail, delivered once by whichever path reaches it.
+
+    Two paths put a message in front of an actor — the hook that interrupts
+    a live turn, and the collection that heads the next one — and they each
+    held their own in-memory position over the same stream. Two positions
+    over one stream can only agree by luck: both started at whatever the
+    head was when they were constructed, so a message posted while a turn
+    was in flight was already behind both of them, and the run reported it
+    sent.
+
+    One inbox per conversation, holding the round it is on, is what lets the
+    hook record a delivery against the actor that actually received it while
+    the position it commits is the one the next turn resumes from.
+    """
+
+    def __init__(
+        self, mailbox: QuestionMailbox, journal: Journal, actor: ActorRef
+    ) -> None:
+        self.mailbox = mailbox
+        self.journal = journal
+        self.actor = actor
+
+    def waiting(self) -> ActorDelivery:
+        """What this conversation has queued, without consuming any of it."""
+        return self.mailbox.waiting(self.actor)
+
+    def commit(self, delivery: ActorDelivery) -> None:
+        """Record one delivery as handed over, and resume after it next time.
+
+        Journaled here rather than at either call site, so a mid-turn
+        delivery and a between-turns one leave the same record. The record
+        being written on only one path is what let a redirect vanish twice
+        over: nothing was delivered, and nothing said so.
+
+        Separate from reading because the two are separated by however long
+        it takes to open a session, and the run this exists for was
+        interrupted by a spend limit. Committing on the read would have
+        consumed a message the interrupted turn never carried.
+        """
+        for message in delivery.messages:
+            self.journal.append(
+                self.actor,
+                MessagePostedEvent(
+                    text=message.text,
+                    door=message.door,
+                    in_reply_to=message.in_reply_to,
+                    redirect=message.redirect,
+                ),
+            )
+        self.mailbox.delivered(self.actor, delivery.through)
+
+    def take(self) -> list[ActorMessage]:
+        """Take everything queued, for a caller delivering it here and now."""
+        delivery = self.waiting()
+        self.commit(delivery)
+        return delivery.messages
+
+    def record_outstanding(self) -> None:
+        """Record whatever is still queued as this conversation closes."""
+        for message in self.waiting().messages:
+            self.journal.append(
+                self.actor,
+                MessageOutstandingEvent(
+                    text=message.text, door=message.door, redirect=message.redirect
+                ),
+            )
+
+
+def create_inbox_hooks(inbox: ActorInbox) -> LupHooksConfig:
+    """Put anything said to this actor in front of it, mid-turn.
+
+    Non-cooperative by construction. The actor calls any tool at all and the
+    message is in its context — it never chooses to check, so it cannot fail
+    to. Waiting for the next turn would mean a directive sits unread for as
+    long as the current one runs, which on a resolver turn is most of the
+    run.
+
+    Telling and stopping are different acts and get different verdicts. A
+    message rides alongside the call and the actor keeps going. A redirect
+    denies the call and hands back the text as the reason, so an actor going
+    the wrong way cannot take one more step down it — which is the whole
+    difference between being informed and being redirected. Nothing here
+    spends an interrupt: a turn that ends mid-report is a turn whose typed
+    submission never arrives, and the actor is answering a refused tool call
+    either way.
+
+    The inbox is the actor's own rather than one opened here, so what this
+    delivers the next turn does not deliver again, and what it delivers is
+    recorded. Built from a target of its own, it matched the bare concern id
+    while the console printed and accepted ``worker:some-concern#1`` — so a
+    redirect sent to the address the console gave reached neither path.
+    """
+
+    async def deliver(_input: LupHookInput) -> LupHookOutput:
+        arrived = inbox.take()
+        if not arrived:
+            return LupHookOutput(decision="allow")
+        # Everything that arrived is carried either way. The position has
+        # already moved past all of it, so a message batched alongside a
+        # redirect has this one delivery and no other.
+        delivered = "\n".join(
+            f"[{'redirected' if message.redirect else 'message'} by {message.door}] "
+            f"{message.text}"
+            for message in arrived
+        )
+        if any(message.redirect for message in arrived):
+            return LupHookOutput(
+                decision="deny",
+                reason=delivered
+                + "\n\nStop what this call was part of and act on the above.",
+            )
+        return LupHookOutput(decision="allow", additional_context=delivered)
+
+    return LupHooksConfig(pre_tool_use=[LupHookMatcher(hook=deliver, tag="inbox")])
+
+
 class ActorSession:
     """One actor's conversation, held open across every turn it takes."""
 
@@ -93,17 +216,17 @@ class ActorSession:
         factory: SessionFactory,
         journal: Journal,
         record: ActorRecord | None = None,
-        inbox: QuestionMailbox | None = None,
+        inbox: ActorInbox | None = None,
     ) -> None:
         self.actor = actor
         self.factory = factory
         self.journal = journal
         self.inbox = inbox
-        self.inbox_offset = inbox.stream_offset() if inbox is not None else 0
         self.record = record or ActorRecord(actor=actor)
         self.stack = AsyncExitStack()
         self.handle: SessionHandle | None = None
         self.pending: list[str] = []
+        self.collected: ActorDelivery | None = None
 
     async def opened(self) -> SessionHandle:
         """Open this actor's session once, resuming where one was persisted."""
@@ -193,24 +316,21 @@ class ActorSession:
         """
         if self.inbox is None:
             return
-        arrived = self.inbox.messages_for(self.actor.label(), self.inbox_offset)
-        self.inbox_offset = self.inbox.stream_offset()
-        for message in arrived:
-            self.pending.append(
-                f"[redirected by {message.door}] {message.text}\n"
-                "Stop what you were doing and act on this."
-                if message.redirect
-                else f"[{message.door}] {message.text}"
-            )
-            self.journal.append(
-                self.actor,
-                MessagePostedEvent(
-                    text=message.text,
-                    door=message.door,
-                    in_reply_to=message.in_reply_to,
-                    redirect=message.redirect,
-                ),
-            )
+        collected = self.inbox.waiting()
+        if not collected.messages:
+            # Nothing here for this actor, but the region held mail for
+            # others: skipping past it is what stops every turn re-reading
+            # the whole stream, and there is nothing to lose by committing.
+            self.inbox.commit(collected)
+            return
+        self.collected = collected
+        self.pending.extend(
+            f"[redirected by {message.door}] {message.text}\n"
+            "Stop what you were doing and act on this."
+            if message.redirect
+            else f"[{message.door}] {message.text}"
+            for message in collected.messages
+        )
 
     def with_pending[T: BaseModel | None](
         self, request: TurnRequest[T]
@@ -219,11 +339,19 @@ class ActorSession:
 
         Ahead of the prompt rather than after it, because a message that
         retargets an actor has to be read before the instruction it revises.
+
+        This is where the mail counts as delivered, because this is where it
+        joins a turn. Anything that ends the run between collecting it and
+        here leaves the position untouched, so the message heads the next
+        turn instead of being consumed by one that never happened.
         """
         if not self.pending:
             return request
         delivered = "\n\n".join([*self.pending, request.input.text])
         self.pending.clear()
+        if self.inbox is not None and self.collected is not None:
+            self.inbox.commit(self.collected)
+            self.collected = None
         return request.model_copy(
             update={"input": request.input.model_copy(update={"text": delivered})}
         )
@@ -253,27 +381,31 @@ class ActorSessions:
     job and happens once, at the end of the run or at a park.
     """
 
-    def __init__(
-        self, root: Path, journal: Journal, inbox: QuestionMailbox | None = None
-    ) -> None:
+    def __init__(self, root: Path, journal: Journal, mailbox: QuestionMailbox) -> None:
         self.root = root / SESSION_DIR
         self.journal = journal
-        self.inbox = inbox
+        self.mailbox = mailbox
         self.sessions: dict[str, ActorSession] = {}
-
-    def key(self, actor: ActorRef) -> str:
-        """Which conversation this actor belongs to.
-
-        Deliberately not the round. A worker on round two is the agent that
-        wrote round one's code and was told what was wrong with it, and a
-        reviewer that re-read its concern cold each round is one of the
-        symptoms this exists to remove. The round attributes what happened
-        in the journal; it does not fork the conversation.
-        """
-        return f"{actor.kind}-{actor.id}"
+        self.inboxes: dict[str, ActorInbox] = {}
 
     def path(self, actor: ActorRef) -> Path:
-        return self.root / f"{self.key(actor)}.json"
+        return self.root / f"{actor.conversation()}.json"
+
+    def inbox(self, actor: ActorRef) -> ActorInbox:
+        """This conversation's mail, kept current with the round it is on.
+
+        One object per conversation rather than one per caller, because the
+        hook that interrupts a live turn and the collection that heads the
+        next one are two views of one mailbox. Handing each its own left
+        them with two positions over one stream, and a message could sit
+        behind both.
+        """
+        held = self.inboxes.get(actor.conversation())  # lup: ignore[dict-get] presence
+        if held is None:
+            held = ActorInbox(self.mailbox, self.journal, actor)
+            self.inboxes[actor.conversation()] = held
+        held.actor = actor
+        return held
 
     def persisted(self, actor: ActorRef) -> ActorRecord | None:
         """The identity this actor left behind, if it has run before."""
@@ -288,25 +420,34 @@ class ActorSessions:
 
     def session(self, actor: ActorRef, factory: SessionFactory) -> ActorSession:
         """This actor's session, resumed from its record the first time."""
-        held = self.sessions.get(self.key(actor))  # lup: ignore[dict-get] — presence
+        inbox = self.inbox(actor)
+        held = self.sessions.get(actor.conversation())  # lup: ignore[dict-get] presence
         if held is not None:
             held.actor = actor
             return held
         opened = ActorSession(
-            actor, factory, self.journal, self.persisted(actor), self.inbox
+            actor, factory, self.journal, self.persisted(actor), inbox
         )
-        self.sessions[self.key(actor)] = opened
+        self.sessions[actor.conversation()] = opened
         return opened
 
     def save(self, actor: ActorRef) -> None:
         """Persist one actor's identity so a resumed run reattaches to it."""
-        held = self.sessions.get(self.key(actor))  # lup: ignore[dict-get] — presence
+        held = self.sessions.get(actor.conversation())  # lup: ignore[dict-get] presence
         if held is not None:
             publish_atomic(self.path(actor), held.record)
 
     async def close(self) -> None:
-        """Close every open session, persisting what each one needs to return."""
+        """Close every open session, recording what each was never handed.
+
+        A sender is told a message was sent on the strength of the mailbox
+        accepting it, which is not the same as anyone reading it. What is
+        still queued as the sessions close is therefore recorded against the
+        actor it was for — outstanding across a park, and never read at all
+        on a run that ended.
+        """
         for held in list(self.sessions.values()):
             self.save(held.actor)
+            self.inbox(held.actor).record_outstanding()
             await held.close()
         self.sessions.clear()

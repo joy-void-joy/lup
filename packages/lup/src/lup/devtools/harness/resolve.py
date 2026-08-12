@@ -30,6 +30,7 @@ from lup.resolver.contracts import (
     ResolverObserver,
     WorktreePreparer,
 )
+from lup.resolver.actors import create_inbox_hooks
 from lup.resolver.core import ResolverCore
 from lup.resolver.state import ResolverStateRepository
 from lup.resolver.models import (
@@ -58,7 +59,6 @@ from lup.resolver.tools import (
     RESOLVER_CONCERN_ENV,
     RESOLVER_RUN_DIR_ENV,
     ResolverToolContext,
-    create_inbox_hooks,
     create_question_tools,
     read_resolver_tool_context,
 )
@@ -884,8 +884,14 @@ def run_resolve(
             id as an argument, so a worker structurally cannot post against
             a sibling. ``core`` is read at call time, which is after it is
             built — the wake event only exists once the core does.
+
+            The inbox is the run's own for this actor, not a second reader
+            opened here. Two readers over one message stream each began at
+            whatever its head was when they were made, so a message posted
+            while a turn was in flight sat behind both of them.
             """
             cwd = context.root
+            inbox = core.actors.inbox(context.actor)
             tool_context = ResolverToolContext(
                 run_dir=state_root / resolved_run_id,
                 concern_id=context.concern_id,
@@ -933,10 +939,7 @@ def run_resolve(
                                 ),
                                 create_git_inspection_hook(),
                             ),
-                            create_inbox_hooks(
-                                QuestionMailbox(tool_context.run_dir),
-                                context.concern_id,
-                            ),
+                            create_inbox_hooks(inbox),
                         ),
                     )
                 )
@@ -955,10 +958,7 @@ def run_resolve(
                     approval_policy="onRequest",
                     hooks=merge_hooks(
                         worker_policy_hooks(granted, CODEX_SEMANTICS),
-                        create_inbox_hooks(
-                            QuestionMailbox(tool_context.run_dir),
-                            context.concern_id,
-                        ),
+                        create_inbox_hooks(inbox),
                     ),
                     environment=concern_environment,
                     mcp_servers={
