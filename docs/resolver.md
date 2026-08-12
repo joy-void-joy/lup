@@ -57,6 +57,19 @@ The doors are `--answer <question-id>=<value>`, the supervisor page,
 `integration-acceptance` question, so every door records it the same way. See
 [supervisor.md](supervisor.md).
 
+**Telling an actor something is a stream, and delivery is a position.**
+`resolve say` rides in front of the actor's next tool call; `resolve redirect`
+refuses that call and hands back the text as the reason. Both are recorded
+against the actor that received them, and both are consumed exactly once
+through one position per conversation, kept in the run directory rather than
+in whichever session happens to be open — a reader starting at the stream
+head begins *after* everything posted while it was away. An actor recognizes
+every spelling of itself, so the label `resolve actors` prints reaches it
+whatever round it has moved on to. Because a door writes the stream and the
+actor reads it later, `say` and `redirect` report what a message is queued
+for rather than that it sent, `actors` lists what each actor has not read
+yet, and anything still queued when a session closes is recorded.
+
 **`state.json` lags the mailbox.** The run folds `questions/` and `answers/`
 into `state.questions`/`state.answers` as it promotes, so those copies are
 correct once a run finishes and behind while it moves. The rule: the mailbox
@@ -77,9 +90,45 @@ tree are unchanged.
 The lifecycle inventories concerns, publishes material questions, persists
 eligibility and integration approval, validates the dependency DAG, leases a
 non-overlapping branch/worktree per approved concern, and executes independent
-topological nodes concurrently. Root nodes start from the source snapshot,
+topological nodes concurrently. Root nodes start from the run's base,
 single-parent nodes start from the verified parent commit, and multi-parent
 nodes use an orchestrator-prepared semantic join.
+
+**Evidence has three kinds, and the tracker is one of them.** A run plans
+from `# lup:` notes in the tree, statements a human typed, and the project's
+open issues — every one minus an exclusion label, so what goes unlabelled
+still gets read rather than what goes unremembered going unfixed. Positions
+run end to end in that order, so a planner cites any kind the same way and
+clusters issues exactly as it clusters notes: one issue routinely raises
+several concerns and several routinely raise one. The library knows an issue
+only as a number, a URL and some text; reaching a tracker is devtools' job,
+so a project on another forge supplies its own reader. When a concern
+derived from an issue lands, the run comments there naming the review branch,
+and never closes it — a reviewer passing is not a human having read the code.
+
+**A base is refreshed, not only inherited.** The base starts as the source
+snapshot and is brought up to the branch it came from whenever a lease is
+created — fast-forwarded where the snapshot is contained in the branch,
+merged where it is not, so a run planned from uncommitted notes keeps them.
+That is the one moment it costs nothing: the worktree does not exist yet. A
+lease already holding work keeps its base until somebody asks, with
+`lup-devtools harness resolve refresh --run-id <id>`, which reports per lease
+what merging would conflict on and takes it only with `--apply`. A concern
+whose work is already verified is never moved: its commit is what the run
+records and joins.
+
+Combining the two bases can itself conflict, and ordinarily does: the fix
+that unblocks a parked run touches the files that run's notes are about. So
+the refusal names the paths, and `--base <commit>` adopts a combine somebody
+resolved by hand — checked to contain both the run's base and the branch, so
+a resolution that dropped one side is refused rather than taken. One
+resolution there replaces the same conflict met again in every lease.
+
+Verification is scoped by the tree it runs on rather than by the run. A
+command declares the flag it takes a base through — `--since` for `dev
+check` — and the run supplies the commit of whatever tree is being verified.
+A base written into the arguments instead would sit inside the digest that
+gates resume, so a run could not resume itself once its base moved.
 
 The initial question batch includes an approve/defer decision for each planned
 concern. A directly approved concern is still ineligible when any dependency is

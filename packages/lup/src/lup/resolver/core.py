@@ -21,8 +21,8 @@ from lup.resolver.dag import ConcernGraph
 from lup.resolver.execution import ConcernExecutor
 from lup.resolver.joins import Joiner
 from lup.resolver.journal import (
-    ActorRef,
     Journal,
+    LeaseDriftEvent,
     RunFailedEvent,
 )
 from lup.resolver.mailbox import (
@@ -31,6 +31,7 @@ from lup.resolver.mailbox import (
 )
 from lup.resolver.models import (
     INTEGRATION_CONCERN_ID,
+    ActorRef,
     AdmissionRequest,
     AnswerBatch,
     CleanupRecord,
@@ -45,11 +46,13 @@ from lup.resolver.models import (
     IntegrationRecord,
     MaterialQuestion,
     QuestionBatch,
+    RefreshReport,
     ResolveInventory,
     ResolveManifest,
     ResolvePhase,
     ResolveRequest,
     ResolverSource,
+    IssueEvidence,
     ReviewNote,
     ResolverConfig,
     ResolveState,
@@ -61,6 +64,7 @@ from lup.resolver.orchestrator import (
     WritableRootLeases,
 )
 from lup.resolver.questions import QuestionBroker
+from lup.resolver.rebase import BaseRefresher
 from lup.resolver.run import ResolveRun, ResolverInvariantError
 from lup.resolver.state import PHASE_ORDER, ResolverStateRepository
 from lup.resolver.turns import (
@@ -94,12 +98,32 @@ class EvidenceCitation(BaseModel):
 
     notes: list[ReviewNote]
     evidence: str
+    issues: list[IssueEvidence]
 
 
 def resolver_config_digest(config: ResolverConfig) -> str:
     """Bind resumed state to the exact injected resolver composition inputs."""
     encoded = config.model_dump_json().encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
+
+
+def moved_config_fields(
+    persisted: ResolverConfig, current: ResolverConfig
+) -> list[str]:
+    """Which fields of the composition a run was persisted under now differ.
+
+    Empty while the digest still disagrees means no recorded value moved and
+    the composition's shape did: a field absent from the persisted document
+    parses as its default, so growing the model changes the serialization
+    every digest is taken over without changing anything a run was decided
+    on. Naming that case is the difference between adopting a schema
+    addition and adopting a changed verification gate.
+    """
+    return sorted(
+        name
+        for name in type(current).model_fields
+        if getattr(persisted, name) != getattr(current, name)
+    )
 
 
 def failure_messages(error: BaseException) -> list[str]:
@@ -135,10 +159,11 @@ def coverage_complaint(referenced: list[int], total: int) -> str | None:
 def planned_evidence(request: ResolveRequest, indexes: list[int]) -> EvidenceCitation:
     """Split one plan's positional references back into what it cites.
 
-    Positions below the note count name notes; the rest continue into the
-    statements, so a planner references either kind the same way and the
+    The lists run end to end in declaration order — notes, then statements,
+    then issues — so a planner references any kind the same way and the
     materialized concern still carries each in the form it came in.
     """
+    statements = len(request.notes) + len(request.statements)
     return EvidenceCitation(
         notes=[
             ReviewNote.model_validate(
@@ -150,8 +175,13 @@ def planned_evidence(request: ResolveRequest, indexes: list[int]) -> EvidenceCit
         evidence="\n".join(
             request.statements[index - len(request.notes)]
             for index in indexes
-            if index >= len(request.notes)
+            if len(request.notes) <= index < statements
         ),
+        issues=[
+            request.issues[index - statements]
+            for index in indexes
+            if statements <= index < statements + len(request.issues)
+        ],
     )
 
 
@@ -235,7 +265,9 @@ class ResolverCore:
         worktree_preparer: WorktreePreparer | None = None,
         answer_wait_seconds: float = 0.0,
         poll_interval_seconds: float = ANSWER_POLL_SECONDS,
+        adopt_config: bool = False,
     ) -> None:
+        self.adopt_config = adopt_config
         self.config = config
         self.spec = spec
         self.answer_wait_seconds = answer_wait_seconds
@@ -250,6 +282,7 @@ class ResolverCore:
         self.journal = Journal(self.repository.root)
         self.actors = ActorSessions(self.repository.root, self.journal, self.mailbox)
         self.run_state = ResolveRun(self.repository, self.journal, observer)
+        self.rebaser = BaseRefresher(self.run_state, self.worktrees, self.journal)
         self.questions = QuestionBroker(
             config,
             self.run_state,
@@ -351,9 +384,10 @@ class ResolverCore:
             "implementation concerns without editing. Cluster by underlying "
             "issue, not file. Reference evidence through evidence_indexes using "
             "its zero-based position in the evidence below — notes first, then "
-            "statements. A note is not a unit of work: split one that "
-            "raises several issues across several concerns, and reference it "
-            "from each. Every index must appear at least once; none may repeat "
+            "statements, then issues. Neither a note nor an issue is a unit of "
+            "work: split one that raises several problems across several "
+            "concerns, and reference it from each. "
+            "Every index must appear at least once; none may repeat "
             "within a single concern. Give each concern path-safe id, complete acceptance "
             "criteria, dependencies, material questions, and starting files. Every "
             "concern's criteria must scope analysis and action together — never "
@@ -428,6 +462,7 @@ class ResolverCore:
         state = ResolveState(
             run_id=self.config.run_id,
             config_digest=resolver_config_digest(self.config),
+            config=self.config,
             phase=ResolvePhase.INVENTORY,
             source=inventory.source,
             spec=self.spec,
@@ -450,6 +485,39 @@ class ResolverCore:
         with self.repository.exclusive():
             return await self.resume_exclusive()
 
+    def composition_delta(self, state: ResolveState) -> str:
+        """Which composition fields moved, for a refusal that must be judged.
+
+        A run persisted before the composition was recorded can only say
+        that something moved. One that recorded it names the fields, and
+        names their absence too: no field differing while the digest does is
+        the signature of a field added to the model rather than a decision
+        this run was made under, which is the one move that is safe to adopt
+        without re-deriving anything.
+        """
+        if state.config is None:
+            return " (persisted before the composition itself was recorded)"
+        fields = moved_config_fields(state.config, self.config)
+        if not fields:
+            return (
+                " (every recorded field matches, so the model gained or lost one"
+                " rather than this run's inputs changing)"
+            )
+        return f" (moved: {', '.join(fields)})"
+
+    def adopted(self) -> ResolveState:
+        """Re-stamp a run onto the current composition, on the human's word.
+
+        Adoption is recorded rather than silent: the digest is what a later
+        resume checks, so a run that adopted one composition and reports the
+        old one would refuse itself again for a move nobody made.
+        """
+        adopted = self.repository.adopt(
+            self.config, resolver_config_digest(self.config)
+        )
+        self.state = adopted
+        return adopted
+
     async def resume_exclusive(self) -> ResolveManifest:
         """Resume while holding the run's inter-process lease."""
         if not self.repository.exists():
@@ -471,7 +539,9 @@ class ResolverCore:
             )
             if persisted != current
         ]
-        if moved:
+        if moved == ["configuration"] and self.adopt_config:
+            state = self.adopted()
+        elif moved:
             # Naming neither what moved nor the way out left one recovery to
             # guess at, and the run holding the most answers is the one that
             # hits this: parking exposes a defect, and fixing the defect is
@@ -479,7 +549,9 @@ class ResolverCore:
             raise ResolverInvariantError(
                 f"resolver run {state.run_id!r} was persisted under a different "
                 + " and ".join(moved)
-                + "; resume it from the same tree and gate, or abort it with "
+                + self.composition_delta(state)
+                + "; resume it from the same tree and gate, adopt the move with "
+                "--adopt-config once it reads as compatible, or abort it with "
                 "--abort <reason> to start a run that matches"
             )
         if state.phase == ResolvePhase.ABORTED:
@@ -670,6 +742,7 @@ class ResolverCore:
             concern for concern in approved if concern.id not in lease_by_concern
         ]
         if unleased:
+            state = self.rebaser.refreshed(state)
             fresh = [
                 self.leases.acquire(concern.id, self.concern_branch(concern.id))
                 for concern in unleased
@@ -698,7 +771,7 @@ class ResolverCore:
         }
         outcomes = list(state.outcomes)
         completed_ids = {outcome.concern_id for outcome in outcomes}
-        builder = DependencyBaseBuilder(state.source)
+        builder = DependencyBaseBuilder(state.root_base())
         if state.integration is None:
             for batch in graph.topological_batches():
                 selected = [
@@ -801,6 +874,20 @@ class ResolverCore:
         self.land_nested(state)
         return self.manifest(self.release(state))
 
+    def refresh(self, apply: bool = False) -> RefreshReport:
+        """Report, and optionally take, what refreshing this run would do.
+
+        The leases already made are the ones the automatic refresh cannot
+        reach: they hold work, so bringing the branch into them is a
+        decision rather than a default. Reporting first is what makes it a
+        decision somebody can take — several concerns in the run this comes
+        from were editing the very files the upstream fix touched.
+        """
+        with self.repository.exclusive():
+            state = self.repository.load()
+            self.state = state
+            return self.rebaser.report(state, apply)
+
     def restore_leases(self, state: ResolveState) -> None:
         """Validate persisted authority and reset incomplete attempts for retry."""
         self.leases.adopt(state.leases)
@@ -831,7 +918,7 @@ class ResolverCore:
                     expected = state.join_progress.commit
                 else:
                     recorded = False
-                    expected = state.source.commit
+                    expected = state.root_base().commit
                 self.restore_worktree(lease, expected, recorded)
                 continue
             outcome = (
@@ -847,9 +934,16 @@ class ResolverCore:
                     for parent in concern.dependencies
                     if parent in commits
                 ]
-                expected = parent_commits[0] if parent_commits else state.source.commit
+                expected = (
+                    parent_commits[0] if parent_commits else state.root_base().commit
+                )
             if outcome is not None:
-                self.restore_worktree(lease, outcome.commit or expected, True)
+                self.restore_worktree(
+                    lease,
+                    outcome.head or outcome.commit or expected,
+                    True,
+                    abandoned=not outcome.verified,
+                )
                 continue
             if not lease.root.exists() and not self.worktrees.branch_exists(lease):
                 self.restore_concern_progress(lease.concern_id)
@@ -858,9 +952,21 @@ class ResolverCore:
             self.restore_concern_progress(lease.concern_id)
 
     def restore_worktree(
-        self, lease: WritableRootLease, expected: str, terminal: bool
+        self,
+        lease: WritableRootLease,
+        expected: str,
+        terminal: bool,
+        *,
+        abandoned: bool = False,
     ) -> None:
-        """Restore one persisted branch and validate or reset its exact commit."""
+        """Restore one persisted branch and validate or reset its exact commit.
+
+        An abandoned tree is one no actor will open again in this run: the
+        concern failed, so nothing reads it and nothing merges from it. Its
+        drift is recorded rather than raised, because a resume that refuses
+        the whole run over it strands every healthy concern beside it — four
+        verified and five newly eligible, in the run that reported this.
+        """
         if not lease.root.exists():
             if self.worktrees.branch_exists(lease):
                 self.worktrees.restore(lease)
@@ -868,10 +974,19 @@ class ResolverCore:
                 self.worktrees.create(lease, expected)
         self.worktrees.branch(lease)
         if terminal:
-            if self.worktrees.head(lease) != expected:
+            found = self.worktrees.head(lease)
+            if found == expected:
+                return
+            if not abandoned:
                 raise ResolverInvariantError(
-                    f"persisted commit changed for {lease.concern_id}"
+                    f"persisted commit changed for {lease.concern_id}: expected "
+                    f"{expected}, found {found}"
                 )
+            self.journal.record(
+                LeaseDriftEvent(
+                    concern_id=lease.concern_id, expected=expected, found=found
+                )
+            )
             return
         # A park is a pause, not an abandonment. What sits in the working tree
         # is the turn a question interrupted — the join being resolved, or the
@@ -978,12 +1093,12 @@ class ResolverCore:
             )
             self.persist(state)
             if not integration_lease.root.exists():
-                self.worktrees.create(integration_lease, state.source.commit)
+                self.worktrees.create(integration_lease, state.root_base().commit)
             commits = [
                 outcome.commit for outcome in verified if outcome.commit is not None
             ]
             if commits:
-                parents = [state.source.commit, *commits]
+                parents = [state.root_base().commit, *commits]
                 integration_commit = await self.joiner.join_commits(
                     integration_lease,
                     parents,
@@ -1024,7 +1139,9 @@ class ResolverCore:
                 ) from error
 
         if not integration.completed:
-            verification = self.verifier.verify(integration_lease.root)
+            verification = self.verifier.verify(
+                integration_lease.root, state.root_base().commit
+            )
             state = state.model_copy(
                 update={
                     "phase": ResolvePhase.VERIFICATION,
@@ -1105,6 +1222,7 @@ class ResolverCore:
                     source=state.source,
                     notes=request.notes,
                     statements=request.statements,
+                    issues=request.issues,
                 ),
                 origin=ConcernOrigin.ADMITTED,
                 taken=[concern.id for concern in state.concerns],

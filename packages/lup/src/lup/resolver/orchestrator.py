@@ -1,12 +1,16 @@
 """Concrete lease, worktree, commit, and dependency-base orchestration."""
 
+from itertools import takewhile
 from pathlib import Path
 
 from lup.codescan.symbols import DefinedSymbol, defined_symbols, symbols_lost
+from lup.gitlocks import admin_dirs, diagnose_git_admin
 from lup.harness.process import ExitStatus, LaunchRequest, ProcessLauncher
 from lup.resolver.contracts import WorktreePreparer
+from lup.resolver.declaration import declaration_delta, inspect_changes
 from lup.resolver.notes import clear_concern_notes
 from lup.resolver.models import (
+    BaseRefresh,
     Concern,
     DependencyBase,
     DiffValidation,
@@ -17,29 +21,6 @@ from lup.resolver.models import (
     WorktreeRemoval,
     WritableRootLease,
 )
-
-
-def report_mismatch(undeclared: list[str], unswept: list[str]) -> str:
-    """Name exactly which paths a worker must reconcile to pass this gate.
-
-    A revision round can only converge on something it can read. The prior
-    wording named no path at all, so a worker re-derived the same report and
-    failed identically until the round budget ran out.
-    """
-    return "; ".join(
-        [
-            *(
-                [f"changed but not declared: {', '.join(undeclared)}"]
-                if undeclared
-                else []
-            ),
-            *(
-                [f"declared swept but not changed: {', '.join(unswept)}"]
-                if unswept
-                else []
-            ),
-        ]
-    )
 
 
 class LeaseViolationError(RuntimeError):
@@ -125,6 +106,27 @@ class WorktreeOrchestrator:
         self.workspace = workspace
         self.preparer = preparer
 
+    def config_lock_note(self, root: Path) -> str:
+        """What a failed step's mount state says that git's words cannot.
+
+        A run leases a worktree per concern, and every lease writes config, so
+        a confinement that owns `config.lock` kills the run at its first one
+        with `File exists` — the wording of a stale lock, which is the search
+        this sends nobody on. Read only after a step has already failed, and
+        appended rather than substituted, because git's own refusal stays the
+        record of what it refused.
+        """
+        located = self.launcher.launch(
+            LaunchRequest(
+                arguments=["git", "rev-parse", "--git-dir", "--git-common-dir"],
+                cwd=root,
+            )
+        )
+        if located.code != 0:
+            return ""
+        diagnosis = diagnose_git_admin(admin_dirs(root, located.stdout.splitlines()))
+        return f" — {diagnosis}" if diagnosis else ""
+
     def require(self, request: LaunchRequest, failure: str) -> ExitStatus:
         """Launch one step whose failure refuses the run, in git's own words.
 
@@ -138,6 +140,7 @@ class WorktreeOrchestrator:
             raise RuntimeError(
                 f"{failure}: `{' '.join(request.arguments)}` exited "
                 f"{status.code}: {status.stderr.strip()}"
+                f"{self.config_lock_note(request.cwd)}"
             )
         return status
 
@@ -202,6 +205,45 @@ class WorktreeOrchestrator:
             raise RuntimeError(f"failed to clear review notes for {concern.id}")
         return NoteClearanceCommit(clearance=clearance, commit=commit_lines[0])
 
+    def settled_round(
+        self,
+        concern: Concern,
+        report: WorkerReport,
+        base_commit: str,
+        origin_commit: str,
+    ) -> DiffValidation:
+        """What an unmoved worktree means, given what the branch already holds.
+
+        Three readings, and only one of them is a fault. A worker that
+        reported no change and made none is settled. A revision whose right
+        answer was to change the report — because the rejection was for
+        something no edit inside this lease could reach — has already
+        committed its work in an earlier round, and the branch still holds
+        it. Only an empty branch behind a claim of changes is a worker that
+        did not do what it said.
+
+        Reading the second as the third is what cost `composition-seam-abc`
+        its remaining rounds: complete work, rejected as though absent, until
+        the budget ran out with its criteria never evaluated.
+        """
+        if not report.changed:
+            return DiffValidation(concern_id=concern.id, valid=True, commit=base_commit)
+        if origin_commit and base_commit != origin_commit:
+            return DiffValidation(
+                concern_id=concern.id,
+                valid=True,
+                commit=base_commit,
+                reason=(
+                    "revision changed the report; the work it describes stands "
+                    f"at {base_commit[:12]}"
+                ),
+            )
+        return DiffValidation(
+            concern_id=concern.id,
+            valid=False,
+            reason="worker reported changes but diff is empty",
+        )
+
     def validate_and_commit(
         self,
         concern: Concern,
@@ -209,6 +251,7 @@ class WorktreeOrchestrator:
         lease: WritableRootLease,
         base_commit: str,
         leases: WritableRootLeases,
+        origin_commit: str = "",
     ) -> DiffValidation:
         try:
             self.branch(lease)
@@ -236,14 +279,10 @@ class WorktreeOrchestrator:
                 valid=False,
                 reason="worker changed commit or branch authority",
             )
-        intent = self.launcher.launch(
-            LaunchRequest(arguments=["git", "add", "-N", "."], cwd=lease.root)
-        )
-        if intent.code != 0:
+        inspected = inspect_changes(self.launcher, lease.root, base_commit)
+        if inspected.failure:
             return DiffValidation(
-                concern_id=concern.id,
-                valid=False,
-                reason="new paths could not be inspected",
+                concern_id=concern.id, valid=False, reason=inspected.failure
             )
         checked = self.launcher.launch(
             LaunchRequest(
@@ -257,19 +296,7 @@ class WorktreeOrchestrator:
                 valid=False,
                 reason="diff validation failed",
             )
-        named = self.launcher.launch(
-            LaunchRequest(
-                arguments=["git", "diff", "--name-only", base_commit],
-                cwd=lease.root,
-            )
-        )
-        if named.code != 0:
-            return DiffValidation(
-                concern_id=concern.id,
-                valid=False,
-                reason="changed paths could not be inspected",
-            )
-        changed = [Path(line) for line in named.stdout.splitlines() if line]
+        changed = inspected.paths
         for path in changed:
             if path.is_absolute() or ".." in path.parts:
                 return DiffValidation(
@@ -278,35 +305,18 @@ class WorktreeOrchestrator:
                     reason=f"changed path escapes the worktree: {path}",
                 )
             leases.assert_path(concern.id, lease.root / path)
-        actual = {path.as_posix() for path in changed}
-        reported = {path.as_posix() for path in report.files_changed}
-        swept = {path.as_posix() for path in report.swept_beyond_scope}
-        # The safety property is that nothing changes undeclared, which is
-        # containment and not equality. Requiring equality also punished a
-        # worker for a stale path it believed it had touched, and cost 71
-        # files of correct work over two such entries — nothing was hidden in
-        # either. Over-reporting is named back rather than rejected, because a
-        # reason that names no path cannot converge: every retry re-derives
-        # the same report and fails identically until the budget is spent.
-        undeclared = sorted(actual - reported)
-        unswept = sorted(swept - actual)
-        if undeclared or unswept:
+        delta = declaration_delta(
+            changed, report.files_changed, report.swept_beyond_scope
+        )
+        if not delta.settled:
             return DiffValidation(
                 concern_id=concern.id,
                 valid=False,
-                reason=report_mismatch(undeclared, unswept),
+                reason=delta.reason,
+                declaration=True,
             )
         if not changed:
-            return DiffValidation(
-                concern_id=concern.id,
-                valid=not report.changed,
-                commit=base_commit if not report.changed else None,
-                reason=(
-                    ""
-                    if not report.changed
-                    else "worker reported changes but diff is empty"
-                ),
-            )
+            return self.settled_round(concern, report, base_commit, origin_commit)
         if not report.changed:
             return DiffValidation(
                 concern_id=concern.id,
@@ -344,6 +354,216 @@ class WorktreeOrchestrator:
             commit=commit_lines[0],
         )
 
+    def resolved(self, revision: str) -> str:
+        """One revision's commit, empty where the repository has no such name."""
+        found = self.launcher.launch(
+            LaunchRequest(
+                arguments=[
+                    "git",
+                    "rev-parse",
+                    "-q",
+                    "--verify",
+                    f"{revision}^{{commit}}",
+                ],
+                cwd=self.workspace,
+            )
+        )
+        lines = found.stdout.splitlines()
+        return lines[0] if found.code == 0 and lines else ""
+
+    def contains(self, commit: str, candidate: str) -> bool:
+        """Whether ``candidate`` is already reachable from ``commit``."""
+        return (
+            self.launcher.launch(
+                LaunchRequest(
+                    arguments=["git", "merge-base", "--is-ancestor", candidate, commit],
+                    cwd=self.workspace,
+                )
+            ).code
+            == 0
+        )
+
+    def conflicted_names(self, lines: list[str]) -> list[Path]:
+        """The paths a ``merge-tree`` refusal named, before its prose.
+
+        Three sections separated by a blank line: the tree it wrote, the
+        paths it could not settle, and the messages it writes for a human.
+        Reading past the blank line offers `Auto-merging a.py` as a path,
+        which is not one.
+        """
+        return [Path(line) for line in takewhile(bool, lines[1:])]
+
+    def merged_base(self, base: str, onto: str, message: str) -> BaseRefresh:
+        """Where a base stands once it holds ``onto`` as well as itself.
+
+        Three shapes, and only the third costs anything. A base that already
+        contains the other keeps the commit it had. A base the other
+        contains is superseded by it. Two that contain neither — which is
+        what an intake snapshot of uncommitted notes always looks like,
+        since it is a commit no branch holds — are merged, so the notes this
+        run was planned from survive instead of being dropped in favour of
+        the newer tree.
+
+        The merge is predicted before it is made. ``git merge-tree`` answers
+        both questions at once: it names the paths that would conflict and,
+        when none do, writes the tree the merge would produce — so a
+        combination that cannot be made cleanly reports what stands in the
+        way rather than leaving a half-merged base behind, and no worktree
+        is needed for either answer.
+        """
+        if base == onto or self.contains(base, onto):
+            return BaseRefresh(was=base, commit=base)
+        if self.contains(onto, base):
+            return BaseRefresh(was=base, commit=onto)
+        merged = self.launcher.launch(
+            LaunchRequest(
+                arguments=[
+                    "git",
+                    "merge-tree",
+                    "--write-tree",
+                    "--name-only",
+                    base,
+                    onto,
+                ],
+                cwd=self.workspace,
+            )
+        )
+        lines = merged.stdout.splitlines()
+        if merged.code != 0 or not lines:
+            return BaseRefresh(
+                was=base,
+                commit=base,
+                conflicts=self.conflicted_names(lines),
+                reason=(
+                    "combining these bases conflicts: "
+                    f"{merged.stderr.strip() or 'see the paths named'}"
+                ),
+            )
+        return BaseRefresh(
+            was=base, commit=self.commit_tree(lines[0], [base, onto], message)
+        )
+
+    def refreshed_base(self, source: SourceSnapshot) -> BaseRefresh:
+        """Where a root concern should start now, given where the run began."""
+        tip = self.resolved(source.branch)
+        if not tip:
+            return BaseRefresh(
+                branch=source.branch,
+                was=source.commit,
+                commit=source.commit,
+                reason=f"no branch named {source.branch!r} to refresh from",
+            )
+        combined = self.merged_base(
+            source.commit,
+            tip,
+            f"chore(resolve): refresh base onto {source.branch}",
+        )
+        return combined.model_copy(update={"branch": source.branch})
+
+    def adopted_base(self, source: SourceSnapshot, commit: str) -> BaseRefresh:
+        """Take a base somebody resolved by hand, once it holds both sides.
+
+        `merged_base` predicts the combine and declines to guess at a
+        conflict, which leaves the case a refresh exists for with no route
+        at all: a fix landed on the branch to unblock this very run touches
+        the files that run's notes are about, so conflicting is the ordinary
+        outcome rather than the exceptional one. Resolving it belongs where
+        conflicts are resolved — a worktree, with both sides visible — and
+        this adopts the commit that came out.
+
+        Containment is what is checked, because it is the half of "nothing
+        was dropped" a machine can answer: a resolution reachable from
+        neither the base nor the branch settled something else entirely.
+        Whether every hunk survived is the reviewer's question, and the
+        merge guidance is what asks it.
+        """
+        resolved = self.resolved(commit)
+        if not resolved:
+            return BaseRefresh(
+                branch=source.branch,
+                was=source.commit,
+                commit=source.commit,
+                reason=f"no commit {commit!r} in this repository to adopt",
+            )
+        tip = self.resolved(source.branch)
+        dropped = [
+            name
+            for name, side in (("the run's base", source.commit), (source.branch, tip))
+            if side and not self.contains(resolved, side)
+        ]
+        if dropped:
+            return BaseRefresh(
+                branch=source.branch,
+                was=source.commit,
+                commit=source.commit,
+                reason=(
+                    f"{resolved[:12]} does not contain "
+                    + " or ".join(dropped)
+                    + "; a resolved base has to hold both sides"
+                ),
+            )
+        return BaseRefresh(branch=source.branch, was=source.commit, commit=resolved)
+
+    def commit_tree(self, tree: str, parents: list[str], message: str) -> str:
+        """Record one prepared tree as a commit, without touching a worktree."""
+        arguments = ["git", "commit-tree", tree]
+        for parent in parents:
+            arguments.extend(["-p", parent])
+        created = self.require(
+            LaunchRequest(arguments=[*arguments, "-m", message], cwd=self.workspace),
+            "failed to record a merged base",
+        )
+        lines = created.stdout.splitlines()
+        if len(lines) != 1 or not lines[0]:
+            raise RuntimeError(
+                f"failed to record a merged base: `git commit-tree` named "
+                f"{len(lines)} commits"
+            )
+        return lines[0]
+
+    def predicted_merge(self, lease: WritableRootLease, commit: str) -> list[Path]:
+        """Which paths merging ``commit`` into this lease would leave conflicted.
+
+        Asked before a refresh touches a branch with work in flight, which
+        is the case the answer matters for: the concerns most likely to
+        conflict with an upstream fix are the ones editing the files it
+        touched.
+        """
+        head = self.head(lease)
+        if self.contains(head, commit):
+            return []
+        merged = self.launcher.launch(
+            LaunchRequest(
+                arguments=[
+                    "git",
+                    "merge-tree",
+                    "--write-tree",
+                    "--name-only",
+                    head,
+                    commit,
+                ],
+                cwd=lease.root,
+            )
+        )
+        if merged.code == 0:
+            return []
+        return self.conflicted_names(merged.stdout.splitlines())
+
+    def merge_into(self, lease: WritableRootLease, commit: str, message: str) -> bool:
+        """Bring one commit into a lease's branch, reporting whether it took."""
+        merged = self.launcher.launch(
+            LaunchRequest(
+                arguments=["git", "merge", "--no-ff", "-m", message, commit],
+                cwd=lease.root,
+            )
+        )
+        if merged.code == 0:
+            return True
+        self.launcher.launch(
+            LaunchRequest(arguments=["git", "merge", "--abort"], cwd=lease.root)
+        )
+        return False
+
     def remove(self, lease: WritableRootLease) -> WorktreeRemoval:
         """Free a lease's worktree, reporting what actually stands in the way.
 
@@ -352,7 +572,10 @@ class WorktreeOrchestrator:
         refusal as uncommitted work sent a human to directories that did not
         exist and described work that was not being held. What remains on
         disk is observable, so it is observed rather than inferred, and the
-        refusal git gave is carried instead of a guess at it.
+        refusal git gave is carried instead of a guess at it. A prune that
+        cannot run leaves the registration standing, so it is retained rather
+        than reported freed — a lease recorded as cleaned by a step that
+        failed is the same mislabel one layer up.
         """
         status = self.launcher.launch(
             LaunchRequest(
@@ -363,12 +586,21 @@ class WorktreeOrchestrator:
         notes: list[str] = []
         if status.code != 0:
             if lease.root.exists():
-                return WorktreeRemoval(freed=False, detail=status.stderr.strip())
-            self.launcher.launch(
+                return WorktreeRemoval(
+                    freed=False,
+                    detail=status.stderr.strip() + self.config_lock_note(lease.root),
+                )
+            pruned = self.launcher.launch(
                 LaunchRequest(
                     arguments=["git", "worktree", "prune"], cwd=self.workspace
                 )
             )
+            if pruned.code != 0:
+                return WorktreeRemoval(
+                    freed=False,
+                    detail=f"prune failed: {pruned.stderr.strip()}"
+                    + self.config_lock_note(self.workspace),
+                )
             notes.append("worktree was already gone")
         deleted = self.launcher.launch(
             LaunchRequest(
@@ -377,7 +609,10 @@ class WorktreeOrchestrator:
             )
         )
         if deleted.code != 0:
-            notes.append(f"branch retained: {deleted.stderr.strip()}")
+            notes.append(
+                f"branch retained: {deleted.stderr.strip()}"
+                + self.config_lock_note(self.workspace)
+            )
         return WorktreeRemoval(freed=True, detail="; ".join(notes))
 
     def restore(self, lease: WritableRootLease) -> None:

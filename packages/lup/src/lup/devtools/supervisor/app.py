@@ -24,6 +24,7 @@ from lup.resolver.mailbox import (
     ActorMessage,
     AnswerDoor,
     AnswerOffer,
+    MailboxConflictError,
     ParkRequest,
     QuestionMailbox,
 )
@@ -241,7 +242,10 @@ def create_supervisor(
         )
         if problems:
             raise HTTPException(status_code=400, detail="; ".join(problems))
-        offer_answers(state_root, selected, submission.answers, AnswerDoor.PAGE)
+        try:
+            offer_answers(state_root, selected, submission.answers, AnswerDoor.PAGE)
+        except MailboxConflictError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
         return read_run(state_root, selected, adapter)
 
     @supervisor.post("/api/runs/{selected}/messages")
