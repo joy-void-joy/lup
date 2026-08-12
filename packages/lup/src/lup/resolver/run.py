@@ -164,6 +164,26 @@ class ResolveRun:
             )
         return moved
 
+    def replace_dependency_base(self, base: DependencyBase) -> None:
+        """Move one recorded base's commit, keeping its dependency shape.
+
+        Not a path :meth:`record_dependency_base` can offer, because a
+        concern re-deriving its own base must adopt what the run holds
+        rather than overwrite it. This is the other direction: the run
+        itself moved the lease, so the record follows the lease.
+        """
+        state = self.require()
+        self.persist(
+            state.model_copy(
+                update={
+                    "bases": [
+                        base if item.concern_id == base.concern_id else item
+                        for item in state.bases
+                    ]
+                }
+            )
+        )
+
     async def record_dependency_base(self, base: DependencyBase) -> DependencyBase:
         """Persist one dependency base, or adopt the one already recorded.
 

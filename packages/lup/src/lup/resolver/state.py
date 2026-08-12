@@ -1,6 +1,7 @@
 """Atomic schema-versioned resolver state persistence."""
 
 import fcntl
+import logging
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -15,13 +16,18 @@ from lup.resolver.models import (
     ConcernProgress,
     ConcernStatus,
     ConcernsDocument,
+    HeldLease,
     LeasesDocument,
     QuestionBatch,
+    ResolverConfig,
+    VerificationAcceptance,
     ReviewReport,
     ResolveState,
     ResolvePhase,
     WorkerReport,
 )
+
+logger = logging.getLogger(__name__)
 
 PHASE_ORDER: dict[ResolvePhase, int] = {
     phase: index for index, phase in enumerate(ResolvePhase)
@@ -240,6 +246,41 @@ class ResolverStateRepository:
                 "or remove the run directory to start over"
             ) from error
 
+    def accept(self, acceptance: VerificationAcceptance) -> ResolveState:
+        """Record that a human accepts one concern over one failing check.
+
+        Written through its own door for the same reason adoption is: a run
+        that is parked has no process to route this through, and `save`
+        guards transitions this is not one of. Re-accepting the same pair
+        replaces the reason rather than accumulating, so a corrected reason
+        reads as the decision rather than beside it.
+        """
+        current = self.load()
+        kept = [
+            recorded
+            for recorded in current.acceptances
+            if (recorded.concern_id, recorded.verification)
+            != (acceptance.concern_id, acceptance.verification)
+        ]
+        accepted = current.model_copy(update={"acceptances": [*kept, acceptance]})
+        self.write_model("state.json", accepted)
+        return accepted
+
+    def adopt(self, config: ResolverConfig, digest: str) -> ResolveState:
+        """Re-stamp a persisted run onto a composition a human accepted.
+
+        `save` holds the composition immutable, which is what stops a run
+        drifting under itself between resumes. Adoption is the one change to
+        it anybody sanctions, so it is written through its own door rather
+        than by loosening that guard for every path that saves — including
+        the ones a run takes while work is in flight.
+        """
+        adopted = self.load().model_copy(
+            update={"config": config, "config_digest": digest}
+        )
+        self.write_model("state.json", adopted)
+        return adopted
+
     def save(self, state: ResolveState) -> None:
         if state.run_id != self.root.name:
             raise StateTransitionError(
@@ -318,3 +359,48 @@ class ResolverStateRepository:
 
     def write_model(self, relative: str, value: PersistedResolverModel) -> None:
         publish_atomic(self.root / relative, value)
+
+
+def held_leases(state_root: Path) -> Iterator[HeldLease]:
+    """Each lease a run that has not finished is still holding.
+
+    A lease looks exactly like abandoned work to a branch survey: commits the
+    integration branch lacks, and no pull request driving them. So a sweep
+    offers to land it individually or drop it, and either answer destroys
+    something — landing bypasses the join machinery the run is partway
+    through, dropping deletes a parked run's work outright. The run directory
+    is the only thing that can tell a lease from an abandoned branch, so it is
+    what gets asked.
+
+    A run whose state cannot be read holds nothing here, and says so in the
+    log. The alternative is a survey that any unreadable resolver directory
+    takes down with it.
+    """
+    if not state_root.is_dir():
+        return
+    for run in sorted(state_root.iterdir()):
+        repository = ResolverStateRepository(state_root, run.name)
+        if not repository.exists():
+            continue
+        try:
+            state = repository.load()
+        except (StateCorruptionError, OSError, ValidationError):
+            logger.exception("resolver run %s could not be read", run.name)
+            continue
+        if state.phase.terminal():
+            continue
+        progress = {record.concern_id: record.status for record in state.progress}
+        for lease in state.leases:
+            if lease.active:
+                yield HeldLease(
+                    branch=lease.branch,
+                    run_id=state.run_id,
+                    standing=progress[lease.concern_id]
+                    if lease.concern_id in progress
+                    else state.phase,
+                )
+
+
+def live_lease_branches(state_root: Path) -> dict[str, HeldLease]:
+    """Every held lease, by the branch a survey will meet it as."""
+    return {held.branch: held for held in held_leases(state_root)}

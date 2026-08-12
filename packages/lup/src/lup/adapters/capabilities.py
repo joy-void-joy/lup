@@ -78,7 +78,7 @@ def capability_matrix_markdown(adapters: list[AdapterCapabilities]) -> str:
     """Render one row per capability and one column per adapter."""
     lines = [
         "| Capability | " + " | ".join(adapter.name for adapter in adapters) + " |",
-        "|---" * (len(adapters) + 1) + "|",
+        "| " + " | ".join(["---"] * (len(adapters) + 1)) + " |",
     ]
     for row, cell in enumerate(adapters[0].cells):
         rendered: list[str] = []

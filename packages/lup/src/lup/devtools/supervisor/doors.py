@@ -16,9 +16,12 @@ import typer
 
 from lup.channels.models import utc_now
 from lup.resolver.journal import Journal
+from lup.resolver.models import VerificationAcceptance
+from lup.resolver.state import ResolverStateRepository
 from lup.resolver.mailbox import (
     AnswerDoor,
     AnswerOffer,
+    MailboxConflictError,
     ParkRequest,
     QuestionMailbox,
     new_message,
@@ -79,6 +82,32 @@ def describe(view: PendingQuestionView) -> list[str]:
     return lines
 
 
+def queued(run_id: str, to: str) -> list[str]:
+    """Say what a just-posted message is waiting on, rather than that it sent.
+
+    Reporting `sent` on the strength of having written the mailbox is what
+    let a redirect read as successful while reaching nobody at all. The
+    honest report is that it is queued, for whom, and — when the address
+    matches no actor the run has recorded — that nobody it can name will
+    read it. Not a refusal: a message may legitimately be posted for a
+    concern that has not started, and it waits at that actor's first turn.
+    """
+    reached = [
+        actor
+        for actor in Journal(resolve_state_root() / run_id).actors()
+        if to in actor.addresses()
+    ]
+    if not reached:
+        return [
+            f"queued for {to or 'every actor'}, which names no actor this run "
+            "has recorded yet; it waits until one by that address takes a turn",
+        ]
+    return [
+        f"queued for {actor.label()}; it arrives at that actor's next tool call or turn"
+        for actor in reached
+    ]
+
+
 app = typer.Typer(help="Read and answer resolver runs from the console")
 
 
@@ -124,15 +153,18 @@ def answer_questions(
             raise typer.BadParameter(
                 f"{identifier!r} accepts only: " + ", ".join(question.choices)
             )
-        mailbox.offer(
-            AnswerOffer(
-                run_id=run_id,
-                question_id=identifier,
-                value=value,
-                door=AnswerDoor.CONSOLE,
-                offered_at=utc_now(),
+        try:
+            mailbox.offer(
+                AnswerOffer(
+                    run_id=run_id,
+                    question_id=identifier,
+                    value=value,
+                    door=AnswerDoor.CONSOLE,
+                    offered_at=utc_now(),
+                )
             )
-        )
+        except MailboxConflictError as error:
+            raise typer.BadParameter(str(error)) from error
         typer.echo(f"offered {identifier}={value}")
 
 
@@ -140,13 +172,25 @@ def answer_questions(
 def list_actors(
     run_id: str = typer.Option(..., "--run-id", help="Run whose record to read"),
 ) -> None:
-    """List every actor this run has recorded, which is every one addressable."""
+    """List every actor this run has recorded, and what each has not read yet.
+
+    Undelivered mail is shown because sending is not delivering: a door
+    writes the stream and the actor reads it at its next tool call or turn,
+    and nothing between those two moments used to say which had happened.
+    A redirect sitting here through a whole concern is that concern being
+    worked on the instructions it was supposed to abandon.
+    """
     actors = Journal(resolve_state_root() / run_id).actors()
     if not actors:
         typer.echo("No actor has recorded anything yet.")
         return
+    mailbox = open_mailbox(run_id)
     for actor in actors:
         typer.echo(actor.label())
+        waiting = mailbox.waiting(actor)
+        for message in waiting.messages:
+            kind = "redirect" if message.redirect else "message"
+            typer.echo(f"  undelivered {kind} from {message.door}: {message.text}")
 
 
 @app.command("say")
@@ -164,7 +208,38 @@ def say_to_actor(
     open_mailbox(run_id).send(
         new_message(run_id, to, text, AnswerDoor.AGENT, in_reply_to)
     )
-    typer.echo(f"sent to {to or 'every actor'}")
+    for line in queued(run_id, to):
+        typer.echo(line)
+
+
+@app.command("accept")
+def accept_verification(
+    reason: str = typer.Argument(..., help="Why this failure is accepted"),
+    run_id: str = typer.Option(..., "--run-id", help="Run whose state to write"),
+    concern: str = typer.Option(..., "--concern", help="Concern to accept"),
+    verification: str = typer.Option(
+        ..., "--verification", help="The failing verification, by name"
+    ),
+) -> None:
+    """Accept one concern over one failing verification, on the human's word.
+
+    A verdict is an exit code, and some failures are true but unfixable from
+    inside the lease that meets them — a finding the worker did not
+    introduce and cannot converge on. Resubmitting into it spends a revision
+    round each time until the concern fails with its criteria never read.
+
+    The reason is required because this is what review sees in place of a
+    green check that was never green.
+    """
+    root = resolve_state_root() / run_id
+    if not root.is_dir():
+        raise typer.BadParameter(f"no resolver run {run_id!r} under {root.parent}")
+    ResolverStateRepository(resolve_state_root(), run_id).accept(
+        VerificationAcceptance(
+            concern_id=concern, verification=verification, reason=reason
+        )
+    )
+    typer.echo(f"accepted {concern} over {verification}: {reason}")
 
 
 @app.command("redirect")
@@ -184,7 +259,8 @@ def redirect_actor(
     open_mailbox(run_id).send(
         new_message(run_id, to, text, AnswerDoor.AGENT, redirect=True)
     )
-    typer.echo(f"redirected {to or 'every actor'}")
+    for line in queued(run_id, to):
+        typer.echo(line)
 
 
 @app.command("park")

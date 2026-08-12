@@ -4,10 +4,10 @@ A worker used to surface questions by ending its turn with them in its
 typed report, which cost a whole new session to deliver the answer. These
 tools let it ask mid-turn and keep working.
 
-The handlers touch nothing but the mailbox, so one factory serves both
-transports: Claude registers the server in-process, Codex spawns it as a
-stdio subprocess that rebuilds the same mailbox from the relayed run
-directory. Only where the mailbox comes from differs.
+The handlers touch nothing but the mailbox and the lease they are bound to,
+so one factory serves both transports: Claude registers the server
+in-process, Codex spawns it as a stdio subprocess that rebuilds both from
+the relayed context. Only where that context comes from differs.
 """
 
 import asyncio
@@ -17,15 +17,11 @@ from typing import Literal
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings
 
-from lup.hooks import (
-    LupHookInput,
-    LupHookMatcher,
-    LupHookOutput,
-    LupHooksConfig,
-)
+from lup.harness.process import LocalProcessLauncher, ProcessLauncher
 from lup.mcp import LupMcpTool, ToolError, lup_tool
 from lup.policy.assets.host import recoverable_write_targets
 from lup.channels.models import utc_now
+from lup.resolver.declaration import declaration_delta, inspect_changes
 from lup.resolver.mailbox import (
     ANSWER_POLL_SECONDS,
     ActorMessage,
@@ -41,6 +37,7 @@ from lup.types import EnvVars
 
 RESOLVER_RUN_DIR_ENV = "LUP_RESOLVER_RUN_DIR"
 RESOLVER_CONCERN_ENV = "LUP_RESOLVER_CONCERN"
+RESOLVER_LEASE_ROOT_ENV = "LUP_RESOLVER_LEASE_ROOT"
 TOOL_WAIT_SECONDS = 300.0
 
 WAIT_CONTRACT = (
@@ -56,11 +53,13 @@ class ResolverToolContext(BaseModel):
 
     run_dir: Path
     concern_id: str
+    lease_root: Path
 
     def to_env(self) -> EnvVars:
         return {
             RESOLVER_RUN_DIR_ENV: str(self.run_dir),
             RESOLVER_CONCERN_ENV: self.concern_id,
+            RESOLVER_LEASE_ROOT_ENV: str(self.lease_root),
         }
 
 
@@ -69,14 +68,19 @@ class ResolverToolEnv(BaseSettings):
 
     run_dir: Path | None = Field(default=None, validation_alias=RESOLVER_RUN_DIR_ENV)
     concern_id: str | None = Field(default=None, validation_alias=RESOLVER_CONCERN_ENV)
+    lease_root: Path | None = Field(
+        default=None, validation_alias=RESOLVER_LEASE_ROOT_ENV
+    )
 
 
 def read_resolver_tool_context() -> ResolverToolContext | None:
     """Rebuild the relayed context, or None when this is not a tool subprocess."""
     env = ResolverToolEnv()
-    if env.run_dir is None or env.concern_id is None:
+    if env.run_dir is None or env.concern_id is None or env.lease_root is None:
         return None
-    return ResolverToolContext(run_dir=env.run_dir, concern_id=env.concern_id)
+    return ResolverToolContext(
+        run_dir=env.run_dir, concern_id=env.concern_id, lease_root=env.lease_root
+    )
 
 
 class AskedQuestion(BaseModel):
@@ -131,6 +135,31 @@ class AwaitAnswersOutput(BaseModel):
     instruction: str
 
 
+class CheckDeclarationInput(BaseModel):
+    files_changed: list[Path] = Field(
+        default_factory=list,
+        description="Every path you believe you changed, as you would report it",
+    )
+    swept_beyond_scope: list[Path] = Field(
+        default_factory=list,
+        description="Paths you would report as swept beyond your concern's scope",
+    )
+
+
+class CheckDeclarationOutput(BaseModel):
+    settled: bool = Field(
+        description="Whether this account would pass the declaration gate"
+    )
+    changed: list[str] = Field(description="Every path git sees your worktree moved")
+    undeclared: list[str] = Field(
+        description="Changed, and named nowhere in the account you passed"
+    )
+    unswept: list[str] = Field(
+        description="Claimed as swept beyond scope, and not changed at all"
+    )
+    instruction: str
+
+
 IRREVERSIBLE_VERBS = dict.fromkeys(
     ["push", "reset", "checkout", "restore", "clean", "rebase", "filter-branch"]
 )
@@ -160,50 +189,6 @@ def agent_may_approve(command: str, root: Path) -> bool:
         return True
     targets = [word for word in words[1:] if not word.startswith("-")]
     return bool(targets) and recoverable_write_targets(targets, root) == targets
-
-
-def create_inbox_hooks(mailbox: QuestionMailbox, actor: str) -> LupHooksConfig:
-    """Put anything said to this actor in front of it, mid-turn.
-
-    Non-cooperative by construction. The actor calls any tool at all and the
-    message is in its context — it never chooses to check, so it cannot fail
-    to. Waiting for the next turn would mean a directive sits unread for as
-    long as the current one runs, which on a resolver turn is most of the
-    run.
-
-    Telling and stopping are different acts and get different verdicts. A
-    message rides alongside the call and the actor keeps going. A redirect
-    denies the call and hands back the text as the reason, so an actor going
-    the wrong way cannot take one more step down it — which is the whole
-    difference between being informed and being redirected. Nothing here
-    spends an interrupt: a turn that ends mid-report is a turn whose typed
-    submission never arrives, and the actor is answering a refused tool call
-    either way.
-    """
-    offset = [mailbox.stream_offset()]
-
-    async def deliver(_input: LupHookInput) -> LupHookOutput:
-        arrived = mailbox.messages_for(actor, offset[0])
-        offset[0] = mailbox.stream_offset()
-        if not arrived:
-            return LupHookOutput(decision="allow")
-        # Everything that arrived is carried either way. The offset has already
-        # moved past all of it, so a message batched alongside a redirect has
-        # this one delivery and no other.
-        delivered = "\n".join(
-            f"[{'redirected' if message.redirect else 'message'} by {message.door}] "
-            f"{message.text}"
-            for message in arrived
-        )
-        if any(message.redirect for message in arrived):
-            return LupHookOutput(
-                decision="deny",
-                reason=delivered
-                + "\n\nStop what this call was part of and act on the above.",
-            )
-        return LupHookOutput(decision="allow", additional_context=delivered)
-
-    return LupHooksConfig(pre_tool_use=[LupHookMatcher(hook=deliver, tag="inbox")])
 
 
 class RequestAllowanceInput(BaseModel):
@@ -239,6 +224,8 @@ def create_question_tools(
     concern_id: str,
     *,
     run_id: str,
+    lease_root: Path,
+    launcher: ProcessLauncher | None = None,
     poll_interval_seconds: float = ANSWER_POLL_SECONDS,
     wait_seconds: float = TOOL_WAIT_SECONDS,
     wake: asyncio.Event | None = None,
@@ -251,6 +238,7 @@ def create_question_tools(
     same short id must not collide in one flat namespace.
     """
     queued: list[str] = []
+    inspector = launcher if launcher is not None else LocalProcessLauncher()
 
     def compose(identifier: str) -> str:
         return f"{concern_id}-{identifier}"
@@ -411,10 +399,48 @@ def create_question_tools(
             )
         )
 
+    @lup_tool(
+        "Check the file account you are about to submit against what your "
+        "worktree actually changed. Your report must name every path you "
+        "changed, and must not claim to have swept a path you left alone — "
+        "two directions, where correcting one is what violates the other. "
+        "Call this before you submit: it runs the same reading the gate runs, "
+        "so an account it settles is one the gate accepts. You cannot run git "
+        "yourself here, and a report the gate rejects costs you a whole "
+        "session to correct.",
+        name="check_declaration",
+    )
+    async def check_declaration(
+        params: CheckDeclarationInput,
+    ) -> CheckDeclarationOutput:
+        # HEAD is the commit the gate measures from: a worker holds no commit
+        # authority, so the lease's head is where its turn opened and stays
+        # there for as long as the turn runs.
+        inspected = inspect_changes(inspector, lease_root, "HEAD")
+        if inspected.failure:
+            raise ToolError(inspected.failure)
+        delta = declaration_delta(
+            inspected.paths, params.files_changed, params.swept_beyond_scope
+        )
+        return CheckDeclarationOutput(
+            settled=delta.settled,
+            changed=sorted(path.as_posix() for path in inspected.paths),
+            undeclared=delta.undeclared,
+            unswept=delta.unswept,
+            instruction=(
+                "This account passes the declaration gate. Submit it as it stands."
+                if delta.settled
+                else f"{delta.reason}. Fix the account, not the work: add "
+                "every undeclared path to files_changed, and drop every "
+                "unswept path from swept_beyond_scope. Then call this again."
+            ),
+        )
+
     return [
         queue_questions,
         await_answers,
         ask_questions,
         send_message,
         request_allowance,
+        check_declaration,
     ]
