@@ -46,6 +46,7 @@ from lup.resolver.models import (
     IntegrationRecord,
     MaterialQuestion,
     QuestionBatch,
+    RefreshReport,
     ResolveInventory,
     ResolveManifest,
     ResolvePhase,
@@ -62,6 +63,7 @@ from lup.resolver.orchestrator import (
     WritableRootLeases,
 )
 from lup.resolver.questions import QuestionBroker
+from lup.resolver.rebase import BaseRefresher
 from lup.resolver.run import ResolveRun, ResolverInvariantError
 from lup.resolver.state import PHASE_ORDER, ResolverStateRepository
 from lup.resolver.turns import (
@@ -272,6 +274,7 @@ class ResolverCore:
         self.journal = Journal(self.repository.root)
         self.actors = ActorSessions(self.repository.root, self.journal, self.mailbox)
         self.run_state = ResolveRun(self.repository, self.journal, observer)
+        self.rebaser = BaseRefresher(self.run_state, self.worktrees, self.journal)
         self.questions = QuestionBroker(
             config,
             self.run_state,
@@ -730,6 +733,7 @@ class ResolverCore:
             concern for concern in approved if concern.id not in lease_by_concern
         ]
         if unleased:
+            state = self.rebaser.refreshed(state)
             fresh = [
                 self.leases.acquire(concern.id, self.concern_branch(concern.id))
                 for concern in unleased
@@ -758,7 +762,7 @@ class ResolverCore:
         }
         outcomes = list(state.outcomes)
         completed_ids = {outcome.concern_id for outcome in outcomes}
-        builder = DependencyBaseBuilder(state.source)
+        builder = DependencyBaseBuilder(state.root_base())
         if state.integration is None:
             for batch in graph.topological_batches():
                 selected = [
@@ -861,6 +865,20 @@ class ResolverCore:
         self.land_nested(state)
         return self.manifest(self.release(state))
 
+    def refresh(self, apply: bool = False) -> RefreshReport:
+        """Report, and optionally take, what refreshing this run would do.
+
+        The leases already made are the ones the automatic refresh cannot
+        reach: they hold work, so bringing the branch into them is a
+        decision rather than a default. Reporting first is what makes it a
+        decision somebody can take — several concerns in the run this comes
+        from were editing the very files the upstream fix touched.
+        """
+        with self.repository.exclusive():
+            state = self.repository.load()
+            self.state = state
+            return self.rebaser.report(state, apply)
+
     def restore_leases(self, state: ResolveState) -> None:
         """Validate persisted authority and reset incomplete attempts for retry."""
         self.leases.adopt(state.leases)
@@ -891,7 +909,7 @@ class ResolverCore:
                     expected = state.join_progress.commit
                 else:
                     recorded = False
-                    expected = state.source.commit
+                    expected = state.root_base().commit
                 self.restore_worktree(lease, expected, recorded)
                 continue
             outcome = (
@@ -907,7 +925,9 @@ class ResolverCore:
                     for parent in concern.dependencies
                     if parent in commits
                 ]
-                expected = parent_commits[0] if parent_commits else state.source.commit
+                expected = (
+                    parent_commits[0] if parent_commits else state.root_base().commit
+                )
             if outcome is not None:
                 self.restore_worktree(
                     lease,
@@ -1064,12 +1084,12 @@ class ResolverCore:
             )
             self.persist(state)
             if not integration_lease.root.exists():
-                self.worktrees.create(integration_lease, state.source.commit)
+                self.worktrees.create(integration_lease, state.root_base().commit)
             commits = [
                 outcome.commit for outcome in verified if outcome.commit is not None
             ]
             if commits:
-                parents = [state.source.commit, *commits]
+                parents = [state.root_base().commit, *commits]
                 integration_commit = await self.joiner.join_commits(
                     integration_lease,
                     parents,
@@ -1110,7 +1130,9 @@ class ResolverCore:
                 ) from error
 
         if not integration.completed:
-            verification = self.verifier.verify(integration_lease.root)
+            verification = self.verifier.verify(
+                integration_lease.root, state.root_base().commit
+            )
             state = state.model_copy(
                 update={
                     "phase": ResolvePhase.VERIFICATION,

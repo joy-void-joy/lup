@@ -138,6 +138,7 @@ def create_harness_app(
     resolve_app.command("say")(say_to_actor)
     resolve_app.command("redirect")(redirect_actor)
     resolve_app.command("park")(park_run)
+    resolve_app.command("refresh")(resolve.refresh_run)
     app.add_typer(resolve_app, name="resolve")
 
     @resolve_app.callback(invoke_without_command=True)

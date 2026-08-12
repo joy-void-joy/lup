@@ -167,6 +167,27 @@ class RecheckRepeatedEvent(BaseModel):
     criteria: list[str]
 
 
+class BaseRefreshedEvent(BaseModel):
+    """A lease made from here starts from the branch as it stands now.
+
+    A run pinned to the commit it was created at cannot see a fix made to
+    unblock it, and its workers reason about code that has already been
+    replaced — reaching careful conclusions that contradict decisions the
+    repository has already taken. Recorded whether it moved or not: a
+    refresh that could not be made cleanly is the reason the leases beside
+    it are still where they were.
+    """
+
+    model_config = FROZEN
+
+    type: Literal["base_refreshed"] = "base_refreshed"
+    branch: str
+    was: str
+    commit: str
+    conflicts: list[str] = Field(default_factory=list)
+    reason: str = ""
+
+
 class LeaseDriftEvent(BaseModel):
     """An abandoned concern's tree does not hold the commit last recorded.
 
@@ -203,6 +224,7 @@ type RunEvent = (
     | JoinAuditEvent
     | ReviewResidualEvent
     | RecheckRepeatedEvent
+    | BaseRefreshedEvent
     | LeaseDriftEvent
     | RunFailedEvent
 )
