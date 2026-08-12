@@ -360,8 +360,8 @@ def create_dev_app(
             str | None,
             typer.Option(
                 "--since",
-                help="Scope the note gate to paths changed since this ref, for a "
-                "tree that holds work it is not answerable for",
+                help="Scope the note and anti-pattern gates to paths changed since "
+                "this ref, for a tree that holds work it is not answerable for",
             ),
         ] = None,
         path: Annotated[
