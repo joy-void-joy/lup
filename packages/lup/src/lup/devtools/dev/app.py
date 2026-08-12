@@ -33,6 +33,7 @@ from lup.devtools.harness.drift import RepositoryWriter
 from lup.devtools.harness.launch import relocation_hint
 from lup.devtools.project import DevProject
 from lup.harness.models import HookSet, Plugin, PromptDocument
+from lup.policy.kernel.edit import SUPPRESSION_COLUMN_LIMIT
 from lup.workspace.paths import project_root
 
 
@@ -492,6 +493,39 @@ def create_dev_app(
         file/line/text/context shape as `dev comments`.
         """
         comments.todos(as_json)
+
+    @app.command("directives")
+    def directives_cmd(
+        as_json: Annotated[
+            bool,
+            typer.Option("--json", help="Output as JSON"),
+        ] = False,
+        limit: Annotated[
+            int,
+            typer.Option("--limit", help="Column budget the inline placement gets"),
+        ] = SUPPRESSION_COLUMN_LIMIT,
+        fix: Annotated[
+            bool,
+            typer.Option(
+                "--fix", help="Move each directive to its canonical placement"
+            ),
+        ] = False,
+    ) -> None:
+        """Measure every `# lup: ignore` against the canonical inline placement.
+
+        Placement is uniform — a directive sits on the line it guards, or
+        stands alone directly above it — and the inline form is the canonical
+        one. This reports which sites the column budget lets stay inline and
+        which only fit above, so the fallback is sized against the tree rather
+        than assumed.
+        """
+        if fix:
+            moved = antipatterns_mod.place_directives(declared().project, limit)
+            typer.echo(f"{len(moved)} file(s) replaced")
+            for rel in moved:
+                typer.echo(f"  {rel}")
+            return
+        antipatterns_mod.report_directives(declared().project, as_json, limit)
 
     @app.command("issues")
     def issues_cmd(

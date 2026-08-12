@@ -310,21 +310,21 @@
     {
       "path": ".claude/plugins/lup/hooks/runtime/kernel/commands.py",
       "category": "generated",
-      "sha256": "7208e213a736cdca28538c0647576d3237889a9742d08960eb13abeb7df0699a",
+      "sha256": "763f134cbb7953a2b787f0cd29b335a938c50370876156f337446e8716855ce1",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
     {
       "path": ".claude/plugins/lup/hooks/runtime/kernel/decision.py",
       "category": "generated",
-      "sha256": "f1fa7461e795dee3a13011ed185f6206148f253acb473252633d1a898a84399e",
+      "sha256": "65393981a8867c6b2d85659bdca0c66487062240a38d2e8d9f65c1b622255630",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
     {
       "path": ".claude/plugins/lup/hooks/runtime/kernel/edit.py",
       "category": "generated",
-      "sha256": "c2dd757eb3829800f82115c04270b018817d9362137109940cc313dcd686c7b8",
+      "sha256": "0f5600493ea69ecd7d418707a6884a3ddbbfa3d0aebd7608ec799480da8cd04b",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -366,7 +366,7 @@
     {
       "path": ".claude/plugins/lup/hooks/runtime/kernel/words.py",
       "category": "generated",
-      "sha256": "6a2c1b41ebd84762e36a257f6771f5fd059697bb8ed700c543e70eee022c5224",
+      "sha256": "707666398f830ed35a4f69c799736421bb6b67dbb7ef187504fc89f0ee9d1071",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -380,7 +380,7 @@
     {
       "path": ".claude/plugins/lup/hooks/scripts/policy.py",
       "category": "generated",
-      "sha256": "f5335d2d17326cea4c4c63ba48d4e24c24bd47b704a65fba12d02f03321cd50c",
+      "sha256": "bd9b4550107065f5e9a4e3802419719ef8c016805593071d7aa5b7e54658b932",
       "semantic_id": "hooks.lup-policy",
       "executable": true
     },
@@ -415,7 +415,7 @@
     {
       "path": "docs/contributing.md",
       "category": "generated",
-      "sha256": "c9640d4a8a613e89d31d9f1d0c510aca6be44de90c85a71a2fadbad9abb84923",
+      "sha256": "3bdb7cde089410d7d7884478f8e74da53e38ea5ce9a477b0de6521191eb51d2e",
       "semantic_id": "docs.contributing",
       "executable": false
     },

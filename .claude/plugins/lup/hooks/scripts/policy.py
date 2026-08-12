@@ -21,8 +21,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parents[1] / "runtime"))
 from kernel.decision import KernelDecision
 from policy_data import AGENT_IDENTITY_ENV, AUTONOMOUS_AGENT_IDENTITIES
-import subprocess  # lup: ignore[subprocess] — `sh` is third-party and this half is compiled into a bare script that has no virtual environment to resolve it from
-from kernel.edit import decide_edit
+
+# lup: ignore[subprocess] — `sh` is third-party and this half is compiled into a bare script that has no virtual environment to resolve it from
+import subprocess
+from kernel.edit import decide_edit, relocated_edit_text, relocated_suppressions
 from kernel.fetch import decide_fetch
 from kernel.lex import shell_path_verb_targets, shell_write_targets
 from kernel.shell import decide_shell
@@ -221,6 +223,25 @@ def fetch_decision(url: str) -> KernelDecision:
     return decide_fetch(url, ALLOWED_FETCH_SCOPES, DENIED_FETCH_SCOPES)
 
 
+def placed_document(path_text: str, after: str) -> str:
+    """One file's text with every suppression at its canonical placement.
+
+    Only Python has a placement to settle here: the policy is written in terms
+    of a comment the formatter cannot wrap, and the tokenizer that says where
+    a comment really opens is Python's.
+    """
+    if Path(path_text).suffix.lower() not in (".py", ".pyi"):
+        return after
+    return relocated_suppressions(after)
+
+
+def placed_edit_text(path_text: str, after: str, start: int, end: int) -> str | None:
+    """The replacement for an edit's own span, or ``None`` to place nothing."""
+    if Path(path_text).suffix.lower() not in (".py", ".pyi"):
+        return None
+    return relocated_edit_text(after, start, end)
+
+
 def edit_decision(
     path_text: str,
     before: str | None,
@@ -286,6 +307,43 @@ def edit_documents(path, old_text, new_text, replace_all):
     return current, updated
 
 
+def placed_input(payload):
+    """The tool arguments that land the same edit with its directives placed.
+
+    The correcting route rather than the refusing one: where a directive was
+    written somewhere the placement policy does not keep it, the call goes out
+    rewritten instead of coming back as a complaint, so nobody weighs a reason
+    against a column count while writing one. This is what `ruff --add-noqa`
+    does for its own directives, moved to the gate that already reads the
+    edit.
+
+    ``None`` says place nothing. An edit can only rewrite the text it supplies,
+    so a move reaching outside that text declines rather than guesses — and a
+    `replace_all` edit has no single span to read a move back out of.
+    """
+    name = payload["tool_name"]
+    tool_input = payload["tool_input"]
+    if name not in ("Edit", "Write"):
+        return None
+    path = tool_input["file_path"]
+    if Path(path).suffix.lower() not in (".py", ".pyi"):
+        return None
+    if name == "Write":
+        content = tool_input["content"]
+        revised = placed_document(path, content)
+        return None if revised == content else {**tool_input, "content": revised}
+    if "replace_all" in tool_input and tool_input["replace_all"] is True:
+        return None
+    before, after = edit_documents(
+        path, tool_input["old_string"], tool_input["new_string"], False
+    )
+    start = before.find(tool_input["old_string"])
+    revised = placed_edit_text(
+        path, after, start, start + len(tool_input["new_string"])
+    )
+    return None if revised is None else {**tool_input, "new_string": revised}
+
+
 def dispatch(payload):
     name = payload["tool_name"]
     tool_input = payload["tool_input"]
@@ -328,21 +386,34 @@ def dispatch(payload):
     return KernelDecision("ask", "tool is not classified")
 
 
-def rendered(decision):
+def rendered(decision, placed):
+    """Answer one call on the permission channel, carrying any placement with it.
+
+    A rewrite replaces the arguments rather than merging into them, so `placed`
+    is the whole input. It rides along with the verdict rather than replacing
+    it: placing a directive settles where it is written and says nothing about
+    whether the edit may happen, so an ask still asks — over the placed text,
+    which is what the approver should be reading. A denied or deferred call
+    runs nothing, so there is nothing to place.
+    """
     if decision.effect == "defer":
         return {}
-    return {
-        "hookSpecificOutput": {
-            "hookEventName": "PreToolUse",
-            "permissionDecision": decision.effect,
-            "permissionDecisionReason": decision.reason,
-        }
+    answer = {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": decision.effect,
+        "permissionDecisionReason": decision.reason,
     }
+    if placed is None or decision.effect == "deny":
+        return {"hookSpecificOutput": answer}
+    return {"hookSpecificOutput": {**answer, "updatedInput": placed}}
 
 
 def main():
+    placed = None
     try:
-        decision = dispatch(json.load(sys.stdin))
+        payload = json.load(sys.stdin)
+        decision = dispatch(payload)
+        placed = placed_input(payload)
     # Every way this can fail means one thing — the call went unjudged — and
     # one answer is right for all of them. Naming the exceptions instead is
     # what let a plain unreadable file escape, and the traceback exit reaches
@@ -353,7 +424,7 @@ def main():
         decision = KernelDecision(
             "ask", f"Malformed hook input requires approval: {error}"
         )
-    json.dump(rendered(decision), sys.stdout)
+    json.dump(rendered(decision, placed), sys.stdout)
 
 
 if __name__ == "__main__":

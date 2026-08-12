@@ -25,7 +25,8 @@ class VerbOperands(TypedDict):
     inert: bool
 
 
-PASS_THROUGH_WORDS = (  # lup: ignore[library-default] — real wrappers that exec the argument after them
+# lup: ignore[library-default] — real wrappers that exec the argument after them
+PASS_THROUGH_WORDS = (
     "env",
     "command",
     "exec",
@@ -34,7 +35,8 @@ PASS_THROUGH_WORDS = (  # lup: ignore[library-default] — real wrappers that ex
     "setsid",
     "stdbuf",
 )
-DANGEROUS_ENV_NAMES = (  # lup: ignore[library-default] — variables the shell and language runtimes read to redirect execution
+# lup: ignore[library-default] — variables the shell and language runtimes read to redirect execution
+DANGEROUS_ENV_NAMES = (
     "PATH",
     "IFS",
     "ENV",
@@ -57,7 +59,8 @@ DANGEROUS_ENV_NAMES = (  # lup: ignore[library-default] — variables the shell 
 DANGEROUS_ENV_PREFIXES = ("LD_", "DYLD_", "PYTHON", "GIT_", "BASH_FUNC_")
 # lup: ignore[library-default] — the native runtimes' own plugin directory names
 GENERATED_PLUGIN_ROOTS = (".claude/plugins", ".codex/plugins")
-INTERPRETERS = (  # lup: ignore[library-default] — real interpreter executables; omitting one is a hole, not a preference
+# lup: ignore[library-default] — real interpreter executables; omitting one is a hole, not a preference
+INTERPRETERS = (
     "python",
     "python3",
     "perl",
@@ -150,7 +153,8 @@ def uv_run_words(words: list[str]) -> list[str]:
 # Every judged-ask verb that acts on paths, paired with the short flags whose
 # presence does not change what the verb does to them. A long flag or an
 # unrecognized cluster falls through to the verb's own ask.
-SCRATCH_VERB_FLAGS = {  # lup: ignore[library-default] — each verb's own POSIX flags, fixed by what the utility does rather than by who is asking
+# lup: ignore[library-default] — each verb's own POSIX flags, fixed by what the utility does rather than by who is asking
+SCRATCH_VERB_FLAGS = {
     "rm": "rfv",
     "rmdir": "pv",
     "mv": "fnv",

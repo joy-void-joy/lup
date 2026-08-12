@@ -18,7 +18,9 @@ variable to read — never as a branch on which runtime is asking.
 
 import json
 import os
-import subprocess  # lup: ignore[subprocess] — `sh` is third-party and this half is compiled into a bare script that has no virtual environment to resolve it from
+
+# lup: ignore[subprocess] — `sh` is third-party and this half is compiled into a bare script that has no virtual environment to resolve it from
+import subprocess
 from pathlib import Path
 
 

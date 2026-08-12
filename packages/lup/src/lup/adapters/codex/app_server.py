@@ -113,7 +113,8 @@ class CodexAppServer:
             self.stderr.append(line)
 
         environment = dict(
-            os.environ  # lup: ignore[os-environ] — native process boundary inherits ambient variables
+            # lup: ignore[os-environ] — native process boundary inherits ambient variables
+            os.environ
         )
         environment.update(self.environment)
         command = sh.Command(str(self.executable))

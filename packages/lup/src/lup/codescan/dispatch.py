@@ -80,15 +80,8 @@ def dispatch_violations(
         aliases = imported_names(tree, source.module)
 
         def report(node: ast.expr | ast.pattern, message: str) -> None:
-            line = node.lineno
-            end = node.end_lineno or line
             violations.append(
-                RuleViolation(
-                    path=source.path,
-                    line=line,
-                    message=message,
-                    suppression_lines=list(range(line, end + 1)),
-                )
+                RuleViolation(path=source.path, line=node.lineno, message=message)
             )
 
         def matched_model(name: str) -> str | None:

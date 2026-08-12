@@ -6,7 +6,7 @@ Every executable Lup rule family — anti-pattern, boundary, spelling, and archi
 
 ## Typed suppressions
 
-Suppress one deliberate site with `# lup: ignore[rule-id]` and a reason. Comma-separated ids cover a line that intentionally matches several rules. A typed directive in the first ten lines applies file-wide. Bare `# lup: ignore` remains parseable but is reported as untyped; a stale typed directive is blocking. `# noqa`, `# type: ignore`, and `# pyright: ignore` are separate forbidden shapes.
+Suppress one deliberate site with `# lup: ignore[rule-id]` and a reason. Comma-separated ids cover a line that intentionally matches several rules. A directive sits on the line it guards, or stands alone directly above it when the reason is too long to fit inline; nowhere else reaches. A typed directive in the file's opening comment block applies file-wide. Bare `# lup: ignore` remains parseable but is reported as untyped; a stale typed directive is blocking. `# noqa`, `# type: ignore`, and `# pyright: ignore` are separate forbidden shapes.
 
 The **Suppression** column says whether a directive reaches a rule at all. Most are soft: they name a shape that is usually wrong and occasionally the only thing that works, so a typed directive is a reasoned exception and the audit grades it. A rule marked **refused** is strong — its replacement is right every time, which leaves a directive nothing to express but a decision to keep the defect. Those rules ignore every directive, report the violation anyway, and report the directive itself as spurious; the only way past one is to write the replacement its diagnostic names.
 

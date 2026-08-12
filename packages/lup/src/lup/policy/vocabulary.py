@@ -354,7 +354,8 @@ def guarded_tool_rules() -> list[ShellCommandRule]:
     ]
 
 
-GIT_READ_ONLY_SUBCOMMANDS = (  # lup: ignore[library-default] — git's own query subcommands; each reads the object store and writes nothing, which is a fact about git rather than a choice made for an adopter
+# lup: ignore[library-default] — git's own query subcommands; each reads the object store and writes nothing, which is a fact about git rather than a choice made for an adopter
+GIT_READ_ONLY_SUBCOMMANDS = (
     "status",
     "rev-parse",
     "ls-files",
@@ -406,7 +407,8 @@ GIT_READ_ONLY_SUBCOMMANDS = (  # lup: ignore[library-default] — git's own quer
     "help",
 )
 
-GIT_REVERSIBLE_SUBCOMMANDS = (  # lup: ignore[library-default] — git subcommands the reflog or a second invocation undoes; fixed by what git records rather than by taste
+# lup: ignore[library-default] — git subcommands the reflog or a second invocation undoes; fixed by what git records rather than by taste
+GIT_REVERSIBLE_SUBCOMMANDS = (
     "add",
     "commit",
     "mv",

@@ -182,11 +182,13 @@ the check on its own authority.
 Prefer the typed, pyright-style `# lup: ignore[rule-id]`, comma-separating a
 list (`# lup: ignore[dict-get, tuple-shape]`), so a site silences exactly the
 rule it needs and still trips the others. The bare `# lup: ignore` stays
-valid, but the auditor flags it as untyped to nudge migration. The marker must
-sit on the line that trips the rule: one line above is reported as spurious
-while the violation stays uncovered.
+valid, but the auditor flags it as untyped to nudge migration. The marker sits
+on the line that trips the rule, or stands alone directly above it — one
+policy for every rule alike, and nowhere else reaches. Inline is the canonical
+placement; the line above is where a reason too long for the column budget
+goes, since a comment is the one thing the formatter cannot wrap.
 
-In a file's first 10 lines the marker goes file-wide — a standalone
+In a file's opening comment block the marker goes file-wide — a standalone
 `# lup: ignore` disables anti-pattern checks for the whole file, and
 `# lup: ignore[rule-id]` disables only that rule, the way `# pyright: ignore`
 works for files.

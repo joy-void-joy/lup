@@ -1511,6 +1511,25 @@ def test_compiled_dispatcher_reaches_only_what_a_bare_script_resolves(
     assert script == dispatcher.script.read_text(encoding="utf-8")
 
 
+@pytest.mark.parametrize("target", sorted(SHIPPED_DISPATCHERS))
+def test_compiled_dispatcher_is_already_formatted(target: str) -> None:
+    """What the compiler emits has to be formatted, not merely correct.
+
+    The generated tree is checked by the same formatter as everything else, so
+    a compiler that splices source into a shape the formatter would rewrite
+    fails a gate nothing near the compiler runs. Asserting it here is what
+    couples the two: emitting an unformatted script is a failing test rather
+    than a red sweep somebody meets later, on a file they are told not to
+    edit.
+    """
+    script = compile_dispatcher(SHIPPED_DISPATCHERS[target].declaration)
+    formatted = str(
+        sh.Command("ruff")("format", "-", "--stdin-filename", "policy.py", _in=script)
+    )
+
+    assert script == formatted
+
+
 def test_compilation_refuses_a_dispatcher_that_breaks_its_declaration() -> None:
     """A dispatcher that cannot be proven is a session without a boundary.
 

@@ -475,7 +475,8 @@ def build_session_factory(
 
         allowed_tools = policy.get_allowed_tools(
             tool_servers,
-            builtin_tools=frozenset(  # lup: ignore[frozenset-shape] — immutable policy input
+            # lup: ignore[frozenset-shape] — immutable policy input
+            builtin_tools=frozenset(
                 {"Read", "Glob", "Grep", "WebSearch", "WebFetch", "Bash"}
             ),
         )

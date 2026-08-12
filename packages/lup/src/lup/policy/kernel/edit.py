@@ -45,6 +45,217 @@ FILE_IGNORE_RE = re.compile(
     re.IGNORECASE,
 )
 
+SUPPRESSION_COLUMN_LIMIT = 88
+"""How wide a line carrying its own directive may be before the reason moves up.
+
+The formatter's limit is what decides whether the canonical inline placement
+can hold a directive and the reason that justifies it at all; past it the
+choice is a shorter reason or a shorter identifier, and both are the defect
+this budget exists to avoid. A project whose formatter is configured
+differently passes its own.
+"""
+
+
+def standalone_suppression(line: str) -> re.Match[str] | None:
+    """The directive on a line that carries nothing but the directive."""
+    match = IGNORE_RE.search(line)
+    return None if match is None or line[: match.start()].strip() else match
+
+
+def suppression_reaches(
+    lines: list[str], directive_line: int, violation_line: int
+) -> bool:
+    """Whether a directive on `directive_line` may silence `violation_line`.
+
+    One policy, for every rule alike: a directive sits on the violation's own
+    line — the canonical placement — or stands alone on the line directly
+    above, which is where a reason too long for the column budget goes. No
+    rule widens this and none narrows it, so a marker shape valid against one
+    rule is valid against all of them.
+
+    Standing alone is what makes the line above a placement rather than an
+    accident: an inline directive guards the line it was written on, and a
+    rule tripping the line below cannot quietly borrow it.
+    """
+    if directive_line == violation_line:
+        return True
+    if directive_line != violation_line - 1:
+        return False
+    if directive_line < 1 or directive_line > len(lines):
+        return False
+    return standalone_suppression(lines[directive_line - 1]) is not None
+
+
+def inline_suppression(code: str, directive: str) -> str:
+    """One code line carrying a directive that had been standing above it."""
+    return f"{code.rstrip()}  {directive.strip()}"
+
+
+def hoisted_suppression(line: str, match: re.Match[str]) -> list[str]:
+    """The two lines one inline directive becomes with its reason hoisted.
+
+    The directive comes first, taking the code's own indentation, which is
+    what makes it read as belonging to the line beneath rather than to the
+    block around it.
+    """
+    indent = line[: len(line) - len(line.lstrip())]
+    return [f"{indent}{line[match.start() :].strip()}", line[: match.start()].rstrip()]
+
+
+def python_parses(source: str) -> bool:
+    """Whether source is valid Python, which tokenizing alone does not decide.
+
+    A comment inserted after a backslash continuation still tokenizes and
+    still will not parse, so only the grammar can say whether moving a line
+    left the file intact.
+    """
+    try:
+        ast.parse(source)
+    except (SyntaxError, ValueError):
+        return False
+    return True
+
+
+def relocated_suppressions(text: str, limit: int = SUPPRESSION_COLUMN_LIMIT) -> str:
+    """Rewrite one file so every directive sits at its canonical placement.
+
+    Both placements are accepted, so this changes nothing about what a
+    directive silences — only where it is written. Inline is canonical and
+    holds until the reason stops fitting: a comment is the one thing the
+    formatter cannot wrap, so past the budget an inline directive costs either
+    its reason or its line's width, and the first of those is the pressure
+    that ends in a shortened identifier.
+
+    Both directions are what make this a normal form rather than a nudge. An
+    over-wide inline directive is hoisted onto the line above; a directive
+    standing above a line it would fit on is folded back onto it. Every input
+    reaches the same output and reaching it twice changes nothing, which is
+    what keeps the placement from needing a sweep each time a tree drifts —
+    hoisting alone would leave a directive written above a line it fits on
+    correct forever, with nothing that ever moves it.
+
+    Non-Python text is returned untouched, and so is any move that would stop
+    the file parsing: a directive trailing a backslash continuation has no
+    line above it a comment may occupy.
+    """
+    columns = python_comment_columns(text)
+    if columns is None:
+        return text
+    lines = text.splitlines()
+    file_level = file_level_line(text)
+
+    def directive_at(number: int) -> re.Match[str] | None:
+        """The directive one line carries, if a comment really opens there.
+
+        The whole-file opt-out is not one: it governs the file rather than the
+        line beneath it, and folding it onto that line would silently narrow
+        it to one statement.
+        """
+        if number < 1 or number > len(lines) or number == file_level:
+            return None
+        match = IGNORE_RE.search(lines[number - 1])
+        if match is None or number not in columns or columns[number] != match.start():
+            return None
+        return match
+
+    def folds_onto(number: int) -> bool:
+        """Whether the line below a standalone directive can take it inline.
+
+        It has to be code — a blank or a comment is not what the directive
+        guards — and it has to be carrying no directive of its own, since two
+        on one line leaves the second unread.
+        """
+        below = lines[number] if number < len(lines) else ""
+        if not below.strip() or below.lstrip().startswith(("#", "//")):
+            return False
+        return directive_at(number + 1) is None
+
+    def placed() -> Iterator[str]:
+        folded = 0
+        for number, line in enumerate(lines, start=1):
+            if number == folded:
+                continue
+            match = directive_at(number)
+            if match is None:
+                yield line
+                continue
+            if standalone_suppression(line) is None:
+                if len(line) <= limit:
+                    yield line
+                    continue
+                yield from hoisted_suppression(line, match)
+                continue
+            merged = inline_suppression(
+                lines[number] if number < len(lines) else "", line
+            )
+            if not folds_onto(number) or len(merged) > limit:
+                yield line
+                continue
+            folded = number + 1
+            yield merged
+
+    revised = "\n".join(placed()) + ("\n" if text.endswith("\n") else "")
+    # Hoisting into a file's opening comment block would land the directive
+    # where the whole-file form is read, silently widening one line's excuse
+    # to every line. A move that changes which directive heads the file is
+    # declined, and the reason stays inline where it was written.
+    if file_level_line(revised) != file_level_line(text):
+        return text
+    return revised if python_parses(revised) else text
+
+
+def relocated_edit_text(
+    after: str, start: int, end: int, limit: int = SUPPRESSION_COLUMN_LIMIT
+) -> str | None:
+    """What an edit's own span becomes once placement is settled, or ``None``.
+
+    ``start`` and ``end`` bound the region of the finished document the edit
+    wrote. Placement has to be decided on the whole document — which line a
+    directive guards is the line beneath it, and an edit's fragment need not
+    contain it — and the answer is then read back out of that region.
+
+    ``None`` says the edit cannot express the move: either nothing moved, or
+    the move reached text this call does not write. Declining is free, because
+    both placements are valid and the directive stays where its author put it.
+    """
+    revised = relocated_suppressions(after, limit)
+    if revised == after:
+        return None
+    tail = len(after) - end
+    if (
+        revised[:start] != after[:start]
+        or revised[len(revised) - tail :] != after[end:]
+    ):
+        return None
+    return revised[start : len(revised) - tail]
+
+
+def covering_suppression_line(lines: list[str], violation_line: int) -> int:
+    """The line holding the directive that covers `violation_line`, or 0.
+
+    Both accepted placements, nearest first, so an inline directive is
+    preferred over one standing above and the site a refusal quotes is the one
+    whoever wrote it would recognize.
+    """
+    for candidate in (violation_line, violation_line - 1):
+        if candidate < 1 or IGNORE_RE.search(lines[candidate - 1]) is None:
+            continue
+        if suppression_reaches(lines, candidate, violation_line):
+            return candidate
+    return 0
+
+
+def suppression_placement(violation_line: int) -> str:
+    """Name the lines a refusal expected the directive it did not find on.
+
+    The reported failure this answers is a directive that went spurious while
+    the violation it meant to guard stayed missing, with nothing in either
+    message saying where the two were supposed to meet.
+    """
+    if violation_line <= 1:
+        return "line 1"
+    return f"line {violation_line}, or line {violation_line - 1} directly above it"
+
 
 def python_tokens(source: str) -> list[tokenize.TokenInfo] | None:
     """Tokenize Python source, returning ``None`` for incomplete syntax."""
@@ -622,13 +833,30 @@ class FileIgnore(TypedDict):
     ids: tuple[str, ...] | None
 
 
+def file_level_line(source: str, max_lines: int = 10) -> int:
+    """The line holding the whole-file directive, or 0 where there is none.
+
+    A file-level opt-out lives in the header, before anything it could be
+    mistaken for governing: the run of comments and blank lines a file opens
+    with. That boundary is what keeps it apart from a directive standing above
+    the one line it guards, which is the same characters in the same shape and
+    stops being distinguishable the moment code has intervened.
+    """
+    for number, line in enumerate(source.splitlines()[:max_lines], start=1):
+        if FILE_IGNORE_RE.match(line) is not None:
+            return number
+        if line.strip() and not line.lstrip().startswith(("#", "//")):
+            return 0
+    return 0
+
+
 def file_ignore(source: str) -> FileIgnore:
     """Return whether a file-level suppression exists and the ids it names."""
-    for line in source.splitlines()[:10]:
-        match = FILE_IGNORE_RE.match(line)
-        if match is not None:
-            return FileIgnore(present=True, ids=ignore_rule_ids(match))
-    return FileIgnore(present=False, ids=())
+    number = file_level_line(source)
+    if number == 0:
+        return FileIgnore(present=False, ids=())
+    match = FILE_IGNORE_RE.match(source.splitlines()[number - 1])
+    return FileIgnore(present=True, ids=ignore_rule_ids(match) if match else None)
 
 
 def suppression_site(number: int, line: str) -> str:
@@ -691,9 +919,10 @@ def anti_pattern_denial(number: int, row: AntiPatternRow) -> KernelDecision:
         if row["strength"] == "strong"
         else ""
     )
+    placement = refusal or f" — suppress on {suppression_placement(number)}"
     return KernelDecision(
         "deny",
-        f"line {number}: {row['message']}{refusal} "
+        f"line {number}: {row['message']}{placement} "
         f"(rule {row['id']} — see docs/rules.md)",
     )
 
@@ -769,14 +998,15 @@ def antipattern_decision(
         rule_id = hit["row"]["id"]
         if has_file_ignore and (disabled_ids is None or rule_id in disabled_ids):
             continue
-        original = original_lines[number - 1]
-        directive = IGNORE_RE.search(original)
+        holder = covering_suppression_line(original_lines, number)
+        original = original_lines[holder - 1] if holder else ""
+        directive = IGNORE_RE.search(original) if holder else None
         if directive is not None:
             covered = ignore_rule_ids(directive)
             if covered is None or rule_id in covered:
                 return KernelDecision(
                     suppression,
-                    suppression_reason([suppression_site(number, original)]),
+                    suppression_reason([suppression_site(holder, original)]),
                 )
         return anti_pattern_denial(number, hit["row"])
     return None

@@ -48,7 +48,6 @@ from lup.policy.kernel.edit import IGNORE_RE
 MARKER_RE = re.compile(r"(#|//)\s*lup\s*:", re.IGNORECASE)
 
 
-
 # `# lup: defer: <text>` parks work; a `defer[<gate>]: <text>` head parks it
 # behind a gate somebody other than this note can check ("until the v2 API
 # ships"). The bare spelling is the default, because nothing evaluates a
