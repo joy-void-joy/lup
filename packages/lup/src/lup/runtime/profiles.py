@@ -2,9 +2,12 @@
 
 What a profile name means is the application's to decide: a personal registry
 file listing accounts by hand, or a directory the project already keeps one
-account per entry in. :class:`ProfileStore` is the engine answering for one
-such origin, and :class:`ProfileDirectory` is the concrete surface a command
-tree and a launcher hold over whichever engine an application supplied.
+account per entry in. Two capabilities answer for such an origin, because
+reading one and curating one are separate powers and most callers only ever
+need the first — :class:`ProfileNames` says which names exist and what each
+selects, :class:`ProfileRegistrar` registers, selects, and forgets them. Both
+are engines; :class:`ProfileDirectory` is the concrete surface a command tree
+and a launcher hold over whichever pair an application supplied.
 
 Nothing here names a provider. A directory carries the :class:`ProviderLogin`
 of the runtime whose homes it holds, so reporting whether one is signed in —
@@ -20,8 +23,8 @@ from pydantic import BaseModel, ConfigDict
 from lup.runtime.login import ProviderLogin
 
 
-class ProfileStore(ABC):
-    """One origin of named configuration homes.
+class ProfileNames(ABC):
+    """Which named configuration homes one origin knows, and what each selects.
 
     Injected into :class:`ProfileDirectory` and never held by a consumer
     directly, so an application supplies its own origin without any caller
@@ -39,6 +42,15 @@ class ProfileStore(ABC):
     @abstractmethod
     def active_profile(self) -> str | None:
         """The name that answers for a caller naming none."""
+
+
+class ProfileRegistrar(ABC):
+    """Curating one origin's named homes: registering, selecting, forgetting.
+
+    Separate from reading them because it is a separate power. A launcher
+    resolves a name on every run and never curates; keeping the two apart
+    is what lets an origin offer the first without offering the second.
+    """
 
     @abstractmethod
     def add_profile(self, name: str, config_dir: Path | None = None) -> Path:
@@ -69,27 +81,30 @@ class Profile(BaseModel):
 class ProfileDirectory:
     """Resolve, list, and curate profiles over whichever origin holds them."""
 
-    def __init__(self, store: ProfileStore, login: ProviderLogin) -> None:
-        self.store = store
+    def __init__(
+        self, names: ProfileNames, registrar: ProfileRegistrar, login: ProviderLogin
+    ) -> None:
+        self.names = names
+        self.registrar = registrar
         self.login = login
 
     def profile(self, name: str) -> Profile:
         """Resolve one name against the origin, login state included."""
-        config_dir = self.store.config_dir_for(name)
+        config_dir = self.names.config_dir_for(name)
         return Profile(
             name=name,
             config_dir=config_dir,
-            active=name == self.store.active_profile(),
+            active=name == self.names.active_profile(),
             logged_in=self.login.logged_in(config_dir),
         )
 
     def entries(self) -> list[Profile]:
         """Every known profile, in the origin's own display order."""
-        return [self.profile(name) for name in self.store.names()]
+        return [self.profile(name) for name in self.names.names()]
 
     def active(self) -> Profile | None:
         """The profile answering for a caller naming none, where there is one."""
-        name = self.store.active_profile()
+        name = self.names.active_profile()
         return None if name is None else self.profile(name)
 
     def launch_home(self, name: str | None) -> Path | None:
@@ -100,23 +115,23 @@ class ProfileDirectory:
         both what a project with no profiles expects and what keeps a session
         launched from inside another one on the account it was started under.
         """
-        selected = name or self.store.active_profile()
+        selected = name or self.names.active_profile()
         if selected is None:
             return None
-        return self.store.config_dir_for(selected)
+        return self.names.config_dir_for(selected)
 
     def add(self, name: str, config_dir: Path | None = None) -> Profile:
         """Register a profile and resolve what registering it produced."""
-        self.store.add_profile(name, config_dir)
+        self.registrar.add_profile(name, config_dir)
         return self.profile(name)
 
     def use(self, name: str) -> Profile:
         """Make one profile the active selection, and resolve it."""
-        self.store.set_active(name)
+        self.registrar.set_active(name)
         return self.profile(name)
 
     def remove(self, name: str) -> Profile:
         """Forget a profile, resolving it first so a caller can report it."""
         removed = self.profile(name)
-        self.store.remove_profile(name)
+        self.registrar.remove_profile(name)
         return removed

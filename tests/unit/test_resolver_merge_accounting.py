@@ -26,7 +26,7 @@ from lup.resolver.models import (
     ResolveState,
     SourceSnapshot,
 )
-from lup.resolver.orchestrator import report_mismatch
+from lup.resolver.declaration import DeclarationDelta
 from lup.resolver.state import StateTransitionError, validate_concern_admission
 from lup.resolver.tools import agent_may_approve
 from lup.devtools.harness.resolve import integration_branch
@@ -186,7 +186,9 @@ def test_a_kept_hunk_inside_the_conflict_set_needs_no_declaration() -> None:
 
 def test_the_containment_gate_names_the_paths_it_rejected_over() -> None:
     """A round that cannot read which path failed re-derives the same report."""
-    reason = report_mismatch(["src/new.py"], ["src/stale.py"])
+    reason = DeclarationDelta(
+        undeclared=["src/new.py"], unswept=["src/stale.py"]
+    ).reason
 
     assert "src/new.py" in reason
     assert "src/stale.py" in reason
@@ -194,7 +196,7 @@ def test_the_containment_gate_names_the_paths_it_rejected_over() -> None:
 
 def test_over_reporting_alone_passes_the_containment_gate() -> None:
     """Nothing changed undeclared is containment; equality cost 71 files."""
-    assert report_mismatch([], []) == ""
+    assert DeclarationDelta().settled
 
 
 def test_a_concern_may_join_a_run_that_has_already_started() -> None:

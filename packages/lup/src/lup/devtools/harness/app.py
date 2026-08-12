@@ -21,12 +21,14 @@ import lup.devtools.harness.drift as drift
 import lup.devtools.harness.launch as launch
 import lup.devtools.harness.reconcile as reconcile
 import lup.devtools.harness.resolve as resolve
+from lup.devtools.dev.issues import EXCLUDED_LABEL
 from lup.devtools.harness.composition import NativeTargets, claude_profile_directory
 from lup.devtools.harness.profile_app import create_profile_app
 from lup.runtime.profiles import ProfileDirectory
 from lup.devtools.harness.drift import RepositoryWriter
 from lup.devtools.supervisor.app import serve_supervisor
 from lup.devtools.supervisor.doors import (
+    accept_verification,
     answer_questions,
     list_actors,
     list_questions,
@@ -136,8 +138,10 @@ def create_harness_app(
     resolve_app.command("answer")(answer_questions)
     resolve_app.command("actors")(list_actors)
     resolve_app.command("say")(say_to_actor)
+    resolve_app.command("accept")(accept_verification)
     resolve_app.command("redirect")(redirect_actor)
     resolve_app.command("park")(park_run)
+    resolve_app.command("refresh")(resolve.refresh_run)
     app.add_typer(resolve_app, name="resolve")
 
     @resolve_app.callback(invoke_without_command=True)
@@ -170,6 +174,16 @@ def create_harness_app(
                 "recorded evidence. Requires the run's process to have exited.",
             ),
         ] = None,
+        adopt_config: Annotated[
+            bool,
+            typer.Option(
+                "--adopt-config",
+                help="Resume a run whose composition moved, re-stamping it onto "
+                "the current one. The refusal names which fields moved; adopt "
+                "once they read as compatible, rather than aborting and losing "
+                "every answer the run has collected.",
+            ),
+        ] = False,
         admit: Annotated[
             list[str] | None,
             typer.Option(
@@ -188,6 +202,23 @@ def create_harness_app(
                 "the admitted concern stays traceable to code.",
             ),
         ] = None,
+        admit_issue: Annotated[
+            list[int] | None,
+            typer.Option(
+                "--admit-issue",
+                help="Admit an open tracker issue by number (repeatable). Its "
+                "title and body are read from the tracker, so the admitted "
+                "concern stays traceable to what was filed.",
+            ),
+        ] = None,
+        issues: Annotated[
+            bool,
+            typer.Option(
+                "--issues/--no-issues",
+                help="Take the project's open issues as evidence alongside the "
+                f"tree's notes, minus anything labelled `{EXCLUDED_LABEL}`.",
+            ),
+        ] = True,
         wait: Annotated[
             float,
             typer.Option(
@@ -255,8 +286,10 @@ def create_harness_app(
             resolve.SupervisorSpawn(
                 enabled=supervise, port=supervise_port, linger=supervise_linger
             ),
-            resolve.admission_request(admit or [], admit_note or []),
+            resolve.admission_request(admit or [], admit_note or [], admit_issue or []),
             model,
+            adopt_config,
+            issues,
         )
 
     claude_target = targets.builder("claude")

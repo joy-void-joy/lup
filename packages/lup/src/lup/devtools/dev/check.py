@@ -10,7 +10,7 @@ from lup.adapters.harness import claude_prompt_renderer, codex_prompt_renderer
 from lup.codescan.markers import find_feedback
 from lup.harness.models import GUIDANCE_BYTE_BUDGET, PromptDocument, document_byte_size
 
-from lup.devtools.dev.antipatterns import scan_antipatterns
+from lup.devtools.dev.antipatterns import FoundAntiPattern, scan_antipatterns
 from lup.devtools.project import DevProject
 from lup.devtools.dev.boundaries import (
     scan_boundaries,
@@ -41,6 +41,13 @@ class CheckOutcome(BaseModel):
 
     name: str
     passed: bool
+
+
+class ScopedFindings(BaseModel):
+    """A sweep split into what a check answers for, and what it only reports."""
+
+    owned: list[FoundAntiPattern]
+    outside: list[FoundAntiPattern]
 
 
 class TestRoot(BaseModel):
@@ -99,6 +106,27 @@ def owned_comments(
         return found
     owned = dict.fromkeys(scope)
     return [item for item in found if str(item.file) in owned]
+
+
+def owned_findings(
+    findings: list[FoundAntiPattern], scope: list[str] | None
+) -> ScopedFindings:
+    """Which anti-pattern findings this check is answerable for.
+
+    A lease holds one concern's changes, so its gate answers "is this change
+    good?". Answering "is the whole repository clean?" makes every lease's
+    verdict depend on state no worker in the run controls, and one pre-existing
+    finding then blocks every lease at once with nothing a revision can do
+    about it. What lies outside is still named, so a worker learns the tree has
+    an issue rather than reading it as clean.
+    """
+    if scope is None:
+        return ScopedFindings(owned=findings, outside=[])
+    owned = dict.fromkeys(scope)
+    return ScopedFindings(
+        owned=[item for item in findings if item.file in owned],
+        outside=[item for item in findings if item.file not in owned],
+    )
 
 
 def run_checks(
@@ -195,7 +223,8 @@ def run_checks(
         typer.echo(line)
 
     scan = scan_antipatterns(project)
-    blocking = [f for f in scan.findings if f.kind != "untyped"]
+    scoped = owned_findings(scan.findings, scope)
+    blocking = [f for f in scoped.owned if f.kind != "untyped"]
     refined = f", {len(scan.refuted)} refuted" if scan.refuted else ""
     if blocking:
         typer.echo(f"antipatterns: FAIL ({len(blocking)} finding(s){refined})")
@@ -203,10 +232,14 @@ def run_checks(
             typer.echo(f"  {finding.file}:{finding.line} [{finding.kind}]")
         results.append(CheckOutcome(name="antipatterns", passed=False))
     else:
-        advisory = len(scan.findings) - len(blocking)
+        advisory = len(scoped.owned) - len(blocking)
         tail = f" ({advisory} untyped, advisory{refined})" if advisory else refined
         typer.echo(f"antipatterns: ok{tail}")
         results.append(CheckOutcome(name="antipatterns", passed=True))
+    for finding in scoped.outside:
+        typer.echo(
+            f"  outside this scope: {finding.file}:{finding.line} [{finding.kind}]"
+        )
 
     breaches = scan_boundaries(project)
     if breaches:

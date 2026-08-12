@@ -25,9 +25,9 @@ from lup.harness.contracts import SkillInvocationRenderer
 from lup.harness.models import ResolveSpec
 from lup.policy.identity import ConcernAllowance
 from lup.resolver.actors import ActorSession, ActorSessions
-from lup.resolver.journal import ActorRef
 from lup.resolver.mailbox import QuestionMailbox
 from lup.resolver.models import (
+    ActorRef,
     Concern,
     DropCandidate,
     MergeReport,
@@ -70,6 +70,15 @@ ASK_PREAMBLE = (
     "When a decision is not yours to make, ask through the resolver's question "
     "tools — queue_questions, await_answers, ask_questions — rather than "
     "guessing or ending your turn to report it. " + WAIT_CONTRACT
+)
+
+DECLARATION_PREAMBLE = (
+    "Before you submit, put the file account you are about to report through "
+    "check_declaration and act on what it says. It runs the same reading that "
+    "judges the account, so one it settles is one that passes. Declaring is "
+    "the only part of your turn you cannot verify by looking — you have no "
+    "git of your own here — and an account the gate rejects costs a whole "
+    "session to correct."
 )
 
 
@@ -153,7 +162,12 @@ class TurnRunner:
         return self.actors.session(
             actor,
             self.worker_factory(
-                WorkerContext(root=root, concern_id=actor.id, allowances=allowances)
+                WorkerContext(
+                    root=root,
+                    concern_id=actor.id,
+                    actor=actor,
+                    allowances=allowances,
+                )
             ),
         )
 
@@ -181,6 +195,7 @@ class TurnRunner:
             "means deleting or moving code that carries one, do so and name it in "
             "your summary.\n\n"
             f"{ASK_PREAMBLE}\n\n"
+            f"{DECLARATION_PREAMBLE}\n\n"
             f"{assignment.rendered_skill_invocation}\n\n"
             f"Assignment:\n{assignment.model_dump_json(indent=2)}"
         )

@@ -16,7 +16,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from lup.resolver.journal import ActorRef
+from lup.resolver.models import ActorRef
 from lup.resolver.mailbox import (
     MESSAGE_FILE,
     QUESTION_DIR,
@@ -377,11 +377,7 @@ def run_is_live(
     exclusive one, so the page would break the very runs it reports on. A
     run is live when it has not finished and something wrote recently.
     """
-    if state.phase in {
-        ResolvePhase.COMPLETE,
-        ResolvePhase.ABORTED,
-        ResolvePhase.FAILED,
-    }:
+    if state.phase.terminal():
         return False
     return now - activity <= window_seconds
 

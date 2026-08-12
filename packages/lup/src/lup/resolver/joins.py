@@ -20,13 +20,13 @@ from pathlib import Path
 
 from lup.resolver.dag import ConcernGraph
 from lup.resolver.journal import (
-    ActorRef,
     JoinAuditEvent,
     JoinCompletedEvent,
     Journal,
     RecheckRepeatedEvent,
 )
 from lup.resolver.models import (
+    ActorRef,
     Concern,
     DropCandidate,
     IntegrationRecord,
@@ -172,7 +172,7 @@ class Joiner:
             # introduced it.
             failed = [
                 record.name
-                for record in self.verifier.verify(lease.root)
+                for record in self.verifier.verify(lease.root, base)
                 if not record.passed
             ]
             if failed:

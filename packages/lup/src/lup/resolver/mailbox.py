@@ -28,13 +28,20 @@ from lup.channels.models import (
     DoorPolicy,
     utc_now,
 )
+from lup.channels.cursor import StreamCursors
 from lup.channels.slot import Slot, SlotSet
 from lup.channels.stream import Stream
 from lup.channels.wait import POLL_SECONDS, wait_until
-from lup.resolver.models import FROZEN, MaterialQuestion, QuestionAnswer
+from lup.resolver.models import (
+    FROZEN,
+    ActorRef,
+    MaterialQuestion,
+    QuestionAnswer,
+)
 
 QUESTION_DIR = "questions"
 MESSAGE_FILE = "messages.jsonl"
+DELIVERY_DIR = "delivery"
 PARK_DIR = "park"
 RESUME_DIR = "resume"
 ANSWER_POLL_SECONDS = POLL_SECONDS
@@ -116,6 +123,23 @@ class ActorMessage(BaseModel):
     redirect: bool = False
 
 
+class ActorDelivery(BaseModel):
+    """What one actor has waiting, and the position that consumes exactly it.
+
+    The position is carried rather than taken again at the moment of
+    delivery, because a message posted between reading and handing over
+    would otherwise be committed past without ever being read.
+    """
+
+    model_config = FROZEN
+
+    messages: list[ActorMessage]
+    through: int
+
+    def redirects(self) -> list[ActorMessage]:
+        return [message for message in self.messages if message.redirect]
+
+
 class MailboxWait(BaseModel):
     """How one wait ended. ``reason`` is empty only on a complete answer."""
 
@@ -156,6 +180,7 @@ class QuestionMailbox:
         self.stream: Stream[ActorMessage] = Stream(
             root / MESSAGE_FILE, TypeAdapter(ActorMessage)
         )
+        self.cursors = StreamCursors(root / DELIVERY_DIR)
         self.park_slot: Slot[ParkRequest] = Slot(root / PARK_DIR, ParkRequest)
         # Pause and resume are asymmetric on purpose. Pausing is a directive
         # any door may issue; resuming is a decision, and excluding AGENT
@@ -176,11 +201,35 @@ class QuestionMailbox:
             return
         slot.declare(MailboxSlotRecord(pending=pending))
 
+    def settled_answer(self, question_id: str) -> RecordedAnswer | None:
+        """The promoted answer to one question, where a promoter took one."""
+        record = self.slots.slot(question_id).settled()
+        return None if record is None else record.answer
+
     def offer(self, offer: AnswerOffer) -> None:
-        """Propose an answer, replacing any earlier proposal for that question."""
-        self.slots.slot(offer.question_id).offer(
-            MailboxSlotRecord(offer=offer), offer.door
-        )
+        """Propose an answer, replacing any earlier proposal for that question.
+
+        A promoted answer is never revised, so an offer reaching a settled
+        question cannot take. Re-offering the value that settled is how a
+        rerun recipe resumes, and passes as the no-op it already is. A
+        *different* value is a correction, and recording one silently left
+        the run advancing under exactly the value its author meant to
+        replace — a concern the human had rejected was leased for work. It
+        is refused at the one point every door writes through, so no door
+        can be the one that still does this quietly.
+        """
+        settled = self.settled_answer(offer.question_id)
+        if settled is None:
+            self.slots.slot(offer.question_id).offer(
+                MailboxSlotRecord(offer=offer), offer.door
+            )
+            return
+        if settled.answer.value != offer.value:
+            raise MailboxConflictError(
+                f"question {offer.question_id!r} is already settled as "
+                f"{settled.answer.value!r}, a promoted answer is not revisable, "
+                f"so the offered {offer.value!r} would not take"
+            )
 
     def record(self, answer: RecordedAnswer) -> bool:
         """Promote one answer, or report that another door already won."""
@@ -214,23 +263,34 @@ class QuestionMailbox:
         """Tell an actor something. This never settles and never parks a run."""
         self.stream.append(message)
 
-    def messages_for(self, actor: str, offset: int = 0) -> list[ActorMessage]:
-        """Every message addressed to one actor, or broadcast to all of them."""
-        return [
-            pair.item
-            for pair in self.stream.read_from(offset)
-            if pair.item.to_actor in (actor, "")
-        ]
+    def waiting(self, actor: ActorRef) -> ActorDelivery:
+        """Everything queued for one actor, consuming none of it.
 
-    def stream_offset(self) -> int:
-        """Where a reader that has consumed everything should resume.
+        From the position that actor was last *delivered* to, which is a
+        file rather than a number some session happens to hold. Starting
+        each session at the stream head instead meant a message posted while
+        the previous turn was in flight was skipped rather than queued: the
+        window a turn opened began after it, in every round, so it reached
+        nobody ever. Reading is separated from consuming so that asking what
+        an actor has waiting — which is how a sender learns whether anything
+        was read — cannot itself be what makes it disappear.
+        """
+        position = self.cursors.offset(actor.conversation())
+        found = self.stream.read_from(position)
+        reaching = actor.addresses()
+        return ActorDelivery(
+            messages=[pair.item for pair in found if pair.item.to_actor in reaching],
+            through=found[-1].commit_offset if found else position,
+        )
 
-        Taken rather than derived from the last message read, because a
+    def delivered(self, actor: ActorRef, through: int) -> None:
+        """Record that one actor has been handed everything through ``through``.
+
+        The whole region rather than the last matching message, because a
         reader filtering by actor must still skip past the ones addressed
         elsewhere or it re-reads them on every turn.
         """
-        found = self.stream.read_from(0)
-        return found[-1].commit_offset if found else 0
+        self.cursors.commit(actor.conversation(), through)
 
     def park(self, request: ParkRequest) -> None:
         self.park_slot.clear()

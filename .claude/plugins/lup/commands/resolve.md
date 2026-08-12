@@ -22,6 +22,14 @@ The run parks rather than guessing, so every material question is a decision tha
 
 A parked run is when the most is known about what else needs doing. Admit that work into the run that found it: hand the run the new evidence and only that evidence is planned, so the run keeps its id, every answer already recorded, and every concern already completed. The admitted concern then passes the same approval and material-question gates as one from intake, and may depend on a concern this run has already finished.
 
-The evidence is either a `# lup:` note you write in the file it concerns, which keeps the concern traceable to code, or the human's own words when nothing in the tree carries them; the run records which, so a statement-grounded concern is distinguishable in review. Admission is accepted at any phase before integration — past that the review branch is assembled, and a fresh run is the honest answer.
+The evidence is a `# lup:` note you write in the file it concerns, which keeps the concern traceable to code; an open issue by number, which keeps it traceable to what was filed; or the human's own words when neither carries them. The run records which, so a statement-grounded concern is distinguishable in review. Admission is accepted at any phase before integration — past that the review branch is assembled, and a fresh run is the honest answer.
 
 So a concern discovered mid-run is never dropped and never a reason to restart. Restarting re-derives the inventory from scratch and discards every material answer already collected, which is the most expensive thing you can do at exactly the moment the run holds the most of them.
+
+## Friction you hit during a run is an issue, not just an admission
+
+A run exercises the resolver harder than anything else does, so it is where the harness's own defects surface. **File each one as an issue against this repository at the moment you meet it**, with the exact command, the exact error, the state it left behind, and what the recovery cost — observation rather than conclusion.
+
+File it *and then* decide whether to admit it. The two do different work: an admission dies with the run, while an issue survives it and is picked up by the next intake, which is what closes the loop — friction becomes an issue, an issue becomes evidence, evidence becomes a concern, and the concern becomes the fix. Friction only admitted is friction that has to be rediscovered.
+
+Intake takes every open issue except those labelled `resolver-skip`, so a filed issue needs no further wiring to reach the next run. `uv run lup-devtools dev issues` prints exactly what a run would take, without starting one. When a concern derived from an issue lands, the run comments on the issue naming the review branch — and never closes it, because a reviewer passing is not a human having read the code.

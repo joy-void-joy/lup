@@ -589,6 +589,21 @@ class ClaudeSessionOpener:
             gate_resolver=self.config.submission_gate_resolver,
             submission_tool=SUBMISSION_TOOL,
         )
+        # lup: defer: A resolver run that parks can end on `an error occurred
+        # during closing of asynchronous generator <ClaudeSessionOpener.
+        # open_session>: RuntimeError: aclose(): asynchronous generator is
+        # already running`, after the park output is complete and with exit
+        # code 0 — so successful work reads as failed. Two candidates are
+        # already refuted: `settle_reader` below was in the build that
+        # reported it, and a concurrent double close of the actor's exit
+        # stack cannot collide, because `AsyncExitStack.__aexit__` pops each
+        # callback before awaiting it. What is left is that `asyncio.run`
+        # cancels leftover tasks before finalizing async generators, so a
+        # task still suspended inside this `finally` when the run returns
+        # leaves the generator running for the finalizer's own `aclose` to
+        # trip over — which means finding who closes a session without
+        # awaiting it to completion. Needs a live parking run to confirm;
+        # do not fix it from the shape alone.
         try:
             yield SessionHandle(session=session, fork=ClaudeFork(state))
         finally:

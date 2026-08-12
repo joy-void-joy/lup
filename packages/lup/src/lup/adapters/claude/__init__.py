@@ -23,7 +23,7 @@ internals.
 
 Deliberately Claude-only, with no neutral contract:
 
-- :class:`~lup.adapters.claude.profile_store.ClaudeProfileStore` persists
+- :class:`~lup.adapters.claude.profile_store.AccountFile` persists
   personal named config-directory selections because the Claude CLI has no
   native profile registry. It projects into ``ClaudeProfileRegistry``, which
   the ``ProfileResolver`` filling consumes. The Codex CLI owns account homes
