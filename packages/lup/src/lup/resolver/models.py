@@ -719,6 +719,28 @@ class VerificationRecord(BaseModel):
     exit_code: int
 
 
+class VerificationAcceptance(BaseModel):
+    """One human's decision to accept a concern over a failing verification.
+
+    A verification verdict is an exit code, and some failures are true and
+    unfixable from inside the lease that meets them: a finding the worker
+    did not introduce, reproduces at its base, and cannot converge on. The
+    worker then resubmits into a rejection that spends a revision round each
+    time, until the concern fails with its criteria never evaluated.
+
+    Accepting is therefore a decision, not a repair, and it is recorded like
+    one. The reason is required because the record is what review reads
+    instead of a green check that was never green.
+    """
+
+    model_config = FROZEN
+
+    concern_id: str
+    verification: str
+    """The verification this accepts, by the name it fails under."""
+    reason: str
+
+
 class WorktreeRemoval(BaseModel):
     """Whether a lease's worktree is gone, and what stands in the way if not."""
 
@@ -970,6 +992,7 @@ class ResolveState(BaseModel):
     integration: IntegrationRecord | None = None
     join_progress: JoinProgress | None = None
     verification: list[VerificationRecord] = Field(default_factory=list)
+    acceptances: list[VerificationAcceptance] = Field(default_factory=list)
     cleanup: list[CleanupRecord] = Field(default_factory=list)
     failures: list[str] = Field(default_factory=list)
     resume_from: ResolvePhase | None = None

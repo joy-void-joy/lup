@@ -16,6 +16,8 @@ import typer
 
 from lup.channels.models import utc_now
 from lup.resolver.journal import Journal
+from lup.resolver.models import VerificationAcceptance
+from lup.resolver.state import ResolverStateRepository
 from lup.resolver.mailbox import (
     AnswerDoor,
     AnswerOffer,
@@ -208,6 +210,36 @@ def say_to_actor(
     )
     for line in queued(run_id, to):
         typer.echo(line)
+
+
+@app.command("accept")
+def accept_verification(
+    reason: str = typer.Argument(..., help="Why this failure is accepted"),
+    run_id: str = typer.Option(..., "--run-id", help="Run whose state to write"),
+    concern: str = typer.Option(..., "--concern", help="Concern to accept"),
+    verification: str = typer.Option(
+        ..., "--verification", help="The failing verification, by name"
+    ),
+) -> None:
+    """Accept one concern over one failing verification, on the human's word.
+
+    A verdict is an exit code, and some failures are true but unfixable from
+    inside the lease that meets them — a finding the worker did not
+    introduce and cannot converge on. Resubmitting into it spends a revision
+    round each time until the concern fails with its criteria never read.
+
+    The reason is required because this is what review sees in place of a
+    green check that was never green.
+    """
+    root = resolve_state_root() / run_id
+    if not root.is_dir():
+        raise typer.BadParameter(f"no resolver run {run_id!r} under {root.parent}")
+    ResolverStateRepository(resolve_state_root(), run_id).accept(
+        VerificationAcceptance(
+            concern_id=concern, verification=verification, reason=reason
+        )
+    )
+    typer.echo(f"accepted {concern} over {verification}: {reason}")
 
 
 @app.command("redirect")

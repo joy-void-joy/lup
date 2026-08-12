@@ -166,10 +166,20 @@ class ConcernExecutor:
                 # integrated tree, so a concern could reach VERIFIED with a
                 # red suite and the breakage surfaced after every join with
                 # nothing to attribute it to.
+                # A failure a human has accepted for this concern is not a
+                # verdict the worker can act on: it accepted one it had
+                # already judged unfixable from inside the lease, and
+                # rejecting again would spend a revision round to reach the
+                # same place.
+                accepted = [
+                    acceptance.verification
+                    for acceptance in self.run.require().acceptances
+                    if acceptance.concern_id == concern.id
+                ]
                 broke = [
                     record.name
                     for record in self.verifier.verify(lease.root, base.commit)
-                    if not record.passed
+                    if not record.passed and record.name not in accepted
                 ]
                 review = (
                     ReviewReport(

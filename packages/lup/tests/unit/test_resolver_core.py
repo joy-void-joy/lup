@@ -74,6 +74,7 @@ from lup.resolver.models import (
     ReviewReport,
     RunTally,
     SourceSnapshot,
+    VerificationAcceptance,
     VerificationCommand,
     WorkerContext,
     WorkerReport,
@@ -314,6 +315,40 @@ def test_dependency_bases_cover_root_single_and_semantic_join() -> None:
         commit="join-sha",
         semantic_join=True,
     )
+
+
+def test_state_repository_records_and_replaces_an_acceptance(tmp_path: Path) -> None:
+    """Accepting is recorded, and re-accepting a pair corrects rather than adds."""
+    state = ResolveState(
+        config_digest="config-sha",
+        run_id="run-1",
+        phase=ResolvePhase.INVENTORY,
+        source=SourceSnapshot(branch="feature", commit="source-sha"),
+        spec=resolve_spec(),
+        concerns=[concern("a")],
+        progress=[ConcernProgress(concern_id="a")],
+    )
+    repository = ResolverStateRepository(tmp_path, "run-1")
+    repository.save(state)
+
+    repository.accept(
+        VerificationAcceptance(concern_id="a", verification="dev check", reason="first")
+    )
+    repository.accept(
+        VerificationAcceptance(
+            concern_id="a", verification="dev check", reason="second"
+        )
+    )
+    repository.accept(
+        VerificationAcceptance(concern_id="b", verification="dev check", reason="other")
+    )
+    recorded = repository.load().acceptances
+
+    # One row per concern-and-verification pair, carrying the latest reason.
+    assert [(row.concern_id, row.reason) for row in recorded] == [
+        ("a", "second"),
+        ("b", "other"),
+    ]
 
 
 def test_state_repository_adopts_a_moved_composition(tmp_path: Path) -> None:
