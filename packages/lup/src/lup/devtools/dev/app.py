@@ -21,6 +21,7 @@ import lup.devtools.dev.check as check
 import lup.devtools.dev.comments as comments
 import lup.devtools.dev.commit_guard as commit_guard
 import lup.devtools.dev.conflicts as conflicts
+import lup.devtools.dev.issues as issues_mod
 import lup.devtools.dev.plugin as plugin_mod
 import lup.devtools.dev.policy_explain as policy_explain
 import lup.devtools.dev.pr as pr
@@ -400,8 +401,8 @@ def create_dev_app(
             str | None,
             typer.Option(
                 "--since",
-                help="Scope the note gate to paths changed since this ref, for a "
-                "tree that holds work it is not answerable for",
+                help="Scope the note and anti-pattern gates to paths changed since "
+                "this ref, for a tree that holds work it is not answerable for",
             ),
         ] = None,
         path: Annotated[
@@ -531,6 +532,25 @@ def create_dev_app(
         file/line/text/context shape as `dev comments`.
         """
         comments.todos(as_json)
+
+    @app.command("issues")
+    def issues_cmd(
+        excluded: Annotated[
+            str,
+            typer.Option("--excluded", help="Label that withholds an issue"),
+        ] = issues_mod.EXCLUDED_LABEL,
+    ) -> None:
+        """List the open issues a resolver run would take as evidence.
+
+        Answerable without starting a run, which is the whole point: a run
+        leases a worktree per concern, so "what would this plan from?" should
+        not cost one.
+        """
+        found = issues_mod.fetch_open_issues(excluded)
+        slug = issues_mod.repository_slug()
+        typer.echo(f"{len(found)} open issue(s) in {slug or 'this repository'}")
+        for issue in found:
+            typer.echo(f"  {issue.reference()}  {issue.title}")
 
     @app.command("rules")
     def rules_cmd(

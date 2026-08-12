@@ -1,20 +1,22 @@
 """Worktree create, list, and remove operations."""
 
 import shutil
-from collections.abc import Callable
+from abc import abstractmethod
+from collections.abc import Callable, Iterator, Sequence
 from pathlib import Path
 
 import sh
 import typer
 from pydantic import BaseModel
 
-from lup.devtools.dev.commit_guard import CommitGuard, arm
+from lup.devtools.dev.commit_guard import CommitGuard, arm, read_guard
 from lup.devtools.layout import get_tree_dir
 from lup.devtools.utils import (
     copy_to_clipboard,
     decode_stderr,
     format_table,
     git,
+    refuse_blocked_config_writes,
     short_sha,
     uv,
 )
@@ -116,37 +118,166 @@ def register_merge_driver() -> None:
     git("config", f"merge.{OWNERSHIP_MERGE_DRIVER}.driver", "true")
 
 
-def create(
-    name: str,
-    no_sync: bool,
-    no_copy_data: bool,
-    base_branch: str | None,
-    launcher: WorktreeLauncher,
-    force: bool = False,
-    extras: list[str] = GITIGNORED_EXTRAS,
-) -> None:
-    """Create or re-attach a git worktree."""
-    current_dir = Path.cwd()
+class SetupStep(BaseModel, frozen=True):
+    """One part of making a worktree usable, checkable on its own.
 
-    tree_dir = get_tree_dir()
-    worktree_path = tree_dir / name
-    already_exists = branch_exists(name)
+    A worktree is registered by one git call and made usable by several more,
+    so an interruption between them leaves a directory that exists without
+    being ready — and a later run that asks only whether the directory exists
+    calls that ready. Each step reads its own effect off the worktree instead,
+    rather than off a record of what an earlier run meant to do, so a re-run
+    finishes exactly what was left and ``already active`` can mean ready
+    rather than merely present.
+    """
 
-    if worktree_path.exists():
-        if worktree_is_registered(worktree_path):
-            typer.echo(f"Worktree already active: {worktree_path}")
-            raise typer.Exit(0)
-        if not force:
-            typer.echo(
-                f"Directory exists but is not a registered worktree: {worktree_path}\n"
-                "Re-run with --force to delete it and create the worktree.",
-                err=True,
+    @abstractmethod
+    def label(self) -> str:
+        """What to call this step where it has to be named as missing."""
+
+    @abstractmethod
+    def satisfied(self) -> bool:
+        """Whether this step's effect is already there to be found."""
+
+    @abstractmethod
+    def run(self) -> None:
+        """Carry the step out; whether it worked is re-read, never reported."""
+
+
+class MergeDriver(SetupStep, frozen=True):
+    """The merge driver ``.gitattributes`` names, registered for this clone."""
+
+    def label(self) -> str:
+        return f"the {OWNERSHIP_MERGE_DRIVER} merge driver"
+
+    def satisfied(self) -> bool:
+        return all(
+            git.out(
+                "config",
+                "--get",
+                f"merge.{OWNERSHIP_MERGE_DRIVER}.{setting}",
+                _ok_code=[0, 1],
             )
-            raise typer.Exit(1)
-        typer.echo(f"Removing stale worktree directory: {worktree_path}")
-        shutil.rmtree(worktree_path)
+            for setting in ("name", "driver")
+        )
 
+    def run(self) -> None:
+        register_merge_driver()
+
+
+class ArmedCommitGuard(SetupStep, frozen=True):
+    """The commit-time refusal of stale generated output, installed here.
+
+    A worktree is where a commit is made, so it is where the guard has to be
+    armed: a check that only runs when somebody remembers to run it is what
+    let two artifact-stale commits land.
+    """
+
+    guard: CommitGuard = CommitGuard()
+    worktree: Path
+
+    def label(self) -> str:
+        return f"the {self.guard.hook} commit guard"
+
+    def satisfied(self) -> bool:
+        return read_guard(self.guard, self.worktree).armed
+
+    def run(self) -> None:
+        typer.echo(arm(self.guard, self.worktree))
+
+
+class RecordedBase(SetupStep, frozen=True):
+    """The branch a worktree was cut from, recorded where detection reads it.
+
+    Recorded wherever it is missing rather than only on a branch this run
+    created: an interrupted run leaves the branch made and the record unmade,
+    and afterwards the two are indistinguishable. A branch that already
+    carries a record keeps it.
+    """
+
+    branch: str
+    origin: str
+
+    def label(self) -> str:
+        return f"the base recorded for {self.branch}"
+
+    def satisfied(self) -> bool:
+        if not self.origin or self.origin == self.branch:
+            return True
+        return bool(
+            git.out(
+                "config", "--get", f"branch.{self.branch}.lup-base", _ok_code=[0, 1]
+            )
+        )
+
+    def run(self) -> None:
+        git("config", f"branch.{self.branch}.lup-base", self.origin)
+
+
+class CopiedExtras(SetupStep, frozen=True):
+    """The gitignored files a checkout needs that ``worktree add`` leaves behind."""
+
+    source: Path
+    worktree: Path
+    extras: list[str]
+
+    def label(self) -> str:
+        return "the gitignored extras"
+
+    def satisfied(self) -> bool:
+        return all(
+            (self.worktree / rel_path).exists()
+            for rel_path in self.extras
+            if (self.source / rel_path).exists()
+        )
+
+    def run(self) -> None:
+        for rel_path in copy_gitignored_extras(self.source, self.worktree, self.extras):
+            typer.echo(f"Copied {rel_path}")
+
+
+class SyncedEnvironment(SetupStep, frozen=True):
+    """The environment ``uv sync`` builds inside the worktree.
+
+    Its absence is the expensive failure, and the reason a worktree that only
+    exists cannot be called ready: pyright resolves the project from wherever
+    else it can and reports errors in code nobody touched, which reads as a
+    bug in the change rather than as setup that never ran.
+    """
+
+    worktree: Path
+
+    def label(self) -> str:
+        return "the synced environment (.venv)"
+
+    def satisfied(self) -> bool:
+        return (self.worktree / ".venv").is_dir()
+
+    def run(self) -> None:
+        typer.echo("Running uv sync...")
+        sync_dependencies(self.worktree)
+
+
+def finish(steps: Sequence[SetupStep]) -> Iterator[str]:
+    """Run each step given, naming the ones still unfinished afterwards.
+
+    Whether a step worked is re-read from the worktree rather than taken from
+    whether it raised: a step whose tool exited badly and a step that quietly
+    produced nothing leave the same worktree behind, and both are judged by
+    what a later run will find rather than by their own account of themselves.
+    """
+    for step in steps:
+        try:
+            step.run()
+        except sh.ErrorReturnCode as e:
+            typer.echo(f"Warning: {step.label()} failed: {decode_stderr(e)}", err=True)
+        if not step.satisfied():
+            yield step.label()
+
+
+def register_worktree(name: str, worktree_path: Path, base_branch: str | None) -> None:
+    """Register the worktree itself, the one step nothing else can precede."""
     git("worktree", "prune")
+    already_exists = branch_exists(name)
 
     if already_exists:
         typer.echo(f"Re-attaching worktree: {worktree_path}")
@@ -163,13 +294,26 @@ def create(
         else:
             git("worktree", "add", str(worktree_path), "-b", name)
     except sh.ErrorReturnCode as e:
-        typer.echo(f"Error creating worktree: {decode_stderr(e)}")
+        typer.echo(f"Error creating worktree: {decode_stderr(e)}", err=True)
         raise typer.Exit(1)
 
-    register_merge_driver()
-    typer.echo(arm(CommitGuard(), worktree_path))
 
-    # lup: The mechanism behind the note below, measured downstream: the sandbox
+def create(
+    name: str,
+    no_sync: bool,
+    no_copy_data: bool,
+    base_branch: str | None,
+    launcher: WorktreeLauncher,
+    force: bool = False,
+    extras: list[str] = GITIGNORED_EXTRAS,
+) -> None:
+    """Create a git worktree, re-attach one, or finish one left half-made."""
+    # Three config writes follow — the two merge-driver settings and the
+    # recorded base — and `worktree add` takes the same lock before any of
+    # them, so a confinement that owns `config.lock` is said once here rather
+    # than discovered as `File exists` against a half-created worktree.
+    #
+    # lup: solved: The mechanism behind the note below, measured downstream: the sandbox
     # bind-mounts `/dev/null` over `.git/config.lock` and `.git/config.worktree`
     # (device 1:3, read-only devtmpfs) and mounts `.git/config` read-only, so git
     # cannot take its lock and every config write fails. This function does three
@@ -180,7 +324,7 @@ def create(
     # config writes are blocked by the sandbox, rerun outside it" instead of
     # letting `File exists` send a reader after a stale lock that does not exist.
     #
-    # lup: This config write is what fails under the sandbox, and the reported
+    # lup: solved: This config write is what fails under the sandbox, and the reported
     # cause is wrong. Sibling worktrees are *not* read-only — writing into
     # `tree/main/` succeeds, because the allowlist covers the whole repository
     # root. What fails is git's lock protocol: `config.lock` sits on a read-only
@@ -189,28 +333,67 @@ def create(
     # deleting it does nothing. `git worktree prune`/`remove` fail the same way
     # on the admin dirs. Any fix deriving writable paths from the worktree set
     # misses this entirely.
-    #
-    # lup: `lup-devtools sync base` often reports "Base guessed", because this is
-    # where the record fails to happen: the fallback reads the *cwd's* current
-    # branch, which is not the branch being worked in once EnterWorktree has
-    # moved the session, and records nothing at all when the read comes back
-    # empty. Make `worktree create` refuse without `--branch` when it cannot know
-    # what base to record, with a `--no-record` to suppress that deliberately.
-    if not already_exists:
-        origin = base_branch or git.out("branch", "--show-current")
-        if origin and origin != name:
-            git("config", f"branch.{name}.lup-base", origin)
+    refuse_blocked_config_writes()
+    current_dir = Path.cwd()
 
-    if not no_copy_data:
-        for rel_path in copy_gitignored_extras(current_dir, worktree_path, extras):
-            typer.echo(f"Copied {rel_path}")
+    tree_dir = get_tree_dir()
+    worktree_path = tree_dir / name
+    resuming = worktree_path.exists() and worktree_is_registered(worktree_path)
 
-    if not no_sync:
-        typer.echo("Running uv sync...")
-        sync_dependencies(worktree_path)
+    if worktree_path.exists() and not resuming:
+        if not force:
+            typer.echo(
+                f"Directory exists but is not a registered worktree: {worktree_path}\n"
+                "Re-run with --force to delete it and create the worktree.",
+                err=True,
+            )
+            raise typer.Exit(1)
+        typer.echo(f"Removing stale worktree directory: {worktree_path}")
+        shutil.rmtree(worktree_path)
+
+    if not resuming:
+        register_worktree(name, worktree_path, base_branch)
+
+    def setup() -> Iterator[SetupStep]:
+        """Everything that has to hold before this worktree can be used."""
+        yield MergeDriver()
+        yield ArmedCommitGuard(worktree=worktree_path)
+        # lup: `lup-devtools sync base` often reports "Base guessed", because this is
+        # where the record fails to happen: the fallback reads the *cwd's* current
+        # branch, which is not the branch being worked in once EnterWorktree has
+        # moved the session, and records nothing at all when the read comes back
+        # empty. Make `worktree create` refuse without `--branch` when it cannot know
+        # what base to record, with a `--no-record` to suppress that deliberately.
+        yield RecordedBase(
+            branch=name, origin=base_branch or git.out("branch", "--show-current")
+        )
+        if not no_copy_data:
+            yield CopiedExtras(
+                source=current_dir, worktree=worktree_path, extras=extras
+            )
+        if not no_sync:
+            yield SyncedEnvironment(worktree=worktree_path)
+
+    pending = [step for step in setup() if not step.satisfied()]
+
+    if resuming and not pending:
+        typer.echo(f"Worktree already active: {worktree_path}")
+        raise typer.Exit(0)
+    if resuming:
+        typer.echo(f"Worktree exists, but its setup never finished: {worktree_path}")
+
+    incomplete = list(finish(pending))
 
     typer.echo()
     typer.echo(f"Worktree path: {worktree_path}")
+
+    if incomplete:
+        typer.echo("This worktree is not ready — these steps did not complete:")
+        for label in incomplete:
+            typer.echo(f"  - {label}")
+        typer.echo("Re-run the same command to finish them.", err=True)
+        raise typer.Exit(1)
+
     typer.echo("Creating a worktree does not move whoever ran this. To follow it:")
     hint = launcher(worktree_path)
     if hint.agent:
@@ -288,6 +471,9 @@ def list_worktrees() -> None:
 
 def remove(name: str, force: bool) -> None:
     """Remove a git worktree."""
+    # `worktree remove` rewrites the admin directory the same lock guards, so
+    # it fails exactly as `create` does and gets the same diagnosis.
+    refuse_blocked_config_writes()
     path = Path(name)
 
     if not path.is_absolute():

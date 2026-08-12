@@ -9,6 +9,7 @@ from lup.adapters.claude.runtime import (
     ClaudeSessionConfig,
     create_claude_session_factory,
 )
+from lup.adapters.claude.config_home import default_config_home
 from lup.adapters.claude.login import CLAUDE_LOGIN
 from lup.runtime.config import ConfigTransform, ProfileResolver, ProfileSelector
 
@@ -32,7 +33,7 @@ class ClaudeProfileRegistry(BaseModel):
     active: str | None = None
     default: ClaudeProfileSelection = Field(
         default_factory=lambda: ClaudeProfileSelection(
-            config_directory=Path.home() / ".claude"
+            config_directory=default_config_home()
         )
     )
 

@@ -72,7 +72,7 @@ advertised as a live stream. This checked-in evidence targets Claude Agent SDK
 changes.
 
 | Capability | claude-sdk-0.2.89 | codex-app-server-0.144.4 |
-|---|---|---|
+| --- | --- | --- |
 | live_events | ✅ | ✅ |
 | interrupt | ✅ | ✅ |
 | steer | — | ✅ |
