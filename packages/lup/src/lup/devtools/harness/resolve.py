@@ -80,7 +80,7 @@ from lup.devtools.dev.worktree import (
     sync_dependencies,
 )
 from lup.devtools.harness.generate import NativeHarnessComposition
-from lup.devtools.supervisor.app import SUPERVISOR_PORT
+from lup.devtools.supervisor.page import SUPERVISOR_PORT
 from lup.devtools.supervisor.projection import answer_recipe as rerun_recipe
 
 
