@@ -218,6 +218,7 @@ async def test_miniature_resolver_run_on_a_fixture_repository(tmp_path: Path) ->
                 QuestionMailbox(repo / ".lup" / "resolve" / run_id),
                 context.concern_id,
                 run_id=run_id,
+                lease_root=context.root,
                 wake=core.wake,
             ),
         )

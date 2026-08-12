@@ -13,7 +13,7 @@ from rich.live import Live
 from rich.panel import Panel
 from rich.text import Text
 
-from lup.adapters.claude.profile_store import ClaudeProfileStore
+from lup.adapters.claude.profile_store import AccountFile
 from lup.devtools.subapps import subapp
 from lup.adapters.claude.usage.api import creds_path, fetch_usage, load_stats
 from lup.adapters.claude.usage.render import (
@@ -95,7 +95,7 @@ def claude(
     ] = 600,
 ) -> None:
     """Show live Claude Code usage with pacing bars (Anthropic OAuth only)."""
-    config_dir = ClaudeProfileStore().resolve_config_dir(profile)
+    config_dir = AccountFile().resolve_config_dir(profile)
     creds = creds_path(config_dir)
     if not creds.exists():
         console.print(f"[red]No credentials at {creds}[/red]")
