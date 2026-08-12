@@ -18,10 +18,12 @@ from lup.harness.process import LaunchRequest, LocalProcessLauncher
 from lup.resolver.journal import Journal
 from lup.resolver.models import (
     AcceptanceCriterion,
+    BaseRefresh,
     Concern,
     ConcernOutcome,
     ConcernProgress,
     ConcernStatus,
+    RefreshReport,
     ResolvePhase,
     ResolveState,
     SourceSnapshot,
@@ -396,3 +398,31 @@ def test_a_verified_concern_is_left_where_its_recorded_commit_says(
 
     assert report.leases == []
     assert not (lease.root / "b.py").exists()
+
+
+def test_a_conflicted_base_names_the_paths_it_could_not_settle() -> None:
+    # The refusal says "see the paths named", so it has to name them: a
+    # human deciding whether to resolve the base by hand is choosing between
+    # one resolution here and the same one repeated in every lease at land.
+    report = RefreshReport(
+        base=BaseRefresh(
+            branch="dev",
+            was="a" * 40,
+            commit="a" * 40,
+            conflicts=[Path("packages/lup/src/lup/devtools/dev/worktree.py")],
+            reason="combining these bases conflicts: see the paths named",
+        )
+    )
+
+    assert resolve.describe_refresh(report) == [
+        "base unchanged: combining these bases conflicts: see the paths named",
+        "  packages/lup/src/lup/devtools/dev/worktree.py",
+    ]
+
+
+def test_a_base_already_current_names_nothing() -> None:
+    report = RefreshReport(
+        base=BaseRefresh(branch="dev", was="a" * 40, commit="a" * 40)
+    )
+
+    assert resolve.describe_refresh(report) == ["base is current with dev"]

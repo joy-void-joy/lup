@@ -646,6 +646,7 @@ def describe_refresh(report: RefreshReport) -> list[str]:
             f"{base.was[:12]} → {base.commit[:12]}"
         )
     lines = [opening]
+    lines.extend(f"  {path.as_posix()}" for path in base.conflicts)
     if not base.moved():
         return lines
     for lease in report.leases:
