@@ -335,7 +335,9 @@ def rendered(decision, payload):
     as part of the verdict, so a placed decision goes out as the permission
     decision plus a rewrite of the arguments — which is what makes an
     unprompted placement reachable at all. Three things in the runtime make
-    that rewrite carry the flag rather than swallow it: the PreToolUse hook
+    that rewrite carry the flag rather than swallow it, each read out of the
+    shipped Claude Code binary at version 2.1.228 — the baseline to re-check
+    against, rather than a conclusion to remember: the PreToolUse hook
     schema types `updatedInput` as an open record of arbitrary keys;
     `dangerouslyDisableSandbox` is a declared field of the shell tool's own
     input schema, so it is not an unknown key for the schema validation a

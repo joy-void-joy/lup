@@ -224,6 +224,8 @@ class ClaudeDecisionRenderer(NativeDecisionRenderer[ClaudeDecisionOutput]):
     schema rather than an unknown key the validation would reject, and the one
     per-tool key filter applied before execution names a different tool
     entirely — so the object arrives whole and the sandbox is chosen from it.
+    Read out of the shipped binary at version 2.1.228; the compiled dispatcher
+    in ``assets/policy_dispatcher.py`` carries the finding in full.
     """
 
     def render(
