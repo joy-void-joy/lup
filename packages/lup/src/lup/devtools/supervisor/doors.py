@@ -80,6 +80,32 @@ def describe(view: PendingQuestionView) -> list[str]:
     return lines
 
 
+def queued(run_id: str, to: str) -> list[str]:
+    """Say what a just-posted message is waiting on, rather than that it sent.
+
+    Reporting `sent` on the strength of having written the mailbox is what
+    let a redirect read as successful while reaching nobody at all. The
+    honest report is that it is queued, for whom, and — when the address
+    matches no actor the run has recorded — that nobody it can name will
+    read it. Not a refusal: a message may legitimately be posted for a
+    concern that has not started, and it waits at that actor's first turn.
+    """
+    reached = [
+        actor
+        for actor in Journal(resolve_state_root() / run_id).actors()
+        if to in actor.addresses()
+    ]
+    if not reached:
+        return [
+            f"queued for {to or 'every actor'}, which names no actor this run "
+            "has recorded yet; it waits until one by that address takes a turn",
+        ]
+    return [
+        f"queued for {actor.label()}; it arrives at that actor's next tool call or turn"
+        for actor in reached
+    ]
+
+
 app = typer.Typer(help="Read and answer resolver runs from the console")
 
 
@@ -144,13 +170,25 @@ def answer_questions(
 def list_actors(
     run_id: str = typer.Option(..., "--run-id", help="Run whose record to read"),
 ) -> None:
-    """List every actor this run has recorded, which is every one addressable."""
+    """List every actor this run has recorded, and what each has not read yet.
+
+    Undelivered mail is shown because sending is not delivering: a door
+    writes the stream and the actor reads it at its next tool call or turn,
+    and nothing between those two moments used to say which had happened.
+    A redirect sitting here through a whole concern is that concern being
+    worked on the instructions it was supposed to abandon.
+    """
     actors = Journal(resolve_state_root() / run_id).actors()
     if not actors:
         typer.echo("No actor has recorded anything yet.")
         return
+    mailbox = open_mailbox(run_id)
     for actor in actors:
         typer.echo(actor.label())
+        waiting = mailbox.waiting(actor)
+        for message in waiting.messages:
+            kind = "redirect" if message.redirect else "message"
+            typer.echo(f"  undelivered {kind} from {message.door}: {message.text}")
 
 
 @app.command("say")
@@ -168,7 +206,8 @@ def say_to_actor(
     open_mailbox(run_id).send(
         new_message(run_id, to, text, AnswerDoor.AGENT, in_reply_to)
     )
-    typer.echo(f"sent to {to or 'every actor'}")
+    for line in queued(run_id, to):
+        typer.echo(line)
 
 
 @app.command("redirect")
@@ -188,7 +227,8 @@ def redirect_actor(
     open_mailbox(run_id).send(
         new_message(run_id, to, text, AnswerDoor.AGENT, redirect=True)
     )
-    typer.echo(f"redirected {to or 'every actor'}")
+    for line in queued(run_id, to):
+        typer.echo(line)
 
 
 @app.command("park")
