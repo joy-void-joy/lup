@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "c3bc4f693a13c8bec9b6b71c618bc523b9f52d6942bd9e7d36dd472ee7899bb2",
+  "source_digest": "4b5aa90a1937806804e47fec792db8a084a77912eae665c86574928468d8ec75",
   "target_requirements": [
     "claude-code"
   ],
@@ -37,7 +37,7 @@
     {
       "path": ".claude/plugins/lup/TEMPLATE_CLAUDE.md",
       "category": "generated",
-      "sha256": "a48b745aad70a8221ba29d7cbd442c9cf2fb0f5c2ae875974034b38d71c1cf9b",
+      "sha256": "a21aafb18dae0da71bd555db80fa4d265dc1e8f42b9f53418df048d2cc66c60e",
       "semantic_id": "harness.template-guidance",
       "executable": false
     },
@@ -310,7 +310,7 @@
     {
       "path": ".claude/plugins/lup/hooks/runtime/kernel/commands.py",
       "category": "generated",
-      "sha256": "74e85cafd92bfeaba377b3845ab72601d3fd1e5f21264fd212116f2138a3d75f",
+      "sha256": "b6292bc5b44729261f49dd434f8d839d5810c9051b9169357544cbf7438a08e4",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -352,7 +352,7 @@
     {
       "path": ".claude/plugins/lup/hooks/runtime/kernel/rows.py",
       "category": "generated",
-      "sha256": "a3bb6fccf126527e625d601166df029b56305a65ce6aa4137a531b5faab27d22",
+      "sha256": "1fad5c9e2f6788c0cdc6089d0119a984d3c341bc411087aec51e4bd6c6a533ec",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -373,7 +373,7 @@
     {
       "path": ".claude/plugins/lup/hooks/runtime/policy_data.py",
       "category": "generated",
-      "sha256": "a784cf4a5d667f526f09826520afe00ec90b21d8cbd71241fab78b5cc2379f51",
+      "sha256": "2fb46f45cc63ff74fe15f9e2c4f87862755404613e52d95f240b9e3391b673fe",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -436,7 +436,7 @@
     {
       "path": "docs/harness.md",
       "category": "generated",
-      "sha256": "63165f7eb493c4b25ed3ad94d6f59251b9189af9b0d95af1debcfb5f6e14a498",
+      "sha256": "5ab0815df724847f31b4a6919863c621a6cbc510cd23564cae2a2fd89df7b3af",
       "semantic_id": "docs.harness",
       "executable": false
     },
@@ -471,7 +471,7 @@
     {
       "path": "docs/permissions.md",
       "category": "generated",
-      "sha256": "f5c380775dd27a3d1dd0274e84e45ad6f6ac9e0a57f22fa1fca87bbab306bbe9",
+      "sha256": "5671cd9924af7f4acea318109850d3f4a495aa0dde49876139580ee561039b5b",
       "semantic_id": "docs.permissions",
       "executable": false
     },

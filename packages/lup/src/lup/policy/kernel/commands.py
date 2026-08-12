@@ -93,9 +93,16 @@ class Subcommand(TypedDict):
 def split_subcommand(
     executable: str, arguments: list[str], default: ShellRuleRow | None
 ) -> Subcommand | KernelDecision:
-    """Find the subcommand word, honoring global value-taking and guarded flags."""
+    """Find the subcommand word, honoring global value-taking and guarded flags.
+
+    A guarded global is answered from the command's own row, so the approval it
+    raises carries that row's placement: the call still has to run where the
+    command declared it runs, and a question that dropped the placement would
+    approve one thing and perform another.
+    """
     ask_flags = default["ask_flags"] if default else []
     value_flags = default["value_flags"] if default else []
+    placement = default["sandbox"] if default else "ambient"
     position = 0
     while position < len(arguments):
         word = arguments[position]
@@ -103,7 +110,9 @@ def split_subcommand(
             return Subcommand(word=word, remainder=arguments[position + 1 :])
         if flag_matches(word, ask_flags):
             return KernelDecision(
-                "ask", f"{executable} global flag {word} requires approval"
+                "ask",
+                f"{executable} global flag {word} requires approval",
+                placement,
             )
         position += 2 if word in value_flags else 1
     return Subcommand(word="", remainder=[])

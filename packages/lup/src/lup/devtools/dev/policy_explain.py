@@ -13,6 +13,7 @@ kernel through their own compiled halves, which is why one answer covers both
 the in-process session and the native plugin.
 """
 
+import json
 from pathlib import Path
 
 import typer
@@ -22,6 +23,8 @@ from lup.devtools.utils import output_json
 from lup.harness.enforcement import semantic_policy_for
 from lup.harness.models import HookSet
 from lup.policy.models import EditBatch, EditChange, FetchUrl, ShellCommand
+from lup.policy.shell_rules import ShellCommandRule
+from lup.policy.survey import classify_forms, survey_shell_rules
 from lup.types import StringMap
 
 # Open keys only by spelling: the effects are lup's own closed set, but this
@@ -106,3 +109,38 @@ def explain(
             typer.echo(f"       {verdict.reason}")
     if all(verdict.effect != "allow" for verdict in verdicts):
         raise typer.Exit(1)
+
+
+def survey(
+    rules: list[ShellCommandRule],
+    as_json: bool,
+    output: Path | None,
+    provenance: bool,
+) -> None:
+    """Print every command form the shell vocabulary declares, and its verdict.
+
+    Reshaping a table is where verdicts move without anybody deciding to move
+    them, so ``output`` exists to capture the whole table before a change and
+    diff it against the same capture after — an equality no reading of the
+    rules can establish.
+
+    ``provenance`` answers the other question, one row per rule rather than one
+    per form: which level of the nesting supplied each axis, so a verdict that
+    was inherited from three levels up says so instead of being re-derived.
+    """
+    lines = (
+        [rule.provenance() for rule in survey_shell_rules(rules)]
+        if provenance
+        else [
+            json.dumps(form.model_dump(), sort_keys=True)
+            if as_json
+            else f"{form.effect:>5} {form.sandbox:>7}  {form.command}"
+            for form in classify_forms(rules)
+        ]
+    )
+    if output is None:
+        for line in lines:
+            typer.echo(line)
+        return
+    output.write_text("\n".join([*lines, ""]), encoding="utf-8")
+    typer.echo(f"{len(lines)} line(s) written: {output}")

@@ -446,7 +446,7 @@ async def test_a_command_approval_is_judged_on_the_command_it_carries() -> None:
     policy = SemanticToolPolicy(
         shell=ShellPolicy(
             [
-                ShellCommandRule(name="ls"),
+                ShellCommandRule(name="ls", default_effect="allow"),
                 ShellCommandRule(name="curl", default_effect="deny", reason="egress"),
             ]
         )
