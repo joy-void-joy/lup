@@ -46,6 +46,7 @@ from lup.resolver.core import (
     resolver_config_digest,
 )
 from lup.resolver.run import ResolverInvariantError
+from lup.resolver.journal import LeaseDriftEvent
 from lup.resolver.models import (
     AdmissionRequest,
     AnswerBatch,
@@ -73,6 +74,7 @@ from lup.resolver.models import (
     ReviewReport,
     RunTally,
     SourceSnapshot,
+    VerificationAcceptance,
     VerificationCommand,
     WorkerContext,
     WorkerReport,
@@ -313,6 +315,78 @@ def test_dependency_bases_cover_root_single_and_semantic_join() -> None:
         commit="join-sha",
         semantic_join=True,
     )
+
+
+def test_state_repository_records_and_replaces_an_acceptance(tmp_path: Path) -> None:
+    """Accepting is recorded, and re-accepting a pair corrects rather than adds."""
+    state = ResolveState(
+        config_digest="config-sha",
+        run_id="run-1",
+        phase=ResolvePhase.INVENTORY,
+        source=SourceSnapshot(branch="feature", commit="source-sha"),
+        spec=resolve_spec(),
+        concerns=[concern("a")],
+        progress=[ConcernProgress(concern_id="a")],
+    )
+    repository = ResolverStateRepository(tmp_path, "run-1")
+    repository.save(state)
+
+    repository.accept(
+        VerificationAcceptance(concern_id="a", verification="dev check", reason="first")
+    )
+    repository.accept(
+        VerificationAcceptance(
+            concern_id="a", verification="dev check", reason="second"
+        )
+    )
+    repository.accept(
+        VerificationAcceptance(concern_id="b", verification="dev check", reason="other")
+    )
+    recorded = repository.load().acceptances
+
+    # One row per concern-and-verification pair, carrying the latest reason.
+    assert [(row.concern_id, row.reason) for row in recorded] == [
+        ("a", "second"),
+        ("b", "other"),
+    ]
+
+
+def test_state_repository_adopts_a_moved_composition(tmp_path: Path) -> None:
+    """Adoption writes the one field every other save path holds immutable."""
+    state = ResolveState(
+        config_digest="config-sha",
+        run_id="run-1",
+        phase=ResolvePhase.INVENTORY,
+        source=SourceSnapshot(branch="feature", commit="source-sha"),
+        spec=resolve_spec(),
+        concerns=[concern("a")],
+        progress=[ConcernProgress(concern_id="a")],
+    )
+    repository = ResolverStateRepository(tmp_path, "run-1")
+    repository.save(state)
+    moved = ResolverConfig(
+        state_root=tmp_path / "state",
+        workspace=tmp_path,
+        worktree_root=tmp_path / "worktrees",
+        run_id="run-1",
+        integration_branch="resolve/run-1/review",
+        verification_commands=[
+            VerificationCommand(name="verify", arguments=["git", "diff"])
+        ],
+    )
+
+    # save refuses the same change, which is what adoption exists to get past.
+    with pytest.raises(StateTransitionError):
+        repository.save(state.model_copy(update={"config_digest": "moved-sha"}))
+
+    adopted = repository.adopt(moved, "moved-sha")
+
+    assert adopted.config_digest == "moved-sha"
+    assert adopted.config == moved
+    assert repository.load().config_digest == "moved-sha"
+    # Adoption re-stamps the composition and nothing else about the run.
+    assert repository.load().concerns == state.concerns
+    assert repository.load().source == state.source
 
 
 def test_state_repository_writes_atomic_typed_projection_tree(tmp_path: Path) -> None:
@@ -801,8 +875,8 @@ def test_only_orchestrator_creates_commits_and_reads_their_identity(
         ["git", "branch", "--show-current"],
         ["git", "rev-parse", "HEAD"],
         ["git", "add", "-N", "."],
-        ["git", "diff", "--check", "base-sha"],
         ["git", "diff", "--name-only", "base-sha"],
+        ["git", "diff", "--check", "base-sha"],
         ["git", "add", "-A"],
         ["git", "commit", "-m", "resolve: A"],
         ["git", "rev-parse", "HEAD"],
@@ -1565,6 +1639,7 @@ def failure_leg_core(
     worker_response: Callable[[Path, str], JsonObject],
     reviewer_response: Callable[[Path, str], JsonObject],
     max_revision_rounds: int = 2,
+    max_declaration_attempts: int = 2,
 ) -> ResolverCore:
     return ResolverCore(
         ResolverConfig(
@@ -1579,6 +1654,7 @@ def failure_leg_core(
                 )
             ],
             max_revision_rounds=max_revision_rounds,
+            max_declaration_attempts=max_declaration_attempts,
         ),
         resolve_spec(),
         lambda context: resolver_test_factory(context.root, worker_response),
@@ -1637,6 +1713,227 @@ async def test_worker_crash_persists_the_failure_and_raises_a_group(
     assert progress["a"].status == ConcernStatus.FAILED
     assert progress["a"].reason == "worker exploded"
     assert any("worker exploded" in failure for failure in persisted.failures)
+
+
+def test_a_failed_concern_does_not_strand_the_leases_beside_it(
+    tmp_path: Path,
+) -> None:
+    """One stale pointer must not cost a resume every healthy concern.
+
+    A concern can only exhaust its rounds by committing work across several,
+    so its tree legitimately sits ahead of the base while no commit was ever
+    accepted. Restoring read that as the branch having moved under the run
+    and raised before any other lease was reached, which left four verified
+    concerns and five newly eligible ones unreachable through every resume.
+    """
+    launcher = LocalProcessLauncher()
+    workspace = failure_leg_workspace(tmp_path, launcher)
+    source = snapshot(workspace, launcher)
+    core = failure_leg_core(
+        tmp_path,
+        workspace,
+        launcher,
+        "stranded",
+        lambda _root, _name: {},
+        lambda _root, _name: {},
+    )
+    failed = WritableRootLease(
+        concern_id="a",
+        root=tmp_path / "resolver-worktrees" / "a",
+        branch="resolve/stranded/a",
+    )
+    healthy = WritableRootLease(
+        concern_id="b",
+        root=tmp_path / "resolver-worktrees" / "b",
+        branch="resolve/stranded/b",
+    )
+    core.worktrees.create(failed, source.commit)
+    core.worktrees.create(healthy, source.commit)
+    (failed.root / "work.txt").write_text("salvageable\n", encoding="utf-8")
+    for arguments in (["add", "-A"], ["commit", "-m", "work the worker committed"]):
+        status = launcher.launch(
+            LaunchRequest(arguments=["git", *arguments], cwd=failed.root)
+        )
+        assert status.code == 0, status.stderr
+    moved = core.worktrees.head(failed)
+
+    def base(identifier: str) -> DependencyBase:
+        return DependencyBase(
+            concern_id=identifier,
+            parent_concerns=[],
+            parent_commits=[],
+            commit=source.commit,
+        )
+
+    state = ResolveState(
+        config_digest="config-sha",
+        run_id="stranded",
+        phase=ResolvePhase.WORKERS,
+        source=source,
+        spec=resolve_spec(),
+        concerns=[concern("a"), concern("b")],
+        progress=[
+            ConcernProgress(concern_id="a", status=ConcernStatus.FAILED),
+            ConcernProgress(concern_id="b", status=ConcernStatus.RUNNING),
+        ],
+        leases=[failed, healthy],
+        bases=[base("a"), base("b")],
+        outcomes=[
+            # The shape a run persisted before an outcome carried its head:
+            # no accepted commit, and nothing recording where the tree ended.
+            ConcernOutcome(
+                concern_id="a",
+                branch=failed.branch,
+                verified=False,
+                failure="revision limit exhausted",
+            )
+        ],
+    )
+    core.persist(state)
+
+    core.restore_leases(state)
+
+    assert moved != source.commit
+    assert LeaseDriftEvent(concern_id="a", expected=source.commit, found=moved) in [
+        entry.event for entry in core.journal.read()
+    ]
+    persisted = core.repository.load()
+    progress = {item.concern_id: item.status for item in persisted.progress}
+    assert progress["b"] == ConcernStatus.LEASED
+    assert core.worktrees.head(failed) == moved
+
+
+@pytest.mark.asyncio
+async def test_a_declaration_mismatch_does_not_spend_a_revision_round(
+    tmp_path: Path,
+) -> None:
+    """The contract is bookkeeping, and it is not what the budget is for.
+
+    A worker learns where the declaration boundary is by crossing it, and
+    the two directions are reported one at a time: correcting an
+    under-declaration by declaring the whole expected set is what produces
+    an over-declaration. Charging both to the revision budget let a concern
+    fail on the third crossing with its six criteria never once evaluated.
+    """
+    launcher = LocalProcessLauncher()
+    workspace = failure_leg_workspace(tmp_path, launcher)
+    worker_calls: Counter[str] = Counter()
+
+    def worker_response(root: Path, output_name: str) -> JsonObject:
+        if output_name == MergeReport.__name__:
+            return {"completed": True, "summary": "integration join reviewed"}
+        assert output_name == WorkerReport.__name__
+        identifier = root.name
+        worker_calls[identifier] += 1
+        attempt = worker_calls[identifier]
+        (root / "a.txt").write_text(f"round {attempt}\n", encoding="utf-8")
+        report = {
+            "concern_id": identifier,
+            "changed": True,
+            "summary": f"implemented {identifier}",
+            "files_changed": ["a.txt"],
+        }
+        if attempt == 1:
+            # Changed a file it did not declare.
+            (root / "stray.txt").write_text("undeclared\n", encoding="utf-8")
+            return report
+        if attempt == 2:
+            # Corrected by declaring more, which crosses the other way.
+            (root / "stray.txt").unlink()
+            return {**report, "swept_beyond_scope": ["ghost.txt"]}
+        return report
+
+    def reviewer_response(root: Path, output_name: str) -> JsonObject:
+        assert output_name == ReviewReport.__name__
+        return {
+            "concern_id": root.name,
+            "accepted": True,
+            "generalized": True,
+            "reason": "criteria met",
+            "criteria_met": [f"{root.name}-done"],
+        }
+
+    core = failure_leg_core(
+        tmp_path,
+        workspace,
+        launcher,
+        "declaration-budget",
+        worker_response,
+        reviewer_response,
+        max_revision_rounds=0,
+    )
+
+    seed_approvals(core, [concern("a")])
+    manifest = await core.run(
+        ResolveInventory(
+            source=snapshot(workspace, launcher),
+            concerns=[concern("a")],
+        )
+    )
+
+    outcomes = {outcome.concern_id: outcome for outcome in manifest.outcomes}
+    assert outcomes["a"].verified is True
+    assert worker_calls == {"a": 3}
+
+
+@pytest.mark.asyncio
+async def test_a_concern_that_never_reached_its_criteria_says_so(
+    tmp_path: Path,
+) -> None:
+    """`revision limit exhausted` reads as "the work was not good enough".
+
+    A concern that spent every attempt on the declaration contract never had
+    its work judged at all, and reporting that as the same failure hides a
+    harness problem inside a work-quality verdict.
+    """
+    launcher = LocalProcessLauncher()
+    workspace = failure_leg_workspace(tmp_path, launcher)
+    worker_calls: Counter[str] = Counter()
+
+    def worker_response(root: Path, output_name: str) -> JsonObject:
+        if output_name == MergeReport.__name__:
+            return {"completed": True, "summary": "integration join reviewed"}
+        assert output_name == WorkerReport.__name__
+        worker_calls[root.name] += 1
+        (root / "a.txt").write_text(
+            f"round {worker_calls[root.name]}\n", encoding="utf-8"
+        )
+        return {
+            "concern_id": root.name,
+            "changed": True,
+            "summary": "implemented a",
+            "files_changed": ["a.txt"],
+            "swept_beyond_scope": ["ghost.txt"],
+        }
+
+    def reviewer_response(_root: Path, _output_name: str) -> JsonObject:
+        raise AssertionError("no round should have reached the reviewer")
+
+    core = failure_leg_core(
+        tmp_path,
+        workspace,
+        launcher,
+        "never-judged",
+        worker_response,
+        reviewer_response,
+        max_revision_rounds=1,
+        max_declaration_attempts=1,
+    )
+
+    seed_approvals(core, [concern("a")])
+    manifest = await core.run(
+        ResolveInventory(
+            source=snapshot(workspace, launcher),
+            concerns=[concern("a")],
+        )
+    )
+
+    outcomes = {outcome.concern_id: outcome for outcome in manifest.outcomes}
+    assert outcomes["a"].verified is False
+    assert outcomes["a"].failure == (
+        "declaration contract unmet: no round reached the criteria"
+    )
+    assert worker_calls == {"a": 3}
 
 
 @pytest.mark.asyncio
@@ -3507,6 +3804,78 @@ def test_a_restore_git_refused_prepares_no_root(tmp_path: Path) -> None:
     assert preparer.prepared == []
 
 
+def shadowed_admin(tmp_path: Path, shadow: bool) -> ScriptedLauncher:
+    """A launcher whose `rev-parse` names an admin directory, optionally shadowed.
+
+    Bind-mounting `/dev/null` over `config.lock` is what the sandbox does and
+    what a test may not do, so a symlink stands in for it: `stat` reports the
+    same device node either way. `rev-parse` names the same directory twice
+    because that is what a checkout whose worktree is its own reports.
+    """
+    admin = tmp_path / ("shadowed" if shadow else "healthy")
+    admin.mkdir()
+    (admin / "config").write_text("[core]\n", encoding="utf-8")
+    if shadow:
+        (admin / "config.lock").symlink_to(Path("/dev/null"))
+    return ScriptedLauncher(
+        {
+            "worktree add": out(code=128, stderr="fatal: config.lock: File exists"),
+            "rev-parse --git-dir": out(stdout=f"{admin}\n{admin}\n"),
+        }
+    )
+
+
+def test_a_lease_git_refused_names_the_sandbox_holding_the_lock(
+    tmp_path: Path,
+) -> None:
+    """A run leases a worktree per concern and dies at the first one.
+
+    `File exists` is also what a stale lock reports, so the bare refusal sends
+    a reader after a file that is not there. What the admin directory is says
+    which of the two this is, and git never had that to say.
+    """
+    with pytest.raises(RuntimeError) as raised:
+        WorktreeOrchestrator(shadowed_admin(tmp_path, True), tmp_path).create(
+            joined_lease(tmp_path), "9e060ad"
+        )
+
+    assert "git config writes are blocked by the sandbox" in str(raised.value)
+    assert "Rerun outside the sandbox" in str(raised.value)
+
+
+def test_a_prune_the_sandbox_blocked_retains_the_lease_rather_than_cleaning_it(
+    tmp_path: Path,
+) -> None:
+    """A step that could not run must not be recorded as one that did.
+
+    `remove` reaches prune only where the checkout is already gone, and a
+    prune the lock refuses leaves the registration standing — so reporting
+    the lease freed would tell a reviewer it was cleaned by the very command
+    that failed, which is this concern's mislabel one layer up.
+    """
+    launcher = shadowed_admin(tmp_path, True)
+    launcher.script["worktree remove"] = out(code=128, stderr="fatal: not found")
+    launcher.script["worktree prune"] = out(code=128, stderr="fatal: config.lock")
+
+    removal = WorktreeOrchestrator(launcher, tmp_path).remove(joined_lease(tmp_path))
+
+    assert not removal.freed
+    assert "prune failed" in removal.detail
+    assert "blocked by the sandbox" in removal.detail
+
+
+def test_a_lease_git_refused_on_a_normal_tree_stays_gits_own_words(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(RuntimeError) as raised:
+        WorktreeOrchestrator(shadowed_admin(tmp_path, False), tmp_path).create(
+            joined_lease(tmp_path), "9e060ad"
+        )
+
+    assert "File exists" in str(raised.value)
+    assert "sandbox" not in str(raised.value)
+
+
 def test_a_restored_root_is_the_one_the_preparer_receives(tmp_path: Path) -> None:
     lease = joined_lease(tmp_path)
     preparer = RecordingPreparer()
@@ -3736,3 +4105,56 @@ async def test_a_park_report_names_a_broken_promoter(tmp_path: Path) -> None:
         )
 
     assert any("promoter stopped early" in item for item in raised.value.problems)
+
+
+def test_a_revision_that_only_changed_its_report_keeps_the_work_it_describes(
+    tmp_path: Path,
+) -> None:
+    # `composition-seam-abc`: the rejection named a finding outside the lease,
+    # so the honest revision answered it and left the tree alone. Read as an
+    # empty diff, that spent a round to say the worker had done nothing — and
+    # the concern failed with its criteria never evaluated.
+    orchestrator = WorktreeOrchestrator(recording_launcher(), tmp_path)
+
+    diff = orchestrator.settled_round(
+        concern("a"),
+        WorkerReport(concern_id="a", changed=True, summary="answered the rejection"),
+        "round-one-sha",
+        "origin-sha",
+    )
+
+    assert diff.valid
+    assert diff.commit == "round-one-sha"
+    assert "the work it describes stands" in diff.reason
+
+
+def test_a_claim_of_changes_over_an_untouched_branch_is_still_a_fault(
+    tmp_path: Path,
+) -> None:
+    orchestrator = WorktreeOrchestrator(recording_launcher(), tmp_path)
+
+    diff = orchestrator.settled_round(
+        concern("a"),
+        WorkerReport(concern_id="a", changed=True, summary="claimed a change"),
+        "origin-sha",
+        "origin-sha",
+    )
+
+    assert not diff.valid
+    assert diff.reason == "worker reported changes but diff is empty"
+
+
+def test_a_worker_that_reported_no_change_and_made_none_is_settled(
+    tmp_path: Path,
+) -> None:
+    orchestrator = WorktreeOrchestrator(recording_launcher(), tmp_path)
+
+    diff = orchestrator.settled_round(
+        concern("a"),
+        WorkerReport(concern_id="a", changed=False, summary="nothing to do here"),
+        "origin-sha",
+        "origin-sha",
+    )
+
+    assert diff.valid
+    assert diff.commit == "origin-sha"

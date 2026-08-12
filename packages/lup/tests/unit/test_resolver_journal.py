@@ -2,7 +2,8 @@
 
 from pathlib import Path
 
-from lup.resolver.journal import ActorRef, Journal
+from lup.resolver.journal import Journal
+from lup.resolver.models import ActorRef
 from lup.runtime.models import (
     BlockCompletedEvent,
     MessageCompletedEvent,

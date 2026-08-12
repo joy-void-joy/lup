@@ -15,6 +15,64 @@ from lup.policy.identity import ConcernAllowance
 FROZEN = ConfigDict(frozen=True)
 FROZEN_STRICT = ConfigDict(frozen=True, extra="forbid")
 
+type ActorKind = Literal["worker", "reviewer", "merger", "planner", "run"]
+
+
+class ActorRef(BaseModel):
+    """Which actor something belongs to.
+
+    A round is part of the identity because the same concern's worker is a
+    different actor on round two: it holds a different session, and a reader
+    tracing a decision needs to know which attempt they are looking at.
+
+    Here rather than with the record it attributes, because addressing an
+    actor is not the journal's business alone: the mailbox routes mail by
+    the same identity, and the two disagreeing about what named an actor is
+    what made a redirect reach nobody.
+    """
+
+    model_config = FROZEN
+
+    kind: ActorKind
+    id: str
+    round: int = Field(default=1, ge=1)
+
+    def label(self) -> str:
+        return f"{self.kind}:{self.id}#{self.round}"
+
+    def conversation(self) -> str:
+        """Which session this actor speaks through, which outlives its round.
+
+        Deliberately not the label. A worker on round two is the agent that
+        wrote round one's code and was told what was wrong with it, so the
+        round attributes what happened without forking the conversation —
+        and anything held per conversation, an open session or a delivery
+        position, is keyed by this rather than by the round it is on.
+        """
+        return f"{self.kind}-{self.id}"
+
+    def addresses(self) -> list[str]:
+        """Every spelling a door may use that reaches this actor.
+
+        Recognizing rather than parsing, because the two delivery paths
+        disagreed about what an address was: the console prints and accepts
+        ``worker:some-concern#1`` while the mid-turn hook matched the bare
+        concern id, so a redirect sent to the address the console itself
+        printed reached nobody.
+
+        Earlier rounds are included because they name the same conversation.
+        A worker's second round is the session that took its first, so an
+        operator addressing the label ``actors`` printed a round ago is not
+        addressing a different agent, and nothing they could read would tell
+        them the label had moved on.
+        """
+        return [
+            "",
+            self.id,
+            f"{self.kind}:{self.id}",
+            *(f"{self.kind}:{self.id}#{taken}" for taken in range(1, self.round + 1)),
+        ]
+
 
 class ResolvePhase(StrEnum):
     """Persisted resolver phase names in their only valid forward order."""
@@ -33,6 +91,14 @@ class ResolvePhase(StrEnum):
     COMPLETE = "complete"
     ABORTED = "aborted"
     FAILED = "failed"
+
+    def terminal(self) -> bool:
+        """Whether a run in this phase holds nothing and reads nothing."""
+        return self in {
+            ResolvePhase.COMPLETE,
+            ResolvePhase.ABORTED,
+            ResolvePhase.FAILED,
+        }
 
 
 class ConcernStatus(StrEnum):
@@ -69,6 +135,57 @@ class SourceSnapshot(BaseModel):
     commit: str
 
 
+class BaseRefresh(BaseModel):
+    """What bringing a run's base up to its branch would do, or did.
+
+    Reported rather than performed silently, because a lease cut from a
+    commit is a lease whose worker reasons about that commit's code: a run
+    sealed against its own repository does not merely go stale, it argues
+    confidently for reverting decisions it cannot see. Conflicts are named
+    per path so the answer to "what would this cost" is available before
+    anything moves.
+    """
+
+    model_config = FROZEN
+
+    branch: str = ""
+    """Which branch the base was brought up to, empty when it was another
+    base rather than a branch — a lease combining what it inherited."""
+    was: str
+    commit: str
+    conflicts: list[Path] = Field(default_factory=list)
+    reason: str = ""
+
+    def moved(self) -> bool:
+        return self.commit != self.was
+
+
+class LeaseRefresh(BaseModel):
+    """What bringing one lease up to a refreshed base would do, or did."""
+
+    model_config = FROZEN
+
+    concern_id: str
+    conflicts: list[Path] = Field(default_factory=list)
+    applied: bool = False
+    reason: str = ""
+
+
+class RefreshReport(BaseModel):
+    """A refresh as it stands: what the base would become, lease by lease.
+
+    Answering before acting is the whole point, because the concerns most
+    likely to conflict with an upstream fix are the ones editing the files
+    it touched — and those are branches with work in flight.
+    """
+
+    model_config = FROZEN
+
+    base: BaseRefresh
+    leases: list[LeaseRefresh] = Field(default_factory=list)
+    applied: bool = False
+
+
 class ReviewNote(BaseModel):
     model_config = FROZEN
 
@@ -100,6 +217,30 @@ class InventoryNote(ReviewNote):
     """One review note together with the source context used for planning."""
 
     context: str
+
+
+class IssueEvidence(BaseModel):
+    """One tracker issue offered to a run as evidence.
+
+    Forge-neutral by construction: a number, where to read it, and what it
+    says. Fetching belongs to whatever tooling knows the forge, which keeps
+    this library free of one — a project on a different tracker supplies its
+    own fetcher rather than waiting for the library to learn its API.
+
+    An issue is evidence, not a unit of work. It is clustered into concerns
+    exactly as a note is, because one issue routinely raises several pieces
+    of work and several issues routinely describe one.
+    """
+
+    model_config = FROZEN
+
+    number: int = Field(ge=1)
+    url: str
+    title: str
+    body: str = ""
+
+    def reference(self) -> str:
+        return f"#{self.number}"
 
 
 class AcceptanceCriterion(BaseModel):
@@ -290,6 +431,14 @@ class Concern(ConcernShape):
             "statement someone made."
         ),
     )
+    issues: list[IssueEvidence] = Field(
+        default_factory=list,
+        description=(
+            "The tracker issues this concern answers. Carried so a landing "
+            "can say so where the issue is read, and so a reviewer can tell "
+            "work the tracker asked for from work the tree did."
+        ),
+    )
     origin: ConcernOrigin = ConcernOrigin.INVENTORY
     eligible: bool = True
     integration_approved: bool = False
@@ -297,7 +446,8 @@ class Concern(ConcernShape):
     @model_validator(mode="after")
     def admission_is_grounded(self) -> "Concern":
         """An admitted concern names the evidence that raised it mid-run."""
-        if self.origin is ConcernOrigin.ADMITTED and not (self.notes or self.evidence):
+        grounded = self.notes or self.evidence or self.issues
+        if self.origin is ConcernOrigin.ADMITTED and not grounded:
             raise ValueError(f"admitted concern {self.id!r} cites no evidence")
         return self
 
@@ -348,6 +498,25 @@ class WritableRootLease(BaseModel):
     active: bool = True
 
 
+class HeldLease(BaseModel):
+    """One branch a run that has not finished is still holding.
+
+    What a branch survey needs in order to leave it alone: which run, and
+    where that run had got to, so the reason it reports is checkable against
+    the run directory rather than being a bare assertion that something is
+    using this.
+    """
+
+    model_config = FROZEN
+
+    branch: str
+    run_id: str
+    standing: str
+
+    def reason(self) -> str:
+        return f"lease of run {self.run_id} ({self.standing})"
+
+
 class DependencyBase(BaseModel):
     model_config = FROZEN
 
@@ -382,6 +551,10 @@ class WorkerContext(BaseModel):
 
     root: Path
     concern_id: str
+    actor: ActorRef
+    """Whose session this is, which is not derivable from the concern: one
+    recipe opens both a concern's worker and the merger that joins into it,
+    and mail addressed to either must reach that one and not the other."""
     allowances: list[ConcernAllowance] = Field(default_factory=list)
     """Edit gates a human granted with this concern. The merge and
     integration leases carry none: no concern approved them."""
@@ -422,6 +595,12 @@ class DiffValidation(BaseModel):
     valid: bool
     commit: str | None = None
     reason: str = ""
+    declaration: bool = False
+    """Whether the only thing wrong was the file-declaration contract.
+
+    Bookkeeping, and mechanically checkable — which is why a caller spends a
+    different allowance on it than on the reviewer's judgement of the work.
+    """
 
 
 class ReviewReport(BaseModel):
@@ -537,6 +716,15 @@ class ConcernOutcome(BaseModel):
     concern_id: str
     branch: str
     commit: str | None = None
+    head: str | None = None
+    """Where the lease's branch actually ended, accepted or not.
+
+    Distinct from ``commit``, which is the commit an accepted round
+    produced. A concern that exhausts its rounds has no accepted commit and
+    still has a branch, because it can only exhaust them by committing work
+    across several — so reading ``commit=None`` as "no commit exists" is
+    what made a restore expect the base and refuse the tree.
+    """
     verified: bool = False
     integrated: bool = False
     rounds: list[AgentRound] = Field(default_factory=list)
@@ -589,6 +777,28 @@ class VerificationRecord(BaseModel):
     arguments: list[str]
     passed: bool
     exit_code: int
+
+
+class VerificationAcceptance(BaseModel):
+    """One human's decision to accept a concern over a failing verification.
+
+    A verification verdict is an exit code, and some failures are true and
+    unfixable from inside the lease that meets them: a finding the worker
+    did not introduce, reproduces at its base, and cannot converge on. The
+    worker then resubmits into a rejection that spends a revision round each
+    time, until the concern fails with its criteria never evaluated.
+
+    Accepting is therefore a decision, not a repair, and it is recorded like
+    one. The reason is required because the record is what review reads
+    instead of a green check that was never green.
+    """
+
+    model_config = FROZEN
+
+    concern_id: str
+    verification: str
+    """The verification this accepts, by the name it fails under."""
+    reason: str
 
 
 class WorktreeRemoval(BaseModel):
@@ -647,9 +857,12 @@ class ResolveInventory(ResolverSource):
 class ResolveRequest(ResolverSource):
     """Unorganized review evidence supplied to the shared inventory phase.
 
-    Evidence is positional across both lists: notes occupy indexes ``0`` to
-    ``len(notes) - 1`` and statements continue from there, so one planning
-    turn references either kind the same way.
+    Evidence is positional across the lists in declaration order: notes
+    occupy indexes ``0`` to ``len(notes) - 1``, statements continue from
+    there, and issues after those — so one planning turn references any kind
+    the same way. A kind is appended rather than inserted, because the
+    indexes a planner already wrote are persisted in run state and a resumed
+    run must still read them as it meant them.
     """
 
     source: SourceSnapshot
@@ -661,15 +874,23 @@ class ResolveRequest(ResolverSource):
             "the tree carries a note for."
         ),
     )
+    issues: list[IssueEvidence] = Field(
+        default_factory=list,
+        description=(
+            "Evidence the project's tracker already holds, so an issue does "
+            "not have to be transcribed into a note before a run can act on "
+            "it."
+        ),
+    )
 
     @model_validator(mode="after")
     def evidence_is_present(self) -> "ResolveRequest":
-        if not self.notes and not self.statements:
+        if not self.evidence_count():
             raise ValueError("a resolve request needs at least one piece of evidence")
         return self
 
     def evidence_count(self) -> int:
-        return len(self.notes) + len(self.statements)
+        return len(self.notes) + len(self.statements) + len(self.issues)
 
     async def inventory(self, planner: InventoryPlanner) -> ResolveInventory:
         return await planner(self)
@@ -708,10 +929,11 @@ class AdmissionRequest(BaseModel):
 
     notes: list[InventoryNote] = Field(default_factory=list)
     statements: list[str] = Field(default_factory=list)
+    issues: list[IssueEvidence] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def evidence_is_present(self) -> "AdmissionRequest":
-        if not self.notes and not self.statements:
+        if not self.notes and not self.statements and not self.issues:
             raise ValueError("an admission needs at least one piece of evidence")
         return self
 
@@ -738,6 +960,15 @@ class ResolverConfig(BaseModel):
     run_id: str
     integration_branch: str
     max_revision_rounds: int = Field(default=2, ge=0)
+    max_declaration_attempts: int = Field(default=2, ge=0)
+    """Rounds a worker may spend reconciling its file declaration for free.
+
+    Separate from the revision budget because the two are not the same
+    scarce thing: a declaration mismatch is mechanical and cheap to check,
+    while a revision round is a reviewer's judgement of the work. Charging
+    both to one allowance let a concern oscillate between under-declaring
+    and over-declaring until it failed with its criteria never evaluated.
+    """
     verification_commands: list["VerificationCommand"] = Field(default_factory=list)
 
     @model_validator(mode="after")
@@ -754,6 +985,26 @@ class VerificationCommand(BaseModel):
 
     name: str
     arguments: list[str]
+    base_option: str = ""
+    """The flag this command is told the verified tree's own base through.
+
+    A base belongs to the tree being checked, not to the command, and
+    writing one into the arguments made it part of the run's composition:
+    the digest that gates a resume moved whenever the base did, so a run
+    could not resume itself once its base changed — including onto the
+    commit that fixed the defect it was parked for. Naming the flag here
+    and supplying the value per tree keeps the composition free of a commit
+    and lets each lease be judged against the base it actually started from.
+
+    Empty for a command that takes no such flag, which is then run exactly
+    as declared.
+    """
+
+    def against(self, base: str) -> list[str]:
+        """This command as run over a tree that started from ``base``."""
+        if not self.base_option or not base:
+            return self.arguments
+        return [*self.arguments, self.base_option, base]
 
 
 class ConcernsDocument(BaseModel):
@@ -781,9 +1032,26 @@ class ResolveState(BaseModel):
 
     schema_version: int = 2
     config_digest: str
+    config: ResolverConfig | None = None
+    """The composition this run was persisted under, for naming what moved.
+
+    Optional because a run persisted before this was recorded has only the
+    digest, which says that something differs and never which field: the
+    resume that hits a moved configuration is exactly when a reader needs
+    the difference, and a hash cannot be subtracted back into one.
+    """
     run_id: str
     phase: ResolvePhase
     source: SourceSnapshot
+    base: SourceSnapshot | None = None
+    """Where a root concern starts now, when the branch has moved since.
+
+    Apart from ``source`` because the two answer different questions. The
+    source is where this run began and never changes, which is what a
+    reader tracing a decision needs; the base is what a lease made today is
+    cut from, and a run parked while its own blocking defect was fixed must
+    be able to start its remaining leases from the fix.
+    """
     spec: ResolveSpec
     concerns: list[Concern]
     progress: list[ConcernProgress]
@@ -796,6 +1064,7 @@ class ResolveState(BaseModel):
     integration: IntegrationRecord | None = None
     join_progress: JoinProgress | None = None
     verification: list[VerificationRecord] = Field(default_factory=list)
+    acceptances: list[VerificationAcceptance] = Field(default_factory=list)
     cleanup: list[CleanupRecord] = Field(default_factory=list)
     failures: list[str] = Field(default_factory=list)
     resume_from: ResolvePhase | None = None
@@ -807,6 +1076,10 @@ class ResolveState(BaseModel):
             "a resume phase."
         ),
     )
+
+    def root_base(self) -> SourceSnapshot:
+        """What a concern with no dependency in this run is cut from."""
+        return self.base if self.base is not None else self.source
 
     @model_validator(mode="after")
     def complete_progress_projection(self) -> "ResolveState":
