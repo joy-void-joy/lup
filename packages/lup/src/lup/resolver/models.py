@@ -219,6 +219,30 @@ class InventoryNote(ReviewNote):
     context: str
 
 
+class IssueEvidence(BaseModel):
+    """One tracker issue offered to a run as evidence.
+
+    Forge-neutral by construction: a number, where to read it, and what it
+    says. Fetching belongs to whatever tooling knows the forge, which keeps
+    this library free of one — a project on a different tracker supplies its
+    own fetcher rather than waiting for the library to learn its API.
+
+    An issue is evidence, not a unit of work. It is clustered into concerns
+    exactly as a note is, because one issue routinely raises several pieces
+    of work and several issues routinely describe one.
+    """
+
+    model_config = FROZEN
+
+    number: int = Field(ge=1)
+    url: str
+    title: str
+    body: str = ""
+
+    def reference(self) -> str:
+        return f"#{self.number}"
+
+
 class AcceptanceCriterion(BaseModel):
     model_config = FROZEN
 
@@ -407,6 +431,14 @@ class Concern(ConcernShape):
             "statement someone made."
         ),
     )
+    issues: list[IssueEvidence] = Field(
+        default_factory=list,
+        description=(
+            "The tracker issues this concern answers. Carried so a landing "
+            "can say so where the issue is read, and so a reviewer can tell "
+            "work the tracker asked for from work the tree did."
+        ),
+    )
     origin: ConcernOrigin = ConcernOrigin.INVENTORY
     eligible: bool = True
     integration_approved: bool = False
@@ -414,7 +446,8 @@ class Concern(ConcernShape):
     @model_validator(mode="after")
     def admission_is_grounded(self) -> "Concern":
         """An admitted concern names the evidence that raised it mid-run."""
-        if self.origin is ConcernOrigin.ADMITTED and not (self.notes or self.evidence):
+        grounded = self.notes or self.evidence or self.issues
+        if self.origin is ConcernOrigin.ADMITTED and not grounded:
             raise ValueError(f"admitted concern {self.id!r} cites no evidence")
         return self
 
@@ -824,9 +857,12 @@ class ResolveInventory(ResolverSource):
 class ResolveRequest(ResolverSource):
     """Unorganized review evidence supplied to the shared inventory phase.
 
-    Evidence is positional across both lists: notes occupy indexes ``0`` to
-    ``len(notes) - 1`` and statements continue from there, so one planning
-    turn references either kind the same way.
+    Evidence is positional across the lists in declaration order: notes
+    occupy indexes ``0`` to ``len(notes) - 1``, statements continue from
+    there, and issues after those — so one planning turn references any kind
+    the same way. A kind is appended rather than inserted, because the
+    indexes a planner already wrote are persisted in run state and a resumed
+    run must still read them as it meant them.
     """
 
     source: SourceSnapshot
@@ -838,15 +874,23 @@ class ResolveRequest(ResolverSource):
             "the tree carries a note for."
         ),
     )
+    issues: list[IssueEvidence] = Field(
+        default_factory=list,
+        description=(
+            "Evidence the project's tracker already holds, so an issue does "
+            "not have to be transcribed into a note before a run can act on "
+            "it."
+        ),
+    )
 
     @model_validator(mode="after")
     def evidence_is_present(self) -> "ResolveRequest":
-        if not self.notes and not self.statements:
+        if not self.evidence_count():
             raise ValueError("a resolve request needs at least one piece of evidence")
         return self
 
     def evidence_count(self) -> int:
-        return len(self.notes) + len(self.statements)
+        return len(self.notes) + len(self.statements) + len(self.issues)
 
     async def inventory(self, planner: InventoryPlanner) -> ResolveInventory:
         return await planner(self)
@@ -885,10 +929,11 @@ class AdmissionRequest(BaseModel):
 
     notes: list[InventoryNote] = Field(default_factory=list)
     statements: list[str] = Field(default_factory=list)
+    issues: list[IssueEvidence] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def evidence_is_present(self) -> "AdmissionRequest":
-        if not self.notes and not self.statements:
+        if not self.notes and not self.statements and not self.issues:
             raise ValueError("an admission needs at least one piece of evidence")
         return self
 

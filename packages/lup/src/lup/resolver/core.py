@@ -52,6 +52,7 @@ from lup.resolver.models import (
     ResolvePhase,
     ResolveRequest,
     ResolverSource,
+    IssueEvidence,
     ReviewNote,
     ResolverConfig,
     ResolveState,
@@ -97,6 +98,7 @@ class EvidenceCitation(BaseModel):
 
     notes: list[ReviewNote]
     evidence: str
+    issues: list[IssueEvidence]
 
 
 def resolver_config_digest(config: ResolverConfig) -> str:
@@ -157,10 +159,11 @@ def coverage_complaint(referenced: list[int], total: int) -> str | None:
 def planned_evidence(request: ResolveRequest, indexes: list[int]) -> EvidenceCitation:
     """Split one plan's positional references back into what it cites.
 
-    Positions below the note count name notes; the rest continue into the
-    statements, so a planner references either kind the same way and the
+    The lists run end to end in declaration order — notes, then statements,
+    then issues — so a planner references any kind the same way and the
     materialized concern still carries each in the form it came in.
     """
+    statements = len(request.notes) + len(request.statements)
     return EvidenceCitation(
         notes=[
             ReviewNote.model_validate(
@@ -172,8 +175,13 @@ def planned_evidence(request: ResolveRequest, indexes: list[int]) -> EvidenceCit
         evidence="\n".join(
             request.statements[index - len(request.notes)]
             for index in indexes
-            if index >= len(request.notes)
+            if len(request.notes) <= index < statements
         ),
+        issues=[
+            request.issues[index - statements]
+            for index in indexes
+            if statements <= index < statements + len(request.issues)
+        ],
     )
 
 
@@ -376,9 +384,10 @@ class ResolverCore:
             "implementation concerns without editing. Cluster by underlying "
             "issue, not file. Reference evidence through evidence_indexes using "
             "its zero-based position in the evidence below — notes first, then "
-            "statements. A note is not a unit of work: split one that "
-            "raises several issues across several concerns, and reference it "
-            "from each. Every index must appear at least once; none may repeat "
+            "statements, then issues. Neither a note nor an issue is a unit of "
+            "work: split one that raises several problems across several "
+            "concerns, and reference it from each. "
+            "Every index must appear at least once; none may repeat "
             "within a single concern. Give each concern path-safe id, complete acceptance "
             "criteria, dependencies, material questions, and starting files. Every "
             "concern's criteria must scope analysis and action together — never "
@@ -1213,6 +1222,7 @@ class ResolverCore:
                     source=state.source,
                     notes=request.notes,
                     statements=request.statements,
+                    issues=request.issues,
                 ),
                 origin=ConcernOrigin.ADMITTED,
                 taken=[concern.id for concern in state.concerns],

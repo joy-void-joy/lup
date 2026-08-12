@@ -43,6 +43,8 @@ from lup.resolver.models import (
     ConcernAdmission,
     ConcernProgress,
     InventoryNote,
+    IssueEvidence,
+    ResolveManifest,
     MaterialQuestion,
     RefreshReport,
     ResolvePhase,
@@ -71,6 +73,7 @@ from lup.runtime.factory import SessionFactory
 from lup.types import EnvVars
 from lup.workspace.paths import project_root
 from lup.devtools.dev.comments import FoundComment, scan_tracked
+from lup.devtools.dev.issues import comment_on_issues, fetch_open_issues
 from lup.devtools.dev.remote_auth import check_remote_auth
 from lup.devtools.dev.worktree import (
     copy_gitignored_extras,
@@ -728,10 +731,10 @@ def detach_resolve(adapter: str, run_id: str | None, answers: list[str]) -> None
 
 
 def admission_request(
-    statements: list[str], note_targets: list[str]
+    statements: list[str], note_targets: list[str], issue_numbers: list[int]
 ) -> AdmissionRequest | None:
     """Build the evidence one invocation asked to admit, if it asked at all."""
-    if not statements and not note_targets:
+    if not statements and not note_targets and not issue_numbers:
         return None
     targets = parse_note_targets(note_targets)
     intake = resolver_intake(
@@ -739,8 +742,51 @@ def admission_request(
     )
     scanned = intake.actionable if targets else []
     return AdmissionRequest(
-        notes=admission_notes(targets, scanned), statements=statements
+        notes=admission_notes(targets, scanned),
+        statements=statements,
+        issues=admitted_issues(issue_numbers),
     )
+
+
+def answer_issues(concerns: list[Concern], manifest: ResolveManifest) -> list[int]:
+    """Say on each answered issue where the work that answers it now sits.
+
+    Only issues whose concern reached the review branch, because a concern
+    that failed has nothing to point at and an issue told about work that
+    does not exist is worse than an issue told nothing. Commented, never
+    closed: a run's reviewer passing is not a human having read the code.
+    """
+    landed = {outcome.concern_id for outcome in manifest.outcomes if outcome.integrated}
+    answered = {
+        issue.number: issue
+        for concern in concerns
+        if concern.id in landed
+        for issue in concern.issues
+    }
+    if not answered:
+        return []
+    return comment_on_issues(
+        sorted(answered.values(), key=lambda issue: issue.number),
+        f"Addressed on review branch `{manifest.review_branch}` by resolver run "
+        f"`{manifest.run_id}`. Left open: the branch still wants a human review.",
+    )
+
+
+def admitted_issues(numbers: list[int]) -> list[IssueEvidence]:
+    """Locate each named issue among the open ones, refusing any it cannot.
+
+    Read from the tracker rather than retyped, so a concern admitted from an
+    issue is grounded in exactly what intake would have planned from — and a
+    number that names nothing open is a typo worth refusing at the flag
+    rather than a concern planned from silence.
+    """
+    if not numbers:
+        return []
+    open_issues = {issue.number: issue for issue in fetch_open_issues()}
+    missing = [str(number) for number in numbers if number not in open_issues]
+    if missing:
+        raise typer.BadParameter("no open issue numbered: " + ", ".join(missing))
+    return [open_issues[number] for number in numbers]
 
 
 def run_resolve(
@@ -753,6 +799,7 @@ def run_resolve(
     admission: AdmissionRequest | None = None,
     model: ConfiguredModel | None = None,
     adopt_config: bool = False,
+    take_issues: bool = True,
 ) -> None:
     """Drive the shared persisted resolver through one explicit native adapter."""
     provided = parse_answer_flags(answers)
@@ -1204,8 +1251,13 @@ def run_resolve(
                     for owned in intake.generated:
                         typer.echo(f"leaving to its generator: {owned}")
                     comments = intake.actionable
-                    if not comments:
-                        typer.echo("No unresolved # lup: comments.")
+                    open_issues = fetch_open_issues() if take_issues else []
+                    for issue in open_issues:
+                        typer.echo(
+                            f"taking as evidence: {issue.reference()} {issue.title}"
+                        )
+                    if not comments and not open_issues:
+                        typer.echo("No unresolved # lup: comments, and no open issues.")
                         return
                     note_paths = sorted({Path(comment.file) for comment in comments})
                     source = resolver_source_snapshot(
@@ -1226,6 +1278,7 @@ def run_resolve(
                                 )
                                 for comment in comments
                             ],
+                            issues=open_issues,
                         )
                     )
             except ResolverAwaitingAnswers as parked:
@@ -1235,6 +1288,8 @@ def run_resolve(
                 report_awaiting(parked, adapter, resolved_run_id, planned)
                 return
             typer.echo(f"Review branch: {manifest.review_branch}")
+            for number in answer_issues(core.repository.load().concerns, manifest):
+                typer.echo(f"commented on #{number}")
             typer.echo(manifest.model_dump_json(indent=2))
 
         async with spawned_supervisor(
