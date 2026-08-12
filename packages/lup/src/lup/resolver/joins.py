@@ -172,7 +172,7 @@ class Joiner:
             # introduced it.
             failed = [
                 record.name
-                for record in self.verifier.verify(lease.root)
+                for record in self.verifier.verify(lease.root, base)
                 if not record.passed
             ]
             if failed:

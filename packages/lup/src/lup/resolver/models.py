@@ -127,6 +127,57 @@ class SourceSnapshot(BaseModel):
     commit: str
 
 
+class BaseRefresh(BaseModel):
+    """What bringing a run's base up to its branch would do, or did.
+
+    Reported rather than performed silently, because a lease cut from a
+    commit is a lease whose worker reasons about that commit's code: a run
+    sealed against its own repository does not merely go stale, it argues
+    confidently for reverting decisions it cannot see. Conflicts are named
+    per path so the answer to "what would this cost" is available before
+    anything moves.
+    """
+
+    model_config = FROZEN
+
+    branch: str = ""
+    """Which branch the base was brought up to, empty when it was another
+    base rather than a branch — a lease combining what it inherited."""
+    was: str
+    commit: str
+    conflicts: list[Path] = Field(default_factory=list)
+    reason: str = ""
+
+    def moved(self) -> bool:
+        return self.commit != self.was
+
+
+class LeaseRefresh(BaseModel):
+    """What bringing one lease up to a refreshed base would do, or did."""
+
+    model_config = FROZEN
+
+    concern_id: str
+    conflicts: list[Path] = Field(default_factory=list)
+    applied: bool = False
+    reason: str = ""
+
+
+class RefreshReport(BaseModel):
+    """A refresh as it stands: what the base would become, lease by lease.
+
+    Answering before acting is the whole point, because the concerns most
+    likely to conflict with an upstream fix are the ones editing the files
+    it touched — and those are branches with work in flight.
+    """
+
+    model_config = FROZEN
+
+    base: BaseRefresh
+    leases: list[LeaseRefresh] = Field(default_factory=list)
+    applied: bool = False
+
+
 class ReviewNote(BaseModel):
     model_config = FROZEN
 
@@ -840,6 +891,26 @@ class VerificationCommand(BaseModel):
 
     name: str
     arguments: list[str]
+    base_option: str = ""
+    """The flag this command is told the verified tree's own base through.
+
+    A base belongs to the tree being checked, not to the command, and
+    writing one into the arguments made it part of the run's composition:
+    the digest that gates a resume moved whenever the base did, so a run
+    could not resume itself once its base changed — including onto the
+    commit that fixed the defect it was parked for. Naming the flag here
+    and supplying the value per tree keeps the composition free of a commit
+    and lets each lease be judged against the base it actually started from.
+
+    Empty for a command that takes no such flag, which is then run exactly
+    as declared.
+    """
+
+    def against(self, base: str) -> list[str]:
+        """This command as run over a tree that started from ``base``."""
+        if not self.base_option or not base:
+            return self.arguments
+        return [*self.arguments, self.base_option, base]
 
 
 class ConcernsDocument(BaseModel):
@@ -878,6 +949,15 @@ class ResolveState(BaseModel):
     run_id: str
     phase: ResolvePhase
     source: SourceSnapshot
+    base: SourceSnapshot | None = None
+    """Where a root concern starts now, when the branch has moved since.
+
+    Apart from ``source`` because the two answer different questions. The
+    source is where this run began and never changes, which is what a
+    reader tracing a decision needs; the base is what a lease made today is
+    cut from, and a run parked while its own blocking defect was fixed must
+    be able to start its remaining leases from the fix.
+    """
     spec: ResolveSpec
     concerns: list[Concern]
     progress: list[ConcernProgress]
@@ -901,6 +981,10 @@ class ResolveState(BaseModel):
             "a resume phase."
         ),
     )
+
+    def root_base(self) -> SourceSnapshot:
+        """What a concern with no dependency in this run is cut from."""
+        return self.base if self.base is not None else self.source
 
     @model_validator(mode="after")
     def complete_progress_projection(self) -> "ResolveState":

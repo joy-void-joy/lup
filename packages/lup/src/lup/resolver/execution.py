@@ -168,7 +168,7 @@ class ConcernExecutor:
                 # nothing to attribute it to.
                 broke = [
                     record.name
-                    for record in self.verifier.verify(lease.root)
+                    for record in self.verifier.verify(lease.root, base.commit)
                     if not record.passed
                 ]
                 review = (
