@@ -56,6 +56,36 @@ def test_a_new_reader_resumes_where_the_last_one_was_delivered_to(
     assert [message.text for message in resumed] == ["second"]
 
 
+def test_the_reported_run_replayed_end_to_end(tmp_path: Path) -> None:
+    """The whole sequence from the report, in the order it happened.
+
+    A redirect issued mid-turn against a live worker, the run interrupted by
+    a spend limit before that turn ended, a second redirect issued after the
+    resume, and the worker taking its next turn. Both must reach it, and the
+    console must have been able to see that neither had yet.
+    """
+    actor = worker()
+    post(tmp_path, "worker:a-concern#1", "superseded; stop", redirect=True)
+    interrupted = inbox_for(tmp_path, actor)
+    interrupted.waiting()  # the turn that was killed before it started
+
+    post(tmp_path, "worker:a-concern#1", "still superseded", redirect=True)
+    resumed = inbox_for(tmp_path, worker(2))
+    outstanding = resumed.waiting()
+    taken = resumed.take()
+
+    assert [message.text for message in outstanding.messages] == [
+        "superseded; stop",
+        "still superseded",
+    ]
+    assert [message.text for message in taken] == [
+        "superseded; stop",
+        "still superseded",
+    ]
+    assert all(message.redirect for message in taken)
+    assert resumed.waiting().messages == []
+
+
 def test_reading_what_is_waiting_does_not_consume_it(tmp_path: Path) -> None:
     """Asking whether anything was read cannot be what makes it disappear."""
     post(tmp_path, "", "everyone stop")

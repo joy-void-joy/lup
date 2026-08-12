@@ -9,6 +9,10 @@ does with three shapes of moved branch.
 
 from pathlib import Path
 
+import pytest
+import typer
+
+from lup.devtools.harness import resolve
 from lup.harness.models import ResolveSpec, SkillInvocation
 from lup.harness.process import LaunchRequest, LocalProcessLauncher
 from lup.resolver.journal import Journal
@@ -326,6 +330,39 @@ def test_applying_a_refresh_merges_only_what_would_not_conflict(
     assert (contested.root / "a.py").read_text(
         encoding="utf-8"
     ) == "the worker's work\n"
+
+
+def test_the_console_refresh_reports_the_move_and_each_lease(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The command an operator actually runs, against a run on disk."""
+    repository = Repository(tmp_path / "source")
+    started = repository.commit("a.py", "one\n")
+    worktrees = repository.orchestrator()
+    lease = WritableRootLease(
+        concern_id="alpha", root=tmp_path / "leases" / "alpha", branch="resolve/alpha"
+    )
+    worktrees.create(lease, started)
+    (lease.root / "a.py").write_text("the worker's rewrite\n", encoding="utf-8")
+    repository.launcher.launch(
+        LaunchRequest(arguments=["git", "commit", "-am", "worker"], cwd=lease.root)
+    )
+    repository.commit("a.py", "the upstream fix\n")
+    state_root = repository.root / ".lup" / "resolve"
+    ResolverStateRepository(state_root, "run-1").save(
+        run_state(SourceSnapshot(branch="dev", commit=started), [lease])
+    )
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(resolve, "project_root", lambda: repository.root)
+        resolve.refresh_run(run_id="run-1", apply=False)
+        reported = capsys.readouterr().out
+        with pytest.raises(typer.BadParameter, match="no resolver run"):
+            resolve.refresh_run(run_id="ghost", apply=False)
+
+    assert "base would move onto dev" in reported
+    assert "alpha: conflicts on a.py" in reported
+    assert (lease.root / "a.py").read_text(encoding="utf-8") == "the worker's rewrite\n"
 
 
 def test_a_verified_concern_is_left_where_its_recorded_commit_says(
