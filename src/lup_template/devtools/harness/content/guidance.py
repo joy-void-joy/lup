@@ -256,6 +256,14 @@ Even for open-ended questions, attach concrete options plus a free-form one. Str
 
 **Evolution signals:** User provides external docs, corrects your approach, asks for something the command should cover, or ignores sections.
 
+### Reporting Friction
+
+When the tooling fights you, **open a GitHub issue against this repository** rather than only working around it and moving on. A workaround that lives in one session's narration teaches nobody; the issue is what survives the session.
+
+File one whenever a command half-completes and leaves inconsistent state, a classifier reports a failed probe as though it were a fact, a sandbox or permission boundary blocks an operation the documented workflow prescribes, or a recovery needed steps the workflow never named.
+
+Record what you observed rather than what you concluded: the exact command, the exact error, the state it left behind, and what the recovery cost. Name the component that owns the fix. A friction report is evidence, which is worth more than a guess at the cause — and evidence is what the self-improvement loop below consumes.
+
 ### External Resources
 
 When a question is about the harness you are running under, its agent SDK, or its model API, read that runtime's own documentation rather than answering from memory:
