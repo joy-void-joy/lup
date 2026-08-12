@@ -66,7 +66,7 @@ NATIVE_SPELLINGS = {
     "turn/steer": "Codex app-server method",
     "turn/interrupt": "Codex app-server method",
     "account/rateLimits/read": "Codex app-server method",
-    "account/tokenUsage/read": "Codex app-server method",
+    "account/usage/read": "Codex app-server method",
 }
 
 

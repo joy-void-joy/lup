@@ -7,6 +7,7 @@ credential stays with the runtime that owns and refreshes it, and a login
 this process never reads cannot be a login it leaks.
 """
 
+import logging
 from datetime import date, datetime, timezone
 from pathlib import Path
 
@@ -15,10 +16,22 @@ from pydantic import BaseModel, ConfigDict, Field
 from lup.adapters.codex.app_server import AppServerError, CodexAppServer
 from lup.types import EnvVars, JsonValue
 
+logger = logging.getLogger(__name__)
+
 FROZEN = ConfigDict(frozen=True, extra="ignore", populate_by_name=True)
 
 RATE_LIMITS_METHOD = "account/rateLimits/read"
-TOKEN_USAGE_METHOD = "account/tokenUsage/read"
+TOKEN_USAGE_METHOD = "account/usage/read"
+"""What the runtime calls the daily-token read, which is not what it returns.
+
+The response type is ``GetAccountTokenUsageResponse`` and the notification
+beside it is ``thread/tokenUsage/updated``, so the method reads as though it
+should be ``account/tokenUsage/read``. It is not, and the runtime answers a
+method it does not know with an error rather than a hint.
+"""
+
+METHOD_NOT_FOUND = -32601
+"""JSON-RPC's own code for a method this runtime does not have."""
 
 
 class RateLimitWindow(BaseModel):
@@ -37,25 +50,20 @@ class RateLimitWindow(BaseModel):
         return datetime.fromtimestamp(self.resets_at, tz=timezone.utc)
 
 
-class CreditsSnapshot(BaseModel):
-    """Whether the account holds credits past its plan, and how many."""
-
-    model_config = FROZEN
-
-    has_credits: bool = Field(default=False, alias="hasCredits")
-    unlimited: bool = False
-    balance: float | None = None
-
-
 class RateLimitSnapshot(BaseModel):
-    """Every window one plan meters, as one reading of them."""
+    """Every window one plan meters, as one reading of them.
+
+    The credit balance beside these is deliberately not modelled. Nothing
+    here renders it, and a field parsed only to be discarded still decides
+    the whole reading: one wrong guess at its type turns a payload this
+    display never reads into a validation error that costs the panel.
+    """
 
     model_config = FROZEN
 
     plan_type: str | None = Field(default=None, alias="planType")
     primary: RateLimitWindow | None = None
     secondary: RateLimitWindow | None = None
-    credits: CreditsSnapshot | None = None
 
 
 class AccountRateLimits(BaseModel):
@@ -137,12 +145,22 @@ class CodexAccountClient:
     async def token_usage(self, server: CodexAppServer) -> AccountTokenUsage:
         """Read the daily buckets, and none where this build has no such call.
 
-        The windows are what the display is for and the buckets are detail an
-        older app-server may not answer at all, so an unknown method leaves
-        the daily section empty rather than failing the whole reading.
+        Only a runtime that does not know the method degrades quietly, and it
+        says so in the log on the way past. Every other error — an expired
+        login, a backend that is down — is raised, because a reading that
+        silently renders as "no history" is indistinguishable from an account
+        that has none, and the difference is the whole value of the section.
         """
         try:
             payload: JsonValue = await server.request(TOKEN_USAGE_METHOD, {})
-        except AppServerError:
+        except AppServerError as error:
+            if error.error.code != METHOD_NOT_FOUND:
+                raise
+            logger.warning(
+                "Codex app-server does not know %s, so this account's daily "
+                "usage is unavailable: %s",
+                TOKEN_USAGE_METHOD,
+                error.error.message,
+            )
             return AccountTokenUsage()
         return AccountTokenUsage.model_validate(payload)

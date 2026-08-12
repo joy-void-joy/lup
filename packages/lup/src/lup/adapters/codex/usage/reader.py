@@ -11,6 +11,7 @@ import asyncio
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import sh
 from pydantic import ValidationError
 
 from lup.adapters.codex.harness import CodexSpellings
@@ -124,20 +125,26 @@ class CodexUsageReader(UsageReader):
         A named profile is refused rather than ignored: a Codex profile is a
         configuration overlay inside one home, so honouring the flag would
         read the same account while looking like it read another.
+
+        Neither message offers the configuration-home variable as a way out.
+        This reads the home it was composed against and exports that same
+        home to the process it starts, so naming another one in the
+        environment changes nothing — and advice that does nothing is worse
+        than none, because it reads as a remedy already tried.
         """
         if self.profile is not None:
             return (
                 "A Codex profile names a configuration overlay inside one "
                 "home, not a second account, so it cannot select whose usage "
-                f"is read. Point {CODEX_LOGIN.config_home_env} at the home "
-                "holding the account you mean instead."
+                f"is read. This display reads {self.home}, which is chosen "
+                "where the usage sub-app is composed."
             )
         credentials = CODEX_LOGIN.credentials_path(self.home)
         if not credentials.exists():
             return (
                 f"No credentials at {credentials}. This reads the account the "
-                "runtime is signed in to; sign in, or point "
-                f"{CODEX_LOGIN.config_home_env} at the home that holds one."
+                f"runtime is signed in to under {self.home}; sign in there "
+                "with the runtime's own login."
             )
         return None
 
@@ -150,6 +157,13 @@ class CodexUsageReader(UsageReader):
             usage = asyncio.run(client.read())
         except (OSError, RuntimeError, ValidationError) as error:
             raise UsageUnavailable(str(error)) from error
+        except sh.CommandNotFound as error:
+            # Not an OSError: `sh` raises this off AttributeError, so a machine
+            # without the runtime installed would otherwise reach the terminal
+            # as a traceback rather than as the one thing gone wrong.
+            raise UsageUnavailable(
+                f"No {self.executable} on PATH to read an account with."
+            ) from error
 
         windows = windows_from(usage)
         report = UsageReport(

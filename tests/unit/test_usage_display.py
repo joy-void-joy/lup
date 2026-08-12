@@ -9,11 +9,24 @@ Codex is read the same way through its own account calls, which is the point:
 one display, two readers, and no second rendering to keep in step.
 """
 
+import asyncio
 import json
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
+import pytest
 from rich.console import Console
 
+from lup.adapters.codex.app_server import AppServerError, CodexAppServer, RpcError
+from lup.adapters.codex.usage.api import (
+    METHOD_NOT_FOUND,
+    RATE_LIMITS_METHOD,
+    TOKEN_USAGE_METHOD,
+    AccountTokenUsage,
+    CodexAccountClient,
+)
+from lup.codescan.boundaries import NATIVE_SPELLINGS
+from lup.types import JsonObject, JsonValue
 from lup.adapters.claude.usage.api import StatsCache, UsageResponse
 from lup.adapters.claude.usage.reader import (
     days_from,
@@ -224,3 +237,53 @@ class TestAPayloadThatDriftsCostsOnlyWhatItNames:
         )
 
         assert windows_from(usage) == []
+
+
+class RefusingServer(CodexAppServer):
+    """An app-server that answers the daily read with one chosen error."""
+
+    def __init__(self, code: int) -> None:
+        super().__init__(Path("codex"))
+        self.refusal = RpcError(code=code, message="nope")
+
+    async def request(self, method: str, params: JsonObject) -> JsonValue:
+        if method == TOKEN_USAGE_METHOD:
+            raise AppServerError(self.refusal)
+        return {}
+
+
+def daily_read(code: int) -> AccountTokenUsage:
+    """Ask for the daily buckets from a server that refuses with that code."""
+    client = CodexAccountClient(Path("codex"), {})
+    return asyncio.run(client.token_usage(RefusingServer(code)))
+
+
+class TestOnlyAnUnknownMethodDegradesQuietly:
+    """A silent empty daily section is indistinguishable from a quiet account.
+
+    So the one error that may render as "no history" is the runtime saying it
+    has no such method. Anything else — an expired login, a backend that is
+    down — has to reach the caller, or a permanent fault and a passing one
+    look identical forever.
+    """
+
+    def test_an_unknown_method_leaves_the_daily_section_empty(self) -> None:
+        assert daily_read(METHOD_NOT_FOUND).daily_usage_buckets is None
+
+    def test_any_other_error_reaches_the_caller(self) -> None:
+        with pytest.raises(AppServerError):
+            daily_read(-32000)
+
+
+def test_the_daily_read_names_the_method_the_runtime_actually_has() -> None:
+    """The wire spellings, pinned where a rename has to reach both places.
+
+    ``account/usage/read`` reads wrongly — the response type beside it is
+    ``GetAccountTokenUsageResponse`` — so the plausible spelling is the one
+    worth guarding against, and ``codescan`` has to sanction whatever this
+    sends or the boundary rule stops covering it.
+    """
+    assert TOKEN_USAGE_METHOD == "account/usage/read"
+    assert RATE_LIMITS_METHOD == "account/rateLimits/read"
+    for method in (TOKEN_USAGE_METHOD, RATE_LIMITS_METHOD):
+        assert method in NATIVE_SPELLINGS, method

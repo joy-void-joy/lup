@@ -64,6 +64,16 @@ only what its account actually reports. What still differs is that one
 account splits its tokens by model and the other does not, which is why one
 draws a legend and the other has none to draw.
 
+The Codex method names are read off the shipped binary rather than off the
+published schema, which is how the daily read came to be spelled wrongly
+once: the response type is ``GetAccountTokenUsageResponse`` and the
+notification beside it is ``thread/tokenUsage/updated``, so the method looks
+like it should match, and it does not. A wrong method name here is invisible
+— the runtime answers with an error, and an error on the daily read renders
+as an account with no history — so the binary is the authority, and
+``codescan``'s sanctioned-spelling table is the second place a rename has to
+reach.
+
 Unmatched, and deliberately so
 ------------------------------
 
@@ -71,6 +81,17 @@ Unmatched, and deliberately so
 patch-envelope decoder. Both exist because the Codex runtime is a process
 speaking a wire protocol; the Claude runtime is a library, and a counterpart
 would have nothing to do.
+
+``claude/config_home.py`` — the configuration document, where it sits under
+each setting of the configuration-home variable, and the workspace trust
+recorded inside it. Unmatched because the two runtimes disagree about what a
+configuration document is for: Claude keeps per-project trust in one JSON
+document whose location changes with that variable, and a session derived
+from the wrong one starts trusting nothing. Codex records installed state
+and hook trust in the TOML its home already holds, which ``codex/home.py``
+seeds and sanitizes — so the concern is answered there rather than absent,
+and a Codex counterpart to this module would have no second document to
+reconcile.
 
 ``codex/home.py`` versus ``claude/profile_store.py`` — the same concern
 answered differently, not a gap. Claude keeps several accounts as several

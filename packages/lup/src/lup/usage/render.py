@@ -276,7 +276,7 @@ def estimated_today(
     elapsed_h = (now - window_start).total_seconds() / 3600
     covered = [day for day in daily if day.day <= fresh_through]
     covered_h = sum(1 for day in covered if day.weight > 0) * 24.0
-    covered_weight = sum(day.weight for day in daily)
+    covered_weight = sum(day.weight for day in covered)
     if not (covered_h > 0 and elapsed_h > covered_h and covered_weight > 0):
         return None
 
@@ -289,7 +289,7 @@ def estimated_today(
 
 
 def rolling_budgets(
-    weights: list[float], days: list[date], total: float
+    weights: list[float], days: list[date], total: float, today: date
 ) -> list[float]:
     """Split a period's budget across its days, carrying each day's surplus.
 
@@ -298,8 +298,11 @@ def rolling_budgets(
     which is what makes the bars answer "can I keep going" rather than only
     "what did I use". Days still ahead spend nothing, so they carry the
     surplus forward untouched.
+
+    ``today`` is taken rather than read, because the caller reads it in the
+    window's own timezone: deciding it again here would put a day on the far
+    side of midnight from the row the caller is drawing for it.
     """
-    today = datetime.now().date()
     even = total / len(days) if days else 0.0
     spent = [
         weight if day <= today else None
@@ -364,7 +367,7 @@ def render_daily_breakdown(
     else:
         budget = max(period_weight, 1)
 
-    budgets = rolling_budgets(weights, [day.day for day in daily], budget)
+    budgets = rolling_budgets(weights, [day.day for day in daily], budget, today)
 
     for index, day in enumerate(daily):
         name = day_name(day.day)
