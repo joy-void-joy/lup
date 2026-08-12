@@ -18,10 +18,12 @@ from lup.harness.process import LaunchRequest, LocalProcessLauncher
 from lup.resolver.journal import Journal
 from lup.resolver.models import (
     AcceptanceCriterion,
+    BaseRefresh,
     Concern,
     ConcernOutcome,
     ConcernProgress,
     ConcernStatus,
+    RefreshReport,
     ResolvePhase,
     ResolveState,
     SourceSnapshot,
@@ -77,6 +79,21 @@ class Repository:
 
     def content(self, commit: str, path: str) -> str:
         return self.git("show", f"{commit}:{path}")
+
+    def merge_commit(self, first: str, second: str, tree_of: str) -> str:
+        """A commit holding both parents, resolved to one side's tree."""
+        tree = self.git("rev-parse", f"{tree_of}^{{tree}}")
+        return self.git(
+            "commit-tree", tree, "-p", first, "-p", second, "-m", "resolved by hand"
+        )
+
+
+def conflicting_base(repository: Repository) -> str:
+    """A run base and its branch that both wrote one path, differently."""
+    repository.commit("a.py", "one\n")
+    base = repository.snapshot("from the run\n")
+    repository.commit("notes.md", "from the branch\n")
+    return base
 
 
 def test_a_branch_that_has_not_moved_keeps_the_base_it_had(tmp_path: Path) -> None:
@@ -355,10 +372,10 @@ def test_the_console_refresh_reports_the_move_and_each_lease(
 
     with pytest.MonkeyPatch.context() as patch:
         patch.setattr(resolve, "project_root", lambda: repository.root)
-        resolve.refresh_run(run_id="run-1", apply=False)
+        resolve.refresh_run(run_id="run-1", apply=False, base="")
         reported = capsys.readouterr().out
         with pytest.raises(typer.BadParameter, match="no resolver run"):
-            resolve.refresh_run(run_id="ghost", apply=False)
+            resolve.refresh_run(run_id="ghost", apply=False, base="")
 
     assert "base would move onto dev" in reported
     assert "alpha: conflicts on a.py" in reported
@@ -396,3 +413,91 @@ def test_a_verified_concern_is_left_where_its_recorded_commit_says(
 
     assert report.leases == []
     assert not (lease.root / "b.py").exists()
+
+
+def test_a_conflicted_base_names_the_paths_it_could_not_settle() -> None:
+    # The refusal says "see the paths named", so it has to name them: a
+    # human deciding whether to resolve the base by hand is choosing between
+    # one resolution here and the same one repeated in every lease at land.
+    report = RefreshReport(
+        base=BaseRefresh(
+            branch="dev",
+            was="a" * 40,
+            commit="a" * 40,
+            conflicts=[Path("packages/lup/src/lup/devtools/dev/worktree.py")],
+            reason="combining these bases conflicts: see the paths named",
+        )
+    )
+
+    assert resolve.describe_refresh(report) == [
+        "base unchanged: combining these bases conflicts: see the paths named",
+        "  packages/lup/src/lup/devtools/dev/worktree.py",
+        "Merge aaaaaaaaaaaa with dev in a worktree, resolve it there, then "
+        "adopt the result: --base <commit> --apply.",
+    ]
+
+
+def test_a_base_already_current_names_nothing() -> None:
+    report = RefreshReport(
+        base=BaseRefresh(branch="dev", was="a" * 40, commit="a" * 40)
+    )
+
+    assert resolve.describe_refresh(report) == ["base is current with dev"]
+
+
+def test_a_conflicting_combine_is_reported_rather_than_guessed(tmp_path: Path) -> None:
+    repository = Repository(tmp_path / "source")
+    base = conflicting_base(repository)
+
+    refreshed = repository.orchestrator().refreshed_base(
+        SourceSnapshot(branch="dev", commit=base)
+    )
+
+    assert not refreshed.moved()
+    assert [path.as_posix() for path in refreshed.conflicts] == ["notes.md"]
+
+
+def test_a_base_resolved_by_hand_is_adopted(tmp_path: Path) -> None:
+    # The route out of the deadlock: the combine conflicts, somebody resolves
+    # it once where both sides are visible, and the run takes that commit
+    # instead of meeting the same conflict again in every lease.
+    repository = Repository(tmp_path / "source")
+    base = conflicting_base(repository)
+    tip = repository.git("rev-parse", "dev")
+    resolved = repository.merge_commit(base, tip, tip)
+
+    adopted = repository.orchestrator().adopted_base(
+        SourceSnapshot(branch="dev", commit=base), resolved
+    )
+
+    assert adopted.commit == resolved
+    assert adopted.moved()
+    assert adopted.reason == ""
+
+
+def test_a_base_that_dropped_one_side_is_refused(tmp_path: Path) -> None:
+    # The branch tip holds the branch and not the run's base, which is what a
+    # resolution that took one side and discarded the other looks like.
+    repository = Repository(tmp_path / "source")
+    base = conflicting_base(repository)
+    tip = repository.git("rev-parse", "dev")
+
+    adopted = repository.orchestrator().adopted_base(
+        SourceSnapshot(branch="dev", commit=base), tip
+    )
+
+    assert not adopted.moved()
+    assert "the run's base" in adopted.reason
+    assert "has to hold both sides" in adopted.reason
+
+
+def test_a_commit_this_repository_does_not_have_is_refused(tmp_path: Path) -> None:
+    repository = Repository(tmp_path / "source")
+    base = conflicting_base(repository)
+
+    adopted = repository.orchestrator().adopted_base(
+        SourceSnapshot(branch="dev", commit=base), "f" * 40
+    )
+
+    assert not adopted.moved()
+    assert "to adopt" in adopted.reason

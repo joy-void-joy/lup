@@ -266,15 +266,16 @@ def test_note_targets_parse_a_path_and_a_line() -> None:
 
 def test_an_invocation_without_admission_evidence_asks_for_nothing() -> None:
     """Every other resolver invocation must stay an ordinary drive."""
-    assert admission_request([], []) is None
+    assert admission_request([], [], []) is None
 
 
 def test_admitted_statements_become_the_evidence_a_run_plans_from() -> None:
-    request = admission_request(["the relay must investigate first"], [])
+    request = admission_request(["the relay must investigate first"], [], [])
 
     assert request is not None
     assert request.statements == ["the relay must investigate first"]
     assert request.notes == []
+    assert request.issues == []
 
 
 def test_an_admitted_note_carries_the_text_and_context_the_tree_holds() -> None:

@@ -205,6 +205,45 @@ class WorktreeOrchestrator:
             raise RuntimeError(f"failed to clear review notes for {concern.id}")
         return NoteClearanceCommit(clearance=clearance, commit=commit_lines[0])
 
+    def settled_round(
+        self,
+        concern: Concern,
+        report: WorkerReport,
+        base_commit: str,
+        origin_commit: str,
+    ) -> DiffValidation:
+        """What an unmoved worktree means, given what the branch already holds.
+
+        Three readings, and only one of them is a fault. A worker that
+        reported no change and made none is settled. A revision whose right
+        answer was to change the report — because the rejection was for
+        something no edit inside this lease could reach — has already
+        committed its work in an earlier round, and the branch still holds
+        it. Only an empty branch behind a claim of changes is a worker that
+        did not do what it said.
+
+        Reading the second as the third is what cost `composition-seam-abc`
+        its remaining rounds: complete work, rejected as though absent, until
+        the budget ran out with its criteria never evaluated.
+        """
+        if not report.changed:
+            return DiffValidation(concern_id=concern.id, valid=True, commit=base_commit)
+        if origin_commit and base_commit != origin_commit:
+            return DiffValidation(
+                concern_id=concern.id,
+                valid=True,
+                commit=base_commit,
+                reason=(
+                    "revision changed the report; the work it describes stands "
+                    f"at {base_commit[:12]}"
+                ),
+            )
+        return DiffValidation(
+            concern_id=concern.id,
+            valid=False,
+            reason="worker reported changes but diff is empty",
+        )
+
     def validate_and_commit(
         self,
         concern: Concern,
@@ -212,6 +251,7 @@ class WorktreeOrchestrator:
         lease: WritableRootLease,
         base_commit: str,
         leases: WritableRootLeases,
+        origin_commit: str = "",
     ) -> DiffValidation:
         try:
             self.branch(lease)
@@ -276,16 +316,7 @@ class WorktreeOrchestrator:
                 declaration=True,
             )
         if not changed:
-            return DiffValidation(
-                concern_id=concern.id,
-                valid=not report.changed,
-                commit=base_commit if not report.changed else None,
-                reason=(
-                    ""
-                    if not report.changed
-                    else "worker reported changes but diff is empty"
-                ),
-            )
+            return self.settled_round(concern, report, base_commit, origin_commit)
         if not report.changed:
             return DiffValidation(
                 concern_id=concern.id,
@@ -428,6 +459,50 @@ class WorktreeOrchestrator:
             f"chore(resolve): refresh base onto {source.branch}",
         )
         return combined.model_copy(update={"branch": source.branch})
+
+    def adopted_base(self, source: SourceSnapshot, commit: str) -> BaseRefresh:
+        """Take a base somebody resolved by hand, once it holds both sides.
+
+        `merged_base` predicts the combine and declines to guess at a
+        conflict, which leaves the case a refresh exists for with no route
+        at all: a fix landed on the branch to unblock this very run touches
+        the files that run's notes are about, so conflicting is the ordinary
+        outcome rather than the exceptional one. Resolving it belongs where
+        conflicts are resolved — a worktree, with both sides visible — and
+        this adopts the commit that came out.
+
+        Containment is what is checked, because it is the half of "nothing
+        was dropped" a machine can answer: a resolution reachable from
+        neither the base nor the branch settled something else entirely.
+        Whether every hunk survived is the reviewer's question, and the
+        merge guidance is what asks it.
+        """
+        resolved = self.resolved(commit)
+        if not resolved:
+            return BaseRefresh(
+                branch=source.branch,
+                was=source.commit,
+                commit=source.commit,
+                reason=f"no commit {commit!r} in this repository to adopt",
+            )
+        tip = self.resolved(source.branch)
+        dropped = [
+            name
+            for name, side in (("the run's base", source.commit), (source.branch, tip))
+            if side and not self.contains(resolved, side)
+        ]
+        if dropped:
+            return BaseRefresh(
+                branch=source.branch,
+                was=source.commit,
+                commit=source.commit,
+                reason=(
+                    f"{resolved[:12]} does not contain "
+                    + " or ".join(dropped)
+                    + "; a resolved base has to hold both sides"
+                ),
+            )
+        return BaseRefresh(branch=source.branch, was=source.commit, commit=resolved)
 
     def commit_tree(self, tree: str, parents: list[str], message: str) -> str:
         """Record one prepared tree as a commit, without touching a worktree."""

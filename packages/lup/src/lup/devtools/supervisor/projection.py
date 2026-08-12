@@ -377,11 +377,7 @@ def run_is_live(
     exclusive one, so the page would break the very runs it reports on. A
     run is live when it has not finished and something wrote recently.
     """
-    if state.phase in {
-        ResolvePhase.COMPLETE,
-        ResolvePhase.ABORTED,
-        ResolvePhase.FAILED,
-    }:
+    if state.phase.terminal():
         return False
     return now - activity <= window_seconds
 

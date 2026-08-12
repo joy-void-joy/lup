@@ -94,6 +94,18 @@ topological nodes concurrently. Root nodes start from the run's base,
 single-parent nodes start from the verified parent commit, and multi-parent
 nodes use an orchestrator-prepared semantic join.
 
+**Evidence has three kinds, and the tracker is one of them.** A run plans
+from `# lup:` notes in the tree, statements a human typed, and the project's
+open issues — every one minus an exclusion label, so what goes unlabelled
+still gets read rather than what goes unremembered going unfixed. Positions
+run end to end in that order, so a planner cites any kind the same way and
+clusters issues exactly as it clusters notes: one issue routinely raises
+several concerns and several routinely raise one. The library knows an issue
+only as a number, a URL and some text; reaching a tracker is devtools' job,
+so a project on another forge supplies its own reader. When a concern
+derived from an issue lands, the run comments there naming the review branch,
+and never closes it — a reviewer passing is not a human having read the code.
+
 **A base is refreshed, not only inherited.** The base starts as the source
 snapshot and is brought up to the branch it came from whenever a lease is
 created — fast-forwarded where the snapshot is contained in the branch,
@@ -104,6 +116,13 @@ lease already holding work keeps its base until somebody asks, with
 what merging would conflict on and takes it only with `--apply`. A concern
 whose work is already verified is never moved: its commit is what the run
 records and joins.
+
+Combining the two bases can itself conflict, and ordinarily does: the fix
+that unblocks a parked run touches the files that run's notes are about. So
+the refusal names the paths, and `--base <commit>` adopts a combine somebody
+resolved by hand — checked to contain both the run's base and the branch, so
+a resolution that dropped one side is refused rather than taken. One
+resolution there replaces the same conflict met again in every lease.
 
 Verification is scoped by the tree it runs on rather than by the run. A
 command declares the flag it takes a base through — `--since` for `dev
