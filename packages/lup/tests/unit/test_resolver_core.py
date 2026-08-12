@@ -4105,3 +4105,56 @@ async def test_a_park_report_names_a_broken_promoter(tmp_path: Path) -> None:
         )
 
     assert any("promoter stopped early" in item for item in raised.value.problems)
+
+
+def test_a_revision_that_only_changed_its_report_keeps_the_work_it_describes(
+    tmp_path: Path,
+) -> None:
+    # `composition-seam-abc`: the rejection named a finding outside the lease,
+    # so the honest revision answered it and left the tree alone. Read as an
+    # empty diff, that spent a round to say the worker had done nothing — and
+    # the concern failed with its criteria never evaluated.
+    orchestrator = WorktreeOrchestrator(recording_launcher(), tmp_path)
+
+    diff = orchestrator.settled_round(
+        concern("a"),
+        WorkerReport(concern_id="a", changed=True, summary="answered the rejection"),
+        "round-one-sha",
+        "origin-sha",
+    )
+
+    assert diff.valid
+    assert diff.commit == "round-one-sha"
+    assert "the work it describes stands" in diff.reason
+
+
+def test_a_claim_of_changes_over_an_untouched_branch_is_still_a_fault(
+    tmp_path: Path,
+) -> None:
+    orchestrator = WorktreeOrchestrator(recording_launcher(), tmp_path)
+
+    diff = orchestrator.settled_round(
+        concern("a"),
+        WorkerReport(concern_id="a", changed=True, summary="claimed a change"),
+        "origin-sha",
+        "origin-sha",
+    )
+
+    assert not diff.valid
+    assert diff.reason == "worker reported changes but diff is empty"
+
+
+def test_a_worker_that_reported_no_change_and_made_none_is_settled(
+    tmp_path: Path,
+) -> None:
+    orchestrator = WorktreeOrchestrator(recording_launcher(), tmp_path)
+
+    diff = orchestrator.settled_round(
+        concern("a"),
+        WorkerReport(concern_id="a", changed=False, summary="nothing to do here"),
+        "origin-sha",
+        "origin-sha",
+    )
+
+    assert diff.valid
+    assert diff.commit == "origin-sha"

@@ -151,7 +151,7 @@ class ConcernExecutor:
                 raise ResolverAwaitingAnswers(outstanding, [])
             await self.run.transition_concern(concern.id, ConcernStatus.VALIDATING)
             diff = self.worktrees.validate_and_commit(
-                concern, worker, lease, round_base, self.leases
+                concern, worker, lease, round_base, self.leases, base.commit
             )
             if not diff.valid or diff.commit is None:
                 review = ReviewReport(

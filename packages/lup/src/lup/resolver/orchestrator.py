@@ -205,6 +205,45 @@ class WorktreeOrchestrator:
             raise RuntimeError(f"failed to clear review notes for {concern.id}")
         return NoteClearanceCommit(clearance=clearance, commit=commit_lines[0])
 
+    def settled_round(
+        self,
+        concern: Concern,
+        report: WorkerReport,
+        base_commit: str,
+        origin_commit: str,
+    ) -> DiffValidation:
+        """What an unmoved worktree means, given what the branch already holds.
+
+        Three readings, and only one of them is a fault. A worker that
+        reported no change and made none is settled. A revision whose right
+        answer was to change the report — because the rejection was for
+        something no edit inside this lease could reach — has already
+        committed its work in an earlier round, and the branch still holds
+        it. Only an empty branch behind a claim of changes is a worker that
+        did not do what it said.
+
+        Reading the second as the third is what cost `composition-seam-abc`
+        its remaining rounds: complete work, rejected as though absent, until
+        the budget ran out with its criteria never evaluated.
+        """
+        if not report.changed:
+            return DiffValidation(concern_id=concern.id, valid=True, commit=base_commit)
+        if origin_commit and base_commit != origin_commit:
+            return DiffValidation(
+                concern_id=concern.id,
+                valid=True,
+                commit=base_commit,
+                reason=(
+                    "revision changed the report; the work it describes stands "
+                    f"at {base_commit[:12]}"
+                ),
+            )
+        return DiffValidation(
+            concern_id=concern.id,
+            valid=False,
+            reason="worker reported changes but diff is empty",
+        )
+
     def validate_and_commit(
         self,
         concern: Concern,
@@ -212,6 +251,7 @@ class WorktreeOrchestrator:
         lease: WritableRootLease,
         base_commit: str,
         leases: WritableRootLeases,
+        origin_commit: str = "",
     ) -> DiffValidation:
         try:
             self.branch(lease)
@@ -276,16 +316,7 @@ class WorktreeOrchestrator:
                 declaration=True,
             )
         if not changed:
-            return DiffValidation(
-                concern_id=concern.id,
-                valid=not report.changed,
-                commit=base_commit if not report.changed else None,
-                reason=(
-                    ""
-                    if not report.changed
-                    else "worker reported changes but diff is empty"
-                ),
-            )
+            return self.settled_round(concern, report, base_commit, origin_commit)
         if not report.changed:
             return DiffValidation(
                 concern_id=concern.id,
