@@ -1,7 +1,7 @@
 """Pre-configured shell commands and output helpers for devtools scripts."""
 
 import json
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from pathlib import Path
 from typing import IO, Annotated, Literal, TypedDict, Unpack
 
@@ -9,7 +9,7 @@ import sh
 import typer
 from pydantic import BaseModel
 
-from lup.gitlocks import admin_dirs, diagnose_git_admin
+from lup.gitlocks import admin_dirs, diagnose_git_admin, inspect_git_admin
 
 # sh declares these only as stub-private aliases, which pyright refuses to
 # import, so they are mirrored here. Each is narrowed where sh wrote `Any` —
@@ -189,8 +189,30 @@ def config_lock_diagnosis(cwd: Path | None = None) -> str:
     return diagnose_git_admin(admins)
 
 
+def clear_stale_config_locks(cwd: Path | None = None) -> Iterator[str]:
+    """Remove every lock nothing is holding, naming each one removed.
+
+    A confinement manufactures this debris — a sandboxed git dies mid-write
+    and its lock outlives it on the host — so the run that can reach the
+    filesystem is the one that has to clear it, and the next unconfined run
+    is not sent hunting for a failure the previous one left. Nothing that
+    declines removal is touched.
+    """
+    try:
+        admins = git_admin_dirs(cwd)
+    except sh.ErrorReturnCode:
+        return
+    for admin in admins:
+        for obstruction in inspect_git_admin(admin):
+            cleared = obstruction.clear()
+            if cleared:
+                yield cleared
+
+
 def refuse_blocked_config_writes(cwd: Path | None = None) -> None:
-    """Stop before a git config write whose lock the sandbox has taken away."""
+    """Clear what is removable, and stop before a config write that still cannot run."""
+    for cleared in clear_stale_config_locks(cwd):
+        typer.echo(cleared)
     diagnosis = config_lock_diagnosis(cwd)
     if diagnosis:
         typer.echo(diagnosis, err=True)

@@ -2,8 +2,10 @@
 
 `File exists` is what git says both when a lock is stale and when the path it
 names is a device node a sandbox put there, so every test here pins the mount
-state — the only thing that separates the two — and none of them pins a
-message git printed.
+state and the lock's age — the only things that separate the two — and none of
+them pins a message git printed. The pair matters more than either half: the
+remedies are opposite, and a diagnosis that names one of them for both sends
+half its readers away from the fix.
 
 `/dev/null` is reached through a symlink because that is a device node any
 user can point at; bind-mounting one, which is what the sandbox does, needs
@@ -11,12 +13,13 @@ privileges a test does not have and produces the same `stat`.
 """
 
 import os
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
 
-from lup.devtools.utils import config_lock_diagnosis
-from lup.gitlocks import inspect_git_admin
+from lup.devtools.utils import clear_stale_config_locks, config_lock_diagnosis
+from lup.gitlocks import diagnosis, inspect_git_admin
 from lup.harness.process import LaunchRequest, LocalProcessLauncher
 
 
@@ -27,11 +30,18 @@ def admin_dir(root: Path) -> Path:
     return root
 
 
-def test_a_writable_admin_directory_reports_nothing(tmp_path: Path) -> None:
-    state = inspect_git_admin(admin_dir(tmp_path / "admin"))
+def aged_lock(root: Path, name: str, age: timedelta) -> Path:
+    """A lock file of a given age, written the way git leaves one behind."""
+    path = root / name
+    path.write_text("")
+    stamp = (datetime.now(UTC) - age).timestamp()
+    os.utime(path, (stamp, stamp))
+    return path
 
-    assert not state.blocked
-    assert state.diagnosis() == ""
+
+def test_a_writable_admin_directory_reports_nothing(tmp_path: Path) -> None:
+    assert inspect_git_admin(admin_dir(tmp_path / "admin")) == []
+    assert diagnosis(inspect_git_admin(admin_dir(tmp_path / "admin"))) == ""
 
 
 def linked_worktree(tmp_path: Path) -> Path:
@@ -88,14 +98,12 @@ def test_a_device_node_lock_names_the_sandbox(tmp_path: Path) -> None:
     root = admin_dir(tmp_path / "admin")
     (root / "config.lock").symlink_to(Path("/dev/null"))
 
-    state = inspect_git_admin(root)
-    diagnosis = state.diagnosis()
+    reported = diagnosis(inspect_git_admin(root))
 
-    assert state.device_locks == [root / "config.lock"]
-    assert "blocked by the sandbox" in diagnosis
-    assert "`config.lock` is a device node" in diagnosis
-    assert "none to delete" in diagnosis
-    assert "Rerun outside the sandbox" in diagnosis
+    assert "`config.lock` is a device node" in reported
+    assert "blocked by the sandbox" in reported
+    assert "none here to delete" in reported
+    assert "Rerun outside the sandbox" in reported
 
 
 def test_the_worktree_config_is_watched_alongside_the_lock(tmp_path: Path) -> None:
@@ -103,7 +111,7 @@ def test_the_worktree_config_is_watched_alongside_the_lock(tmp_path: Path) -> No
     root = admin_dir(tmp_path / "admin")
     (root / "config.worktree").symlink_to(Path("/dev/null"))
 
-    assert inspect_git_admin(root).blocked
+    assert inspect_git_admin(root) != []
 
 
 @pytest.mark.skipif(
@@ -118,13 +126,11 @@ def test_an_admin_directory_that_refuses_the_lock_names_the_sandbox(
     root = admin_dir(tmp_path / "admin")
     root.chmod(0o555)
 
-    state = inspect_git_admin(root)
-    diagnosis = state.diagnosis()
+    reported = diagnosis(inspect_git_admin(root))
     root.chmod(0o755)
 
-    assert state.unwritable_admin
-    assert "refuses a new `config.lock`" in diagnosis
-    assert "Rerun outside the sandbox" in diagnosis
+    assert "refuses a new `config.lock`" in reported
+    assert "Rerun outside the sandbox" in reported
 
 
 @pytest.mark.skipif(
@@ -141,7 +147,7 @@ def test_a_config_nobody_may_write_is_not_a_sandbox(tmp_path: Path) -> None:
     root = admin_dir(tmp_path / "admin")
     (root / "config").chmod(0o444)
 
-    assert not inspect_git_admin(root).blocked
+    assert inspect_git_admin(root) == []
 
 
 def test_a_lock_name_the_confinement_shadows_is_the_callers_to_give(
@@ -151,5 +157,91 @@ def test_a_lock_name_the_confinement_shadows_is_the_callers_to_give(
     root = admin_dir(tmp_path / "admin")
     (root / "index.lock").symlink_to(Path("/dev/null"))
 
-    assert not inspect_git_admin(root).blocked
-    assert inspect_git_admin(root, ["index.lock"]).blocked
+    assert inspect_git_admin(root) == []
+    assert inspect_git_admin(root, ["index.lock"]) != []
+
+
+def test_an_old_lock_on_a_writable_mount_is_the_opposite_diagnosis(
+    tmp_path: Path,
+) -> None:
+    """The failure the sandbox wording sends a reader away from.
+
+    Same `File exists`, nothing confined, and the file really is debris —
+    so the message has to deny the sandbox as plainly as the sandbox one
+    denies the stale lock.
+    """
+    root = admin_dir(tmp_path / "admin")
+    aged_lock(root, "config.lock", timedelta(minutes=31))
+
+    reported = diagnosis(inspect_git_admin(root))
+
+    assert "31 minutes old" in reported
+    assert "Nothing here is confined" in reported
+    assert "removing it is the whole fix" in reported
+    assert "sandbox" not in reported
+
+
+def test_a_young_lock_is_left_for_the_git_that_may_hold_it(tmp_path: Path) -> None:
+    """Age is the only stand-in for a holder, so below the threshold it declines."""
+    root = admin_dir(tmp_path / "admin")
+    aged_lock(root, "config.lock", timedelta(seconds=2))
+
+    reported = diagnosis(inspect_git_admin(root))
+
+    assert "Another git may still be holding it" in reported
+    assert list(inspect_git_admin(root))[0].clear() is None
+
+
+def test_the_staleness_threshold_is_the_callers_to_set(tmp_path: Path) -> None:
+    """How long a write may plausibly take is a judgement, not git's fact."""
+    root = admin_dir(tmp_path / "admin")
+    aged_lock(root, "config.lock", timedelta(seconds=30))
+
+    patient = inspect_git_admin(root, stale_after=timedelta(hours=1))
+    impatient = inspect_git_admin(root, stale_after=timedelta(seconds=5))
+
+    assert patient[0].clear() is None
+    assert impatient[0].clear() is not None
+
+
+def test_clearing_removes_the_stale_lock_and_says_so(tmp_path: Path) -> None:
+    leased = linked_worktree(tmp_path)
+    lock = aged_lock(tmp_path / "work" / ".git", "config.lock", timedelta(minutes=31))
+
+    cleared = list(clear_stale_config_locks(leased))
+
+    assert not lock.exists()
+    assert len(cleared) == 1
+    assert "31 minutes old" in cleared[0]
+    assert config_lock_diagnosis(leased) == ""
+
+
+def test_a_confined_lock_is_never_removed(tmp_path: Path) -> None:
+    """The two failures coincide exactly where deleting is impossible.
+
+    A sandboxed git that died is what leaves the lock, so the confined case
+    is also the one where a lock looks most abandoned — and where removing
+    it is precisely what the mount refuses.
+    """
+    root = admin_dir(tmp_path / "admin")
+    aged_lock(root, "config.lock", timedelta(minutes=31))
+    root.chmod(0o555)
+
+    obstructions = inspect_git_admin(root)
+    cleared = [obstruction.clear() for obstruction in obstructions]
+    root.chmod(0o755)
+
+    assert (root / "config.lock").exists()
+    assert cleared == [None]
+    assert "Rerun outside the sandbox" in diagnosis(obstructions)
+
+
+def test_the_config_a_worktree_keeps_is_never_mistaken_for_debris(
+    tmp_path: Path,
+) -> None:
+    """`config.worktree` is configuration; only `*.lock` is git's to recreate."""
+    root = admin_dir(tmp_path / "admin")
+    kept = aged_lock(root, "config.worktree", timedelta(days=2))
+
+    assert [obstruction.clear() for obstruction in inspect_git_admin(root)] == []
+    assert kept.exists()
