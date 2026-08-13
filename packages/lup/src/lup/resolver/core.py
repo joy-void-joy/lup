@@ -3,7 +3,7 @@
 import asyncio
 import hashlib
 import logging
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Callable
 from contextlib import asynccontextmanager
 
 from pydantic import BaseModel, ConfigDict
@@ -281,6 +281,7 @@ class ResolverCore:
         answer_wait_seconds: float = 0.0,
         poll_interval_seconds: float = ANSWER_POLL_SECONDS,
         adopt_config: bool = False,
+        environmental_fault: Callable[[str], bool] = lambda _: False,
     ) -> None:
         self.adopt_config = adopt_config
         self.config = config
@@ -335,6 +336,7 @@ class ResolverCore:
             self.leases,
             self.repository,
             self.journal,
+            environmental_fault,
         )
 
     @property
