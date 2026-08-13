@@ -82,7 +82,10 @@ from lup.resolver.models import (
     WorkerContext,
     WorkerReport,
     WritableRootLease,
+    ALLOWANCE_GRANTED,
+    ALLOWANCE_REFUSED,
     allowance_question_id,
+    asks_for_an_allowance,
 )
 from lup.resolver.orchestrator import (
     DependencyBaseBuilder,
@@ -2572,6 +2575,56 @@ async def test_a_design_question_records_an_answer_in_the_humans_own_words(
     assert [record.answer.value for record in core.mailbox.answers()] == [
         "neither — close the union at its base"
     ]
+
+
+def test_an_allowance_answered_in_prose_is_refused_rather_than_read_as_no(
+    tmp_path: Path,
+) -> None:
+    """A grant that cannot be read must not promote into a silent refusal.
+
+    The reader tests for the literal token, so anything else means refused —
+    and a promoted answer is never revisable, which made the mistake
+    terminal for the concern. Closing the domain turns it into a correctable
+    problem the human is told about at the moment they answer.
+    """
+    launcher = LocalProcessLauncher()
+    workspace = failure_leg_workspace(tmp_path, launcher)
+    core = ResolverCore(
+        ResolverConfig(
+            state_root=tmp_path / "state",
+            workspace=workspace,
+            worktree_root=tmp_path / "resolver-worktrees",
+            run_id="prose-grant",
+            integration_branch="resolve/prose-grant/review",
+            verification_commands=[VerificationCommand(name="v", arguments=["git"])],
+        ),
+        resolve_spec(),
+        lambda context: resolver_test_factory(context.root, lambda *_: {}),
+        lambda root: resolver_test_factory(root, lambda *_: {}),
+        LiteralInvocationRenderer(),
+        launcher,
+    )
+    gate = allowance_question_id("spu", ConcernAllowance.ANTIPATTERN_SUPPRESSION)
+    core.questions.queue_questions(
+        [
+            MaterialQuestion(
+                id=gate,
+                concern_id="spu",
+                prompt="Grant antipattern-suppression to spu?",
+                choices=[ALLOWANCE_GRANTED, ALLOWANCE_REFUSED],
+                closed_choices=asks_for_an_allowance("spu", gate),
+            )
+        ],
+        "spu",
+    )
+    seed_offer(
+        core, gate, "Granted. Your reading is accepted: the violations do not change."
+    )
+
+    problems = core.questions.promote_offers()
+
+    assert problems and "accepts only: grant, refuse" in problems[0]
+    assert core.mailbox.answers() == []
 
 
 def admitted_plan(*concerns: JsonObject) -> JsonObject:

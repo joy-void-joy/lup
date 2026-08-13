@@ -271,8 +271,9 @@ class MaterialQuestion(BaseModel):
         description=(
             "Whether the choices are the complete answer domain. Planned design "
             "questions must leave this false: their choices are suggestions, and "
-            "the human may answer in their own words. Only the reserved "
-            "integration gates, whose domain really is two words, close it."
+            "the human may answer in their own words. The gates whose domain "
+            "really is two words close it — integration, and allowance, whose "
+            "reader tests for a literal token and so cannot accept prose."
         ),
     )
     criteria: list[str] = Field(
@@ -304,6 +305,13 @@ class MaterialQuestion(BaseModel):
         return self
 
 
+ALLOWANCE_GRANTED = "grant"
+"""The one answer that extends a concern's authority."""
+
+ALLOWANCE_REFUSED = "refuse"
+"""The one answer that withholds it."""
+
+
 def allowance_question_id(concern_id: str, allowance: ConcernAllowance) -> str:
     """The composed id a `request_allowance` question is recorded under.
 
@@ -312,6 +320,21 @@ def allowance_question_id(concern_id: str, allowance: ConcernAllowance) -> str:
     and the run-side reader that turns a "grant" answer into authority.
     """
     return f"{concern_id}-allow-{allowance}"
+
+
+def asks_for_an_allowance(concern_id: str, question_id: str) -> bool:
+    """Whether this question is one of the concern's allowance gates.
+
+    Both the declaration and the reader ask this, so they cannot disagree
+    about which questions have a two-word domain. They did: the gate
+    published its choices as suggestions while its only reader tested for
+    the literal token, so a human's prose grant promoted cleanly and then
+    meant refusal, with nothing anomalous to report anywhere.
+    """
+    return any(
+        question_id == allowance_question_id(concern_id, allowance)
+        for allowance in ConcernAllowance
+    )
 
 
 class QuestionBatch(BaseModel):
