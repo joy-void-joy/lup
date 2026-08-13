@@ -7,7 +7,7 @@ import re
 from typing import TypedDict
 
 from .decision import KernelDecision, unjudged
-from .rows import ShellRuleRow, UrlScopeRow
+from .rows import RunnerTargetRow, ShellRuleRow, UrlScopeRow
 from .words import (
     INTERPRETERS,
     flag_matches,
@@ -610,8 +610,14 @@ def decide_gh_api_words(words: list[str]) -> KernelDecision:
     return KernelDecision("allow", "read-only gh api call")
 
 
-def decide_uv(words: list[str], runner_targets: list[str]) -> KernelDecision:
-    """Classify a uv invocation, gating dependency and inline-code forms."""
+def decide_uv(
+    words: list[str], runner_targets: list[RunnerTargetRow]
+) -> KernelDecision:
+    """Classify a uv invocation, gating dependency and inline-code forms.
+
+    A blessed target carries its own placement, so a toolchain that has to run
+    outside the sandbox says so once here rather than at each call site.
+    """
     subcommand = words[1]
     if subcommand in ("add", "sync"):
         return KernelDecision(
@@ -636,8 +642,11 @@ def decide_uv(words: list[str], runner_targets: list[str]) -> KernelDecision:
             return KernelDecision(
                 "ask", "uv run --with fetches and executes external code"
             )
-        if bare_target and run_command in runner_targets:
-            return KernelDecision("allow")
+        blessed = next(
+            (row for row in runner_targets if row["name"] == run_command), None
+        )
+        if bare_target and blessed is not None:
+            return KernelDecision("allow", "", blessed["sandbox"])
         if bare_target and len(run_words) == 2 and run_words[1] == "--help":
             return KernelDecision("allow", "command help is read-only")
     return unjudged(f"uv {words[1]} is not classified")

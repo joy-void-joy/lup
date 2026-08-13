@@ -34,9 +34,27 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from lup.policy.kernel.decision import SandboxPlacement
-from lup.policy.kernel.rows import ShellRuleRow
+from lup.policy.kernel.rows import RunnerTargetRow, ShellRuleRow
 
 type CommandEffect = Literal["allow", "ask", "deny"]
+
+
+class RunnerTargetRule(BaseModel):
+    """One ``uv run <target>`` a project blesses, and where it has to run.
+
+    ``uv`` is parsed rather than matched against the command table, so this is
+    the only surface on which a runner target can carry the sandbox axis. A
+    toolchain that opens its own agent sessions needs ``outside``: the runtime
+    creates per-session state under its configuration directory, and a session
+    launched from inside a sandbox that does not grant that path loses its
+    shell entirely. Declaring it beside the name is what keeps the escape off
+    the call sites — one that has to remember a flag is one that forgets it.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    name: str
+    sandbox: SandboxPlacement = "ambient"
 
 
 class ShellOperationRule(BaseModel):
@@ -101,6 +119,13 @@ class ShellCommandRule(BaseModel):
     subcommands: list[ShellSubcommandRule] = Field(default_factory=list)
     sandbox: SandboxPlacement = "ambient"
     reason: str = ""
+
+
+def erase_runner_targets(targets: list[RunnerTargetRule]) -> list[RunnerTargetRow]:
+    """Flatten the blessed runner targets into the kernel's primitive rows."""
+    return [
+        RunnerTargetRow(name=target.name, sandbox=target.sandbox) for target in targets
+    ]
 
 
 def erase_shell_rules(rules: list[ShellCommandRule]) -> list[ShellRuleRow]:

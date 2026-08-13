@@ -14,15 +14,19 @@ from pydantic import AnyHttpUrl, ValidationError
 
 from lup.adapters.claude.harness import CLAUDE_DISPATCHER
 from lup.adapters.claude.hooks import CLAUDE_SEMANTICS
+from lup.adapters.claude.runtime import ClaudeSandboxConfig
 from lup.adapters.codex.native import CodexDecisionRenderer
+from lup.devtools.harness.resolve import worker_policy_hooks
 from lup.hooks import LupHookInput, LupHookOutput
 from lup.policy.enforcement import (
     NativeSemantics,
+    SandboxPosture,
     SemanticToolPolicy,
     create_policy_hooks,
     policy_hook_output,
 )
-from lup.policy.kernel.decision import DecisionEffect
+from lup.policy.kernel.decision import SANDBOX_TRAPPED_REASON, DecisionEffect
+from lup.policy.vocabulary import runner_target_rules
 from lup.policy.models import (
     Decision,
     EditBatch,
@@ -34,6 +38,7 @@ from lup.policy.models import (
     UnknownTool,
 )
 from lup.policy.rules import EditPolicy, FetchPolicy, ShellPolicy, UrlScope
+from lup_template.devtools.harness.catalog import declared_hook_set
 from lup_template.devtools.harness.content.shell_vocabulary import SHELL_RULES
 
 DOCS_ORIGIN = AnyHttpUrl("https://docs.example.com")
@@ -179,6 +184,132 @@ async def test_hook_refuses_a_denied_call_and_leaves_other_events_alone() -> Non
         )
     )
     assert after == LupHookOutput()
+
+
+async def test_permitting_an_escape_widens_only_the_calls_that_declare_one() -> None:
+    """Opening the escape must move exactly the calls that asked for it.
+
+    Composed as a worker is: the placement taken from the session's own
+    sandbox declaration, and nothing else taken from it. Three shapes through
+    one session — the toolchain declares ``outside`` and reaches it, an
+    ordinary allow runs where the session runs, and a command no rule
+    classifies is refused rather than carried anywhere. The last is what
+    makes the first safe: a session that may place one call outside must not
+    thereby place the ones it never judged.
+    """
+    posture = ClaudeSandboxConfig(allow_unsandboxed_commands=True).posture()
+    assert posture == SandboxPosture(active=True, escapable=True)
+
+    hooks = create_policy_hooks(
+        SemanticToolPolicy(
+            shell=ShellPolicy(
+                SHELL_RULES,
+                escapable=CLAUDE_SEMANTICS.escapes_from(posture),
+                interactive=False,
+                runner_targets=runner_target_rules(),
+            )
+        ),
+        CLAUDE_SEMANTICS,
+        sandbox=posture,
+    )
+
+    async def placed(command: str) -> LupHookOutput:
+        return await hooks.pre_tool_use[0].hook(
+            LupHookInput(
+                event="PreToolUse",
+                tool_name="Bash",
+                tool_input={"command": command},
+            )
+        )
+
+    assert await placed("uv run lup-devtools harness resolve") == LupHookOutput(
+        decision="allow", sandbox="outside"
+    )
+    assert await placed("uv run pytest tests/unit") == LupHookOutput(
+        decision="allow", sandbox="ambient"
+    )
+    unjudged = await placed("frobnicate --wildly")
+    assert unjudged.decision == "deny"
+    assert unjudged.sandbox == "ambient"
+
+
+async def test_a_worker_is_judged_by_the_composition_a_run_actually_builds() -> None:
+    """The judge itself, not a restatement of it — this is where it went wrong.
+
+    Every verdict the kernel reached was already correct; what shipped a
+    widening was the composition handing it host facts the session did not
+    have. So this builds the worker's judge rather than a policy shaped like
+    it: the toolchain is placed outside and gets there, while a guarded verb
+    stays a refusal, and so does an escalation marker, which in a session
+    with no way to reach a human would otherwise be the way to avoid one.
+    """
+    hooks = worker_policy_hooks(
+        declared_hook_set(),
+        [],
+        CLAUDE_SEMANTICS,
+        ClaudeSandboxConfig(allow_unsandboxed_commands=True).posture(),
+    )
+
+    async def judged(command: str) -> LupHookOutput:
+        return await hooks.pre_tool_use[0].hook(
+            LupHookInput(
+                event="PreToolUse",
+                tool_name="Bash",
+                tool_input={"command": command},
+            )
+        )
+
+    assert await judged("uv run lup-devtools harness resolve") == LupHookOutput(
+        decision="allow", sandbox="outside"
+    )
+    for refused in (
+        "find . -delete",
+        "git push --delete origin feat",
+        "# lup: escalate: I would rather not be asked\nsudo rm -rf /var/tmp/x",
+    ):
+        assert (await judged(refused)).decision == "deny", refused
+
+
+async def test_a_session_that_forbids_the_escape_is_never_told_it_has_one() -> None:
+    """The runtime's channel is not the session's permission to use it.
+
+    Read from the runtime alone, a session whose settings forbid unsandboxed
+    commands was still handed the placement — rendered onto the wire, dropped
+    without a word, and the call left confined to die on whatever it wrote
+    first. Composed from the session instead, the runtime still reports the
+    channel and the pair still says no, so a host that also declares its
+    confinement stops the call with the sandbox named rather than letting it
+    reach a shell it cannot survive.
+    """
+    posture = ClaudeSandboxConfig().posture()
+    assert posture == SandboxPosture(active=True, escapable=False)
+    assert CLAUDE_SEMANTICS.escapable
+    assert not CLAUDE_SEMANTICS.escapes_from(posture)
+
+    hooks = create_policy_hooks(
+        SemanticToolPolicy(
+            shell=ShellPolicy(
+                SHELL_RULES,
+                sandbox_active=posture.active,
+                escapable=CLAUDE_SEMANTICS.escapes_from(posture),
+                interactive=False,
+                runner_targets=runner_target_rules(),
+            )
+        ),
+        CLAUDE_SEMANTICS,
+        sandbox=posture,
+    )
+    stopped = await hooks.pre_tool_use[0].hook(
+        LupHookInput(
+            event="PreToolUse",
+            tool_name="Bash",
+            tool_input={"command": "uv run lup-devtools harness resolve"},
+        )
+    )
+
+    assert stopped.decision == "deny"
+    assert stopped.reason == SANDBOX_TRAPPED_REASON
+    assert stopped.sandbox == "ambient"
 
 
 def test_hook_is_scoped_to_the_tools_the_policy_has_rules_for() -> None:

@@ -178,7 +178,11 @@ def granted_allowances(allowances_env: str, known: list[str]) -> list[str]:
 
 
 def bash_decision(
-    command: str, managed_root: Path | None, sandboxed: bool, interactive: bool
+    command: str,
+    managed_root: Path | None,
+    sandboxed: bool,
+    interactive: bool,
+    escapable: bool,
 ) -> KernelDecision:
     """Judge one shell command against the declared vocabulary.
 
@@ -193,6 +197,11 @@ def bash_decision(
     replacing it would cost. Resolving them for only one of the two writing
     forms is what left ``rm f`` granted while ``echo x > f`` asked about the
     same clean, tracked file.
+
+    ``escapable`` is the one thing here a runtime answers rather than the host:
+    whether it can put a single call outside its own sandbox. It arrives as an
+    argument for the same reason the rest does — a fact one dispatcher stopped
+    passing is a rule that silently stopped applying.
     """
     acted_on = shell_path_verb_targets(command)
     return decide_shell(
@@ -214,6 +223,7 @@ def bash_decision(
         recoverable_target_limit=RECOVERABLE_TARGET_LIMIT,
         runner_targets=RUNNER_TARGETS,
         interactive=interactive,
+        escapable=escapable,
     )
 
 
@@ -276,7 +286,10 @@ def dispatch(payload, permission_request=False):
             tool_input["command"],
             managed_root(),
             False if permission_request else sandbox_active(),
-            permission_request,
+            interactive=permission_request,
+            # Codex's sandbox is a session flag on the binary, so a verdict
+            # that has to leave it is stopped with that reason instead.
+            escapable=False,
         )
     if name == "web_fetch":
         return fetch_decision(tool_input["url"])

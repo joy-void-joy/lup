@@ -54,7 +54,10 @@ def dispatch(payload, permission_request=False):
             tool_input["command"],
             managed_root(),
             False if permission_request else sandbox_active(),
-            permission_request,
+            interactive=permission_request,
+            # Codex's sandbox is a session flag on the binary, so a verdict
+            # that has to leave it is stopped with that reason instead.
+            escapable=False,
         )
     if name == "web_fetch":
         return fetch_decision(tool_input["url"])

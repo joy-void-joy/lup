@@ -49,6 +49,7 @@ from lup.policy.bundle import (
 from lup.policy.kernel.decision import (
     DecisionEffect,
     KernelDecision,
+    SANDBOX_TRAPPED_REASON,
     SandboxPlacement,
 )
 from lup.policy.kernel.edit import decide_edit
@@ -73,6 +74,7 @@ from lup.policy.rules import (
     path_rule_row,
 )
 
+from lup.policy.vocabulary import runner_target_rules
 from lup_template.devtools.harness.catalog import declared_hook_set, portable_harness
 from lup_template.devtools.harness.content.shell_vocabulary import SHELL_RULES
 
@@ -85,9 +87,26 @@ class DecisionCase(BaseModel):
     input: str
     effect: Literal["allow", "ask", "deny", "defer"]
     sandboxed: bool = False
+    escapable: bool = False
+    """Whether the host judging this case can place one call outside its sandbox.
+
+    Off by default, matching the kernel: a host that says nothing about
+    placement cannot perform one, and a command declared ``outside`` is
+    stopped there rather than run somewhere its declaration forbids."""
+
     interactive: bool = True
     existing: list[str] = Field(default_factory=list)
     """Repository-relative files that already exist when the case is judged."""
+
+
+class HostShape(BaseModel):
+    """The host facts a case is judged under, as one hashable identity."""
+
+    model_config = ConfigDict(frozen=True)
+
+    sandboxed: bool
+    escapable: bool
+    interactive: bool
 
 
 class EditDecisionCase(BaseModel):
@@ -121,9 +140,9 @@ a table the two gates could be given differently is the drift these cases
 exist to catch."""
 
 FIXTURE_RECOVERABLE_LIMIT = 5
-FIXTURE_RUNNER_TARGETS = ["pyright", "pytest", "ruff", "lup-devtools"]
-"""What this project declares `uv run <target>` may reach, which is what the
-shell fixtures below are written against."""
+FIXTURE_RUNNER_TARGETS = runner_target_rules()
+"""What this project declares `uv run <target>` may reach, and where each runs,
+which is what the shell fixtures below are written against."""
 """How many restorable files one command may destroy before it asks."""
 
 SHELL_POLICY_CASES = [
@@ -642,11 +661,31 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="sort $UNBOUND f", effect="defer", sandboxed=True),
     DecisionCase(input="foo() { cat x; }", effect="defer", sandboxed=True),
     DecisionCase(input="case $m in a) echo a;;", effect="defer", sandboxed=True),
-    DecisionCase(input="git push --delete origin feat", effect="ask", sandboxed=True),
+    DecisionCase(
+        input="git push --delete origin feat",
+        effect="ask",
+        sandboxed=True,
+        escapable=True,
+    ),
     DecisionCase(input="sed -i 's/a/b/' f", effect="deny", sandboxed=True),
     DecisionCase(input="ssh-add -D", effect="deny", sandboxed=True),
     DecisionCase(input="frobnicate; ssh host", effect="ask", sandboxed=True),
     DecisionCase(input="python -c 'x'", effect="deny", sandboxed=True),
+    # The toolchain declares its escape, so nothing carries a flag to reach it:
+    # unconfined it simply runs, and where a call can be placed it is placed.
+    DecisionCase(input="uv run lup-devtools dev check", effect="allow"),
+    DecisionCase(
+        input="uv run lup-devtools dev check",
+        effect="allow",
+        sandboxed=True,
+        escapable=True,
+    ),
+    # Confined with nowhere to put the call, the declaration cannot be honoured,
+    # so it is stopped with the reason rather than run where it will die on the
+    # first write. The same holds for anything else declared outside.
+    DecisionCase(input="uv run lup-devtools dev check", effect="deny", sandboxed=True),
+    DecisionCase(input="git push --delete origin feat", effect="deny", sandboxed=True),
+    DecisionCase(input="uv run pytest tests/unit", effect="allow", sandboxed=True),
     # A help probe only prints usage, so it reads an unclassified command
     # without judging it. Bare -h counts alone; carrying a value it is an
     # ordinary argument (mysql -h host) and classifies normally.
@@ -664,6 +703,16 @@ SHELL_POLICY_CASES = [
     DecisionCase(
         input="git push --delete origin feat",
         effect="defer",
+        sandboxed=True,
+        escapable=True,
+        interactive=False,
+    ),
+    # A placement nothing can carry out outranks that boundary either way:
+    # deferring means the OS confines the call, which is the one answer a
+    # command declared outside cannot take.
+    DecisionCase(
+        input="git push --delete origin feat",
+        effect="deny",
         sandboxed=True,
         interactive=False,
     ),
@@ -1046,6 +1095,7 @@ def test_assembled_kernel_runs_without_site_packages(tmp_path: Path) -> None:
         "for case in fixtures['shell']:\n"
         "    result = decide_shell(\n"
         "        case['input'], SHELL_RULES, sandboxed=case['sandboxed'],\n"
+        "        escapable=case['escapable'],\n"
         "        interactive=case['interactive'],\n"
         "        path_roles=PATH_ROLES,\n"
         "        path_rules=PATH_RULES,\n"
@@ -1526,26 +1576,29 @@ def test_shell_policy_preserves_golden_compound_and_wrapper_outcomes(
         path_rules=FIXTURE_PATH_RULES,
         runner_targets=FIXTURE_RUNNER_TARGETS,
     )
-    sandboxed_policy = ShellPolicy(
-        SHELL_RULES,
-        sandbox_active=True,
-        path_roles=FIXTURE_PATH_ROLES,
-        path_rules=FIXTURE_PATH_RULES,
-        runner_targets=FIXTURE_RUNNER_TARGETS,
-    )
+    hosts: dict[HostShape, ShellPolicy] = {}
 
-    for index, case in enumerate(SHELL_POLICY_CASES):
-        if case.interactive:
-            active = sandboxed_policy if case.sandboxed else policy
-        else:
-            active = ShellPolicy(
+    def host_policy(case: DecisionCase) -> ShellPolicy:
+        """One policy per host shape a case describes, built once for each."""
+        shape = HostShape(
+            sandboxed=case.sandboxed,
+            escapable=case.escapable,
+            interactive=case.interactive,
+        )
+        if shape not in hosts:
+            hosts[shape] = ShellPolicy(
                 SHELL_RULES,
                 sandbox_active=case.sandboxed,
-                interactive=False,
+                escapable=case.escapable,
+                interactive=case.interactive,
                 path_roles=FIXTURE_PATH_ROLES,
                 path_rules=FIXTURE_PATH_RULES,
                 runner_targets=FIXTURE_RUNNER_TARGETS,
             )
+        return hosts[shape]
+
+    for index, case in enumerate(SHELL_POLICY_CASES):
+        active = host_policy(case)
         # Each case judges a tree of its own, so a file one case declares
         # present never leaks into the next case's create-versus-overwrite.
         root = tmp_path / f"case{index}"
@@ -1560,11 +1613,12 @@ def test_shell_policy_preserves_golden_compound_and_wrapper_outcomes(
             case.input,
             policy.rules,
             sandboxed=case.sandboxed,
+            escapable=case.escapable,
             interactive=case.interactive,
             path_roles=FIXTURE_PATH_ROLES,
             path_rules=policy.path_rules,
             existing_targets=case.existing,
-            runner_targets=FIXTURE_RUNNER_TARGETS,
+            runner_targets=policy.runner_targets,
         ).effect
         assert bundled_effect == case.effect, case.input
 
@@ -1602,6 +1656,35 @@ def test_sandbox_escape_reenters_the_deny_lattice() -> None:
     )
     assert escaped.effect == "deny"
     assert "escalate" in escaped.reason
+
+
+def test_the_toolchain_carries_its_own_escape_and_is_refused_without_one() -> None:
+    """The declaration is the escape, and where nothing can carry it, the stop.
+
+    Confined with nowhere to put the call, the toolchain would reach the shell
+    and die on whatever it wrote first — a bare read-only-filesystem error an
+    agent reads as a broken repository rather than as a boundary, so it
+    retries, works around it, or reports success from a session that never ran
+    a command. Naming the sandbox costs one turn instead.
+    """
+    command = ShellCommand(command="uv run lup-devtools harness resolve")
+
+    placed = ShellPolicy(
+        SHELL_RULES,
+        sandbox_active=True,
+        escapable=True,
+        runner_targets=FIXTURE_RUNNER_TARGETS,
+    ).decide(command)
+    assert placed.effect == "allow"
+    assert placed.sandbox == "outside"
+
+    trapped = ShellPolicy(
+        SHELL_RULES,
+        sandbox_active=True,
+        runner_targets=FIXTURE_RUNNER_TARGETS,
+    ).decide(command)
+    assert trapped.effect == "deny"
+    assert trapped.reason == SANDBOX_TRAPPED_REASON
 
 
 def test_non_interactive_denials_do_not_prescribe_escalation() -> None:

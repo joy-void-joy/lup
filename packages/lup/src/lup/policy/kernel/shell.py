@@ -10,11 +10,18 @@ from .decision import (
     ESCALATE_HINT,
     KernelDecision,
     RESHAPE_HINT,
+    SANDBOX_TRAPPED_REASON,
     SUBSTITUTION_SENTINEL,
     SandboxPlacement,
     unjudged,
 )
-from .rows import PathRoleRow, PathRuleRow, ShellRuleRow, UrlScopeRow
+from .rows import (
+    PathRoleRow,
+    PathRuleRow,
+    RunnerTargetRow,
+    ShellRuleRow,
+    UrlScopeRow,
+)
 from .words import (
     INTERPRETERS,
     asks_before_removing_a_directory,
@@ -65,7 +72,7 @@ class ShellContext(TypedDict):
     recoverable_targets: list[str]
     directory_targets: list[str]
     recoverable_target_limit: int
-    runner_targets: list[str]
+    runner_targets: list[RunnerTargetRow]
 
 
 def shell_context(
@@ -79,7 +86,7 @@ def shell_context(
     recoverable_targets: list[str] | None = None,
     directory_targets: list[str] | None = None,
     recoverable_target_limit: int = 5,
-    runner_targets: list[str] | None = None,
+    runner_targets: list[RunnerTargetRow] | None = None,
 ) -> ShellContext:
     """Bundle one classification's declarations, normalizing absent lists.
 
@@ -309,7 +316,9 @@ def literal_loop_word(word: str) -> bool:
     )
 
 
-def uv_post_target_words_safe(words: list[str], runner_targets: list[str]) -> bool:
+def uv_post_target_words_safe(
+    words: list[str], runner_targets: list[RunnerTargetRow]
+) -> bool:
     """True when every unknown word sits strictly after a blessed uv run target.
 
     uv stops parsing its own options at the first positional word, so a word
@@ -325,7 +334,7 @@ def uv_post_target_words_safe(words: list[str], runner_targets: list[str]) -> bo
             return False
         if word.startswith("-"):
             continue
-        return "/" not in word and word in runner_targets
+        return "/" not in word and any(row["name"] == word for row in runner_targets)
     return False
 
 
@@ -760,7 +769,7 @@ def classify_shell(
     recoverable_targets: list[str] | None = None,
     directory_targets: list[str] | None = None,
     recoverable_target_limit: int = 5,
-    runner_targets: list[str] | None = None,
+    runner_targets: list[RunnerTargetRow] | None = None,
 ) -> KernelDecision:
     """Conservatively classify every segment in one shell command."""
     segments = parse_shell_words(
@@ -809,7 +818,8 @@ def decide_shell(
     recoverable_targets: list[str] | None = None,
     directory_targets: list[str] | None = None,
     recoverable_target_limit: int = 5,
-    runner_targets: list[str] | None = None,
+    runner_targets: list[RunnerTargetRow] | None = None,
+    escapable: bool = False,
 ) -> KernelDecision:
     """Classify one command, honoring an escalation marker and hinting denies.
 
@@ -827,10 +837,20 @@ def decide_shell(
     boundary as unjudged work; unsandboxed, it fails closed. Such a host is
     never told to escalate, because that flow cannot complete there. A judged
     deny is never rescued by the sandbox in either mode.
+
+    ``escapable`` is the third fact of that family: whether this host can put
+    one call outside its own sandbox. A command declared ``outside`` is not
+    advice — confined, it fails on whatever it writes first — so a host that
+    cannot place it stops it here with that reason rather than letting it reach
+    the shell. The pair is what makes the declaration safe to give a toolchain:
+    where the escape is carried out it is unprompted, and where nothing can
+    carry it out the refusal names the sandbox instead of a bare write error.
     """
     hint = ESCALATE_HINT if interactive else RESHAPE_HINT
 
     def resolve(decision: KernelDecision) -> KernelDecision:
+        if sandboxed and not escapable and decision.sandbox == "outside":
+            return KernelDecision("deny", SANDBOX_TRAPPED_REASON)
         match decision.effect:
             case "allow":
                 return decision

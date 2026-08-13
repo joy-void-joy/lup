@@ -7,6 +7,7 @@ from kernel.rows import (
     AntiPatternRow,
     PathRoleRow,
     PathRuleRow,
+    RunnerTargetRow,
     ShellRuleRow,
     UrlScopeRow,
 )
@@ -2918,7 +2919,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
-        "sandbox": "ambient",
+        "sandbox": "outside",
         "reason": "",
     },
     {
@@ -5733,9 +5734,21 @@ MAXIMUM_ADDED_LINES = 3
 
 RECOVERABLE_TARGET_LIMIT = 5
 
-RUNNER_TARGETS: list[str] = [
-    "pyright",
-    "pytest",
-    "ruff",
-    "lup-devtools",
+RUNNER_TARGETS: list[RunnerTargetRow] = [
+    {
+        "name": "pyright",
+        "sandbox": "ambient",
+    },
+    {
+        "name": "pytest",
+        "sandbox": "ambient",
+    },
+    {
+        "name": "ruff",
+        "sandbox": "ambient",
+    },
+    {
+        "name": "lup-devtools",
+        "sandbox": "outside",
+    },
 ]

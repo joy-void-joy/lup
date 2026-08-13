@@ -288,6 +288,41 @@ def test_a_call_placed_outside_the_sandbox_is_allowed_and_rewritten() -> None:
     }
 
 
+def test_the_toolchain_reaches_the_outside_with_no_flag_from_its_caller() -> None:
+    """The declaration carries the escape, so no call site has to remember it.
+
+    Every `lup-devtools` command that opens an agent session is unusable
+    confined: the runtime creates per-session state under its configuration
+    directory, and a session spawned inside a sandbox that does not grant that
+    path loses its shell entirely. The instruction that used to ask an agent
+    for the flag reached one skill on one runtime; the declaration reaches
+    every invocation of the toolchain, whichever entry point started it.
+    """
+    decision = decide(bash_payload("uv run lup-devtools harness resolve"))
+
+    specific = decision["hookSpecificOutput"]
+    assert isinstance(specific, dict)
+    assert specific["permissionDecision"] == "allow"
+    assert specific["updatedInput"] == {
+        "command": "uv run lup-devtools harness resolve",
+        "dangerouslyDisableSandbox": True,
+    }
+
+
+def test_a_checker_target_is_left_where_the_session_already_runs() -> None:
+    """The escape is the toolchain's, not every blessed runner target's.
+
+    A checker reads the tree and writes inside it, so placing it outside would
+    widen the boundary for the commands that have no need of it.
+    """
+    decision = decide(bash_payload("uv run pytest tests/unit"))
+
+    specific = decision["hookSpecificOutput"]
+    assert isinstance(specific, dict)
+    assert specific["permissionDecision"] == "allow"
+    assert "updatedInput" not in specific
+
+
 def test_an_unplaced_call_carries_no_rewrite_at_all() -> None:
     """Saying nothing about the sandbox must not restate the session's own mode.
 

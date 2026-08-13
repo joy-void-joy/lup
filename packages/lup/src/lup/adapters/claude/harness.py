@@ -119,14 +119,7 @@ class ClaudeSpellings(NativeSpellings):
             "wrote in the tree, both repeatable. "
             "Never pass `--wait` or `--supervise`; both hold a run open "
             "for a human instead of parking — `--wait` at the mailbox, "
-            "`--supervise` at the page it opens. "
-            "Launch it with `dangerouslyDisableSandbox: true`. Every session "
-            "the run opens is a child of this call, and a session spawned "
-            "inside the sandbox cannot create its own "
-            "`~/.claude/session-env/<id>` — so each of its shell calls dies on "
-            "`EROFS: read-only file system, mkdir`, leaving planners and "
-            "workers unable to run a single command while still appearing to "
-            "work."
+            "`--supervise` at the page it opens."
         )
 
     def arguments_ref(self) -> Atom:
