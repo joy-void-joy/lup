@@ -429,6 +429,33 @@ def test_console_doors_read_and_answer_without_the_run_lock(
     assert parked is not None and parked.reason == "answering tomorrow"
 
 
+def test_an_answered_question_stops_reading_as_waiting_on_the_human(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`--pending` means waiting on you, not waiting on the promoter.
+
+    Answering and then listing reported every question back as pending,
+    because an offer is not a promoted answer — so the one command a human
+    runs to check their work said nothing had been recorded, and counting
+    files on disk was the only way to tell.
+    """
+    mailbox = build_run(tmp_path)
+    ask(mailbox, "q1", ["yes", "no"])
+    ask(mailbox, "q2", ["yes", "no"])
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(doors, "resolve_state_root", lambda: tmp_path)
+        doors.answer_questions(pairs=["q1=no"], run_id="run-1")
+        doors.list_questions(run_id="run-1", pending_only=True)
+
+    listed = capsys.readouterr().out
+    assert "q2 (concern alpha)" in listed, "a genuinely unanswered question is hidden"
+    assert "q1 (concern alpha)" not in listed, (
+        "an answered question still reads pending"
+    )
+    assert "1 answered and awaiting promotion" in listed
+
+
 @pytest.mark.parametrize(
     "pairs",
     [["ghost=yes"], ["gate=maybe"], ["q1"]],

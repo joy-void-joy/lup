@@ -25,6 +25,26 @@ class ResolverAwaitingAnswers(Exception):
         self.problems = problems
 
 
+class ResolverEnvironmentFault(Exception):
+    """A run stopped because its host failed, not because its work did.
+
+    A revoked credential, an exhausted allowance or a dead network reaches
+    every concern in flight at once and says nothing about any of them. So
+    this travels the way a park does rather than the way a failure does: no
+    concern is transitioned, no outcome is written, and the run keeps every
+    status it held. Resuming re-enters each concern exactly where it was.
+
+    Kept apart from `ResolverAwaitingAnswers` because the two ask different
+    things of a human. A park wants an answer; this wants the host fixed,
+    and then the same command again.
+    """
+
+    def __init__(self, cause: str, concerns: list[str]) -> None:
+        super().__init__(f"resolver run stopped on an environmental fault: {cause}")
+        self.cause = cause
+        self.concerns = concerns
+
+
 class ResolverObserver(ABC):
     """Receive every durably recorded resolver transition as it lands.
 

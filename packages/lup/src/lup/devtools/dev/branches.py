@@ -22,6 +22,7 @@ from lup.devtools.utils import (
     config_lock_diagnosis,
     decode_stderr,
     output_json,
+    repository_arguments,
     short_sha,
 )
 
@@ -159,6 +160,7 @@ def fetch_pr_status(branch_names: list[str]) -> dict[str, PRStatus]:
             gh.out(
                 "pr",
                 "list",
+                *repository_arguments(),
                 "--state",
                 "all",
                 "--limit",
@@ -244,12 +246,21 @@ def get_branch_worktree(branch: str) -> str | None:
 
 
 def get_pr_info(branch: str) -> PRStatus | None:
-    """Get PR info for a branch via gh CLI. None when there is none (or no gh)."""
+    """Get PR info for a branch via gh CLI. None when there is none (or no gh).
+
+    The repository is named rather than inferred. `gh` reads the origin
+    remote to decide which repository it is talking about, and a remote
+    written through an SSH alias names no host it recognizes — so every
+    query failed, and this returned the same ``None`` it returns for a
+    branch that genuinely has no pull request. A branch with an open PR
+    then classified ``LAND``.
+    """
     try:
         items = json.loads(
             gh.out(
                 "pr",
                 "list",
+                *repository_arguments(),
                 "--state=all",
                 f"--head={branch}",
                 "--json=number,title,state,mergedAt,url",
@@ -257,7 +268,8 @@ def get_pr_info(branch: str) -> PRStatus | None:
                 _ok_code=[0],
             )
         )
-    except (sh.ErrorReturnCode, sh.CommandNotFound, json.JSONDecodeError):
+    except (sh.ErrorReturnCode, sh.CommandNotFound, json.JSONDecodeError) as error:
+        logger.warning("no pull-request status for %s: %s", branch, error)
         return None
     return PRStatus.model_validate(items[0]) if items else None
 

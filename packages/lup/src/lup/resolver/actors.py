@@ -252,8 +252,13 @@ class ActorSession:
         delivered = self.with_pending(request)
         try:
             return await handle.session.start(delivered)
-        except ProviderTurnError:
-            if self.record.session is None:
+        except ProviderTurnError as error:
+            # A host fault is not lost context. Reopening would meet the same
+            # dead credential, and the attempt costs the resume point: the
+            # record is cleared before the retry, so a run interrupted here
+            # would resume every actor on a fresh conversation having
+            # forgotten the one it was holding.
+            if self.record.session is None or error.failure.environmental:
                 raise
             logger.exception(
                 "%s could not resume session %s; continuing on a fresh one",

@@ -28,6 +28,7 @@ import lup.devtools.dev.relocate as relocate_mod
 import lup.devtools.dev.resolve_review as resolve_review
 import lup.devtools.dev.rules as rules
 import lup.devtools.dev.worktree as worktree
+from lup.devtools.utils import repository_slug
 from lup.devtools.harness.composition import NativeTargets
 from lup.devtools.harness.drift import RepositoryWriter
 from lup.devtools.harness.launch import relocation_hint
@@ -507,7 +508,7 @@ def create_dev_app(
         not cost one.
         """
         found = issues_mod.fetch_open_issues(excluded)
-        slug = issues_mod.repository_slug()
+        slug = repository_slug()
         typer.echo(f"{len(found)} open issue(s) in {slug or 'this repository'}")
         for issue in found:
             typer.echo(f"  {issue.reference()}  {issue.title}")

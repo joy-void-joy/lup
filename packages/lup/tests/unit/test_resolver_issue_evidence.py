@@ -10,7 +10,9 @@ from pathlib import Path
 
 import pytest
 
-from lup.devtools.dev.issues import IssueLabel, IssueRow, slug_from_remote
+import lup.devtools.utils as utils
+from lup.devtools.dev.issues import IssueLabel, IssueRow
+from lup.devtools.utils import slug_from_remote
 from lup.resolver.core import planned_evidence
 from lup.resolver.models import (
     InventoryNote,
@@ -44,8 +46,8 @@ def request(notes: int, statements: int, issues: int) -> ResolveRequest:
 @pytest.mark.parametrize(
     ("remote", "slug"),
     [
-        # The alias that broke every `gh` query in the reporting repository.
-        ("jvj:joy-void-joy/lup.git", "joy-void-joy/lup"),
+        # An ssh alias, the shape that broke every `gh` query when reported.
+        ("alias:owner/name.git", "owner/name"),
         ("git@github.com:owner/name.git", "owner/name"),
         ("https://github.com/owner/name.git", "owner/name"),
         ("https://github.com/owner/name", "owner/name"),
@@ -58,6 +60,24 @@ def test_a_remote_names_its_repository_whatever_shape_it_is_written_in(
     remote: str, slug: str
 ) -> None:
     assert slug_from_remote(remote) == slug
+
+
+def test_a_query_names_the_repository_it_means(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Named rather than inferred, because inference is what an alias defeats."""
+    monkeypatch.setattr(utils, "repository_slug", lambda: "owner/name")
+
+    assert utils.repository_arguments() == ["--repo", "owner/name"]
+
+
+def test_a_checkout_with_no_readable_forge_names_none(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An empty slug is a project with no forge, not a broken flag to pass on."""
+    monkeypatch.setattr(utils, "repository_slug", lambda: "")
+
+    assert utils.repository_arguments() == []
 
 
 def test_an_excluded_label_withholds_an_issue() -> None:

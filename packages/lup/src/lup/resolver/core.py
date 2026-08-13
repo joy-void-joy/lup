@@ -13,6 +13,7 @@ from lup.harness.models import ResolveSpec
 from lup.harness.process import ProcessLauncher
 from lup.resolver.contracts import (
     ResolverAwaitingAnswers,
+    ResolverEnvironmentFault,
     ResolverObserver,
     WorktreePreparer,
 )
@@ -190,6 +191,20 @@ def merge_parked(parked: list[ResolverAwaitingAnswers]) -> ResolverAwaitingAnswe
     pending = {question.id: question for park in parked for question in park.pending}
     problems = [problem for park in parked for problem in park.problems]
     return ResolverAwaitingAnswers(list(pending.values()), problems)
+
+
+def merge_faults(faults: list[ResolverEnvironmentFault]) -> ResolverEnvironmentFault:
+    """Combine sibling host faults into the one cause they all met.
+
+    Every concern in a batch meets the same dead credential within seconds,
+    so reporting each separately would say one thing several times. The
+    first cause is the whole cause; the concerns are named so a reader knows
+    which turns were spent and will be spent again.
+    """
+    return ResolverEnvironmentFault(
+        faults[0].cause,
+        sorted({concern for fault in faults for concern in fault.concerns}),
+    )
 
 
 def approval_question(concern: Concern) -> MaterialQuestion:
@@ -474,7 +489,11 @@ class ResolverCore:
         self.persist(state)
         try:
             return await self.advance(state)
-        except ResolverAwaitingAnswers:
+        except (ResolverAwaitingAnswers, ResolverEnvironmentFault):
+            # Neither is this run failing. Persisting a failure here would
+            # move the phase to `failed` and make the resume path re-derive
+            # a `resume_from`, when nothing about the run's own state is
+            # wrong — only the host it was running on.
             raise
         except Exception as error:
             self.persist_failure(error)
@@ -574,7 +593,11 @@ class ResolverCore:
         state = self.require_state()
         try:
             return await self.advance(state)
-        except ResolverAwaitingAnswers:
+        except (ResolverAwaitingAnswers, ResolverEnvironmentFault):
+            # Neither is this run failing. Persisting a failure here would
+            # move the phase to `failed` and make the resume path re-derive
+            # a `resume_from`, when nothing about the run's own state is
+            # wrong — only the host it was running on.
             raise
         except Exception as error:
             self.persist_failure(error)
@@ -770,7 +793,12 @@ class ResolverCore:
             if outcome.verified and outcome.commit is not None
         }
         outcomes = list(state.outcomes)
-        completed_ids = {outcome.concern_id for outcome in outcomes}
+        # A retired concern is settled somewhere else, so it neither runs nor
+        # blocks: its dependents build from the base, which is where the work
+        # that settled it now lives. Treating it as completed is what keeps it
+        # out of the eligible set without recording it as having failed.
+        retired = {item.concern_id for item in state.retirements}
+        completed_ids = {outcome.concern_id for outcome in outcomes} | retired
         builder = DependencyBaseBuilder(state.root_base())
         if state.integration is None:
             for batch in graph.topological_batches():
@@ -782,7 +810,10 @@ class ResolverCore:
                 runnable = [
                     concern
                     for concern in selected
-                    if all(parent in commits for parent in concern.dependencies)
+                    if all(
+                        parent in commits or parent in retired
+                        for parent in concern.dependencies
+                    )
                 ]
                 for blocked in selected:
                     if blocked in runnable:
@@ -850,6 +881,18 @@ class ResolverCore:
                         raise ResolverInvariantError(
                             "parallel concern execution was cancelled"
                         )
+                    # A host fault reaches every concern in the batch at
+                    # once, so it decides the batch even when only some of
+                    # them had reached the provider. Nothing here is worth
+                    # asking a human about until the host works again, which
+                    # is why this outranks a park rather than joining it.
+                    faults = [
+                        error
+                        for error in errors
+                        if isinstance(error, ResolverEnvironmentFault)
+                    ]
+                    if faults:
+                        raise merge_faults(faults)
                     parked = [
                         error
                         for error in errors
