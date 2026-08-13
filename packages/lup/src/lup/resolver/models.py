@@ -100,6 +100,18 @@ class ResolvePhase(StrEnum):
             ResolvePhase.FAILED,
         }
 
+    def released_leases(self) -> bool:
+        """Whether a run in this phase has let go of the branches it leased.
+
+        Only a completed run has: it carried every lease through the join
+        machinery, so what those branches held has landed and a sweep may
+        clear them. A failed or aborted run still has its branches out on
+        lease with nothing answerable for them, which is precisely when a
+        survey must leave them alone — the two verbs it would otherwise
+        offer both destroy work no one has salvaged yet.
+        """
+        return self is ResolvePhase.COMPLETE
+
 
 class ConcernStatus(StrEnum):
     """Persisted lifecycle of one independently scheduled concern."""
