@@ -34,7 +34,9 @@ from lup.devtools.supervisor.doors import (
     list_questions,
     park_run,
     redirect_actor,
+    retire_concern,
     say_to_actor,
+    show_status,
 )
 from lup.workspace.paths import project_root
 
@@ -133,12 +135,14 @@ def create_harness_app(
         invoke_without_command=True,
         no_args_is_help=False,
     )
+    resolve_app.command("status")(show_status)
     resolve_app.command("supervise")(serve_supervisor)
     resolve_app.command("questions")(list_questions)
     resolve_app.command("answer")(answer_questions)
     resolve_app.command("actors")(list_actors)
     resolve_app.command("say")(say_to_actor)
     resolve_app.command("accept")(accept_verification)
+    resolve_app.command("retire")(retire_concern)
     resolve_app.command("redirect")(redirect_actor)
     resolve_app.command("park")(park_run)
     resolve_app.command("refresh")(resolve.refresh_run)

@@ -1,8 +1,9 @@
 """Pre-configured shell commands and output helpers for devtools scripts."""
 
 import json
+import logging
 from collections.abc import Callable, Iterable, Iterator, Sequence
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import IO, Annotated, Literal, TypedDict, Unpack
 
 import sh
@@ -10,6 +11,8 @@ import typer
 from pydantic import BaseModel
 
 from lup.gitlocks import admin_dirs, diagnose_git_admin, inspect_git_admin
+
+logger = logging.getLogger(__name__)
 
 # sh declares these only as stub-private aliases, which pyright refuses to
 # import, so they are mirrored here. Each is narrowed where sh wrote `Any` —
@@ -151,6 +154,51 @@ class LazyCommand:
 git = LazyCommand("git", "--no-pager", "-c", "color.ui=never", tty_out=False)
 gh = LazyCommand("gh", tty_out=False)
 uv = LazyCommand("uv")
+
+
+def slug_from_remote(url: str) -> str:
+    """The ``owner/name`` a remote names, empty when it names none.
+
+    Read here rather than left to `gh` to infer, because a remote written
+    through an SSH alias — ``<alias>:owner/name.git``, whose host ssh resolves
+    from its own config — names no host `gh` recognizes, and every query then
+    fails with "no known GitHub host" as though the repository were
+    unreachable.
+
+    The pair is the last two path segments in every shape a remote is written
+    in, and nothing before a colon is ever one of them — which is what reads
+    the scp-like form (``git@host:owner/name``) that is not a URL and has no
+    parser in the standard library.
+    """
+    trimmed = url.removesuffix(".git")
+    located = trimmed.rpartition(":")[2]  # lup: ignore[string-split] — no parser
+    named = PurePosixPath(located).parts
+    return "/".join(named[-2:]) if len(named) >= 2 else ""
+
+
+def repository_slug() -> str:
+    """The ``owner/name`` this checkout answers to, empty when unreadable."""
+    try:
+        return slug_from_remote(git.out("remote", "get-url", "origin"))
+    except sh.ErrorReturnCode as error:
+        logger.warning("no origin remote to read a slug from: %s", decode_stderr(error))
+        return ""
+
+
+def repository_arguments() -> list[str]:
+    """The ``--repo`` a `gh` query needs, or nothing where none is readable.
+
+    Every `gh` subcommand infers its repository from the origin remote unless
+    told, and that inference is what an alias defeats. Naming it once here is
+    what stops a query depending on the spelling a checkout happens to use.
+
+    Empty where no slug is readable, which is a project with no forge rather
+    than a forge that could not be reached. The two want opposite answers from
+    a caller — absence is a fact in the first and unknown in the second — so
+    they are not collapsed here.
+    """
+    slug = repository_slug()
+    return ["--repo", slug] if slug else []
 
 
 def decode_stderr(e: sh.ErrorReturnCode) -> str:
