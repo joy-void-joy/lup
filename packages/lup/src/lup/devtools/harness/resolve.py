@@ -123,15 +123,6 @@ class ResolverIntake(BaseModel):
     generated: list[str]
 
 
-# lup: There is no way to see what a run would plan without starting one. Every
-# resolve subcommand — supervise, questions, answer, actors, say, redirect, park
-# — operates on a run that already exists, so discovering an inventory means
-# committing to a run that leases a worktree per concern. Add `harness resolve
-# intake`, printing all three buckets this returns with file, line, and for a
-# generated note the owning `semantic_id`. Reported from downstream: answering
-# "is this good to clean and restart from scratch?" took a dozen calls of
-# reading this function, `scan_tracked`, and cross-referencing ownership by
-# hand — and that reconstruction is what found the bug fixed in #47.
 def resolver_intake(
     comments: list[FoundComment], owned: GeneratedArtifacts
 ) -> ResolverIntake:
@@ -1280,13 +1271,6 @@ def run_resolve(
                 if core.repository.exists():
                     manifest = await core.resume()
                 else:
-                    # lup: A fresh run can only be seeded from notes already in
-                    # the tree — `--admit` refuses with "no resolver run ... to
-                    # admit into" until one exists. But `/lup:resolve <concerns>`
-                    # is how a human actually arrives, with the concerns in their
-                    # own words and nothing yet written down, so the agent has to
-                    # invent note sites before it can start. Let statements seed
-                    # a run the way they can join one.
                     intake = resolver_intake(
                         scan_tracked(find_feedback), generated_artifacts(root)
                     )
