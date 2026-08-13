@@ -35,8 +35,11 @@ from lup.codescan.project import (
     resolve_name,
 )
 
+# lup: ignore[constant-declaration] — the rule's own identity, what a typed
+# directive and every deny message name it by
 RULE_ID = "own-model-dispatch"
 
+# lup: ignore[constant-declaration] — the import path pydantic publishes
 MODEL_BASES = {"pydantic.BaseModel"}
 """Roots whose project-defined descendants count as models we declare."""
 
@@ -44,9 +47,12 @@ MODEL_BASES = {"pydantic.BaseModel"}
 NARROWING_CALLS = {"isinstance", "issubclass"}
 """Builtins that branch on a runtime type rather than asking the value."""
 
+# lup: ignore[constant-declaration] — typing's own name for it, not ours
 EXHAUSTIVENESS_CALL = "assert_never"
 """The static net that only exists to catch a union gaining a member."""
 
+# lup: ignore[constant-declaration] — the rule's own sentence, declared with what
+# it detects rather than chosen per caller
 REMEDY = (
     "declare the operation on the union's base and let each variant answer or "
     "decline it"

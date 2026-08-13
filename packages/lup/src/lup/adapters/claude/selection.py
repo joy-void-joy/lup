@@ -13,6 +13,8 @@ from lup.adapters.claude.runtime import (
 from lup.runtime.factory import SessionFactory
 from lup.runtime.selection import Runtime, SessionAutonomy, SessionRequest
 
+# lup: ignore[constant-declaration] — each value is Claude Code's own permission
+# mode for the autonomy beside it, over a vocabulary this library closes
 CLAUDE_AUTONOMY: dict[SessionAutonomy, ClaudePermissionMode] = {
     "ask": "default",
     "accept_edits": "acceptEdits",

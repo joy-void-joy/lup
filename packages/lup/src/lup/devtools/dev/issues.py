@@ -29,6 +29,8 @@ unlabelled goes unfixed. The name is this project's choice and no more, so a
 caller passes its own.
 """
 
+# lup: ignore[constant-declaration] — the fields the models below parse, spelled
+# as `gh issue list --json` names them
 ISSUE_FIELDS = "number,url,title,body,labels"
 
 

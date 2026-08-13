@@ -179,6 +179,7 @@ def render_bar(
     utilization: float,
     linear_pct: float,
     bar_width: int,
+    indent: int = BAR_INDENT,
 ) -> None:
     """Render a pacing bar with actual fill and a linear-pace marker."""
     actual_frac = utilization / 100.0
@@ -188,7 +189,7 @@ def render_bar(
     actual_pos = min(int(actual_frac * bar_width), bar_width)
     linear_pos = min(int(linear_frac * bar_width), bar_width - 1)
 
-    out.append(" " * BAR_INDENT)
+    out.append(" " * indent)
     for i in range(bar_width):
         if i == linear_pos:
             out.append("▎", style="bright_black")
@@ -199,7 +200,9 @@ def render_bar(
     out.append("\n")
 
 
-def render_window(out: Text, window: PacingWindow, bar_width: int) -> None:
+def render_window(
+    out: Text, window: PacingWindow, bar_width: int, indent: int = BAR_INDENT
+) -> None:
     """Render one metered window: label, pacing bar, annotations."""
     utilization = window.utilization_pct
     pacing = window_pace(window)
@@ -213,22 +216,24 @@ def render_window(out: Text, window: PacingWindow, bar_width: int) -> None:
     out.append(f"  resets in {fmt_countdown(window.resets_at)}", style="dim")
     out.append("\n")
 
-    render_bar(out, utilization, linear_pct, bar_width)
+    render_bar(out, utilization, linear_pct, bar_width, indent)
 
-    line_width = BAR_INDENT + bar_width
+    line_width = indent + bar_width
 
     you_text = f"↑ you ({utilization:.0f}%)"
     you_bar = min(int((utilization / 100) * bar_width), bar_width - len(you_text))
-    out.append(place_label(you_text, BAR_INDENT + you_bar, line_width), style="dim")
+    out.append(place_label(you_text, indent + you_bar, line_width), style="dim")
     out.append("\n")
 
     pace_text = f"↑ even ({linear_pct:.0f}%)"
     pace_bar = min(int((linear_pct / 100) * bar_width), bar_width - len(pace_text))
-    out.append(place_label(pace_text, BAR_INDENT + pace_bar, line_width), style="dim")
+    out.append(place_label(pace_text, indent + pace_bar, line_width), style="dim")
     out.append("\n")
 
 
-def render_spend(out: Text, spend: SpendWindow, bar_width: int) -> None:
+def render_spend(
+    out: Text, spend: SpendWindow, bar_width: int, indent: int = BAR_INDENT
+) -> None:
     """Render the metered-spend section above the plan."""
     out.append(f"  {spend.label}", style="bold bright_white")
     out.append(f"  ${spend.used:.2f}", style="bold")
@@ -239,7 +244,7 @@ def render_spend(out: Text, spend: SpendWindow, bar_width: int) -> None:
     frac = spend.utilization_pct / 100
     fill_color = pace_color(frac)
     filled = min(int(frac * bar_width), bar_width)
-    out.append(" " * BAR_INDENT)
+    out.append(" " * indent)
     for i in range(bar_width):
         if i < filled:
             out.append("█", style=fill_color)

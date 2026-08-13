@@ -13,10 +13,15 @@ two tests hold it there against the live tree.
 from pathlib import Path
 
 from lup.codescan.boundaries import (
+    CONSTANT_DECLARATION_RULE_ID,
+    LIBRARY_DEFAULT_RULE_ID,
+    ApplicationRoots,
     audit_boundaries,
+    audit_constant_declarations,
     audit_kernel_imports,
     audit_library_defaults,
     audit_path_boundaries,
+    constant_declarations,
     default_position_names,
     find_boundary_breaches,
     find_library_default_breaches,
@@ -32,11 +37,15 @@ from lup_template.devtools.harness.catalog import (
     application_roots,
     dev_project,
 )
+from lup.codescan.common import PythonSource
+from lup.codescan.project import RuleFinding
+from lup.policy.kernel.roles import path_role
 from lup.devtools.dev.boundaries import (
     library_sources,
     overridable_names,
     scan_boundaries,
     scan_library_placement,
+    tracked_python_sources,
 )
 
 BREACHING = "from lup.adapters.claude.runtime import ClaudeSessionFactory\n"
@@ -290,6 +299,160 @@ def test_the_rule_names_every_table_if_the_vocabulary_returns_to_the_library() -
     )
 
     assert [breach.module for breach in breaches] == MOVED_TABLES
+
+
+APPLICATION = Path("src/lup_template/agent/tools/search.py")
+"""A path outside the library, where only the constant rule ever judges."""
+
+
+def constant_findings(text: str, path: Path = APPLICATION) -> list[RuleFinding]:
+    """Judge one module's constants the way the whole-project sweep does."""
+    return audit_constant_declarations(
+        [PythonSource(path=path, module=path.stem, text=text)]
+    )
+
+
+def test_a_judgement_constant_outside_the_library_is_reported() -> None:
+    """The defect the rule exists for: a ceiling with no parameter to replace it."""
+    findings = constant_findings(
+        "SNIPPET_LENGTH = 500\n\n\ndef show(text: str) -> str:\n"
+        "    return text[:SNIPPET_LENGTH]\n"
+    )
+
+    assert [item.kind for item in findings] == ["missing"]
+    assert [item.line for item in findings] == [1]
+    assert "overridable default" in findings[0].message
+    assert f"# lup: ignore[{CONSTANT_DECLARATION_RULE_ID}]" in findings[0].message
+
+
+def test_a_canonical_constant_is_cleared_by_a_reasoned_suppression() -> None:
+    reasoned = (
+        BELOW_FILE_WINDOW
+        + "# lup: ignore[constant-declaration] — the header the vendor requires\n"
+        'ANTHROPIC_BETA = "oauth-2025-04-20"\n'
+    )
+
+    assert constant_findings(reasoned) == []
+
+
+def test_a_reason_may_head_its_declaration_but_never_the_neighbour_above() -> None:
+    """A reason worth reading rarely fits on one line; a run of constants shares none."""
+    block = (
+        BELOW_FILE_WINDOW + "# lup: ignore[constant-declaration] — the two-line\n"
+        "# reason a real exception needs\n"
+        "FIRST = 500\n"
+    )
+    assert constant_findings(block) == []
+
+    run = block + "SECOND = 900\n"
+    assert [item.line for item in constant_findings(run)] == [14]
+
+
+def test_a_constant_a_caller_can_replace_is_not_reported() -> None:
+    """Both spellings of the remedy clear the rule: a parameter, and a field."""
+    parametrized = (
+        "TRAILING_DAYS = 7\n\n\ndef days(trailing: int = TRAILING_DAYS) -> int:\n"
+        "    return trailing\n"
+    )
+    field = (
+        "SUPERVISED_WAIT = 3600.0\n\n\nclass Spawn(BaseModel):\n"
+        "    wait: float = SUPERVISED_WAIT\n"
+    )
+
+    assert constant_findings(parametrized) == []
+    assert constant_findings(field) == []
+
+
+def test_a_vocabulary_cannot_escape_by_naming_its_own_container() -> None:
+    """A bare constructor over literals writes down the same choice a display does."""
+    wrapped = (
+        'VERBS = dict.fromkeys(["push", "reset"])\n'
+        'UNSAFE = set("$*?")\n'
+        'READ = resources.files("lup").joinpath("x").read_text("utf-8")\n'
+    )
+
+    assert [item.line for item in constant_findings(wrapped)] == [1, 2]
+
+
+def test_a_value_derived_from_another_name_is_judged_where_it_is_decided() -> None:
+    """The choice a derived constant embodies was made by what it derives from."""
+    derived = 'ROOT = "packages/lup/"\nKERNEL = f"{ROOT}kernel/"\n'
+
+    assert [item.line for item in constant_findings(derived)] == [1]
+
+
+def test_a_constant_that_carves_text_is_steered_to_the_parser() -> None:
+    """The second defect: the constant exists because nothing parsed the value."""
+    findings = constant_findings(
+        'UTC_SUFFIX = "Z"\n\n\ndef stamp(raw: str) -> str:\n'
+        "    return raw.removesuffix(UTC_SUFFIX)\n"
+    )
+
+    assert [item.line for item in findings] == [1]
+    assert "parse the value instead" in findings[0].message
+    assert "overridable default" not in findings[0].message
+
+
+def test_a_generated_artifact_is_never_judged_for_a_choice_made_elsewhere() -> None:
+    """Its values are compiled, so no fix could survive the next generation."""
+    compiled = Path(".claude/plugins/lup/hooks/runtime/policy_data.py")
+    source = PythonSource(
+        path=compiled,
+        module="policy_data",
+        text='ALLOWED_HOSTS = ["docs.claude.com", "code.claude.com"]\n',
+    )
+
+    assert audit_constant_declarations([source]) != []
+    assert (
+        audit_constant_declarations([source], ApplicationRoots(generated=[".claude/"]))
+        == []
+    )
+
+
+PARTITIONED = (
+    'TABLE = ("ls", "cat")\nSCALAR = "one"\nSINGLETON = (1,)\nDERIVED = OTHER\n'
+)
+"""A vocabulary, a scalar, a one-entry display, and a value naming a name."""
+
+
+def test_the_two_constant_rules_partition_every_declaration() -> None:
+    """cdr-2 in code: one total function hands each declaration to one rule.
+
+    A line both rules could reach would be reported twice and excusable by
+    either directive, which is the state this asserts cannot arise. Only the
+    library's own vocabulary is ``library-default``'s; every other declaration,
+    and every declaration outside the library, is the constant rule's.
+    """
+    declared = constant_declarations(PARTITIONED)
+
+    assert [constant.name for constant in declared] == ["TABLE", "SCALAR", "SINGLETON"]
+    assert [constant.judging_rule(library_module=True) for constant in declared] == [
+        LIBRARY_DEFAULT_RULE_ID,
+        CONSTANT_DECLARATION_RULE_ID,
+        CONSTANT_DECLARATION_RULE_ID,
+    ]
+    assert [constant.judging_rule(library_module=False) for constant in declared] == [
+        CONSTANT_DECLARATION_RULE_ID
+    ] * len(declared)
+
+
+def test_the_live_tree_leaves_no_constant_unresolved() -> None:
+    """cdr-4: every constant the rule trips is parametrized, or reasoned away.
+
+    Production files only, as the sweep that gates them reads: a test declares
+    its fixtures and nothing calls them, so the rule has nothing to say there.
+    """
+    roles = dev_project().path_roles
+    findings = audit_constant_declarations(
+        [
+            PythonSource(path=source.path, module=source.rel, text=source.text)
+            for source in tracked_python_sources()
+            if path_role(source.rel, roles) == "production"
+        ],
+        application_roots(),
+    )
+
+    assert [f"{item.path}:{item.line} {item.kind}" for item in findings] == []
 
 
 def test_adapter_packages_are_exempt_from_the_placement_rule() -> None:

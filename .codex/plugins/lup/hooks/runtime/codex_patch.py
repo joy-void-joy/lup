@@ -1,3 +1,7 @@
+# lup: ignore[constant-declaration]
+# Every constant here is a marker Codex writes into an apply_patch envelope,
+# so the values are the provider's and reading a different set would decode
+# a format no runtime emits.
 """Codex apply_patch envelope parsing for the hook dispatcher.
 
 Codex exposes the complete envelope as ``tool_input.command``. Decoding it

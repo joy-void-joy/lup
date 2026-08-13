@@ -3,7 +3,7 @@
 from pathlib import Path
 
 from lup.codescan.common import RuleStrength
-from lup.codescan.registry import RegisteredRule, all_rules
+from lup.codescan.registry import RULE_REFERENCE, RegisteredRule, all_rules
 from lup.harness.banner import GeneratedBanner
 from lup.harness.materialization import write_generated_file
 from lup.harness.models import Artifact
@@ -115,7 +115,12 @@ def render_rule_reference() -> str:
     )
 
 
-RULE_REFERENCE_PATH = Path("docs/rules.md")
+RULE_REFERENCE_PATH = Path(RULE_REFERENCE)
+"""Where this writes the reference, taken from the path deny messages cite so
+the two cannot name different files."""
+
+# lup: ignore[constant-declaration] — the command a reader types, whose words
+# are the CLI's own rather than a preference this module holds
 RULE_REFERENCE_COMMAND = "uv run lup-devtools dev rules"
 
 

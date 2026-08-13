@@ -33,10 +33,16 @@ subprocess serving and CLI selection (``lup-devtools agent serve-tools
 adding a group. (A plain alias, not a ``type`` statement, so typer can
 read the choices off the annotation.)"""
 
+# One name per member of the closed ``ServerGroup`` alias above, which the CLI
+# spells back and a served group is registered under.
 NOTES_GROUP: ServerGroup = "notes"
+# lup: ignore[constant-declaration] — group identity
 SANDBOX_GROUP: ServerGroup = "sandbox"
+# lup: ignore[constant-declaration] — group identity
 CODEINTEL_GROUP: ServerGroup = "codeintel"
+# lup: ignore[constant-declaration] — group identity
 SESSION_GROUP: ServerGroup = "session"
+# lup: ignore[constant-declaration] — group identity
 EXAMPLE_GROUP: ServerGroup = "example"
 """Placeholder tools with fabricated data — never served to a live agent
 by default; select explicitly (``serve-tools --server example``) to test."""

@@ -15,6 +15,8 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Discriminator, Field
 
+# lup: ignore[constant-declaration] — the command a reader types, whose words are
+# the CLI's own rather than a preference this module holds
 REGENERATE_COMMAND = "uv run lup-devtools harness generate all"
 """The devtools command that rebuilds every native harness tree."""
 
@@ -107,6 +109,8 @@ class CommentRouter:
         return selected.syntax
 
 
+# lup: ignore[library-default] — one route per comment syntax the formats
+# themselves define, so the table follows the languages rather than a taste
 ARTIFACT_COMMENT_ROUTER = CommentRouter(
     [
         CommentRoute(

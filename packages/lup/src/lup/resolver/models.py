@@ -349,6 +349,8 @@ class AnswerBatch(BaseModel):
         return self
 
 
+# lup: ignore[constant-declaration] — the reserved id a run's own vocabulary
+# defines, which planning refuses and integration claims
 INTEGRATION_CONCERN_ID = "integration"
 
 

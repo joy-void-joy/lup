@@ -63,6 +63,8 @@ def assembled_prompt() -> AgentPrompt:
     )
 
 
+# lup: ignore[constant-declaration] — this CLI's own composition: which sub-apps
+# it takes and under what name, decided here because nothing sits above it
 APPLICATION_APPS = {
     "agent": agent_app,
     "dashboard": create_dashboard_app(INTEGRATIONS, DASHBOARD_PORT),

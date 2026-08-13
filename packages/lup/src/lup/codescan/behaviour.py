@@ -60,11 +60,16 @@ from lup.codescan.project import (
     resolve_name,
 )
 
+# lup: ignore[constant-declaration] — the rule's own identity, what a typed
+# directive and every deny message name it by
 RULE_ID = "model-free-function"
 
+# lup: ignore[constant-declaration] — the import path pydantic publishes
 MODEL_BASES = {"pydantic.BaseModel"}
 """Roots whose project-defined descendants count as models we declare."""
 
+# lup: ignore[constant-declaration] — the rule's own sentence, declared with what
+# it detects rather than chosen per caller
 REMEDY = (
     "declare it on the model — or on the ABC the model composes — so the type "
     "carries what can be done with it"

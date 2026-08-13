@@ -34,6 +34,8 @@ from lup.resolver.models import (
 )
 from lup.runtime.models import TurnEvent
 
+# lup: ignore[constant-declaration] — the journal's own file name, which the
+# writing run and every reader of it must spell alike to meet at all
 JOURNAL_FILE = "journal.jsonl"
 
 

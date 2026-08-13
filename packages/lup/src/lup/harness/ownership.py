@@ -101,6 +101,8 @@ def load_manifest(path: Path) -> OwnershipManifest | None:
         ) from error
 
 
+# lup: ignore[constant-declaration] — the proof file's own name, which every
+# generator and the merge driver that reads it must spell alike
 OWNERSHIP_FILENAME = ".lup-ownership.json"
 """What proof is called inside whichever tree a native adapter materializes."""
 

@@ -32,6 +32,8 @@ class ClipboardImage(BaseModel):
     data: bytes
 
 
+# lup: ignore[constant-declaration] — each pair is a media type and the suffix
+# the format is written with, both named outside this repository
 MIME_TO_EXT: dict[str, str] = {  # lup: ignore[dict-str-payload] — mime → suffix
     "image/png": ".png",
     "image/jpeg": ".jpg",
@@ -57,6 +59,8 @@ def save_images(
     return [save_one(image) for image in images]
 
 
+# lup: ignore[constant-declaration] — the media types a clipboard offers an
+# image as, named by the formats rather than by this module
 CLIPBOARD_IMAGE_MIMES = ("image/png", "image/jpeg", "image/webp")
 
 

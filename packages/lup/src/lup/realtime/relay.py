@@ -92,11 +92,15 @@ from lup.telemetry.trace import TraceLogger
 
 logger = logging.getLogger(__name__)
 
-REALTIME_DIRNAME = "realtime"
-ACTIONS_FILENAME = "actions.jsonl"
+# Each of these five names one file of the relay's on-disk protocol, which a
+# writing process and a reading one in another interpreter must spell alike to
+# meet at all — an identity of the format, not a value either end may pick.
+REALTIME_DIRNAME = "realtime"  # lup: ignore[constant-declaration] — protocol name
+ACTIONS_FILENAME = "actions.jsonl"  # lup: ignore[constant-declaration] — protocol name
+# lup: ignore[constant-declaration] — protocol name
 SLEEP_REQUEST_FILENAME = "sleep_request.json"
-STATE_FILENAME = "state.json"
-META_FLAG_FILENAME = "meta_flag"
+STATE_FILENAME = "state.json"  # lup: ignore[constant-declaration] — protocol name
+META_FLAG_FILENAME = "meta_flag"  # lup: ignore[constant-declaration] — protocol name
 
 MAX_ACTIONS_BYTES = 32 * 1024 * 1024
 """Default cap on the actions file — backpressure against a looping agent."""

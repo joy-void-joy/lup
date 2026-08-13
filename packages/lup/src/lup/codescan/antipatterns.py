@@ -58,6 +58,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from lup.codescan.behaviour import RULE_ID as MODEL_FREE_FUNCTION_RULE_ID
 from lup.codescan.boundaries import (
+    CONSTANT_DECLARATION_RULE_ID,
     LIBRARY_DEFAULT_RULE_ID,
     NATIVE_SPELLING_RULE_ID,
     RULE_ID as SEAM_BOUNDARY_RULE_ID,
@@ -502,6 +503,8 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
 """Python rules whose message reads the same whatever runtime is shown it."""
 
 
+# lup: ignore[constant-declaration] — the bare noun a rule's own sentence uses,
+# declared with the rule rather than chosen per caller
 DOCUMENT_IN_HAND = "the file"
 """How the document rule names the file for a runtime to place in its sentence.
 
@@ -658,9 +661,12 @@ PY_SUFFIXES = (".py", ".pyi")
 # lup: ignore[library-default] — the suffixes those ecosystems compile
 TS_SUFFIXES = (".ts", ".tsx", ".js", ".jsx", ".vue", ".svelte")
 
+# lup: ignore[library-default] — the ids other codescan scanners own, so the set
+# follows those rules' own identities rather than any taste of this module's
 FOREIGN_RULE_IDS: frozenset[str] = frozenset(  # lup: ignore[frozenset-shape]
     {
         ABC_CAPABILITY_RULE_ID,
+        CONSTANT_DECLARATION_RULE_ID,
         LIBRARY_DEFAULT_RULE_ID,
         MODEL_FREE_FUNCTION_RULE_ID,
         NATIVE_SPELLING_RULE_ID,

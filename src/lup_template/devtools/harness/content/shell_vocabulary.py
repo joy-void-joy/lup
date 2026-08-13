@@ -69,6 +69,8 @@ def lup_devtools_rule() -> ShellCommandRule:
     )
 
 
+# lup: ignore[constant-declaration] — which vocabulary groups this project takes
+# and what it passes them, decided here because nothing sits above it to be asked
 SHELL_RULES: list[ShellCommandRule] = [
     *read_only_rules(),
     *judged_ask_rules(),

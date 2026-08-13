@@ -346,6 +346,8 @@ def create_realtime_tools(
 # 5. Include notes[-1] in the main agent's context tool
 # 6. Call observer.stop() on session teardown
 
+# lup: ignore[constant-declaration] — the observer's own standing prose, which
+# is what this scaffold exists to state
 OBSERVER_SYSTEM_PROMPT = """\
 You are a background observer for a conversation agent. Each turn you \
 receive new transcript messages and write a note the agent reads for \

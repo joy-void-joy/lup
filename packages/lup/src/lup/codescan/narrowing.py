@@ -47,11 +47,16 @@ from lup.codescan.project import (
     audit_suppressions,
 )
 
+# lup: ignore[constant-declaration] — the rule's own identity, what a typed
+# directive and every deny message name it by
 RULE_ID = "isinstance-chain"
 
+# lup: ignore[constant-declaration] — Python's own builtin, named by the language
 NARROWING_CALL = "isinstance"
 """The builtin whose repetition over one subject spells a dispatch."""
 
+# lup: ignore[constant-declaration] — the rule's own sentence, declared with what
+# it detects rather than chosen per caller
 REMEDY = "write the match it compiles to, one case arm per type"
 
 

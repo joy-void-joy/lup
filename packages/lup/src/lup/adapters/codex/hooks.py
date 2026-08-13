@@ -1,3 +1,7 @@
+# lup: ignore[constant-declaration]
+# Every constant here is a Codex app-server method or reply word, so the wire
+# decides the value and a caller passing another would answer a request the
+# server never sends.
 """Translate backend-neutral Lup hooks to Codex app-server approval replies.
 
 The Claude twin of this module wraps SDK hook handlers. Codex has no such

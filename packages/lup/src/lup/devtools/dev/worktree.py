@@ -101,6 +101,8 @@ def worktree_is_registered(path: Path) -> bool:
     )
 
 
+# lup: ignore[constant-declaration] — the driver name `.gitattributes` and this
+# registration must spell alike for git to find one from the other
 OWNERSHIP_MERGE_DRIVER = "lup-ownership"
 
 

@@ -49,6 +49,7 @@ async def stream(
     interval: float = WATCH_INTERVAL_SECONDS,
     heartbeat: float = HEARTBEAT_SECONDS,
     catchup: int = FRESH_CATCHUP_ENTRIES,
+    retry_milliseconds: int = RETRY_MILLISECONDS,
 ) -> AsyncGenerator[str, None]:
     """Replay what this reader missed, then follow the journal as it grows.
 
@@ -62,7 +63,7 @@ async def stream(
     way would be closed rather than resumed, and the stream would go silent
     exactly when the run went quiet.
     """
-    yield f"retry: {RETRY_MILLISECONDS}\n\n"
+    yield f"retry: {retry_milliseconds}\n\n"
     caught_up = journal.tail(0)
     missed = (
         caught_up.entries[-catchup:]

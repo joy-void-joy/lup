@@ -1,3 +1,8 @@
+# lup: ignore[constant-declaration]
+# Every constant here is this repository's own composition — which documents it
+# publishes and where their sources live. A composition root is where a
+# judgement is finally made rather than passed on, so there is no caller above
+# it to take these from.
 """Every document this repository publishes under ``docs/``.
 
 The pages about lup's own machinery come from the library; declared here are

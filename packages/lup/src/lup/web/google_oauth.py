@@ -28,7 +28,7 @@ from lup.types import JsonValue
 # A loopback redirect that Google accepts for Desktop OAuth clients. On a headless
 # host nothing listens here, but the consent redirect still lands in the browser's
 # address bar with ?code=..., which the user copies back into the dashboard.
-MANUAL_REDIRECT_URI = "http://localhost"  # lup: ignore[library-default] — the redirect Google itself accepts for an installed client, not a choice this library makes
+MANUAL_REDIRECT_URI = "http://localhost"  # lup: ignore[constant-declaration] — the redirect Google itself accepts for an installed client, not a choice this library makes
 
 
 class Consent(BaseModel):

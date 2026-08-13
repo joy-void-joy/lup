@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_ACCOUNT_HOME = Path.home() / ".codex"
 DEFAULT_SCOPED_ROOT = Path.home() / ".lup" / "codex" / "worktrees"
+# lup: ignore[constant-declaration] — the keys Codex writes its own state under
 CODEX_CONFIG_STATE_KEYS = ("marketplaces", "plugins")
 
 

@@ -81,7 +81,9 @@ def windows_from(usage: AccountUsage) -> list[PacingWindow]:
     return [window for window in reported if window is not None]
 
 
-def days_from(usage: AccountUsage, window_end: datetime) -> list[DayUsage]:
+def days_from(
+    usage: AccountUsage, window_end: datetime, trailing_days: int = TRAILING_DAYS
+) -> list[DayUsage]:
     """The trailing week of daily buckets, weighed by the tokens they count.
 
     Codex publishes no per-model prices, so a day weighs what it moved. A day
@@ -94,7 +96,7 @@ def days_from(usage: AccountUsage, window_end: datetime) -> list[DayUsage]:
         if (day := bucket.starts_on()) is not None
     }
     last = window_end.date()
-    shown = [last - timedelta(days=offset) for offset in reversed(range(TRAILING_DAYS))]
+    shown = [last - timedelta(days=offset) for offset in reversed(range(trailing_days))]
     return [
         DayUsage(
             day=day,

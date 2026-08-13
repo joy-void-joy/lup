@@ -199,6 +199,10 @@ async def run_reviewer(
     outputs_dir: Path | None,
     *,
     model: str = "claude-opus-5",
+    system_prompt: str = REVIEWER_SYSTEM_PROMPT,
+    tools: list[str] = REVIEWER_TOOLS,
+    thinking_budget: int = REVIEWER_THINKING_BUDGET,
+    max_turns: int = REVIEWER_MAX_TURNS,
 ) -> ReviewResult | None:
     """Run the nested reviewer agent and return its structured verdict.
 
@@ -225,8 +229,10 @@ async def run_reviewer(
 
     factory = build_auxiliary_factory(
         model=model,
-        system_prompt=REVIEWER_SYSTEM_PROMPT.format(outputs_dir=outputs_dir or "N/A"),
-        tools=REVIEWER_TOOLS,
+        system_prompt=system_prompt.format(outputs_dir=outputs_dir or "N/A"),
+        tools=tools,
+        thinking_budget=thinking_budget,
+        max_turns=max_turns,
     )
     result = await query(factory, reviewer_prompt, ReviewResult)
     return result.output

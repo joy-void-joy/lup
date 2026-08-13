@@ -372,6 +372,7 @@ class CodexLiveEventStream(EventStream):
         return self.iterate()
 
 
+# lup: ignore[constant-declaration] — what the app-server advertises the tool as
 SUBMISSION_TOOL = "submit_output"
 """What the app-server advertises this turn's dynamic submission tool as."""
 

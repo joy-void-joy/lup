@@ -622,6 +622,7 @@ def create_claude_session_factory(
 # The fully qualified name of the turn-bound submission tool as Claude Code
 # sees it. Compositions that install their own tool-allowlist hooks must
 # include it, or the hook denies the very tool the turn requires.
+# lup: ignore[constant-declaration] — the qualified name Claude Code composes
 SUBMISSION_TOOL = "mcp__lup-output__submit_output"
 
 

@@ -1,6 +1,9 @@
-# lup: ignore[native-spelling]
+# lup: ignore[native-spelling, constant-declaration]
 # This portable scaffold names the hook event it teaches adopters about; every
 # skill mention is a typed invocation part rendered natively per platform.
+# Every constant here is one block of that scaffold's prose: a project wanting
+# different words composes different blocks, which is an override the
+# mechanical half of the constant rule cannot see.
 """Portable downstream-template sections shared by every guidance flavor."""
 
 import lup.harness.models as models

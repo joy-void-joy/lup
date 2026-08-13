@@ -44,6 +44,8 @@ from lup.channels.models import write_atomic
 
 logger = logging.getLogger(__name__)
 
+# lup: ignore[constant-declaration] — the metrics file's own name inside a
+# session directory, which the writer and every reader must spell alike
 METRICS_FILENAME = "metrics.json"
 
 

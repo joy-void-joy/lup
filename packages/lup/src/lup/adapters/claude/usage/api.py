@@ -26,7 +26,9 @@ def stats_path(config_dir: Path) -> Path:
     return config_dir / "stats-cache.json"
 
 
+# lup: ignore[constant-declaration] — the endpoint the vendor publishes
 USAGE_API_URL = "https://api.anthropic.com/api/oauth/usage"
+# lup: ignore[constant-declaration] — the beta header value that endpoint requires
 ANTHROPIC_BETA = "oauth-2025-04-20"
 
 

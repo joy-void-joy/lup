@@ -32,6 +32,8 @@ from lup.codescan.common import RuleStrength
 type RuleFamily = Literal["anti-pattern", "boundary", "spelling", "architecture"]
 
 
+# lup: ignore[constant-declaration] — one generated artifact's identity: the
+# writer and every deny message that cites it must name the same file
 RULE_REFERENCE = "docs/rules.md"
 """Repository-relative path of the generated reference deny messages cite."""
 
@@ -170,6 +172,28 @@ STRUCTURAL_RULES: list[RegisteredRule] = [
             "canonical table, whose value is fixed outside this repository."
         ),
         defined_in=boundaries.__name__,
+    ),
+    RegisteredRule(
+        id=boundaries.CONSTANT_DECLARATION_RULE_ID,
+        family="architecture",
+        scope="Python constants",
+        example="SNIPPET_LENGTH = 500",
+        message=(
+            "A constant is a judgement a second implementer with the same intent "
+            "could have made differently — a ceiling, a retry count, an allowlist — "
+            "frozen where no caller can replace it. It reaches them as an overridable "
+            "default instead: a parameter default, a pydantic field default, or the "
+            "sentinel a mutable default is written as. Suppress only a canonical "
+            "value — a provider's wire spelling, a language's own vocabulary, an "
+            "identity this repository defines. A constant that exists to carve "
+            "text by hand is steered to the parser rather than to a parameter, "
+            "because parametrizing it would keep the surgery."
+        ),
+        defined_in=boundaries.__name__,
+        refinement=(
+            "The library's own multi-entry tables are library-default's instead, so "
+            "the two partition every declaration and neither reaches the other's."
+        ),
     ),
     RegisteredRule(
         id=boundaries.KERNEL_IMPORT_RULE_ID,

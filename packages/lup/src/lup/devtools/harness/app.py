@@ -274,6 +274,9 @@ def create_harness_app(
         # adapter decides never comes up.
         if adapter is None and abort is None:
             raise typer.BadParameter("--adapter is required to drive a resolver run")
+        spawn = resolve.SupervisorSpawn(
+            enabled=supervise, port=supervise_port, linger=supervise_linger
+        )
         resolve.run_resolve(
             # An abort needs no adapter, and asking for one reads as a bug. The
             # core still holds a composition, so ending a run without the flag
@@ -282,10 +285,8 @@ def create_harness_app(
             run_id,
             answer or [],
             abort,
-            max(wait, resolve.SUPERVISED_WAIT_SECONDS) if supervise else wait,
-            resolve.SupervisorSpawn(
-                enabled=supervise, port=supervise_port, linger=supervise_linger
-            ),
+            spawn.waiting(wait),
+            spawn,
             resolve.admission_request(admit or [], admit_note or [], admit_issue or []),
             model,
             adopt_config,

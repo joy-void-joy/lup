@@ -17,6 +17,7 @@ import typer
 from pydantic import BaseModel, ConfigDict
 
 from lup.codescan.markers import find_feedback
+from lup.devtools.layout import SUPERVISOR_PORT
 from lup.mcp import create_mcp_server, serve_stdio, server_tool_names
 from lup.policy.identity import (
     agent_identity_environment,
@@ -390,6 +391,8 @@ def run_resolver_tool_server() -> None:
 
 
 SUPERVISED_WAIT_SECONDS = 3600.0
+"""The shipped floor ``SupervisorSpawn`` takes as its field default below,
+which is where a caller replaces it."""
 
 
 class SupervisorSpawn(BaseModel):
@@ -398,8 +401,16 @@ class SupervisorSpawn(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     enabled: bool = False
-    port: int = 8766
+    port: int = SUPERVISOR_PORT
     linger: bool = False
+
+    wait_floor: float = SUPERVISED_WAIT_SECONDS
+    """The shortest wait a supervised run takes, whatever it was asked for: a
+    page nobody is watching yet is the case the wait exists for."""
+
+    def waiting(self, asked: float) -> float:
+        """How long this run waits for an answer, given what was asked."""
+        return max(asked, self.wait_floor) if self.enabled else asked
 
 
 # lup: ignore[model-free-function] — driver: it spawns the supervisor process
@@ -585,6 +596,8 @@ def resolver_source_snapshot(
     return SourceSnapshot(branch=branch, commit=commit)
 
 
+# lup: ignore[constant-declaration] — the run's own branch naming, which a
+# resumed run must spell exactly as the run that created the branch
 REVIEW_BRANCH_SUFFIX = "/review"
 
 

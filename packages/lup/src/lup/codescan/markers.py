@@ -293,7 +293,9 @@ class MarkerScan:
 
         return content_of
 
-    def notes(self) -> list[MarkerComment]:
+    def notes(
+        self, before: int = CONTEXT_BEFORE, after: int = CONTEXT_AFTER
+    ) -> list[MarkerComment]:
         found: list[MarkerComment] = []
         for numbered in self.cursor:
             line_no = numbered.number
@@ -320,8 +322,8 @@ class MarkerScan:
                 MarkerComment(
                     start_line=line_no,
                     end_line=end_line,
-                    read_start=max(1, line_no - CONTEXT_BEFORE),
-                    read_end=min(self.total, end_line + CONTEXT_AFTER),
+                    read_start=max(1, line_no - before),
+                    read_end=min(self.total, end_line + after),
                     text=" ".join(part for part in parts if part),
                 )
             )

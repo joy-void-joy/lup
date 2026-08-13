@@ -19,6 +19,7 @@ cache: dict[str, int] = {}  # lup: ignore[empty-collection] — mutable fold
 | Rule id | Family | Scope | Matching example | Diagnostic | Suppression | Defined in |
 | --- | --- | --- | --- | --- | --- | --- |
 | `abc-capability` | architecture | Python architecture | <code>class Combined(Reader, Writer): ...</code> | Capability ABCs stay independently constructible and cohesive; implementations do not inherit multiple capabilities or reusable behavior. | typed directive | `lup.codescan.capabilities` |
+| `constant-declaration` | architecture | Python constants | <code>SNIPPET_LENGTH = 500</code> | A constant is a judgement a second implementer with the same intent could have made differently — a ceiling, a retry count, an allowlist — frozen where no caller can replace it. It reaches them as an overridable default instead: a parameter default, a pydantic field default, or the sentinel a mutable default is written as. Suppress only a canonical value — a provider&#x27;s wire spelling, a language&#x27;s own vocabulary, an identity this repository defines. A constant that exists to carve text by hand is steered to the parser rather than to a parameter, because parametrizing it would keep the surgery. | typed directive | `lup.codescan.boundaries` |
 | `isinstance-chain` | architecture | Python architecture | <code>if isinstance(n, ast.Name): ... elif isinstance(n, ast.Attribute): ...</code> | Narrowing one subject again, in a later arm of the same if/elif chain, is a dispatch in the older spelling: each arm becomes a case pattern, an and conjunct becomes its guard, and the fallthrough becomes case _. A single narrowing is sanctioned and stays silent, as does isinstance in expression position, where match has no spelling at all. | **refused** | `lup.codescan.narrowing` |
 | `kernel-imports` | boundary | Policy kernel | <code>from pydantic import BaseModel</code> | The copied hook kernel imports only its pinned standard-library allowlist. | typed directive | `lup.codescan.boundaries` |
 | `library-default` | boundary | Neutral library modules | <code>READ_ONLY_COMMANDS = (&quot;ls&quot;, &quot;cat&quot;, &quot;grep&quot;)</code> | A data table a library declares is a choice made for every adopter: it reaches them as an overridable default — a parameter default, a pydantic field default, or the sentinel a mutable default is written as — so they replace the vocabulary instead of editing the library. Suppress only a canonical table, whose value is fixed outside this repository. | typed directive | `lup.codescan.boundaries` |
@@ -94,6 +95,10 @@ cache: dict[str, int] = {}  # lup: ignore[empty-collection] — mutable fold
 ## Audit-side refinements
 
 The edit hook sees a fragment of a proposed edit: no parse tree, no types, and a hermetic kernel that may not reach a type checker. So it decides on the spelling alone, and every rule above means exactly its matching example there. The whole-file audit reads finished source and resolves what a matched name refers to through the type oracle in `lup.codescan.oracle`, so the rules below decide more narrowly in `lup-devtools dev check` than they do at edit time — a hook denial you believe is wrong is answered by the audit, which reports the declaration that settled it. Where the oracle is unavailable the audit falls back to the hook's broad verdict, and a `# lup: ignore` left guarding a refuted line is reported as a dead directive.
+
+### `constant-declaration`
+
+The library's own multi-entry tables are library-default's instead, so the two partition every declaration and neither reaches the other's.
 
 ### `dict-get`
 

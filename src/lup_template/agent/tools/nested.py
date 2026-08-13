@@ -79,5 +79,7 @@ async def critique(params: CritiqueInput) -> CritiqueOutput:
     return CritiqueOutput(critique=text[:limit], truncated=len(text) > limit)
 
 
+# lup: ignore[constant-declaration] — which tools this module defines, which is
+# the module's own roster rather than a value a caller supplies
 NESTED_TOOLS = [critique]
 """Nested-agent tools — add to a server group in ``toolsets.py`` to serve them."""

@@ -13,11 +13,18 @@ from pydantic import BaseModel, ConfigDict
 
 from lup.harness.banner import GeneratedBanner
 from lup.harness.materialization import write_generated_file
+from lup.harness.banner import REGENERATE_COMMAND
 from lup.harness.models import Artifact
 from lup.workspace.paths import project_root
 
+# lup: ignore[constant-declaration] — the directory GitHub Actions itself reads
 WORKFLOW_PATH = Path(".github/workflows/quality.yml")
-WORKFLOW_COMMAND = "uv run lup-devtools harness generate all"
+WORKFLOW_COMMAND = REGENERATE_COMMAND
+"""What the gate runs to rebuild every tree, taken from the command the banners
+already tell a reader to type so the two cannot name different things."""
+
+# lup: ignore[constant-declaration] — the command a reader types, whose words
+# are the CLI's own rather than a preference this module holds
 CHECK_COMMAND = "uv run lup-devtools dev check"
 
 

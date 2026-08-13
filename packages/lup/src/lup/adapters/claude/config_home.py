@@ -1,3 +1,7 @@
+# lup: ignore[constant-declaration]
+# Every constant here is what Claude Code itself calls one of these things, so
+# each docstring below states the value's own provenance and a caller passing
+# a different one would be reading a home no runtime writes.
 """Claude Code's configuration document, and a private one per workspace.
 
 Where that document sits is Claude's own rule rather than a shape any

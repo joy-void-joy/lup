@@ -1,4 +1,8 @@
-# lup: ignore[model-free-function]
+# lup: ignore[model-free-function, constant-declaration]
+# Every constant here is a name in the script this module emits — its package,
+# its members, its router, its entry point, its shebang. They are the compiled
+# artifact's own vocabulary, so a caller passing different ones would be
+# compiling a different artifact than the one the proofs below read.
 # The compiler is the renderer half of declaration-plus-renderer, and its proofs
 # span the halves it joins: a declaration that compiled itself would carry the
 # reading of source it is checked against, and no single half can say whether

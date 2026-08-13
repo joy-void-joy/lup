@@ -40,19 +40,27 @@ KERNEL_IMPORT_ALLOWLIST = (  # lup: ignore[library-default] — the stdlib the k
     "typing",
     "urllib.parse",
 )
+# The five below are sentences and one sentinel the kernel's own decisions
+# carry: each is declared beside the verdict that returns it, so a caller
+# passing different words would be returning a different verdict.
+# lup: ignore[constant-declaration] — refusal wording, declared with its verdict
 ESCALATE_HINT = (
     " — reshape the command into the allowed vocabulary, or resubmit with a"
     " leading '# lup: escalate: <why>' line to request approval"
 )
-RESHAPE_HINT = " — reshape the command into the allowed vocabulary"
+RESHAPE_HINT = " — reshape the command into the allowed vocabulary"  # lup: ignore[constant-declaration] — refusal wording
+# lup: ignore[constant-declaration] — refusal wording, declared with its verdict
 SUBSTITUTION_REASON = (
     "command substitution is denied — run the inner command in its own call"
     " and splice its literal output, or read it through <(...) or a pipe"
 )
+# lup: ignore[constant-declaration] — refusal wording, declared with its verdict
 BACKTICK_REASON = (
     "backtick substitution is denied — use $(...) so the inner command"
     " can be classified"
 )
+# lup: ignore[constant-declaration] — a spelling chosen to sit outside identifier
+# space, which is the property the substitution proof below rests on
 SUBSTITUTION_SENTINEL = "$~sub~"
 """Spliced into a word where a real ``$(...)`` stood.
 

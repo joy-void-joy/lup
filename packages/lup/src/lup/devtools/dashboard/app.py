@@ -13,6 +13,7 @@ import typer
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
+from lup.devtools.layout import DASHBOARD_PORT
 from lup.devtools.setup import Integration, read_env_local, write_env_local
 from lup.types import EnvVars
 from lup.web.serve import local_page_app, serve_local_page
@@ -144,7 +145,7 @@ def create_dashboard(url: str, integrations: list[Integration]) -> FastAPI:
 
 
 def create_dashboard_app(
-    integrations: list[Integration], default_port: int = 8765
+    integrations: list[Integration], default_port: int = DASHBOARD_PORT
 ) -> typer.Typer:
     """Build the dashboard command over a project's declared integrations."""
     app = typer.Typer(

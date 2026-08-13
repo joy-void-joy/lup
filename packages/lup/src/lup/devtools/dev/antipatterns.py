@@ -36,7 +36,7 @@ from lup.codescan.antipatterns import (
     patterns_for_suffix,
 )
 from lup.codescan.behaviour import audit_model_free_functions
-from lup.codescan.boundaries import audit_path_boundaries
+from lup.codescan.boundaries import audit_constant_declarations, audit_path_boundaries
 from lup.codescan.capabilities import audit_capabilities
 from lup.codescan.common import (
     PACKAGE_ROOTS,
@@ -170,6 +170,7 @@ def scan_antipatterns(
             *audit_model_free_functions(sources),
             *audit_own_model_dispatch(sources),
             *audit_isinstance_chains(sources),
+            *audit_constant_declarations(sources, project.roots),
         ]
     )
     boundary_findings = [
@@ -215,7 +216,12 @@ def scan_antipatterns(
 ADVISORY_KINDS = {"untyped"}
 
 
-def summarize(project: DevProject, as_json: bool, paths: Sequence[str] = ()) -> None:
+def summarize(
+    project: DevProject,
+    as_json: bool,
+    paths: Sequence[str] = (),
+    advisory: AbstractSet[str] = ADVISORY_KINDS,
+) -> None:
     """Tally anti-pattern findings by rule and kind — the sweep triage view.
 
     A per-rule count (most-frequent first, with how many files each spans) and
@@ -235,7 +241,7 @@ def summarize(project: DevProject, as_json: bool, paths: Sequence[str] = ()) -> 
         if finding.file not in files_by_rule[rule]:
             files_by_rule[rule].append(finding.file)
 
-    blocking = sum(1 for finding in found if finding.kind not in ADVISORY_KINDS)
+    blocking = sum(1 for finding in found if finding.kind not in advisory)
     file_count = len(dict.fromkeys(finding.file for finding in found))
 
     if as_json:
@@ -269,7 +275,12 @@ def summarize(project: DevProject, as_json: bool, paths: Sequence[str] = ()) -> 
     typer.echo(f"Rule reference: {RULE_REFERENCE} (`uv run lup-devtools dev rules`)")
 
 
-def report(project: DevProject, as_json: bool, paths: Sequence[str] = ()) -> None:
+def report(
+    project: DevProject,
+    as_json: bool,
+    paths: Sequence[str] = (),
+    advisory: AbstractSet[str] = ADVISORY_KINDS,
+) -> None:
     """List anti-pattern findings; exit non-zero when a blocking one remains.
 
     "untyped" findings are advisory (a bare `# lup: ignore` to migrate to a
@@ -279,7 +290,7 @@ def report(project: DevProject, as_json: bool, paths: Sequence[str] = ()) -> Non
     """
     scan = scan_antipatterns(project, paths)
     found = scan.findings
-    blocking = [finding for finding in found if finding.kind not in ADVISORY_KINDS]
+    blocking = [finding for finding in found if finding.kind not in advisory]
     if as_json:
         output_json(
             {
@@ -302,8 +313,8 @@ def report(project: DevProject, as_json: bool, paths: Sequence[str] = ()) -> Non
         typer.echo(f"{finding.file}:{finding.line} [{finding.kind}] {finding.message}")
         typer.echo(f"    {finding.text}")
     files = {finding.file for finding in found}
-    advisory = len(found) - len(blocking)
-    tail = f" (+{advisory} untyped, advisory)" if advisory else ""
+    reported = len(found) - len(blocking)
+    tail = f" (+{reported} untyped, advisory)" if reported else ""
     typer.echo(f"\n{len(blocking)} blocking finding(s){tail} in {len(files)} file(s)")
     typer.echo(f"Rule reference: {RULE_REFERENCE} (`uv run lup-devtools dev rules`)")
     if blocking:

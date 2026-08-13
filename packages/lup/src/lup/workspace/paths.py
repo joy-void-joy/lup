@@ -313,6 +313,8 @@ def feedback_path() -> Path:
 
 # -- Timestamp helpers --------------------------------------------------------
 
+# lup: ignore[constant-declaration] — the stamp already written into every
+# session directory on disk, which a reader must parse exactly as written
 TIMESTAMP_FMT = "%Y%m%d_%H%M%S"
 TIMESTAMP_RE = re.compile(r"\d{8}_\d{6}")
 

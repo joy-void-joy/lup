@@ -315,6 +315,8 @@ async def fetch_example(params: FetchInput) -> FetchOutput:
 # --- Tool Collection ---
 # Group tools for your MCP server
 
+# lup: ignore[constant-declaration] — which tools this module defines, which is
+# the module's own roster rather than a value a caller supplies
 EXAMPLE_TOOLS = [
     search_example,
     fetch_example,

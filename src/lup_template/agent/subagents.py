@@ -1,3 +1,7 @@
+# lup: ignore[constant-declaration]
+# The prompts here are each subagent's own standing prose and the roster is
+# which subagents this application declares — both are what this module is for,
+# and a project wanting others writes them here.
 """Subagent definitions.
 
 This is a TEMPLATE. Define subagents for specialized tasks in your domain.

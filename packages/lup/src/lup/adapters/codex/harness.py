@@ -2,6 +2,7 @@
 
 import json
 import shlex
+from collections.abc import Collection
 from importlib import resources
 from pathlib import Path
 
@@ -450,7 +451,9 @@ CODEX_DYNAMIC_COMMANDS = (
 
 
 def codex_allow_prefixes(
-    rules: list[ShellCommandRule], runner_targets: list[str]
+    rules: list[ShellCommandRule],
+    runner_targets: list[str],
+    dynamic: Collection[str] = CODEX_DYNAMIC_COMMANDS,
 ) -> list[list[str]]:
     """Compile semantic allows that stay allowed for every suffix.
 
@@ -467,7 +470,7 @@ def codex_allow_prefixes(
     for command in rules:
         if not command.subcommands:
             if (
-                command.name not in CODEX_DYNAMIC_COMMANDS
+                command.name not in dynamic
                 and command.default_effect == "allow"
                 and not command.ask_flags
             ):

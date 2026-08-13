@@ -50,6 +50,8 @@ from lup.policy.dispatcher import (
 from lup.policy.kernel.rows import PathRoleRow
 
 
+# lup: ignore[constant-declaration] — each value is Claude Code's own alias for
+# the tier beside it, over a tier vocabulary this library closes
 CLAUDE_MODEL_ALIASES: dict[ModelTier, str] = {
     "inherit": "inherit",
     "strongest": "opus",
@@ -199,6 +201,8 @@ class ClaudeSpellings(NativeSpellings):
                 return Atom(f"{root}/TEMPLATE_CLAUDE.md")
 
 
+# lup: ignore[constant-declaration] — which built-ins Claude Code ships is the
+# runtime's fact to state, not a preference a caller holds
 CLAUDE_ABSENT_TOOLS = ("Glob", "Grep")
 """Built-ins the portable vocabulary names that Claude Code does not ship.
 

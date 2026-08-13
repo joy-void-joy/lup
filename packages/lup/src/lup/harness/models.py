@@ -45,6 +45,8 @@ type QualifiedAgentName = Annotated[
 ]
 """A delegation target, ``<plugin>:<agent>``, as a runtime addresses one."""
 
+# lup: ignore[constant-declaration] — the characters the runtimes actually write,
+# each of which proves its own sigil is one of these
 INVOCATION_SIGILS = "/$"
 """Every character a runtime writes in front of a skill invocation.
 

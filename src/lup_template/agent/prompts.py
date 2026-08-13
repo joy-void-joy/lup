@@ -1,3 +1,7 @@
+# lup: ignore[constant-declaration]
+# Every constant here is a block of this agent's own standing prose. What it is
+# told is the thing this module decides — a project wanting different words
+# writes them here, which is what a scaffold is for.
 """The standing prose the agent is told: its task, its guidelines, and how to
 deliver a result.
 

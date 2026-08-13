@@ -138,6 +138,7 @@ def run_checks(
     repository_writers: list[RepositoryWriter],
     guidance: PromptDocument,
     scope: list[str] | None = None,
+    test_workers: int = TEST_WORKERS,
 ) -> None:
     """Run ruff format, ruff check, pyright, and pytest in sequence.
 
@@ -205,7 +206,7 @@ def run_checks(
                     "run",
                     "pytest",
                     "-n",
-                    str(TEST_WORKERS),
+                    str(test_workers),
                     _cwd=str(test_root.directory),
                 )
                 typer.echo(f"{test_root.name}: ok")

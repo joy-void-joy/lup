@@ -1,3 +1,7 @@
+# lup: ignore[constant-declaration]
+# The constants here name the mailbox's own on-disk layout, which a writer and
+# a reader in different processes must agree on to find each other's files at
+# all — an identity of this format rather than a choice a caller can make.
 """The persisted question mailbox every answer door writes through.
 
 A question is a :class:`~lup.channels.slot.Slot`: declared once by whoever
