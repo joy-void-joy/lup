@@ -364,8 +364,18 @@ def rendered(decision, payload):
     The rewrite replaces the arguments rather than merging into them, so the
     whole input is carried through. A deferral is placed nowhere, which is
     also why nothing here reads a payload a deferral may not have parsed.
+
+    Both sandbox questions are answered yes here, from that one field: the
+    rewrite is how a verdict places a call, and the same field on the call the
+    agent writes is how the agent places its own — which is what an
+    ``escalable`` verdict offers it. The offer goes out as context and not
+    only as the permission reason, because the reason on a grant is shown to
+    the human rather than to the agent, and this offer is the agent's to
+    spend. That is the shape `lup_hook_output_to_claude` already renders for
+    the in-process seam; two emitters disagreeing about one field is how the
+    offer went undelivered here in the first place.
     """
-    settled = decision.placed(True)
+    settled = decision.placed(escapable=True, agent_escalates=True)
     if settled.effect == "defer":
         return {}
     answer = {
@@ -373,6 +383,8 @@ def rendered(decision, payload):
         "permissionDecision": settled.effect,
         "permissionDecisionReason": settled.reason,
     }
+    if settled.sandbox == "escalable":
+        answer["additionalContext"] = settled.reason
     if settled.sandbox == "ambient" or payload["tool_name"] != "Bash":
         return {"hookSpecificOutput": answer}
     return {

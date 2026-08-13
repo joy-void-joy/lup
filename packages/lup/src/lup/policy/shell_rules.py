@@ -49,6 +49,11 @@ class RunnerTargetRule(BaseModel):
     launched from inside a sandbox that does not grant that path loses its
     shell entirely. Declaring it beside the name is what keeps the escape off
     the call sites — one that has to remember a flag is one that forgets it.
+
+    The field is the whole placement vocabulary and not a two-valued switch,
+    so a target that only sometimes needs the outside says ``escalable`` here
+    and keeps the ordinary run confined. One field says every way a target may
+    leave, which is what stops a second way of saying it from growing.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -105,7 +110,11 @@ class ShellCommandRule(BaseModel):
     renderer: it says where an invocation matched by this rule has to run,
     whatever effect the rule reaches. Reads that need a remote take
     ``outside`` and run unprompted; writes that need one take ``outside``
-    beside an ``ask``, so the approval says both things at once.
+    beside an ``ask``, so the approval says both things at once. A command
+    that usually belongs inside but sometimes has to leave takes
+    ``escalable``, which confines it and lets the agent making the call take
+    it out — one field says every one of these, so a rule that permits the
+    outside never has a second way to say it.
     """
 
     model_config = ConfigDict(frozen=True)

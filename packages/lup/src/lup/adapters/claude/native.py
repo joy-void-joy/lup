@@ -192,10 +192,38 @@ def claude_sandbox_input(
     written. The rewrite replaces the arguments outright rather than merging
     into them, which is why the whole input is carried through; an unplaced
     verdict rewrites nothing at all.
+
+    An escalable placement is the one that reads the call's own flag rather
+    than overwriting it. The permission is the agent's to spend, so a call
+    that spent it goes out and one that did not stays confined — writing a
+    plain ``False`` there would answer for the agent and make the offer a
+    verdict it has no way to accept.
     """
     if tool_input is None or sandbox == "ambient":
         return None
-    return {**tool_input, "dangerouslyDisableSandbox": sandbox == "outside"}
+    match sandbox, tool_input:
+        case "escalable", {"dangerouslyDisableSandbox": True}:
+            escaped = True
+        case "escalable", _:
+            escaped = False
+        case _:
+            escaped = sandbox == "outside"
+    return {**tool_input, "dangerouslyDisableSandbox": escaped}
+
+
+def escalation_context(decision: Decision) -> str:
+    """What the verdict has to say to the agent rather than about it.
+
+    A permission channel carries two reasons to two readers: on a refusal the
+    agent is told, and on a grant the human is. So a grant whose reason exists
+    for the agent — an offer to escalate is the one — reaches nobody through
+    that channel, and says itself again on the one an agent reads.
+
+    Only that placement, because everything else a verdict says about an
+    allowed call is bookkeeping, and a context line per allowed call is how a
+    channel meant for what matters stops being read.
+    """
+    return decision.reason if decision.sandbox == "escalable" else ""
 
 
 class ClaudeDecisionOutput(BaseModel):
@@ -211,6 +239,12 @@ class ClaudeDecisionOutput(BaseModel):
     )
     reason: str = Field(default="", alias="permissionDecisionReason")
     updated_input: JsonObject | None = Field(default=None, alias="updatedInput")
+    additional_context: str = Field(default="", alias="additionalContext")
+    """What the agent reads, as against what the human asked is shown.
+
+    The two are separate channels and a grant only travels on this one: a
+    permission reason on an allow reaches the user, so a verdict with
+    something for the agent to act on has to say it here as well."""
 
 
 class ClaudeDecisionRenderer(NativeDecisionRenderer[ClaudeDecisionOutput]):
@@ -231,11 +265,12 @@ class ClaudeDecisionRenderer(NativeDecisionRenderer[ClaudeDecisionOutput]):
     def render(
         self, decision: Decision, tool_input: JsonObject | None = None
     ) -> ClaudeDecisionOutput:
-        settled = decision.placed(escapable=True)
+        settled = decision.placed(escapable=True, agent_escalates=True)
         if settled.effect == "defer":
             return ClaudeDecisionOutput(permissionDecisionReason=settled.reason)
         return ClaudeDecisionOutput(
             permissionDecision=settled.effect,
             permissionDecisionReason=settled.reason,
             updatedInput=claude_sandbox_input(tool_input, settled.sandbox),
+            additionalContext=escalation_context(settled),
         )

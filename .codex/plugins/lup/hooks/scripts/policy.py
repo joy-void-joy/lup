@@ -287,8 +287,9 @@ def dispatch(payload, permission_request=False):
             managed_root(),
             False if permission_request else sandbox_active(),
             interactive=permission_request,
-            # Codex's sandbox is a session flag on the binary, so a verdict
-            # that has to leave it is stopped with that reason instead.
+            # This hook answers without rewriting the call, so a verdict that
+            # has to leave the sandbox is stopped with that reason instead:
+            # the one route out a rule can compile was decided before this ran.
             escapable=False,
         )
     if name == "web_fetch":
@@ -320,10 +321,14 @@ def main():
             if "hook_event_name" in payload
             else False
         )
-        # Codex places nothing per call: its sandbox is a session flag on the
-        # binary, so a verdict is degraded to its plain effect rather than
-        # carrying an intent this boundary has no channel to perform.
-        decision = dispatch(payload, permission_request).placed(False)
+        # A verdict from here places nothing: this hook answers, and the call
+        # runs with the arguments the model wrote, so a placement is degraded
+        # to its plain effect rather than carrying an intent no channel here
+        # performs. The agent's own escape is the other question and Codex
+        # does have one, so a permission to escalate survives as reason text.
+        decision = dispatch(payload, permission_request).placed(
+            escapable=False, agent_escalates=True
+        )
     # Every way this can fail means one thing — the call went unjudged — and
     # one answer is right for all of them. Naming the exceptions instead is
     # what let a plain unreadable file escape, and a traceback exit is not the

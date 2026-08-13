@@ -19,6 +19,7 @@ from lup.harness.contracts import (
     Instruction,
     NativeSpellings,
     PromptRenderer,
+    Spelled,
     Spelling,
     Unsupported,
 )
@@ -70,11 +71,10 @@ class CodexSpellings(NativeSpellings):
     outright: recorded evidence for Codex custom agents covers TOML parsing
     only, so there is no proven alias to spell a tier in.
 
-    Two portable ideas are declined outright rather than approximated, each
-    saying why: escaping the sandbox, whose Codex overrides exist only as
-    session-level flags, and reading a document whole, which nothing in this
-    roster does. An approximation of either would read as an instruction the
-    agent can follow, and cost it a turn to find out otherwise.
+    Reading a document whole is declined outright rather than approximated,
+    saying why: nothing in this roster does it, and an approximation would
+    read as an instruction the agent can follow and cost it a turn to find
+    out otherwise.
     """
 
     @property
@@ -120,13 +120,32 @@ class CodexSpellings(NativeSpellings):
         )
 
     def escape_sandbox(self, reason: str) -> Spelling:
-        return Unsupported(
-            reason=(
-                "the sandbox overrides Codex documents are session-level flags "
-                "on its binary — `--sandbox` and "
-                "`--dangerously-bypass-approvals-and-sandbox` — so a session "
-                "already inside one has no per-call escape to reach for, and "
-                "naming a flag it cannot pass would read as an instruction"
+        """Spell the per-call escape Codex puts in the model's own hands.
+
+        Read out of the source at tag ``rust-v0.145.0`` — the release
+        ``docs/native-capabilities.md`` pins — rather than out of the prose
+        pages, which describe the session-level flags and leave this one
+        unmentioned. ``codex-rs/core/src/tools/handlers/shell_spec.rs`` puts
+        ``sandbox_permissions`` on the shell tool the model calls, describing
+        it to the model as a per-command sandbox override whose
+        ``require_escalated`` value means unsandboxed execution, beside a
+        ``justification`` field that becomes the approval question a human
+        answers; the value is pushed into that enum unconditionally, so it is
+        offered on every session.
+        ``codex-rs/core/src/tools/sandboxing.rs`` is where it lands, mapping
+        ``requires_escalated_permissions()`` to a first attempt that bypasses
+        the sandbox. Both paths are re-derivable at that tag, which is the
+        point of naming them: the finding is checkable rather than inherited.
+
+        This is the agent's route and not a hook's — a Codex policy verdict
+        still places nothing, which is why
+        :data:`~lup.adapters.codex.hooks.CODEX_SEMANTICS` splits the two.
+        """
+        return Spelled(
+            words=Instruction(
+                "Re-issue it with `sandbox_permissions` set to "
+                "`require_escalated`, and a `justification` saying why, which "
+                f"is the approval question the user answers. {reason}"
             )
         )
 
@@ -457,12 +476,15 @@ def codex_allow_prefixes(
     widened into a native allow. The runtime hook continues to classify those
     forms, along with every command whose safety depends on parsed content.
 
-    That bypass is also the whole of this runtime's escape, which is why a
-    runner target's placement does not narrow what is emitted here: a target
-    declared ``outside`` reaches the outside through its prefix rule or not at
-    all. The forms this cannot widen — a target behind a global flag, or one
-    joined into a compound command — reach the hook, where a confined session
-    is stopped with the reason rather than left to fail on the first write.
+    That bypass is the whole of the escape this compiler can declare, which is
+    why a runner target's placement does not narrow what is emitted here: a
+    target declared ``outside`` reaches the outside through its prefix rule or
+    not at all. What a rule cannot reach is the escape the model spends on its
+    own call, which exists but is chosen a call at a time rather than compiled
+    in advance — :meth:`CodexSpellings.escape_sandbox` carries it. The forms
+    this cannot widen — a target behind a global flag, or one joined into a
+    compound command — reach the hook, where a confined session is stopped
+    with the reason rather than left to fail on the first write.
     """
 
     def add(prefix: list[str]) -> None:

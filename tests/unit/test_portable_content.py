@@ -7,7 +7,9 @@ tests check the derivation itself as much as the declarations it judges.
 import pytest
 
 from lup.adapters.claude.harness import ClaudeSpellings, claude_granted_tools
+from lup.adapters.claude.hooks import CLAUDE_SEMANTICS
 from lup.adapters.codex.harness import CodexSpellings
+from lup.adapters.codex.hooks import CODEX_SEMANTICS
 from lup.adapters.harness import compile_codex
 from lup.codescan.portable import native_vocabulary, prose_breaches
 from lup.harness.contracts import NativeSpellings
@@ -72,10 +74,12 @@ def test_a_runtime_that_cannot_spell_an_idea_says_why_rather_than_nothing() -> N
 def test_the_resolver_entry_asks_its_own_vocabulary_about_the_sandbox() -> None:
     """Neither entry may hardcode an escape, and neither may invent one.
 
-    Claude spells a per-call escape and Codex has none to spell, so what the
-    two entries share is the asking. The load-bearing assertion is the second:
-    an entry may name the sandbox exactly when its own vocabulary spelled
-    something, which is what a Codex entry that grew a flag would break.
+    Both runtimes spell one, in words of their own that nothing here knows,
+    so what the two entries share is the asking. The load-bearing assertion is
+    the second: an entry may name the sandbox exactly when its own vocabulary
+    spelled something, which is what an entry that grew a flag would break —
+    and what an entry still naming the sandbox would break on a runtime that
+    later declines.
     """
     for runtime in RUNTIMES:
         escape = runtime.escape_sandbox(SPAWNED_SESSION_LOSES_SHELL).in_prose()
@@ -87,6 +91,28 @@ def test_the_resolver_entry_asks_its_own_vocabulary_about_the_sandbox() -> None:
             )
         assert ("sandbox" in entry.lower()) == bool(escape), (
             f"{runtime.runtime_name} names the sandbox outside escape_sandbox"
+        )
+
+
+def test_the_prose_seam_and_the_decision_seam_agree_about_the_agent_escape() -> None:
+    """One fact reaches two seams, so a runtime cannot answer it both ways.
+
+    ``agent_escalates`` decides whether an ``escalable`` verdict offers the
+    way out and ``escape_sandbox`` supplies the words for taking it. Split,
+    they drift: a runtime that spells an escape its verdicts will not offer
+    keeps words nobody is told they may use, and one that offers an escape it
+    will not spell sends an agent looking for words that are not there.
+
+    ``escapable`` is deliberately not what this compares against. That asks
+    whether a verdict can place a call itself, which Codex answers no while
+    answering yes here — the divergence that makes the two fields two.
+    """
+    seams = [(ClaudeSpellings(), CLAUDE_SEMANTICS), (CodexSpellings(), CODEX_SEMANTICS)]
+
+    for runtime, semantics in seams:
+        spelled = bool(runtime.escape_sandbox(MARK).in_prose())
+        assert spelled == semantics.agent_escalates, (
+            f"{runtime.runtime_name} spells an escape its decisions disagree with"
         )
 
 

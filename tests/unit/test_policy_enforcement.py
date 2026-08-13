@@ -14,6 +14,7 @@ from pydantic import AnyHttpUrl, ValidationError
 
 from lup.adapters.claude.harness import CLAUDE_DISPATCHER
 from lup.adapters.claude.hooks import CLAUDE_SEMANTICS
+from lup.adapters.claude.native import ClaudeDecisionRenderer
 from lup.adapters.claude.runtime import ClaudeSandboxConfig
 from lup.adapters.codex.native import CodexDecisionRenderer
 from lup.devtools.harness.resolve import worker_policy_hooks
@@ -25,8 +26,15 @@ from lup.policy.enforcement import (
     create_policy_hooks,
     policy_hook_output,
 )
-from lup.policy.kernel.decision import SANDBOX_TRAPPED_REASON, DecisionEffect
+from lup.policy.kernel.decision import (
+    SANDBOX_ESCALATION_OFFER,
+    SANDBOX_ESCALATION_UNSUPPORTED,
+    SANDBOX_TRAPPED_REASON,
+    DecisionEffect,
+)
+from lup.policy.shell_rules import ShellCommandRule
 from lup.policy.vocabulary import runner_target_rules
+from lup.types import JsonObject
 from lup.policy.models import (
     Decision,
     EditBatch,
@@ -222,12 +230,11 @@ async def test_permitting_an_escape_widens_only_the_calls_that_declare_one() -> 
             )
         )
 
-    assert await placed("uv run lup-devtools harness resolve") == LupHookOutput(
-        decision="allow", sandbox="outside"
-    )
-    assert await placed("uv run pytest tests/unit") == LupHookOutput(
-        decision="allow", sandbox="ambient"
-    )
+    toolchain = await placed("uv run lup-devtools harness resolve")
+    checker = await placed("uv run pytest tests/unit")
+
+    assert (toolchain.decision, toolchain.sandbox) == ("allow", "outside")
+    assert (checker.decision, checker.sandbox) == ("allow", "ambient")
     unjudged = await placed("frobnicate --wildly")
     assert unjudged.decision == "deny"
     assert unjudged.sandbox == "ambient"
@@ -259,9 +266,8 @@ async def test_a_worker_is_judged_by_the_composition_a_run_actually_builds() -> 
             )
         )
 
-    assert await judged("uv run lup-devtools harness resolve") == LupHookOutput(
-        decision="allow", sandbox="outside"
-    )
+    toolchain = await judged("uv run lup-devtools harness resolve")
+    assert (toolchain.decision, toolchain.sandbox) == ("allow", "outside")
     for refused in (
         "find . -delete",
         "git push --delete origin feat",
@@ -310,6 +316,149 @@ async def test_a_session_that_forbids_the_escape_is_never_told_it_has_one() -> N
     assert stopped.decision == "deny"
     assert stopped.reason == SANDBOX_TRAPPED_REASON
     assert stopped.sandbox == "ambient"
+
+
+def escalation_rules() -> list[ShellCommandRule]:
+    """One command that follows the session, one the caller may take out."""
+    return [
+        ShellCommandRule(name="checker", sandbox="ambient"),
+        ShellCommandRule(name="toolchain", sandbox="escalable"),
+    ]
+
+
+def test_an_offered_escalation_is_not_the_session_read_back() -> None:
+    """The case where standing one placement in for the other is invisible.
+
+    ``ambient`` reads the placement off the session, so an unconfined session
+    runs the call outside without anybody choosing that; ``escalable``
+    confines it whatever the session is doing and hands the way out to the
+    agent. Confined, the two agree — which is why this session is not, and
+    why the assertion is on the arguments the call actually runs with rather
+    than on the placement naming itself.
+    """
+    policy = ShellPolicy(escalation_rules(), sandbox_active=False, escapable=True)
+    render = ClaudeDecisionRenderer().render
+
+    deferring = policy.decide(ShellCommand(command="checker --run"))
+    offered = policy.decide(ShellCommand(command="toolchain --run"))
+
+    assert (deferring.effect, offered.effect) == ("allow", "allow")
+    assert (deferring.sandbox, offered.sandbox) == ("ambient", "escalable")
+
+    call: JsonObject = {"command": "toolchain --run"}
+    assert render(deferring, call).updated_input is None
+    assert render(offered, call).updated_input == {
+        **call,
+        "dangerouslyDisableSandbox": False,
+    }
+    assert SANDBOX_ESCALATION_OFFER in render(offered, call).reason
+
+
+def test_the_offer_goes_where_the_agent_reads_and_not_only_where_a_human_does() -> None:
+    """An offer the agent is never shown is one nobody can take.
+
+    The two channels a grant has reach different readers: a permission
+    reason on an allow is shown to the human who was not asked, while what an
+    agent reads mid-turn is context. So the offer travels on both, and only
+    the offer does — an ordinary grant says nothing, because a context line
+    per allowed call is how the channel meant for what matters stops being
+    read.
+    """
+    policy = ShellPolicy(escalation_rules(), sandbox_active=False, escapable=True)
+    render = ClaudeDecisionRenderer().render
+    call: JsonObject = {"command": "toolchain --run"}
+
+    offered = render(policy.decide(ShellCommand(command="toolchain --run")), call)
+    ordinary = render(policy.decide(ShellCommand(command="checker --run")), call)
+
+    assert offered.additional_context == offered.reason
+    assert SANDBOX_ESCALATION_OFFER in offered.additional_context
+    assert ordinary.additional_context == ""
+
+
+def test_the_agent_spends_the_offer_and_the_whole_call_goes_with_it() -> None:
+    """An offer the agent takes has to survive the hook that made it.
+
+    The rewrite replaces the arguments outright, so it carries the whole
+    input rather than the flag alone — sending the flag by itself would drop
+    the command being judged. The verdict is the same either way, which is
+    what makes the offer safe on a host that forbids unsandboxed commands:
+    such a host ignores a flag it does not honour and is left with the
+    decision it was already given, rather than with a failure.
+    """
+    policy = ShellPolicy(escalation_rules(), sandbox_active=False, escapable=True)
+    render = ClaudeDecisionRenderer().render
+
+    spent: JsonObject = {
+        "command": "toolchain --run",
+        "timeout": 600,
+        "dangerouslyDisableSandbox": True,
+    }
+    taken = render(policy.decide(ShellCommand(command="toolchain --run")), spent)
+
+    assert taken.updated_input == spent
+    assert taken.permission_decision == "allow"
+
+
+async def test_a_session_that_forbids_the_escape_withdraws_the_offer_too() -> None:
+    """An offer needs the session's permission as much as a placement does.
+
+    The runtime hands the agent words and the session decides whether a
+    command may run unsandboxed at all; a host that says no refuses the
+    agent's own attempt, so an offer made there is one nobody can spend. What
+    it is not is a reason to refuse: withdrawing the way out leaves the
+    confined allow the verdict always was, and only the reason changes.
+    """
+    posture = ClaudeSandboxConfig().posture()
+    assert (CLAUDE_SEMANTICS.agent_escalates, posture.escapable) == (True, False)
+    assert not CLAUDE_SEMANTICS.escalates_from(posture)
+
+    hooks = create_policy_hooks(
+        SemanticToolPolicy(
+            shell=ShellPolicy(
+                escalation_rules(),
+                sandbox_active=posture.active,
+                escapable=CLAUDE_SEMANTICS.escapes_from(posture),
+                interactive=False,
+            )
+        ),
+        CLAUDE_SEMANTICS,
+        sandbox=posture,
+    )
+    withdrawn = await hooks.pre_tool_use[0].hook(
+        LupHookInput(
+            event="PreToolUse",
+            tool_name="Bash",
+            tool_input={"command": "toolchain --run"},
+        )
+    )
+
+    assert withdrawn.decision == "allow"
+    assert withdrawn.sandbox == "ambient"
+    assert SANDBOX_ESCALATION_UNSUPPORTED in withdrawn.reason
+
+
+def test_a_line_that_has_to_leave_outranks_one_that_merely_may() -> None:
+    """One command line is one process, so its segments cannot be placed apart.
+
+    A segment that has to stay inside still keeps the whole line inside. An
+    offer yields to a segment that must leave, because leaving is inside what
+    the offer already permits, and outranks a segment that only follows the
+    session, because confinement is the conservative direction.
+    """
+    rules = [
+        *escalation_rules(),
+        ShellCommandRule(name="confined", sandbox="inside"),
+        ShellCommandRule(name="remote", sandbox="outside"),
+    ]
+    policy = ShellPolicy(rules, sandbox_active=False, escapable=True)
+
+    def placed(command: str) -> str:
+        return policy.decide(ShellCommand(command=command)).sandbox
+
+    assert placed("toolchain --run && checker --run") == "escalable"
+    assert placed("toolchain --run && remote --run") == "outside"
+    assert placed("toolchain --run && confined --run") == "inside"
 
 
 def test_hook_is_scoped_to_the_tools_the_policy_has_rules_for() -> None:

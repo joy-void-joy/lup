@@ -218,11 +218,20 @@ class NativeSpellings(SkillInvocationRenderer):  # lup: ignore[abc-capability]
     def escape_sandbox(self, reason: str) -> Spelling:
         """Spell how one command this runtime runs escapes its own sandbox.
 
-        A runtime whose only overrides are session-level flags on its binary
-        has no per-call escape a prompt could ask for, and naming one of those
-        flags would read as an instruction the reader can follow. Declining is
-        the honest answer there, which is why this returns a
-        :class:`Spelling` rather than a sentence every runtime must invent.
+        The test is whether an agent can be told words that take one call
+        out, not whether the runtime ever crosses the boundary. A runtime
+        that crosses it only through configuration written before the session
+        started has nothing a prompt could ask for — and naming a flag the
+        reader cannot pass would read as an instruction. Declining is the
+        honest answer there, which is why this returns a :class:`Spelling`
+        rather than a sentence every runtime must invent.
+
+        This is the question the decision seam asks as ``agent_escalates``,
+        and the answers have to agree, because they are one fact: this seam
+        supplies the words and that one lets an ``escalable`` verdict offer
+        them. It is *not* the question ``escapable`` asks, which is whether a
+        verdict can place a call itself — a runtime can hand the agent a way
+        out while giving a hook no channel to take it.
         """
 
     @abstractmethod

@@ -62,8 +62,13 @@ def report(subject: str, decision: Decision, as_json: bool) -> None:
         output_json({"subject": subject, **decision.model_dump()})
     else:
         typer.echo(f"{decision.effect:>5}  {subject}")
-        if decision.sandbox != "ambient":
-            typer.echo(f"       runs {decision.sandbox} the sandbox")
+        match decision.sandbox:
+            case "ambient":
+                pass
+            case "escalable":
+                typer.echo("       runs inside the sandbox, and may be taken out")
+            case placement:
+                typer.echo(f"       runs {placement} the sandbox")
         if decision.reason:
             typer.echo(f"       {decision.reason}")
     if decision.effect != "allow":

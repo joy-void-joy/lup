@@ -485,7 +485,10 @@ def git_rule(
     ``remote_sandbox`` is where they run. They are the other axis rather than
     another effect: a fetch confined to a sandbox with no route to the remote
     fails however freely it was allowed, and asking about that every time
-    teaches an agent to escalate rather than to read the verdict.
+    teaches an agent to escalate rather than to read the verdict. A project
+    whose sandbox does reach its remotes answers ``escalable`` instead, which
+    keeps the ordinary fetch confined and leaves the way out to the agent that
+    finds it needs one.
     """
 
     def placement(name: str) -> SandboxPlacement:

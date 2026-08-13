@@ -192,9 +192,24 @@ class LupHooksConfig(BaseModel):
         return {event: matchers for event, matchers in events.items() if matchers}
 
 
-def allow_hook(sandbox: SandboxPlacement = "ambient") -> LupHookOutput:
-    """Create a generic allow decision, optionally placed."""
-    return LupHookOutput(decision="allow", sandbox=sandbox)
+def allow_hook(
+    sandbox: SandboxPlacement = "ambient", reason: str = ""
+) -> LupHookOutput:
+    """Create a generic allow decision, optionally placed and optionally said.
+
+    An ``escalable`` grant says its reason twice, on both channels a grant
+    has, because the two reach different readers and only one of them can act
+    on this. A permission channel's reason is what a human is shown when they
+    are asked; on a grant nobody was asked, so it reaches the record and stops
+    there. The offer is addressed to the agent making the call, so it also
+    goes where an agent reads — and an offer delivered to nobody is not one.
+    """
+    return LupHookOutput(
+        decision="allow",
+        sandbox=sandbox,
+        reason=reason,
+        additional_context=reason if sandbox == "escalable" else "",
+    )
 
 
 def ask_hook(reason: str, sandbox: SandboxPlacement = "ambient") -> LupHookOutput:

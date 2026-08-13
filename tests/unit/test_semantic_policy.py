@@ -49,6 +49,8 @@ from lup.policy.bundle import (
 from lup.policy.kernel.decision import (
     DecisionEffect,
     KernelDecision,
+    SANDBOX_ESCALATION_OFFER,
+    SANDBOX_ESCALATION_UNSUPPORTED,
     SANDBOX_TRAPPED_REASON,
     SandboxPlacement,
 )
@@ -1208,6 +1210,7 @@ def test_the_decision_effect_stays_closed_at_four_members() -> None:
     ]
     assert sorted(get_args(SandboxPlacement.__value__)) == [
         "ambient",
+        "escalable",
         "inside",
         "outside",
     ]
@@ -1253,9 +1256,13 @@ def test_a_deny_short_circuits_whatever_the_sandbox_says() -> None:
     )
     assert KernelDecision("defer", "unjudged", "outside").sandbox == "ambient"
 
+    refused = KernelDecision("deny", "refused", "escalable")
+    placed = refused.placed(escapable=True, agent_escalates=True)
+    assert (refused.sandbox, placed.reason) == ("ambient", "refused")
+
 
 def test_a_runtime_that_cannot_place_a_call_renders_the_plain_effect() -> None:
-    """Codex has no per-call sandbox, so an intent it cannot perform is dropped.
+    """A Codex verdict rewrites nothing, so an intent it cannot perform is dropped.
 
     Degrading in silence is the failure this pins: an escape rendered into a
     channel that ignores it reads as honoured to everything upstream, and the
@@ -1268,7 +1275,44 @@ def test_a_runtime_that_cannot_place_a_call_renders_the_plain_effect() -> None:
 
     assert codex.render(escaped).exit_code == 0
     assert "outside the sandbox" not in codex.render(asked).stderr
-    assert escaped.placed(escapable=False) == Decision(effect="allow", reason="fine")
+    assert escaped.placed(escapable=False, agent_escalates=True) == Decision(
+        effect="allow", reason="fine"
+    )
+
+
+def test_a_permission_to_escalate_turns_on_the_agent_and_not_on_the_channel() -> None:
+    """The offer is addressed to the agent, so it is the agent that decides it.
+
+    Which is why it survives on a runtime whose verdicts place nothing: the
+    middle case here is Codex, where a hook rewrites no call — so no placement
+    reaches the wire — while the agent still has words for taking its own call
+    out, and the reason carries them. Reading that case off the placement
+    channel is what would drop an offer the agent could have spent.
+
+    Where the agent has no way out the call runs confined, and says so as
+    ``inside`` rather than as the session-deferring placement: withdrawing an
+    offer is not the same act as handing the question back to the session,
+    and on an unconfined session the two differ by the whole sandbox. The
+    reason says the offer is not available, because an agent that spends a
+    turn discovering that learns nothing it can act on.
+    """
+    offered = Decision(effect="allow", reason="fine", sandbox="escalable")
+
+    placed = offered.placed(escapable=True, agent_escalates=True)
+    carried = offered.placed(escapable=False, agent_escalates=True)
+    degraded = offered.placed(escapable=True, agent_escalates=False)
+
+    assert (placed.sandbox, placed.reason) == (
+        "escalable",
+        "fine" + SANDBOX_ESCALATION_OFFER,
+    )
+    assert (carried.sandbox, carried.reason) == (
+        "ambient",
+        "fine" + SANDBOX_ESCALATION_OFFER,
+    )
+    assert (degraded.sandbox, degraded.effect) == ("inside", "allow")
+    assert degraded.reason == "fine" + SANDBOX_ESCALATION_UNSUPPORTED
+    assert CodexDecisionRenderer(supports_ask=False).render(offered).exit_code == 0
 
 
 def test_fetch_policy_normalizes_origin_and_rejects_lookalikes() -> None:
