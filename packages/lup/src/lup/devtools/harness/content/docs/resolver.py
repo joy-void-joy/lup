@@ -93,6 +93,16 @@ note-bearing file differs from `HEAD`, an unattached Git commit captures those
 files through a temporary index. The user's branch, `HEAD`, index, and working
 tree are unchanged.
 
+**That inventory is readable before a run exists.** `lup-devtools harness
+resolve intake` prints the partition a run would plan from — each actionable
+note at its file and line, the deferred ones it would carry, and the ones it
+would leave to a generator, named by the semantic id that owns them — while
+creating no run and leasing no worktree. Every other subcommand operates on a
+run that already exists, so whether a run is worth starting was answerable
+only by starting one, which leases a worktree per concern. It reads through
+the same partitioning the run itself uses, so a preview cannot show one thing
+and a run plan another.
+
 The lifecycle inventories concerns, publishes material questions, persists
 eligibility and integration approval, validates the dependency DAG, leases a
 non-overlapping branch/worktree per approved concern, and executes independent
@@ -111,6 +121,15 @@ only as a number, a URL and some text; reaching a tracker is devtools' job,
 so a project on another forge supplies its own reader. When a concern
 derived from an issue lands, the run comments there naming the review branch,
 and never closes it — a reviewer passing is not a human having read the code.
+
+**Statements seed a run as well as join one.** `--admit <text>` carries work
+in the human's own words into a live run, and where no run exists yet it opens
+one from those statements beside whatever notes the tree already holds. Both
+are positions in the same request, so a seeded run and a scanned one reach the
+same shape of inventory and one run may mix them. Otherwise somebody arriving
+with the concerns in their own words — which is how a human arrives — had to
+invent a note site for the planner to read back, a file edit standing in for a
+sentence.
 
 **A base is refreshed, not only inherited.** The base starts as the source
 snapshot and is brought up to the branch it came from whenever a lease is

@@ -142,6 +142,7 @@ def create_harness_app(
     resolve_app.command("redirect")(redirect_actor)
     resolve_app.command("park")(park_run)
     resolve_app.command("refresh")(resolve.refresh_run)
+    resolve_app.command("intake")(resolve.preview_intake)
     app.add_typer(resolve_app, name="resolve")
 
     @resolve_app.callback(invoke_without_command=True)
@@ -188,9 +189,11 @@ def create_harness_app(
             list[str] | None,
             typer.Option(
                 "--admit",
-                help="Admit work discovered mid-run into this run, described in "
-                "the human's own words (repeatable). Only the new evidence is "
-                "planned; recorded answers and completed work are kept.",
+                help="Work described in the human's own words (repeatable). It "
+                "seeds a run that does not exist yet, alongside whatever notes "
+                "the tree holds, and joins one that does — where only the new "
+                "evidence is planned and recorded answers and completed work "
+                "are kept.",
             ),
         ] = None,
         admit_note: Annotated[
@@ -262,12 +265,15 @@ def create_harness_app(
         """Drive the shared persisted resolver through one explicit native adapter."""
         if context.invoked_subcommand is not None:
             return
+        admitted = resolve.AdmissionFlags(
+            statements=admit or [], notes=admit_note or [], issues=admit_issue or []
+        )
         if detach:
             if adapter is None:
                 raise typer.BadParameter(
                     "--adapter is required to drive a resolver run"
                 )
-            resolve.detach_resolve(adapter, run_id, answer or [])
+            resolve.detach_resolve(adapter, run_id, answer or [], admitted)
             return
         # Ending a run reads its recorded state and frees its worktrees; no turn
         # is taken and no skill invocation is rendered, so the one thing an
@@ -286,7 +292,7 @@ def create_harness_app(
             resolve.SupervisorSpawn(
                 enabled=supervise, port=supervise_port, linger=supervise_linger
             ),
-            resolve.admission_request(admit or [], admit_note or [], admit_issue or []),
+            resolve.admission_request(admitted),
             model,
             adopt_config,
             issues,

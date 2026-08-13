@@ -590,6 +590,53 @@ def plan_of(*concerns: JsonObject) -> JsonObject:
     return {"concerns": [concern for concern in concerns]}
 
 
+SAID = "the relay must investigate before it answers"
+
+
+@pytest.mark.asyncio
+async def test_a_run_is_planned_from_words_with_no_note_written_first(
+    tmp_path: Path,
+) -> None:
+    """How a human arrives: the work in their own words, nothing in the tree.
+
+    A run seedable only from notes made them invent a note site for the
+    planner to read back, which is a file edit standing in for a sentence.
+    """
+    core = planning_core(tmp_path, lambda *_: plan_of(concern_referencing([0])))
+
+    inventory = await core.plan_inventory(
+        ResolveRequest(
+            source=SourceSnapshot(branch="feature", commit="source-sha"),
+            statements=[SAID],
+        )
+    )
+
+    assert [concern.id for concern in inventory.concerns] == ["concern-0"]
+    assert inventory.concerns[0].notes == []
+    assert inventory.concerns[0].evidence == SAID
+
+
+@pytest.mark.asyncio
+async def test_a_statement_and_a_note_reach_one_inventory(tmp_path: Path) -> None:
+    """Positions run end to end, so one turn plans both kinds together."""
+    request = two_note_request().model_copy(update={"statements": [SAID]})
+    core = planning_core(
+        tmp_path,
+        lambda *_: plan_of(
+            concern_referencing([0, 1]),
+            concern_referencing([2]),
+        ),
+    )
+
+    inventory = await core.plan_inventory(request)
+
+    assert [
+        ([note.line for note in concern.notes], concern.evidence)
+        for concern in inventory.concerns
+    ] == [([7, 1], ""), ([], SAID)]
+    assert all(concern.eligible for concern in inventory.concerns)
+
+
 @pytest.mark.asyncio
 async def test_a_note_no_concern_claims_names_itself_and_stops_the_run(
     tmp_path: Path,

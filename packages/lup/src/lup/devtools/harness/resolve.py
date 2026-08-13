@@ -109,6 +109,37 @@ class ConfiguredModel(BaseModel):
         return self.name if self.adapter == adapter else None
 
 
+class LocatedNote(BaseModel):
+    """Where one scanned note sits, spelled the way a reader opens it."""
+
+    model_config = ConfigDict(frozen=True)
+
+    file: str
+    start_line: int
+    end_line: int
+
+    def location(self) -> str:
+        return f"{self.file}:{self.start_line}-{self.end_line}"
+
+
+class CarriedNote(LocatedNote):
+    """One parked note the resolver leaves alone, with the gate it stated."""
+
+    label: str
+
+    def describe(self) -> str:
+        return f"carrying {self.label} {self.location()}"
+
+
+class GeneratedNote(LocatedNote):
+    """One note a generated artifact holds, named by the id that owns it."""
+
+    semantic_id: str
+
+    def describe(self) -> str:
+        return f"leaving to its generator: {self.semantic_id} owns {self.location()}"
+
+
 class ResolverIntake(BaseModel):
     """The scan partitioned at the resolver boundary.
 
@@ -116,11 +147,17 @@ class ResolverIntake(BaseModel):
     explicit edit that removes its `defer` head — so an editor can never be
     assigned parked work. ``carried`` reports each parked note, and
     ``generated`` each note a generator answers for rather than this tree.
+
+    Each bucket the resolver only reports on carries the note rather than a
+    line about it, so the run's own report and a preview of what a run would
+    plan render from one declaration instead of agreeing by hand. What it
+    plans from stays the scanned comment, because that is what becomes
+    evidence and it carries the read context a planner needs.
     """
 
     actionable: list[FoundComment]
-    carried: list[str]
-    generated: list[str]
+    carried: list[CarriedNote]
+    generated: list[GeneratedNote]
 
 
 def resolver_intake(
@@ -136,26 +173,86 @@ def resolver_intake(
     """
     notes = [comment for comment in comments if comment.kind == "note"]
 
-    def generated() -> Iterator[str]:
+    def generated() -> Iterator[GeneratedNote]:
         """Each note a generated artifact holds, named by the artifact."""
         for comment in notes:
             artifact = owned.owning(comment.file)
             if artifact is not None:
-                yield (
-                    f"{artifact.semantic_id} owns "
-                    f"{comment.file}:{comment.start_line}-{comment.end_line}"
+                yield GeneratedNote(
+                    file=comment.file,
+                    start_line=comment.start_line,
+                    end_line=comment.end_line,
+                    semantic_id=artifact.semantic_id,
                 )
 
     return ResolverIntake(
         actionable=[note for note in notes if owned.owning(note.file) is None],
         generated=list(generated()),
         carried=[
-            f"carrying {comment.deferral_label()} "
-            f"{comment.file}:{comment.start_line}-{comment.end_line}"
+            CarriedNote(
+                file=comment.file,
+                start_line=comment.start_line,
+                end_line=comment.end_line,
+                label=comment.deferral_label(),
+            )
             for comment in comments
             if comment.kind == "defer"
         ],
     )
+
+
+def scanned_intake(root: Path) -> ResolverIntake:
+    """Partition the tree's notes the way a run does, without starting one.
+
+    A preview and a run reach the scan through here, so what a preview shows
+    and what a run plans from cannot come apart: there is one partitioning
+    and both read it.
+
+    The scan is the tracked files of the working directory, which is what
+    ``scan_tracked`` reads; ``root`` names only the tree whose ownership proof
+    decides which of those a generator owns. Both readers pass the project
+    root, so the two halves agree for either of them.
+    """
+    return resolver_intake(scan_tracked(find_feedback), generated_artifacts(root))
+
+
+def describe_intake(intake: ResolverIntake) -> list[str]:
+    """Render one scan the way somebody deciding whether to start a run reads it.
+
+    Every note is named at its own site rather than only counted, because the
+    question this answers — whether the run about to be started is the one
+    worth having — turns on which notes it would plan from and which it would
+    leave alone, not on how many there are of each.
+
+    Each is named and not quoted: what the notes say is one `dev comments`
+    away, and reprinting fifty of them buries the partition this exists to
+    show under the listing that already exists.
+    """
+    return [
+        f"{len(intake.actionable)} to plan, {len(intake.carried)} carried, "
+        f"{len(intake.generated)} left to a generator",
+        *(
+            f"planning from {note.file}:{note.start_line}-{note.end_line}"
+            for note in intake.actionable
+        ),
+        *(note.describe() for note in intake.carried),
+        *(note.describe() for note in intake.generated),
+    ]
+
+
+def preview_intake() -> None:
+    """Print what a run started now would plan from, without starting one.
+
+    Every other resolve subcommand operates on a run that already exists, so
+    reading an inventory meant committing to one — and a run leases a worktree
+    per concern. Reading the tree creates nothing, so the decision to start
+    can come after the evidence rather than before it.
+
+    Notes only. A run also takes the project's open issues unless it is
+    started with `--no-issues`, and `dev issues` prints exactly those.
+    """
+    for line in describe_intake(scanned_intake(project_root())):
+        typer.echo(line)
 
 
 def lease_plugin_dir(root: Path, plugin_name: str) -> Path:
@@ -542,6 +639,11 @@ def resolver_source_snapshot(
     """Create an unattached source commit containing current review-note files."""
     branch = resolver_git(launcher, root, ["branch", "--show-current"]) or "HEAD"
     head = resolver_git(launcher, root, ["rev-parse", "HEAD"])
+    # A run seeded from statements alone has no note file to preserve, and a
+    # pathless diff would compare the whole tree and snapshot HEAD's own tree
+    # under a second commit.
+    if not note_paths:
+        return SourceSnapshot(branch=branch, commit=head)
     status = launcher.launch(
         LaunchRequest(
             arguments=["git", "diff", "--quiet", "HEAD", "--", *map(str, note_paths)],
@@ -686,7 +788,39 @@ def describe_refresh(report: RefreshReport) -> list[str]:
     return lines
 
 
-def detach_resolve(adapter: str, run_id: str | None, answers: list[str]) -> None:
+class AdmissionFlags(BaseModel):
+    """The evidence one invocation named, in the flags that carried it.
+
+    Kept as flags rather than resolved evidence because a detached run is
+    launched by rebuilding this command line: what a human named has to be
+    sayable again, and forwarding only some of it dropped the rest without
+    a word.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    statements: list[str]
+    notes: list[str]
+    issues: list[int]
+
+    def named_anything(self) -> bool:
+        return bool(self.statements or self.notes or self.issues)
+
+    def arguments(self) -> list[str]:
+        """These flags again, so a relaunch carries everything this one named."""
+        return [
+            *(part for item in self.statements for part in ("--admit", item)),
+            *(part for item in self.notes for part in ("--admit-note", item)),
+            *(part for item in self.issues for part in ("--admit-issue", str(item))),
+        ]
+
+
+def detach_resolve(
+    adapter: str,
+    run_id: str | None,
+    answers: list[str],
+    admitted: AdmissionFlags,
+) -> None:
     """Start a run that outlives this command, and say where to reach it.
 
     A blocking run holds the launching agent's only turn, so nothing could
@@ -694,6 +828,10 @@ def detach_resolve(adapter: str, run_id: str | None, answers: list[str]) -> None
     design unreachable, however well the channels underneath worked. Once
     launching returns, the run directory is the whole contract: the page and
     an orchestrating agent are peers on it, exactly as two pages would be.
+
+    Statements are carried through rather than dropped: seeding a run from
+    what a human said and returning is the shape this flag exists for, and
+    forwarding only the answers left the words silently behind.
     """
     root = project_root()
     resolved = run_id or (
@@ -713,6 +851,7 @@ def detach_resolve(adapter: str, run_id: str | None, answers: list[str]) -> None
         "--run-id",
         resolved,
         *(part for answer in answers for part in ("--answer", answer)),
+        *admitted.arguments(),
     ]
     sh.Command(arguments[0])(
         *arguments[1:],
@@ -729,21 +868,57 @@ def detach_resolve(adapter: str, run_id: str | None, answers: list[str]) -> None
     )
 
 
-def admission_request(
-    statements: list[str], note_targets: list[str], issue_numbers: list[int]
-) -> AdmissionRequest | None:
+def admission_request(flags: AdmissionFlags) -> AdmissionRequest | None:
     """Build the evidence one invocation asked to admit, if it asked at all."""
-    if not statements and not note_targets and not issue_numbers:
+    if not flags.named_anything():
         return None
-    targets = parse_note_targets(note_targets)
-    intake = resolver_intake(
-        scan_tracked(find_feedback), generated_artifacts(project_root())
-    )
-    scanned = intake.actionable if targets else []
+    targets = parse_note_targets(flags.notes)
+    scanned = scanned_intake(project_root()).actionable if targets else []
     return AdmissionRequest(
         notes=admission_notes(targets, scanned),
+        statements=flags.statements,
+        issues=admitted_issues(flags.issues),
+    )
+
+
+def seed_request(
+    source: SourceSnapshot,
+    comments: list[FoundComment],
+    issues: list[IssueEvidence],
+    admission: AdmissionRequest | None,
+) -> ResolveRequest:
+    """The evidence a fresh run plans from: what the tree holds and what was said.
+
+    A statement has nowhere else to come from — somebody arriving with the
+    work in their own words has written nothing down yet — so a run seedable
+    only from notes made them invent note sites before it would start. The
+    same evidence a run is handed mid-flight seeds one at the outset, and the
+    two kinds mix: the tree's notes and the human's statements are both
+    positions in one request, planned by one turn.
+
+    Evidence named explicitly is folded in rather than appended, because a
+    note or an issue reaches a fresh run through the scan as well, and the
+    same work described twice is planned as two concerns.
+    """
+    named = admission.notes if admission is not None else []
+    statements = admission.statements if admission is not None else []
+    admitted = admission.issues if admission is not None else []
+    scanned = [
+        InventoryNote(
+            file=Path(comment.file),
+            line=comment.start_line,
+            text=comment.marker_text(),
+            context=comment.context,
+        )
+        for comment in comments
+    ]
+    notes = {(note.file, note.line): note for note in [*scanned, *named]}
+    numbered = {issue.number: issue for issue in [*issues, *admitted]}
+    return ResolveRequest(
+        source=source,
+        notes=list(notes.values()),
         statements=statements,
-        issues=admitted_issues(issue_numbers),
+        issues=list(numbered.values()),
     )
 
 
@@ -1260,32 +1435,52 @@ def run_resolve(
                     )
                 typer.echo(f"aborted {resolved_run_id}: {abort_reason}")
                 return
+            # Evidence offered to a run that does not exist yet seeds one
+            # rather than being refused. What a human arrives with is the work
+            # in their own words, and a refusal here made them write a note
+            # into the tree to name a site the run would only read back.
+            #
+            # A run named explicitly is the one case that still refuses: the
+            # id is a claim that the run exists, so seeding on a typo would
+            # start a second run under the misspelling and lease a worktree
+            # per concern before anyone read the line saying so.
             if admission is not None:
-                if not core.repository.exists():
-                    raise typer.BadParameter(
-                        f"no resolver run {resolved_run_id!r} to admit into"
+                if core.repository.exists():
+                    report_admission(
+                        await core.admit(admission), adapter, resolved_run_id
                     )
-                report_admission(await core.admit(admission), adapter, resolved_run_id)
-                return
+                    return
+                if run_id is not None:
+                    raise typer.BadParameter(
+                        f"no resolver run {resolved_run_id!r} to admit into. "
+                        "Statements seed a run of their own: drop --run-id to "
+                        "start one from them, or name a run that exists."
+                    )
+                typer.echo(
+                    f"No resolver run {resolved_run_id!r} yet; seeding one with "
+                    "what was admitted, beside whatever notes the tree holds."
+                )
             try:
                 if core.repository.exists():
                     manifest = await core.resume()
                 else:
-                    intake = resolver_intake(
-                        scan_tracked(find_feedback), generated_artifacts(root)
-                    )
+                    intake = scanned_intake(root)
                     for carried in intake.carried:
-                        typer.echo(carried)
+                        typer.echo(carried.describe())
                     for owned in intake.generated:
-                        typer.echo(f"leaving to its generator: {owned}")
+                        typer.echo(owned.describe())
                     comments = intake.actionable
                     open_issues = fetch_open_issues() if take_issues else []
                     for issue in open_issues:
                         typer.echo(
                             f"taking as evidence: {issue.reference()} {issue.title}"
                         )
-                    if not comments and not open_issues:
-                        typer.echo("No unresolved # lup: comments, and no open issues.")
+                    if not comments and not open_issues and admission is None:
+                        typer.echo(
+                            "No unresolved # lup: comments, and no open issues. "
+                            "Seed a run with what you want done instead: "
+                            '--admit "<the work, in your own words>".'
+                        )
                         return
                     note_paths = sorted({Path(comment.file) for comment in comments})
                     source = resolver_source_snapshot(
@@ -1295,19 +1490,7 @@ def run_resolve(
                         note_paths,
                     )
                     manifest = await core.run(
-                        ResolveRequest(
-                            source=source,
-                            notes=[
-                                InventoryNote(
-                                    file=Path(comment.file),
-                                    line=comment.start_line,
-                                    text=comment.marker_text(),
-                                    context=comment.context,
-                                )
-                                for comment in comments
-                            ],
-                            issues=open_issues,
-                        )
+                        seed_request(source, comments, open_issues, admission)
                     )
             except ResolverAwaitingAnswers as parked:
                 planned = (
