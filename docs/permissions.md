@@ -69,6 +69,17 @@ resolver's worker receives only its declared autonomous edit exceptions;
 temporary paths, human-owned files like `README.md`, marker changes, and
 anti-pattern violations retain their guardrails in every mode.
 
+A few of those guardrails open only for a gate a human granted — creating a
+devtools module, adding an anti-pattern suppression. What a lease holds is
+written in one document per lease, and every judge reads it at the moment it
+judges: the canonical policy in the composing process and the deployed
+dispatcher in the session's own. The session environment names that document
+and never carries its contents, so a gate granted while the session runs
+reaches it and one taken back stops applying, with no restart either way. A
+narrowed document parks the run rather than silently reducing what a worker
+may do. Nothing else grants: a name outside the declared vocabulary is
+dropped, and an unreadable document is no grant at all.
+
 Autonomy follows the identity a launcher declares for the session it starts,
 carried in the environment and matched against the resolver's own
 `worker_identity`, so it reaches a top-level worker session on either runtime

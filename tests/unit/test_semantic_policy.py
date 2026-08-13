@@ -38,6 +38,8 @@ from lup.adapters.codex.native import (
 from lup.harness.enforcement import declared_path_rules, semantic_policy_for
 from lup.harness.models import HookSet
 from lup.policy.chain import UnknownToolPolicy
+from lup.policy.grants import LeaseGrants, write_allowance_grants
+from lup.policy.identity import ConcernAllowance
 from lup.policy.bundle import (
     bundled_antipattern_rows,
     policy_kernel_modules,
@@ -2083,7 +2085,16 @@ def test_content_prose_examples_do_not_trip_code_or_marker_gates() -> None:
     assert decision.effect == "allow"
 
 
-def test_a_granted_new_devtools_allowance_releases_exactly_that_gate() -> None:
+def granting(root: Path, *allowances: ConcernAllowance) -> LeaseGrants:
+    """A lease holding exactly these gates, through the document that says so."""
+    document = root / "grants.json"
+    write_allowance_grants(document, list(allowances))
+    return LeaseGrants(document)
+
+
+def test_a_granted_new_devtools_allowance_releases_exactly_that_gate(
+    tmp_path: Path,
+) -> None:
     """A concern's grant skips the new-devtools ask and nothing adjacent."""
     rule = PathRule(
         kind="new_devtools",
@@ -2102,7 +2113,9 @@ def test_a_granted_new_devtools_allowance_releases_exactly_that_gate() -> None:
     assert ungranted.effect == "ask"
     assert "new devtools module" in ungranted.reason
     granted = EditPolicy(
-        protected=[rule], autonomous=True, allowances=["new-devtools-module"]
+        protected=[rule],
+        autonomous=True,
+        grants=granting(tmp_path, ConcernAllowance.NEW_DEVTOOLS_MODULE),
     )
     assert granted.decide(creation).effect == "allow"
 
@@ -2134,7 +2147,9 @@ def test_fragment_edits_are_judged_as_the_documents_they_produce(
     assert policy.decide(fragment.as_documents()).effect == "allow"
 
 
-def test_semantic_policy_threads_allowances_into_the_edit_gate() -> None:
+def test_semantic_policy_threads_allowances_into_the_edit_gate(
+    tmp_path: Path,
+) -> None:
     """The composed policy honours the same grants the dispatchers read."""
     creation = EditBatch(
         changes=[
@@ -2148,6 +2163,8 @@ def test_semantic_policy_threads_allowances_into_the_edit_gate() -> None:
     withheld = semantic_policy_for(hooks, autonomous=True)
     assert withheld.decide(creation).effect == "ask"
     released = semantic_policy_for(
-        hooks, autonomous=True, allowances=["new-devtools-module"]
+        hooks,
+        autonomous=True,
+        grants=granting(tmp_path, ConcernAllowance.NEW_DEVTOOLS_MODULE),
     )
     assert released.decide(creation).effect == "allow"

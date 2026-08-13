@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from lup.codescan.symbols import DefinedSymbol
 from lup.harness.models import ResolveSpec
+from lup.policy.grants import LeaseGrants
 from lup.policy.identity import ConcernAllowance
 
 FROZEN = ConfigDict(frozen=True)
@@ -547,7 +548,7 @@ class WorkerContext(BaseModel):
     they are given as the identity a worker cannot post outside of.
     """
 
-    model_config = FROZEN
+    model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
 
     root: Path
     concern_id: str
@@ -555,9 +556,12 @@ class WorkerContext(BaseModel):
     """Whose session this is, which is not derivable from the concern: one
     recipe opens both a concern's worker and the merger that joins into it,
     and mail addressed to either must reach that one and not the other."""
-    allowances: list[ConcernAllowance] = Field(default_factory=list)
-    """Edit gates a human granted with this concern. The merge and
-    integration leases carry none: no concern approved them."""
+    grants: LeaseGrants = Field(default_factory=LeaseGrants)
+    """Where this lease's edit gates are read from, asked afresh at every
+    judgment rather than resolved once here: a gate a human grants while this
+    session runs has no other way to reach it, and one they take back has no
+    other way to stop applying. The document it names is the same one the
+    lease's own deployed dispatcher reads."""
 
 
 class WorkerReport(BaseModel):

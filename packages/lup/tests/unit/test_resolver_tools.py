@@ -12,6 +12,7 @@ import pytest
 
 from lup.harness.process import LaunchRequest, LocalProcessLauncher
 from lup.mcp import LupMcpTool, ToolError
+from lup.policy.identity import ConcernAllowance
 from lup.resolver.mailbox import (
     AnswerDoor,
     QuestionMailbox,
@@ -26,6 +27,7 @@ from lup.resolver.tools import (
     CheckDeclarationOutput,
     QueueQuestionsInput,
     QueueQuestionsOutput,
+    RequestAllowanceInput,
     ResolverToolContext,
     create_question_tools,
     read_resolver_tool_context,
@@ -84,6 +86,34 @@ async def test_queueing_returns_composed_ids_without_waiting(tmp_path: Path) -> 
         "alpha",
         "alpha",
     ]
+
+
+async def test_an_edit_gate_closes_its_domain_where_a_design_question_does_not(
+    tmp_path: Path,
+) -> None:
+    """A gate is read by machinery that recognizes one spelling.
+
+    Answered "yes" instead of "grant", an open gate settles as a refusal
+    silently, and the worker waiting on it is handed an answer with no gate
+    behind it. Closed, the same reply comes back as a correctable problem.
+    A design question's choices stay suggestions the human may answer past.
+    """
+    mailbox = QuestionMailbox(tmp_path)
+    tools = tools_for(mailbox)
+
+    await tools["request_allowance"](
+        RequestAllowanceInput(
+            allowance=ConcernAllowance.NEW_DEVTOOLS_MODULE,
+            reason="the module this concern adds has nowhere else to go",
+        )
+    )
+    await tools["queue_questions"](QueueQuestionsInput(questions=[asked("shape")]))
+
+    closed = {
+        item.question.id: item.question.closed_choices for item in mailbox.questions()
+    }
+    assert closed["alpha-allow-new-devtools-module"]
+    assert not closed["alpha-shape"]
 
 
 async def test_a_worker_cannot_post_against_a_sibling_concern(tmp_path: Path) -> None:

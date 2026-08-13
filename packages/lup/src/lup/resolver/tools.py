@@ -32,7 +32,7 @@ from lup.resolver.mailbox import (
     wait_for_answers,
 )
 from lup.policy.identity import ConcernAllowance
-from lup.resolver.models import MaterialQuestion
+from lup.resolver.models import MaterialQuestion, allowance_question_id
 from lup.types import EnvVars
 
 RESOLVER_RUN_DIR_ENV = "LUP_RESOLVER_RUN_DIR"
@@ -243,6 +243,21 @@ def create_question_tools(
     def compose(identifier: str) -> str:
         return f"{concern_id}-{identifier}"
 
+    def gates(identifier: str) -> bool:
+        """Whether this id names an edit gate, whose domain really is two words.
+
+        A design question's choices are the asker's suggestions and a human
+        may answer in their own words, so those stay open. A gate is read by
+        machinery that recognizes one spelling: answered "yes" instead of
+        "grant" it settles as a refusal, silently, and the worker waiting on
+        it is handed an answer with no gate behind it. Closed, the same reply
+        comes back as a correctable problem naming what the gate accepts.
+        """
+        return any(
+            identifier == allowance_question_id(concern_id, allowance)
+            for allowance in ConcernAllowance
+        )
+
     def prompts() -> dict[str, str]:  # lup: ignore[dict-str-payload] — open id map
         return {item.question.id: item.question.prompt for item in mailbox.questions()}
 
@@ -266,6 +281,7 @@ def create_question_tools(
                     prompt=asked.prompt,
                     choices=asked.choices,
                     recommendation=asked.recommendation,
+                    closed_choices=gates(identifier),
                 )
             except ValueError as error:
                 raise ToolError(
@@ -380,7 +396,10 @@ def create_question_tools(
         "allowance is granted when a concern is planned, and a need nobody "
         "could have foreseen — a rule that only meets its exception once two "
         "branches are joined — has no other route. This asks a human and "
-        "waits, like any other question.",
+        "waits, like any other question. A grant takes effect in this "
+        "session, from the moment it is answered: retry the call that was "
+        "refused and carry on from where you stopped. Nothing restarts, and "
+        "nothing you have already done needs doing again.",
         name="request_allowance",
     )
     async def request_allowance(params: RequestAllowanceInput) -> AwaitAnswersOutput:

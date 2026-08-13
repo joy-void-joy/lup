@@ -25,18 +25,19 @@ from lup.harness.contracts import SkillInvocationRenderer
 from lup.harness.models import ResolveSpec
 from lup.policy.identity import ConcernAllowance
 from lup.resolver.actors import ActorSession, ActorSessions
-from lup.resolver.mailbox import QuestionMailbox
+from lup.resolver.grants import GrantLedger, concern_grants, lease_grants
+from lup.resolver.mailbox import ParkRequest, QuestionMailbox
 from lup.resolver.models import (
     ActorRef,
     Concern,
     DropCandidate,
     MergeReport,
+    QuestionAnswer,
     ReviewReport,
     WorkAssignment,
     WorkerContext,
     WorkerReport,
     WritableRootLease,
-    allowance_question_id,
 )
 from lup.resolver.run import ResolveRun, ResolverInvariantError
 from lup.resolver.tools import WAIT_CONTRACT
@@ -145,11 +146,13 @@ class TurnRunner:
         worker_factory: WorkerFactoryRecipe,
         reviewer_factory: ReviewerFactoryRecipe,
         invocation_renderer: SkillInvocationRenderer,
+        grants: GrantLedger,
     ) -> None:
         self.spec = spec
         self.run = run
         self.actors = actors
         self.mailbox = mailbox
+        self.grants = grants
         self.worker_factory = corrective(worker_factory)
         self.reviewer_factory = corrective(reviewer_factory)
         self.invocation_renderer = invocation_renderer
@@ -158,7 +161,20 @@ class TurnRunner:
     def worker_session(
         self, actor: ActorRef, root: Path, allowances: list[ConcernAllowance]
     ) -> ActorSession:
-        """One writing actor's session, authorized for the gates it was granted."""
+        """One writing actor's session, authorized for the gates it was granted.
+
+        The gates are published to this lease's document and the session is
+        handed the reader for it, not the list: an answer that arrives after
+        the session starts reaches it through the document, and the same
+        document is what the lease's deployed dispatcher reads.
+
+        Whatever a caller passes, what this lease has itself been granted is
+        folded in here rather than left to each caller to remember. A turn
+        republishes before it runs and the session holding the reader is the
+        one opened for the first turn, so a set that omitted a gate that
+        reader had already seen would take it away — and be reported as the
+        withdrawal it is indistinguishable from.
+        """
         return self.actors.session(
             actor,
             self.worker_factory(
@@ -166,10 +182,29 @@ class TurnRunner:
                     root=root,
                     concern_id=actor.id,
                     actor=actor,
-                    allowances=allowances,
+                    grants=self.grants.lease(
+                        actor.id,
+                        lease_grants(actor.id, allowances, self.recorded_answers()),
+                        self.park_lease,
+                    ),
                 )
             ),
         )
+
+    def recorded_answers(self) -> list[QuestionAnswer]:
+        """Every answer this run has settled, from the record that settles them.
+
+        The mailbox rather than the persisted state, because the state is a
+        fold of the mailbox taken a moment afterwards and the publisher that
+        delivers a mid-lease grant works from the mailbox. A lease opened in
+        the gap would otherwise publish a set missing a gate a human had
+        already granted — and its reader would call that a withdrawal.
+        """
+        return [record.answer for record in self.mailbox.answers()]
+
+    def park_lease(self, reason: str) -> None:
+        """Stop the run because a human took back what a lease was granted."""
+        self.mailbox.park(ParkRequest(run_id=self.run.require().run_id, reason=reason))
 
     def reviewer_session(self, actor: ActorRef, worktree: Path) -> ActorSession:
         """One reading actor's session, opened over the tree it judges."""
@@ -491,25 +526,12 @@ class TurnRunner:
         """Every gate this concern may pass: planned grants plus mid-run ones.
 
         A `request_allowance` question a human answered "grant" extends the
-        concern's authority from that answer on: the next session launched
-        for the concern — a revision round, a merge, a remediation — carries
-        it in its environment and its in-process judge. Without this reader,
-        the tool's question had no machinery behind either answer.
+        concern's authority from that answer on — reaching the session that
+        asked, which is still running, through the document that session's
+        judges read. This is what the run believes; the document is what
+        governs, and the two are the same until a human says otherwise.
         """
-        granted = list(concern.allowances)
-        state = self.run.state
-        if state is None or state.answers is None:
-            return granted
-        answered = {
-            answer.question_id: answer.value for answer in state.answers.answers
-        }
-        for allowance in ConcernAllowance:
-            if allowance in granted:
-                continue
-            key = allowance_question_id(concern.id, allowance)
-            if key in answered and answered[key] == "grant":
-                granted.append(allowance)
-        return granted
+        return concern_grants(concern, self.recorded_answers())
 
     def merge_allowances(self) -> list[ConcernAllowance]:
         """Every gate the joined concerns were approved to pass.

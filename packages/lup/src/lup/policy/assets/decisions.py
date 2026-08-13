@@ -37,9 +37,9 @@ from kernel.fetch import decide_fetch
 from kernel.lex import shell_path_verb_targets, shell_write_targets
 from kernel.shell import decide_shell
 from policy_data import (
+    ALLOWANCE_GRANTS_ENV,
     ALLOWED_FETCH_SCOPES,
     ANTI_PATTERN_ROWS,
-    CONCERN_ALLOWANCES_ENV,
     DENIED_FETCH_SCOPES,
     KNOWN_ALLOWANCES,
     MAXIMUM_ADDED_LINES,
@@ -108,6 +108,11 @@ def edit_decision(
     The path is relativized against the worktree holding it rather than the
     directory the runtime started in, because every repo-relative rule matches
     on that answer and a session may be launched anywhere.
+
+    The gates this lease holds are read here, per call, rather than resolved
+    when the session started: a grant is answered by a human while the session
+    that asked for it is still running, and one resolved at launch could not
+    have carried the answer.
     """
     suffix = Path(path_text).suffix.lower()
     return decide_edit(
@@ -122,6 +127,6 @@ def edit_decision(
         path_roles=PATH_ROLES,
         maximum_added_lines=MAXIMUM_ADDED_LINES,
         autonomous=autonomous,
-        allowances=granted_allowances(CONCERN_ALLOWANCES_ENV, KNOWN_ALLOWANCES),
+        allowances=granted_allowances(ALLOWANCE_GRANTS_ENV, KNOWN_ALLOWANCES),
         python_source=suffix in (".py", ".pyi"),
     )

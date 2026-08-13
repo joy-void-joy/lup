@@ -14,7 +14,9 @@ import asyncio
 import logging
 
 from lup.channels.models import utc_now
+from lup.policy.identity import ConcernAllowance
 from lup.resolver.contracts import ResolverAwaitingAnswers
+from lup.resolver.grants import GRANT_ANSWER, GrantLedger
 from lup.resolver.journal import (
     AnswerSettledEvent,
     Journal,
@@ -33,6 +35,7 @@ from lup.resolver.models import (
     QuestionAnswer,
     QuestionBatch,
     ResolverConfig,
+    allowance_question_id,
 )
 from lup.resolver.run import ResolveRun
 
@@ -48,6 +51,7 @@ class QuestionBroker:
         run: ResolveRun,
         mailbox: QuestionMailbox,
         journal: Journal,
+        grants: GrantLedger,
         answer_wait_seconds: float = 0.0,
         poll_interval_seconds: float = ANSWER_POLL_SECONDS,
     ) -> None:
@@ -55,6 +59,7 @@ class QuestionBroker:
         self.run = run
         self.mailbox = mailbox
         self.journal = journal
+        self.grants = grants
         self.answer_wait_seconds = answer_wait_seconds
         self.poll_interval_seconds = poll_interval_seconds
         self.problems: list[str] = []
@@ -126,12 +131,45 @@ class QuestionBroker:
                 )
             )
             self.journal.record(AnswerSettledEvent(answer=answer, door=offer.door))
+        self.publish_grants(
+            [
+                questions[offer.question_id]
+                for offer in valid
+                if offer.value == GRANT_ANSWER
+            ]
+        )
         return [
             f"{offer.question_id} was answered {offer.value!r}, but that gate "
             "accepts only: " + ", ".join(questions[offer.question_id].choices)
             for offer in fresh
             if offer not in valid
         ]
+
+    def publish_grants(self, granted: list[MaterialQuestion]) -> None:
+        """Extend a lease's authority the moment a human grants it.
+
+        In the same breath as the promotion that settled the answer, because
+        the worker waiting on it is woken by that promotion: a document
+        written any later would have the worker retrying its edit against a
+        gate that had not opened yet, on the strength of an answer it had
+        already been handed.
+
+        Each question names the lease that asked it, so this reaches whoever
+        asked rather than only the leases a concern stands behind. The one
+        that needed it most stands behind none: an integration merger holds
+        the reserved lease, and a rule that first meets its exception once
+        two branches are joined is the case `request_allowance` exists for.
+
+        The gate is recognized by composing the id its lease would have
+        asked under rather than by taking the id apart, and the document is
+        widened rather than rewritten — so a lease that legitimately holds
+        more keeps it, and a document a human has edited is not racing a
+        publisher that would put back what they took out.
+        """
+        for question in granted:
+            for allowance in ConcernAllowance:
+                if question.id == allowance_question_id(question.concern_id, allowance):
+                    self.grants.extend(question.concern_id, [allowance])
 
     async def apply_mailbox(self) -> list[str]:
         """Promote the doors' offers and fold the mailbox into persisted state."""

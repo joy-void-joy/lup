@@ -19,6 +19,7 @@ from lup.resolver.contracts import (
 from lup.resolver.actors import ActorSessions
 from lup.resolver.dag import ConcernGraph
 from lup.resolver.execution import ConcernExecutor
+from lup.resolver.grants import GrantLedger
 from lup.resolver.joins import Joiner
 from lup.resolver.journal import (
     Journal,
@@ -283,11 +284,13 @@ class ResolverCore:
         self.actors = ActorSessions(self.repository.root, self.journal, self.mailbox)
         self.run_state = ResolveRun(self.repository, self.journal, observer)
         self.rebaser = BaseRefresher(self.run_state, self.worktrees, self.journal)
+        self.grants = GrantLedger(self.repository.root)
         self.questions = QuestionBroker(
             config,
             self.run_state,
             self.mailbox,
             self.journal,
+            self.grants,
             answer_wait_seconds,
             poll_interval_seconds,
         )
@@ -299,6 +302,7 @@ class ResolverCore:
             worker_factory,
             reviewer_factory,
             invocation_renderer,
+            self.grants,
         )
         self.verifier = Verifier(config.verification_commands, process_launcher)
         self.joiner = Joiner(

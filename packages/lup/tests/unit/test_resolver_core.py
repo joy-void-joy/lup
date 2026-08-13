@@ -3256,7 +3256,7 @@ async def test_a_granted_allowance_reaches_the_sessions_launched_next(
     """
     launcher = LocalProcessLauncher()
     workspace = failure_leg_workspace(tmp_path, launcher)
-    carried: list[list[ConcernAllowance]] = []
+    carried: list[list[str]] = []
 
     def worker_response(root: Path, output_name: str) -> JsonObject:
         if output_name == MergeReport.__name__:
@@ -3270,7 +3270,7 @@ async def test_a_granted_allowance_reaches_the_sessions_launched_next(
         }
 
     def recording_worker_factory(context: WorkerContext) -> SessionFactory:
-        carried.append(list(context.allowances))
+        carried.append(context.grants.granted())
         return resolver_test_factory(context.root, worker_response)
 
     core = ResolverCore(
@@ -3315,7 +3315,7 @@ async def test_a_granted_allowance_reaches_the_sessions_launched_next(
     assert outcome.verified, outcome.failure
     assert concern("a").allowances == []
     assert carried and all(
-        ConcernAllowance.ANTIPATTERN_SUPPRESSION in launch for launch in carried
+        ConcernAllowance.ANTIPATTERN_SUPPRESSION.value in launch for launch in carried
     )
 
 
