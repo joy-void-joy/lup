@@ -95,7 +95,12 @@ class Subcommand(TypedDict):
 def split_subcommand(
     executable: str, arguments: list[str], default: ShellRuleRow | None
 ) -> Subcommand | KernelDecision:
-    """Find the subcommand word, honoring global value-taking and guarded flags."""
+    """Find the subcommand word, honoring global value-taking and guarded flags.
+
+    A guarded global that also takes a value is one that moves the command to
+    another tree, so the question names the way through: running the same verb
+    from inside that tree is judged on its own and needs no redirect.
+    """
     ask_flags = default["ask_flags"] if default else []
     value_flags = default["value_flags"] if default else []
     position = 0
@@ -104,8 +109,14 @@ def split_subcommand(
         if not word.startswith("-"):
             return Subcommand(word=word, remainder=arguments[position + 1 :])
         if flag_matches(word, ask_flags):
+            redirect = (
+                " — or cd into that tree and run it there"
+                if flag_matches(word, value_flags)
+                else ""
+            )
             return KernelDecision(
-                "ask", f"{executable} global flag {word} requires approval"
+                "ask",
+                f"{executable} global flag {word} requires approval{redirect}",
             )
         position += 2 if word in value_flags else 1
     return Subcommand(word="", remainder=[])

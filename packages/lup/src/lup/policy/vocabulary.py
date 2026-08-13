@@ -446,7 +446,6 @@ GIT_READ_ONLY_SUBCOMMANDS = (  # lup: ignore[library-default] — git's own quer
     "blame",
     "annotate",
     "describe",
-    "shortlog",
     "rev-list",
     "name-rev",
     "merge-base",
@@ -454,14 +453,12 @@ GIT_READ_ONLY_SUBCOMMANDS = (  # lup: ignore[library-default] — git's own quer
     "for-each-ref",
     "count-objects",
     "cherry",
-    "range-diff",
-    "diff-tree",
-    "diff-index",
-    "diff-files",
     "check-ignore",
     "check-attr",
     "check-mailmap",
     "check-ref-format",
+    "column",
+    "fmt-merge-msg",
     "show-branch",
     "show-index",
     "verify-commit",
@@ -554,7 +551,38 @@ def git_rule(
                 ask_flags=["--output"],
                 reason="writing command output to a file requires approval",
             )
-            for name in ("log", "diff", "show", "whatchanged")
+            # `--output` names a path on the command line and lands a file
+            # there, which is the clause that disqualified `format-patch` from
+            # the query family above. The plumbing spellings are not a quieter
+            # kind of read: `diff-tree --output=` lands a file exactly where
+            # `log --output=` does.
+            #
+            # The guard has to follow forwarding rather than only the verbs
+            # that document the flag, because several reach it by handing their
+            # arguments to `log` or `diff` — `stash list`, `stash show` and
+            # `bisect view` carry it for that reason, on their own rows below.
+            # Where a verb forwards is a fact about git worth checking against
+            # its source; guarding one that turns out to reject the flag costs
+            # nothing, since git refuses it either way.
+            #
+            # `--ext-diff` and `--textconv` are deliberately absent, by the
+            # same reasoning that leaves `--paginate` alone: neither names a
+            # program. They enable a driver already configured, and reaching
+            # that configuration means `-c` or `git config`, which ask. That is
+            # what separates them from `rg --pre`, which takes its program as
+            # the next word.
+            for name in (
+                "log",
+                "diff",
+                "show",
+                "whatchanged",
+                "diff-tree",
+                "diff-index",
+                "diff-files",
+                "diff-pairs",
+                "range-diff",
+                "shortlog",
+            )
         ],
         ShellSubcommandRule(
             name="grep",
@@ -667,7 +695,14 @@ def git_rule(
             effect="ask",
             operations=[
                 ShellOperationRule(name="log", effect="allow"),
-                ShellOperationRule(name="view", effect="allow"),
+                ShellOperationRule(
+                    # Falls back to `git log` where no display is available,
+                    # and hands it the arguments it was given.
+                    name="view",
+                    effect="allow",
+                    ask_flags=["--output"],
+                    reason="writing command output to a file requires approval",
+                ),
             ],
             reason="a bisect step moves HEAD across commits",
         ),
@@ -727,8 +762,20 @@ def git_rule(
         ShellSubcommandRule(
             name="stash",
             operations=[
-                ShellOperationRule(name="list", effect="allow"),
-                ShellOperationRule(name="show", effect="allow"),
+                ShellOperationRule(
+                    # Forwards its arguments to `git log`, `--output` included.
+                    name="list",
+                    effect="allow",
+                    ask_flags=["--output"],
+                    reason="writing command output to a file requires approval",
+                ),
+                ShellOperationRule(
+                    # Accepts any format git diff knows, `--output` included.
+                    name="show",
+                    effect="allow",
+                    ask_flags=["--output"],
+                    reason="writing command output to a file requires approval",
+                ),
                 ShellOperationRule(name="push", effect="allow"),
                 ShellOperationRule(name="save", effect="allow"),
                 ShellOperationRule(name="pop", effect="allow"),
@@ -771,11 +818,40 @@ def git_rule(
             ],
         ),
     ]
+    # A global that points git somewhere else is judged here rather than per
+    # subcommand, because the subcommand word is found only after these are
+    # read. A redirect left to `value_flags` alone would only advance the
+    # parser past its argument, and every verb behind it would be answered by a
+    # row reasoning about this worktree: `git -C /elsewhere commit` reads as
+    # reversible because the reflog that undoes it is *here*. The redirect is
+    # exactly what makes that premise someone else's.
+    #
+    # Only the three that name a directory are also in `value_flags`, which
+    # selects the wording of the question rather than the parse — the ask is
+    # reached before any value is skipped. Those three have a way through worth
+    # naming, because `cd there && git status` is two allowed segments.
+    # `--namespace` has none: it redirects refs rather than a path, and the
+    # environment spelling of it is a guarded assignment of its own.
+    #
+    # `--paginate` is deliberately not among them, though it is on the list this
+    # sweep was measured against. It moves no ref, no index entry, and no file:
+    # it forces the pager these subcommands already run by default, and the
+    # program that pager names is reachable only through `-c` or `git config`,
+    # which ask. Gating it would spend a question on the flag rather than on
+    # what the flag could reach.
+    directory_flags = ["-C", "--git-dir", "--work-tree"]
     return ShellCommandRule(
         name="git",
         default_effect="deny",
-        ask_flags=["-c", "--config-env", "--exec-path"],
-        value_flags=["-C", "--git-dir", "--work-tree", "--namespace"],
+        ask_flags=[
+            "-c",
+            "--config-env",
+            "--exec-path",
+            "--super-prefix",
+            "--namespace",
+            *directory_flags,
+        ],
+        value_flags=directory_flags,
         subcommands=[*leaf, *guarded],
         reason="this git subcommand is not classified as read-only or reversible",
     )

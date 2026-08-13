@@ -448,11 +448,55 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="git config --global user.name me", effect="ask"),
     DecisionCase(input="git config --get $KEY", effect="ask"),
     # Global value flags are consumed, never read as the subcommand; globals
-    # that change execution behavior ask.
-    DecisionCase(input="git -C /other status", effect="allow"),
+    # that change execution behavior or move git to another repository ask.
+    # A redirect is judged before the subcommand word is even found, so it
+    # cannot be answered by the row that would otherwise reason about this
+    # worktree — `commit` is reversible here, where the reflog lives.
+    DecisionCase(input="git -C /other status", effect="ask"),
+    DecisionCase(input="git -C /tmp/other commit -am x", effect="ask"),
+    DecisionCase(input="git -C /tmp/o merge --abort", effect="ask"),
+    DecisionCase(input="git --git-dir=/tmp/x --work-tree=/tmp add .", effect="ask"),
+    DecisionCase(input="git --namespace=other push", effect="ask"),
+    DecisionCase(input="git --super-prefix=x/ status", effect="ask"),
+    # Reading another tree keeps its way through, as two allowed segments.
+    DecisionCase(input="cd /other && git status", effect="allow"),
     DecisionCase(input="git -C status restore f", effect="ask"),
     DecisionCase(input="git -c core.pager=touch log", effect="ask"),
     DecisionCase(input="git --exec-path=/tmp/x status", effect="ask"),
+    # The pager is not gated: it moves nothing, these subcommands already run
+    # it by default, and the program it names is reachable only through `-c`
+    # and `git config`, which ask.
+    DecisionCase(input="git --paginate diff", effect="allow"),
+    DecisionCase(input="git --no-pager log", effect="allow"),
+    # A configured diff driver stays allowed on purpose, the way `--paginate`
+    # does: the flag names no program, only enables one already configured,
+    # and that configuration is reachable only through `-c` and `git config`.
+    # git also enables textconv by default for `diff` and `log`, so refusing
+    # the flag would not stop a driver that already runs on the bare form.
+    DecisionCase(input="git diff --ext-diff", effect="allow"),
+    DecisionCase(input="git diff --textconv HEAD", effect="allow"),
+    DecisionCase(input="git cat-file --textconv HEAD:f", effect="allow"),
+    # `--output` is the guard, because it names a path and lands a file there.
+    # It follows forwarding rather than only the verbs that document the flag:
+    # `stash list`, `stash show` and `bisect view` reach it by handing their
+    # arguments to `log` or `diff`. Bare, each still reports and allows.
+    DecisionCase(input="git stash show --output=/tmp/f", effect="ask"),
+    DecisionCase(input="git stash list --output=/tmp/f", effect="ask"),
+    DecisionCase(input="git bisect view --output=/tmp/f", effect="ask"),
+    DecisionCase(input="git shortlog --output=/tmp/f HEAD", effect="ask"),
+    DecisionCase(input="git stash show", effect="allow"),
+    DecisionCase(input="git stash list", effect="allow"),
+    DecisionCase(input="git bisect view", effect="allow"),
+    DecisionCase(input="git shortlog HEAD", effect="allow"),
+    DecisionCase(input="git diff-tree --output=/tmp/f", effect="ask"),
+    DecisionCase(input="git diff-index --output=/tmp/f", effect="ask"),
+    DecisionCase(input="git diff-pairs --output=/tmp/f", effect="ask"),
+    DecisionCase(input="git range-diff --output=/tmp/f a b", effect="ask"),
+    DecisionCase(input="git diff-tree HEAD", effect="allow"),
+    DecisionCase(input="git diff-files", effect="allow"),
+    DecisionCase(input="git diff-index HEAD", effect="allow"),
+    DecisionCase(input="git range-diff a...b", effect="allow"),
+    DecisionCase(input="git diff-pairs", effect="allow"),
     # Exec-bearing and file-writing flags on allowed subcommands ask.
     DecisionCase(input="git rebase --exec 'touch x' HEAD~2", effect="ask"),
     DecisionCase(input="git fetch --upload-pack=/tmp/x origin", effect="ask"),
@@ -479,12 +523,18 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="git hash-object -w README.md", effect="allow"),
     DecisionCase(input="git commit-tree -m x HEAD^{tree}", effect="allow"),
     DecisionCase(input="git mktree", effect="allow"),
+    DecisionCase(input="git mktag", effect="allow"),
     DecisionCase(input="git write-tree", effect="allow"),
     DecisionCase(input="git patch-id", effect="allow"),
+    DecisionCase(input="git show-index", effect="allow"),
+    DecisionCase(input="git get-tar-commit-id", effect="allow"),
     DecisionCase(input="git fsck", effect="allow"),
     DecisionCase(input="git verify-pack -v x.idx", effect="allow"),
     DecisionCase(input="git check-ref-format --branch topic", effect="allow"),
     DecisionCase(input="git stripspace", effect="allow"),
+    DecisionCase(input="git column", effect="allow"),
+    DecisionCase(input="git diff-pairs", effect="allow"),
+    DecisionCase(input="git fmt-merge-msg", effect="allow"),
     DecisionCase(input="git request-pull main https://x.test/r HEAD", effect="allow"),
     # And the near misses the criterion excludes, each for a different one of
     # its three clauses. A sweep that admitted any of these would have been a

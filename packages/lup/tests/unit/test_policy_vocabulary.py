@@ -120,6 +120,35 @@ def test_the_git_family_is_drawn_by_what_a_verb_reaches_not_by_what_it_writes() 
     assert (outside.effect, outside.sandbox) == ("allow", "outside")
 
 
+def test_a_global_that_moves_git_to_another_tree_is_judged_before_the_verb() -> None:
+    """The criterion is about refs, index and working tree — not about whose.
+
+    Naming a redirect in `value_flags` alone only advanced the parser past its
+    argument, so the verb behind it was answered by a row reasoning about this
+    worktree: `commit` allowed because the reflog that undoes it is here. The
+    redirect is exactly what makes that premise someone else's, and it is read
+    before the subcommand word is found, so it has to answer for itself.
+    """
+    rules = [git_rule()]
+
+    def effect(command: str) -> str:
+        return verdict(command, rules).effect
+
+    assert effect("git -C /tmp/other commit -am x") == "ask"
+    assert effect("git -C /tmp/o merge --abort") == "ask"
+    assert effect("git --git-dir=/tmp/x --work-tree=/tmp add .") == "ask"
+    assert effect("git --namespace=other push") == "ask"
+    # The refusal names the way through rather than leaving it to be guessed —
+    # but only where one exists. A namespace is not a directory, so offering to
+    # cd into it would send an agent somewhere it cannot go.
+    assert "cd into that tree" in verdict("git -C /tmp/o status", rules).reason
+    assert "cd into" not in verdict("git --namespace=o push", rules).reason
+    # Forcing the pager moves nothing, and the program it names is reachable
+    # only through the globals that already ask.
+    assert effect("git --paginate diff") == "allow"
+    assert effect("git --no-pager log") == "allow"
+
+
 def test_allow_authoring_moves_only_the_author_describing_their_own_work() -> None:
     """Opening and titling a PR is authoring; commenting reaches other people."""
     authoring = [gh_rule()]
