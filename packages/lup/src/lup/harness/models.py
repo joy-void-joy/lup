@@ -24,6 +24,7 @@ from pydantic import (
 )
 
 from lup.harness.banner import ArtifactBanner, GeneratedBanner
+from lup.markdown import TableCell, escaped
 from lup.policy.kernel.rows import PathRoleName
 from lup.policy.models import PolicyId, UrlPathPrefix
 from lup.policy.shell_rules import ShellCommandRule
@@ -164,6 +165,49 @@ class SpellingExample(SemanticPart):
     @property
     def text_payload(self) -> str:
         return self.text
+
+
+class MarkdownTable(SemanticPart):
+    """A table derived from declarations, laid out and escaped as it renders.
+
+    Rows arrive as the values they stand for rather than as finished Markdown,
+    so the escaping that keeps a pipe or a newline from breaking the row it
+    lands in happens here — a caller composes a table into a document the way
+    it composes any other part, and has no way to splice one in wrong. Every
+    runtime reads the same Markdown, so this spells itself.
+
+    Headers and cells hold data rather than authored prose — a rule's matching
+    shape, a path a document already renders to — so they are not held to the
+    portable-prose invariant a :class:`TextPart` answers for. What the table
+    renders still reaches ``text_payload``, so a native spelling that arrived
+    through a cell is caught where the assembled document is checked.
+    """
+
+    type: Literal["markdown_table"] = "markdown_table"
+    headers: list[str]
+    rows: list[list[TableCell]]
+
+    @model_validator(mode="after")
+    def rows_match_the_header(self) -> "MarkdownTable":
+        ragged = [len(row) for row in self.rows if len(row) != len(self.headers)]
+        if ragged:
+            raise ValueError(
+                f"table rows hold {ragged} cells under {len(self.headers)} headers"
+            )
+        return self
+
+    def spell(self, renderer: "PromptRenderer") -> str:
+        return self.text_payload
+
+    @property
+    def text_payload(self) -> str:
+        """The table as Markdown, one line per row, newline-terminated."""
+        lines = [
+            [escaped(header) for header in self.headers],
+            ["---"] * len(self.headers),
+            *[[cell.render() for cell in row] for row in self.rows],
+        ]
+        return "".join(f"| {' | '.join(line)} |\n" for line in lines)
 
 
 class InvocationArgument(BaseModel):
@@ -368,6 +412,7 @@ class ArgumentsRef(SemanticPart):
 type PromptPart = Annotated[
     TextPart
     | SpellingExample
+    | MarkdownTable
     | SkillInvocation
     | NativePath
     | PluginPath

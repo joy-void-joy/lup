@@ -14,7 +14,7 @@ own words about its own repository, and pass through untouched.
 from pydantic import BaseModel, ConfigDict
 
 import lup.harness.models as models
-from lup.markdown import MarkdownTable, cell, link
+from lup.markdown import LinkCell, PlainCell
 
 
 class IndexEntry(BaseModel):
@@ -36,17 +36,23 @@ class IndexGroup(BaseModel):
     blurb: str = ""
     """Prose between the heading and the table, for a group that needs it."""
 
-    def render(self) -> str:
-        """This heading, its blurb, and its rows as a Markdown table."""
-        table = MarkdownTable(
-            headers=["Page", "Answers"],
-            rows=[
-                [link(item.link, item.link), cell(item.answers)]
-                for item in self.entries
-            ],
-        )
+    def parts(self) -> list[models.PromptPart]:
+        """This heading, its blurb, and its rows as a table part."""
         blurb = f"{self.blurb}\n\n" if self.blurb else ""
-        return f"## {self.title}\n\n{blurb}{table.render()}\n"
+        return [
+            models.TextPart(text=f"## {self.title}\n\n{blurb}"),
+            models.MarkdownTable(
+                headers=["Page", "Answers"],
+                rows=[
+                    [
+                        LinkCell(text=item.link, target=item.link),
+                        PlainCell(text=item.answers),
+                    ]
+                    for item in self.entries
+                ],
+            ),
+            models.TextPart(text="\n"),
+        ]
 
 
 def entry(document: models.Document, answers: str) -> IndexEntry:
@@ -68,7 +74,7 @@ def document_index(
         source=__name__,
         parts=[
             *preamble,
-            models.TextPart(text="".join(group.render() for group in groups)),
+            *[part for group in groups for part in group.parts()],
             *epilogue,
         ],
     )

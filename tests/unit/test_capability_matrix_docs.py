@@ -7,20 +7,39 @@ table is regenerated, so documentation cannot drift from code.
 
 from lup.adapters.capabilities import (
     canonical_capability_matrix,
-    capability_matrix_markdown,
+    capability_matrix,
 )
 from lup.workspace.paths import project_root
 
 
 def test_readme_capability_matrix_is_current() -> None:
     readme = (project_root() / "README.md").read_text(encoding="utf-8")
-    expected = capability_matrix_markdown(canonical_capability_matrix())
+    expected = capability_matrix(canonical_capability_matrix()).text_payload
 
     assert expected in readme, (
         "README capability matrix is stale. Regenerate with "
         "`uv run lup-devtools agent capabilities --markdown` and paste it "
         "into the runtime capability section."
     )
+
+
+def test_each_kind_of_fact_reaches_the_table_as_the_matrix_shows_it() -> None:
+    """The three renderings, pinned where the README copy cannot pin them.
+
+    The test above is the contract with the README and goes red whenever that
+    copy is stale. This one holds the composition — supported, absent, and
+    qualified — so a red README window never leaves the rendering unwatched.
+    """
+    table = capability_matrix(canonical_capability_matrix())
+    rows = {row[0].render(): [cell.render() for cell in row[1:]] for row in table.rows}
+
+    assert table.headers == [
+        "Capability",
+        "claude-sdk-0.2.89",
+        "codex-app-server-0.144.4",
+    ]
+    assert rows["steer"] == ["—", "✅"]
+    assert rows["resume"] == ["✅", "without a fresh dynamic tool"]
 
 
 def test_probed_matrix_is_consistent() -> None:

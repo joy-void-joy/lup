@@ -17,6 +17,9 @@ what a contract can do; that records what is currently sitting on disk.
 
 from pydantic import BaseModel, ConfigDict
 
+from lup.harness.models import MarkdownTable
+from lup.markdown import PlainCell, TableCell
+
 
 class CapabilityCell(BaseModel):
     """One supported, absent, or qualified capability fact."""
@@ -74,16 +77,26 @@ def canonical_capability_matrix() -> list[AdapterCapabilities]:
     ]
 
 
-def capability_matrix_markdown(adapters: list[AdapterCapabilities]) -> str:
-    """Render one row per capability and one column per adapter."""
-    lines = [
-        "| Capability | " + " | ".join(adapter.name for adapter in adapters) + " |",
-        "| " + " | ".join(["---"] * (len(adapters) + 1)) + " |",
-    ]
-    for row, cell in enumerate(adapters[0].cells):
-        rendered: list[str] = []
-        for adapter in adapters:
-            value = adapter.cells[row].value
-            rendered.append("✅" if value is True else "—" if value is False else value)
-        lines.append(f"| {cell.capability} | " + " | ".join(rendered) + " |")
-    return "\n".join(lines)
+def capability_cell(value: bool | str) -> TableCell:
+    """One evidence fact as the matrix shows it: supported, absent, qualified."""
+    match value:
+        case True:
+            return PlainCell(text="✅")
+        case False:
+            return PlainCell(text="—")
+        case str(qualification):
+            return PlainCell(text=qualification)
+
+
+def capability_matrix(adapters: list[AdapterCapabilities]) -> MarkdownTable:
+    """One row per capability and one column per adapter, as a table part."""
+    return MarkdownTable(
+        headers=["Capability", *[adapter.name for adapter in adapters]],
+        rows=[
+            [
+                PlainCell(text=cell.capability),
+                *[capability_cell(adapter.cells[row].value) for adapter in adapters],
+            ]
+            for row, cell in enumerate(adapters[0].cells)
+        ],
+    )
