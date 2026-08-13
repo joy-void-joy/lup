@@ -10,13 +10,11 @@ the library to learn an API it has no business knowing.
 import json
 import logging
 from collections.abc import Iterator
-from pathlib import PurePosixPath
-from urllib.parse import urlsplit
 
 import sh
 from pydantic import BaseModel, Field
 
-from lup.devtools.utils import decode_stderr, gh, git
+from lup.devtools.utils import decode_stderr, gh, repository_slug
 from lup.resolver.models import IssueEvidence
 
 logger = logging.getLogger(__name__)
@@ -54,37 +52,6 @@ class IssueRow(BaseModel):
         return IssueEvidence(
             number=self.number, url=self.url, title=self.title, body=self.body
         )
-
-
-def slug_from_remote(url: str) -> str:
-    """The ``owner/name`` a remote names, empty when it names none.
-
-    Read here rather than left to `gh` to infer, because a remote written
-    through an SSH alias — `jvj:owner/name.git`, whose host ssh resolves from
-    its own config — names no host `gh` recognizes, and every query then
-    fails with "no known GitHub host" as though the repository were
-    unreachable.
-
-    Two shapes, and only one of them is a URL. `urlsplit` reads `https://`
-    and `ssh://` remotes. Git's scp-like form (`git@host:owner/name`) is not
-    a URL and has no parser in the standard library — a single colon is the
-    whole of its structure — so the path is what follows the last one.
-    """
-    trimmed = url.removesuffix(".git")
-    split = urlsplit(trimmed)
-    after_host = trimmed.rpartition(":")[2]  # lup: ignore[string-split] — no parser
-    located = split.path if split.netloc else after_host
-    named = [part for part in PurePosixPath(located).parts if part != "/"]
-    return "/".join(named[-2:]) if len(named) >= 2 else ""
-
-
-def repository_slug() -> str:
-    """The ``owner/name`` this checkout answers to, empty when unreadable."""
-    try:
-        return slug_from_remote(git.out("remote", "get-url", "origin").strip())
-    except sh.ErrorReturnCode as error:
-        logger.warning("no origin remote to read a slug from: %s", decode_stderr(error))
-        return ""
 
 
 def fetch_open_issues(
