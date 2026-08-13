@@ -16,8 +16,9 @@ import typer
 
 from lup.channels.models import utc_now
 from lup.resolver.journal import Journal
-from lup.resolver.models import VerificationAcceptance
-from lup.resolver.state import ResolverStateRepository
+from lup.resolver.models import ConcernRetirement, VerificationAcceptance
+from lup.resolver.state import ResolverStateRepository, StateTransitionError
+from lup.resolver.status import run_status
 from lup.resolver.mailbox import (
     AnswerDoor,
     AnswerOffer,
@@ -287,3 +288,68 @@ def park_run(
     """Ask every open wait in this run to give up now."""
     open_mailbox(run_id).park(ParkRequest(run_id=run_id, reason=reason))
     typer.echo(f"parked {run_id}: {reason}")
+
+
+def show_status(
+    run_id: str = typer.Option(..., "--run-id", help="Run to report on"),
+) -> None:
+    """Say whether a run is alive, where it stands, and what it last did.
+
+    The liveness answer comes from the run's own lock rather than from the
+    process table, because under a sandbox `/proc` is PID-isolated: `ps` and
+    `pgrep` list nothing outside the current shell, so a healthy run looks
+    exactly like one that died. That ambiguity has produced confident wrong
+    conclusions in both directions, and the run directory is the only thing
+    a reader is guaranteed to be able to see.
+    """
+    root = resolve_state_root()
+    repository = ResolverStateRepository(root, run_id)
+    status = run_status(repository, run_id)
+    if not status.exists:
+        raise typer.BadParameter(f"no resolver run {run_id!r} under {root}")
+    typer.echo(status.verdict())
+    typer.echo(f"  phase: {status.phase}")
+    for count in status.counts:
+        typer.echo(f"  {count.concerns:>3} {count.status}")
+    if status.unanswered:
+        typer.echo(f"  {status.unanswered} question(s) waiting on you")
+    if status.last is not None:
+        typer.echo(
+            f"  last: {status.last.event} by {status.last.actor} "
+            f"at {status.last.at:%Y-%m-%d %H:%M:%S}Z"
+        )
+
+
+def retire_concern(
+    reason: str = typer.Argument(
+        ..., help="Where this concern was settled — a commit, branch or issue"
+    ),
+    run_id: str = typer.Option(..., "--run-id", help="Run whose state to write"),
+    concern: str = typer.Option(..., "--concern", help="Concern to retire"),
+) -> None:
+    """Retire one concern whose work was settled somewhere other than this run.
+
+    A run parked while its branch moved forward routinely finds the branch
+    already did some of its work, and base refresh makes that the expected
+    consequence of following a branch rather than a rare accident. Without
+    this, every route was wrong: hand-resolving an add/add conflict between
+    two independent implementations of one thing, letting a worker open on a
+    concern whose notes no longer exist in its tree, or aborting the whole
+    run — discarding every settled answer — to retire one concern.
+
+    The concern leaves the eligible set without failing, its dependents build
+    from the base where the work that settled it now lives, and its lease
+    stops being active. The worktree and branch stay: a retired concern often
+    built its own answer to what landed upstream, and that is worth reading
+    before it is thrown away.
+    """
+    root = resolve_state_root() / run_id
+    if not root.is_dir():
+        raise typer.BadParameter(f"no resolver run {run_id!r} under {root.parent}")
+    try:
+        ResolverStateRepository(resolve_state_root(), run_id).retire(
+            ConcernRetirement(concern_id=concern, reason=reason)
+        )
+    except StateTransitionError as error:
+        raise typer.BadParameter(str(error)) from error
+    typer.echo(f"retired {concern}: {reason}")

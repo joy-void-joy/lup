@@ -2151,3 +2151,55 @@ def test_semantic_policy_threads_allowances_into_the_edit_gate() -> None:
         hooks, autonomous=True, allowances=["new-devtools-module"]
     )
     assert released.decide(creation).effect == "allow"
+
+
+def test_removing_a_file_s_last_conflict_marker_is_not_read_as_deleting_a_note() -> (
+    None
+):
+    """Resolving a merge must be able to finish in a file that mentions the marker.
+
+    A conflicted Python file does not tokenize, so the count fell back to a
+    whole-text tally that also sees the marker inside ordinary string
+    literals. Removing the last conflict marker is what makes the file parse
+    for the first time, at which point the count drops to the tokenised
+    truth — a difference the gate read as removed feedback, denying the one
+    edit that completes any conflict resolution.
+    """
+    conflicted = (
+        "<<<<<<< HEAD\n"
+        'MESSAGE = "No unresolved # lup: comments"\n'
+        "=======\n"
+        'MESSAGE = "No unresolved # lup: comments, and no open issues."\n'
+        ">>>>>>> other\n"
+    )
+    resolved = 'MESSAGE = "No unresolved # lup: comments, and no open issues."\n'
+
+    decision = decide_edit(
+        "a.py",
+        conflicted,
+        resolved,
+        path_exists=True,
+        path_rules=[],
+        antipattern_rows=[],
+        allowances=[],
+        python_source=True,
+    )
+
+    assert "removes inline review feedback" not in decision.reason
+
+
+def test_a_real_note_deletion_is_still_denied_when_both_sides_parse() -> None:
+    """Unknown must widen to no-opinion, not to a hole in the gate."""
+    decision = decide_edit(
+        "a.py",
+        "x = 1  # lup: reconsider this\n",
+        "x = 1\n",
+        path_exists=True,
+        path_rules=[],
+        antipattern_rows=[],
+        allowances=[],
+        python_source=True,
+    )
+
+    assert decision.effect == "deny"
+    assert "removes inline review feedback" in decision.reason

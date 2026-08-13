@@ -34,9 +34,11 @@ from lup.resolver.mailbox import (
 from lup.policy.identity import ConcernAllowance
 from lup.resolver.contracts import (
     ResolverAwaitingAnswers,
+    ResolverEnvironmentFault,
     ResolverObserver,
     WorktreePreparer,
 )
+from lup.runtime.errors import ProviderTurnError, TurnFailure
 from lup.resolver.core import (
     APPROVE,
     DEFER,
@@ -80,7 +82,10 @@ from lup.resolver.models import (
     WorkerContext,
     WorkerReport,
     WritableRootLease,
+    ALLOWANCE_GRANTED,
+    ALLOWANCE_REFUSED,
     allowance_question_id,
+    asks_for_an_allowance,
 )
 from lup.resolver.orchestrator import (
     DependencyBaseBuilder,
@@ -1716,6 +1721,98 @@ async def test_worker_crash_persists_the_failure_and_raises_a_group(
     assert any("worker exploded" in failure for failure in persisted.failures)
 
 
+@pytest.mark.asyncio
+async def test_a_host_fault_parks_the_run_without_failing_any_concern(
+    tmp_path: Path,
+) -> None:
+    """A dead credential says nothing about the work, so it records nothing.
+
+    The whole recovery rests on no outcome being written: a resume reads
+    progress, finds the concern non-terminal, and returns it to the eligible
+    set. Recording a failure here to explain the interruption would convert
+    every expired login into permanent concern loss.
+    """
+    launcher = LocalProcessLauncher()
+    workspace = failure_leg_workspace(tmp_path, launcher)
+
+    def worker_response(_root: Path, _output_name: str) -> JsonObject:
+        raise ProviderTurnError(
+            TurnFailure(
+                message="Failed to authenticate. API Error: 401 OAuth "
+                "access token has been revoked.",
+                environmental=True,
+            )
+        )
+
+    def reviewer_response(_root: Path, _output_name: str) -> JsonObject:
+        raise AssertionError("the reviewer must not run after a host fault")
+
+    core = failure_leg_core(
+        tmp_path,
+        workspace,
+        launcher,
+        "host-fault",
+        worker_response,
+        reviewer_response,
+    )
+
+    with pytest.raises(ResolverEnvironmentFault) as raised:
+        seed_approvals(core, [concern("a")])
+        await core.run(
+            ResolveInventory(
+                source=snapshot(workspace, launcher), concerns=[concern("a")]
+            )
+        )
+
+    assert "401 OAuth access token has been revoked" in raised.value.cause
+    assert raised.value.concerns == ["a"]
+    persisted = core.repository.load()
+    progress = {item.concern_id: item for item in persisted.progress}
+    assert progress["a"].status is not ConcernStatus.FAILED
+    assert not [outcome for outcome in persisted.outcomes if outcome.concern_id == "a"]
+    assert not persisted.failures
+
+
+@pytest.mark.asyncio
+async def test_a_turn_failure_that_is_not_environmental_still_fails_its_concern(
+    tmp_path: Path,
+) -> None:
+    """The classification must not become a blanket amnesty for provider errors.
+
+    `environmental` defaults false precisely so an unclassified fault is
+    attributed to the turn: treating a real failure as the host's would
+    retry it on every resume forever.
+    """
+    launcher = LocalProcessLauncher()
+    workspace = failure_leg_workspace(tmp_path, launcher)
+
+    def worker_response(_root: Path, _output_name: str) -> JsonObject:
+        raise ProviderTurnError(TurnFailure(message="the model refused the tool"))
+
+    def reviewer_response(_root: Path, _output_name: str) -> JsonObject:
+        raise AssertionError("the reviewer must not run after a worker crash")
+
+    core = failure_leg_core(
+        tmp_path,
+        workspace,
+        launcher,
+        "ordinary-provider-failure",
+        worker_response,
+        reviewer_response,
+    )
+
+    with pytest.raises(ExceptionGroup):
+        seed_approvals(core, [concern("a")])
+        await core.run(
+            ResolveInventory(
+                source=snapshot(workspace, launcher), concerns=[concern("a")]
+            )
+        )
+
+    progress = {item.concern_id: item for item in core.repository.load().progress}
+    assert progress["a"].status == ConcernStatus.FAILED
+
+
 def test_a_failed_concern_does_not_strand_the_leases_beside_it(
     tmp_path: Path,
 ) -> None:
@@ -2478,6 +2575,56 @@ async def test_a_design_question_records_an_answer_in_the_humans_own_words(
     assert [record.answer.value for record in core.mailbox.answers()] == [
         "neither — close the union at its base"
     ]
+
+
+def test_an_allowance_answered_in_prose_is_refused_rather_than_read_as_no(
+    tmp_path: Path,
+) -> None:
+    """A grant that cannot be read must not promote into a silent refusal.
+
+    The reader tests for the literal token, so anything else means refused —
+    and a promoted answer is never revisable, which made the mistake
+    terminal for the concern. Closing the domain turns it into a correctable
+    problem the human is told about at the moment they answer.
+    """
+    launcher = LocalProcessLauncher()
+    workspace = failure_leg_workspace(tmp_path, launcher)
+    core = ResolverCore(
+        ResolverConfig(
+            state_root=tmp_path / "state",
+            workspace=workspace,
+            worktree_root=tmp_path / "resolver-worktrees",
+            run_id="prose-grant",
+            integration_branch="resolve/prose-grant/review",
+            verification_commands=[VerificationCommand(name="v", arguments=["git"])],
+        ),
+        resolve_spec(),
+        lambda context: resolver_test_factory(context.root, lambda *_: {}),
+        lambda root: resolver_test_factory(root, lambda *_: {}),
+        LiteralInvocationRenderer(),
+        launcher,
+    )
+    gate = allowance_question_id("spu", ConcernAllowance.ANTIPATTERN_SUPPRESSION)
+    core.questions.queue_questions(
+        [
+            MaterialQuestion(
+                id=gate,
+                concern_id="spu",
+                prompt="Grant antipattern-suppression to spu?",
+                choices=[ALLOWANCE_GRANTED, ALLOWANCE_REFUSED],
+                closed_choices=asks_for_an_allowance("spu", gate),
+            )
+        ],
+        "spu",
+    )
+    seed_offer(
+        core, gate, "Granted. Your reading is accepted: the violations do not change."
+    )
+
+    problems = core.questions.promote_offers()
+
+    assert problems and "accepts only: grant, refuse" in problems[0]
+    assert core.mailbox.answers() == []
 
 
 def admitted_plan(*concerns: JsonObject) -> JsonObject:

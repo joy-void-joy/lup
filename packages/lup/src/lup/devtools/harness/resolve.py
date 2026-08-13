@@ -27,6 +27,7 @@ from lup.harness.ownership import GeneratedArtifacts, generated_artifacts
 from lup.harness.process import LaunchRequest, LocalProcessLauncher, ProcessLauncher
 from lup.resolver.contracts import (
     ResolverAwaitingAnswers,
+    ResolverEnvironmentFault,
     ResolverObserver,
     WorktreePreparer,
 )
@@ -489,6 +490,28 @@ def report_awaiting(
     report_questions(parked.pending, concerns)
     typer.echo("Relay the questions to the human, then rerun:")
     typer.echo(f"  {rerun_recipe(adapter, run_id, parked.pending)}")
+
+
+def report_environment_fault(
+    fault: ResolverEnvironmentFault, adapter: str, run_id: str
+) -> None:
+    """Print what stopped the host, and the command that continues once it works.
+
+    Says plainly that nothing failed, because the record used to say the
+    opposite: every concern in flight was written down as having failed with
+    a provider's error as its reason, and a reader deciding what to re-admit
+    could not tell those from work that did not hold up.
+    """
+    typer.echo("Resolver run stopped on an environmental fault, not on its work.")
+    typer.echo(f"  cause: {fault.cause}")
+    if fault.concerns:
+        typer.echo(f"  interrupted: {', '.join(fault.concerns)}")
+    typer.echo("No concern was failed and no outcome was recorded.")
+    typer.echo("Fix the host, then continue with:")
+    typer.echo(
+        f"  uv run lup-devtools harness resolve --adapter {adapter} "
+        f"--run-id {run_id} --adopt-config"
+    )
 
 
 def report_admission(admission: ConcernAdmission, adapter: str, run_id: str) -> None:
@@ -1281,6 +1304,9 @@ def run_resolve(
                             issues=open_issues,
                         )
                     )
+            except ResolverEnvironmentFault as fault:
+                report_environment_fault(fault, adapter, resolved_run_id)
+                raise typer.Exit(code=75)
             except ResolverAwaitingAnswers as parked:
                 planned = (
                     core.repository.load().concerns if core.repository.exists() else []
