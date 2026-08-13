@@ -1752,10 +1752,10 @@ def test_the_faults_that_named_the_host_in_a_real_run_are_classified() -> None:
         "Not logged in · Please run /login",
     ]
 
-    assert all(environmental_fault(RuntimeError(message)) for message in observed)
+    assert all(environmental_fault(message) for message in observed)
 
 
 def test_a_failure_that_names_the_work_is_not_read_as_the_host() -> None:
     """False is the conservative default: a real failure retried forever is worse."""
-    assert not environmental_fault(RuntimeError("the model refused the tool"))
-    assert not environmental_fault(RuntimeError("Command failed with exit code 1"))
+    assert not environmental_fault("the model refused the tool")
+    assert not environmental_fault("Command failed with exit code 1")

@@ -856,6 +856,7 @@ def run_resolve(
             ClaudeSandboxConfig,
             ClaudeSessionConfig,
             create_claude_session_factory,
+            environmental_fault,
         )
         from lup.adapters.codex.runtime import (
             CodexMcpServerConfig,
@@ -1233,6 +1234,7 @@ def run_resolve(
             worktree_preparer=FeatureWorktreePreparer(root),
             answer_wait_seconds=wait_seconds,
             adopt_config=adopt_config,
+            environmental_fault=environmental_fault,
         )
 
         async def drive() -> None:
