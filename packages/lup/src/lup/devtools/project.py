@@ -9,16 +9,14 @@ those by name is what kept these commands in an application package; taking
 them as a declaration is what lets any adopter supply its own.
 """
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
 from lup.codescan.boundaries import ApplicationRoots
 from lup.policy.kernel.rows import PathRoleRow
 
 
-class DevProject(BaseModel):
+class DevProject(BaseModel, frozen=True):
     """The repository facts shared development tooling cannot work out alone."""
-
-    model_config = ConfigDict(frozen=True)
 
     package: str
     """The import root this application publishes.

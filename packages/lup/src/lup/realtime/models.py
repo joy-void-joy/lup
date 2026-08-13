@@ -7,7 +7,7 @@ both validate against these models, so a schema change reaches every backend
 at once. This module depends on neither the scheduler core nor the relay.
 """
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field
 
 # =====================================================================
 # Tool input models
@@ -171,10 +171,8 @@ class RemindOutput(BaseModel):
     delay_seconds: int
 
 
-class ContextOutput(BaseModel):
+class ContextOutput(BaseModel, extra="allow"):
     """Output for the context tool. Accepts domain-specific fields."""
-
-    model_config = ConfigDict(extra="allow")
 
 
 class MetaOutput(BaseModel):

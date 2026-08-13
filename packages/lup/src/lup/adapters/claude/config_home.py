@@ -17,7 +17,7 @@ repository, and to nothing else it happens to open a session in.
 import json
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
 from lup.adapters.claude.login import CLAUDE_CONFIG_DIR, CLAUDE_LOGIN
 from lup.channels.models import write_atomic
@@ -62,10 +62,8 @@ def default_config_home() -> Path:
     return Path.home() / CLAUDE_HOME_DIR
 
 
-class ClaudeConfigHome(BaseModel):
+class ClaudeConfigHome(BaseModel, frozen=True):
     """One selected configuration home, and the document it reads."""
-
-    model_config = ConfigDict(frozen=True)
 
     directory: Path
     document: Path

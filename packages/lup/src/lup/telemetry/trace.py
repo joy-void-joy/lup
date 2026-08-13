@@ -31,7 +31,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field
 
 from lup.telemetry.blocks import extract_block_info, truncate_str
 from lup.types import LupContentBlock, LupMessage, normalize_content
@@ -142,7 +142,7 @@ class TraceEntry(BaseModel):
     content: str = Field(description="Markdown content for this entry")
 
 
-class TraceLogger(BaseModel):
+class TraceLogger(BaseModel, arbitrary_types_allowed=True):
     """Accumulates agent reasoning for feedback loop analysis.
 
     Collects content blocks during agent execution and saves them
@@ -160,8 +160,6 @@ class TraceLogger(BaseModel):
     combined display and tracing. Methods like ``log_message`` and
     ``log_text`` support trace-only logging without console output.
     """
-
-    model_config = ConfigDict(arbitrary_types_allowed=True)
 
     trace_path: Path = Field(description="Path to save the trace file")
     title: str = Field(description="Title for the trace")

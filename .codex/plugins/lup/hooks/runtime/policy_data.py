@@ -655,6 +655,13 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "strength": "soft",
         },
         {
+            "id": "model-config",
+            "pattern": "^\\s*model_config\\s*[:=]",
+            "message": "Declare pydantic configuration as class keywords \u2014 class A(BaseModel, frozen=True, extra='forbid') \u2014 instead of assigning model_config, so the configuration reads in the header beside the class it configures. Every key carries over under its own name; a shared ConfigDict alias inlines into each header rather than being imported",
+            "context": "code",
+            "strength": "soft",
+        },
+        {
             "id": "subprocess",
             "pattern": "\\bimport\\s+subprocess\\b|\\bfrom\\s+subprocess\\s+import\\b",
             "message": "Use the `sh` library instead of subprocess",
@@ -961,6 +968,13 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "id": "namedtuple",
             "pattern": "\\bNamedTuple\\b|\\bnamedtuple\\b",
             "message": "Use Pydantic BaseModel (or TypedDict) instead of NamedTuple/namedtuple",
+            "context": "code",
+            "strength": "soft",
+        },
+        {
+            "id": "model-config",
+            "pattern": "^\\s*model_config\\s*[:=]",
+            "message": "Declare pydantic configuration as class keywords \u2014 class A(BaseModel, frozen=True, extra='forbid') \u2014 instead of assigning model_config, so the configuration reads in the header beside the class it configures. Every key carries over under its own name; a shared ConfigDict alias inlines into each header rather than being imported",
             "context": "code",
             "strength": "soft",
         },

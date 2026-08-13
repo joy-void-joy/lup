@@ -4,7 +4,7 @@ from collections.abc import Awaitable, Callable
 from datetime import timedelta
 from typing import TypeIs
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field
 
 from lup.runtime.contracts import (
     EventStream,
@@ -39,10 +39,8 @@ from lup.runtime.output import InMemorySubmittedOutputStore, submission_history
 from lup.types import Usage
 
 
-class CompletedTurn(BaseModel):
+class CompletedTurn(BaseModel, frozen=True):
     """Native-neutral completed evidence before typed submission assembly."""
-
-    model_config = ConfigDict(frozen=True)
 
     messages: list[TurnMessage] = []
     blocks: list[AnyTurnBlock] = []
@@ -61,10 +59,8 @@ class CompletedTurn(BaseModel):
 type CompleteTurn = Callable[[], Awaitable[CompletedTurn]]
 
 
-class AcceptedTurn(BaseModel):
+class AcceptedTurn(BaseModel, frozen=True, arbitrary_types_allowed=True):
     """Acknowledged native turn and independently supplied optional capabilities."""
-
-    model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
 
     identifiers: TurnIdentifiers
     complete: CompleteTurn

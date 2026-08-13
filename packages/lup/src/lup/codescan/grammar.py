@@ -39,13 +39,13 @@ import ast
 from collections.abc import Callable
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
 from lup.codescan.common import PythonSource, Refutation
 from lup.codescan.oracle import DefinitionOracle, DefinitionSite, SourcePosition
 
 
-class MatchSite(BaseModel):
+class MatchSite(BaseModel, frozen=True):
     """One AST site a selector chose, and the symbol that decides its fate.
 
     ``line`` is where the finding and any `# lup: ignore` guarding it sit —
@@ -54,8 +54,6 @@ class MatchSite(BaseModel):
     same line but need not be. ``subject`` is the unparsed source of the
     expression the verdict is about, quoted back as evidence.
     """
-
-    model_config = ConfigDict(frozen=True)
 
     line: int
     query_line: int
@@ -67,7 +65,7 @@ type SiteSelector = Callable[[ast.Module], list[MatchSite]]
 """Walks one parsed module and yields every site a rule is about."""
 
 
-class TypeFamily(BaseModel):
+class TypeFamily(BaseModel, frozen=True):
     """A named set of declaring classes membership is decided against.
 
     ``classes`` names the declarations that constitute the family. A subject
@@ -77,13 +75,11 @@ class TypeFamily(BaseModel):
     either.
     """
 
-    model_config = ConfigDict(frozen=True)
-
     name: str
     classes: list[str]
 
 
-class GrammarRule(BaseModel):
+class GrammarRule(BaseModel, frozen=True):
     """One typed AST rule: the sites it selects and the family they must be in.
 
     ``id`` is the anti-pattern rule id this refines, so one vocabulary spans
@@ -92,23 +88,19 @@ class GrammarRule(BaseModel):
     verdict.
     """
 
-    model_config = ConfigDict(frozen=True)
-
     id: str
     select: SiteSelector
     family: TypeFamily
     refinement: str
 
 
-class ClassOrigin(BaseModel):
+class ClassOrigin(BaseModel, frozen=True):
     """The class a resolved declaration belongs to, and where it was found.
 
     ``bases`` holds each base's declared name without the module path that
     qualifies it, because family membership is about the class a stub names —
     `MutableMapping`, whether spelled bare or as `collections.abc.MutableMapping`.
     """
-
-    model_config = ConfigDict(frozen=True)
 
     name: str
     bases: list[str]
@@ -234,10 +226,8 @@ def origin_of(
     )
 
 
-class SelectedSite(BaseModel):
+class SelectedSite(BaseModel, frozen=True):
     """One site a rule selected, tagged with the file and rule it came from."""
-
-    model_config = ConfigDict(frozen=True)
 
     file: str
     rule: GrammarRule

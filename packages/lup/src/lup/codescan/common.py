@@ -24,7 +24,7 @@ from collections.abc import Callable, Set as AbstractSet
 from pathlib import Path, PurePosixPath
 from typing import Literal, Self
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
 from lup.policy.kernel.edit import (
     FILE_IGNORE_RE,
@@ -112,15 +112,13 @@ initialization renames it, so a value written down here would go on naming a
 package that no longer exists and silently resolve nothing."""
 
 
-class PythonSource(BaseModel):
+class PythonSource(BaseModel, frozen=True):
     """One import-resolvable Python module a project-wide scanner reads.
 
     The unit every whole-project scan consumes: the architecture audit builds
     its symbol index from these, and the typed grammar parses them for the
     sites it judges.
     """
-
-    model_config = ConfigDict(frozen=True)
 
     path: Path
     module: str
@@ -165,7 +163,7 @@ def sources_from_paths(
     ]
 
 
-class Refutation(BaseModel):
+class Refutation(BaseModel, frozen=True):
     """One rule hit a refiner proved does not apply, and the proof.
 
     A refiner sharpens a broad line rule after the fact: the regex says the
@@ -178,8 +176,6 @@ class Refutation(BaseModel):
     ``subject`` is the source expression the verdict is about and ``evidence``
     the sentence that justifies it, so a dropped finding is always accountable.
     """
-
-    model_config = ConfigDict(frozen=True)
 
     rule_id: str
     line: int

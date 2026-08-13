@@ -19,7 +19,7 @@ turns can keep it.
 from collections.abc import Callable
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
 from lup.harness.contracts import SkillInvocationRenderer
 from lup.harness.models import ResolveSpec
@@ -123,10 +123,8 @@ def format_candidates(owed: list[DropCandidate]) -> str:
     )
 
 
-class LedgerEntry(BaseModel):
+class LedgerEntry(BaseModel, frozen=True):
     """One join, as the merger accounted for it."""
-
-    model_config = ConfigDict(frozen=True)
 
     parent: str
     summary: str

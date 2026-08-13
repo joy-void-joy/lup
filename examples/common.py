@@ -1,11 +1,9 @@
 """Shared typed output used by the runtime examples."""
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field
 
 
-class Summary(BaseModel):
+class Summary(BaseModel, frozen=True):
     """A minimal structured result submitted by an example agent."""
-
-    model_config = ConfigDict(frozen=True)
 
     summary: str = Field(min_length=1)

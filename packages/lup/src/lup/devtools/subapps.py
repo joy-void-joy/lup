@@ -13,10 +13,10 @@ beside its own app has neither problem.
 """
 
 import typer
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
 
-class SubAppSpec(BaseModel):
+class SubAppSpec(BaseModel, frozen=True):
     """What a sub-app is called and what it is for.
 
     Separate from the app it names because prose about the CLI is generated
@@ -25,16 +25,12 @@ class SubAppSpec(BaseModel):
     A spec carries everything a reader needs and nothing that executes.
     """
 
-    model_config = ConfigDict(frozen=True)
-
     name: str
     help: str
 
 
-class SubApp(BaseModel):
+class SubApp(BaseModel, frozen=True, arbitrary_types_allowed=True):
     """One sub-app: what it is called, and the Typer app that answers to it."""
-
-    model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
 
     spec: SubAppSpec
     app: typer.Typer

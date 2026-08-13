@@ -9,7 +9,7 @@ defined here because materializers are the only producers.
 import hashlib
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
 from lup.harness.contracts import Materializer
 from lup.harness.models import Artifact
@@ -17,9 +17,7 @@ from lup.harness.reconciliation import ReconciliationProposal
 from lup.harness.validation import validated_tree
 
 
-class MaterializationResult(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class MaterializationResult(BaseModel, frozen=True):
     changed: list[Path]
     removed: list[Path]
 

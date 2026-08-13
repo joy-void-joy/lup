@@ -13,15 +13,13 @@ re-probes have a schedule instead of a habit.
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as installed_package_version
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
 EVIDENCE_REFRESHED = "2026-08-05"
 
 
-class EvidenceEntry(BaseModel):
+class EvidenceEntry(BaseModel, frozen=True):
     """One accepted contract version, keyed by its probe capability name."""
-
-    model_config = ConfigDict(frozen=True)
 
     capability: str
     version: str
@@ -34,10 +32,8 @@ EVIDENCE_LEDGER = [
 ]
 
 
-class EvidenceDrift(BaseModel):
+class EvidenceDrift(BaseModel, frozen=True):
     """One installed component that is newer than its accepted evidence."""
-
-    model_config = ConfigDict(frozen=True)
 
     capability: str
     installed: str

@@ -6,7 +6,7 @@ from collections.abc import Awaitable, Callable
 from datetime import timedelta
 from typing import Annotated, Literal, Self, overload
 
-from pydantic import BaseModel, ConfigDict, Discriminator
+from pydantic import BaseModel, Discriminator
 
 from lup.runtime.contracts import (
     EventStream,
@@ -27,44 +27,33 @@ from lup.types import (
     Usage,
 )
 
-FROZEN = ConfigDict(frozen=True)
-FROZEN_ARBITRARY = ConfigDict(frozen=True, arbitrary_types_allowed=True)
 
-
-class SessionId(BaseModel):
+class SessionId(BaseModel, frozen=True):
     """Opaque native conversation identity."""
 
-    model_config = FROZEN
-
     value: str
 
 
-class TurnId(BaseModel):
+class TurnId(BaseModel, frozen=True):
     """Opaque native turn identity."""
 
-    model_config = FROZEN
-
     value: str
 
 
-class TurnIdentifiers(BaseModel):
+class TurnIdentifiers(BaseModel, frozen=True):
     """Identities attached to one accepted turn."""
-
-    model_config = FROZEN
 
     session: SessionId
     turn: TurnId
 
 
-class TurnInput(BaseModel):
+class TurnInput(BaseModel, frozen=True):
     """Portable user input for one turn."""
-
-    model_config = FROZEN
 
     text: str
 
 
-class TurnBlock(BaseModel):
+class TurnBlock(BaseModel, frozen=True):
     """One completed block of a turn, answering every question about itself.
 
     Whatever a caller needs to know about a block is declared here and
@@ -77,8 +66,6 @@ class TurnBlock(BaseModel):
     Pydantic's metaclass is an ``ABCMeta``, so ``telemetry_block`` binds like
     any abstract property: a kind that does not answer it cannot be built.
     """
-
-    model_config = FROZEN
 
     @property
     @abstractmethod
@@ -115,7 +102,7 @@ class TurnBlock(BaseModel):
         return None
 
 
-class TurnTextBlock(TurnBlock):
+class TurnTextBlock(TurnBlock, frozen=True):
     """One completed assistant text block."""
 
     type: Literal["text"] = "text"
@@ -130,7 +117,7 @@ class TurnTextBlock(TurnBlock):
         return self.text
 
 
-class TurnThinkingBlock(TurnBlock):
+class TurnThinkingBlock(TurnBlock, frozen=True):
     """One completed reasoning block."""
 
     type: Literal["thinking"] = "thinking"
@@ -142,7 +129,7 @@ class TurnThinkingBlock(TurnBlock):
         return LupThinkingBlock(thinking=self.thinking, redacted=self.redacted)
 
 
-class TurnToolCallBlock(TurnBlock):
+class TurnToolCallBlock(TurnBlock, frozen=True):
     """One completed tool invocation."""
 
     type: Literal["tool_call"] = "tool_call"
@@ -167,16 +154,14 @@ class TurnToolCallBlock(TurnBlock):
         return self.id
 
 
-class ToolRefusal(BaseModel):
+class ToolRefusal(BaseModel, frozen=True):
     """One tool call that returned an error instead of a result."""
-
-    model_config = FROZEN
 
     call_id: str
     detail: str
 
 
-class TurnToolResultBlock(TurnBlock):
+class TurnToolResultBlock(TurnBlock, frozen=True):
     """One completed tool result."""
 
     type: Literal["tool_result"] = "tool_result"
@@ -212,16 +197,14 @@ every block as a base instance and drop its payload.
 """
 
 
-class TurnMessage(BaseModel):
+class TurnMessage(BaseModel, frozen=True):
     """A portable transcript message derived from canonical blocks."""
-
-    model_config = FROZEN
 
     role: Literal["user", "assistant", "tool", "system"]
     blocks: list[AnyTurnBlock]
 
 
-class TurnEventBase(BaseModel):
+class TurnEventBase(BaseModel, frozen=True):
     """One thing that happened during a turn, answering about itself.
 
     The same arrangement :class:`TurnBlock` uses, for the same reason: a walk
@@ -230,8 +213,6 @@ class TurnEventBase(BaseModel):
     answers are what make omission safe — a caller folding ``completed_message``
     reaches every kind that carries one, including kinds written later.
     """
-
-    model_config = FROZEN
 
     @property
     def durable(self) -> "Self | None":
@@ -251,14 +232,14 @@ class TurnEventBase(BaseModel):
         return None
 
 
-class TurnStartedEvent(TurnEventBase):
+class TurnStartedEvent(TurnEventBase, frozen=True):
     """A native turn was accepted."""
 
     type: Literal["turn_started"] = "turn_started"
     identifiers: TurnIdentifiers
 
 
-class BlockStartedEvent(TurnEventBase):
+class BlockStartedEvent(TurnEventBase, frozen=True):
     """A native content block started."""
 
     type: Literal["block_started"] = "block_started"
@@ -266,7 +247,7 @@ class BlockStartedEvent(TurnEventBase):
     block: AnyTurnBlock
 
 
-class BlockDeltaEvent(TurnEventBase):
+class BlockDeltaEvent(TurnEventBase, frozen=True):
     """One text or thinking delta from an active native block."""
 
     type: Literal["block_delta"] = "block_delta"
@@ -279,7 +260,7 @@ class BlockDeltaEvent(TurnEventBase):
         return None
 
 
-class BlockCompletedEvent(TurnEventBase):
+class BlockCompletedEvent(TurnEventBase, frozen=True):
     """One native content block completed."""
 
     type: Literal["block_completed"] = "block_completed"
@@ -287,7 +268,7 @@ class BlockCompletedEvent(TurnEventBase):
     block: AnyTurnBlock
 
 
-class MessageCompletedEvent(TurnEventBase):
+class MessageCompletedEvent(TurnEventBase, frozen=True):
     """One whole transcript message completed.
 
     The message is carried rather than reconstructed. Folding loose blocks
@@ -305,7 +286,7 @@ class MessageCompletedEvent(TurnEventBase):
         return self.message
 
 
-class TurnCompletedEvent(TurnEventBase):
+class TurnCompletedEvent(TurnEventBase, frozen=True):
     """A native turn reached a terminal state."""
 
     type: Literal["turn_completed"] = "turn_completed"
@@ -335,10 +316,8 @@ about what happened.
 """
 
 
-class SubmissionDecision(BaseModel):
+class SubmissionDecision(BaseModel, frozen=True):
     """A reflection gate's decision about validated output."""
-
-    model_config = FROZEN
 
     accepted: bool
     message: str = ""
@@ -350,10 +329,10 @@ type SubmissionGateResolver = Callable[
 ]
 
 
-class TurnRequest[T: BaseModel | None](BaseModel):
+class TurnRequest[T: BaseModel | None](
+    BaseModel, frozen=True, arbitrary_types_allowed=True
+):
     """Per-turn input and optional validated output type."""
-
-    model_config = FROZEN_ARBITRARY
 
     input: TurnInput
     output_type: type[T] | None = None
@@ -402,10 +381,8 @@ def turn_request[T: BaseModel](
     return TurnRequest[T](input=prompt, output_type=output_type)
 
 
-class TurnResult[T: BaseModel | None](BaseModel):
+class TurnResult[T: BaseModel | None](BaseModel, frozen=True):
     """Successful terminal result; failures are represented only by errors."""
-
-    model_config = FROZEN
 
     output: T
     messages: list[TurnMessage]
@@ -415,7 +392,7 @@ class TurnResult[T: BaseModel | None](BaseModel):
     identifiers: TurnIdentifiers
 
 
-class SessionHandle(BaseModel):
+class SessionHandle(BaseModel, frozen=True, arbitrary_types_allowed=True):
     """Transparent composition of a session and optional fork capability.
 
     Reaching a capability through this handle is not a consumer holding an
@@ -424,13 +401,13 @@ class SessionHandle(BaseModel):
     the behavioural surface over these seams.
     """
 
-    model_config = FROZEN_ARBITRARY
-
     session: Session
     fork: ForkSession | None = None
 
 
-class TurnHandle[T: BaseModel | None](BaseModel):
+class TurnHandle[T: BaseModel | None](
+    BaseModel, frozen=True, arbitrary_types_allowed=True
+):
     """Transparent composition of an accepted turn's capabilities.
 
     A carrier on the same terms as :class:`SessionHandle`: it holds seams and
@@ -438,18 +415,16 @@ class TurnHandle[T: BaseModel | None](BaseModel):
     surface that should have owned shared behaviour.
     """
 
-    model_config = FROZEN_ARBITRARY
-
     turn: Turn[T]
     events: EventStream | None = None
     interrupt: Interrupt | None = None
     steer: Steer | None = None
 
 
-class TurnToolBinding[T: BaseModel](BaseModel):
+class TurnToolBinding[T: BaseModel](
+    BaseModel, frozen=True, arbitrary_types_allowed=True
+):
     """Turn-local schema, store, and optional reflection gate."""
-
-    model_config = FROZEN_ARBITRARY
 
     output_type: type[T]
     store: SubmittedOutputStore

@@ -111,14 +111,12 @@ type LupToolHandler = Callable[[JsonObject], Awaitable[ToolResponse]]
 type ToolHandler[I: BaseModel, O: BaseModel] = Callable[[I], Awaitable[O]]
 
 
-class LupMcpServerConfig(BaseModel):
+class LupMcpServerConfig(BaseModel, arbitrary_types_allowed=True):
     """SDK-agnostic MCP server configuration.
 
     Wraps an ``mcp.server.Server`` instance. Each adapter converts
     this to its native server config at build time.
     """
-
-    model_config = {"arbitrary_types_allowed": True}
 
     name: str
     server: Server

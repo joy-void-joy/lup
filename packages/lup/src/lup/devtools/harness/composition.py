@@ -11,7 +11,7 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 
 import typer
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
 from lup.adapters.claude.harness import ClaudeSpellings
 from lup.adapters.claude.harness_runtime import (
@@ -90,7 +90,7 @@ def codex_composition(
     )
 
 
-class NativeTargets(BaseModel):
+class NativeTargets(BaseModel, frozen=True):
     """Every native adapter a CLI selector can name, and how to build each.
 
     A project declares which runtimes it generates a tree for; the commands
@@ -98,8 +98,6 @@ class NativeTargets(BaseModel):
     builders are keyed rather than listed because the selector a human types
     is the key, and the launch commands are the adapter's own surface.
     """
-
-    model_config = ConfigDict(frozen=True)
 
     builders: dict[str, Callable[[Path], NativeHarnessComposition]]
 

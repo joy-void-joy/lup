@@ -50,7 +50,7 @@ from collections.abc import Awaitable, Callable
 from datetime import datetime
 from typing import TypedDict
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field
 
 from lup.hooks import LupHookInput, LupHooksConfig, create_tool_gate
 from lup.reflect import ReflectionGate
@@ -61,10 +61,8 @@ ActionCallback = Callable[[str], Awaitable[None]]
 """Async callback for delivering actions (messages, commands, etc.)."""
 
 
-class DelayedAction(BaseModel):
+class DelayedAction(BaseModel, arbitrary_types_allowed=True):
     """A pending delayed-action task with its content, so cancels can save ideas."""
-
-    model_config = ConfigDict(arbitrary_types_allowed=True)
 
     task: asyncio.Task[None]
     content: str
@@ -110,10 +108,8 @@ class SchedulerState(TypedDict, total=False):
 # =====================================================================
 
 
-class PendingReminder(BaseModel):
+class PendingReminder(BaseModel, arbitrary_types_allowed=True):
     """A scheduled self-prompt."""
-
-    model_config = ConfigDict(arbitrary_types_allowed=True)
 
     task: asyncio.Task[None]
     label: str

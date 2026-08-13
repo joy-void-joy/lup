@@ -14,7 +14,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -50,7 +50,7 @@ class SkillInvocationRenderer(ABC):
         """Render qualification, escaping, and arguments together."""
 
 
-class Spelling(BaseModel):
+class Spelling(BaseModel, frozen=True):
     """What one runtime says for a portable idea, or why it has nothing to say.
 
     A portable idea one runtime cannot express is the case absence handles
@@ -65,8 +65,6 @@ class Spelling(BaseModel):
     declined answer contributes nothing there; a parity audit reads
     :meth:`audited`, which is where a declined answer says why.
     """
-
-    model_config = ConfigDict(frozen=True)
 
     @abstractmethod
     def in_prose(self) -> str:
@@ -95,7 +93,7 @@ class Instruction(str):
     """
 
 
-class Spelled(Spelling):
+class Spelled(Spelling, frozen=True):
     """The runtime's own words for the idea, ready to be placed in prose.
 
     What a runtime hands over is an :class:`Instruction`, since these
@@ -114,7 +112,7 @@ class Spelled(Spelling):
         return self.words
 
 
-class Unsupported(Spelling):
+class Unsupported(Spelling, frozen=True):
     """One portable idea this runtime has no way to say, and why not.
 
     The reason is the whole point: a runtime declines because of something

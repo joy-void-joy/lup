@@ -10,7 +10,7 @@ from abc import abstractmethod
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Literal, Self
 
-from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import AnyHttpUrl, BaseModel, Field, StringConstraints
 
 from lup.policy.kernel.decision import DecisionEffect
 from lup.types import JsonObject, JsonValue
@@ -30,19 +30,15 @@ type UrlPathPrefix = Annotated[str, StringConstraints(pattern=r"^/")]
 """An absolute URL path prefix scoping a fetch rule beneath an origin."""
 
 
-class ToolIdentity(BaseModel):
+class ToolIdentity(BaseModel, frozen=True):
     """Opaque source identity retained only for diagnostics."""
-
-    model_config = ConfigDict(frozen=True)
 
     original_name: str
     source_evidence: JsonValue = None
 
 
-class EditChange(BaseModel):
+class EditChange(BaseModel, frozen=True):
     """One named file change within an edit operation."""
-
-    model_config = ConfigDict(frozen=True)
 
     path: Path
     before: str | None = None
@@ -82,7 +78,7 @@ def undeclared(family: str) -> "Decision":
     )
 
 
-class SemanticToolBase(BaseModel):
+class SemanticToolBase(BaseModel, frozen=True):
     """One native call as policy understands it, judging itself.
 
     Each kind knows which declared family judges it, so routing is the tool
@@ -90,8 +86,6 @@ class SemanticToolBase(BaseModel):
     ``ABCMeta``, so a kind that does not answer :meth:`decide_under` cannot be
     built at all — a new tool cannot slip past the router by omission.
     """
-
-    model_config = ConfigDict(frozen=True)
 
     @abstractmethod
     def decide_under(self, policies: "DeclaredPolicies") -> "Decision":
@@ -108,7 +102,7 @@ class SemanticToolBase(BaseModel):
         return self
 
 
-class EditBatch(SemanticToolBase):
+class EditBatch(SemanticToolBase, frozen=True):
     """The complete set of file changes in one native edit operation."""
 
     changes: list[EditChange] = Field(min_length=1)
@@ -124,7 +118,7 @@ class EditBatch(SemanticToolBase):
         )
 
 
-class ShellCommand(SemanticToolBase):
+class ShellCommand(SemanticToolBase, frozen=True):
     """A semantic command execution request."""
 
     command: str
@@ -137,7 +131,7 @@ class ShellCommand(SemanticToolBase):
         return policies.shell.decide(self)
 
 
-class FetchUrl(SemanticToolBase):
+class FetchUrl(SemanticToolBase, frozen=True):
     """Retrieval of one known URL."""
 
     url: AnyHttpUrl
@@ -148,7 +142,7 @@ class FetchUrl(SemanticToolBase):
         return policies.fetch.decide(self)
 
 
-class SearchWeb(SemanticToolBase):
+class SearchWeb(SemanticToolBase, frozen=True):
     """A web search query, distinct from fetching a known URL."""
 
     query: str
@@ -161,7 +155,7 @@ class SearchWeb(SemanticToolBase):
         )
 
 
-class UnknownTool(SemanticToolBase):
+class UnknownTool(SemanticToolBase, frozen=True):
     """An unclassified native tool invocation retained for audit."""
 
     identity: ToolIdentity
@@ -174,68 +168,48 @@ class UnknownTool(SemanticToolBase):
 type SemanticTool = EditBatch | ShellCommand | FetchUrl | SearchWeb | UnknownTool
 
 
-class SessionStarted(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class SessionStarted(BaseModel, frozen=True):
     session_id: str
 
 
-class InputSubmitted(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class InputSubmitted(BaseModel, frozen=True):
     text: str
 
 
-class BeforeTool(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class BeforeTool(BaseModel, frozen=True):
     tool: SemanticTool
     identity: ToolIdentity
 
 
-class ApprovalRequested(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class ApprovalRequested(BaseModel, frozen=True):
     tool: SemanticTool
     reason: str
 
 
-class AfterTool(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class AfterTool(BaseModel, frozen=True):
     identity: ToolIdentity
     succeeded: bool
     output: str = ""
 
 
-class SubagentStarted(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class SubagentStarted(BaseModel, frozen=True):
     name: str
 
 
-class SubagentStopped(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class SubagentStopped(BaseModel, frozen=True):
     name: str
     succeeded: bool
 
 
-class CompletionRequested(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class CompletionRequested(BaseModel, frozen=True):
     reason: str = ""
 
 
-class BeforeCompaction(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class BeforeCompaction(BaseModel, frozen=True):
     reason: str = ""
 
 
-class AfterCompaction(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class AfterCompaction(BaseModel, frozen=True):
     summary: str = ""
 
 
@@ -253,28 +227,22 @@ type SemanticEvent = (
 )
 
 
-class Decision(BaseModel):
+class Decision(BaseModel, frozen=True):
     """One conservative policy verdict."""
-
-    model_config = ConfigDict(frozen=True)
 
     effect: DecisionEffect
     reason: str = ""
 
 
-class ObservationFailure(BaseModel):
+class ObservationFailure(BaseModel, frozen=True):
     """One observer failure that cannot change the policy verdict."""
-
-    model_config = ConfigDict(frozen=True)
 
     observer: str
     message: str
 
 
-class PolicyEvaluation(BaseModel):
+class PolicyEvaluation(BaseModel, frozen=True):
     """Computed decision plus separately surfaced observer failures."""
-
-    model_config = ConfigDict(frozen=True)
 
     decision: Decision
     observation_failures: list[ObservationFailure] = []

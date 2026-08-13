@@ -14,7 +14,7 @@ import json
 import shlex
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
 from lup.harness.contracts import CurrentTreeReader, Reconciler
 from lup.harness.generation import artifact_map
@@ -22,9 +22,7 @@ from lup.harness.models import Artifact, ArtifactTree
 from lup.harness.ownership import OwnershipCategory, OwnershipManifest
 
 
-class CurrentArtifact(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class CurrentArtifact(BaseModel, frozen=True):
     path: Path
     content: str
     category: OwnershipCategory
@@ -32,9 +30,7 @@ class CurrentArtifact(BaseModel):
     executable: bool = False
 
 
-class CurrentTree(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class CurrentTree(BaseModel, frozen=True):
     root: Path
     artifacts: list[CurrentArtifact]
 
@@ -54,33 +50,25 @@ class CurrentTree(BaseModel):
         return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
-class ProposedWrite(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class ProposedWrite(BaseModel, frozen=True):
     artifact: Artifact
     previous_sha256: str | None = None
     previous_executable: bool | None = None
 
 
-class ProposedDelete(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class ProposedDelete(BaseModel, frozen=True):
     path: Path
     prior_ownership_sha256: str
 
 
-class ReconciliationConflict(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class ReconciliationConflict(BaseModel, frozen=True):
     path: Path
     category: OwnershipCategory
     message: str
     sensitive: bool = False
 
 
-class ReconciliationProposal(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class ReconciliationProposal(BaseModel, frozen=True):
     id: str
     root: Path
     writes: list[ProposedWrite] = []
@@ -89,10 +77,8 @@ class ReconciliationProposal(BaseModel):
     base_digest: str
 
 
-class SourcePreimageRow(BaseModel):
+class SourcePreimageRow(BaseModel, frozen=True):
     """One named source path and its optional preimage hash."""
-
-    model_config = ConfigDict(frozen=True)
 
     path: str
     sha256: str | None

@@ -15,7 +15,7 @@ from uuid import uuid4
 
 from mcp.server import Server
 from mcp.types import CallToolResult, TextContent, Tool
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field
 
 from lup.mcp import LupMcpServerConfig, McpServerEntry
 from lup.hooks import LupHooksConfig
@@ -74,10 +74,8 @@ type ClaudeSettingSource = Literal["user", "project", "local"]
 """One filesystem settings source the CLI may load for a session."""
 
 
-class ClaudeSandboxConfig(BaseModel):
+class ClaudeSandboxConfig(BaseModel, frozen=True):
     """Claude SDK sandbox settings consumed by this factory."""
-
-    model_config = ConfigDict(frozen=True)
 
     enabled: bool = True
     auto_allow_bash_if_sandboxed: bool = True
@@ -90,10 +88,8 @@ type ClaudePermissionMode = Literal[
 """Claude Code's own words for how much a session may do without asking."""
 
 
-class ClaudeSessionConfig(BaseModel):
+class ClaudeSessionConfig(BaseModel, frozen=True, arbitrary_types_allowed=True):
     """Immutable Claude-only provider configuration."""
-
-    model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
 
     model: str | None = None
     system_prompt: str = ""

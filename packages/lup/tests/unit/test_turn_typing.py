@@ -12,7 +12,7 @@ from datetime import timedelta
 from typing import assert_type
 
 import pytest
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
 from lup.runtime.contracts import Session, Turn
 from lup.runtime.factory import SessionFactory
@@ -35,10 +35,8 @@ IDENTIFIERS = TurnIdentifiers(
 )
 
 
-class Summary(BaseModel):
+class Summary(BaseModel, frozen=True):
     """A default-constructible output model, so the stub can submit one."""
-
-    model_config = ConfigDict(frozen=True)
 
     title: str = "pinned"
 

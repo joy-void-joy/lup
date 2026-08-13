@@ -19,13 +19,11 @@ files in the derived home, and a runtime that names none shares everything.
 import hashlib
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
 
-class SessionHomeLayout(BaseModel):
+class SessionHomeLayout(BaseModel, frozen=True):
     """Which of one runtime's configuration entries a session cannot share."""
-
-    model_config = ConfigDict(frozen=True)
 
     private_files: list[str] = []
     """Entries a starting session rewrites, so concurrent ones each need

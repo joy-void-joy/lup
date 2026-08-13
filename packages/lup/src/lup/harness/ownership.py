@@ -12,7 +12,7 @@ from collections.abc import Collection, Iterator
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ValidationError
 
 from lup.channels.models import publish_atomic
 from lup.harness.models import ArtifactTree, Harness
@@ -27,9 +27,7 @@ type OwnershipCategory = Literal[
 ]
 
 
-class OwnedArtifact(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class OwnedArtifact(BaseModel, frozen=True):
     path: Path
     category: OwnershipCategory
     sha256: str
@@ -37,9 +35,7 @@ class OwnedArtifact(BaseModel):
     executable: bool = False
 
 
-class OwnershipManifest(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class OwnershipManifest(BaseModel, frozen=True):
     schema_version: int
     generator_version: str
     source_digest: str
@@ -108,15 +104,13 @@ ADAPTER_HOMES: tuple[str, ...] = (".claude", ".codex")
 """The trees proof is kept in, as a default an adopter naming its own replaces."""
 
 
-class GeneratedArtifacts(BaseModel):
+class GeneratedArtifacts(BaseModel, frozen=True):
     """Which files in a tree the generator owns rather than the repository.
 
     Keyed the way a repository scan names files — relative to the root the
     proof was read from — so a scanned path can be asked about directly, and
     answered with the artifact rather than a bare yes.
     """
-
-    model_config = ConfigDict(frozen=True)
 
     by_path: dict[str, OwnedArtifact]
 
