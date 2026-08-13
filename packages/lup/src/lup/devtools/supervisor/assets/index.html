@@ -791,6 +791,8 @@
             return `<div class="entry note">${head}<div>audited ${event.parents.length} parent(s), ${event.outstanding} outstanding</div></div>`;
           case "review_residual":
             return `<div class="entry note">${head}<div>residual beside round ${event.round}'s acceptance: ${escapeHtml(event.residual.join("; "))}</div></div>`;
+          case "verification_failed":
+            return `<div class="entry note">${head}<div class="error"><strong>${escapeHtml(event.concern_id)}</strong> round ${event.round}: ${escapeHtml(event.name)} exited ${event.exit_code}</div>${event.output ? bodyMarkup(event.output, `${entry.seq}:verification`, "pre-body") : ""}</div>`;
           case "recheck_repeated":
             return `<div class="entry note">${head}<div><strong>${escapeHtml(event.concern_id)}</strong> reproduced a settled finding (${escapeHtml(event.criteria.join(", "))}) at ${escapeHtml(event.occasion)}</div></div>`;
           case "base_refreshed":

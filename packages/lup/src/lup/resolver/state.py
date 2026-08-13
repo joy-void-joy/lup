@@ -234,6 +234,28 @@ class ResolverStateRepository:
             finally:
                 fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
 
+    def held(self) -> bool:
+        """Whether another process is driving this run right now.
+
+        Asked of the lock rather than of the process table, because under a
+        sandbox `/proc` is PID-isolated and `ps` lists nothing outside the
+        current shell — so a healthy long-running run is indistinguishable
+        from one that died, and that ambiguity has produced a confident
+        wrong conclusion in both directions. Taking the lock and dropping it
+        answers from the run directory alone, which is the only thing a
+        reader is guaranteed to be able to see.
+        """
+        lock_path = self.root / ".run.lock"
+        if not lock_path.exists():
+            return False
+        with lock_path.open("a+", encoding="utf-8") as lock:
+            try:
+                fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                return True
+            fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+            return False
+
     def load(self) -> ResolveState:
         path = self.root / "state.json"
         if not path.exists():

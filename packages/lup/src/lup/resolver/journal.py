@@ -366,3 +366,14 @@ async def record_turn(
     """
     async for event in events:
         journal.append(actor, event)
+
+
+def journal_tail(root: Path) -> JournalEntry | None:
+    """A run's most recent entry, without paying for its whole journal.
+
+    `Journal` counts every record on construction to know its next
+    sequence, which a writer needs and a reader does not. A status view
+    asks this each time it runs against a file that reaches tens of
+    megabytes in one run, so it reads the stream directly.
+    """
+    return Stream(root / JOURNAL_FILE, ENTRY_ADAPTER).last()

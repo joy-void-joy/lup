@@ -18,6 +18,7 @@ from lup.channels.models import utc_now
 from lup.resolver.journal import Journal
 from lup.resolver.models import VerificationAcceptance
 from lup.resolver.state import ResolverStateRepository
+from lup.resolver.status import run_status
 from lup.resolver.mailbox import (
     AnswerDoor,
     AnswerOffer,
@@ -287,3 +288,33 @@ def park_run(
     """Ask every open wait in this run to give up now."""
     open_mailbox(run_id).park(ParkRequest(run_id=run_id, reason=reason))
     typer.echo(f"parked {run_id}: {reason}")
+
+
+def show_status(
+    run_id: str = typer.Option(..., "--run-id", help="Run to report on"),
+) -> None:
+    """Say whether a run is alive, where it stands, and what it last did.
+
+    The liveness answer comes from the run's own lock rather than from the
+    process table, because under a sandbox `/proc` is PID-isolated: `ps` and
+    `pgrep` list nothing outside the current shell, so a healthy run looks
+    exactly like one that died. That ambiguity has produced confident wrong
+    conclusions in both directions, and the run directory is the only thing
+    a reader is guaranteed to be able to see.
+    """
+    root = resolve_state_root()
+    repository = ResolverStateRepository(root, run_id)
+    status = run_status(repository, run_id)
+    if not status.exists:
+        raise typer.BadParameter(f"no resolver run {run_id!r} under {root}")
+    typer.echo(status.verdict())
+    typer.echo(f"  phase: {status.phase}")
+    for count in status.counts:
+        typer.echo(f"  {count.concerns:>3} {count.status}")
+    if status.unanswered:
+        typer.echo(f"  {status.unanswered} question(s) waiting on you")
+    if status.last is not None:
+        typer.echo(
+            f"  last: {status.last.event} by {status.last.actor} "
+            f"at {status.last.at:%Y-%m-%d %H:%M:%S}Z"
+        )

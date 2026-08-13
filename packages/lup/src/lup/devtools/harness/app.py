@@ -35,6 +35,7 @@ from lup.devtools.supervisor.doors import (
     park_run,
     redirect_actor,
     say_to_actor,
+    show_status,
 )
 from lup.workspace.paths import project_root
 
@@ -133,6 +134,7 @@ def create_harness_app(
         invoke_without_command=True,
         no_args_is_help=False,
     )
+    resolve_app.command("status")(show_status)
     resolve_app.command("supervise")(serve_supervisor)
     resolve_app.command("questions")(list_questions)
     resolve_app.command("answer")(answer_questions)
