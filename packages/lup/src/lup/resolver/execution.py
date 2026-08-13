@@ -15,7 +15,7 @@ named, because the alternative is a concern that passes on criteria nobody
 wrote down.
 """
 
-from lup.resolver.contracts import ResolverAwaitingAnswers
+from lup.resolver.contracts import ResolverAwaitingAnswers, ResolverEnvironmentFault
 from lup.resolver.joins import Joiner
 from lup.resolver.journal import Journal, ReviewResidualEvent
 from lup.resolver.models import (
@@ -39,6 +39,7 @@ from lup.resolver.run import ResolveRun
 from lup.resolver.state import ResolverStateRepository
 from lup.resolver.turns import TurnRunner
 from lup.resolver.verification import Verifier
+from lup.runtime.errors import TurnError
 
 
 class ConcernExecutor:
@@ -85,6 +86,18 @@ class ConcernExecutor:
                 "parked on material questions",
             )
             raise
+        except TurnError as error:
+            # A host fault is not this concern's verdict. Transitioning here
+            # would write `failed (401 OAuth access token has been revoked)`
+            # into a record whose readers cannot tell it from work that did
+            # not hold up — and the concern would then have to be re-admitted
+            # by somebody who knew which reasons were environmental.
+            if not error.failure.environmental:
+                await self.run.transition_concern(
+                    concern.id, ConcernStatus.FAILED, str(error)
+                )
+                raise
+            raise ResolverEnvironmentFault(str(error), [concern.id]) from error
         except Exception as error:
             await self.run.transition_concern(
                 concern.id, ConcernStatus.FAILED, str(error)
