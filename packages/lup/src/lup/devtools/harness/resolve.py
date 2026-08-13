@@ -497,6 +497,17 @@ class SupervisorSpawn(BaseModel):
     port: int = 8766
     linger: bool = False
 
+    def arguments(self) -> list[str]:
+        """These settings again, for a relaunch that must open the same page."""
+        if not self.enabled:
+            return []
+        return [
+            "--supervise",
+            "--supervise-port",
+            str(self.port),
+            *(["--supervise-linger"] if self.linger else []),
+        ]
+
 
 @asynccontextmanager
 async def spawned_supervisor(
@@ -793,8 +804,8 @@ class AdmissionFlags(BaseModel):
 
     Kept as flags rather than resolved evidence because a detached run is
     launched by rebuilding this command line: what a human named has to be
-    sayable again, and forwarding only some of it dropped the rest without
-    a word.
+    sayable again, and whatever a relaunch cannot say is dropped without a
+    word.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -815,12 +826,56 @@ class AdmissionFlags(BaseModel):
         ]
 
 
-def detach_resolve(
-    adapter: str,
-    run_id: str | None,
-    answers: list[str],
-    admitted: AdmissionFlags,
-) -> None:
+class DetachedRun(BaseModel):
+    """One invocation, spelled as the relaunch that has to carry it on.
+
+    A detached launch re-issues its own command in a child, so every option
+    deciding what the run does has to survive the fork. Carrying a subset is
+    what this shape exists to prevent, and each omission fails silently
+    behind a parent that has already reported a run started: a missing
+    `--admit` loses the words the run was asked to plan from, and a missing
+    `--no-issues` detaches a larger run than anyone asked for — every open
+    issue as evidence, a worktree leased per concern.
+
+    ``run_id`` is forwarded only where a human named one. A launch derives
+    the same id from the same commit the child derives it from, so passing it
+    back adds nothing except a claim that the run already exists — and that
+    claim refuses an admission instead of seeding from it, leaving the child
+    to reject its own command line where nobody is listening.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    adapter: str
+    run_id: str | None
+    answers: list[str]
+    admitted: AdmissionFlags
+    issues: bool
+    wait: float
+    supervisor: SupervisorSpawn
+    adopt_config: bool
+
+    def arguments(self) -> list[str]:
+        """The command a child is started with, carrying this whole invocation."""
+        return [
+            "uv",
+            "run",
+            "lup-devtools",
+            "harness",
+            "resolve",
+            "--adapter",
+            self.adapter,
+            *(["--run-id", self.run_id] if self.run_id is not None else []),
+            *(part for answer in self.answers for part in ("--answer", answer)),
+            *self.admitted.arguments(),
+            *([] if self.issues else ["--no-issues"]),
+            *(["--wait", str(self.wait)] if self.wait else []),
+            *self.supervisor.arguments(),
+            *(["--adopt-config"] if self.adopt_config else []),
+        ]
+
+
+def detach_resolve(detached: DetachedRun) -> None:
     """Start a run that outlives this command, and say where to reach it.
 
     A blocking run holds the launching agent's only turn, so nothing could
@@ -829,40 +884,46 @@ def detach_resolve(
     launching returns, the run directory is the whole contract: the page and
     an orchestrating agent are peers on it, exactly as two pages would be.
 
-    Statements are carried through rather than dropped: seeding a run from
-    what a human said and returning is the shape this flag exists for, and
-    forwarding only the answers left the words silently behind.
+    Statements ride along with everything else the invocation named: seeding
+    a run from what a human said and returning is the shape this flag exists
+    for.
+
+    A detached child speaks to nobody, so this reports success the moment it
+    forks and cannot take that back. Two things keep that honest: what can be
+    judged before forking is judged here, and what cannot goes to a file this
+    names on the way out, so a child that refuses its own command line leaves
+    a record instead of a launcher claiming a run that does not exist.
     """
     root = project_root()
-    resolved = run_id or (
+    resolved = detached.run_id or (
         "resolve-"
         + resolver_git(
             LocalProcessLauncher(), root, ["rev-parse", "--short=12", "HEAD"]
         )
     )
-    arguments = [
-        "uv",
-        "run",
-        "lup-devtools",
-        "harness",
-        "resolve",
-        "--adapter",
-        adapter,
-        "--run-id",
-        resolved,
-        *(part for answer in answers for part in ("--answer", answer)),
-        *admitted.arguments(),
-    ]
+    # Resolve the evidence here and discard what it returns. The child
+    # resolves it again, but only the child would meet a `--admit-note`
+    # naming nothing actionable or an issue number naming nothing open, and
+    # it meets it after this command has already reported a run started.
+    admission_request(detached.admitted)
+    log = root / ".lup" / "resolve" / resolved / "detached.log"
+    log.parent.mkdir(parents=True, exist_ok=True)
+    arguments = detached.arguments()
+    # One stream, not one path opened twice: sh opens `_out` and `_err`
+    # separately, so naming the same file for both leaves two handles
+    # truncating at offset zero and overwriting each other — losing exactly
+    # the refusal this file exists to keep.
     sh.Command(arguments[0])(
         *arguments[1:],
         _cwd=str(root),
         _bg=True,
         _bg_exc=False,
         _new_session=True,
-        _out="/dev/null",
-        _err="/dev/null",
+        _out=str(log),
+        _err_to_out=True,
     )
     typer.echo(f"Run {resolved} started detached.")
+    typer.echo(f"Its output: {log}")
     typer.echo(
         f"Follow it: uv run lup-devtools harness resolve supervise --run-id {resolved}"
     )

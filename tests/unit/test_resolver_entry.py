@@ -1,5 +1,6 @@
 """Behavioral contract of the resolver entry: headless answers and note intake."""
 
+import inspect
 from pathlib import Path
 
 import pytest
@@ -31,7 +32,9 @@ from lup.harness.ownership import (
 )
 from lup.devtools.harness.resolve import (
     AdmissionFlags,
+    DetachedRun,
     NoteTargetRef,
+    SupervisorSpawn,
     admission_notes,
     admission_request,
     describe_intake,
@@ -45,6 +48,10 @@ from lup.devtools.harness.resolve import (
     scanned_intake,
     seed_request,
 )
+from typer.core import TyperGroup
+from typer.main import get_group
+
+from lup_template.devtools.main import app
 from tests.unit.repos import commit_file, initialized_repo
 
 
@@ -315,6 +322,174 @@ def test_a_detached_relaunch_carries_every_kind_of_evidence_it_was_given() -> No
         "--admit-issue",
         "42",
     ]
+
+
+def forwarded_run_id(arguments: list[str]) -> str | None:
+    """The `--run-id` a relaunched child parses out of this command, if any."""
+    if "--run-id" not in arguments:
+        return None
+    return arguments[arguments.index("--run-id") + 1]
+
+
+def detached(
+    run_id: str | None = None,
+    admitted: AdmissionFlags | None = None,
+    issues: bool = True,
+) -> list[str]:
+    """The command a detached launch of one invocation relaunches with."""
+    return DetachedRun(
+        adapter="claude",
+        run_id=run_id,
+        answers=[],
+        admitted=admitted or admission_flags([]),
+        issues=issues,
+        wait=0.0,
+        supervisor=SupervisorSpawn(),
+        adopt_config=False,
+    ).arguments()
+
+
+def test_a_detached_seed_does_not_claim_the_run_it_is_about_to_create() -> None:
+    """The launcher reported a run started while the child refused itself.
+
+    Pinned as a composition rather than at either end: both halves were green
+    on their own, and the failure lived only in what one handed the other.
+    """
+    arguments = detached(admitted=admission_flags(["seed a run from these words"]))
+
+    assert "--admit" in arguments
+    # Exactly what the child decides, given exactly what the launcher hands it.
+    assert missing_run_refusal(forwarded_run_id(arguments), "resolve-derived") is None
+
+
+def test_a_detached_admission_into_a_run_a_human_named_still_refuses() -> None:
+    """The typo guard survives the fix that stopped the launcher forging one."""
+    arguments = detached("resolve-typo", admission_flags(["widen the run"]))
+
+    assert forwarded_run_id(arguments) == "resolve-typo"
+    assert missing_run_refusal(forwarded_run_id(arguments), "resolve-typo") is not None
+
+
+def test_a_detached_launch_carries_the_evidence_scope_it_was_given() -> None:
+    """Dropping it detached a larger run than was asked for, reported as this one."""
+    assert "--no-issues" in detached(issues=False)
+    assert "--no-issues" not in detached(issues=True)
+
+
+DETACH_CARRIES = [
+    "adapter",
+    "run_id",
+    "answer",
+    "admit",
+    "admit_note",
+    "admit_issue",
+    "issues",
+    "wait",
+    "supervise",
+    "supervise_port",
+    "supervise_linger",
+    "adopt_config",
+]
+"""Every `harness resolve` option a detached relaunch reproduces."""
+
+DETACH_DECLINES = {
+    "context": "typer's own handle, not an option anybody passes",
+    "abort": "refused beside --detach: ending a run takes no turn to outlive",
+    "detach": "the flag itself, which a relaunch must not fork on again",
+}
+"""Every option a relaunch deliberately does not carry, and why."""
+
+
+def registered_group(parent: typer.Typer, name: str) -> typer.Typer:
+    """The sub-app one typer app registers under a name."""
+    for group in parent.registered_groups:
+        if group.name == name and group.typer_instance is not None:
+            return group.typer_instance
+    raise AssertionError(f"no {name!r} group is registered")
+
+
+def test_every_resolver_option_is_carried_or_declined_by_a_detached_launch() -> None:
+    """A flag added later has to be decided rather than silently dropped.
+
+    Each silent misfire of this command was one option missing from the
+    relaunch — the admitted words, then a forged `--run-id`, then the evidence
+    scope. So the guard belongs on the whole option list rather than on
+    whichever one was dropped most recently.
+    """
+    callback = registered_group(
+        registered_group(app, "harness"), "resolve"
+    ).registered_callback
+
+    assert callback is not None and callback.callback is not None
+    assert sorted(inspect.signature(callback.callback).parameters) == sorted(
+        [*DETACH_CARRIES, *DETACH_DECLINES]
+    )
+
+
+def declared_spellings() -> dict[str, list[str]]:
+    """Every option `harness resolve` declares, and the flags that reach it.
+
+    Read off the command rather than listed beside the renderer. A spelling
+    kept by hand can drift from the one the parser accepts — typer decouples
+    a flag from its parameter name, so renaming one leaves the other alone —
+    and a relaunch naming a flag this command does not declare is a child
+    that rejects its own command line where nobody is listening.
+    """
+    group = get_group(app)
+    for name in ("harness", "resolve"):
+        found = group.commands[name]
+        assert isinstance(found, TyperGroup)
+        group = found
+    return {
+        parameter.name: [*parameter.opts, *parameter.secondary_opts]
+        for parameter in group.params
+        if parameter.name is not None
+    }
+
+
+def test_a_relaunch_renders_a_declared_flag_for_every_option_it_carries() -> None:
+    """Every direction, against the spellings the command itself declares.
+
+    Naming an option carried is not carrying it, and rendering a flag is not
+    rendering one this command would accept. Neither half is worth much
+    alone: the first lets a name outlive the field that fed it, the second
+    lets a renamed flag pass every check while the child fails to parse. And
+    a declined option is spellable like any other, so it takes a third
+    assertion to keep one out of the command a launch hands its child.
+    """
+    spellings = declared_spellings()
+    rendered = [
+        part
+        for part in DetachedRun(
+            adapter="claude",
+            run_id="resolve-named",
+            answers=["q-1=yes"],
+            admitted=AdmissionFlags(statements=["said"], notes=["a.py:1"], issues=[7]),
+            issues=False,
+            wait=42.0,
+            supervisor=SupervisorSpawn(enabled=True, port=9999, linger=True),
+            adopt_config=True,
+        ).arguments()
+        if part.startswith("--")
+    ]
+
+    unreached = [
+        option
+        for option in DETACH_CARRIES
+        if not any(flag in rendered for flag in spellings[option])
+    ]
+    assert unreached == []
+    declared = [flag for flags in spellings.values() for flag in flags]
+    assert [flag for flag in rendered if flag not in declared] == []
+    # A declined option is declared too, so being spellable is not enough to
+    # keep it out: rendering `--detach` would fork a child that forks again.
+    assert [
+        flag
+        for option in DETACH_DECLINES
+        if option in spellings
+        for flag in spellings[option]
+        if flag in rendered
+    ] == []
 
 
 def test_an_admitted_note_carries_the_text_and_context_the_tree_holds() -> None:

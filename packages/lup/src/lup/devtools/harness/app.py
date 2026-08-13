@@ -273,7 +273,30 @@ def create_harness_app(
                 raise typer.BadParameter(
                     "--adapter is required to drive a resolver run"
                 )
-            resolve.detach_resolve(adapter, run_id, answer or [], admitted)
+            # Ending a run reads recorded state and frees worktrees: it takes
+            # no turn, so there is nothing for a child to outlive this command
+            # with, and a relaunch carrying no `--abort` would start the run it
+            # was asked to end.
+            if abort is not None:
+                raise typer.BadParameter(
+                    "a run cannot be started detached and ended in one command"
+                )
+            resolve.detach_resolve(
+                resolve.DetachedRun(
+                    adapter=adapter,
+                    run_id=run_id,
+                    answers=answer or [],
+                    admitted=admitted,
+                    issues=issues,
+                    wait=wait,
+                    supervisor=resolve.SupervisorSpawn(
+                        enabled=supervise,
+                        port=supervise_port,
+                        linger=supervise_linger,
+                    ),
+                    adopt_config=adopt_config,
+                )
+            )
             return
         # Ending a run reads its recorded state and frees its worktrees; no turn
         # is taken and no skill invocation is rendered, so the one thing an
