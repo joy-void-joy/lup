@@ -881,6 +881,25 @@ def admission_request(flags: AdmissionFlags) -> AdmissionRequest | None:
     )
 
 
+def missing_run_refusal(run_id: str | None, resolved_run_id: str) -> str | None:
+    """Why admitting into a run that does not exist is refused, where it is.
+
+    Naming a run is a claim that it exists, so a typo seeds a second run under
+    the misspelling and leases a worktree per concern before anyone reads the
+    line saying so. An id nobody named was never that claim: it defaulted from
+    the commit, and seeding is what somebody arriving with statements asked
+    for. So the refusal survives for exactly one case, and says that statements
+    do not need a run to exist rather than leaving that to be inferred.
+    """
+    if run_id is None:
+        return None
+    return (
+        f"no resolver run {resolved_run_id!r} to admit into. Statements seed a "
+        "run of their own: drop --run-id to start one from them, or name a run "
+        "that exists."
+    )
+
+
 def seed_request(
     source: SourceSnapshot,
     comments: list[FoundComment],
@@ -1450,12 +1469,9 @@ def run_resolve(
                         await core.admit(admission), adapter, resolved_run_id
                     )
                     return
-                if run_id is not None:
-                    raise typer.BadParameter(
-                        f"no resolver run {resolved_run_id!r} to admit into. "
-                        "Statements seed a run of their own: drop --run-id to "
-                        "start one from them, or name a run that exists."
-                    )
+                refusal = missing_run_refusal(run_id, resolved_run_id)
+                if refusal is not None:
+                    raise typer.BadParameter(refusal)
                 typer.echo(
                     f"No resolver run {resolved_run_id!r} yet; seeding one with "
                     "what was admitted, beside whatever notes the tree holds."

@@ -36,6 +36,7 @@ from lup.devtools.harness.resolve import (
     admission_request,
     describe_intake,
     inert_offers,
+    missing_run_refusal,
     offer_flag_answers,
     parse_answer_flags,
     parse_note_targets,
@@ -434,6 +435,25 @@ def test_the_preview_lists_exactly_what_a_run_would_plan_from(
     assert [
         line for line in describe_intake(intake) if line.startswith("planning from")
     ] == ["planning from mine.py:2-2"]
+
+
+def test_statements_offered_to_no_named_run_seed_one_rather_than_refusing() -> None:
+    """An id nobody named was never a claim that the run exists."""
+    assert missing_run_refusal(None, "resolve-abc123def456") is None
+
+
+def test_admitting_into_a_run_named_explicitly_still_refuses_when_it_is_missing() -> (
+    None
+):
+    """A typo would otherwise start a second run and lease a worktree each."""
+    refusal = missing_run_refusal("resolve-typo", "resolve-typo")
+
+    assert refusal is not None
+    assert "resolve-typo" in refusal
+    # The refusal says statements are usable without a run, rather than
+    # leaving a reader to infer that one must pre-exist for them to count.
+    assert "Statements seed a run of their own" in refusal
+    assert "drop --run-id" in refusal
 
 
 def test_a_run_is_seeded_from_words_with_no_note_written_into_the_tree() -> None:
