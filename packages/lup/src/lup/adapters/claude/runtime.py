@@ -213,11 +213,16 @@ credential died, which is the direction worth erring away from.
 
 
 def environmental_fault(
-    error: Exception, signatures: tuple[str, ...] = ENVIRONMENTAL_SIGNATURES
+    message: str, signatures: tuple[str, ...] = ENVIRONMENTAL_SIGNATURES
 ) -> bool:
-    """Whether this failure is the host's rather than the turn's."""
-    message = str(error).casefold()
-    return any(signature in message for signature in signatures)
+    """Whether this failure's own words name the host rather than the turn.
+
+    Takes the message rather than the exception, because the message is what
+    survives: several layers above the adapter re-wrap a raw exception into a
+    fresh failure carrying `str(error)` and nothing else, so a caller reading
+    a failure long after it was raised has the words and not the object.
+    """
+    return any(signature in message.casefold() for signature in signatures)
 
 
 def turn_error(interrupt: "ClaudeInterrupt") -> type[TurnError]:
@@ -293,7 +298,7 @@ class ClaudeConversationState:
                 raise ProviderTurnError(
                     TurnFailure(
                         message=str(error),
-                        environmental=environmental_fault(error),
+                        environmental=environmental_fault(str(error)),
                     )
                 ) from error
             # The provider no longer holds what this state was resuming. A
@@ -315,7 +320,7 @@ class ClaudeConversationState:
                 raise ProviderTurnError(
                     TurnFailure(
                         message=str(fresh_error),
-                        environmental=environmental_fault(fresh_error),
+                        environmental=environmental_fault(str(fresh_error)),
                     )
                 ) from fresh_error
         return self.client
@@ -434,7 +439,7 @@ class ClaudeConversationState:
                         blocks=fold_blocks(durable),
                         duration=timedelta(seconds=perf_counter() - started),
                         identifiers=identifiers,
-                        environmental=environmental_fault(error),
+                        environmental=environmental_fault(str(error)),
                     )
                 ) from error
 

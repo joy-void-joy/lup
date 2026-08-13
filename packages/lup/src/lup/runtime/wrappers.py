@@ -731,6 +731,12 @@ def combined_failure(last: TurnFailure, failures: list[TurnFailure]) -> TurnFail
             "usage": usage,
             "duration": duration,
             "validation_history": history,
+            # A host fault met on any attempt is a host fault for the whole
+            # logical turn. Reading it off `last` alone loses it whenever the
+            # retry fails a different way — and the retry meets a dead
+            # credential precisely because the first attempt did.
+            "environmental": last.environmental
+            or any(failure.environmental for failure in failures),
         }
     )
 

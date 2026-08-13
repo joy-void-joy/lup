@@ -1646,6 +1646,7 @@ def failure_leg_core(
     reviewer_response: Callable[[Path, str], JsonObject],
     max_revision_rounds: int = 2,
     max_declaration_attempts: int = 2,
+    environmental_fault: Callable[[str], bool] = lambda _: False,
 ) -> ResolverCore:
     return ResolverCore(
         ResolverConfig(
@@ -1667,6 +1668,7 @@ def failure_leg_core(
         lambda root: resolver_test_factory(root, reviewer_response),
         LiteralInvocationRenderer(),
         launcher,
+        environmental_fault=environmental_fault,
     )
 
 
@@ -1771,6 +1773,53 @@ async def test_a_host_fault_parks_the_run_without_failing_any_concern(
     assert progress["a"].status is not ConcernStatus.FAILED
     assert not [outcome for outcome in persisted.outcomes if outcome.concern_id == "a"]
     assert not persisted.failures
+
+
+@pytest.mark.asyncio
+async def test_a_host_fault_is_recognised_from_its_words_when_the_flag_is_lost(
+    tmp_path: Path,
+) -> None:
+    """The flag is set where an exception is caught; layers above re-wrap it.
+
+    `composition.py` and `wrappers.py` both turn a raw exception into a fresh
+    `TurnFailure(message=str(error))`, so the words survive and the flag does
+    not. A session limit reached six concurrent concerns and every one was
+    recorded as having failed, with the classifier working correctly and its
+    answer discarded two frames above where it was made.
+    """
+    launcher = LocalProcessLauncher()
+    workspace = failure_leg_workspace(tmp_path, launcher)
+    limit = "You've hit your session limit · resets 11:50pm (Europe/Paris)"
+
+    def worker_response(_root: Path, _output_name: str) -> JsonObject:
+        # environmental deliberately unset, as a re-wrapping layer leaves it.
+        raise ProviderTurnError(TurnFailure(message=limit))
+
+    def reviewer_response(_root: Path, _output_name: str) -> JsonObject:
+        raise AssertionError("the reviewer must not run after a host fault")
+
+    core = failure_leg_core(
+        tmp_path,
+        workspace,
+        launcher,
+        "rewrapped-host-fault",
+        worker_response,
+        reviewer_response,
+        environmental_fault=lambda message: "session limit" in message.casefold(),
+    )
+
+    with pytest.raises(ResolverEnvironmentFault):
+        seed_approvals(core, [concern("a")])
+        await core.run(
+            ResolveInventory(
+                source=snapshot(workspace, launcher), concerns=[concern("a")]
+            )
+        )
+
+    persisted = core.repository.load()
+    progress = {item.concern_id: item for item in persisted.progress}
+    assert progress["a"].status is not ConcernStatus.FAILED
+    assert not [outcome for outcome in persisted.outcomes if outcome.concern_id == "a"]
 
 
 @pytest.mark.asyncio

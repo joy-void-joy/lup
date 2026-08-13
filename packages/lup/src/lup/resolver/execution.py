@@ -15,6 +15,8 @@ named, because the alternative is a concern that passes on criteria nobody
 wrote down.
 """
 
+from collections.abc import Callable
+
 from lup.resolver.contracts import ResolverAwaitingAnswers, ResolverEnvironmentFault
 from lup.resolver.joins import Joiner
 from lup.resolver.journal import Journal, ReviewResidualEvent, VerificationFailedEvent
@@ -57,6 +59,7 @@ class ConcernExecutor:
         leases: WritableRootLeases,
         repository: ResolverStateRepository,
         journal: Journal,
+        environmental_fault: Callable[[str], bool] = lambda _: False,
     ) -> None:
         self.config = config
         self.run = run
@@ -68,6 +71,21 @@ class ConcernExecutor:
         self.leases = leases
         self.repository = repository
         self.journal = journal
+        self.environmental_fault = environmental_fault
+        """Whether a failure's own words name the host rather than the work.
+
+        Asked of the message rather than read off `TurnFailure.environmental`
+        alone, because the flag is set where an exception is first caught and
+        several layers above re-wrap a raw exception into a fresh failure —
+        the message survives that, the flag does not. A run whose whole batch
+        died on one session limit was recorded as six concerns failing for
+        exactly this reason, with the classifier working and its answer
+        discarded two frames up.
+
+        Defaults to answering no, so a library with no adapter attributes a
+        fault to the work — the conservative direction, since treating a real
+        failure as the host's would retry it forever.
+        """
 
     async def execute_concern(
         self,
@@ -92,7 +110,10 @@ class ConcernExecutor:
             # into a record whose readers cannot tell it from work that did
             # not hold up — and the concern would then have to be re-admitted
             # by somebody who knew which reasons were environmental.
-            if not error.failure.environmental:
+            if not (
+                error.failure.environmental
+                or self.environmental_fault(error.failure.message)
+            ):
                 await self.run.transition_concern(
                     concern.id, ConcernStatus.FAILED, str(error)
                 )
