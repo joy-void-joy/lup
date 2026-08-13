@@ -193,7 +193,7 @@ regenerate.
 - /lup:resolve-reviewer — Review one resolver concern against its acceptance criteria
 - /lup:review — Review a session trace for workflow quality, tool usage, and improvement opportunities
 - /lup:update — Review upstream template commits and apply improvements
-- /lup:verify-solved — Check every claimed-resolved note against what it actually asked
+- /lup:verify-solved — Check every claimed-resolved note and stale open issue against what it actually asked
 
 **Agents:**
 

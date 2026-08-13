@@ -37,6 +37,20 @@ class TurnFailure(BaseModel):
     the same refusal, so the cycles only delay the failure they report.
     """
 
+    environmental: bool = False
+    """Whether the fault is a property of the host rather than of the work.
+
+    A revoked credential, an exhausted session allowance or a dead network
+    says nothing about the turn that met it: the same request on a healthy
+    host would have succeeded. Callers that record a verdict need the two
+    apart, because attributing an expired login to the work makes a record
+    that reads as the work having failed and cannot be told from one.
+
+    False by default, so a fault nobody has classified is attributed to the
+    turn — the conservative direction, since treating a real failure as
+    environmental would retry it forever.
+    """
+
 
 class TurnError(Exception):
     """Base for failures carrying complete available partial evidence."""
