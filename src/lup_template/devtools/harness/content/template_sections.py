@@ -560,7 +560,7 @@ src/
     │   ├── dev/                # Worktrees, branches, PRs, and pre-flight checks
     │   ├── feedback/           # Feedback state, metrics, and session commits
     │   ├── trace/              # Trace display, search, and analysis
-    │   ├── usage/              # Claude Code usage display (api/render/app)
+    │   ├── usage/              # Usage display, filled by each backend's reader
     │   ├── setup.py            # Shared integration registry + terminal wizard
     │   ├── dashboard/          # Local setup API and packaged zero-build web UI
     │   ├── supervisor/         # Live and read-only web supervision of resolver runs

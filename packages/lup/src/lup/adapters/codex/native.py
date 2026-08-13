@@ -8,11 +8,6 @@
 # added.
 """Codex-private native event parsing and capability-aware decisions."""
 
-# lup: Please ensure there is full Codex parity. `lup-devtools usage` is
-# Claude-only right now — `lup.adapters.claude` ships a whole `usage/` package
-# (api, app, render) and this adapter has no equivalent at all. Sweep the two
-# adapter surfaces against each other rather than fixing only this one.
-
 from pathlib import Path
 from typing import Literal
 

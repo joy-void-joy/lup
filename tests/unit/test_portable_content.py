@@ -12,6 +12,7 @@ from lup.adapters.harness import compile_codex
 from lup.codescan.portable import native_vocabulary, prose_breaches
 from lup.harness.contracts import NativeSpellings
 from lup.harness.models import PromptDocument, TextPart
+from lup.harness.prompts import SPAWNED_SESSION_LOSES_SHELL
 from lup_template.devtools.harness.catalog import portable_harness
 
 RUNTIMES: list[NativeSpellings] = [ClaudeSpellings(), CodexSpellings()]
@@ -36,6 +37,8 @@ def instruction_text(runtime: NativeSpellings) -> str:
             runtime.relocate_session(MARK),
             runtime.resolver_entry(),
             runtime.runtime_docs(),
+            runtime.escape_sandbox(MARK).in_prose(),
+            runtime.read_document(MARK).in_prose(),
         ]
     )
 
@@ -48,6 +51,43 @@ def test_declared_identifiers_occur_in_what_the_runtime_spells() -> None:
             assert identifier in spelled, (
                 f"{runtime.runtime_name} declares {identifier!r} but never spells it"
             )
+
+
+def test_a_runtime_that_cannot_spell_an_idea_says_why_rather_than_nothing() -> None:
+    """Declining is an answer here, and an answer without a reason is silence.
+
+    Both spellings a runtime may decline are asked of both runtimes, so the
+    seam being closed is checked as behavior and not only as an abstract
+    method somebody remembered to implement.
+    """
+    for runtime in RUNTIMES:
+        for spelling in [runtime.escape_sandbox(MARK), runtime.read_document(MARK)]:
+            audited = spelling.audited()
+            assert audited, f"{runtime.runtime_name} answers with nothing at all"
+            assert audited != "unsupported — ", (
+                f"{runtime.runtime_name} declines without saying why"
+            )
+
+
+def test_the_resolver_entry_asks_its_own_vocabulary_about_the_sandbox() -> None:
+    """Neither entry may hardcode an escape, and neither may invent one.
+
+    Claude spells a per-call escape and Codex has none to spell, so what the
+    two entries share is the asking. The load-bearing assertion is the second:
+    an entry may name the sandbox exactly when its own vocabulary spelled
+    something, which is what a Codex entry that grew a flag would break.
+    """
+    for runtime in RUNTIMES:
+        escape = runtime.escape_sandbox(SPAWNED_SESSION_LOSES_SHELL).in_prose()
+        entry = runtime.resolver_entry()
+
+        if escape:
+            assert escape in entry, (
+                f"{runtime.runtime_name} spells an escape its own entry drops"
+            )
+        assert ("sandbox" in entry.lower()) == bool(escape), (
+            f"{runtime.runtime_name} names the sandbox outside escape_sandbox"
+        )
 
 
 def test_vocabulary_follows_the_locations_a_runtime_can_spell() -> None:

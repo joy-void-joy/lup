@@ -518,7 +518,7 @@ src/
     │   ├── dev/                # Worktrees, branches, PRs, and pre-flight checks
     │   ├── feedback/           # Feedback state, metrics, and session commits
     │   ├── trace/              # Trace display, search, and analysis
-    │   ├── usage/              # Claude Code usage display (api/render/app)
+    │   ├── usage/              # Usage display, filled by each backend's reader
     │   ├── setup.py            # Shared integration registry + terminal wizard
     │   ├── dashboard/          # Local setup API and packaged zero-build web UI
     │   ├── supervisor/         # Live and read-only web supervision of resolver runs
@@ -741,7 +741,8 @@ Run `uv run lup-devtools --help` for the full command tree.
 
 `lup-devtools harness claude` regenerates, verifies, and runs Claude Code with
 the local Lup plugin and the active profile's account (`CLAUDE_CONFIG_DIR`).
-`lup-devtools usage claude` reports usage for the chosen profile. Profiles are managed
+`lup-devtools usage claude` reports usage for the chosen profile, and
+`lup-devtools usage codex` reports the other backend's. Profiles are managed
 with `lup-devtools setup profile`.
 
 Each repo names its plugin **marketplace** after the project — the plugin entry stays `lup`, so `/lup:*` is identical everywhere. Marketplace names share one global namespace (`~/.claude/plugins/known_marketplaces.json`), so a shared name like `lup`/`local` collides across repos and an install from one shadows the others; `lup-devtools dev plugin name` (run by `/lup:init` and `/lup:install`) wires the per-project name.

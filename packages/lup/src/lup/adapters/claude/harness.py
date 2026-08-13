@@ -12,9 +12,15 @@ from lup.harness.contracts import (
     Instruction,
     NativeSpellings,
     PromptRenderer,
+    Spelled,
+    Spelling,
 )
 from lup.harness.generation import argument_text
-from lup.harness.prompts import guidance_banner
+from lup.harness.prompts import (
+    SPAWNED_SESSION_LOSES_SHELL,
+    guidance_banner,
+    sentences,
+)
 from lup.harness.models import (
     Agent,
     Artifact,
@@ -104,29 +110,39 @@ class ClaudeSpellings(NativeSpellings):
             'with `ExitWorktree(action="keep")`'
         )
 
+    def escape_sandbox(self, reason: str) -> Spelling:
+        return Spelled(
+            words=Instruction(
+                f"Launch it with `dangerouslyDisableSandbox: true`. {reason}"
+            )
+        )
+
+    def read_document(self, path: str) -> Spelling:
+        return Spelled(
+            words=Instruction(
+                f"Hand {path} to the `Read` tool, which takes the document itself"
+            )
+        )
+
     def resolver_entry(self) -> Instruction:
         return Instruction(
-            "Run `uv run lup-devtools harness resolve --adapter claude`. "
-            "The command accepts optional flags: `--run-id <id>` resumes "
-            "a persisted run and `--accept`/`--reject` records the human "
-            "decision on its review branch. It waits zero seconds by "
-            "default and parks on material questions, printing each one "
-            "beside the `# lup:` notes it was raised from, the concern's "
-            "spec, and its acceptance criteria; rerun with the repeatable "
-            "`--answer <question-id>=<value>` flag to answer them. "
-            "`--admit <text>` admits work discovered mid-run in the human's "
-            "own words and `--admit-note <file>:<line>` admits a note you "
-            "wrote in the tree, both repeatable. "
-            "Never pass `--wait` or `--supervise`; both hold a run open "
-            "for a human instead of parking — `--wait` at the mailbox, "
-            "`--supervise` at the page it opens. "
-            "Launch it with `dangerouslyDisableSandbox: true`. Every session "
-            "the run opens is a child of this call, and a session spawned "
-            "inside the sandbox cannot create its own "
-            "`~/.claude/session-env/<id>` — so each of its shell calls dies on "
-            "`EROFS: read-only file system, mkdir`, leaving planners and "
-            "workers unable to run a single command while still appearing to "
-            "work."
+            sentences(
+                "Run `uv run lup-devtools harness resolve --adapter claude`. "
+                "The command accepts optional flags: `--run-id <id>` resumes "
+                "a persisted run and `--accept`/`--reject` records the human "
+                "decision on its review branch. It waits zero seconds by "
+                "default and parks on material questions, printing each one "
+                "beside the `# lup:` notes it was raised from, the concern's "
+                "spec, and its acceptance criteria; rerun with the repeatable "
+                "`--answer <question-id>=<value>` flag to answer them. "
+                "`--admit <text>` admits work discovered mid-run in the human's "
+                "own words and `--admit-note <file>:<line>` admits a note you "
+                "wrote in the tree, both repeatable. "
+                "Never pass `--wait` or `--supervise`; both hold a run open "
+                "for a human instead of parking — `--wait` at the mailbox, "
+                "`--supervise` at the page it opens.",
+                self.escape_sandbox(SPAWNED_SESSION_LOSES_SHELL).in_prose(),
+            )
         )
 
     def arguments_ref(self) -> Atom:

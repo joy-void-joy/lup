@@ -5,9 +5,8 @@ api.anthropic.com, and parses stats-cache.json into typed models.
 """
 
 import json
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
-from typing import TypedDict
 
 import httpx
 from pydantic import BaseModel, ConfigDict, Field
@@ -34,30 +33,55 @@ ANTHROPIC_BETA = "oauth-2025-04-20"
 # ── API response types ─────────────────────────────────────
 
 
-class UsageBucket(TypedDict):
-    utilization: float
-    resets_at: str
+class UsageBucket(BaseModel):
+    """One rate-limit window: how much is spent, and when it clears."""
+
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    utilization: float = 0
+    resets_at: str = ""
+
+    def clears_at(self) -> datetime | None:
+        """When this window clears, or none where it does not say.
+
+        A window with no readable reset cannot be paced against — the bar
+        needs the window's start to place even pace — so it is left out
+        rather than drawn against a guess.
+        """
+        try:
+            return datetime.fromisoformat(self.resets_at)
+        except ValueError:
+            return None
 
 
-class ExtraUsage(TypedDict):
-    is_enabled: bool
-    monthly_limit: int
-    used_credits: float
-    utilization: float
+class ExtraUsage(BaseModel):
+    """Metered spend past the plan, in cents."""
+
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    is_enabled: bool = False
+    monthly_limit: float = 0
+    used_credits: float = 0
+    utilization: float = 0
 
 
-# total=False: the payload is an unvalidated resp.json() from an unversioned
-# OAuth endpoint, so any top-level key may be absent — readers probe with .get
-# and guard a bucket's presence before subscripting its fields.
-class UsageResponse(TypedDict, total=False):
-    five_hour: UsageBucket | None
-    seven_day: UsageBucket | None
-    seven_day_opus: UsageBucket | None
-    seven_day_sonnet: UsageBucket | None
-    seven_day_oauth_apps: UsageBucket | None
-    seven_day_cowork: UsageBucket | None
-    iguana_necktie: UsageBucket | None
-    extra_usage: ExtraUsage | None
+class UsageResponse(BaseModel):
+    """What the unversioned OAuth endpoint reports about this account.
+
+    Every window is optional and unknown keys are ignored: the endpoint is
+    unversioned, plans differ in which windows they meter, and a payload that
+    grew a field is not a reason to stop reporting the ones it kept.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    five_hour: UsageBucket | None = None
+    seven_day: UsageBucket | None = None
+    seven_day_opus: UsageBucket | None = None
+    seven_day_sonnet: UsageBucket | None = None
+    seven_day_oauth_apps: UsageBucket | None = None
+    seven_day_cowork: UsageBucket | None = None
+    extra_usage: ExtraUsage | None = None
 
 
 # ── stats cache models ─────────────────────────────────────
@@ -125,6 +149,19 @@ class StatsCache(BaseModel):
         alias="totalSpeculationTimeSavedMs", default=0
     )
 
+    def fresh_through(self) -> date | None:
+        """The last day this cache covers, or none where it does not say.
+
+        The runtime writes this file on its own schedule and in its own
+        shape, so a date it stops stating readably leaves the breakdown
+        unable to mark what it does not cover — which costs the annotation,
+        not the reading.
+        """
+        try:
+            return date.fromisoformat(self.last_computed_date)
+        except ValueError:
+            return None
+
 
 # ── derived data ───────────────────────────────────────────
 
@@ -160,8 +197,7 @@ def fetch_usage(config_dir: Path) -> UsageResponse:
         timeout=10,
     )
     resp.raise_for_status()
-    data: UsageResponse = resp.json()
-    return data
+    return UsageResponse.model_validate(resp.json())
 
 
 # ── stats cache ────────────────────────────────────────────
