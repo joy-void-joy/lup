@@ -24,6 +24,7 @@ from lup.adapters.claude.runtime import (
     build_submission_server,
     claude_usage,
     convert_claude_block,
+    environmental_fault,
 )
 from lup.adapters.codex.app_server import CodexAppServer, RpcMessage, RpcNotification
 from lup.adapters.codex.runtime import (
@@ -1741,3 +1742,20 @@ def test_an_elicitation_reads_the_server_it_names() -> None:
 def test_an_elicitation_without_the_server_it_names_is_refused() -> None:
     with pytest.raises(ValidationError):
         McpElicitationRequest.model_validate({"threadId": "thread-1"})
+
+
+def test_the_faults_that_named_the_host_in_a_real_run_are_classified() -> None:
+    """The three messages that produced 19 false concern failures in one run."""
+    observed = [
+        "Failed to authenticate. API Error: 401 OAuth access token has been revoked.",
+        "You've hit your session limit · resets 5:40pm (Europe/Paris)",
+        "Not logged in · Please run /login",
+    ]
+
+    assert all(environmental_fault(RuntimeError(message)) for message in observed)
+
+
+def test_a_failure_that_names_the_work_is_not_read_as_the_host() -> None:
+    """False is the conservative default: a real failure retried forever is worse."""
+    assert not environmental_fault(RuntimeError("the model refused the tool"))
+    assert not environmental_fault(RuntimeError("Command failed with exit code 1"))

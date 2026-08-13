@@ -25,6 +25,14 @@ from lup.channels.models import ChannelOverflowError, Offset
 logger = logging.getLogger(__name__)
 
 
+TAIL_WINDOW_BYTES = 256 * 1024
+"""How far back to look for a log's last complete record.
+
+Large enough to contain one, small enough that reading it is free. Our
+judgement about record sizes, so a caller with bigger records raises it.
+"""
+
+
 class Stream[T]:
     """One ordered log of records, readable from any offset.
 
@@ -100,3 +108,35 @@ class Stream[T]:
 
     def read_all(self) -> list[T]:
         return [pair.item for pair in self.read_from(0)]
+
+    def last(self, window: int = TAIL_WINDOW_BYTES) -> T | None:
+        """The most recent complete record, without reading the whole log.
+
+        "What happened most recently?" is the cheapest question a log is
+        asked and the one a status view asks every time, so it must not
+        scale with the log. A resolver journal reaches tens of megabytes in
+        a single run, and parsing all of it to read its last line is the
+        difference between a status command somebody runs and one they
+        avoid.
+
+        Reading backwards from a bounded window means the earliest line in
+        it may be a fragment, which is why a record that will not decode is
+        passed over rather than reported: the frontier is expected to be
+        cut. A caller wanting every record still uses `read_from`, which
+        reports what it could not decode.
+        """
+        if not self.path.exists():
+            return None
+        size = self.path.stat().st_size
+        with self.path.open("rb") as handle:
+            handle.seek(max(0, size - window))
+            data = handle.read()
+        for raw in reversed(data.splitlines()):
+            line = raw.strip()
+            if not line:
+                continue
+            try:
+                return self.adapter.validate_json(line)
+            except ValidationError:
+                logger.debug("Incomplete record at the tail of %s", self.path)
+        return None

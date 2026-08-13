@@ -36,6 +36,7 @@ from lup.resolver.models import (
     WorkerContext,
     WorkerReport,
     WritableRootLease,
+    ALLOWANCE_GRANTED,
     allowance_question_id,
 )
 from lup.resolver.run import ResolveRun, ResolverInvariantError
@@ -507,7 +508,7 @@ class TurnRunner:
             if allowance in granted:
                 continue
             key = allowance_question_id(concern.id, allowance)
-            if key in answered and answered[key] == "grant":
+            if key in answered and answered[key] == ALLOWANCE_GRANTED:
                 granted.append(allowance)
         return granted
 

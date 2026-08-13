@@ -29,9 +29,11 @@ from lup.resolver.mailbox import (
 )
 from lup.resolver.models import (
     AnswerBatch,
+    ConcernStatus,
     MaterialQuestion,
     QuestionAnswer,
     QuestionBatch,
+    ResolveState,
     ResolverConfig,
 )
 from lup.resolver.run import ResolveRun
@@ -133,6 +135,42 @@ class QuestionBroker:
             if offer not in valid
         ]
 
+    def unparked(self, state: ResolveState) -> list[str]:
+        """Concerns recorded as waiting whose questions the mailbox has answered.
+
+        The status is written where a concern raises to park and overwritten
+        only where that concern executes again, so between advances it
+        records the last transition rather than what the mailbox holds. A
+        parked run is precisely the span in which nothing executes, so the
+        one value a human reads to decide whether the run is unblocked was
+        the one value nothing could refresh — and it said "waiting" over a
+        mailbox that had settled every answer it named.
+
+        Derived from the questions rather than tracked alongside them: an
+        answer settling is already recorded, and a second record of the same
+        fact is a second thing to keep true.
+
+        Only a concern already judged eligible is moved. One still waiting on
+        the answer that decides its own approval may yet be found ineligible,
+        and ``eligible`` does not lead there — so unparking it on the strength
+        of the answer arriving would replace a stale status with an illegal
+        transition out of it.
+        """
+        answered = self.mailbox.answered_ids()
+        approved = {item.concern_id for item in state.eligibility if item.eligible}
+        waiting = {
+            item.concern_id
+            for item in state.progress
+            if item.status == ConcernStatus.WAITING_FOR_ANSWERS
+            and item.concern_id in approved
+        }
+        outstanding = {
+            item.question.concern_id
+            for item in self.mailbox.questions()
+            if item.question.id not in answered
+        }
+        return sorted(waiting - outstanding)
+
     async def apply_mailbox(self) -> list[str]:
         """Promote the doors' offers and fold the mailbox into persisted state."""
         problems = self.promote_offers()
@@ -146,11 +184,15 @@ class QuestionBroker:
                 run_id=state.run_id,
                 answers=[record.answer for record in self.mailbox.answers()],
             )
-            if state.questions != questions or state.answers != answers:
+            settled = self.unparked(state)
+            if state.questions != questions or state.answers != answers or settled:
+                folded = state.model_copy(
+                    update={"questions": questions, "answers": answers}
+                )
                 self.run.persist(
-                    state.model_copy(
-                        update={"questions": questions, "answers": answers}
-                    )
+                    self.run.progress_state(folded, settled, ConcernStatus.ELIGIBLE)
+                    if settled
+                    else folded
                 )
         self.run.wake.set()
         return problems

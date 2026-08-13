@@ -197,6 +197,53 @@ def attach_cli_stderr(error: Exception, stderr_lines: deque[str]) -> None:
     )
 
 
+ENVIRONMENTAL_SIGNATURES: tuple[str, ...] = (
+    "oauth access token has been revoked",
+    "failed to authenticate",
+    "authentication_error",
+    "invalid api key",
+    "not logged in",
+    "please run /login",
+    "credit balance is too low",
+    "session limit",
+    "usage limit",
+    "rate limit",
+    "rate_limit_error",
+    "overloaded_error",
+    "api error: 401",
+    "api error: 403",
+    "api error: 429",
+    "api error: 500",
+    "api error: 502",
+    "api error: 503",
+    "api error: 529",
+    "connection error",
+    "connection reset",
+    "temporary failure in name resolution",
+)
+"""Which CLI failures name the host rather than the work.
+
+Claude Code reports an expired login, an exhausted allowance and a refused
+upstream as ordinary process output rather than as typed exceptions, so
+reading its words is the only place the distinction exists. Matched as
+lowercase substrings against the whole message, since the CLI wraps the same
+cause differently depending on where it surfaced.
+
+Our judgement rather than the provider's vocabulary, so a caller replaces
+it instead of forking this module. Over-matching costs a run that parks and
+resumes; under-matching costs a concern recorded as having failed when its
+credential died, which is the direction worth erring away from.
+"""
+
+
+def environmental_fault(
+    error: Exception, signatures: tuple[str, ...] = ENVIRONMENTAL_SIGNATURES
+) -> bool:
+    """Whether this failure is the host's rather than the turn's."""
+    message = str(error).casefold()
+    return any(signature in message for signature in signatures)
+
+
 def turn_error(interrupt: "ClaudeInterrupt") -> type[TurnError]:
     """Classify a failed turn the way Codex's terminal status does."""
     return TurnInterruptedError if interrupt.requested else ProviderTurnError
@@ -267,7 +314,12 @@ class ClaudeConversationState:
             self.client = await self.connected(options)
         except Exception as error:
             if self.resume is None:
-                raise ProviderTurnError(TurnFailure(message=str(error))) from error
+                raise ProviderTurnError(
+                    TurnFailure(
+                        message=str(error),
+                        environmental=environmental_fault(error),
+                    )
+                ) from error
             # The provider no longer holds what this state was resuming. A
             # turn that cannot reach its history still beats one that cannot
             # happen, so the conversation is forgotten rather than the run.
@@ -285,7 +337,10 @@ class ClaudeConversationState:
                 )
             except Exception as fresh_error:
                 raise ProviderTurnError(
-                    TurnFailure(message=str(fresh_error))
+                    TurnFailure(
+                        message=str(fresh_error),
+                        environmental=environmental_fault(fresh_error),
+                    )
                 ) from fresh_error
         return self.client
 
@@ -403,6 +458,7 @@ class ClaudeConversationState:
                         blocks=fold_blocks(durable),
                         duration=timedelta(seconds=perf_counter() - started),
                         identifiers=identifiers,
+                        environmental=environmental_fault(error),
                     )
                 ) from error
 

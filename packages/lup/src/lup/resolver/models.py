@@ -118,6 +118,7 @@ class ConcernStatus(StrEnum):
     INTEGRATED = "integrated"
     CLEANED = "cleaned"
     RETAINED = "retained"
+    RETIRED = "retired"
     FAILED = "failed"
 
 
@@ -271,8 +272,9 @@ class MaterialQuestion(BaseModel):
         description=(
             "Whether the choices are the complete answer domain. Planned design "
             "questions must leave this false: their choices are suggestions, and "
-            "the human may answer in their own words. Only the reserved "
-            "integration gates, whose domain really is two words, close it."
+            "the human may answer in their own words. The gates whose domain "
+            "really is two words close it — integration, and allowance, whose "
+            "reader tests for a literal token and so cannot accept prose."
         ),
     )
     criteria: list[str] = Field(
@@ -304,6 +306,13 @@ class MaterialQuestion(BaseModel):
         return self
 
 
+ALLOWANCE_GRANTED = "grant"
+"""The one answer that extends a concern's authority."""
+
+ALLOWANCE_REFUSED = "refuse"
+"""The one answer that withholds it."""
+
+
 def allowance_question_id(concern_id: str, allowance: ConcernAllowance) -> str:
     """The composed id a `request_allowance` question is recorded under.
 
@@ -312,6 +321,21 @@ def allowance_question_id(concern_id: str, allowance: ConcernAllowance) -> str:
     and the run-side reader that turns a "grant" answer into authority.
     """
     return f"{concern_id}-allow-{allowance}"
+
+
+def asks_for_an_allowance(concern_id: str, question_id: str) -> bool:
+    """Whether this question is one of the concern's allowance gates.
+
+    Both the declaration and the reader ask this, so they cannot disagree
+    about which questions have a two-word domain. They did: the gate
+    published its choices as suggestions while its only reader tested for
+    the literal token, so a human's prose grant promoted cleanly and then
+    meant refusal, with nothing anomalous to report anywhere.
+    """
+    return any(
+        question_id == allowance_question_id(concern_id, allowance)
+        for allowance in ConcernAllowance
+    )
 
 
 class QuestionBatch(BaseModel):
@@ -778,6 +802,40 @@ class VerificationRecord(BaseModel):
     passed: bool
     exit_code: int
 
+    output: str = ""
+    """What the check said, kept because a verdict is read long after it ran.
+
+    A rejection used to record only the gate's own name, so learning which
+    row of an eleven-row check failed meant reproducing the whole check
+    inside the lease worktree — which a later session often cannot do,
+    because the run is still holding it. Three concerns in one run were
+    rejected on the same string for the same pre-existing finding, and each
+    worker re-derived it from scratch; one then exhausted its revision
+    budget with its acceptance criteria never evaluated.
+    """
+
+
+class ConcernRetirement(BaseModel):
+    """One human's decision that a concern is settled somewhere else.
+
+    A run parked while its branch moved forward will routinely find that
+    the branch already did some of its work, and base refresh makes that
+    the expected consequence of following a branch rather than a rare
+    accident. Every route available without this was wrong: hand-resolving
+    an add/add conflict between two independent implementations of one
+    thing, letting a worker open on a concern whose notes no longer exist,
+    or aborting the whole run to retire one concern.
+
+    The reason is required because retiring is a claim about somewhere
+    else — the commit, branch or issue that settled it — and a record
+    saying only that a concern stopped is one nobody can check.
+    """
+
+    model_config = FROZEN
+
+    concern_id: str
+    reason: str = Field(min_length=1)
+
 
 class VerificationAcceptance(BaseModel):
     """One human's decision to accept a concern over a failing verification.
@@ -1065,6 +1123,7 @@ class ResolveState(BaseModel):
     join_progress: JoinProgress | None = None
     verification: list[VerificationRecord] = Field(default_factory=list)
     acceptances: list[VerificationAcceptance] = Field(default_factory=list)
+    retirements: list[ConcernRetirement] = Field(default_factory=list)
     cleanup: list[CleanupRecord] = Field(default_factory=list)
     failures: list[str] = Field(default_factory=list)
     resume_from: ResolvePhase | None = None
