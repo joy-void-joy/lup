@@ -115,18 +115,32 @@ app = typer.Typer(help="Read and answer resolver runs from the console")
 def list_questions(
     run_id: str = typer.Option(..., "--run-id", help="Run whose mailbox to read"),
     pending_only: bool = typer.Option(
-        False, "--pending", help="Show only questions with no promoted answer"
+        False, "--pending", help="Show only questions still waiting on you"
     ),
 ) -> None:
-    """List a run's questions and what each one has been answered."""
+    """List a run's questions and what each one has been answered.
+
+    ``--pending`` is what a human reads after answering, so it means what
+    they mean by it: still waiting on you. A question already offered is
+    waiting on the run to take it, not on another answer — listed as
+    pending it read as though nothing had been recorded, and the only way
+    to tell was to go and count files on disk.
+    """
     views = pending_views(open_mailbox(run_id))
-    selected = [view for view in views if view.answered is None or not pending_only]
+    waiting = [view for view in views if view.answered is None and view.offer is None]
+    offered = [view for view in views if view.answered is None and view.offer]
+    selected = waiting if pending_only else views
     if not selected:
-        typer.echo("No questions." if not views else "No unanswered questions.")
+        typer.echo("No questions." if not views else "Nothing waiting on you.")
         return
     for view in selected:
         for line in describe(view):
             typer.echo(line)
+    if pending_only and offered:
+        typer.echo(
+            f"{len(offered)} answered and awaiting promotion; "
+            "the run takes them when it next advances"
+        )
 
 
 @app.command("answer")
