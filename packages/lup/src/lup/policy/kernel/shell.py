@@ -151,14 +151,6 @@ def decide_find_words(words: list[str], context: ShellContext) -> KernelDecision
     return decide_command_rows(remaining, context["rows"])
 
 
-# lup: The shell auto-allow asks for permission far too often, and in general it
-# feels very incomplete. Take example from Codex' own allowlist —
-# https://github.com/openai/codex. Measured with `lup-devtools hooks classify`
-# after landing review-fixes, these still stop and should not: `git restore
-# <path>` asks, `rm tracked.py` asks, and `git merge-tree --write-tree` denies
-# as unclassified though it writes no ref, index, or working tree. Also
-# EnterWorktree and ExitWorktree. Already fixed there, for the record:
-# `rm -rf build/` and `make --dry-run` both allow now.
 def decide_shell_segment(segment: list[str], context: ShellContext) -> KernelDecision:
     """Classify one parsed shell segment against the vocabulary and handlers."""
     while segment and segment[0] == "!":
