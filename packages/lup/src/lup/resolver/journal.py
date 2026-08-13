@@ -151,6 +151,26 @@ class ReviewResidualEvent(BaseModel):
     residual: list[str]
 
 
+class VerificationFailedEvent(BaseModel):
+    """What one gate saw at the moment it decided a concern's round.
+
+    A run's record held no verification event of any kind: the check ran,
+    produced a verdict that decided a concern's fate, and left nothing
+    behind. Journalling it puts what the gate saw beside the turns it
+    decided about, which is the one place a later session can read it — the
+    lease worktree the check ran in is usually still held by the run.
+    """
+
+    model_config = FROZEN
+
+    type: Literal["verification_failed"] = "verification_failed"
+    concern_id: str
+    round: int
+    name: str
+    exit_code: int
+    output: str
+
+
 class RecheckRepeatedEvent(BaseModel):
     """A re-check reproduced a standing finding already put to the humans.
 
@@ -223,6 +243,7 @@ type RunEvent = (
     | JoinCompletedEvent
     | JoinAuditEvent
     | ReviewResidualEvent
+    | VerificationFailedEvent
     | RecheckRepeatedEvent
     | BaseRefreshedEvent
     | LeaseDriftEvent

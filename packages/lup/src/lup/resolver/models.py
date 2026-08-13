@@ -801,6 +801,18 @@ class VerificationRecord(BaseModel):
     passed: bool
     exit_code: int
 
+    output: str = ""
+    """What the check said, kept because a verdict is read long after it ran.
+
+    A rejection used to record only the gate's own name, so learning which
+    row of an eleven-row check failed meant reproducing the whole check
+    inside the lease worktree — which a later session often cannot do,
+    because the run is still holding it. Three concerns in one run were
+    rejected on the same string for the same pre-existing finding, and each
+    worker re-derived it from scratch; one then exhausted its revision
+    budget with its acceptance criteria never evaluated.
+    """
+
 
 class VerificationAcceptance(BaseModel):
     """One human's decision to accept a concern over a failing verification.

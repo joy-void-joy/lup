@@ -17,7 +17,7 @@ wrote down.
 
 from lup.resolver.contracts import ResolverAwaitingAnswers, ResolverEnvironmentFault
 from lup.resolver.joins import Joiner
-from lup.resolver.journal import Journal, ReviewResidualEvent
+from lup.resolver.journal import Journal, ReviewResidualEvent, VerificationFailedEvent
 from lup.resolver.models import (
     AgentRound,
     Concern,
@@ -38,7 +38,7 @@ from lup.resolver.questions import QuestionBroker
 from lup.resolver.run import ResolveRun
 from lup.resolver.state import ResolverStateRepository
 from lup.resolver.turns import TurnRunner
-from lup.resolver.verification import Verifier
+from lup.resolver.verification import Verifier, rejection_reason
 from lup.runtime.errors import TurnError
 
 
@@ -190,16 +190,26 @@ class ConcernExecutor:
                     if acceptance.concern_id == concern.id
                 ]
                 broke = [
-                    record.name
+                    record
                     for record in self.verifier.verify(lease.root, base.commit)
                     if not record.passed and record.name not in accepted
                 ]
+                for record in broke:
+                    self.journal.record(
+                        VerificationFailedEvent(
+                            concern_id=concern.id,
+                            round=round_number,
+                            name=record.name,
+                            exit_code=record.exit_code,
+                            output=record.output,
+                        )
+                    )
                 review = (
                     ReviewReport(
                         concern_id=concern.id,
                         accepted=False,
                         generalized=False,
-                        reason="verification failed: " + ", ".join(broke),
+                        reason=rejection_reason(broke),
                     )
                     if broke
                     else await self.runner.review_turn(
