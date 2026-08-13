@@ -15,13 +15,14 @@ from pathlib import Path
 
 import pytest
 
-from lup.devtools.dev.branches import disposition_for
+from lup.devtools.dev.branches import disposition_for, runs_holding
 from lup.harness.models import ResolveSpec, SkillInvocation
 from lup.resolver.models import (
     AcceptanceCriterion,
     Concern,
     ConcernProgress,
     ConcernStatus,
+    HeldLease,
     ResolvePhase,
     ResolveState,
     SourceSnapshot,
@@ -126,6 +127,40 @@ def test_a_working_run_reports_where_its_concern_had_got_to(tmp_path: Path) -> N
         tmp_path, run_state(ResolvePhase.WORKERS, status=ConcernStatus.REVIEWING)
     )
     assert "reviewing" in reasons[BRANCH]
+
+
+def test_a_dead_run_is_reported_as_not_alive(tmp_path: Path) -> None:
+    """What a sweep reads to know nothing will retire these branches."""
+    ResolverStateRepository(tmp_path, RUN_ID).save(run_state(ResolvePhase.FAILED))
+    assert [hold.alive for hold in runs_holding(live_lease_branches(tmp_path))] == [
+        False
+    ]
+
+
+def test_a_working_run_is_reported_as_alive(tmp_path: Path) -> None:
+    ResolverStateRepository(tmp_path, RUN_ID).save(run_state(ResolvePhase.WORKERS))
+    assert [hold.alive for hold in runs_holding(live_lease_branches(tmp_path))] == [
+        True
+    ]
+
+
+def test_holds_group_under_the_run_answerable_for_them() -> None:
+    """One entry per run, so a run-shaped sweep cannot present as loose branches."""
+    holds = runs_holding(
+        {
+            "b": HeldLease(branch="b", run_id="two", standing="failed", alive=False),
+            "a": HeldLease(branch="a", run_id="one", standing="workers"),
+            "c": HeldLease(branch="c", run_id="one", standing="workers"),
+        }
+    )
+    assert [(hold.run_id, hold.branches) for hold in holds] == [
+        ("one", ["a", "c"]),
+        ("two", ["b"]),
+    ]
+
+
+def test_no_run_holding_anything_is_no_entries() -> None:
+    assert runs_holding({}) == []
 
 
 def test_a_held_branch_surveys_as_keep_rather_than_land(tmp_path: Path) -> None:

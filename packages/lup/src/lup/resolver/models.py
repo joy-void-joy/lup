@@ -548,6 +548,7 @@ class HeldLease(BaseModel):
     branch: str
     run_id: str
     standing: str
+    alive: bool = True
 
     def reason(self) -> str:
         return f"lease of run {self.run_id} ({self.standing})"

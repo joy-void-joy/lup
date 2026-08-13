@@ -540,6 +540,7 @@ def held_leases(state_root: Path) -> Iterator[HeldLease]:
                     else progress[lease.concern_id]
                     if lease.concern_id in progress
                     else state.phase,
+                    alive=not state.phase.terminal(),
                 )
 
 
