@@ -268,6 +268,10 @@ Even for open-ended questions, attach concrete options plus a free-form one. Str
 
 **When proposing changes:** Propose (don't assume), show relevant current state, explain rationale, offer alternatives.
 
+**Explain from scratch, and walk through the options.** A finding handed over as a verdict cannot be judged — only accepted or refused on trust. Explain the underlying problem as though the reader has none of your context, then the options, then your own recommendation marked as yours. Prefer being slow and complete over being brief: the reader is deciding, and a decision made without the reasoning is one they have to re-derive later.
+
+This is what makes a claim checkable rather than plausible. Verify each one against **what was actually asked** — the note's own words, the issue's own report — not against a title, a commit subject, or your own earlier summary. A claim that survives that check is worth stating plainly; one that does not is worth correcting out loud, including when the claim was yours.
+
 **When in doubt, ask.**
 
 ### Slash Commands & Skills

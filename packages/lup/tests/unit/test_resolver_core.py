@@ -55,6 +55,7 @@ from lup.resolver.models import (
     ConcernInventory,
     ConcernOrigin,
     ConcernOutcome,
+    ConcernEligibility,
     ConcernProgress,
     ConcernStatus,
     DependencyBase,
@@ -4065,6 +4066,75 @@ async def test_a_failing_promotion_round_is_retried_not_fatal(tmp_path: Path) ->
 
     assert rounds["called"] > 1, "the promoter stopped after the failing round"
     assert any("retried" in problem for problem in core.promoter_problems)
+
+
+async def test_a_settled_answer_stops_a_concern_reporting_that_it_waits(
+    tmp_path: Path,
+) -> None:
+    """Parked is the one span in which nothing refreshes the status.
+
+    ``waiting_for_answers`` is written where a concern raises to park and
+    overwritten only where that concern executes again, so a run holding a
+    settled answer for every question it named still reported itself
+    blocked on them — and the status view is what a human reads to decide
+    whether the run is unblocked.
+    """
+    core = planning_core(tmp_path, lambda *_: plan_of())
+    core.persist(
+        ResolveState(
+            config_digest="config-sha",
+            run_id=core.config.run_id,
+            phase=ResolvePhase.WORKERS,
+            source=SourceSnapshot(branch="feature", commit="source-sha"),
+            spec=resolve_spec(),
+            concerns=[concern("a"), concern("b"), concern("c")],
+            progress=[
+                ConcernProgress(
+                    concern_id="a", status=ConcernStatus.WAITING_FOR_ANSWERS
+                ),
+                ConcernProgress(
+                    concern_id="b", status=ConcernStatus.WAITING_FOR_ANSWERS
+                ),
+                ConcernProgress(
+                    concern_id="c", status=ConcernStatus.WAITING_FOR_ANSWERS
+                ),
+            ],
+            eligibility=[
+                ConcernEligibility(
+                    concern_id="a", eligible=True, integration_approved=True
+                ),
+                ConcernEligibility(
+                    concern_id="b", eligible=True, integration_approved=True
+                ),
+            ],
+        )
+    )
+    core.questions.queue_questions(
+        [
+            MaterialQuestion(id="a-q1", concern_id="a", prompt="settle a?"),
+            MaterialQuestion(id="b-q1", concern_id="b", prompt="settle b?"),
+            MaterialQuestion(id="c-q1", concern_id="c", prompt="approve c?"),
+        ],
+        "planning",
+    )
+    seed_offer(core, "a-q1", "yes")
+    seed_offer(core, "c-q1", "defer")
+
+    await core.questions.apply_mailbox()
+
+    statuses = {
+        item.concern_id: item.status for item in core.repository.load().progress
+    }
+    assert statuses["a"] == ConcernStatus.ELIGIBLE, (
+        "a concern whose every question settled still reported waiting"
+    )
+    assert statuses["b"] == ConcernStatus.WAITING_FOR_ANSWERS, (
+        "a concern with an outstanding question was unparked by a sibling's answer"
+    )
+    assert statuses["c"] == ConcernStatus.WAITING_FOR_ANSWERS, (
+        "a concern whose own eligibility is undecided was moved to eligible, "
+        "which has no transition to ineligible if the answer defers it"
+    )
 
 
 async def test_a_promoter_failure_does_not_replace_the_bodys_exception(
