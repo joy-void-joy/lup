@@ -745,6 +745,13 @@ EDIT_POLICY_CASES = [
         after="value = 1\nother = 2  # lup: ignore[any-type]",
         effect="deny",
     ),
+    # And a directive covering one line does not carry the line beside it.
+    EditDecisionCase(
+        path="src/module.py",
+        before="value = 1",
+        after="value = 1\nfirst: Any = 2  # lup: ignore[any-type]\nsecond: Any = 3",
+        effect="deny",
+    ),
     EditDecisionCase(
         path="src/module.py", before="value = 1", after="value = 2", effect="allow"
     ),
@@ -1650,6 +1657,46 @@ def test_a_suppression_that_silences_nothing_is_refused() -> None:
 
     assert decision.effect == "deny"
     assert "dict-get" in decision.reason
+
+
+def test_an_uncovered_violation_denies_whatever_else_the_edit_declares() -> None:
+    """One suppression must not carry the violations beside it through.
+
+    Deciding the declared ask first left the denial below it unreachable for
+    any edit that added a directive at all, so a marker covering line 2 bought
+    approval for an unsuppressed line 3 the prompt never mentioned. The
+    precedence is the strong rule's, applied to the rest of the table.
+
+    The fourth case is what keeps this narrow: an edit whose every added
+    violation is covered is the ordinary suppression path, and it still asks.
+    """
+    policy = EditPolicy(protected=[])
+
+    def decide(after: str) -> Decision:
+        return policy.decide(
+            EditBatch(
+                changes=[EditChange(path=Path("a.py"), before="x = 1\n", after=after)]
+            )
+        )
+
+    alone = decide("x = 1\nsecond: Any = 3\n")
+    genuine = decide(
+        "x = 1\nfirst: Any = 2  # lup: ignore[any-type]\nsecond: Any = 3\n"
+    )
+    bare = decide("x = 1\ny = 2  # lup: ignore\nsecond: Any = 3\n")
+    every_one_covered = decide(
+        "x = 1\nfirst: Any = 2  # lup: ignore[any-type]\n"
+        "second: Any = 3  # lup: ignore[any-type]\n"
+    )
+
+    assert alone.effect == "deny"
+    assert genuine.effect == "deny"
+    assert bare.effect == "deny"
+    # The denial names what the ask was hiding, or it trades a silent approval
+    # for a silent refusal.
+    assert "line 3" in genuine.reason
+    assert "any-type" in genuine.reason
+    assert every_one_covered.effect == "ask"
 
 
 def test_the_gate_refuses_the_marker_the_refiner_already_refutes() -> None:

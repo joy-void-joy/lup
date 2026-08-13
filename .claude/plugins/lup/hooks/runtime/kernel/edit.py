@@ -998,6 +998,13 @@ def antipattern_decision(
     `abc-capability` and its family, and a verdict this gate cannot reach is
     not one it may refuse over.
 
+    A violation nothing covers is denied whatever else the edit declares, and
+    only then are the declared suppressions asked about. Both halves of that
+    order matter: without the first, a directive covering one line bought
+    approval for every unsuppressed line beside it; without the second, an
+    edit whose violations are all covered would be refused for suppressing
+    them, which is the ordinary and approved way to write one.
+
     A granted ``antipattern-suppression`` allowance turns the two suppression
     asks into allows, because a human already approved the plan that needs
     them. It reaches neither denial: an allowance justifies a typed, argued
@@ -1094,12 +1101,13 @@ def antipattern_decision(
                 number, dead, [rule for rule in sorted(fired) if rule not in named]
             )
 
-    if declared:
-        sites = [
-            suppression_site(number, original_lines[number - 1]) for number in declared
-        ]
-        return KernelDecision(suppression, suppression_reason(sites, before is None))
-
+    # The same precedence the strong-rule loop above takes, applied to the rest
+    # of the table: a violation nothing covers outranks every suppression the
+    # edit declares. Deciding the declared ask first left this loop unreachable
+    # for any edit that added a directive at all, so one legitimate suppression
+    # carried the unsuppressed violations beside it through on its approval —
+    # an approval whose reason named only the directive.
+    covering: dict[int, bool] = {}
     for hit in hits:
         number = hit["line"]
         rule_id = hit["row"]["id"]
@@ -1111,11 +1119,25 @@ def antipattern_decision(
         if directive is not None:
             covered = ignore_rule_ids(directive)
             if covered is None or rule_id in covered:
-                return KernelDecision(
-                    suppression,
-                    suppression_reason([suppression_site(holder, original)]),
-                )
+                covering[holder] = True
+                continue
         return anti_pattern_denial(number, hit["row"])
+
+    def sites_at(numbers: list[int]) -> list[str]:
+        """The directives written on these lines, rendered for the prompt."""
+        return [
+            suppression_site(number, original_lines[number - 1]) for number in numbers
+        ]
+
+    # Every violation the edit added is covered, so what is left to decide is
+    # the suppressions themselves: the ones this edit declares, or the standing
+    # one an added line has moved under.
+    if declared:
+        return KernelDecision(
+            suppression, suppression_reason(sites_at(declared), before is None)
+        )
+    if covering:
+        return KernelDecision(suppression, suppression_reason(sites_at(list(covering))))
     return None
 
 
