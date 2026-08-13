@@ -20,6 +20,8 @@ from lup.resolver.models import (
     LeasesDocument,
     QuestionBatch,
     ResolverConfig,
+    CleanupRecord,
+    ConcernRetirement,
     VerificationAcceptance,
     ReviewReport,
     ResolveState,
@@ -46,8 +48,26 @@ PHASE_TRANSITIONS: dict[ResolvePhase, ResolvePhase] = {
     ResolvePhase.VERIFICATION: ResolvePhase.CLEANUP,
     ResolvePhase.CLEANUP: ResolvePhase.COMPLETE,
 }
+
+
+def already_settled(status: ConcernStatus) -> bool:
+    """Whether this concern is done, so retiring it would claim nothing.
+
+    A concern whose work reached the review branch, or was deliberately
+    retained, has an answer. Everything else — including failed, and
+    including ineligible — is still open, and open is exactly what a human
+    retires when the work turns out to have landed somewhere else.
+    """
+    return status in (
+        ConcernStatus.INTEGRATED,
+        ConcernStatus.CLEANED,
+        ConcernStatus.RETAINED,
+        ConcernStatus.RETIRED,
+    )
+
+
 # lup: ignore[library-default] — the legal successors of each status in this library's own closed enum
-CONCERN_TRANSITIONS: dict[ConcernStatus, list[ConcernStatus]] = {
+DECLARED_TRANSITIONS: dict[ConcernStatus, list[ConcernStatus]] = {
     ConcernStatus.DISCOVERED: [
         ConcernStatus.WAITING_FOR_ANSWERS,
         ConcernStatus.ELIGIBLE,
@@ -110,6 +130,18 @@ CONCERN_TRANSITIONS: dict[ConcernStatus, list[ConcernStatus]] = {
         ConcernStatus.RETAINED,
     ],
 }
+
+CONCERN_TRANSITIONS: dict[ConcernStatus, list[ConcernStatus]] = {
+    status: targets if already_settled(status) else [*targets, ConcernStatus.RETIRED]
+    for status, targets in DECLARED_TRANSITIONS.items()
+} | {ConcernStatus.RETIRED: []}
+"""Every move a concern may make, with retirement derived rather than listed.
+
+Retiring is a human's decision about a concern that is still open, so it is
+reachable from every status that is not already settled. Deriving it is what
+keeps a status added later from silently being un-retirable — the omission a
+hand-written table cannot report.
+"""
 type PersistedResolverModel = (
     ResolveState
     | AgentRound
@@ -234,6 +266,28 @@ class ResolverStateRepository:
             finally:
                 fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
 
+    def held(self) -> bool:
+        """Whether another process is driving this run right now.
+
+        Asked of the lock rather than of the process table, because under a
+        sandbox `/proc` is PID-isolated and `ps` lists nothing outside the
+        current shell — so a healthy long-running run is indistinguishable
+        from one that died, and that ambiguity has produced a confident
+        wrong conclusion in both directions. Taking the lock and dropping it
+        answers from the run directory alone, which is the only thing a
+        reader is guaranteed to be able to see.
+        """
+        lock_path = self.root / ".run.lock"
+        if not lock_path.exists():
+            return False
+        with lock_path.open("a+", encoding="utf-8") as lock:
+            try:
+                fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                return True
+            fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+            return False
+
     def load(self) -> ResolveState:
         path = self.root / "state.json"
         if not path.exists():
@@ -265,6 +319,84 @@ class ResolverStateRepository:
         accepted = current.model_copy(update={"acceptances": [*kept, acceptance]})
         self.write_model("state.json", accepted)
         return accepted
+
+    def retire(self, retirement: ConcernRetirement) -> ResolveState:
+        """Record that a human settled one concern somewhere other than here.
+
+        Through its own door, like acceptance and adoption, and for the same
+        reason: a parked run has no process to route the decision through.
+        The concern leaves the eligible set without failing — its record
+        says it was retired and by what, rather than that its work did not
+        hold up — and its dependents proceed from the base, which is where
+        the work that settled it now lives.
+
+        Retiring the same concern twice replaces the reason rather than
+        accumulating one, so a corrected reason reads as the decision.
+        """
+        current = self.load()
+        known = {concern.id for concern in current.concerns}
+        if retirement.concern_id not in known:
+            raise StateTransitionError(
+                f"concern {retirement.concern_id!r} is not in this run"
+            )
+        settled = [
+            item.status
+            for item in current.progress
+            if item.concern_id == retirement.concern_id and already_settled(item.status)
+        ]
+        if settled:
+            raise StateTransitionError(
+                f"concern {retirement.concern_id!r} is already {settled[0]}; "
+                "retiring claims a concern is settled elsewhere, and this one "
+                "is settled here"
+            )
+        kept = [
+            recorded
+            for recorded in current.retirements
+            if recorded.concern_id != retirement.concern_id
+        ]
+        # The lease stops being active so nothing re-opens on it, and its
+        # worktree is left where it stands. A door cannot safely remove a
+        # tree a live run may be holding, and the branch is evidence besides:
+        # a retired concern often built its own answer to work that landed
+        # upstream, and that answer is worth reading before it is discarded.
+        retired = current.model_copy(
+            update={
+                "retirements": [*kept, retirement],
+                "leases": [
+                    lease.model_copy(update={"active": False})
+                    if lease.concern_id == retirement.concern_id
+                    else lease
+                    for lease in current.leases
+                ],
+                "cleanup": [
+                    *current.cleanup,
+                    *[
+                        CleanupRecord(
+                            path=lease.root,
+                            branch=lease.branch,
+                            action="retained",
+                            reason=f"lease retained after retirement: {retirement.reason}",
+                        )
+                        for lease in current.leases
+                        if lease.concern_id == retirement.concern_id
+                    ],
+                ],
+                "progress": [
+                    item.model_copy(
+                        update={
+                            "status": ConcernStatus.RETIRED,
+                            "reason": retirement.reason,
+                        }
+                    )
+                    if item.concern_id == retirement.concern_id
+                    else item
+                    for item in current.progress
+                ],
+            }
+        )
+        self.write_model("state.json", retired)
+        return retired
 
     def adopt(self, config: ResolverConfig, digest: str) -> ResolveState:
         """Re-stamp a persisted run onto a composition a human accepted.

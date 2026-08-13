@@ -32,7 +32,12 @@ from lup.resolver.mailbox import (
     wait_for_answers,
 )
 from lup.policy.identity import ConcernAllowance
-from lup.resolver.models import MaterialQuestion
+from lup.resolver.models import (
+    ALLOWANCE_GRANTED,
+    ALLOWANCE_REFUSED,
+    MaterialQuestion,
+    asks_for_an_allowance,
+)
 from lup.types import EnvVars
 
 RESOLVER_RUN_DIR_ENV = "LUP_RESOLVER_RUN_DIR"
@@ -266,6 +271,7 @@ def create_question_tools(
                     prompt=asked.prompt,
                     choices=asked.choices,
                     recommendation=asked.recommendation,
+                    closed_choices=asks_for_an_allowance(concern_id, identifier),
                 )
             except ValueError as error:
                 raise ToolError(
@@ -393,7 +399,7 @@ def create_question_tools(
                             f"Grant `{params.allowance}` to {concern_id}?\n\n"
                             f"{params.reason}"
                         ),
-                        choices=["grant", "refuse"],
+                        choices=[ALLOWANCE_GRANTED, ALLOWANCE_REFUSED],
                     )
                 ]
             )
