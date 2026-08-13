@@ -35,12 +35,6 @@ from lup.policy.kernel.decision import KERNEL_IMPORT_ALLOWLIST
 RULE_ID = "seam-boundary"
 NATIVE_SPELLING_RULE_ID = "native-spelling"
 KERNEL_IMPORT_RULE_ID = "kernel-imports"
-# lup: Probably also want an anti-pattern against constant declaration itself,
-# wider than this library-only rule. The model tends to write `SNIPPET_LENGTH =
-# 500` ("how much of a result is returned inline before it is saved to disk
-# instead") where the value should have been parametrized, and `UTC_SUFFIX = "Z"`
-# ("what Exa appends to a timestamp, which callers here read without") where the
-# timestamp should have been parsed with datetime rather than removesuffix.
 LIBRARY_DEFAULT_RULE_ID = "library-default"
 LIBRARY_ROOT = "packages/lup/src/lup/"
 KERNEL_ROOT = f"{LIBRARY_ROOT}policy/kernel/"
