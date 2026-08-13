@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "1242db848fe894421a15fd3d5c577cb46ece6e9907bfabc90455ffc4e521f28c",
+  "source_digest": "c4d05f89afc59a8fa756175a46b2bd23da459a74fbb35c4ef7848d63006c6bee",
   "target_requirements": [
     "claude-code"
   ],
@@ -9,7 +9,7 @@
     {
       "path": ".claude/CLAUDE.md",
       "category": "generated",
-      "sha256": "5d999617336e7172ad1d4efdbd13561ba6e4e492b9ec08ebd169c08247633e8c",
+      "sha256": "49c8ea913c22c3dd8998285382ff2d991ad7d4bf29b239c862fe144f03c16205",
       "semantic_id": "harness.guidance",
       "executable": false
     },
@@ -254,7 +254,7 @@
     {
       "path": ".claude/plugins/lup/commands/resolve-reviewer.md",
       "category": "generated",
-      "sha256": "e149fe24ff52bfa658cdd6ef62b82ba4167ab9e76d9d8308b4d53f4b60a531e7",
+      "sha256": "60a66b74d2edad53623d41ec8353855e3830d23c7d5c4eb40e0302e9e2702eaa",
       "semantic_id": "skill.resolve-reviewer",
       "executable": false
     },
@@ -282,7 +282,7 @@
     {
       "path": ".claude/plugins/lup/commands/verify-solved.md",
       "category": "generated",
-      "sha256": "1ad43a6e38526b9641788feb0121550f1319ef56e35b0e60016ffd6476577568",
+      "sha256": "66b40e3d16fbe0cadafcf8814a5ca0c2e75127b65c7c0df5276e3e1b5baa2948",
       "semantic_id": "skill.verify-solved",
       "executable": false
     },
@@ -324,7 +324,7 @@
     {
       "path": ".claude/plugins/lup/hooks/runtime/kernel/edit.py",
       "category": "generated",
-      "sha256": "c2dd757eb3829800f82115c04270b018817d9362137109940cc313dcd686c7b8",
+      "sha256": "3fe415e75af6bdcd8d145011186d4d1e3a0a507ff4382043d41021dcbb3ed890",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -436,7 +436,7 @@
     {
       "path": "docs/harness.md",
       "category": "generated",
-      "sha256": "63165f7eb493c4b25ed3ad94d6f59251b9189af9b0d95af1debcfb5f6e14a498",
+      "sha256": "396f1329ed1f02f439ada590646f31c08fb8014ad88336776da1c98e3f408fd8",
       "semantic_id": "docs.harness",
       "executable": false
     },
