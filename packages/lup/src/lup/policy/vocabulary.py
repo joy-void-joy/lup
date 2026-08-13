@@ -67,7 +67,6 @@ class JudgedCommand(BaseModel):
 def read_only_rules(
     commands: Sequence[str] = (
         "ls",
-        "tree",
         "cat",
         "echo",
         "printf",
@@ -308,6 +307,13 @@ def guarded_tool_rules() -> list[ShellCommandRule]:
             name="sort",
             ask_flags=["-o", "--output", "--compress-program"],
             reason="a sort flag that writes a file or runs a program requires approval",
+        ),
+        ShellCommandRule(
+            # Listing a directory is a read, and `-o` lands that listing in a
+            # file — the same flag on the same kind of tool as `sort -o`.
+            name="tree",
+            ask_flags=["-o"],
+            reason="a tree flag that writes a file requires approval",
         ),
         ShellCommandRule(
             # A search that runs a program. `--pre` and `--hostname-bin` name

@@ -516,6 +516,8 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="numfmt --to=iec 1024", effect="allow"),
     DecisionCase(input="base64 payload.bin", effect="allow"),
     DecisionCase(input="base64 -o out.txt payload.bin", effect="ask"),
+    DecisionCase(input="tree -L 2 src", effect="allow"),
+    DecisionCase(input="tree -o listing.txt", effect="ask"),
     # Patch application allows in every in-repository form; only the flags that
     # write outside the working area are guarded.
     DecisionCase(input="git apply p.diff", effect="allow"),

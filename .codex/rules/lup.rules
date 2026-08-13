@@ -201,7 +201,6 @@ prefix_rule(pattern = ["tac"], decision = "allow", justification = "Allowed by L
 prefix_rule(pattern = ["tail"], decision = "allow", justification = "Allowed by Lup semantic shell policy")
 prefix_rule(pattern = ["test"], decision = "allow", justification = "Allowed by Lup semantic shell policy")
 prefix_rule(pattern = ["tr"], decision = "allow", justification = "Allowed by Lup semantic shell policy")
-prefix_rule(pattern = ["tree"], decision = "allow", justification = "Allowed by Lup semantic shell policy")
 prefix_rule(pattern = ["true"], decision = "allow", justification = "Allowed by Lup semantic shell policy")
 prefix_rule(pattern = ["uname"], decision = "allow", justification = "Allowed by Lup semantic shell policy")
 prefix_rule(pattern = ["uniq"], decision = "allow", justification = "Allowed by Lup semantic shell policy")
