@@ -172,6 +172,13 @@ policy for every rule alike, and nowhere else reaches. Inline is the canonical
 placement; the line above is where a reason too long for the column budget
 goes, since a comment is the one thing the formatter cannot wrap.
 
+A directive naming a rule that nothing it guards trips is refused rather than
+approved — it silences nothing, so the approval would buy an exemption the
+auditor already calls spurious. The refusal names the rule that does not fire,
+and what the line trips instead where it trips something. Rules another
+scanner owns are not judged this way: the edit gate carries the anti-pattern
+table alone, and a verdict it cannot reach is not one it refuses over.
+
 In a file's opening comment block the marker goes file-wide — a standalone
 `# lup: ignore` disables anti-pattern checks for the whole file, and
 `# lup: ignore[rule-id]` disables only that rule, the way `# pyright: ignore`

@@ -110,12 +110,12 @@ class AntiPattern(BaseModel):
     ``refiner`` is present when the regex is wider than the defect the rule
     names and an AST context settles the difference. It carries the function
     itself, so reading the rule tells you what narrows it rather than only
-    that something does. The kernel reaches the same functions through
-    :data:`lup.policy.kernel.edit.REFINERS`, because a row projected into the
-    hermetic runtime is primitive and cannot carry a callable;
-    ``test_declared_refiners_are_the_kernel_refiners`` pins the two to the
-    same objects, since a rule refined on one side only is exactly the split
-    that makes a marker unremovable.
+    that something does. The row carries its name, which
+    :func:`lup.policy.kernel.edit.refiner_named` resolves back to the function,
+    because a row projected into the hermetic runtime is primitive and cannot
+    carry a callable; ``test_declared_refiners_are_the_kernel_refiners`` pins
+    the two to the same objects, since a rule refined on one side only is
+    exactly the split that makes a marker unremovable.
     """
 
     model_config = {"arbitrary_types_allowed": True}

@@ -658,21 +658,22 @@ def tuple_shape_exempt_lines(source: str) -> set[int]:
     return variadic - fixed
 
 
-def refiner_for(rule_id: str) -> Callable[[str], set[int]] | None:
-    """The AST context that narrows one rule, where the rule has one.
+def refiner_named(name: str) -> Callable[[str], set[int]] | None:
+    """The AST context one row names, where the row names one.
 
     A rule earns a refiner when its pattern is wider than the defect it names
-    and the difference is decidable without types. The kernel resolves it from
-    the id because a row projected into the hermetic runtime is primitive and
-    cannot carry a callable; the rule declaration in `lup.codescan.antipatterns`
-    holds the same function directly, and a test pins the two together.
+    and the difference is decidable without types. Which rule has which lives
+    at the declaration in `lup.codescan.antipatterns` and travels in the row,
+    so this side holds only the functions a row may name — a rule that gains a
+    refiner reaches the gate by construction rather than by someone also
+    remembering to widen a list of ids here.
     """
-    match rule_id:
-        case "empty-collection":
+    match name:
+        case "empty_collection_exempt_lines":
             return empty_collection_exempt_lines
-        case "dict-get":
+        case "dict_get_exempt_lines":
             return dict_get_exempt_lines
-        case "tuple-shape":
+        case "tuple_shape_exempt_lines":
             return tuple_shape_exempt_lines
     return None
 
@@ -683,7 +684,7 @@ def refined_exempt_lines(
     """Where each refined rule is cleared in this source, computed once."""
     found: dict[str, set[int]] = {}
     for row in rows:
-        refiner = refiner_for(row["id"])
+        refiner = refiner_named(row["refiner"])
         if refiner is not None:
             found[row["id"]] = refiner(source)
     return found
@@ -860,11 +861,19 @@ def file_ignore(source: str) -> FileIgnore:
 
 
 def suppression_site(number: int, line: str) -> str:
-    """One suppression, located and quoted so it can be read before approving."""
-    return f"line {number}: {line.strip()[:160]}"
+    """One suppression, located, named, and quoted before it is approved.
+
+    The rules are named rather than left to be read back out of the quote,
+    because the quote is a preview: a long line is cut, and a directive is
+    written at the end of the line it guards — the end being what a cut takes.
+    """
+    match = IGNORE_RE.search(line)
+    named = ignore_rule_ids(match) if match is not None else None
+    silenced = ", ".join(named) if named else "every rule"
+    return f"line {number} silences {silenced}: {line.strip()[:160]}"
 
 
-def suppression_reason(sites: list[str]) -> str:
+def suppression_reason(sites: list[str], creation: bool = False) -> str:
     """Name every suppression this edit declares, not merely that it declares one.
 
     A permission prompt carries the reason and nothing else, so a verdict
@@ -872,8 +881,20 @@ def suppression_reason(sites: list[str]) -> str:
     line themselves — in a diff they were being asked to approve precisely
     because it needed reading. Every site is listed rather than the first,
     since approving is one decision over the whole batch.
+
+    A creation is the case where that matters most and reads least. The whole
+    file arrives at once, so its directives are approved along with everything
+    else about it — the layout and the shape, which is what a reviewer is
+    reading a new file for — and a line in the middle of a new module is the
+    easiest thing in an edit to approve without having seen.
     """
-    return "edit introduces an antipattern suppression\n" + "\n".join(sites)
+    header = (
+        "this new file arrives carrying antipattern suppressions, and writing "
+        "it approves them"
+        if creation
+        else "edit introduces an antipattern suppression"
+    )
+    return header + "\n" + "\n".join(sites)
 
 
 class AntiPatternHit(TypedDict):
@@ -927,6 +948,32 @@ def anti_pattern_denial(number: int, row: AntiPatternRow) -> KernelDecision:
     )
 
 
+def spurious_refusal(number: int, dead: list[str], live: list[str]) -> KernelDecision:
+    """Refuse a directive for the rules it names that nothing it guards trips.
+
+    Asking spends a human turn on ids that were never going to silence
+    anything, and approving them is worse than refusing: they read as reviewed
+    exceptions while the audit is already calling them dead.
+
+    The remedy is stated as dropping the ids rather than the directive,
+    because the rest of one may be doing its job and dropping the whole would
+    resurface the denial it was silencing. The reach is stated with it, since
+    a directive written one line off from its violation is dead for a reason
+    that wants it moved instead. What the line trips is named too, because
+    that is the directive the site actually wanted.
+    """
+    named = ", ".join(dead)
+    instead = f" — the line trips {', '.join(live)} instead" if live else ""
+    return KernelDecision(
+        "deny",
+        f"line {number}: this suppression names {named}, which nothing it guards "
+        f"trips{instead}. Drop {named} from it: a rule that does not fire is "
+        f"silenced by nothing, and the audit reports the directive spurious. One "
+        f"written on line {number} reaches line {number}, and line {number + 1} "
+        "when it stands alone (see docs/rules.md)",
+    )
+
+
 def antipattern_decision(
     before: str | None,
     after: str,
@@ -942,10 +989,19 @@ def antipattern_decision(
     directives and sees comments intact. Without a tokenizer (non-Python
     files, fragments that fail to tokenize) every rule scans the raw line.
 
+    A declared suppression is judged before it is asked about. One naming a
+    rule that nothing it guards trips is refused outright: it silences
+    nothing, so the ask would spend a human turn admitting a marker the audit
+    reports spurious the moment it lands — and a marker that suppresses
+    nothing is the cheapest way past a gate that asks about every directive
+    alike. Only the rules these rows carry are judged; another scanner owns
+    `abc-capability` and its family, and a verdict this gate cannot reach is
+    not one it may refuse over.
+
     A granted ``antipattern-suppression`` allowance turns the two suppression
     asks into allows, because a human already approved the plan that needs
-    them. It never touches the deny below: an allowance justifies a typed,
-    argued suppression, never a bare anti-pattern.
+    them. It reaches neither denial: an allowance justifies a typed, argued
+    suppression, never a bare anti-pattern and never a dead directive.
     """
     suppression = "allow" if "antipattern-suppression" in (allowances or []) else "ask"
     added = added_line_numbers(before, after)
@@ -960,7 +1016,7 @@ def antipattern_decision(
     has_file_ignore = file_level["present"]
     disabled_ids = file_level["ids"]
     gone = removed_lines(before, after)
-    declared: list[str] = []
+    declared: list[int] = []
     for number in added:
         original = original_lines[number - 1]
         directive = IGNORE_RE.search(original)
@@ -976,11 +1032,43 @@ def antipattern_decision(
                 )
             )
         ):
-            declared.append(suppression_site(number, original))
+            declared.append(number)
+    # Which of them this gate may judge for suppressing nothing. The
+    # whole-file form governs lines an edit's own text need not contain, so it
+    # is asked about like any other and judged by none of what follows.
+    # Judging the rest rests on the refiners, and a refiner reads a tree:
+    # where the document has none, `tuple_shape_exempt_lines` clears every
+    # line by design, and reading a clearance as proof would refuse a
+    # directive for this gate's own blindness.
+    decidable = not declared or not python_source or python_parses(after)
+    whole_file = file_level_line(after)
+    judged = [
+        number for number in (declared if decidable else []) if number != whole_file
+    ]
     tokenized = comment_columns is not None
     hits = list(
         anti_pattern_hits(added, rows, code_lines, scanned_lines, exempt, tokenized)
     )
+
+    def guarded_hits(number: int) -> list[AntiPatternHit]:
+        """Every rule tripped by the lines one directive is written to guard.
+
+        Read from the directive's side, through the one placement policy: its
+        own line always, and the line below when it stands alone. The rows and
+        the refined exemptions are the ones the gate matched with above, so
+        what counts as a trip here is what counts as a trip everywhere.
+        """
+        guarded = {
+            candidate: True
+            for candidate in (number, number + 1)
+            if candidate <= len(original_lines)
+            and suppression_reaches(original_lines, number, candidate)
+        }
+        return list(
+            anti_pattern_hits(
+                guarded, rows, code_lines, scanned_lines, exempt, tokenized
+            )
+        )
 
     # A strong rule outranks every suppression below it, including the declared
     # gate: its replacement is right every time, so a directive beside it
@@ -990,8 +1078,27 @@ def antipattern_decision(
         if hit["row"]["strength"] == "strong":
             return anti_pattern_denial(hit["line"], hit["row"])
 
+    known_ids = {row["id"] for row in rows}
+    for number in judged:
+        directive = IGNORE_RE.search(original_lines[number - 1])
+        named = ignore_rule_ids(directive) if directive is not None else None
+        # A directive standing at the end of the text guards a line the text
+        # does not carry, so what it silences is not visible from here.
+        alone = standalone_suppression(original_lines[number - 1]) is not None
+        if named is None or (alone and number == len(original_lines)):
+            continue
+        fired = {hit["row"]["id"] for hit in guarded_hits(number)}
+        dead = [rule for rule in named if rule in known_ids and rule not in fired]
+        if dead:
+            return spurious_refusal(
+                number, dead, [rule for rule in sorted(fired) if rule not in named]
+            )
+
     if declared:
-        return KernelDecision(suppression, suppression_reason(declared))
+        sites = [
+            suppression_site(number, original_lines[number - 1]) for number in declared
+        ]
+        return KernelDecision(suppression, suppression_reason(sites, before is None))
 
     for hit in hits:
         number = hit["line"]

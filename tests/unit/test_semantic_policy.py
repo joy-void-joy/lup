@@ -730,6 +730,21 @@ EDIT_POLICY_CASES = [
         after="value: dict[str, object] = {}",
         effect="deny",
     ),
+    # A directive is judged by what it silences: one covering the violation
+    # beside it is the reasoned exception a human weighs, and one covering
+    # nothing is refused before anybody is asked to weigh it.
+    EditDecisionCase(
+        path="src/module.py",
+        before="value = 1",
+        after="value = 1\nother: Any = 2  # lup: ignore[any-type]",
+        effect="ask",
+    ),
+    EditDecisionCase(
+        path="src/module.py",
+        before="value = 1",
+        after="value = 1\nother = 2  # lup: ignore[any-type]",
+        effect="deny",
+    ),
     EditDecisionCase(
         path="src/module.py", before="value = 1", after="value = 2", effect="allow"
     ),
@@ -1613,6 +1628,242 @@ def test_declaring_a_suppression_still_asks() -> None:
     assert decision.reason.startswith("edit introduces an antipattern suppression")
 
 
+def test_a_suppression_that_silences_nothing_is_refused() -> None:
+    """A marker that suppresses nothing is the cheap way past a gate.
+
+    The gate asks about every added directive alike, so a directive naming a
+    rule the line does not trip costs one approval and buys an exemption
+    nobody weighed. Asking would spend a human turn admitting a marker the
+    audit reports spurious the moment it lands.
+    """
+    policy = EditPolicy(protected=[])
+    dead = EditBatch(
+        changes=[
+            EditChange(
+                path=Path("a.py"),
+                before="x = 1\n",
+                after="x = 1\ny = 2  # lup: ignore[dict-get]\n",
+            )
+        ]
+    )
+    decision = policy.decide(dead)
+
+    assert decision.effect == "deny"
+    assert "dict-get" in decision.reason
+
+
+def test_the_gate_refuses_the_marker_the_refiner_already_refutes() -> None:
+    """Both gates reach one verdict, because one refiner answers both.
+
+    A route decorator trips the `dict-get` regex and the AST refutes it, so a
+    marker written there guards nothing. The audit reports that afterwards;
+    the exemption it reads is the kernel's own, so the same verdict is
+    available at the point of writing, which is where it is worth having.
+    """
+    policy = EditPolicy(protected=[])
+    refuted = EditBatch(
+        changes=[
+            EditChange(
+                path=Path("a.py"),
+                before="def read() -> None:\n    pass\n",
+                after=(
+                    '@app.get("/x")  # lup: ignore[dict-get]\n'
+                    "def read() -> None:\n    pass\n"
+                ),
+            )
+        ]
+    )
+    decision = policy.decide(refuted)
+
+    assert decision.effect == "deny"
+    assert "dict-get" in decision.reason
+
+
+def test_a_refusal_names_what_the_line_trips_instead() -> None:
+    """The directive the site wanted is named, so the next attempt is not a guess."""
+    policy = EditPolicy(protected=[])
+    misnamed = EditBatch(
+        changes=[
+            EditChange(
+                path=Path("a.py"),
+                before="x = 1\n",
+                after="x = 1\nvalue: Any = 2  # lup: ignore[dict-get]\n",
+            )
+        ]
+    )
+    decision = policy.decide(misnamed)
+
+    assert decision.effect == "deny"
+    assert "names dict-get" in decision.reason
+    assert "the line trips any-type instead" in decision.reason
+
+
+def test_a_directive_written_above_its_violation_is_not_dead() -> None:
+    """The overflow placement guards the line below, which an edit need not add.
+
+    The reported failure this answers is a marker that went spurious while the
+    violation it was written for stayed live. Judging a directive by its own
+    line alone would refuse exactly the placement a reason too long to sit
+    inline has to take.
+    """
+    policy = EditPolicy(protected=[])
+    hoisted = EditBatch(
+        changes=[
+            EditChange(
+                path=Path("a.py"),
+                before="x = 1\nvalue: Any = 2\n",
+                after=(
+                    "x = 1\n"
+                    "# lup: ignore[any-type] — the SDK hands back Any\n"
+                    "value: Any = 2\n"
+                ),
+            )
+        ]
+    )
+    assert policy.decide(hoisted).effect == "ask"
+
+
+def test_shrinking_a_dead_directive_is_still_the_audit_s_own_fix() -> None:
+    """The gate refusing a marker must not refuse the edit that removes it.
+
+    Dropping one id from a directive is what the audit demands when it reports
+    that id spurious, and the result is smaller whether or not what remains is
+    dead too — refusing it would leave the marker unremovable.
+    """
+    policy = EditPolicy(protected=[])
+    narrowed = EditBatch(
+        changes=[
+            EditChange(
+                path=Path("a.py"),
+                before="x = 1\ny = 2  # lup: ignore[any-type, dict-get]\n",
+                after="x = 1\ny = 2  # lup: ignore[any-type]\n",
+            )
+        ]
+    )
+    assert policy.decide(narrowed).effect == "allow"
+
+
+def test_only_the_dead_half_of_a_directive_is_refused() -> None:
+    """A directive doing part of its job is refused for the part that is dead.
+
+    The remedy names the id rather than the directive, because dropping the
+    whole of one that also covers a live violation would only resurface the
+    denial it was silencing.
+    """
+    policy = EditPolicy(protected=[])
+    mixed = EditBatch(
+        changes=[
+            EditChange(
+                path=Path("a.py"),
+                before="x = 1\n",
+                after="x = 1\nvalue: Any = 2  # lup: ignore[any-type, dict-get]\n",
+            )
+        ]
+    )
+    decision = policy.decide(mixed)
+
+    assert decision.effect == "deny"
+    assert "names dict-get" in decision.reason
+    assert "Drop dict-get from it" in decision.reason
+
+
+def test_a_rule_another_scanner_owns_is_not_refused_over() -> None:
+    """A verdict this gate cannot reach is not one it may refuse over.
+
+    `abc-capability` belongs to a scanner the hermetic runtime does not
+    carry, so whether the line trips it is unknowable here — the same line
+    the audit draws when it decides which markers it may call spurious.
+    """
+    policy = EditPolicy(protected=[])
+    foreign = EditBatch(
+        changes=[
+            EditChange(
+                path=Path("a.py"),
+                before="x = 1\n",
+                after="x = 1\nclass Store(ABC):  # lup: ignore[abc-capability]\n",
+            )
+        ]
+    )
+    assert policy.decide(foreign).effect == "ask"
+
+
+def test_a_fragment_with_no_tree_is_not_refused_over_a_guess() -> None:
+    """A refiner reads an AST, and an exemption from a missing one is a guess.
+
+    `tuple_shape_exempt_lines` clears every line where the source does not
+    parse, so a gate that read clearance as proof would refuse a directive for
+    its own blindness. With no tree there is no hit either, so what is left is
+    the ordinary ask.
+    """
+    policy = EditPolicy(protected=[])
+    fragment = EditBatch(
+        changes=[
+            EditChange(
+                path=Path("a.py"),
+                before="    pass\n",
+                after="    pair: tuple[int, str] = (1, 2)  # lup: ignore[tuple-shape]\n",
+            )
+        ]
+    )
+    assert policy.decide(fragment).effect == "ask"
+
+
+def test_an_allowance_buys_a_live_suppression_and_never_a_dead_one() -> None:
+    """The grant answers the ask, and the refusal is not an ask.
+
+    A human approving a plan that needs suppressions approved reasoned
+    exceptions, not markers that silence nothing — so the allowance reaches
+    the directive that covers a violation and stops at the one that covers
+    none.
+    """
+
+    def granted(after: str) -> KernelDecision:
+        change = EditChange(path=Path("a.py"), before="value: str\n", after=after)
+        return decide_edit(
+            "a.py",
+            change.before,
+            change.after,
+            path_exists=True,
+            path_rules=[],
+            antipattern_rows=antipattern_rows(change),
+            allowances=["antipattern-suppression"],
+            python_source=True,
+        )
+
+    assert granted("value: Any  # lup: ignore[any-type]\n").effect == "allow"
+    assert granted("value: str  # lup: ignore[any-type]\n").effect == "deny"
+
+
+def test_a_creation_names_the_suppressions_it_arrives_carrying() -> None:
+    """A whole write is approved for its shape, and its directives ride along.
+
+    Reviewing a creation is worth doing for the layout and the shape it shows,
+    which is exactly what makes a directive in the middle of a new module the
+    easiest thing in an edit to approve without having seen it.
+    """
+    policy = EditPolicy(protected=[])
+    carrying = EditBatch(
+        changes=[
+            EditChange(
+                path=Path("src/new.py"),
+                after='"""Doc."""\n\nvalue: Any = 1  # lup: ignore[any-type]\n',
+            )
+        ]
+    )
+    plain = EditBatch(
+        changes=[EditChange(path=Path("src/new.py"), after='"""Doc."""\n')]
+    )
+    decision = policy.decide(carrying)
+
+    assert decision.effect == "ask"
+    assert "this new file arrives carrying antipattern suppressions" in decision.reason
+    assert (
+        "line 3 silences any-type: value: Any = 1  # lup: ignore[any-type]"
+        in decision.reason
+    )
+    assert policy.decide(plain).reason == "full-file writes require approval"
+
+
 def test_dropping_one_rule_from_a_suppression_needs_no_approval() -> None:
     """Shrinking a directive is what the audit asks for when it calls one spurious.
 
@@ -1856,7 +2107,12 @@ def test_retiring_a_suppression_the_ast_refutes_is_allowed() -> None:
 
 
 def test_a_suppression_ask_names_every_line_it_is_asking_about() -> None:
-    """A prompt carries the reason and nothing else, so it has to locate the line."""
+    """A prompt carries the reason and nothing else, so it locates and names.
+
+    The quoted line is a preview and a directive is written at the end of the
+    line it guards, so which rule is being silenced is the first thing a cut
+    takes — it is stated rather than left to be read back out.
+    """
     policy = EditPolicy(protected=[])
     batch = EditBatch(
         changes=[
@@ -1874,8 +2130,14 @@ def test_a_suppression_ask_names_every_line_it_is_asking_about() -> None:
     decision = policy.decide(batch)
 
     assert decision.effect == "ask"
-    assert "line 2: first: Any = 1  # lup: ignore[any-type]" in decision.reason
-    assert "line 3: second: Any = 2  # lup: ignore[any-type]" in decision.reason
+    assert (
+        "line 2 silences any-type: first: Any = 1  # lup: ignore[any-type]"
+        in decision.reason
+    )
+    assert (
+        "line 3 silences any-type: second: Any = 2  # lup: ignore[any-type]"
+        in decision.reason
+    )
 
 
 def test_a_denial_names_the_line_that_tripped_it() -> None:

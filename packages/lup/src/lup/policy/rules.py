@@ -254,6 +254,7 @@ def antipattern_row(rule: AntiPattern) -> AntiPatternRow:
         pattern=rule.pattern.pattern,
         message=rule.message,
         context=rule.context,
+        refiner="" if rule.refiner is None else rule.refiner.exempt.__name__,
         strength=rule.strength,
     )
 

@@ -21,7 +21,7 @@ from lup.policy.kernel.edit import (
     antipattern_decision,
     dict_get_exempt_lines,
     empty_collection_exempt_lines,
-    refiner_for,
+    refiner_named,
 )
 from lup.policy.kernel.rows import AntiPatternRow
 from lup.policy.rules import antipattern_row
@@ -398,16 +398,16 @@ def test_refiner_survives_a_fragment_it_cannot_parse() -> None:
 
 
 def test_declared_refiners_are_the_kernel_refiners() -> None:
-    """A rule's refiner is the same object the hook applies under its id.
+    """A rule's refiner is the same object the hook applies from its row.
 
-    The rule holds the function and the kernel holds an id map, because a row
+    The rule holds the function and its row carries the name, because a row
     projected into the hermetic runtime cannot carry a callable. Nothing but
     this keeps them the same: a rule refined on one side only is how a marker
     becomes one the audit demands gone and the hook refuses to remove.
     """
     for rule in PYTHON_ANTI_PATTERNS:
         expected = None if rule.refiner is None else rule.refiner.exempt
-        assert refiner_for(rule.id) is expected, rule.id
+        assert refiner_named(antipattern_row(rule)["refiner"]) is expected, rule.id
 
 
 def test_refiner_exempts_deliberate_defaults() -> None:
