@@ -178,13 +178,23 @@ def count_outside_examples(pattern: re.Pattern[str], text: str) -> int:
 
 def count_in_prose(
     source: str, pattern: re.Pattern[str], python_source: bool = False
-) -> int:
-    """Count pattern matches where prose belongs, not inside ordinary strings."""
+) -> int | None:
+    """Count pattern matches where prose belongs, not inside ordinary strings.
+
+    `None` where a Python source does not tokenize, because there is then no
+    way to tell a comment from a string and the honest answer is that the
+    count is unknown for that revision. Returning a whole-text tally instead
+    counts a different population, so differencing it against a tokenised
+    one measures the change of regime rather than the change of notes: a
+    conflicted file mentioning the marker in a string literal counted one
+    higher until its last conflict marker went, and that drop read as
+    deleted feedback.
+    """
     if not python_source:
         return count_outside_examples(pattern, source)
     tokens = python_tokens(source)
     if tokens is None:
-        return count_outside_examples(pattern, source)
+        return None
     documentation = docstring_lines(source)
     return sum(
         count_outside_examples(pattern, token.string)
@@ -200,17 +210,17 @@ def count_in_prose(
     )
 
 
-def review_marker_count(source: str, python_source: bool = False) -> int:
+def review_marker_count(source: str, python_source: bool = False) -> int | None:
     """Count review notes — the feedback whose removal is the gated act."""
     return count_in_prose(source, NOTE_RE, python_source)
 
 
-def open_note_count(source: str, python_source: bool = False) -> int:
+def open_note_count(source: str, python_source: bool = False) -> int | None:
     """Count notes still owed an answer, excluding resolution claims."""
     return count_in_prose(source, OPEN_NOTE_RE, python_source)
 
 
-def solved_note_count(source: str, python_source: bool = False) -> int:
+def solved_note_count(source: str, python_source: bool = False) -> int | None:
     """Count resolution claims waiting to be checked."""
     return count_in_prose(source, SOLVED_NOTE_RE, python_source)
 
@@ -234,12 +244,23 @@ def marker_decision(
     exempt here: an environment cannot carry this authority, so a grant that
     claims to is ignored.
     """
-    opened = open_note_count(updated, python_source) - open_note_count(
-        previous, python_source
-    )
-    claimed = solved_note_count(updated, python_source) - solved_note_count(
-        previous, python_source
-    )
+    # A revision whose note count could not be established has not been shown
+    # to have lost anything, and denying on an unmeasurable difference is
+    # what blocked the completing step of every merge resolution: removing a
+    # file's last conflict marker is what makes it parse for the first time.
+    opened_now = open_note_count(updated, python_source)
+    opened_before = open_note_count(previous, python_source)
+    claimed_now = solved_note_count(updated, python_source)
+    claimed_before = solved_note_count(previous, python_source)
+    if (
+        opened_now is None
+        or opened_before is None
+        or claimed_now is None
+        or claimed_before is None
+    ):
+        return None
+    opened = opened_now - opened_before
+    claimed = claimed_now - claimed_before
     if opened < 0 and opened + claimed == 0:
         return None
     if opened < 0:
