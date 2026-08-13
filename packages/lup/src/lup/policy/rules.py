@@ -39,7 +39,12 @@ from lup.policy.kernel.rows import (
 )
 from lup.policy.kernel.shell import decide_shell, decide_shell_segment, shell_context
 from lup.policy.kernel.words import command_words as kernel_command_words
-from lup.policy.shell_rules import ShellCommandRule, erase_shell_rules
+from lup.policy.shell_rules import (
+    RunnerTargetRule,
+    ShellCommandRule,
+    erase_runner_targets,
+    erase_shell_rules,
+)
 from lup.policy.models import (
     Decision,
     EditBatch,
@@ -138,17 +143,19 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
         allowed_urls: list[UrlScope] | None = None,
         denied_urls: list[UrlScope] | None = None,
         sandbox_active: bool = False,
+        escapable: bool = False,
         trusted_script_roots: list[str] | None = None,
         interactive: bool = True,
         path_roles: list[PathRoleRow] | None = None,
         path_rules: list["PathRule"] | None = None,
         recoverable_target_limit: int = 5,
-        runner_targets: list[str] | None = None,
+        runner_targets: list[RunnerTargetRule] | None = None,
     ) -> None:
         self.path_rules = [path_rule_row(rule) for rule in path_rules or []]
         self.path_roles = path_roles or []
         self.recoverable_target_limit = recoverable_target_limit
-        self.runner_targets = runner_targets or []
+        self.runner_targets = erase_runner_targets(runner_targets or [])
+        self.escapable = escapable
         self.rules = erase_shell_rules(rules)
         self.allowed_scopes = [url_scope_row(scope) for scope in allowed_urls or []]
         self.denied_scopes = [url_scope_row(scope) for scope in denied_urls or []]
@@ -181,6 +188,7 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
                 directory_targets=directory_write_targets(acted_on, root),
                 recoverable_target_limit=self.recoverable_target_limit,
                 runner_targets=self.runner_targets,
+                escapable=self.escapable,
             )
         )
 

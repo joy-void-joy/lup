@@ -26,7 +26,7 @@ from pydantic import (
 from lup.harness.banner import ArtifactBanner, GeneratedBanner
 from lup.policy.kernel.rows import PathRoleName
 from lup.policy.models import PolicyId, UrlPathPrefix
-from lup.policy.shell_rules import ShellCommandRule
+from lup.policy.shell_rules import RunnerTargetRule, ShellCommandRule
 from lup.types import JsonValue, ToolGrant, ToolName
 
 if TYPE_CHECKING:
@@ -709,11 +709,12 @@ class HookSet(BaseModel):
             "denied; declare a downstream toolchain here, not in the kernel"
         ),
     )
-    runner_targets: list[str] = Field(
+    runner_targets: list[RunnerTargetRule] = Field(
         default_factory=list,
         description=(
-            "Which bare targets `uv run <target>` may reach without a question. "
-            "A project's own toolchain, so the library holds no opinion: an "
+            "Which bare targets `uv run <target>` may reach without a question, "
+            "and where each has to run. A project's own toolchain, so the "
+            "library holds no opinion: an "
             "empty list judges every runner invocation by the ordinary shell "
             "vocabulary instead"
         ),

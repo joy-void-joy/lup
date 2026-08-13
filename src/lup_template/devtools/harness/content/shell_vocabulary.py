@@ -19,6 +19,7 @@ and ``git restore``, so ``checkout`` denies and names them instead of asking.
 """
 
 from lup.policy.shell_rules import (
+    RunnerTargetRule,
     ShellCommandRule,
     ShellOperationRule,
     ShellSubcommandRule,
@@ -31,6 +32,7 @@ from lup.policy.vocabulary import (
     judged_ask_rules,
     read_only_rules,
     redirected_rules,
+    runner_target_rules,
 )
 
 
@@ -47,6 +49,11 @@ def lup_devtools_rule() -> ShellCommandRule:
     console script named by path still presents. Every other subcommand
     bounces back naming the spelling that is admitted, which is what an agent
     reaching past `uv` for no reason should be told.
+
+    The one operation it admits carries the placement `RUNNER_TARGETS` gives
+    the same toolchain reached through `uv`: a merge repair rewrites the git
+    configuration behind a worktree, which a confined session cannot do, and a
+    verdict that depended on which spelling reached it would be two policies.
     """
     reach_through_uv = (
         "reach this toolchain through `uv run lup-devtools`, which guarantees"
@@ -61,12 +68,24 @@ def lup_devtools_rule() -> ShellCommandRule:
             ShellSubcommandRule(
                 name="dev",
                 effect="deny",
-                operations=[ShellOperationRule(name="conflict", effect="allow")],
+                operations=[
+                    ShellOperationRule(
+                        name="conflict", effect="allow", sandbox="outside"
+                    )
+                ],
                 reason=reach_through_uv,
             )
         ],
         reason=reach_through_uv,
     )
+
+
+RUNNER_TARGETS: list[RunnerTargetRule] = runner_target_rules()
+"""What `uv run <target>` may reach here, and where each target has to run.
+
+Taken as the library offers it: the checkers are this project's, and
+`lup-devtools` is the toolchain the group places outside the sandbox.
+"""
 
 
 SHELL_RULES: list[ShellCommandRule] = [

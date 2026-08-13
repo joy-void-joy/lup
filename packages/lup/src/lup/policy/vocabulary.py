@@ -43,6 +43,7 @@ from pydantic import BaseModel, ConfigDict
 
 from lup.policy.kernel.decision import SandboxPlacement
 from lup.policy.shell_rules import (
+    RunnerTargetRule,
     ShellCommandRule,
     ShellOperationRule,
     ShellSubcommandRule,
@@ -355,6 +356,48 @@ def guarded_tool_rules() -> list[ShellCommandRule]:
     ]
 
 
+def runner_target_rules(
+    ambient: Sequence[str] = ("pyright", "pytest", "ruff"),
+    session_opening: Sequence[str] = ("lup-devtools",),
+) -> list[RunnerTargetRule]:
+    """The ``uv run`` targets a project blesses, grouped by what each needs.
+
+    A checker reads the tree and writes inside it, so it runs wherever the
+    session runs and takes ``ambient``.
+
+    A toolchain that opens agent sessions cannot. The runtime keeps
+    per-session state under its own configuration directory — for Claude Code,
+    ``~/.claude/session-env/<session id>``, following ``CLAUDE_CONFIG_DIR`` —
+    and a session opened from inside a sandbox that does not grant that path
+    dies on its first shell call with a bare ``EROFS``, which reads to an agent
+    like a broken repository rather than like a boundary. It then retries,
+    works around it, or reports success from a session that never ran a
+    command; one planning run finished that way and looked normal.
+
+    Measured rather than assumed, because the deny looks like the runtime
+    protecting its own configuration directory: under one ``~/.claude`` parent,
+    ``debug`` — a path the sandbox grants — accepts a directory, while
+    ``session-env`` and a per-session configuration directory beside it, which
+    it does not grant, both refuse one with ``EROFS``. So the deny is the
+    ordinary write allowlist and a grant would lift it. It is still not the
+    remedy: the runtime chooses that path per session, so the grant is a family
+    rather than a path; deriving a private configuration home does not move it,
+    because every entry such a home does not own links back to the shared one;
+    and session state is only the first thing such a
+    toolchain writes outside the tree — a worktree, a plugin cache, and the
+    git configuration behind them follow it.
+
+    Which is why the escape is declared here, once, on the toolchain itself,
+    rather than left to each caller to remember. Where a runtime places no
+    single call outside its sandbox, a confined session is stopped with that
+    reason instead — see :func:`~lup.policy.kernel.shell.decide_shell`.
+    """
+    return [
+        *[RunnerTargetRule(name=name) for name in ambient],
+        *[RunnerTargetRule(name=name, sandbox="outside") for name in session_opening],
+    ]
+
+
 GIT_READ_ONLY_SUBCOMMANDS = (  # lup: ignore[library-default] — git's own query subcommands; each reads the object store and writes nothing, which is a fact about git rather than a choice made for an adopter
     "status",
     "rev-parse",
@@ -369,19 +412,6 @@ GIT_READ_ONLY_SUBCOMMANDS = (  # lup: ignore[library-default] — git's own quer
     "rev-list",
     "name-rev",
     "merge-base",
-    # lup: This toolchain should carry an automatic sandbox escalation rather
-    # than each caller remembering a flag. Every `lup-devtools` command that
-    # opens agent sessions is broken inside the sandbox, and the resolver is
-    # only the case that cost 90 minutes to notice. Whatever mechanism lands —
-    # a declared escape list, or the sandbox axis on a decision — the toolchain
-    # that runs the workflow should be on it by declaration.
-    #
-    # lup: A command that will fail this way should be *blocked*, with the
-    # reason, rather than allowed to run and die on a bare `EROFS`. The agent
-    # cannot tell that failure from a broken repository, so it retries, works
-    # around it, or reports success from a session that never ran a command.
-    # A denial naming the sandbox and the escape costs one turn; this cost a
-    # whole planning run whose output looked normal.
     # lup: `git merge-tree` belongs on this list and is missing, so probing
     # whether a branch still merges is refused as "not classified as read-only
     # or reversible". Even with `--write-tree` it only adds objects to the

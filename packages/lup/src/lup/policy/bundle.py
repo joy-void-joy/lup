@@ -28,10 +28,16 @@ from lup.policy.kernel.rows import (
     AntiPatternRow,
     PathRoleRow,
     PathRuleRow,
+    RunnerTargetRow,
     ShellRuleRow,
     UrlScopeRow,
 )
-from lup.policy.shell_rules import ShellCommandRule, erase_shell_rules
+from lup.policy.shell_rules import (
+    RunnerTargetRule,
+    ShellCommandRule,
+    erase_runner_targets,
+    erase_shell_rules,
+)
 from lup.policy.rules import antipattern_row, human_owned_path_rule, path_rule_row
 
 
@@ -215,6 +221,19 @@ def path_role_rows_literal(rows: list[PathRoleRow]) -> str:
     )
 
 
+def runner_target_rows_literal(rows: list[RunnerTargetRow]) -> str:
+    """Render the blessed runner targets as primitive runtime rows."""
+    return dict_rows_literal(
+        [
+            [
+                f'"name": {json.dumps(row["name"])}',
+                f'"sandbox": {json.dumps(row["sandbox"])}',
+            ]
+            for row in rows
+        ]
+    )
+
+
 def string_rows_literal(rows: list[str]) -> str:
     """Render a sequence of generated string identities."""
     if not rows:
@@ -266,7 +285,7 @@ def render_policy_data(
     path_roles: list[PathRoleRow],
     shell_rules: list[ShellCommandRule],
     recoverable_target_limit: int,
-    runner_targets: list[str],
+    runner_targets: list[RunnerTargetRule],
 ) -> str:
     """Render one plugin's canonical policy rows without executable logic."""
     body = "\n\n".join(
@@ -292,7 +311,8 @@ def render_policy_data(
             + string_rows_literal([member.value for member in ConcernAllowance]),
             "MAXIMUM_ADDED_LINES = 3",
             "RECOVERABLE_TARGET_LIMIT = " + json.dumps(recoverable_target_limit),
-            "RUNNER_TARGETS: list[str] = " + string_rows_literal(runner_targets),
+            "RUNNER_TARGETS: list[RunnerTargetRow] = "
+            + runner_target_rows_literal(erase_runner_targets(runner_targets)),
         ]
     )
     return (
@@ -301,6 +321,7 @@ def render_policy_data(
         "    AntiPatternRow,\n"
         "    PathRoleRow,\n"
         "    PathRuleRow,\n"
+        "    RunnerTargetRow,\n"
         "    ShellRuleRow,\n"
         "    UrlScopeRow,\n"
         ")"
