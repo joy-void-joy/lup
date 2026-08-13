@@ -79,6 +79,20 @@ class AntiPatternRow(TypedDict):
     """
 
 
+class RefusedToolRow(TypedDict):
+    """One erased refusal of a native call, and where to go instead.
+
+    ``specifier`` is ``""`` when the whole tool is refused, and otherwise the
+    subject that selects one of its uses — the ``artifact-design`` in
+    ``Skill(artifact-design)``. ``reason`` is the whole of what the agent is
+    told, so it names the surface to reach for and not only the refusal.
+    """
+
+    tool: str
+    specifier: str
+    reason: str
+
+
 class ShellRuleRow(TypedDict):
     """One erased shell-command rule the kernel matches by executable name.
 

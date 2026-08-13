@@ -48,6 +48,7 @@ from lup.policy.bundle import (
 from lup.policy.kernel.decision import KernelDecision
 from lup.policy.kernel.edit import decide_edit
 from lup.policy.kernel.rows import PathRoleRow
+from lup.policy.refused_tools import RefusedTool, erase_refused_tools
 from lup.policy.kernel.lex import shell_write_targets
 from lup.policy.models import (
     Decision,
@@ -55,8 +56,10 @@ from lup.policy.models import (
     EditChange,
     FetchUrl,
     ShellCommand,
+    ToolIdentity,
     UnknownTool,
 )
+from lup.types import JsonObject
 from lup.policy.rules import (
     EditPolicy,
     antipattern_rows,
@@ -121,6 +124,19 @@ FIXTURE_EXCLUDED_COMMANDS = ["quuxify *"]
 Unjudged exactly like `frobnicate` beside it, so the pair says the whole
 rule between them: unjudged work defers to a boundary that covers it, and
 denies where the declaration removed the cover."""
+
+FIXTURE_REFUSED_TOOLS = [
+    RefusedTool(tool="Quuxify", reason="quuxifying leaves the repository"),
+    RefusedTool(
+        tool="Skill", specifier="quux-design", reason="designing quux leaves it too"
+    ),
+]
+"""One whole-tool refusal and one narrowed to a single subject.
+
+The pair says the rule between them: a bare row refuses every use of its
+tool, a specifier row refuses one and leaves the tool's other uses to the
+runtime, and neither is a name this repository actually refuses — what is
+being pinned is the shape, not this project's own judgement."""
 
 FIXTURE_RECOVERABLE_LIMIT = 5
 FIXTURE_RUNNER_TARGETS = ["pyright", "pytest", "ruff", "lup-devtools"]
@@ -1005,6 +1021,7 @@ def test_assembled_kernel_runs_without_site_packages(tmp_path: Path) -> None:
             autonomous_agent_identities=["resolver-worker"],
             path_roles=FIXTURE_PATH_ROLES,
             shell_rules=SHELL_RULES,
+            refused_tools=FIXTURE_REFUSED_TOOLS,
             recoverable_target_limit=FIXTURE_RECOVERABLE_LIMIT,
             runner_targets=FIXTURE_RUNNER_TARGETS,
             sandbox_excluded_commands=FIXTURE_EXCLUDED_COMMANDS,
@@ -1111,6 +1128,54 @@ def test_unknown_tools_remain_auditable_and_ask() -> None:
     assert isinstance(codex.tool, UnknownTool)
     assert UnknownToolPolicy().decide(claude.tool).effect == "ask"
     assert UnknownToolPolicy().decide(codex.tool).effect == "ask"
+
+
+def refused_tool_call(name: str, payload: JsonObject) -> UnknownTool:
+    """One unclassified native call, as a decoder hands it to the policy."""
+    return UnknownTool(identity=ToolIdentity(original_name=name), input=payload)
+
+
+REFUSAL_CASES = [
+    ("Quuxify", {"content": "a page"}, "deny"),
+    ("Skill", {"skill": "quux-design"}, "deny"),
+    ("Skill", {"skill": "commit"}, "defer"),
+    ("Novel", {"skill": "quux-design"}, "ask"),
+    ("Quuxify", {"body": "# lup: escalate: the user asked for a page\nbody"}, "ask"),
+    ("Quuxify", {"body": "# lup: escalate:\nbody"}, "deny"),
+]
+"""What a declared refusal answers, across every shape it has to tell apart.
+
+The whole rule reads off the rows: a refused tool denies, a refused subject
+of a tool denies, another subject of that same tool passes to the runtime
+rather than stopping at a human, a tool nobody mentioned stays unclassified,
+a stated escalation becomes the question it asked for, and one stating
+nothing does not.
+"""
+
+
+@pytest.mark.parametrize(("name", "payload", "effect"), REFUSAL_CASES)
+def test_declared_tool_refusals_decide_identically(
+    name: str, payload: JsonObject, effect: str, tmp_path: Path
+) -> None:
+    policy = UnknownToolPolicy(FIXTURE_REFUSED_TOOLS)
+    module = load_bundled_kernel(tmp_path, "tools")
+    bundled = module.decide_tool(
+        name,
+        [value for value in payload.values() if isinstance(value, str)],
+        erase_refused_tools(FIXTURE_REFUSED_TOOLS),
+    )
+
+    assert policy.decide(refused_tool_call(name, payload)).effect == effect
+    assert (bundled.effect if bundled is not None else "ask") == effect
+
+
+def test_a_tool_refusal_names_what_to_reach_for_instead() -> None:
+    policy = UnknownToolPolicy(FIXTURE_REFUSED_TOOLS)
+
+    decision = policy.decide(refused_tool_call("Quuxify", {"content": "a page"}))
+
+    assert "quuxifying leaves the repository" in decision.reason
+    assert "lup: escalate:" in decision.reason
 
 
 def test_malformed_native_fetch_urls_become_conservative_unknown_tools() -> None:

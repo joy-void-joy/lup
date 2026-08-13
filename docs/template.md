@@ -87,6 +87,7 @@ backend simply leaves it out of the roster.
 - `harness` — Generate and launch the native harnesses
 - `hooks` — Query the permission policy
 - `py` — Python module introspection
+- `report` — Everything left to implement, in one place
 - `setup` — Interactive setup wizard
 - `sync` — Track sync.json repos and review their commits
 - `trace` — Trace display, search, and analysis

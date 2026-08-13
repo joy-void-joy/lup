@@ -67,6 +67,7 @@ from lup.devtools.harness.content.skills.refactor import SKILL as SKILL_REFACTOR
 from lup.devtools.harness.content.skills.refactor_tools import (
     SKILL as SKILL_REFACTOR_TOOLS,
 )
+from lup.devtools.harness.content.skills.report import SKILL as SKILL_REPORT
 from lup.devtools.harness.content.skills.resolve import SKILL as SKILL_RESOLVE
 from lup.devtools.harness.content.skills.resolve_reviewer import (
     SKILL as SKILL_RESOLVE_REVIEWER,
@@ -99,6 +100,7 @@ LIBRARY_SKILLS = [
     SKILL_REBASE,
     SKILL_REFACTOR,
     SKILL_REFACTOR_TOOLS,
+    SKILL_REPORT,
     SKILL_RESOLVE,
     SKILL_RESOLVE_REVIEWER,
     SKILL_REVIEW,

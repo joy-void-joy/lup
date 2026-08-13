@@ -26,6 +26,7 @@ from pydantic import (
 from lup.harness.banner import ArtifactBanner, GeneratedBanner
 from lup.policy.kernel.rows import PathRoleName
 from lup.policy.models import PolicyId, UrlPathPrefix
+from lup.policy.refused_tools import RefusedTool
 from lup.policy.shell_rules import ShellCommandRule
 from lup.types import JsonValue, ToolGrant, ToolName
 
@@ -714,6 +715,15 @@ class HookSet(BaseModel):
         description=(
             "The whole shell vocabulary this project judges safe, asked, or "
             "denied; declare a downstream toolchain here, not in the kernel"
+        ),
+    )
+    refused_tools: list[RefusedTool] = Field(
+        default_factory=list,
+        description=(
+            "Native calls this project has decided against outright, each "
+            "carrying the surface to reach for instead. Whether a tool is "
+            "against the point of a project is that project's judgement, so "
+            "an empty list — the library's own answer — refuses nothing"
         ),
     )
     runner_targets: list[str] = Field(

@@ -28,9 +28,11 @@ from lup.policy.kernel.rows import (
     AntiPatternRow,
     PathRoleRow,
     PathRuleRow,
+    RefusedToolRow,
     ShellRuleRow,
     UrlScopeRow,
 )
+from lup.policy.refused_tools import RefusedTool, erase_refused_tools
 from lup.policy.shell_rules import ShellCommandRule, erase_shell_rules
 from lup.policy.rules import antipattern_row, human_owned_path_rule, path_rule_row
 
@@ -215,6 +217,20 @@ def path_role_rows_literal(rows: list[PathRoleRow]) -> str:
     )
 
 
+def refused_tool_rows_literal(rows: list[RefusedToolRow]) -> str:
+    """Render declared tool refusals as primitive runtime rows."""
+    return dict_rows_literal(
+        [
+            [
+                f'"tool": {json.dumps(row["tool"])}',
+                f'"specifier": {json.dumps(row["specifier"])}',
+                f'"reason": {json.dumps(row["reason"])}',
+            ]
+            for row in rows
+        ]
+    )
+
+
 def string_rows_literal(rows: list[str]) -> str:
     """Render a sequence of generated string identities."""
     if not rows:
@@ -264,6 +280,7 @@ def render_policy_data(
     autonomous_agent_identities: list[str],
     path_roles: list[PathRoleRow],
     shell_rules: list[ShellCommandRule],
+    refused_tools: list[RefusedTool],
     recoverable_target_limit: int,
     runner_targets: list[str],
     sandbox_excluded_commands: list[str],
@@ -284,6 +301,8 @@ def render_policy_data(
             "PATH_ROLES: list[PathRoleRow] = " + path_role_rows_literal(path_roles),
             "SHELL_RULES: list[ShellRuleRow] = "
             + shell_rule_rows_literal(erase_shell_rules(shell_rules)),
+            "REFUSED_TOOLS: list[RefusedToolRow] = "
+            + refused_tool_rows_literal(erase_refused_tools(refused_tools)),
             "AUTONOMOUS_AGENT_IDENTITIES: list[str] = "
             + string_rows_literal(autonomous_agent_identities),
             "AGENT_IDENTITY_ENV = " + json.dumps(AGENT_IDENTITY_ENV),
@@ -303,6 +322,7 @@ def render_policy_data(
         "    AntiPatternRow,\n"
         "    PathRoleRow,\n"
         "    PathRuleRow,\n"
+        "    RefusedToolRow,\n"
         "    ShellRuleRow,\n"
         "    UrlScopeRow,\n"
         ")"

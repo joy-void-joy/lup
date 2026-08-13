@@ -1148,7 +1148,7 @@ def run_resolve(
                     interactive=False,
                     allowances=granted,
                 ),
-                semantics,
+                semantics.also_refusing(harness.declared_hooks.refused_tools),
             )
 
         def reviewer_factory(cwd: Path) -> SessionFactory:

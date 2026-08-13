@@ -10,7 +10,7 @@
             "type": "command"
           }
         ],
-        "matcher": "Bash|WebFetch|Edit|Write"
+        "matcher": "Bash|WebFetch|Edit|Write|Artifact|Skill"
       }
     ]
   }

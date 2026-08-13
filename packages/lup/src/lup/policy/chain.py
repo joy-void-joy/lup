@@ -2,13 +2,16 @@
 
 ``OrderedPolicyChain`` folds several
 :class:`~lup.policy.contracts.DecisionPolicy` verdicts into the strictest
-one, ``UnknownToolPolicy`` holds unclassified tools at ``ask``, and
+one, ``UnknownToolPolicy`` refuses the calls a project declared against and
+holds every other unclassified tool at ``ask``, and
 ``PolicyDispatcher`` notifies observers after deciding without letting an
 observer failure alter the outcome. The shared fixture suite and embedding
 applications compose the :mod:`lup.policy.rules` policies through here.
 """
 
 from lup.policy.contracts import DecisionPolicy, Observer
+from lup.policy.kernel.tools import decide_tool
+from lup.policy.refused_tools import RefusedTool, erase_refused_tools
 from lup.policy.models import (
     Decision,
     ObservationFailure,
@@ -46,13 +49,27 @@ class OrderedPolicyChain[E](DecisionPolicy[E]):
 
 
 class UnknownToolPolicy(DecisionPolicy[UnknownTool]):
-    """Fail conservatively when no adapter classification exists."""
+    """Refuse a declared call, and fail conservatively on the rest.
+
+    A refusal table is the one rule surface a tool with no semantics of its
+    own can have, so it is consulted here rather than in a family of its own:
+    what is being judged is still the call nothing classified. Everything the
+    table does not speak to keeps the conservative ask.
+    """
+
+    def __init__(self, refused: list[RefusedTool] | None = None) -> None:
+        self.refused = erase_refused_tools(refused or [])
 
     def decide(self, event: UnknownTool) -> Decision:
-        return Decision(
-            effect="ask",
-            reason=f"unclassified tool {event.identity.original_name!r}",
+        name = event.identity.original_name
+        refusal = decide_tool(
+            name,
+            [value for value in event.input.values() if isinstance(value, str)],
+            self.refused,
         )
+        if refusal is not None:
+            return Decision(effect=refusal.effect, reason=refusal.reason)
+        return Decision(effect="ask", reason=f"unclassified tool {name!r}")
 
 
 class PolicyDispatcher[E]:

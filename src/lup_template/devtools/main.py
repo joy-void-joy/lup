@@ -21,6 +21,7 @@ Examples::
     $ uv run lup-devtools dev branches
     $ uv run lup-devtools dev worktree create feat-name
     $ uv run lup-devtools dev check --no-test
+    $ uv run lup-devtools report
     $ uv run lup-devtools version
     $ uv run lup-devtools sync status
     $ uv run lup-devtools usage claude --no-detail
@@ -46,6 +47,7 @@ from lup_template.devtools.harness.composition import REPOSITORY_WIDE, TARGETS
 from lup_template.devtools.setup import INTEGRATIONS
 from lup_template.devtools.hooks.app import app as hooks_app
 from lup.devtools.layout import DASHBOARD_PORT
+from lup.devtools.report.app import create_report_app
 from lup_template.devtools.setup import app as setup_app
 from lup_template.devtools.subapps import APPLICATION_SPECS, INHERITED
 
@@ -74,6 +76,7 @@ APPLICATION_APPS = {
         ConfiguredModel(name=settings.model, adapter=engine_for_model(settings.model)),
     ),
     "hooks": hooks_app,
+    "report": create_report_app(TARGETS, REPOSITORY_WIDE),
     "setup": setup_app,
 }
 """Where each application spec meets the Typer app answering to its name.

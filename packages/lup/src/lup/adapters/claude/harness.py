@@ -41,6 +41,7 @@ from lup.policy.dispatcher import (
     dispatcher_banner,
 )
 from lup.policy.kernel.rows import PathRoleRow
+from lup.policy.refused_tools import routed_for
 
 
 CLAUDE_MODEL_ALIASES: dict[ModelTier, str] = {
@@ -398,7 +399,9 @@ class ClaudeHookRenderer(ArtifactRenderer[HookSet]):
     def render(self, source: HookSet) -> ArtifactTree:
         registration = [
             {
-                "matcher": "|".join(CLAUDE_DISPATCHER.routed_tools),
+                "matcher": "|".join(
+                    routed_for(CLAUDE_DISPATCHER.routed_tools, source.refused_tools)
+                ),
                 "hooks": [
                     {
                         "type": "command",
@@ -483,6 +486,7 @@ class ClaudeHookRenderer(ArtifactRenderer[HookSet]):
                             for role in source.path_roles
                         ],
                         shell_rules=list(source.shell_rules),
+                        refused_tools=list(source.refused_tools),
                         recoverable_target_limit=source.recoverable_target_limit,
                         runner_targets=list(source.runner_targets),
                         sandbox_excluded_commands=source.excluded_commands(),

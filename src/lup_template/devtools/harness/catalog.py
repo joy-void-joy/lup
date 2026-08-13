@@ -33,6 +33,7 @@ from lup.devtools.dev.workflow import WorkflowSpec
 from lup.devtools.project import DevProject
 from lup.harness.contracts import NativeSpellings
 from lup.policy.kernel.rows import PathRoleRow
+from lup.policy.refused_tools import RefusedTool
 from lup.workspace.paths import project_root, read_project_name
 from lup_template.agent.toolsets import tool_group_names
 from lup_template.devtools.harness.content.catalog import AGENTS, SKILLS
@@ -65,6 +66,34 @@ EXCLUDED_COMMANDS = [
 Each is a requirement the boundary cannot express any other way, and the
 count is the point: an exclusion is not a widened rule but a removed one, so
 the list stays as short as the toolchain's actual incompatibilities."""
+
+ARTIFACT_REFUSAL = (
+    "publishing a page leaves the repository, and this project already owns"
+    " surfaces that do not — run `uv run lup-devtools report` for everything"
+    " left to implement, or the report skill to write it whole to tmp/report.md"
+)
+"""Why an artifact is the wrong reflex here, and what answers the same need.
+
+The redirect is the point rather than the refusal, exactly as the
+generated-tree refusal names the source to edit instead of only saying no. A
+report that leaves the repository is one nothing in this project can read
+back; the report surface is where the same question is answered in a place
+every later session, scan, and gate can reach.
+"""
+
+REFUSED_TOOLS = [
+    RefusedTool(tool="Artifact", reason=ARTIFACT_REFUSAL),
+    RefusedTool(tool="Skill", specifier="artifact-design", reason=ARTIFACT_REFUSAL),
+]
+"""The calls this project has decided against, each naming what to reach for.
+
+Both are Claude Code's spellings, and it is there the reflex they stop exists.
+Every runtime consults the table all the same, because which names are worth
+refusing is this declaration's answer rather than an adapter's — so a name
+Codex does offer would be refused there by writing one line here. Neither is
+walled off — a deliberate use escalates with the marker the shell lattice
+already uses, and gets an approval question carrying its own stated reason.
+"""
 
 HARNESS_SESSION = "harness"
 """The session a natively launched tool server opens for itself.
@@ -277,6 +306,7 @@ def portable_harness(version: str = "0.2.0", root: Path | None = None) -> Harnes
                 HookPathRole(root=Path("node_modules"), role="scratch"),
             ],
             human_owned_files=[Path("README.md")],
+            refused_tools=REFUSED_TOOLS,
             shell_rules=SHELL_RULES,
             # This project's toolchain: what `uv run <target>` may reach here
             # without a question, which is nothing any other project inherits.

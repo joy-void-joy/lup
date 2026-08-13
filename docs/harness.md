@@ -189,6 +189,7 @@ regenerate.
 - /lup:rebase — Clean up commit history on the feature branch and open/update a PR
 - /lup:refactor — Rewrite a file or folder from scratch while respecting coding conventions
 - /lup:refactor-tools — Audit SDK agent tools and subagents — find gaps, overlaps, and refactoring opportunities
+- /lup:report — Write the report of everything left to implement, rewritten whole under tmp/, after a long session or after implementing a plan
 - /lup:resolve — Resolve inline feedback through isolated work
 - /lup:resolve-reviewer — Review one resolver concern against its acceptance criteria
 - /lup:review — Review a session trace for workflow quality, tool usage, and improvement opportunities

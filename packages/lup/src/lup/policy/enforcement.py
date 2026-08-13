@@ -28,6 +28,7 @@ from lup.hooks import (
 )
 from lup.policy.chain import UnknownToolPolicy
 from lup.policy.contracts import DeclaredPolicies, DecisionPolicy
+from lup.policy.refused_tools import RefusedTool, routed_for
 from lup.policy.models import (
     Decision,
     EditBatch,
@@ -71,9 +72,13 @@ class SemanticToolPolicy(DecisionPolicy[SemanticTool]):
         fetch: DecisionPolicy[FetchUrl] | None = None,
         shell: DecisionPolicy[ShellCommand] | None = None,
         edit: DecisionPolicy[EditBatch] | None = None,
+        refused_tools: list[RefusedTool] | None = None,
     ) -> None:
         self.policies = DeclaredPolicies(
-            unknown=UnknownToolPolicy(), fetch=fetch, shell=shell, edit=edit
+            unknown=UnknownToolPolicy(refused_tools),
+            fetch=fetch,
+            shell=shell,
+            edit=edit,
         )
 
     def decide(self, event: SemanticTool) -> Decision:
@@ -105,6 +110,18 @@ class NativeSemantics(BaseModel):
 
     decode: SemanticDecoder
     routed_tools: list[str] = Field(min_length=1)
+
+    def also_refusing(self, refused: list[RefusedTool]) -> "NativeSemantics":
+        """The same decoder, registered for the refused tools as well.
+
+        A refusal reaches nothing it was not routed for, and the plugin widens
+        its matcher from the same declaration — so an in-process session that
+        took the adapter's pairing unchanged would enforce strictly less than
+        the generated tree beside it.
+        """
+        return NativeSemantics(
+            decode=self.decode, routed_tools=routed_for(self.routed_tools, refused)
+        )
 
 
 def create_policy_hooks(
