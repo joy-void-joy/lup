@@ -16,8 +16,8 @@ import typer
 
 from lup.channels.models import utc_now
 from lup.resolver.journal import Journal
-from lup.resolver.models import VerificationAcceptance
-from lup.resolver.state import ResolverStateRepository
+from lup.resolver.models import ConcernRetirement, VerificationAcceptance
+from lup.resolver.state import ResolverStateRepository, StateTransitionError
 from lup.resolver.status import run_status
 from lup.resolver.mailbox import (
     AnswerDoor,
@@ -318,3 +318,38 @@ def show_status(
             f"  last: {status.last.event} by {status.last.actor} "
             f"at {status.last.at:%Y-%m-%d %H:%M:%S}Z"
         )
+
+
+def retire_concern(
+    reason: str = typer.Argument(
+        ..., help="Where this concern was settled — a commit, branch or issue"
+    ),
+    run_id: str = typer.Option(..., "--run-id", help="Run whose state to write"),
+    concern: str = typer.Option(..., "--concern", help="Concern to retire"),
+) -> None:
+    """Retire one concern whose work was settled somewhere other than this run.
+
+    A run parked while its branch moved forward routinely finds the branch
+    already did some of its work, and base refresh makes that the expected
+    consequence of following a branch rather than a rare accident. Without
+    this, every route was wrong: hand-resolving an add/add conflict between
+    two independent implementations of one thing, letting a worker open on a
+    concern whose notes no longer exist in its tree, or aborting the whole
+    run — discarding every settled answer — to retire one concern.
+
+    The concern leaves the eligible set without failing, its dependents build
+    from the base where the work that settled it now lives, and its lease
+    stops being active. The worktree and branch stay: a retired concern often
+    built its own answer to what landed upstream, and that is worth reading
+    before it is thrown away.
+    """
+    root = resolve_state_root() / run_id
+    if not root.is_dir():
+        raise typer.BadParameter(f"no resolver run {run_id!r} under {root.parent}")
+    try:
+        ResolverStateRepository(resolve_state_root(), run_id).retire(
+            ConcernRetirement(concern_id=concern, reason=reason)
+        )
+    except StateTransitionError as error:
+        raise typer.BadParameter(str(error)) from error
+    typer.echo(f"retired {concern}: {reason}")

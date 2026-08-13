@@ -118,6 +118,7 @@ class ConcernStatus(StrEnum):
     INTEGRATED = "integrated"
     CLEANED = "cleaned"
     RETAINED = "retained"
+    RETIRED = "retired"
     FAILED = "failed"
 
 
@@ -814,6 +815,28 @@ class VerificationRecord(BaseModel):
     """
 
 
+class ConcernRetirement(BaseModel):
+    """One human's decision that a concern is settled somewhere else.
+
+    A run parked while its branch moved forward will routinely find that
+    the branch already did some of its work, and base refresh makes that
+    the expected consequence of following a branch rather than a rare
+    accident. Every route available without this was wrong: hand-resolving
+    an add/add conflict between two independent implementations of one
+    thing, letting a worker open on a concern whose notes no longer exist,
+    or aborting the whole run to retire one concern.
+
+    The reason is required because retiring is a claim about somewhere
+    else — the commit, branch or issue that settled it — and a record
+    saying only that a concern stopped is one nobody can check.
+    """
+
+    model_config = FROZEN
+
+    concern_id: str
+    reason: str = Field(min_length=1)
+
+
 class VerificationAcceptance(BaseModel):
     """One human's decision to accept a concern over a failing verification.
 
@@ -1100,6 +1123,7 @@ class ResolveState(BaseModel):
     join_progress: JoinProgress | None = None
     verification: list[VerificationRecord] = Field(default_factory=list)
     acceptances: list[VerificationAcceptance] = Field(default_factory=list)
+    retirements: list[ConcernRetirement] = Field(default_factory=list)
     cleanup: list[CleanupRecord] = Field(default_factory=list)
     failures: list[str] = Field(default_factory=list)
     resume_from: ResolvePhase | None = None
