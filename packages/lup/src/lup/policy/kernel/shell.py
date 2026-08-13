@@ -45,6 +45,8 @@ from .commands import (
     decide_uv,
     git_checkout_pathspec,
     git_restore_source,
+    git_restore_unchanged,
+    git_symbolic_ref_read,
 )
 
 ESCALATE_RE = re.compile(
@@ -193,11 +195,16 @@ def decide_shell_segment(segment: list[str], context: ShellContext) -> KernelDec
             "ask", "the git ext transport can execute commands — requires approval"
         )
     if executable == "git":
-        pathspec = git_checkout_pathspec(words)
-        if pathspec is None:
-            pathspec = git_restore_source(words)
-        if pathspec is not None:
-            return pathspec
+        recognized = (
+            git_checkout_pathspec(words)
+            or git_restore_source(words)
+            or git_restore_unchanged(
+                words, context["recoverable_targets"], context["path_rules"]
+            )
+            or git_symbolic_ref_read(words)
+        )
+        if recognized is not None:
+            return recognized
     refused = refuses_generated_plugin_write(words)
     if refused is not None:
         return refused

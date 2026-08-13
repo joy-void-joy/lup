@@ -229,6 +229,54 @@ def path_verb_operands(words: list[str]) -> VerbOperands:
     return VerbOperands(operands=operands, inert=inert)
 
 
+class RestoreOperands(TypedDict):
+    """A ``git restore``'s source ref, if it named one, and the paths it rewrites.
+
+    ``source`` is ``None`` for the index-sourced form, which is the one whose
+    safety depends on whether those paths carry uncommitted work.
+    """
+
+    source: str | None
+    paths: list[str]
+
+
+def git_restore_operands(words: list[str]) -> RestoreOperands | None:
+    """Split ``git restore`` into the ref it reads from and the paths it writes.
+
+    ``None`` where the line is not a restore, carries a flag beyond the source
+    and target selectors, or holds a word that expands at run time — each of
+    which leaves the restore row's ask to answer for it, because a flag this
+    does not know could move which paths are touched.
+    """
+    if len(words) < 3 or posixpath.basename(words[0]) != "git" or words[1] != "restore":
+        return None
+    source: str | None = None
+    paths: list[str] = []
+    position = 2
+    while position < len(words):
+        word = words[position]
+        if word == "--source" and position + 1 < len(words):
+            source = words[position + 1]
+            position += 2
+            continue
+        if word.startswith("--source="):
+            source = word[len("--source=") :]
+            position += 1
+            continue
+        if word in ("--staged", "--worktree", "-S", "-W", "--"):
+            position += 1
+            continue
+        if word.startswith("-"):
+            return None
+        paths.append(word)
+        position += 1
+    if not paths or (source is not None and source.startswith("-")):
+        return None
+    if opaque_argument(source or "") or any(opaque_argument(word) for word in paths):
+        return None
+    return RestoreOperands(source=source, paths=paths)
+
+
 def written_operands(executable: str, operands: list[str]) -> list[str]:
     """The operands a path verb modifies, as opposed to the ones it reads.
 

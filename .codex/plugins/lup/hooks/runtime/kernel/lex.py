@@ -17,6 +17,7 @@ from .rows import PathRoleRow, PathRuleRow
 from .words import (
     SCRATCH_VERB_FLAGS,
     effective_command,
+    git_restore_operands,
     path_verb_operands,
     protected_write_target,
     refuses_generated_plugin_target,
@@ -707,6 +708,10 @@ def parse_shell_words(
 def shell_path_verb_targets(command: str) -> list[str]:
     """Name every operand a path-writing verb in this command acts on.
 
+    ``git restore`` is one of them: it rewrites the paths it names from the
+    index, so whether that costs anything is the same filesystem question the
+    delete verbs ask.
+
     A caller that can reach the filesystem resolves facts about these — which
     are directories, which Git could restore — and hands them back, so the
     kernel decides from primitive data without ever reading a disk. Naming
@@ -724,7 +729,13 @@ def shell_path_verb_targets(command: str) -> list[str]:
     targets: list[str] = []
     for segment in segments:
         words = effective_command(segment)["words"]
-        if not words or posixpath.basename(words[0]) not in SCRATCH_VERB_FLAGS:
+        if not words:
+            continue
+        restore = git_restore_operands(words)
+        if restore is not None:
+            targets.extend(restore["paths"])
+            continue
+        if posixpath.basename(words[0]) not in SCRATCH_VERB_FLAGS:
             continue
         operands = path_verb_operands(words)["operands"]
         targets.extend(operands)

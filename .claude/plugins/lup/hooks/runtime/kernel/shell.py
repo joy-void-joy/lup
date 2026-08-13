@@ -45,6 +45,8 @@ from .commands import (
     decide_uv,
     git_checkout_pathspec,
     git_restore_source,
+    git_restore_unchanged,
+    git_symbolic_ref_read,
 )
 
 ESCALATE_RE = re.compile(
@@ -151,14 +153,6 @@ def decide_find_words(words: list[str], context: ShellContext) -> KernelDecision
     return decide_command_rows(remaining, context["rows"])
 
 
-# lup: The shell auto-allow asks for permission far too often, and in general it
-# feels very incomplete. Take example from Codex' own allowlist —
-# https://github.com/openai/codex. Measured with `lup-devtools hooks classify`
-# after landing review-fixes, these still stop and should not: `git restore
-# <path>` asks, `rm tracked.py` asks, and `git merge-tree --write-tree` denies
-# as unclassified though it writes no ref, index, or working tree. Also
-# EnterWorktree and ExitWorktree. Already fixed there, for the record:
-# `rm -rf build/` and `make --dry-run` both allow now.
 def decide_shell_segment(segment: list[str], context: ShellContext) -> KernelDecision:
     """Classify one parsed shell segment against the vocabulary and handlers."""
     while segment and segment[0] == "!":
@@ -201,11 +195,16 @@ def decide_shell_segment(segment: list[str], context: ShellContext) -> KernelDec
             "ask", "the git ext transport can execute commands — requires approval"
         )
     if executable == "git":
-        pathspec = git_checkout_pathspec(words)
-        if pathspec is None:
-            pathspec = git_restore_source(words)
-        if pathspec is not None:
-            return pathspec
+        recognized = (
+            git_checkout_pathspec(words)
+            or git_restore_source(words)
+            or git_restore_unchanged(
+                words, context["recoverable_targets"], context["path_rules"]
+            )
+            or git_symbolic_ref_read(words)
+        )
+        if recognized is not None:
+            return recognized
     refused = refuses_generated_plugin_write(words)
     if refused is not None:
         return refused

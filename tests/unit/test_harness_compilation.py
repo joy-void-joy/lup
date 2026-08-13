@@ -2055,6 +2055,21 @@ def test_a_declared_tool_server_is_granted_rather_than_asked_about() -> None:
     assert "WebSearch" in allowed
 
 
+def test_entering_and_leaving_a_worktree_is_granted_rather_than_asked_about() -> None:
+    """The workflow mandates the worktree, so asking about it asks whether to follow it.
+
+    Neither tool is a shell command, so no vocabulary sweep reaches them and
+    `hooks classify` cannot answer for them: the grant lives in the settings
+    artifact, which is why the pin does too.
+    """
+    permissions = project_settings(portable_harness().plugins[0])["permissions"]
+    assert isinstance(permissions, dict)
+    allowed = permissions["allow"]
+    assert isinstance(allowed, list)
+    assert "EnterWorktree" in allowed
+    assert "ExitWorktree" in allowed
+
+
 def test_codex_sandbox_arguments_establish_the_envelope() -> None:
     environment: EnvVars = {}
     arguments = codex_sandbox_arguments(

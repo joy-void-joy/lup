@@ -471,6 +471,51 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="git restore --source=$REF f", effect="ask"),
     DecisionCase(input="git restore --source=HEAD", effect="ask"),
     DecisionCase(input="git restore -s HEAD f", effect="ask"),
+    # The query family, pinned so a later narrowing reads as a failing test
+    # rather than as friction nobody can source. Each of these moves no ref,
+    # touches no index entry, and writes nothing into the working tree.
+    DecisionCase(input="git merge-tree main dev", effect="allow"),
+    DecisionCase(input="git merge-tree --write-tree main dev", effect="allow"),
+    DecisionCase(input="git hash-object -w README.md", effect="allow"),
+    DecisionCase(input="git commit-tree -m x HEAD^{tree}", effect="allow"),
+    DecisionCase(input="git mktree", effect="allow"),
+    DecisionCase(input="git write-tree", effect="allow"),
+    DecisionCase(input="git patch-id", effect="allow"),
+    DecisionCase(input="git fsck", effect="allow"),
+    DecisionCase(input="git verify-pack -v x.idx", effect="allow"),
+    DecisionCase(input="git check-ref-format --branch topic", effect="allow"),
+    DecisionCase(input="git stripspace", effect="allow"),
+    DecisionCase(input="git request-pull main https://x.test/r HEAD", effect="allow"),
+    # And the near misses the criterion excludes, each for a different one of
+    # its three clauses. A sweep that admitted any of these would have been a
+    # sweep of the word rather than of what the word reaches.
+    DecisionCase(input="git read-tree HEAD", effect="deny"),
+    DecisionCase(input="git update-index --refresh", effect="deny"),
+    DecisionCase(input="git update-ref refs/heads/x HEAD", effect="deny"),
+    DecisionCase(input="git pack-refs --all", effect="deny"),
+    DecisionCase(input="git format-patch HEAD~1", effect="deny"),
+    DecisionCase(input="git unpack-file abc123", effect="deny"),
+    DecisionCase(input="git difftool -y main", effect="deny"),
+    DecisionCase(input="git gc --prune=now", effect="deny"),
+    # symbolic-ref spells its write as a second operand rather than as a flag,
+    # so the reading form is recognized and every writing form keeps the ask.
+    DecisionCase(input="git symbolic-ref HEAD", effect="allow"),
+    DecisionCase(input="git symbolic-ref --short HEAD", effect="allow"),
+    DecisionCase(input="git symbolic-ref HEAD refs/heads/topic", effect="ask"),
+    DecisionCase(input="git symbolic-ref --delete HEAD", effect="ask"),
+    DecisionCase(input="git symbolic-ref --short $REF", effect="ask"),
+    # A search that runs a program is not a read, however it is spelled.
+    DecisionCase(input="rg -n needle src", effect="allow"),
+    DecisionCase(input="rg --pre ./decrypt needle", effect="ask"),
+    DecisionCase(input="rg --pre=./decrypt needle", effect="ask"),
+    DecisionCase(input="rg --hostname-bin ./who needle", effect="ask"),
+    DecisionCase(input="rg -z needle archive", effect="ask"),
+    DecisionCase(input="find . -name '*.py' -fprint0 out", effect="ask"),
+    # Filters that read and print, and the one flag on each that lands a file.
+    DecisionCase(input="expr 1 + 2", effect="allow"),
+    DecisionCase(input="numfmt --to=iec 1024", effect="allow"),
+    DecisionCase(input="base64 payload.bin", effect="allow"),
+    DecisionCase(input="base64 -o out.txt payload.bin", effect="ask"),
     # Patch application allows in every in-repository form; only the flags that
     # write outside the working area are guarded.
     DecisionCase(input="git apply p.diff", effect="allow"),
@@ -1450,6 +1495,43 @@ def test_a_recoverable_grant_never_covers_a_protected_path(tmp_path: Path) -> No
     assert effect("rm notes.md") == "allow"
     assert effect("rm README.md") == "ask"
     assert effect("cp notes.md README.md") == "ask"
+    # Restoring one grants on the same host fact, so it defers to the same
+    # table: a clean README.md is exactly as restorable and exactly as owned.
+    assert effect("git restore notes.md") == "allow"
+    assert effect("git restore README.md") == "ask"
+
+
+def test_restoring_a_file_that_holds_no_pending_work_changes_nothing(
+    tmp_path: Path,
+) -> None:
+    """The restore row asks about discarded work, so it should not ask when there is none.
+
+    Whether `git restore <path>` costs anything is the same question `rm
+    <path>` poses and the same host answer settles it: a tracked path with no
+    uncommitted change has nothing the index does not already hold, so the
+    restore writes back the bytes on disk. Pending work restores the ask,
+    which is the only case the row was ever about.
+    """
+    committed_tree(tmp_path, "notes.md", "other.md")
+    policy = ShellPolicy(SHELL_RULES, runner_targets=FIXTURE_RUNNER_TARGETS)
+
+    def effect(command: str) -> str:
+        return policy.decide(ShellCommand(command=command, cwd=tmp_path)).effect
+
+    assert effect("git restore notes.md") == "allow"
+    assert effect("git restore --staged notes.md") == "allow"
+    assert effect("git restore notes.md other.md") == "allow"
+    # Deleting and restoring the same clean path agree, because one host fact
+    # answers both.
+    assert effect("rm notes.md") == "allow"
+    # Uncommitted work, an untracked path, and a directory each keep the ask:
+    # the first would be discarded, and the host vouches for neither of the
+    # others.
+    (tmp_path / "notes.md").write_text("uncommitted\n", encoding="utf-8")
+    assert effect("git restore notes.md") == "ask"
+    assert effect("git restore notes.md other.md") == "ask"
+    assert effect("git restore untracked.md") == "ask"
+    assert effect("git restore .") == "ask"
 
 
 def test_moving_a_recoverable_file_costs_what_deleting_it_costs(

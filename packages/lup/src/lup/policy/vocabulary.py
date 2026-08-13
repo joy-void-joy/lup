@@ -82,6 +82,8 @@ def read_only_rules(
         "fold",
         "cut",
         "tr",
+        "expr",
+        "numfmt",
         "comm",
         "join",
         "paste",
@@ -90,7 +92,6 @@ def read_only_rules(
         "grep",
         "egrep",
         "fgrep",
-        "rg",
         "diff",
         "cmp",
         "jq",
@@ -309,6 +310,21 @@ def guarded_tool_rules() -> list[ShellCommandRule]:
             reason="a sort flag that writes a file or runs a program requires approval",
         ),
         ShellCommandRule(
+            # A search that runs a program. `--pre` and `--hostname-bin` name
+            # one ripgrep invokes for every file it touches, which is
+            # arbitrary execution wearing a search's clothes, and `-z` hands
+            # the input to whichever decompressor the extension implies.
+            name="rg",
+            ask_flags=["--pre", "--hostname-bin", "--search-zip", "-z"],
+            reason="a ripgrep flag that runs another program requires approval",
+        ),
+        ShellCommandRule(
+            # Encoding is a filter; `-o` is the one form that lands a file.
+            name="base64",
+            ask_flags=["-o", "--output"],
+            reason="a base64 flag that writes a file requires approval",
+        ),
+        ShellCommandRule(
             name="yq",
             ask_flags=["-i", "--inplace", "--in-place", "-s", "--split-exp"],
             reason=(
@@ -332,7 +348,7 @@ def guarded_tool_rules() -> list[ShellCommandRule]:
             # screen; only the file-writing and deleting actions remain
             # flag-guarded.
             name="find",
-            ask_flags=["-delete", "-fprint", "-fprintf", "-fls"],
+            ask_flags=["-delete", "-fprint", "-fprint0", "-fprintf", "-fls"],
             reason="a mutating find action requires approval",
         ),
         ShellCommandRule(
@@ -398,7 +414,23 @@ def runner_target_rules(
     ]
 
 
-GIT_READ_ONLY_SUBCOMMANDS = (  # lup: ignore[library-default] — git's own query subcommands; each reads the object store and writes nothing, which is a fact about git rather than a choice made for an adopter
+# One criterion decides this table, applied across git's surface rather than to
+# whichever word was last found missing: a subcommand belongs here when it moves
+# no ref, mutates no index entry, and writes nothing into the working tree.
+#
+# That is a question about what a verb *reaches*, not about whether it happens
+# to write bytes, which is why the object-construction verbs pass it. An object
+# nothing points at is unreachable the moment it exists and git collects it, so
+# there is no ref to restore and nothing to undo — `merge-tree --write-tree`,
+# the way to ask whether two branches still merge, is as unremarkable as
+# `merge-base`, and refusing it refuses the question rather than the write.
+#
+# What fails the criterion is absent on purpose and meets git's own deny:
+# `read-tree` and `update-index` write the index, `update-ref` and `pack-refs`
+# move refs, and `format-patch`, `unpack-file`, and `difftool --dir-diff` each
+# land files in the working tree.
+GIT_READ_ONLY_SUBCOMMANDS = (  # lup: ignore[library-default] — git's own query and object-construction verbs, taken by the criterion above; which of them reaches a ref is a fact about git rather than a choice made for an adopter
+    # Reporting on the object store, the refs, the index, and the config.
     "status",
     "rev-parse",
     "ls-files",
@@ -413,7 +445,6 @@ GIT_READ_ONLY_SUBCOMMANDS = (  # lup: ignore[library-default] — git's own quer
     "name-rev",
     "merge-base",
     "show-ref",
-    "symbolic-ref",
     "for-each-ref",
     "count-objects",
     "cherry",
@@ -424,12 +455,27 @@ GIT_READ_ONLY_SUBCOMMANDS = (  # lup: ignore[library-default] — git's own quer
     "check-ignore",
     "check-attr",
     "check-mailmap",
+    "check-ref-format",
     "show-branch",
+    "show-index",
     "verify-commit",
     "verify-tag",
+    "verify-pack",
+    "fsck",
+    "patch-id",
+    "request-pull",
+    "stripspace",
+    "get-tar-commit-id",
     "var",
     "version",
     "help",
+    # Constructing an object, which no ref yet points at.
+    "merge-tree",
+    "hash-object",
+    "commit-tree",
+    "mktree",
+    "mktag",
+    "write-tree",
 )
 
 GIT_REVERSIBLE_SUBCOMMANDS = (  # lup: ignore[library-default] — git subcommands the reflog or a second invocation undoes; fixed by what git records rather than by taste
@@ -453,6 +499,9 @@ def git_rule(
         "pull",
         "push",
         "clone",
+        # A summary of what a remote would be asked to pull, which it builds
+        # by running ls-remote against that remote.
+        "request-pull",
     ),
     remote_sandbox: SandboxPlacement = "outside",
 ) -> ShellCommandRule:
@@ -629,6 +678,14 @@ def git_rule(
             name="tag",
             ask_flags=["-d", "--delete"],
             reason="deleting a tag requires approval",
+        ),
+        ShellSubcommandRule(
+            # The one query verb whose write form is spelled by arity rather
+            # than by a flag: a second operand points the ref somewhere else.
+            # The kernel recognizes the reading form ahead of this row.
+            name="symbolic-ref",
+            effect="ask",
+            reason="pointing a symbolic ref somewhere else moves HEAD",
         ),
         ShellSubcommandRule(
             name="reset",

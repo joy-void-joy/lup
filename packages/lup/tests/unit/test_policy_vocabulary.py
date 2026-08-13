@@ -85,6 +85,41 @@ def test_redirect_checkout_chooses_between_asking_and_naming_the_newer_verbs() -
     assert verdict("git checkout HEAD~1 -- src/x.py", redirecting).effect == "allow"
 
 
+def test_the_git_family_is_drawn_by_what_a_verb_reaches_not_by_what_it_writes() -> None:
+    """One criterion decides the table: no ref, no index, no working tree.
+
+    Asking whether a subcommand writes bytes draws the line in the wrong
+    place. `merge-tree --write-tree` writes an object and is how a session
+    asks whether two branches still merge, while `read-tree` writes nothing
+    a caller sees and replaces the index wholesale. What separates them is
+    reach, so the sweep is by reach — and a word arriving on the list for any
+    other reason is what this pins against.
+    """
+    rules = [git_rule()]
+
+    def effect(command: str) -> str:
+        return verdict(command, rules).effect
+
+    # Constructing an object moves no ref, so nothing points at the result and
+    # nothing needs undoing.
+    assert effect("git merge-tree --write-tree main dev") == "allow"
+    assert effect("git hash-object -w README.md") == "allow"
+    assert effect("git commit-tree -m x HEAD^{tree}") == "allow"
+    # Each of the three clauses, refused by a verb that trips only that one.
+    assert effect("git read-tree HEAD") == "deny"
+    assert effect("git update-ref refs/heads/x HEAD") == "deny"
+    assert effect("git format-patch HEAD~1") == "deny"
+    # A ref write spelled as a second operand is still a ref write.
+    assert effect("git symbolic-ref HEAD") == "allow"
+    assert effect("git symbolic-ref HEAD refs/heads/topic") == "ask"
+    assert effect("git symbolic-ref --delete HEAD") == "ask"
+    # Passing the criterion settles the effect, never the placement: a summary
+    # of what a remote would pull is built by asking that remote, so it needs
+    # the route ls-remote needs rather than a confinement it dies inside.
+    outside = verdict("git request-pull main https://x.test/r HEAD", rules)
+    assert (outside.effect, outside.sandbox) == ("allow", "outside")
+
+
 def test_allow_authoring_moves_only_the_author_describing_their_own_work() -> None:
     """Opening and titling a PR is authoring; commenting reaches other people."""
     authoring = [gh_rule()]
