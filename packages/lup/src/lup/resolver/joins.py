@@ -237,10 +237,7 @@ class Joiner:
         contested join lands next to the work it contests.
         """
         touched = {
-            parent: {
-                path.as_posix()
-                for path in self.worktrees.authored_between(lease, base, parent)
-            }
+            parent: {path.as_posix() for path in self.authored_by(lease, base, parent)}
             for parent in parents
         }
         ranked = sorted(
@@ -256,6 +253,23 @@ class Joiner:
             ),
         )
         return ranked
+
+    def authored_by(
+        self, lease: WritableRootLease, base: str, commit: str
+    ) -> list[Path]:
+        """Every path one parent wrote, measured from where it forked.
+
+        Measured from the base instead, a parent is credited with every path
+        the base moved ahead on since the leases were cut — 124 paths where
+        the real answer was 19, in one measured run. That inflation is the
+        same for every parent, so every pair appears to overlap and the
+        filters built on this stop discriminating: the ordering below ranks
+        every parent equally, and the standing re-check examines every pair
+        it was written to prune. The fork point is what the drop-candidate
+        detector already asks from, for the same reason.
+        """
+        fork = self.worktrees.merge_base(lease, base, commit)
+        return self.worktrees.authored_between(lease, fork, commit)
 
     def record_join_progress(self, joined: list[str], commit: str) -> None:
         """Say where the join sequence got to, as each parent lands.
@@ -378,10 +392,7 @@ class Joiner:
         state = self.run.state
         if state is None or not standing:
             return
-        changed = {
-            path.as_posix()
-            for path in self.worktrees.authored_between(lease, base, parent)
-        }
+        changed = {path.as_posix() for path in self.authored_by(lease, base, parent)}
         owners = {
             outcome.commit: outcome.concern_id
             for outcome in state.outcomes
@@ -391,8 +402,7 @@ class Joiner:
             if earlier not in owners:
                 continue
             overlap = changed & {
-                path.as_posix()
-                for path in self.worktrees.authored_between(lease, base, earlier)
+                path.as_posix() for path in self.authored_by(lease, base, earlier)
             }
             if not overlap:
                 continue

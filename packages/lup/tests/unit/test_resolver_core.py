@@ -846,6 +846,54 @@ def test_already_joined_reports_containment_from_merge_base(tmp_path: Path) -> N
     assert not WorktreeOrchestrator(absent, tmp_path).already_joined(lease, "sha")
 
 
+def test_a_parent_is_credited_only_with_the_paths_it_wrote(tmp_path: Path) -> None:
+    """A base that moved ahead was charged to every parent that forked before it.
+
+    The inflation is identical for every parent, so it does not cancel out:
+    it makes each one look like it touched everything, every pair of them
+    look like they overlap, and the two filters built on this — the join
+    ordering and the standing re-check — stop discriminating at all.
+    """
+    launcher = LocalProcessLauncher()
+    workspace = failure_leg_workspace(tmp_path, launcher)
+
+    def git(*arguments: str) -> str:
+        status = launcher.launch(
+            LaunchRequest(arguments=["git", *arguments], cwd=workspace)
+        )
+        assert status.code == 0, status.stderr
+        return status.stdout.strip()
+
+    def commit_file(filename: str) -> str:
+        (workspace / filename).write_text(f"{filename}\n", encoding="utf-8")
+        git("add", filename)
+        git("commit", "-m", f"add {filename}")
+        return git("rev-parse", "HEAD")
+
+    fork = git("rev-parse", "HEAD")
+    git("checkout", "-b", "lease", fork)
+    parent = commit_file("lease.txt")
+    git("checkout", "source")
+    base = commit_file("upstream.txt")
+
+    def unused_actor(_root: Path, _output_name: str) -> JsonObject:
+        raise AssertionError("measuring what a parent wrote spends no turn")
+
+    core = failure_leg_core(
+        tmp_path, workspace, launcher, "authored", unused_actor, unused_actor
+    )
+    lease = core.leases.acquire("integration", "resolve/authored/review")
+    core.worktrees.create(lease, base)
+
+    assert [
+        path.as_posix() for path in core.joiner.authored_by(lease, base, parent)
+    ] == ["lease.txt"]
+    # Measured from the base, the parent answers for the upstream file too.
+    assert {
+        path.as_posix() for path in core.worktrees.authored_between(lease, base, parent)
+    } == {"lease.txt", "upstream.txt"}
+
+
 def test_join_accepts_a_resolved_path_the_merger_left_unstaged(
     tmp_path: Path,
 ) -> None:
