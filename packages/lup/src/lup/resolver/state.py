@@ -238,6 +238,29 @@ def validate_progress_transition(
                 f"concern {identifier!r} cannot move from {prior.status} "
                 f"to {next_item.status}"
             )
+    validate_settled_outcomes(candidate)
+
+
+def validate_settled_outcomes(candidate: ResolveState) -> None:
+    """Refuse a state whose progress claims a success its outcomes cannot support.
+
+    Progress and outcome are two records of one fact, and a write that
+    carries only the first leaves the run reporting work no integration can
+    consume — the surfaces that count progress read the higher number while
+    the outcome that would have proved it never arrives. Checked here rather
+    than trusted at the one call site that settles a concern, because the
+    next site added would reintroduce the skew silently.
+    """
+    recorded = {outcome.concern_id for outcome in candidate.outcomes}
+    unsupported = sorted(
+        item.concern_id
+        for item in candidate.progress
+        if item.status == ConcernStatus.VERIFIED and item.concern_id not in recorded
+    )
+    if unsupported:
+        raise StateTransitionError(
+            "verified concerns have no recorded outcome: " + ", ".join(unsupported)
+        )
 
 
 class ResolverStateRepository:

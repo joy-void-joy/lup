@@ -290,20 +290,18 @@ class ConcernExecutor:
                             residual=list(review.residual),
                         )
                     )
-                await self.run.transition_concern(concern.id, ConcernStatus.VERIFIED)
-                return ConcernExecution(
-                    base=base,
-                    outcome=ConcernOutcome(
-                        concern_id=concern.id,
-                        branch=lease.branch,
-                        commit=diff.commit,
-                        head=diff.commit,
-                        verified=True,
-                        rounds=rounds,
-                        notes_cleared=cleared.clearance.cleared,
-                        notes_missing=cleared.clearance.missing,
-                    ),
+                verified = ConcernOutcome(
+                    concern_id=concern.id,
+                    branch=lease.branch,
+                    commit=diff.commit,
+                    head=diff.commit,
+                    verified=True,
+                    rounds=rounds,
+                    notes_cleared=cleared.clearance.cleared,
+                    notes_missing=cleared.clearance.missing,
                 )
+                await self.run.settle_concern(verified, ConcernStatus.VERIFIED)
+                return ConcernExecution(base=base, outcome=verified)
             await self.run.transition_concern(
                 concern.id, ConcernStatus.REVISING, review.reason
             )
@@ -320,18 +318,16 @@ class ConcernExecutor:
             if charged
             else "declaration contract unmet: no round reached the criteria"
         )
-        await self.run.transition_concern(concern.id, ConcernStatus.FAILED, failure)
-        return ConcernExecution(
-            base=base,
-            outcome=ConcernOutcome(
-                concern_id=concern.id,
-                branch=lease.branch,
-                commit=rounds[-1].diff.commit if rounds else None,
-                head=self.worktrees.head(lease),
-                verified=False,
-                rounds=rounds,
-                failure=failure,
-                notes_cleared=cleared.clearance.cleared,
-                notes_missing=cleared.clearance.missing,
-            ),
+        exhausted = ConcernOutcome(
+            concern_id=concern.id,
+            branch=lease.branch,
+            commit=rounds[-1].diff.commit if rounds else None,
+            head=self.worktrees.head(lease),
+            verified=False,
+            rounds=rounds,
+            failure=failure,
+            notes_cleared=cleared.clearance.cleared,
+            notes_missing=cleared.clearance.missing,
         )
+        await self.run.settle_concern(exhausted, ConcernStatus.FAILED, failure)
+        return ConcernExecution(base=base, outcome=exhausted)

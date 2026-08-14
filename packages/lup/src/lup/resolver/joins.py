@@ -16,6 +16,7 @@ failing the run, because later work can legitimately supersede an earlier
 one and only a human can say whether this did.
 """
 
+from collections.abc import AsyncIterator
 from pathlib import Path
 
 from lup.resolver.dag import ConcernGraph
@@ -33,6 +34,8 @@ from lup.resolver.models import (
     JoinProgress,
     MaterialQuestion,
     MergeReport,
+    QuestionAnswer,
+    RecheckRuling,
     ResolveState,
     ReviewReport,
     WritableRootLease,
@@ -98,6 +101,22 @@ def merge_problems(
             if undeclared
             else []
         ),
+    ]
+
+
+def asked_rulings(
+    asked: list[MaterialQuestion], answers: list[QuestionAnswer]
+) -> list[RecheckRuling]:
+    """Pair each re-check with its recorded answer, dropping the unanswered."""
+    recorded = {answer.question_id: answer for answer in answers}
+    return [
+        RecheckRuling(
+            concern_id=question.concern_id,
+            criteria=list(question.criteria),
+            ruling=recorded[question.id].value,
+        )
+        for question in asked
+        if question.id in recorded
     ]
 
 
@@ -392,7 +411,7 @@ class Joiner:
 
     async def recheck_criteria(
         self, state: ResolveState, integration: IntegrationRecord
-    ) -> None:
+    ) -> list[MaterialQuestion]:
         """Re-run each concern's reviewer against the tree its siblings built.
 
         ``review_turn`` runs against a concern's own worktree before
@@ -404,28 +423,60 @@ class Joiner:
 
         A failed criterion opens a question rather than failing the run,
         because later work can legitimately supersede an earlier criterion
-        and only a human can say whether this did.
+        and only a human can say whether this did. The questions are returned
+        rather than merely queued, so integration waits on the answers it is
+        about to act on instead of completing around them.
         """
         integrated = {identifier: True for identifier in integration.concerns}
-        for concern in state.concerns:
-            if concern.id not in integrated:
-                continue
-            await self.recheck_concern(
-                concern,
-                integration.worktree,
-                situation=(
-                    "Every concern in this run is now integrated into one "
-                    "tree. Re-check your concern's acceptance criteria "
-                    "against that tree rather than the worktree you "
-                    "reviewed. A criterion you passed before may no "
-                    "longer hold now that a sibling has landed; say so "
-                    "plainly if it does not.\n\n"
-                    f"Integrated concerns: {', '.join(integration.concerns)}\n"
-                    f"Worktree: {integration.worktree}"
-                ),
-                occasion="integrated",
-                lost_because="once every sibling is integrated",
-            )
+
+        async def asked() -> AsyncIterator[MaterialQuestion]:
+            """Each concern whose criteria no longer hold in the merged tree."""
+            for concern in state.concerns:
+                if concern.id not in integrated:
+                    continue
+                question = await self.recheck_concern(
+                    concern,
+                    integration.worktree,
+                    situation=(
+                        "Every concern in this run is now integrated into one "
+                        "tree. Re-check your concern's acceptance criteria "
+                        "against that tree rather than the worktree you "
+                        "reviewed. A criterion you passed before may no "
+                        "longer hold now that a sibling has landed; say so "
+                        "plainly if it does not.\n\n"
+                        f"Integrated concerns: {', '.join(integration.concerns)}\n"
+                        f"Worktree: {integration.worktree}"
+                    ),
+                    occasion="integrated",
+                    lost_because="once every sibling is integrated",
+                )
+                if question is not None:
+                    yield question
+
+        return [question async for question in asked()]
+
+    async def settle_rechecks(
+        self, asked: list[MaterialQuestion]
+    ) -> list[RecheckRuling]:
+        """Wait for these re-checks, and report what each was ruled.
+
+        Queuing publishes a question; it does not wait for one. So the run
+        used to reach the end of integration with its re-checks unanswered,
+        mark the branch complete, and finish — and a `regression` ruling that
+        arrived afterwards was recorded into a run that had already shipped
+        it. Waiting parks the run instead, which costs nothing to resume and
+        makes the answer arrive before the decision it governs.
+
+        Only the final pass waits. A per-join standing check already has a
+        consumer — it is what stops the same finding being re-asked join
+        after join — and every concern it examines is examined again here,
+        against the finished tree, where the answer can still change what
+        happens.
+        """
+        if not asked:
+            return asked_rulings(asked, [])
+        answers = await self.questions.await_questions(asked)
+        return asked_rulings(asked, answers.answers)
 
     async def recheck_concern(
         self,
@@ -435,7 +486,7 @@ class Joiner:
         situation: str,
         occasion: str,
         lost_because: str,
-    ) -> None:
+    ) -> MaterialQuestion | None:
         """Ask one concern's reviewer whether its criteria still hold here.
 
         A failed criterion opens a question rather than failing the run,
@@ -480,32 +531,29 @@ class Joiner:
             criterion.id for criterion in concern.criteria if criterion.id not in met
         ]
         if not lost:
-            return
+            return None
         if self.standing_ruling_exists(concern.id, lost):
             self.journal.record(
                 RecheckRepeatedEvent(
                     concern_id=concern.id, occasion=occasion, criteria=sorted(lost)
                 )
             )
-            return
-        self.questions.queue_questions(
-            [
-                MaterialQuestion(
-                    id=f"{concern.id}-superseded-{occasion}",
-                    concern_id=concern.id,
-                    prompt=(
-                        f"{concern.id} no longer meets {', '.join(lost)} "
-                        f"{lost_because}. The reviewer says: "
-                        f"{result.output.reason}. Was this criterion "
-                        "superseded by later work, or is this a regression?"
-                    ),
-                    choices=["superseded", "regression"],
-                    closed_choices=True,
-                    criteria=sorted(lost),
-                )
-            ],
-            concern.id,
+            return None
+        question = MaterialQuestion(
+            id=f"{concern.id}-superseded-{occasion}",
+            concern_id=concern.id,
+            prompt=(
+                f"{concern.id} no longer meets {', '.join(lost)} "
+                f"{lost_because}. The reviewer says: "
+                f"{result.output.reason}. Was this criterion "
+                "superseded by later work, or is this a regression?"
+            ),
+            choices=["superseded", "regression"],
+            closed_choices=True,
+            criteria=sorted(lost),
         )
+        self.questions.queue_questions([question], concern.id)
+        return question
 
     def standing_ruling_exists(self, concern_id: str, lost: list[str]) -> bool:
         """Whether this lost-criteria set was already put to the humans.

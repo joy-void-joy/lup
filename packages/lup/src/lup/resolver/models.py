@@ -306,6 +306,28 @@ class MaterialQuestion(BaseModel):
         return self
 
 
+RECHECK_SUPERSEDED = "superseded"
+"""The ruling that settles a lost criterion: later work replaced it."""
+
+RECHECK_REGRESSION = "regression"
+"""The ruling that does not: the merged tree broke something that held."""
+
+
+class RecheckRuling(BaseModel):
+    """One answered re-check, read where the decision it governs is taken.
+
+    The question is closed over two words that mean opposite things about
+    the review branch, so the answer is only worth asking for if something
+    consults it. This is what integration consults.
+    """
+
+    model_config = FROZEN
+
+    concern_id: str
+    criteria: list[str]
+    ruling: str
+
+
 ALLOWANCE_GRANTED = "grant"
 """The one answer that extends a concern's authority."""
 
@@ -751,6 +773,15 @@ class ConcernOutcome(BaseModel):
     """
     verified: bool = False
     integrated: bool = False
+    regressed: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Criteria a human ruled the merged tree broke. Verification is "
+            "about this concern's own lease; this is about the tree its "
+            "siblings built, and only the second can disqualify a branch "
+            "that already passed the first."
+        ),
+    )
     rounds: list[AgentRound] = Field(default_factory=list)
     failure: str | None = None
     notes_cleared: list[ReviewNote] = Field(default_factory=list)
