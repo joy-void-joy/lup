@@ -1,47 +1,46 @@
-"""Rendering Markdown structures that are generated rather than authored.
+"""The cells a generated Markdown table is laid out from.
 
 Prose written by a human is Markdown all the way down and needs nothing here.
 What needs a renderer is a table *derived* from declarations: a pipe or a
 newline in a value silently breaks the row it lands in, and the layout is the
 same every time it is written by hand.
 
-Escaping belongs at the leaf where data enters the document, not at the table:
-a cell is built from :func:`cell`, :func:`code` or :func:`link` — each of
-which escapes what it is given — and the table lays the finished cells out
-without looking inside them. That is what lets one cell hold formatting the
-author meant while the value inside it stays literal.
+A cell holds the literal value it stands for and escapes that value as it
+renders, so there is no way to put text in a table that does not survive being
+there. What the kinds below differ on is the formatting the author meant
+around the value — plain, code, a link — never whether the value inside stays
+literal. The table itself is :class:`lup.harness.models.MarkdownTable`, a
+prompt part like any other, which lays these out without looking inside them.
 """
 
 import html
+from abc import abstractmethod
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict
-
-
-def cell(value: str) -> str:
-    """Escape generated text so it survives as the content of one cell."""
-    return html.escape(value).translate(str.maketrans({"|": "&#124;", "\n": " "}))
+from pydantic import BaseModel, ConfigDict, Discriminator
 
 
-def code(value: str) -> str:
-    """One cell's worth of text, escaped and marked as code."""
-    return f"`{cell(value)}`"
+def contained(value: str) -> str:
+    """Neutralize every character that would end a cell or a row early.
+
+    Both line endings count: a lone carriage return ends a line for a Markdown
+    reader exactly as a newline does, so leaving it would break the row one
+    character short of the case anyone tests for.
+    """
+    return value.translate(str.maketrans({"|": "&#124;", "\n": " ", "\r": " "}))
 
 
-def link(text: str, target: str) -> str:
-    """An inline link, for a cell naming a page rather than describing one."""
-    return f"[{cell(text)}]({target})"
+def escaped(value: str) -> str:
+    """Generated text made safe to be the content of one cell."""
+    return contained(html.escape(value))
 
 
-# lup: The markdown utils seem wrong. This should instead be a `TextPart`
-# subclass (or whatever the more general of that class is) that takes the table
-# to render as a param in list-of-list form, and then renders it — so a
-# generated table is a document part like any other rather than a string a
-# caller has to remember to escape into and splice by hand.
-class MarkdownTable(BaseModel):
-    """A header row and the finished cells beneath it.
+class MarkdownCell(BaseModel):
+    """One cell of a generated table, holding the value it displays.
 
-    Rows hold cells that are already rendered, so a caller composes each one
-    out of the pieces above and this only decides the layout.
+    Every kind answers :meth:`render`, and every answer runs the value it
+    holds through :func:`escaped`, so a new kind of formatting is one class
+    and cannot be the one that forgot to escape.
     """
 
     # lup: Add an anti-pattern on `model_config =` and instruct the agent to use
@@ -60,14 +59,60 @@ class MarkdownTable(BaseModel):
     # exempt, and delete the aliases rather than leaving them unreferenced.
     model_config = ConfigDict(frozen=True)
 
-    headers: list[str]
-    rows: list[list[str]]
+    text: str
+
+    @abstractmethod
+    def render(self) -> str:
+        """This cell's Markdown, with the value it holds escaped."""
+
+
+class PlainCell(MarkdownCell):
+    """A value shown as it reads."""
+
+    type: Literal["plain"] = "plain"
 
     def render(self) -> str:
-        """The table as Markdown, one line per row, newline-terminated."""
-        lines = [
-            self.headers,
-            ["---"] * len(self.headers),
-            *self.rows,
-        ]
-        return "".join(f"| {' | '.join(line)} |\n" for line in lines)
+        return escaped(self.text)
+
+
+class CodeCell(MarkdownCell):
+    """A value marked as code by the fence Markdown spells with backticks."""
+
+    type: Literal["code"] = "code"
+
+    def render(self) -> str:
+        return f"`{escaped(self.text)}`"
+
+
+class HtmlCodeCell(MarkdownCell):
+    """A value marked as code by the HTML element rather than the fence.
+
+    For a value that may itself hold a backtick — a rule's matching shape, a
+    snippet quoting one — which no fence of a fixed length survives.
+    """
+
+    type: Literal["html_code"] = "html_code"
+
+    def render(self) -> str:
+        return f"<code>{escaped(self.text)}</code>"
+
+
+class LinkCell(MarkdownCell):
+    """A cell naming a page rather than describing one.
+
+    The destination is held to the row's structure but not otherwise escaped:
+    the characters Markdown reserves inside a destination are the ones a real
+    path uses, so quoting them would break the link this cell exists to make.
+    """
+
+    type: Literal["link"] = "link"
+    target: str
+
+    def render(self) -> str:
+        return f"[{escaped(self.text)}]({contained(self.target)})"
+
+
+type TableCell = Annotated[
+    PlainCell | CodeCell | HtmlCodeCell | LinkCell, Discriminator("type")
+]
+"""Any cell a generated table holds, parseable back from what it rendered."""

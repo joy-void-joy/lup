@@ -2,9 +2,10 @@
 
 from pathlib import Path
 
+from lup.adapters.harness import claude_prompt_renderer, codex_prompt_renderer
 from lup.codescan.antipatterns import PYTHON_ANTI_PATTERNS, TS_ANTI_PATTERNS
 from lup.codescan.registry import STRUCTURAL_RULES, all_rules
-from lup.devtools.dev.rules import rule_reference_artifact
+from lup.devtools.dev.rules import rule_reference_artifact, rule_reference_document
 
 
 def test_checked_in_rule_reference_matches_canonical_objects() -> None:
@@ -13,6 +14,20 @@ def test_checked_in_rule_reference_matches_canonical_objects() -> None:
     assert Path("docs/rules.md").read_text(encoding="utf-8") == artifact.content
     for rule in [*PYTHON_ANTI_PATTERNS, *TS_ANTI_PATTERNS, *STRUCTURAL_RULES]:
         assert f"`{rule.id}`" in artifact.content
+
+
+def test_the_reference_names_no_runtime_it_is_rendered_through() -> None:
+    """Which renderer writes this page is a non-choice, so it is checked as one.
+
+    The document is prose and tables end to end. Pinning that both vocabularies
+    produce the same bytes is what makes picking either honest, rather than a
+    dependency nobody noticed the page had acquired.
+    """
+    document = rule_reference_document()
+
+    assert claude_prompt_renderer().render(document) == (
+        codex_prompt_renderer().render(document)
+    )
 
 
 def test_every_card_carries_the_strength_its_rule_declares() -> None:

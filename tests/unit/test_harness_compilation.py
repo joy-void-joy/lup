@@ -50,6 +50,7 @@ from lup.harness.models import (
     Delegate,
     Harness,
     InvocationArgument,
+    MarkdownTable,
     NativePath,
     Plugin,
     PluginPath,
@@ -69,6 +70,7 @@ from lup.harness.models import (
     document_text_size,
 )
 from lup.harness.contracts import PromptRenderer
+from lup.markdown import CodeCell, PlainCell
 from lup.harness.ownership import (
     OwnershipManifestError,
     build_manifest,
@@ -462,6 +464,13 @@ PART_CONTRACT: dict[str, PartExpectation] = {
     "SpellingExample": PartExpectation(
         part=SpellingExample(text="`/lup:merge` beside `$lup:merge`"), diverges=False
     ),
+    "MarkdownTable": PartExpectation(
+        part=MarkdownTable(
+            headers=["Rule id", "Diagnostic"],
+            rows=[[CodeCell(text="dict-get"), PlainCell(text="a | b")]],
+        ),
+        diverges=False,
+    ),
     "SkillInvocation": PartExpectation(
         part=SkillInvocation(plugin="lup", skill="merge"), diverges=True
     ),
@@ -532,7 +541,7 @@ class PartQuestion(BaseModel):
 PART_QUESTIONS: dict[str, PartQuestion] = {
     "text_payload": PartQuestion(
         ask=lambda part: part.text_payload is not None,
-        answered_by=["TextPart", "SpellingExample"],
+        answered_by=["TextPart", "SpellingExample", "MarkdownTable"],
     ),
     "invocation": PartQuestion(
         ask=lambda part: part.invocation is not None, answered_by=["SkillInvocation"]

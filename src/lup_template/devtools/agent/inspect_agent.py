@@ -237,12 +237,12 @@ def run_capabilities(markdown: bool) -> None:
     """
     from lup.adapters.capabilities import (
         canonical_capability_matrix,
-        capability_matrix_markdown,
+        capability_matrix,
     )
 
     matrix = canonical_capability_matrix()
     if markdown:
-        typer.echo(capability_matrix_markdown(matrix))
+        typer.echo(capability_matrix(matrix).text_payload)
         return
 
     label_width = max(len(cell.capability) for cell in matrix[0].cells)
