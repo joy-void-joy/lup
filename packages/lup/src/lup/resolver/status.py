@@ -21,7 +21,7 @@ from pydantic import BaseModel, Field
 
 from lup.channels.models import utc_now
 from lup.resolver.journal import journal_tail
-from lup.resolver.models import FROZEN, ConcernStatus, ResolvePhase
+from lup.resolver.models import FROZEN, ConcernStatus, ResolvePhase, ResolveState
 from lup.resolver.state import ResolverStateRepository
 
 
@@ -48,6 +48,80 @@ class LastRecorded(BaseModel):
         return (now if now is not None else utc_now()) - self.at
 
 
+def elapsed_per_item(
+    completions: list[datetime], gap: timedelta = timedelta(hours=1)
+) -> timedelta | None:
+    """The mean time one item took, over the stretches actually worked.
+
+    A run is resumed, so consecutive samples can be separated by however
+    long nobody was driving it — this one holds an interval of twenty-eight
+    hours between two joins a minute of work apart. Averaged in, a single
+    such gap makes every later estimate meaningless, so an interval longer
+    than ``gap`` is read as the run having been away rather than as work.
+
+    None until two samples on one stretch exist, because one timestamp is a
+    when and not a duration. A bar with no rate yet prints without one.
+    """
+    intervals = [
+        later - earlier
+        for earlier, later in zip(completions, completions[1:], strict=False)
+        if later - earlier <= gap
+    ]
+    if not intervals:
+        return None
+    return sum(intervals, timedelta()) / len(intervals)
+
+
+class PhaseProgress(BaseModel):
+    """One phase's iterator, as far through it as the run has got.
+
+    Per phase rather than one figure for the run, because the phases do not
+    share a rate: a join is a merge and a verification, while the re-check
+    that follows the last of them is a reviewer turn per concern. One
+    estimate spanning both would be wrong for whichever phase it was not
+    measured on, and wrong most of the time.
+    """
+
+    model_config = FROZEN
+
+    label: str
+    done: int
+    total: int
+    per_item: timedelta | None = None
+
+    def remaining(self) -> timedelta | None:
+        """How long the rest of this phase should take at the observed rate."""
+        if self.per_item is None or self.done >= self.total:
+            return None
+        return self.per_item * (self.total - self.done)
+
+    def render(self, width: int = 16) -> str:
+        """The bar, its count, and the two figures a reader plans around."""
+        filled = round(width * self.done / self.total) if self.total else 0
+        eta = self.remaining()
+        return " · ".join(
+            [
+                f"{'█' * filled}{'░' * (width - filled)} {self.done}/{self.total}",
+                *(
+                    [f"{compact_interval(self.per_item)}/it"]
+                    if self.per_item is not None
+                    else []
+                ),
+                *([f"ETA {compact_interval(eta)}"] if eta is not None else []),
+            ]
+        )
+
+
+def compact_interval(span: timedelta) -> str:
+    """A duration as a reader says it out loud, to two units at most."""
+    seconds = int(span.total_seconds())
+    if seconds < 60:
+        return f"{seconds}s"
+    if seconds < 3600:
+        return f"{seconds // 60}m{seconds % 60:02d}s"
+    return f"{seconds // 3600}h{seconds % 3600 // 60:02d}m"
+
+
 class RunStatus(BaseModel):
     """Where a run stands, and whether anything is driving it."""
 
@@ -62,6 +136,8 @@ class RunStatus(BaseModel):
     counts: list[StatusCount] = Field(default_factory=list)
     unanswered: int = 0
     last: LastRecorded | None = None
+    progress: PhaseProgress | None = None
+    """The current phase's iterator, where the phase has one worth drawing."""
 
     def verdict(self) -> str:
         """One line a reader can act on without interpreting the rest.
@@ -96,6 +172,10 @@ class RunStatus(BaseModel):
                 str(self.held),
                 str(self.phase),
                 str(self.unanswered),
+                # A join is one of the four facts a reader waits on, and the
+                # statuses above do not move for it: every concern is already
+                # `integrating` and stays there until the last one lands.
+                str(self.progress.done if self.progress else 0),
                 *(f"{count.status}={count.concerns}" for count in self.counts),
             ]
         )
@@ -134,6 +214,25 @@ class RunStatus(BaseModel):
         return not self.held
 
 
+def phase_progress(state: ResolveState) -> PhaseProgress | None:
+    """The iterator the current phase is working through, where it has one.
+
+    Only the join sequence so far. A phase earns a bar by knowing both how
+    many items it faces and when each one landed; the worker phase knows the
+    first and not the second, and drawing a bar that cannot say a rate would
+    promise an estimate the run has no way to make.
+    """
+    progress = state.join_progress
+    if progress is None or not progress.planned:
+        return None
+    return PhaseProgress(
+        label="joins",
+        done=len(progress.joined),
+        total=progress.planned,
+        per_item=elapsed_per_item(progress.completions),
+    )
+
+
 def run_status(repository: ResolverStateRepository, run_id: str) -> RunStatus:
     """Everything the run directory can say about where this run stands."""
     held = repository.held()
@@ -162,6 +261,7 @@ def run_status(repository: ResolverStateRepository, run_id: str) -> RunStatus:
             for question in (state.questions.questions if state.questions else [])
             if question.id not in answered
         ),
+        progress=phase_progress(state),
         last=None
         if entry is None
         else LastRecorded(
