@@ -56,6 +56,21 @@ from lup.resolver.verification import Verifier
 from lup.runtime.models import TurnInput, turn_request
 
 
+def names_parent(declared: str, parent: str) -> bool:
+    """Whether a disposition's commit names this candidate's parent.
+
+    Prefix rather than equality, because the merger is shown each candidate
+    abbreviated and keyed the full sha against it. Echoing back the twelve
+    characters it was given then read as having said nothing, and the refusal
+    quoted those same twelve characters at it, so there was no revision that
+    could converge: one observed merger dispositioned all three candidates
+    with correct rationales, twice, and the run failed on the second.
+    """
+    return bool(declared) and (
+        parent.startswith(declared) or declared.startswith(parent)
+    )
+
+
 def merge_problems(
     merge: MergeReport, conflicted: list[Path], owed: list[DropCandidate]
 ) -> list[str]:
@@ -64,20 +79,23 @@ def merge_problems(
     Two obligations rather than two prohibitions. Every candidate the
     detector raised must be dispositioned — containment, never equality,
     because a legitimate resolution rewrites hunks and requiring the exact
-    candidate set back would reject the right answer. And every edit outside
+    candidate set back would reject the right answer. That holds for how a
+    disposition is keyed as much as for which ones are owed: it is matched
+    against the abbreviation the merger was shown rather than the sha it was
+    not. And every edit outside
     the conflict set must be declared, because that is where a silent
     override lives: the merger is handed an already-correct tree with
     unrestricted write access, and the canonical joint failure is fixed in a
     file that never conflicted.
     """
-    dispositioned = {
-        (disposition.parent, disposition.path.as_posix())
-        for disposition in merge.dispositions
-    }
     undispositioned = sorted(
         f"{candidate.path.as_posix()} from {candidate.parent[:12]}"
         for candidate in owed
-        if (candidate.parent, candidate.path.as_posix()) not in dispositioned
+        if not any(
+            disposition.path.as_posix() == candidate.path.as_posix()
+            and names_parent(disposition.parent, candidate.parent)
+            for disposition in merge.dispositions
+        )
     )
     unreasoned = sorted(
         disposition.path.as_posix()
@@ -234,7 +252,7 @@ class Joiner:
             )
             if self.standing_rechecks:
                 await self.recheck_standing(lease, base, joined[:-1], parent)
-            self.record_join_progress(joined, current)
+            self.record_join_progress(joined, current, len(tips))
             # After the progress file names a tree that exists, for the same
             # reason the worker round checks before its turn: this is where
             # stopping costs nothing. Integration is the longest phase and
@@ -329,7 +347,9 @@ class Joiner:
         fork = self.worktrees.merge_base(lease, base, commit)
         return self.worktrees.authored_between(lease, fork, commit)
 
-    def record_join_progress(self, joined: list[str], commit: str) -> None:
+    def record_join_progress(
+        self, joined: list[str], commit: str, planned: int = 0
+    ) -> None:
         """Say where the join sequence got to, as each parent lands.
 
         Written after the parent is committed, so what it names is a tree
@@ -342,7 +362,9 @@ class Joiner:
         self.run.persist(
             state.model_copy(
                 update={
-                    "join_progress": JoinProgress(joined=list(joined), commit=commit)
+                    "join_progress": JoinProgress(
+                        joined=list(joined), commit=commit, planned=planned
+                    )
                 }
             )
         )
