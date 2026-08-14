@@ -247,7 +247,11 @@ ASSEMBLY_QUESTION_ID = "integration-assembly"
 
 
 def assembly_question(
-    verified: list[ConcernOutcome], excluded: list[ConcernOutcome], base: str
+    verified: list[ConcernOutcome],
+    excluded: list[ConcernOutcome],
+    base: str,
+    behind: int = 0,
+    branch: str = "",
 ) -> MaterialQuestion:
     """Build the gate on assembling the review branch itself.
 
@@ -262,18 +266,30 @@ def assembly_question(
     will be built on — so the prompt names all three instead of asking for a
     bare yes. A run parking here resumes at no cost, and the recorded answer
     is who decided to assemble that branch.
+
+    How far the base has fallen behind is the fourth. A run parks for hours
+    and its branch moves underneath; assembling onto a superseded base is
+    exactly the moment a human wants to know, and it said nothing. Reported
+    rather than acted on, because refreshing here would move every lease
+    under work already verified against where it stood.
     """
     merging = "\n".join(f"  merge {outcome.concern_id}" for outcome in verified)
     dropping = "\n".join(
         f"  exclude {outcome.concern_id}: {outcome.failure or 'not verified'}"
         for outcome in excluded
     )
+    stale = (
+        f"\n  this base is {behind} commit(s) behind {branch}; "
+        "`harness resolve refresh --apply` moves it before you approve"
+        if behind and branch
+        else ""
+    )
     return MaterialQuestion(
         id=ASSEMBLY_QUESTION_ID,
         concern_id="integration",
         prompt=(
             f"Assemble the review branch from {len(verified)} verified "
-            f"concern(s) onto {base[:12]}?\n{merging}"
+            f"concern(s) onto {base[:12]}?{stale}\n{merging}"
             + (f"\n{dropping}" if dropping else "")
         ),
         choices=[APPROVE, DEFER],
@@ -1237,7 +1253,14 @@ class ResolverCore:
         if not verified:
             return
         excluded = [outcome for outcome in outcomes if not outcome.verified]
-        question = assembly_question(verified, excluded, state.root_base().commit)
+        source = state.root_base()
+        question = assembly_question(
+            verified,
+            excluded,
+            source.commit,
+            self.worktrees.behind(source.commit, source.branch),
+            source.branch,
+        )
         self.questions.queue_questions([question], "integration")
         answers = await self.questions.await_questions([question])
         if any(answer.value == DEFER for answer in answers.answers):

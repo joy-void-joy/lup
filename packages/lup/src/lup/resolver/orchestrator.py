@@ -383,6 +383,24 @@ class WorktreeOrchestrator:
             == 0
         )
 
+    def behind(self, commit: str, branch: str) -> int:
+        """How many commits ``branch`` holds that ``commit`` does not.
+
+        Zero when the branch cannot be read, because this decorates a
+        question rather than deciding anything: a run whose remote is
+        unreachable still has an assembly to approve, and a count nobody
+        could take is not worth refusing over.
+        """
+        counted = self.launcher.launch(
+            LaunchRequest(
+                arguments=["git", "rev-list", "--count", f"{commit}..{branch}"],
+                cwd=self.workspace,
+            )
+        )
+        if counted.code != 0:
+            return 0
+        return int(counted.stdout.strip() or 0)
+
     def conflicted_names(self, lines: list[str]) -> list[Path]:
         """The paths a ``merge-tree`` refusal named, before its prose.
 
