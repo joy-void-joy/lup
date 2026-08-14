@@ -29,7 +29,7 @@ The run parks rather than guessing, so every material question is a decision tha
 
 **Relay the whole batch at once.** A run parks with all of its open questions together; asking them one at a time makes the human re-establish the same context for each.
 
-**End every report with `status --line`.** A run outlasts the attention of whoever started it, and a reader returning to a terminal sees how long your turn took, never when it ended — so two reports an hour apart and two a minute apart read identically. That one line carries the hour, the phase, and whether anything is held up, and nothing else: a count of what has already settled is progress, not attention, and putting it there buries the one field that changes. Do not restate the counts around it either — if a reader wants the breakdown they run `status` without the flag.
+**End every report with `status --line`.** A run outlasts the attention of whoever started it, and a reader returning to a terminal sees how long your turn took, never when it ended — so two reports an hour apart and two a minute apart read identically. That one line carries the hour, the phase, how far the run has got, what it has lost, and whether it is holding anybody up — and nothing else. A per-status breakdown is progress rather than attention: nobody acts on "9 retired", and putting all nine figures there buries the two that change. Do not restate the counts around it either; a reader who wants the breakdown runs `status` without the flag.
 
 ## Watching a run, and what silence means
 

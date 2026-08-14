@@ -17,7 +17,11 @@ import typer
 
 from lup.channels.models import local_stamp, utc_now
 from lup.resolver.journal import Journal
-from lup.resolver.models import ConcernRetirement, VerificationAcceptance
+from lup.resolver.models import (
+    ConcernRetirement,
+    ConcernStatus,
+    VerificationAcceptance,
+)
 from lup.resolver.state import ResolverStateRepository, StateTransitionError
 from lup.resolver.status import RunStatus, run_status
 from lup.resolver.mailbox import (
@@ -378,7 +382,28 @@ def show_status(
     watch_status(repository, run_id, heartbeat, poll, startup, status)
 
 
-def attention_line(status: RunStatus) -> str:
+SETTLED_STATUSES: tuple[ConcernStatus, ...] = (
+    ConcernStatus.VERIFIED,
+    ConcernStatus.INELIGIBLE,
+    ConcernStatus.RETIRED,
+    ConcernStatus.FAILED,
+    ConcernStatus.INTEGRATED,
+    ConcernStatus.CLEANED,
+    ConcernStatus.RETAINED,
+)
+"""Which statuses mean a concern is done being decided, however it ended.
+
+Ours to draw rather than the lifecycle's own, so a caller redraws it: a
+reader could reasonably count `integrating` as finished, and this does not.
+Naming the settled half rather than the working one makes an unlisted status
+read as still in flight, which is the safer way to be wrong — a new state
+counted as finished would inflate the fraction silently.
+"""
+
+
+def attention_line(
+    status: RunStatus, settled: tuple[ConcernStatus, ...] = SETTLED_STATUSES
+) -> str:
     """The one line worth interrupting somebody with, and nothing more.
 
     A breakdown of every status is progress rather than attention: nobody
@@ -389,15 +414,32 @@ def attention_line(status: RunStatus) -> str:
     half. A concern that failed days ago is not something to attend to now,
     and carrying its count displaced the one field that does change — so
     the line read as though a failure were happening while the run worked
-    quietly through it. What is left is only what a reader acts on: whether
-    the run holds anybody up, and whether anything is driving it at all.
+    quietly through it. What is left is how far along the run is, what it
+    has lost on the way, and whether it is holding anybody up.
+
+    The fraction counts every concern that reached a terminal state rather
+    than only the ones that produced work, so it can actually arrive at its
+    own total. Measured against the plan it would stop short by every
+    concern retired or found ineligible, and a progress figure that can
+    never complete teaches a reader to stop believing it.
     """
+    counts = {count.status: count.concerns for count in status.counts}
+    done = sum(counts[status_] for status_ in settled if status_ in counts)
+    total = sum(counts.values())
+    failed = counts[ConcernStatus.FAILED] if ConcernStatus.FAILED in counts else 0
     waiting = status.unanswered
     held = "running" if status.held else "stopped"
-    state = (
-        f"{waiting} question{'' if waiting == 1 else 's'} waiting" if waiting else held
+    return " · ".join(
+        [
+            local_stamp(),
+            str(status.phase),
+            f"{done}/{total} settled",
+            *([f"{failed} failed"] if failed else []),
+            f"{waiting} question{'' if waiting == 1 else 's'} waiting"
+            if waiting
+            else held,
+        ]
     )
-    return " · ".join([local_stamp(), str(status.phase), state])
 
 
 def report_status(status: RunStatus) -> None:

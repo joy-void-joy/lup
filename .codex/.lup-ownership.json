@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "4754ff83d71b2b92be2862c0bde39c7f732207039e8df5b3040a123ff27a1e09",
+  "source_digest": "497cf3688692a6bc8bae853807a83db2beff4994d650c94cc4bc08011f1cb8ed",
   "target_requirements": [
     "codex-cli>=0.144"
   ],
@@ -359,7 +359,7 @@
     {
       "path": ".codex/plugins/lup/skills/resolve/SKILL.md",
       "category": "generated",
-      "sha256": "13b1ec743ebc49812ac1414502ca8cb314877400baa30887a8ea5ad4acd8246e",
+      "sha256": "fe2f0f87c72e8fdb400535169b686618cae4fe7a9837aed1cc67fc9bb2636cd0",
       "semantic_id": "skill.resolve",
       "executable": false
     },

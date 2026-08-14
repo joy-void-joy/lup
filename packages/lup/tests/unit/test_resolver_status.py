@@ -169,29 +169,69 @@ def test_a_reading_is_dated_in_the_reader_s_own_zone() -> None:
     assert stamp == datetime.now().astimezone().strftime(LOCAL_STAMP_FORMAT)
 
 
-def test_the_attention_line_carries_only_what_a_reader_acts_on() -> None:
-    """A standing failure is not something to attend to, and displaced one.
+def test_the_attention_line_carries_progress_losses_and_who_is_held_up() -> None:
+    """Three facts and no fourth: how far, what was lost, who is waiting.
 
-    Carrying it put "1 failed" where the changing field goes, so a run
-    working quietly through a days-old failure read as though one were
-    happening. What is left is whether anybody is held up, and whether
-    anything is driving it.
+    A per-status breakdown is progress rather than attention — nobody acts
+    on "9 retired" — and finding what needs you among nine figures that do
+    not is the reading this replaces.
     """
     counts = [
         StatusCount(status=ConcernStatus.VERIFIED, concerns=21),
+        StatusCount(status=ConcernStatus.RETIRED, concerns=9),
+        StatusCount(status=ConcernStatus.INELIGIBLE, concerns=7),
         StatusCount(status=ConcernStatus.FAILED, concerns=1),
+        StatusCount(status=ConcernStatus.REVISING, concerns=1),
     ]
     working = RunStatus(
         run_id="r", exists=True, held=True, phase=ResolvePhase.WORKERS, counts=counts
     )
-    parked = working.model_copy(update={"held": False, "unanswered": 2})
-    dead = working.model_copy(update={"held": False})
 
-    assert attention_line(working).endswith("workers · running")
-    assert attention_line(parked).endswith("workers · 2 questions waiting")
-    assert attention_line(dead).endswith("workers · stopped")
-    assert "failed" not in attention_line(working)
-    assert "21" not in attention_line(working)
+    assert attention_line(working).endswith(
+        "workers · 38/39 settled · 1 failed · running"
+    )
+    assert attention_line(working.model_copy(update={"unanswered": 2})).endswith(
+        "38/39 settled · 1 failed · 2 questions waiting"
+    )
+    assert attention_line(working.model_copy(update={"held": False})).endswith(
+        "stopped"
+    )
+    assert "retired" not in attention_line(working)
+
+
+def test_a_run_that_lost_nothing_says_nothing_about_losses() -> None:
+    """The failure field is absent rather than zero, so its presence means it."""
+    clean = RunStatus(
+        run_id="r",
+        exists=True,
+        held=True,
+        phase=ResolvePhase.WORKERS,
+        counts=[StatusCount(status=ConcernStatus.VERIFIED, concerns=4)],
+    )
+
+    assert attention_line(clean).endswith("workers · 4/4 settled · running")
+
+
+def test_the_fraction_can_reach_its_own_total() -> None:
+    """Counting only what produced work leaves a bar that never completes.
+
+    Measured against the plan it stops short by every concern retired or
+    found ineligible, and a progress figure that cannot finish teaches a
+    reader to stop believing it.
+    """
+    ended = RunStatus(
+        run_id="r",
+        exists=True,
+        held=False,
+        phase=ResolvePhase.COMPLETE,
+        counts=[
+            StatusCount(status=ConcernStatus.VERIFIED, concerns=2),
+            StatusCount(status=ConcernStatus.RETIRED, concerns=1),
+            StatusCount(status=ConcernStatus.INELIGIBLE, concerns=1),
+        ],
+    )
+
+    assert "4/4 settled" in attention_line(ended)
 
 
 def test_a_caller_wanting_another_shape_passes_one() -> None:
