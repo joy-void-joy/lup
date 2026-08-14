@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "0b6a6d620f0b1e2af71536326e6b80c2798ca910c762fe571840951ffbf78661",
+  "source_digest": "9595492a9f869936bf9967a0161cca805b6a209c80d5a73888e2e2df85ec4e79",
   "target_requirements": [
     "claude-code"
   ],
@@ -198,7 +198,7 @@
     {
       "path": ".claude/plugins/lup/commands/land.md",
       "category": "generated",
-      "sha256": "dc424998010e9abc5e16afcef875fbac537720eedb7545ea17f20e78c93aa2b6",
+      "sha256": "e98fb4712801afcef530493078f6d313df3269b29bd7627495e225ddbbe29578",
       "semantic_id": "skill.land",
       "executable": false
     },
@@ -261,7 +261,7 @@
     {
       "path": ".claude/plugins/lup/commands/resolve.md",
       "category": "generated",
-      "sha256": "99cf3d15d9b878d4859bdcf4dcb338bc4f14d49a8c3c28949a17975a198738b7",
+      "sha256": "b833230f77732f45fe7c4f5769cd80ef071edfcfe5cd876ab3999fc65645975c",
       "semantic_id": "skill.resolve",
       "executable": false
     },
@@ -478,7 +478,7 @@
     {
       "path": "docs/platform-differentiation.md",
       "category": "generated",
-      "sha256": "47162b1b58943a00e8486b28ce0f24bf5e4566132afecf885060fd8264da830d",
+      "sha256": "53b3124f6961a4f2937d9494b6660c280abf2cba1459c4146d9db4a78892ca67",
       "semantic_id": "docs.platform-differentiation",
       "executable": false
     },
@@ -492,7 +492,7 @@
     {
       "path": "docs/resolver.md",
       "category": "generated",
-      "sha256": "fed071af0515deb03e93ec9099da4e174d80527cee8d0b06c887131023fefe85",
+      "sha256": "cb32cfcb0caadd50fbc4be2c79c51a661fbb443fe332283c6d935db041423ad7",
       "semantic_id": "docs.resolver",
       "executable": false
     },
@@ -506,7 +506,7 @@
     {
       "path": "docs/supervisor.md",
       "category": "generated",
-      "sha256": "cc1ac3435603eed21df0640938d5b4d85db3e61c39b8ce0af4384b1d5fc210c1",
+      "sha256": "084bdd4c3f74375c3ce00b136293bd2e3c7a1a0c6a1e91bd8de91050ed25c0e5",
       "semantic_id": "docs.supervisor",
       "executable": false
     },

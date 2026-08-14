@@ -40,8 +40,8 @@ mistyped free-text value correctable until it counts.
 
 | Door | How |
 | --- | --- |
-| the page | answer form, *Park run*, accept/reject |
-| a rerun | `--answer <question-id>=<value>`, `--accept`/`--reject` |
+| the page | answer form, *Park run* |
+| a rerun | `--answer <question-id>=<value>` |
 | another shell | `harness resolve answer --run-id <id> q=value`, `harness resolve questions`, `harness resolve park` |
 | a worker | its own `queue_questions` / `await_answers` tools |
 
@@ -49,9 +49,9 @@ Partial answers are legal. A question is answered by whoever knows that
 decision, whenever they know it, so answering one of six open questions is
 the normal case rather than a validation error.
 
-Acceptance is not special: it is the reserved `integration-acceptance`
-question with choices `accept` and `reject`, so `--accept` and the page's
-button write the same offer through the same path.
+Assembling the review branch is not special: it is the reserved
+`integration-assembly` question with choices `approve` and `defer`, so every
+door records that decision the way it records any other answer.
 
 **Park is the clean abort.** *Park run* writes `park.request`, which ends
 every open wait in that run and lands on exactly the headless park state,
