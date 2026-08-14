@@ -105,7 +105,7 @@ def utc_now() -> datetime:
     return datetime.now(UTC)
 
 
-LOCAL_STAMP_FORMAT = "%a %H:%M %Z"
+LOCAL_STAMP_FORMAT = "%H:%M"
 """How a reported time reads to whoever is deciding whether to come back."""
 
 
@@ -116,7 +116,5 @@ def local_stamp(fmt: str = LOCAL_STAMP_FORMAT) -> str:
     deciding how stale a report is compares it against their own clock, and
     was given a relative age from the run's point of view instead — which
     says how long a worker has been quiet, never how long ago they were told.
-    The weekday carries because these runs span days and a bare clock time
-    reads as today.
     """
     return datetime.now().astimezone().strftime(fmt)

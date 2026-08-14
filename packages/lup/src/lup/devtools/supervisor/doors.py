@@ -347,6 +347,13 @@ def show_status(
         help="Seconds a watch allows a just-launched run to take its lock "
         "before an unheld run reads as parked rather than as starting",
     ),
+    line: bool = typer.Option(
+        False,
+        "--line",
+        help="One line carrying only what needs you — the time, the phase, "
+        "and a question waiting, a stop, or a failure. Nothing when there "
+        "is nothing to act on but that it is running",
+    ),
 ) -> None:
     """Say whether a run is alive, where it stands, and what it last did.
 
@@ -362,10 +369,35 @@ def show_status(
     status = run_status(repository, run_id)
     if not status.exists:
         raise typer.BadParameter(f"no resolver run {run_id!r} under {root}")
+    if line:
+        typer.echo(attention_line(status))
+        return
     report_status(status)
     if not watch:
         return
     watch_status(repository, run_id, heartbeat, poll, startup, status)
+
+
+def attention_line(status: RunStatus) -> str:
+    """The one line worth interrupting somebody with, and nothing more.
+
+    A breakdown of every status is progress rather than attention: nobody
+    acts on "9 retired", and a reader scanning for what needs them has to
+    find it among nine figures that do not.
+
+    Standing facts are left out for the same reason, which is the sharper
+    half. A concern that failed days ago is not something to attend to now,
+    and carrying its count displaced the one field that does change — so
+    the line read as though a failure were happening while the run worked
+    quietly through it. What is left is only what a reader acts on: whether
+    the run holds anybody up, and whether anything is driving it at all.
+    """
+    waiting = status.unanswered
+    held = "running" if status.held else "stopped"
+    state = (
+        f"{waiting} question{'' if waiting == 1 else 's'} waiting" if waiting else held
+    )
+    return " · ".join([local_stamp(), str(status.phase), state])
 
 
 def report_status(status: RunStatus) -> None:

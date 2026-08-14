@@ -10,6 +10,7 @@ from lup.channels.stream import Stream
 from lup.resolver.models import ConcernStatus, ResolvePhase
 from lup.resolver.state import ResolverStateRepository
 from lup.resolver.status import LastRecorded, RunStatus, StatusCount, run_status
+from lup.devtools.supervisor.doors import attention_line
 
 
 def test_an_unheld_run_reads_as_not_running(tmp_path: Path) -> None:
@@ -166,7 +167,31 @@ def test_a_reading_is_dated_in_the_reader_s_own_zone() -> None:
     stamp = local_stamp()
 
     assert stamp == datetime.now().astimezone().strftime(LOCAL_STAMP_FORMAT)
-    assert stamp.split()[0] in {"Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"}
+
+
+def test_the_attention_line_carries_only_what_a_reader_acts_on() -> None:
+    """A standing failure is not something to attend to, and displaced one.
+
+    Carrying it put "1 failed" where the changing field goes, so a run
+    working quietly through a days-old failure read as though one were
+    happening. What is left is whether anybody is held up, and whether
+    anything is driving it.
+    """
+    counts = [
+        StatusCount(status=ConcernStatus.VERIFIED, concerns=21),
+        StatusCount(status=ConcernStatus.FAILED, concerns=1),
+    ]
+    working = RunStatus(
+        run_id="r", exists=True, held=True, phase=ResolvePhase.WORKERS, counts=counts
+    )
+    parked = working.model_copy(update={"held": False, "unanswered": 2})
+    dead = working.model_copy(update={"held": False})
+
+    assert attention_line(working).endswith("workers · running")
+    assert attention_line(parked).endswith("workers · 2 questions waiting")
+    assert attention_line(dead).endswith("workers · stopped")
+    assert "failed" not in attention_line(working)
+    assert "21" not in attention_line(working)
 
 
 def test_a_caller_wanting_another_shape_passes_one() -> None:

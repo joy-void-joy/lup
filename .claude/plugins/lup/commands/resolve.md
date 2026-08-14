@@ -18,7 +18,7 @@ The run parks rather than guessing, so every material question is a decision tha
 
 **Relay the whole batch at once.** A run parks with all of its open questions together; asking them one at a time makes the human re-establish the same context for each.
 
-**End every report with the hour it was written.** A run outlasts the attention of whoever started it, and a reader returning to a terminal sees how long your turn took, never when it ended — so two reports an hour apart and two a minute apart read identically. `status`, the watch heartbeat, and every report that stops a run each open with a local stamp; close what you write with the same one, so a reader can date it and measure the gap themselves without asking you.
+**End every report with `status --line`.** A run outlasts the attention of whoever started it, and a reader returning to a terminal sees how long your turn took, never when it ended — so two reports an hour apart and two a minute apart read identically. That one line carries the hour, the phase, and whether anything is held up, and nothing else: a count of what has already settled is progress, not attention, and putting it there buries the one field that changes. Do not restate the counts around it either — if a reader wants the breakdown they run `status` without the flag.
 
 ## Watching a run, and what silence means
 
