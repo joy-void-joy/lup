@@ -104,6 +104,26 @@ def escalation_offer(sandbox: SandboxPlacement, reason: str) -> str:
     return reason if sandbox == "escalable" else ""
 
 
+def sandbox_escaped(sandbox: SandboxPlacement, agent_escaped: bool) -> bool:
+    """Whether a placed call runs outside, given what the call already asked.
+
+    ``outside`` leaves because the verdict says so and ``inside`` stays
+    whatever the call said, so only ``escalable`` reads the second argument:
+    the permission is the agent's to spend, so a call that spent it goes out
+    and one that did not stays confined. Answering a plain ``False`` there
+    would answer for the agent and make the offer a verdict it has no way to
+    accept — granted on the permission channel and revoked on the rewrite.
+
+    Which field of a call carries the escape is one runtime's own spelling,
+    so this takes the answer rather than the call and stays as neutral as the
+    kernel around it. One function because two boundaries render the rewrite —
+    the in-process seam and the compiled dispatcher — and a condition spelled
+    out at each is one that can be spelled differently at each, which is how
+    the offer came to be honoured on one path and stripped on the other.
+    """
+    return sandbox == "outside" or (sandbox == "escalable" and agent_escaped)
+
+
 KERNEL_IMPORT_ALLOWLIST = (  # lup: ignore[library-default] — the stdlib the kernel actually imports; the hermetic guarantee it exists to hold
     "ast",
     "collections.abc",

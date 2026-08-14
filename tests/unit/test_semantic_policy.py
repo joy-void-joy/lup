@@ -53,6 +53,7 @@ from lup.policy.kernel.decision import (
     SANDBOX_ESCALATION_UNSUPPORTED,
     SANDBOX_TRAPPED_REASON,
     SandboxPlacement,
+    sandbox_escaped,
 )
 from lup.policy.kernel.edit import decide_edit
 from lup.policy.kernel.rows import PathRoleRow
@@ -1314,6 +1315,20 @@ def test_a_permission_to_escalate_turns_on_the_agent_and_not_on_the_channel() ->
     assert (degraded.sandbox, degraded.effect) == ("inside", "allow")
     assert degraded.reason == "fine" + SANDBOX_ESCALATION_UNSUPPORTED
     assert CodexDecisionRenderer(supports_ask=False).render(offered).exit_code == 0
+
+
+def test_only_an_escalable_placement_reads_what_the_call_already_asked() -> None:
+    """Which placements leave is one answer, so two renderers cannot differ.
+
+    ``outside`` leaves and ``inside`` stays whatever the call said, because
+    those are the verdict's to decide. Only ``escalable`` reads the second
+    argument, which is what makes it a permission the agent spends rather
+    than a placement done to it.
+    """
+    for spent in (True, False):
+        assert sandbox_escaped("outside", spent) is True
+        assert sandbox_escaped("inside", spent) is False
+        assert sandbox_escaped("escalable", spent) is spent
 
 
 def test_fetch_policy_normalizes_origin_and_rejects_lookalikes() -> None:

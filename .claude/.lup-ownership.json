@@ -317,7 +317,7 @@
     {
       "path": ".claude/plugins/lup/hooks/runtime/kernel/decision.py",
       "category": "generated",
-      "sha256": "4186cfa5e1447d779fe28ea0da19447f897e868a917610277eafb33e791a8512",
+      "sha256": "34097a802c17972ec575d2fcfe0348f16230ecb11a68e8d50d71bb45f3d6ee56",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -380,7 +380,7 @@
     {
       "path": ".claude/plugins/lup/hooks/scripts/policy.py",
       "category": "generated",
-      "sha256": "361603b9dadecd1c4a020f5bad109d53f6b5cc178a165eaaf60f54d20771253f",
+      "sha256": "29946894c37b5dc8f5bc96cbfd2cc7462e223f13cc6792ffff7109be5441b612",
       "semantic_id": "hooks.lup-policy",
       "executable": true
     },

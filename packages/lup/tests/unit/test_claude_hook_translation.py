@@ -236,6 +236,38 @@ def test_rewrite_carries_corrected_arguments_without_granting_the_call() -> None
     }
 
 
+def test_an_offered_escalation_keeps_both_the_placement_and_the_offer() -> None:
+    """The one verdict that fills both channels must not lose either.
+
+    An escalable grant is placed — so it carries a rewrite — and speaks to
+    the agent — so it carries context. Those are separate arms, and an arm
+    ordered on the context alone answers first for a verdict that has both,
+    dropping the rewrite that is the placement's only channel. The offer
+    would then be granted in words and unspendable in arguments.
+    """
+    placed: JsonObject = {
+        "command": "toolchain --run",
+        "dangerouslyDisableSandbox": True,
+    }
+
+    offered = lup_hook_output_to_claude(
+        LupHookOutput(
+            decision="allow", sandbox="escalable", additional_context="may leave"
+        ),
+        event="PreToolUse",
+        placed_input=placed,
+    )
+
+    assert offered == {
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "allow",
+            "updatedInput": placed,
+            "additionalContext": "may leave",
+        }
+    }
+
+
 def test_refusal_outranks_a_rewrite_riding_along_with_it() -> None:
     refused = lup_hook_output_to_claude(
         LupHookOutput(

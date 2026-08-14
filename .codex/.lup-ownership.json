@@ -100,7 +100,7 @@
     {
       "path": ".codex/plugins/lup/hooks/runtime/kernel/decision.py",
       "category": "generated",
-      "sha256": "4186cfa5e1447d779fe28ea0da19447f897e868a917610277eafb33e791a8512",
+      "sha256": "34097a802c17972ec575d2fcfe0348f16230ecb11a68e8d50d71bb45f3d6ee56",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },

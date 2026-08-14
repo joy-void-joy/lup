@@ -25,7 +25,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parents[1] / "runtime"))
 from decisions import bash_decision, edit_decision, fetch_decision
 from host import declared_identity, read_document, sandbox_active
-from kernel.decision import KernelDecision, escalation_offer
+from kernel.decision import KernelDecision, escalation_offer, sandbox_escaped
 from policy_data import AGENT_IDENTITY_ENV, AUTONOMOUS_AGENT_IDENTITIES
 
 
@@ -63,6 +63,19 @@ def edit_documents(path, old_text, new_text, replace_all):
     return current, updated
 
 
+def spent_escape(tool_input):
+    """Whether the call as written already asked to run outside the sandbox.
+
+    Claude Code's own spelling of the escape, read here rather than compared
+    against in two places: what it means is the kernel's `sandbox_escaped`,
+    which both this boundary and the in-process seam ask.
+    """
+    return (
+        "dangerouslyDisableSandbox" in tool_input
+        and tool_input["dangerouslyDisableSandbox"] is True
+    )
+
+
 def dispatch(payload):
     name = payload["tool_name"]
     tool_input = payload["tool_input"]
@@ -72,10 +85,7 @@ def dispatch(payload):
         or declared_identity(AGENT_IDENTITY_ENV) in AUTONOMOUS_AGENT_IDENTITIES
     )
     if name == "Bash":
-        unsandboxed = (
-            "dangerouslyDisableSandbox" in tool_input
-            and tool_input["dangerouslyDisableSandbox"] is True
-        )
+        unsandboxed = spent_escape(tool_input)
         return bash_decision(
             tool_input["command"],
             managed_root(),
@@ -135,11 +145,12 @@ def rendered(decision, payload):
     Both sandbox questions are answered yes here, from that one field: the
     rewrite is how a verdict places a call, and the same field on the call the
     agent writes is how the agent places its own — which is what an
-    ``escalable`` verdict offers it. That offer goes out as context as well as
-    on the permission channel, and `escalation_offer` is what decides so —
-    the same answer `lup_hook_output_to_claude` renders from for the
-    in-process seam, because one field two boundaries fill from two
-    conditions is a field they can fill differently.
+    ``escalable`` verdict offers it. Both halves of that offer are decided in
+    the kernel rather than spelled here: `escalation_offer` says whether it is
+    extended, and `sandbox_escaped` whether a call that spent it still leaves.
+    The in-process seam asks the same two, because one field two boundaries
+    fill from two conditions is a field they can fill differently — which is
+    how the rewrite once revoked an offer the permission channel had granted.
     """
     settled = decision.placed(escapable=True, agent_escalates=True)
     if settled.effect == "defer":
@@ -159,7 +170,9 @@ def rendered(decision, payload):
             **answer,
             "updatedInput": {
                 **payload["tool_input"],
-                "dangerouslyDisableSandbox": settled.sandbox == "outside",
+                "dangerouslyDisableSandbox": sandbox_escaped(
+                    settled.sandbox, spent_escape(payload["tool_input"])
+                ),
             },
         }
     }

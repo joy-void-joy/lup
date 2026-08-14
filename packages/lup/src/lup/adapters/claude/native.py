@@ -24,7 +24,11 @@ from lup.policy.models import (
     ToolIdentity,
     UnknownTool,
 )
-from lup.policy.kernel.decision import SandboxPlacement, escalation_offer
+from lup.policy.kernel.decision import (
+    SandboxPlacement,
+    escalation_offer,
+    sandbox_escaped,
+)
 from lup.policy.native import NativeDecisionRenderer, NativeEventDecoder
 from lup.types import JsonObject
 
@@ -193,21 +197,19 @@ def claude_sandbox_input(
     into them, which is why the whole input is carried through; an unplaced
     verdict rewrites nothing at all.
 
-    An escalable placement is the one that reads the call's own flag rather
-    than overwriting it. The permission is the agent's to spend, so a call
-    that spent it goes out and one that did not stays confined — writing a
-    plain ``False`` there would answer for the agent and make the offer a
-    verdict it has no way to accept.
+    Which placements leave is :func:`~lup.policy.kernel.decision.sandbox_escaped`
+    and not this function, because the compiled dispatcher renders the same
+    rewrite and cannot import this one. What stays here is the field name,
+    which is Claude Code's own and reaches no other runtime.
     """
     if tool_input is None or sandbox == "ambient":
         return None
-    match sandbox, tool_input:
-        case "escalable", {"dangerouslyDisableSandbox": True}:
-            escaped = True
-        case "escalable", _:
-            escaped = False
+    match tool_input:
+        case {"dangerouslyDisableSandbox": True}:
+            spent = True
         case _:
-            escaped = sandbox == "outside"
+            spent = False
+    escaped = sandbox_escaped(sandbox, spent)
     return {**tool_input, "dangerouslyDisableSandbox": escaped}
 
 
