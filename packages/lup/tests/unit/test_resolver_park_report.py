@@ -2,7 +2,7 @@
 
 import pytest
 
-from lup.devtools.harness.resolve import report_awaiting
+from lup.devtools.harness.resolve import host_retry_delay, report_awaiting
 from lup.devtools.supervisor.projection import PendingQuestionView
 from lup.resolver.contracts import ResolverAwaitingAnswers
 from lup.resolver.models import MaterialQuestion
@@ -103,3 +103,17 @@ def test_a_park_with_nothing_answered_yet_relays_everything(
     assert "question second" in printed
     assert "were answered while it ran" not in printed
     assert "Relay the questions to the human" in printed
+
+
+def test_coming_back_to_a_refusing_host_backs_off_into_a_ceiling() -> None:
+    """Doubling reaches an allowance's reset without probing it every minute."""
+    schedule = [host_retry_delay(attempt, 20, 60.0) for attempt in range(6)]
+
+    assert schedule == [60.0, 120.0, 240.0, 480.0, 960.0, 1800.0]
+    assert host_retry_delay(19, 20, 60.0) == 1800.0
+
+
+def test_a_run_out_of_retries_stops_asking() -> None:
+    """None is what parks the run, so the budget has to be reachable."""
+    assert host_retry_delay(20, 20, 60.0) is None
+    assert host_retry_delay(0, 0, 60.0) is None

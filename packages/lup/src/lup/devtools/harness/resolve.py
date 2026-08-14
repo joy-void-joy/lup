@@ -525,6 +525,33 @@ def report_awaiting(
     typer.echo(f"  {rerun_recipe(adapter, run_id, outstanding)}")
 
 
+HOST_RETRIES: int = 20
+"""How many times to come back to a host that refused, before giving up."""
+
+HOST_BACKOFF_SECONDS: float = 60.0
+"""The first wait after a host refuses; each later one doubles into the ceiling."""
+
+HOST_RETRY_CEILING_SECONDS: float = 1800.0
+"""The longest gap between probes, once doubling has grown past it."""
+
+
+def host_retry_delay(
+    attempt: int,
+    retries: int = HOST_RETRIES,
+    backoff: float = HOST_BACKOFF_SECONDS,
+    ceiling: float = HOST_RETRY_CEILING_SECONDS,
+) -> float | None:
+    """How long to wait before trying the host again, or None to stop trying.
+
+    Doubling rather than reading the reset time the message quotes: the
+    time is prose in a provider's sentence, and a probe that is early costs
+    one failed session while a parse that is wrong costs the whole wait.
+    """
+    if attempt >= retries:
+        return None
+    return min(backoff * 2.0**attempt, ceiling)
+
+
 def report_environment_fault(
     fault: ResolverEnvironmentFault, adapter: str, run_id: str
 ) -> None:
@@ -540,10 +567,21 @@ def report_environment_fault(
     if fault.concerns:
         typer.echo(f"  interrupted: {', '.join(fault.concerns)}")
     typer.echo("No concern was failed and no outcome was recorded.")
+    typer.echo(
+        "It came back for this one until its retries ran out, so the host is "
+        "either still refusing or wants a person."
+    )
     typer.echo("Fix the host, then continue with:")
     typer.echo(
         f"  uv run lup-devtools harness resolve --adapter {adapter} "
         f"--run-id {run_id} --adopt-config"
+    )
+    # Naming what resuming already does, because the fix that unblocks a run
+    # lands while it is stopped, and a reader who does not know the base comes
+    # forward on its own reaches for `refresh` or resumes onto a stale tree.
+    typer.echo(
+        "That takes whatever landed on the branch meanwhile. Leases already "
+        "holding work stay put; `harness resolve refresh --apply` moves those."
     )
 
 
@@ -946,6 +984,8 @@ def run_resolve(
     model: ConfiguredModel | None = None,
     adopt_config: bool = False,
     take_issues: bool = True,
+    host_retries: int = HOST_RETRIES,
+    host_backoff: float = HOST_BACKOFF_SECONDS,
 ) -> None:
     """Drive the shared persisted resolver through one explicit native adapter."""
     provided = parse_answer_flags(answers)
@@ -980,6 +1020,7 @@ def run_resolve(
             ClaudeSessionConfig,
             create_claude_session_factory,
             environmental_fault,
+            needs_a_person,
         )
         from lup.adapters.codex.runtime import (
             CodexMcpServerConfig,
@@ -1429,9 +1470,6 @@ def run_resolve(
                             issues=open_issues,
                         )
                     )
-            except ResolverEnvironmentFault as fault:
-                report_environment_fault(fault, adapter, resolved_run_id)
-                raise typer.Exit(code=75)
             except ResolverDrained as drained:
                 # Exit zero: an operator asked for this and got it, which is
                 # the command succeeding rather than the run failing.
@@ -1461,9 +1499,41 @@ def run_resolve(
                 typer.echo(f"commented on #{number}")
             typer.echo(manifest.model_dump_json(indent=2))
 
+        async def drive_through_host_faults() -> None:
+            """Come back to a refusing host until it answers, as a human would.
+
+            Parking on an exhausted allowance is correct and costs nothing —
+            no concern fails and no outcome is recorded — but somebody has to
+            notice, and one run was stopped this way about twenty times over
+            several days, each time waiting on a person rather than on the
+            allowance. The waiting is the part a person adds nothing to.
+
+            A fault only a person can clear still parks immediately: a revoked
+            credential does not heal, so probing one is just a slower way to
+            hand it back.
+            """
+            for attempt in range(host_retries + 1):
+                try:
+                    await drive()
+                    return
+                except ResolverEnvironmentFault as fault:
+                    delay = (
+                        None
+                        if needs_a_person(fault.cause)
+                        else host_retry_delay(attempt, host_retries, host_backoff)
+                    )
+                    if delay is None:
+                        report_environment_fault(fault, adapter, resolved_run_id)
+                        raise typer.Exit(code=75) from fault
+                    typer.echo(
+                        f"[resolve] the host refused ({fault.cause}); "
+                        f"coming back in {delay / 60:.0f} min"
+                    )
+                    await asyncio.sleep(delay)
+
         async with spawned_supervisor(
             supervisor or SupervisorSpawn(), resolved_run_id, adapter
         ):
-            await drive()
+            await drive_through_host_faults()
 
     asyncio.run(execute())

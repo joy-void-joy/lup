@@ -254,6 +254,25 @@ def create_harness_app(
                 help="Leave the supervisor page running after the run exits",
             ),
         ] = False,
+        host_retries: Annotated[
+            int,
+            typer.Option(
+                "--host-retries",
+                help="How many times to come back to a host that refused — an "
+                "exhausted allowance, a rate limit, an unreachable upstream — "
+                "before parking the run for a human. Zero parks on the first "
+                "refusal. A fault only a person can clear, such as a revoked "
+                "credential, parks however this is set.",
+            ),
+        ] = resolve.HOST_RETRIES,
+        host_backoff: Annotated[
+            float,
+            typer.Option(
+                "--host-backoff",
+                help="Seconds to wait after the first refusal; each later wait "
+                "doubles, up to half an hour between probes.",
+            ),
+        ] = resolve.HOST_BACKOFF_SECONDS,
         detach: Annotated[
             bool,
             typer.Option(
@@ -297,6 +316,8 @@ def create_harness_app(
             model,
             adopt_config,
             issues,
+            host_retries,
+            host_backoff,
         )
 
     claude_target = targets.builder("claude")
