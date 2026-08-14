@@ -1153,6 +1153,42 @@ def test_interrupted_exact_write_can_reacquire_prior_ownership(tmp_path: Path) -
     assert proposal.writes == []
 
 
+def test_an_owned_path_the_generator_disagrees_with_is_regenerated(
+    tmp_path: Path,
+) -> None:
+    current = CurrentTree(
+        root=tmp_path,
+        artifacts=[
+            CurrentArtifact(
+                path=Path("owned.txt"),
+                content="what a merge left behind\n",
+                category="backpropagation_candidate",
+                sha256=content_digest("what a merge left behind\n"),
+            )
+        ],
+    )
+    desired = ArtifactTree(
+        artifacts=[
+            Artifact(
+                path=Path("owned.txt"),
+                content="what the generator wants\n",
+                semantic_id="owned",
+            )
+        ]
+    )
+
+    proposal = DeterministicReconciler().propose(current, desired)
+
+    # A resolver join merges both plugin trees and their ownership proof, so
+    # the recorded digest ends up describing neither parent. Read as an edit
+    # nobody made, that refused generation outright and left no recovery a
+    # worker could reach.
+    assert proposal.conflicts == []
+    assert [write.artifact.path.as_posix() for write in proposal.writes] == [
+        "owned.txt"
+    ]
+
+
 def test_native_override_does_not_silently_reown_backpropagation(
     tmp_path: Path,
 ) -> None:
