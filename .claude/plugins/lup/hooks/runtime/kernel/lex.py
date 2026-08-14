@@ -619,6 +619,24 @@ def parse_shell_words(
 
     segments: list[list[str]] = []
     current: list[str] = []
+    # A substitution's own command, held until the segment being built closes.
+    # Spliced the moment it is read, it lands ahead of the words around it —
+    # between a `for` header and its `do`, where the loop reader takes it for
+    # a condition and refuses a construct that parsed fine. It cannot simply
+    # flush the partial segment either: the tokenizer leaves a sentinel in the
+    # word where the substitution stood, and cutting the segment there strands
+    # that sentinel as a command of its own.
+    pending: list[list[str]] = []
+
+    def close_segment() -> None:
+        """End the segment being built, then place what it substituted."""
+        nonlocal current
+        if current:
+            segments.append(current)
+            current = []
+        segments.extend(pending)
+        pending.clear()
+
     index = 0
     while index < len(tokens):
         token = tokens[index]
@@ -654,9 +672,7 @@ def parse_shell_words(
         ):
             return unjudged("shell function definitions are not classified")
         if token.kind == "op" and token.text in SENTINEL_OPS:
-            if current:
-                segments.append(current)
-                current = []
+            close_segment()
             segments.append([token.text])
             index += 1
             continue
@@ -673,7 +689,7 @@ def parse_shell_words(
             )
             if isinstance(inner, KernelDecision):
                 return inner
-            segments.extend(inner)
+            pending.extend(inner)
             current.append("/dev/fd/63")
             index += 1
             continue
@@ -681,13 +697,11 @@ def parse_shell_words(
             spliced = substituted_segments(token.text)
             if isinstance(spliced, KernelDecision):
                 return spliced
-            segments.extend(spliced)
+            pending.extend(spliced)
             index += 1
             continue
         if is_control_operator(token.text):
-            if current:
-                segments.append(current)
-                current = []
+            close_segment()
             index += 1
             continue
         redirection = resolve_redirection(
@@ -697,8 +711,7 @@ def parse_shell_words(
         verdict = redirection["decision"]
         if verdict is not None:
             return verdict
-    if current:
-        segments.append(current)
+    close_segment()
     if not segments:
         return unjudged("shell command has no executable segment")
     return segments

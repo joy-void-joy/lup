@@ -357,6 +357,13 @@ SHELL_POLICY_CASES = [
         input='for a in x y; do for b in z; do echo "$a$b"; done; done',
         effect="allow",
     ),
+    # A substitution inside a loop body. Spliced where it was read, it landed
+    # between the `for` header and its `do`, so the loop reader took it for a
+    # condition — which a `for` loop cannot have — and refused the construct
+    # while reporting that it did not parse. Running one read-only command per
+    # branch is the commonest shape in this work, and all of it was blocked.
+    DecisionCase(input="for b in x y; do echo $(git log -1 $b); done", effect="allow"),
+    DecisionCase(input="for f in a b; do diff <(cat $f) base; done", effect="allow"),
     DecisionCase(input="for x in -i; do sed \"$x\" 's/a/b/' f; done", effect="deny"),
     DecisionCase(input='for f in *.txt; do sort "$f"; done', effect="deny"),
     DecisionCase(input='for f in a; do python "$f"; done', effect="deny"),

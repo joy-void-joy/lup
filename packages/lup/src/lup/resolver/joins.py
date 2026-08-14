@@ -9,25 +9,33 @@ What makes it one thing rather than a git call is everything that hangs off
 a join. Parents are ordered so contested work meets while a merger is on it;
 a conflict or a dropped hunk is put to that merger and held to what it
 declares; the tree is verified after every parent rather than once at the
-end, so a red result names the join that caused it; and a criterion an
-earlier concern had met is re-checked whenever a later parent touches the
-same files. A criterion that stops holding opens a question rather than
-failing the run, because later work can legitimately supersede an earlier
-one and only a human can say whether this did.
+end, so a red result names the join that caused it; and every concern is
+re-checked against the finished tree. A criterion that stops holding opens
+a question rather than failing the run, because later work can legitimately
+supersede an earlier one and only a human can say whether this did.
+
+The same re-check can also run after each join, against the concerns that
+join touched, which names the merge responsible instead of leaving the
+finding to be attributed among every parent. That is what it buys, and it
+costs a reviewer turn per overlapping pair, so it is asked for rather than
+assumed.
 """
 
 from collections.abc import AsyncIterator
 from pathlib import Path
 
+from lup.resolver.contracts import ResolverDrained
 from lup.resolver.dag import ConcernGraph
 from lup.resolver.journal import (
     JoinAuditEvent,
     JoinCompletedEvent,
+    JoinPlannedEvent,
     Journal,
     RecheckRepeatedEvent,
 )
 from lup.resolver.models import (
     ActorRef,
+    CarriedParent,
     Concern,
     DropCandidate,
     IntegrationRecord,
@@ -131,6 +139,7 @@ class Joiner:
         verifier: Verifier,
         worktrees: WorktreeOrchestrator,
         journal: Journal,
+        standing_rechecks: bool = False,
     ) -> None:
         self.run = run
         self.runner = runner
@@ -138,6 +147,7 @@ class Joiner:
         self.verifier = verifier
         self.worktrees = worktrees
         self.journal = journal
+        self.standing_rechecks = standing_rechecks
 
     async def join_commits(
         self,
@@ -149,9 +159,16 @@ class Joiner:
         """Join parents one at a time, spending a turn only where one is owed.
 
         Every join is pairwise because git cannot merge N branches at once
-        when it matters — octopus refuses on conflict — so the boundary that
-        moves is the session rather than the sequence. One merger sees every
-        parent, and by parent six it has genuinely seen one through five.
+        when it matters — octopus refuses outright on conflict rather than
+        leaving an index to resolve, and 9 of 12 parents measured against one
+        run's part-built tree conflicted — so the boundary that moves is the
+        session rather than the sequence. One merger sees every parent, and
+        by parent six it has genuinely seen one through five.
+
+        Only the parents no other parent contains are merged. The rest are in
+        the tree the moment their container lands, so merging them separately
+        buys a verification and can buy a turn spent concluding that nothing
+        happened.
         """
         if len(commits) < 2:
             raise ValueError("a semantic join requires at least two commits")
@@ -160,7 +177,12 @@ class Joiner:
         base = self.worktrees.head(lease)
         current = base
         joined: list[str] = []  # lup: ignore[empty-collection] — audit input
-        for parent in self.join_order(lease, base, commits[1:]):
+        ordered = self.join_order(lease, base, commits[1:])
+        carried = self.carried_parents(lease, ordered)
+        riding = {item.commit: item.inside for item in carried}
+        tips = [parent for parent in ordered if parent not in riding]
+        self.journal.record(JoinPlannedEvent(tips=tips, carried=carried))
+        for parent in tips:
             # The loop carries no resumption point, so a resumed join re-enters
             # at the first parent. One already contained in HEAD has nothing to
             # merge, and a merge turn spent on it is not free: the session
@@ -210,9 +232,21 @@ class Joiner:
                     broke=failed,
                 )
             )
-            await self.recheck_standing(lease, base, joined[:-1], parent)
+            if self.standing_rechecks:
+                await self.recheck_standing(lease, base, joined[:-1], parent)
             self.record_join_progress(joined, current)
-        await self.audit_join(lease, base, joined, current, purpose)
+            # After the progress file names a tree that exists, for the same
+            # reason the worker round checks before its turn: this is where
+            # stopping costs nothing. Integration is the longest phase and
+            # held no such boundary, so a drain issued during it was never
+            # observed and `kill` was the only lever left.
+            drain = self.questions.draining()
+            if drain is not None:
+                raise ResolverDrained(drain.reason, [])
+        # A parent that rode inside another was never merged on its own, but
+        # its content is in the tree and is exactly as capable of having been
+        # dropped there, so the final audit answers for it too.
+        await self.audit_join(lease, base, [*joined, *riding], current, purpose)
         return current
 
     def join_order(
@@ -228,10 +262,7 @@ class Joiner:
         contested join lands next to the work it contests.
         """
         touched = {
-            parent: {
-                path.as_posix()
-                for path in self.worktrees.authored_between(lease, base, parent)
-            }
+            parent: {path.as_posix() for path in self.authored_by(lease, base, parent)}
             for parent in parents
         }
         ranked = sorted(
@@ -247,6 +278,56 @@ class Joiner:
             ),
         )
         return ranked
+
+    def carried_parents(
+        self, lease: WritableRootLease, parents: list[str]
+    ) -> list[CarriedParent]:
+        """Every parent another parent already contains, and which one does.
+
+        Concerns are cut from their dependencies' commits, so the branches
+        stack rather than fanning out from the base. A parent inside another
+        is in the tree the moment that one lands, and merging it separately
+        buys nothing: a verification, and a merger turn where the session
+        cannot tell "already joined" from "something upstream is wrong". In
+        one measured run, 8 of 21 parents were inside a sibling, and two of
+        the three joins spent before it was stopped were on such a parent —
+        one of them contained in five different siblings.
+        """
+
+        def container_of(parent: str) -> str | None:
+            """The first other parent holding this one, of however many do."""
+            return next(
+                (
+                    other
+                    for other in parents
+                    if other != parent
+                    and self.worktrees.contained_in(lease, parent, other)
+                ),
+                None,
+            )
+
+        return [
+            CarriedParent(commit=parent, inside=container)
+            for parent in parents
+            if (container := container_of(parent)) is not None
+        ]
+
+    def authored_by(
+        self, lease: WritableRootLease, base: str, commit: str
+    ) -> list[Path]:
+        """Every path one parent wrote, measured from where it forked.
+
+        Measured from the base instead, a parent is credited with every path
+        the base moved ahead on since the leases were cut — 124 paths where
+        the real answer was 19, in one measured run. That inflation is the
+        same for every parent, so every pair appears to overlap and the
+        filters built on this stop discriminating: the ordering below ranks
+        every parent equally, and the standing re-check examines every pair
+        it was written to prune. The fork point is what the drop-candidate
+        detector already asks from, for the same reason.
+        """
+        fork = self.worktrees.merge_base(lease, base, commit)
+        return self.worktrees.authored_between(lease, fork, commit)
 
     def record_join_progress(self, joined: list[str], commit: str) -> None:
         """Say where the join sequence got to, as each parent lands.
@@ -358,7 +439,8 @@ class Joiner:
         holds. Checking that only after the last join reports it with every
         parent a candidate and the merger long past the context; asking it
         here names the join that caused it while the tree is still small
-        enough to read.
+        enough to read. Off unless asked for: the naming is the whole of what
+        it adds, and it costs a reviewer turn for every overlapping pair.
 
         Only concerns this join could have touched are re-examined. A join
         that changes no file an earlier concern changed cannot have broken its
@@ -369,10 +451,7 @@ class Joiner:
         state = self.run.state
         if state is None or not standing:
             return
-        changed = {
-            path.as_posix()
-            for path in self.worktrees.authored_between(lease, base, parent)
-        }
+        changed = {path.as_posix() for path in self.authored_by(lease, base, parent)}
         owners = {
             outcome.commit: outcome.concern_id
             for outcome in state.outcomes
@@ -382,8 +461,7 @@ class Joiner:
             if earlier not in owners:
                 continue
             overlap = changed & {
-                path.as_posix()
-                for path in self.worktrees.authored_between(lease, base, earlier)
+                path.as_posix() for path in self.authored_by(lease, base, earlier)
             }
             if not overlap:
                 continue

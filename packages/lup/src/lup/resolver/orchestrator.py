@@ -694,15 +694,21 @@ class WorktreeOrchestrator:
         lines = status.stdout.splitlines()
         return lines[0] if status.code == 0 and lines else None
 
-    def already_joined(self, lease: WritableRootLease, commit: str) -> bool:
-        """Report whether a parent is already contained in the worktree's HEAD."""
+    def contained_in(
+        self, lease: WritableRootLease, commit: str, container: str
+    ) -> bool:
+        """Report whether one commit is already an ancestor of another."""
         status = self.launcher.launch(
             LaunchRequest(
-                arguments=["git", "merge-base", "--is-ancestor", commit, "HEAD"],
+                arguments=["git", "merge-base", "--is-ancestor", commit, container],
                 cwd=lease.root,
             )
         )
         return status.code == 0
+
+    def already_joined(self, lease: WritableRootLease, commit: str) -> bool:
+        """Report whether a parent is already contained in the worktree's HEAD."""
+        return self.contained_in(lease, commit, "HEAD")
 
     def branch(self, lease: WritableRootLease) -> str:
         """Read the current branch for an orchestrated worktree."""

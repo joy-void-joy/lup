@@ -513,13 +513,13 @@ def decide_loop(
         return unjudged("loops nest too deeply")
     end = find_loop_end(segments, start)
     if end is None:
-        return unjudged("loop construct does not parse")
+        return unjudged("loop construct is never closed by `done`")
     interior = segments[start + 1 : end]
     do_index = next(
         (position for position, seg in enumerate(interior) if seg[0] == "do"), None
     )
     if do_index is None:
-        return unjudged("loop construct does not parse")
+        return unjudged("loop construct has no `do` introducing its body")
     body = [seg for seg in [interior[do_index][1:], *interior[do_index + 1 :]] if seg]
     if not body:
         return unjudged("loop body is empty")
@@ -527,7 +527,7 @@ def decide_loop(
     match segments[start]:
         case ["for", name, "in", *loop_words] if name.isidentifier():
             if condition:
-                return unjudged("loop construct does not parse")
+                return unjudged("a `for` loop cannot carry a condition")
             return Group(
                 decisions=decide_for_body(
                     name, loop_words, body, context, depth, bindings

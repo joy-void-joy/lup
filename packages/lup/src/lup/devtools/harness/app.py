@@ -273,6 +273,17 @@ def create_harness_app(
                 "doubles, up to half an hour between probes.",
             ),
         ] = resolve.HOST_BACKOFF_SECONDS,
+        recheck_standing_per_join: Annotated[
+            bool,
+            typer.Option(
+                "--recheck-standing-per-join",
+                help="After each join, re-check every concern already in the tree "
+                "that the join touched. Buys attribution — the join that broke a "
+                "criterion is named — at a reviewer turn per overlapping pair, "
+                "which grows quadratically. The final pass examines every concern "
+                "against the finished tree either way.",
+            ),
+        ] = False,
         detach: Annotated[
             bool,
             typer.Option(
@@ -318,6 +329,7 @@ def create_harness_app(
             issues,
             host_retries,
             host_backoff,
+            recheck_standing_per_join,
         )
 
     claude_target = targets.builder("claude")
