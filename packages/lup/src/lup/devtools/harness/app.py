@@ -31,6 +31,7 @@ from lup.devtools.supervisor.app import serve_supervisor
 from lup.devtools.supervisor.doors import (
     accept_verification,
     answer_questions,
+    drain_run,
     list_actors,
     list_questions,
     park_run,
@@ -146,6 +147,7 @@ def create_harness_app(
     resolve_app.command("retire")(retire_concern)
     resolve_app.command("redirect")(redirect_actor)
     resolve_app.command("park")(park_run)
+    resolve_app.command("drain")(drain_run)
     resolve_app.command("refresh")(resolve.refresh_run)
     app.add_typer(resolve_app, name="resolve")
 

@@ -196,11 +196,15 @@ def list_actors(
     A redirect sitting here through a whole concern is that concern being
     worked on the instructions it was supposed to abandon.
     """
+    # Before the journal is read, not after. A run directory that is not
+    # there yields no actors, which printed "nothing recorded yet" and exited
+    # zero — indistinguishable from a real run that has not started, and the
+    # answer a sibling worktree with no `.lup` at all gave for every id.
+    mailbox = open_mailbox(run_id)
     actors = Journal(resolve_state_root() / run_id).actors()
     if not actors:
         typer.echo("No actor has recorded anything yet.")
         return
-    mailbox = open_mailbox(run_id)
     for actor in actors:
         typer.echo(actor.label())
         waiting = mailbox.waiting(actor)
