@@ -15,7 +15,7 @@ from time import sleep
 
 import typer
 
-from lup.channels.models import utc_now
+from lup.channels.models import local_stamp, utc_now
 from lup.resolver.journal import Journal
 from lup.resolver.models import ConcernRetirement, VerificationAcceptance
 from lup.resolver.state import ResolverStateRepository, StateTransitionError
@@ -369,8 +369,14 @@ def show_status(
 
 
 def report_status(status: RunStatus) -> None:
-    """Print one reading of a run, verdict first."""
-    typer.echo(status.verdict())
+    """Print one reading of a run, verdict first and stamped with the hour.
+
+    Stamped because whoever reads this reads it inside a report written
+    later still, and "how long since I was last told anything" is the
+    question they are actually asking. The run's own relative ages answer a
+    different one: how long a worker has been quiet.
+    """
+    typer.echo(f"{local_stamp()} — {status.verdict()}")
     typer.echo(f"  phase: {status.phase}")
     for count in status.counts:
         typer.echo(f"  {count.concerns:>3} {count.status}")
@@ -418,13 +424,13 @@ def watch_status(
             report_status(status)
         elif quiet >= heartbeat:
             quiet = 0.0
-            typer.echo(status.verdict())
+            typer.echo(f"{local_stamp()} — {status.verdict()}")
     # Nothing is reported here. Every way this loop ends moves a field the
     # frame is taken over — the lock is released, or the phase becomes
     # terminal — so the reading that ended it was already printed as a
     # change, and a run settled before the first poll was printed by the
     # caller.
-    typer.echo(f"Watch ended: {run_id} is waiting on you.")
+    typer.echo(f"{local_stamp()} — watch ended: {run_id} is waiting on you.")
 
 
 def retire_concern(

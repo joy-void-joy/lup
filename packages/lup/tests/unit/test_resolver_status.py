@@ -1,10 +1,11 @@
 """Answering a run's liveness from its directory, where /proc cannot be read."""
 
+from datetime import datetime
 from pathlib import Path
 
 from pydantic import TypeAdapter
 
-from lup.channels.models import utc_now
+from lup.channels.models import LOCAL_STAMP_FORMAT, local_stamp, utc_now
 from lup.channels.stream import Stream
 from lup.resolver.models import ConcernStatus, ResolvePhase
 from lup.resolver.state import ResolverStateRepository
@@ -153,3 +154,21 @@ def test_a_watch_on_a_run_that_does_not_exist_ends_at_once() -> None:
     absent = RunStatus(run_id="absent", exists=False, held=False)
 
     assert absent.settled(running_yet=False)
+
+
+def test_a_reading_is_dated_in_the_reader_s_own_zone() -> None:
+    """A run outlasts the attention of whoever started it.
+
+    The run's own ages say how long a worker has been quiet, which is a
+    different question from how long ago the reader was last told anything —
+    and a terminal shows how long a turn took, never when it ended.
+    """
+    stamp = local_stamp()
+
+    assert stamp == datetime.now().astimezone().strftime(LOCAL_STAMP_FORMAT)
+    assert stamp.split()[0] in {"Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"}
+
+
+def test_a_caller_wanting_another_shape_passes_one() -> None:
+    """The format is this project's judgement, so a default and not a law."""
+    assert local_stamp("%Y") == str(datetime.now().astimezone().year)
