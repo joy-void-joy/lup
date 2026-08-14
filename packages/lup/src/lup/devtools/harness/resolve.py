@@ -84,6 +84,7 @@ from lup.devtools.dev.worktree import (
 )
 from lup.devtools.harness.generate import NativeHarnessComposition
 from lup.devtools.supervisor.projection import answer_recipe as rerun_recipe
+from lup.devtools.supervisor.projection import PendingQuestionView, question_views
 
 
 class ConfiguredModel(BaseModel):
@@ -484,14 +485,43 @@ def report_awaiting(
     adapter: str,
     run_id: str,
     concerns: list[Concern],
+    views: list[PendingQuestionView],
 ) -> None:
-    """Print parked questions, their evidence, and the rerun recipe."""
+    """Print the parked questions still open, their evidence, and the recipe.
+
+    ``parked.pending`` is the list one concern held when it raised, and a run
+    goes on working after that — for 37 minutes in the case reported, during
+    which an answer arrived and was promoted. Printed unfiltered, the report
+    named a settled question and told the human to answer it again, which
+    costs a whole round trip to discover.
+
+    An offered answer settles a question here alongside a promoted one: it
+    is waiting on the run to take it, not on somebody to decide it, and this
+    report's whole job is naming what a human still owes.
+    """
     typer.echo("Resolver run parked awaiting material answers.")
     for problem in parked.problems:
         typer.echo(f"  problem: {problem}")
-    report_questions(parked.pending, concerns)
-    typer.echo("Relay the questions to the human, then rerun:")
-    typer.echo(f"  {rerun_recipe(adapter, run_id, parked.pending)}")
+    settled = {
+        view.question.id
+        for view in views
+        if view.answered is not None or view.offer is not None
+    }
+    outstanding = [
+        question for question in parked.pending if question.id not in settled
+    ]
+    report_questions(outstanding, concerns)
+    already = len(parked.pending) - len(outstanding)
+    if already:
+        typer.echo(
+            f"{already} question(s) raised with this park were answered while "
+            "it ran, and are not repeated here."
+        )
+    if not outstanding:
+        typer.echo("Every question this park raised is answered; rerun to continue:")
+    else:
+        typer.echo("Relay the questions to the human, then rerun:")
+    typer.echo(f"  {rerun_recipe(adapter, run_id, outstanding)}")
 
 
 def report_environment_fault(
@@ -1395,10 +1425,17 @@ def run_resolve(
                 report_deferred_assembly(deferred, adapter, resolved_run_id)
                 return
             except ResolverAwaitingAnswers as parked:
-                planned = (
-                    core.repository.load().concerns if core.repository.exists() else []
+                # Read back rather than trusting what the raise carried: the
+                # run kept working after it, and the mailbox is authoritative
+                # for anything still pending.
+                recorded = core.repository.load() if core.repository.exists() else None
+                report_awaiting(
+                    parked,
+                    adapter,
+                    resolved_run_id,
+                    [] if recorded is None else recorded.concerns,
+                    [] if recorded is None else question_views(recorded, mailbox),
                 )
-                report_awaiting(parked, adapter, resolved_run_id, planned)
                 return
             typer.echo(f"Review branch: {manifest.review_branch}")
             for number in answer_issues(core.repository.load().concerns, manifest):
