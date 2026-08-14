@@ -1,6 +1,6 @@
 """Answering a run's liveness from its directory, where /proc cannot be read."""
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from pydantic import TypeAdapter
@@ -9,8 +9,69 @@ from lup.channels.models import local_stamp, utc_now
 from lup.channels.stream import Stream
 from lup.resolver.models import ConcernStatus, ResolvePhase
 from lup.resolver.state import ResolverStateRepository
-from lup.resolver.status import LastRecorded, RunStatus, StatusCount, run_status
+from lup.resolver.status import (
+    LastRecorded,
+    PhaseProgress,
+    RunStatus,
+    StatusCount,
+    elapsed_per_item,
+    run_status,
+)
 from lup.devtools.supervisor.doors import attention_line
+
+
+def test_a_bar_reports_the_rate_of_the_stretches_actually_worked() -> None:
+    """A resume separates two samples by however long nobody was driving it.
+
+    This run holds an interval of twenty-eight hours between two joins a
+    minute of work apart. Averaged in, one such gap makes every later
+    estimate meaningless — an ETA of days for eight joins of about a minute.
+    """
+    start = utc_now()
+    worked = timedelta(minutes=1)
+    away = timedelta(hours=28)
+    samples = [
+        start,
+        start + worked,
+        start + worked + away,
+        start + worked + away + worked,
+    ]
+
+    assert elapsed_per_item(samples) == worked
+
+
+def test_a_bar_has_no_rate_until_two_samples_share_a_stretch() -> None:
+    """One timestamp is a when, not a duration, and neither is a lone gap."""
+    start = utc_now()
+
+    assert elapsed_per_item([]) is None
+    assert elapsed_per_item([start]) is None
+    assert elapsed_per_item([start, start + timedelta(hours=28)]) is None
+
+
+def test_a_bar_without_a_rate_still_draws_its_count() -> None:
+    """The first item of a phase has nothing to estimate from, and says so."""
+    rendered = PhaseProgress(label="joins", done=0, total=13).render(width=4)
+
+    assert rendered == "░░░░ 0/13"
+
+
+def test_a_bar_carries_the_two_figures_a_reader_plans_around() -> None:
+    fifth = PhaseProgress(
+        label="joins", done=5, total=13, per_item=timedelta(minutes=2, seconds=11)
+    )
+
+    assert fifth.render(width=4) == "██░░ 5/13 · 2m11s/it · ETA 17m28s"
+
+
+def test_a_finished_bar_estimates_nothing_further() -> None:
+    """Nothing remains, so an ETA would be a number about no work."""
+    done = PhaseProgress(
+        label="joins", done=13, total=13, per_item=timedelta(minutes=2)
+    )
+
+    assert done.remaining() is None
+    assert "ETA" not in done.render()
 
 
 def test_an_unheld_run_reads_as_not_running(tmp_path: Path) -> None:

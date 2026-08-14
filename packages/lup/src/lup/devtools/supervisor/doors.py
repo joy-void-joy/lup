@@ -452,6 +452,8 @@ def report_status(status: RunStatus) -> None:
     """
     typer.echo(f"{local_stamp()} — {status.verdict()}")
     typer.echo(f"  phase: {status.phase}")
+    if status.progress is not None:
+        typer.echo(f"  {status.progress.label}: {status.progress.render()}")
     for count in status.counts:
         typer.echo(f"  {count.concerns:>3} {count.status}")
     if status.unanswered:
