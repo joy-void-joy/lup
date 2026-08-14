@@ -116,12 +116,22 @@ class RunStatus(BaseModel):
         is still starting. Both, because either alone is wrong in one
         direction: a flag alone spins forever on a run parked before the
         watch began, and a timer alone ends a slow start.
+
+        It gates the phase for the same reason it gates the lock. Until the
+        resuming process persists one, the phase on disk is whatever the
+        last one left — and what a resume is most often started from is a
+        terminal phase, because failing is what stopped the run. Read inside
+        the startup window that reads as finished, so a watch armed on a
+        just-relaunched run announced the failure it was resuming from and
+        ended, having never polled once.
         """
         if not self.exists:
             return True
+        if not running_yet:
+            return False
         if self.phase is not None and self.phase.terminal():
             return True
-        return running_yet and not self.held
+        return not self.held
 
 
 def run_status(repository: ResolverStateRepository, run_id: str) -> RunStatus:
