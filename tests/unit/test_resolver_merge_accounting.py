@@ -96,6 +96,53 @@ def test_a_declared_rewrite_settles_a_candidate() -> None:
     assert merge_problems(settled, [], [candidate("src/api.py")]) == []
 
 
+def test_a_disposition_keyed_by_the_abbreviation_the_merger_was_shown_settles() -> None:
+    """The merger is handed twelve characters and was keyed against forty.
+
+    `merge_turn` renders each candidate as `(from {parent[:12]})`, so echoing
+    the parent back is echoing an abbreviation — which never equalled the full
+    sha the check compared, while the refusal quoted those same twelve
+    characters at it. No revision could converge: one observed merger
+    dispositioned all three of its candidates with correct rationales, twice,
+    and the run failed on the second. The fixtures missed it because this
+    file's PARENT is itself twelve characters, so both spellings coincided.
+    """
+    full = "76d6060e49d0c0c128417733547232db1445c1dc"
+    shown = full[:12]
+    settled = report(
+        dispositions=[
+            HunkDisposition(
+                path=Path("src/api.py"),
+                parent=shown,
+                fate="rewritten",
+                rationale="folded into the constant the sibling introduced",
+            )
+        ],
+        out_of_conflict_edits=[DeclaredEdit(path=Path("src/api.py"), rationale="same")],
+    )
+    owed = [DropCandidate(parent=full, path=Path("src/api.py"), missing=["gone"])]
+
+    assert merge_problems(settled, [], owed) == []
+
+
+def test_a_disposition_naming_a_different_parent_settles_nothing() -> None:
+    """Forgiving the abbreviation must not forgive naming the wrong commit."""
+    settled = report(
+        dispositions=[
+            HunkDisposition(
+                path=Path("src/api.py"),
+                parent="ffffffffffff",
+                fate="rewritten",
+                rationale="a real reason about the wrong parent",
+            )
+        ],
+        out_of_conflict_edits=[DeclaredEdit(path=Path("src/api.py"), rationale="same")],
+    )
+    owed = [DropCandidate(parent=PARENT, path=Path("src/api.py"), missing=["gone"])]
+
+    assert len(merge_problems(settled, [], owed)) == 1
+
+
 def test_dispositioning_without_a_reason_does_not_settle_anything() -> None:
     silent = report(
         dispositions=[

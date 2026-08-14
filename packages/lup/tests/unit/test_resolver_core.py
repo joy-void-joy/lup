@@ -56,6 +56,7 @@ from lup.resolver.journal import LeaseDriftEvent
 from lup.resolver.models import (
     AdmissionRequest,
     AnswerBatch,
+    run_tally,
     AcceptanceCriterion,
     CarriedParent,
     Concern,
@@ -845,6 +846,27 @@ def test_already_joined_reports_containment_from_merge_base(tmp_path: Path) -> N
 
     absent = ancestry_launcher(is_ancestor=False)
     assert not WorktreeOrchestrator(absent, tmp_path).already_joined(lease, "sha")
+
+
+def test_the_join_tally_counts_the_parents_that_will_be_merged() -> None:
+    """A bar has to be able to reach its own end.
+
+    Counted from the outcomes, the total included every concern holding a
+    commit — each one that failed or retired still holding work, and each
+    that rides inside a sibling and is therefore never merged on its own.
+    On the run this was measured against it read 24 where 13 parents would
+    be joined, so it stood at 3/24 having done 3 of 13.
+    """
+    state = integration_state(
+        "tallied",
+        Path("/tmp/tallied"),
+        JoinProgress(joined=["one", "two", "three"], commit="j3", planned=13),
+    )
+
+    tally = run_tally(state)
+
+    assert (tally.joined, tally.join_total) == (3, 13)
+    assert "joins 3/13" in tally.concerns_line()
 
 
 def test_a_parent_inside_another_is_carried_rather_than_merged(
