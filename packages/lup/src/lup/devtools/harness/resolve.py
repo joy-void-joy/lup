@@ -26,13 +26,16 @@ from lup.harness.environment import non_interactive_environment
 from lup.harness.ownership import GeneratedArtifacts, generated_artifacts
 from lup.harness.process import LaunchRequest, LocalProcessLauncher, ProcessLauncher
 from lup.resolver.contracts import (
+    ResolverAssemblyDeferred,
     ResolverAwaitingAnswers,
+    ResolverDrained,
     ResolverEnvironmentFault,
+    ResolverRegression,
     ResolverObserver,
     WorktreePreparer,
 )
 from lup.resolver.actors import create_inbox_hooks
-from lup.resolver.core import ResolverCore
+from lup.resolver.core import ASSEMBLY_QUESTION_ID, ResolverCore
 from lup.resolver.journal import Journal
 from lup.resolver.orchestrator import WorktreeOrchestrator
 from lup.resolver.rebase import BaseRefresher
@@ -82,6 +85,7 @@ from lup.devtools.dev.worktree import (
 )
 from lup.devtools.harness.generate import NativeHarnessComposition
 from lup.devtools.supervisor.projection import answer_recipe as rerun_recipe
+from lup.devtools.supervisor.projection import PendingQuestionView, question_views
 
 
 class ConfiguredModel(BaseModel):
@@ -482,14 +486,70 @@ def report_awaiting(
     adapter: str,
     run_id: str,
     concerns: list[Concern],
+    views: list[PendingQuestionView],
 ) -> None:
-    """Print parked questions, their evidence, and the rerun recipe."""
+    """Print the parked questions still open, their evidence, and the recipe.
+
+    ``parked.pending`` is the list one concern held when it raised, and a run
+    goes on working after that — for 37 minutes in the case reported, during
+    which an answer arrived and was promoted. Printed unfiltered, the report
+    named a settled question and told the human to answer it again, which
+    costs a whole round trip to discover.
+
+    An offered answer settles a question here alongside a promoted one: it
+    is waiting on the run to take it, not on somebody to decide it, and this
+    report's whole job is naming what a human still owes.
+    """
     typer.echo("Resolver run parked awaiting material answers.")
     for problem in parked.problems:
         typer.echo(f"  problem: {problem}")
-    report_questions(parked.pending, concerns)
-    typer.echo("Relay the questions to the human, then rerun:")
-    typer.echo(f"  {rerun_recipe(adapter, run_id, parked.pending)}")
+    settled = {
+        view.question.id
+        for view in views
+        if view.answered is not None or view.offer is not None
+    }
+    outstanding = [
+        question for question in parked.pending if question.id not in settled
+    ]
+    report_questions(outstanding, concerns)
+    already = len(parked.pending) - len(outstanding)
+    if already:
+        typer.echo(
+            f"{already} question(s) raised with this park were answered while "
+            "it ran, and are not repeated here."
+        )
+    if not outstanding:
+        typer.echo("Every question this park raised is answered; rerun to continue:")
+    else:
+        typer.echo("Relay the questions to the human, then rerun:")
+    typer.echo(f"  {rerun_recipe(adapter, run_id, outstanding)}")
+
+
+HOST_RETRIES: int = 20
+"""How many times to come back to a host that refused, before giving up."""
+
+HOST_BACKOFF_SECONDS: float = 60.0
+"""The first wait after a host refuses; each later one doubles into the ceiling."""
+
+HOST_RETRY_CEILING_SECONDS: float = 1800.0
+"""The longest gap between probes, once doubling has grown past it."""
+
+
+def host_retry_delay(
+    attempt: int,
+    retries: int = HOST_RETRIES,
+    backoff: float = HOST_BACKOFF_SECONDS,
+    ceiling: float = HOST_RETRY_CEILING_SECONDS,
+) -> float | None:
+    """How long to wait before trying the host again, or None to stop trying.
+
+    Doubling rather than reading the reset time the message quotes: the
+    time is prose in a provider's sentence, and a probe that is early costs
+    one failed session while a parse that is wrong costs the whole wait.
+    """
+    if attempt >= retries:
+        return None
+    return min(backoff * 2.0**attempt, ceiling)
 
 
 def report_environment_fault(
@@ -507,7 +567,73 @@ def report_environment_fault(
     if fault.concerns:
         typer.echo(f"  interrupted: {', '.join(fault.concerns)}")
     typer.echo("No concern was failed and no outcome was recorded.")
+    typer.echo(
+        "It came back for this one until its retries ran out, so the host is "
+        "either still refusing or wants a person."
+    )
     typer.echo("Fix the host, then continue with:")
+    typer.echo(
+        f"  uv run lup-devtools harness resolve --adapter {adapter} "
+        f"--run-id {run_id} --adopt-config"
+    )
+    # Naming what resuming already does, because the fix that unblocks a run
+    # lands while it is stopped, and a reader who does not know the base comes
+    # forward on its own reaches for `refresh` or resumes onto a stale tree.
+    typer.echo(
+        "That takes whatever landed on the branch meanwhile. Leases already "
+        "holding work stay put; `harness resolve refresh --apply` moves those."
+    )
+
+
+def report_drained(drained: ResolverDrained, adapter: str, run_id: str) -> None:
+    """Print what an operator's stop cost, which is nothing, and how to go on."""
+    typer.echo("Resolver run drained at a safe boundary, on request.")
+    typer.echo(f"  reason: {drained.reason}")
+    if drained.concerns:
+        typer.echo(f"  stopped before a turn: {', '.join(drained.concerns)}")
+    typer.echo("No concern failed and every committed round stands.")
+    typer.echo("Continue with:")
+    typer.echo(
+        f"  uv run lup-devtools harness resolve --adapter {adapter} --run-id {run_id}"
+    )
+
+
+def report_deferred_assembly(
+    deferred: ResolverAssemblyDeferred, adapter: str, run_id: str
+) -> None:
+    """Print what is waiting to be merged, and how to come back to it.
+
+    Deferring is not failing, and the wording matters: every branch this
+    names is committed, verified and untouched. The run stopped at the one
+    junction where stopping used to mean killing the process.
+    """
+    typer.echo("Assembly deferred. The review branch was not built.")
+    typer.echo(f"  ready to merge: {', '.join(deferred.verified)}")
+    if deferred.excluded:
+        typer.echo(f"  would be excluded: {', '.join(deferred.excluded)}")
+    typer.echo("Every lease, branch and outcome is intact. Assemble later with:")
+    typer.echo(
+        f"  uv run lup-devtools harness resolve --adapter {adapter} "
+        f"--run-id {run_id} --adopt-config "
+        f"--answer {ASSEMBLY_QUESTION_ID}=approve"
+    )
+
+
+def report_regression(
+    regression: ResolverRegression, adapter: str, run_id: str
+) -> None:
+    """Print which concerns the merged tree broke, and what the ruling means.
+
+    The re-check's other answer, "superseded", settles a lost criterion and
+    lets the run finish. This one does not, and saying so is the point: the
+    review branch is deliberately left unfinished so the repair happens
+    before anything is landed, rather than after.
+    """
+    typer.echo("Integration regressed criteria that held before the merge.")
+    for ruling in regression.regressed:
+        typer.echo(f"  {ruling.concern_id}: {', '.join(ruling.criteria)}")
+    typer.echo("The review branch was not completed. Every lease and branch is intact.")
+    typer.echo("Repair the merged tree, then continue with:")
     typer.echo(
         f"  uv run lup-devtools harness resolve --adapter {adapter} "
         f"--run-id {run_id} --adopt-config"
@@ -710,7 +836,7 @@ def describe_refresh(report: RefreshReport) -> list[str]:
     return lines
 
 
-def detach_resolve(adapter: str, run_id: str | None, answers: list[str]) -> None:
+def detach_resolve(run_id: str | None, forwarded: list[str]) -> None:
     """Start a run that outlives this command, and say where to reach it.
 
     A blocking run holds the launching agent's only turn, so nothing could
@@ -718,6 +844,14 @@ def detach_resolve(adapter: str, run_id: str | None, answers: list[str]) -> None
     design unreachable, however well the channels underneath worked. Once
     launching returns, the run directory is the whole contract: the page and
     an orchestrating agent are peers on it, exactly as two pages would be.
+
+    The child's arguments are *derived* from the ones this process received
+    rather than re-listed from the flags detaching happens to know about. A
+    re-listing drops whatever it was not taught: it forwarded adapter, run
+    id and answers, so `--adopt-config` silently vanished and a moved run
+    could not be resumed detached at all — and `--no-issues`, `--admit*` and
+    `--wait` went the same way. Derived, a flag added to the callback is
+    forwarded because it was typed, not because someone remembered it here.
     """
     root = project_root()
     resolved = run_id or (
@@ -730,27 +864,54 @@ def detach_resolve(adapter: str, run_id: str | None, answers: list[str]) -> None
         "uv",
         "run",
         "lup-devtools",
-        "harness",
-        "resolve",
-        "--adapter",
-        adapter,
-        "--run-id",
-        resolved,
-        *(part for answer in answers for part in ("--answer", answer)),
+        *forwarded,
+        # Named explicitly even when it was defaulted, so parent and child
+        # agree on which run this is rather than each deriving it from a
+        # HEAD that may move between the two.
+        *(() if run_id else ("--run-id", resolved)),
     ]
+    log = detached_log(root, resolved)
     sh.Command(arguments[0])(
         *arguments[1:],
         _cwd=str(root),
         _bg=True,
         _bg_exc=False,
         _new_session=True,
-        _out="/dev/null",
-        _err="/dev/null",
+        # Discarding both streams made a detached run that refused on its
+        # first step indistinguishable from one working quietly: the refusal
+        # went nowhere, and the run directory held no trace of it either.
+        _out=str(log),
+        _err=str(log),
     )
     typer.echo(f"Run {resolved} started detached.")
+    typer.echo(f"Its output: {log}")
     typer.echo(
-        f"Follow it: uv run lup-devtools harness resolve supervise --run-id {resolved}"
+        f"Follow it: uv run lup-devtools harness resolve status "
+        f"--run-id {resolved} --watch"
     )
+
+
+def detached_log(root: Path, run_id: str) -> Path:
+    """Where a detached run's console output is kept, beside its own record."""
+    directory = root / ".lup" / "resolve" / run_id
+    directory.mkdir(parents=True, exist_ok=True)
+    return directory / "detached.log"
+
+
+def forwardable_arguments(argv: list[str]) -> list[str]:
+    """This invocation's own arguments, minus the flag that detached it.
+
+    Taken from the command line rather than rebuilt from parsed values
+    because rebuilding is what loses flags. ``--detach`` is the one thing
+    removed: left in, the child detaches again and nothing ever runs.
+
+    Matched as a token, so an option *value* spelled ``--detach`` would go
+    with it. Every value this command takes is a reason, an id, an answer or
+    a number, and detaching an abort is contradictory anyway — the case is
+    named rather than guarded because a guard would have to re-list the
+    options, which is the coupling this function exists to remove.
+    """
+    return [argument for argument in argv[1:] if argument != "--detach"]
 
 
 def admission_request(
@@ -823,6 +984,8 @@ def run_resolve(
     model: ConfiguredModel | None = None,
     adopt_config: bool = False,
     take_issues: bool = True,
+    host_retries: int = HOST_RETRIES,
+    host_backoff: float = HOST_BACKOFF_SECONDS,
 ) -> None:
     """Drive the shared persisted resolver through one explicit native adapter."""
     provided = parse_answer_flags(answers)
@@ -856,6 +1019,8 @@ def run_resolve(
             ClaudeSandboxConfig,
             ClaudeSessionConfig,
             create_claude_session_factory,
+            environmental_fault,
+            needs_a_person,
         )
         from lup.adapters.codex.runtime import (
             CodexMcpServerConfig,
@@ -1233,6 +1398,7 @@ def run_resolve(
             worktree_preparer=FeatureWorktreePreparer(root),
             answer_wait_seconds=wait_seconds,
             adopt_config=adopt_config,
+            environmental_fault=environmental_fault,
         )
 
         async def drive() -> None:
@@ -1304,23 +1470,70 @@ def run_resolve(
                             issues=open_issues,
                         )
                     )
-            except ResolverEnvironmentFault as fault:
-                report_environment_fault(fault, adapter, resolved_run_id)
-                raise typer.Exit(code=75)
+            except ResolverDrained as drained:
+                # Exit zero: an operator asked for this and got it, which is
+                # the command succeeding rather than the run failing.
+                report_drained(drained, adapter, resolved_run_id)
+                return
+            except ResolverRegression as regression:
+                report_regression(regression, adapter, resolved_run_id)
+                raise typer.Exit(code=65)
+            except ResolverAssemblyDeferred as deferred:
+                report_deferred_assembly(deferred, adapter, resolved_run_id)
+                return
             except ResolverAwaitingAnswers as parked:
-                planned = (
-                    core.repository.load().concerns if core.repository.exists() else []
+                # Read back rather than trusting what the raise carried: the
+                # run kept working after it, and the mailbox is authoritative
+                # for anything still pending.
+                recorded = core.repository.load() if core.repository.exists() else None
+                report_awaiting(
+                    parked,
+                    adapter,
+                    resolved_run_id,
+                    [] if recorded is None else recorded.concerns,
+                    [] if recorded is None else question_views(recorded, mailbox),
                 )
-                report_awaiting(parked, adapter, resolved_run_id, planned)
                 return
             typer.echo(f"Review branch: {manifest.review_branch}")
             for number in answer_issues(core.repository.load().concerns, manifest):
                 typer.echo(f"commented on #{number}")
             typer.echo(manifest.model_dump_json(indent=2))
 
+        async def drive_through_host_faults() -> None:
+            """Come back to a refusing host until it answers, as a human would.
+
+            Parking on an exhausted allowance is correct and costs nothing —
+            no concern fails and no outcome is recorded — but somebody has to
+            notice, and one run was stopped this way about twenty times over
+            several days, each time waiting on a person rather than on the
+            allowance. The waiting is the part a person adds nothing to.
+
+            A fault only a person can clear still parks immediately: a revoked
+            credential does not heal, so probing one is just a slower way to
+            hand it back.
+            """
+            for attempt in range(host_retries + 1):
+                try:
+                    await drive()
+                    return
+                except ResolverEnvironmentFault as fault:
+                    delay = (
+                        None
+                        if needs_a_person(fault.cause)
+                        else host_retry_delay(attempt, host_retries, host_backoff)
+                    )
+                    if delay is None:
+                        report_environment_fault(fault, adapter, resolved_run_id)
+                        raise typer.Exit(code=75) from fault
+                    typer.echo(
+                        f"[resolve] the host refused ({fault.cause}); "
+                        f"coming back in {delay / 60:.0f} min"
+                    )
+                    await asyncio.sleep(delay)
+
         async with spawned_supervisor(
             supervisor or SupervisorSpawn(), resolved_run_id, adapter
         ):
-            await drive()
+            await drive_through_host_faults()
 
     asyncio.run(execute())

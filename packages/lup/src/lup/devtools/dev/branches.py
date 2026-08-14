@@ -4,6 +4,8 @@ import json
 import logging
 from collections import defaultdict
 from collections.abc import Set as AbstractSet
+from itertools import groupby
+from operator import attrgetter
 from pathlib import Path
 from typing import Literal, NoReturn, Required, TypedDict
 
@@ -12,6 +14,7 @@ import typer
 from pydantic import BaseModel, Field
 
 from lup.devtools.dev.remote_auth import check_remote_auth
+from lup.resolver.models import HeldLease
 from lup.resolver.state import live_lease_branches
 from lup.types import StringMap
 from lup.workspace.paths import project_root
@@ -64,10 +67,40 @@ class BranchInfo(BaseModel):
     reason: str
 
 
+class RunHold(BaseModel):
+    """One resolver run and the branches it is still holding out of the sweep.
+
+    A sweep reads this before it reads the branch list. A run that is still
+    working answers for its own branches, so they are somebody's business
+    already; a run that died answers for nothing, and the branches it holds
+    are work with no owner and no verb — the one shape a sweep exists to
+    surface and cannot express as a per-branch disposition.
+    """
+
+    run_id: str
+    alive: bool
+    branches: list[str]
+
+
 class SurveyResult(BaseModel):
     integration_branch: str
     current_branch: str
     branches: list[BranchInfo]
+    runs: list[RunHold] = Field(default_factory=list)
+
+
+def runs_holding(leased: dict[str, HeldLease]) -> list[RunHold]:
+    """Group every held branch under the run answerable for it."""
+    ordered = sorted(leased.values(), key=attrgetter("run_id"))
+    return [
+        RunHold(
+            run_id=run_id,
+            alive=held[0].alive,
+            branches=sorted(lease.branch for lease in held),
+        )
+        for run_id, group in groupby(ordered, key=attrgetter("run_id"))
+        if (held := list(group))
+    ]
 
 
 class BranchClassification(TypedDict, total=False):
@@ -724,6 +757,7 @@ def survey(as_json: bool) -> None:
         integration_branch=integration,
         current_branch=cur,
         branches=branches_list,
+        runs=runs_holding(leased),
     )
 
     if as_json:
@@ -745,6 +779,15 @@ def survey(as_json: bool) -> None:
 
         headers = ("Branch", "Disposition", "Unique", "Diff", "PR", "Reason")
         typer.echo(format_table(headers, [display_row(bi) for bi in branches_list]))
+
+        for hold in result.runs:
+            if not hold.alive:
+                typer.echo(
+                    f"\nrun {hold.run_id} is not running and holds "
+                    f"{len(hold.branches)} branch(es): nothing will retire them.\n"
+                    f"  uv run lup-devtools harness resolve status "
+                    f"--run-id {hold.run_id}"
+                )
 
 
 type ActionVerdict = Literal["ok", "forced", "blocked"]

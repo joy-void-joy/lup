@@ -1399,6 +1399,30 @@ def test_shell_policy_checks_every_segment_and_deny_wins() -> None:
     assert policy.decide(ShellCommand(command="echo $(dangerous)")).effect == "deny"
 
 
+def test_shell_policy_allows_control_flow_and_still_refuses_what_outlives_it() -> None:
+    policy = ShellPolicy(SHELL_RULES, runner_targets=FIXTURE_RUNNER_TARGETS)
+
+    def effect(command: str) -> str:
+        return policy.decide(ShellCommand(command=command)).effect
+
+    # Control flow reports nothing, so it fails the "reads and reports" half of
+    # the read-only test and passes the half that decides: it changes nothing,
+    # and nothing it does reaches a later command.
+    for builtin in ("continue", "break", "shift", "return", "local", "exit"):
+        assert effect(builtin) == "allow", builtin
+
+    # Each of these decides what some later command sees or does, which is what
+    # the read-only list promises a reader it does not touch.
+    for builtin in ("eval", "exec", "export", "declare", "unset"):
+        assert effect(builtin) == "deny", builtin
+
+    # Control flow de-escalates nothing around it: a guarded verb sharing the
+    # command keeps its own verdict.
+    assert effect("test -d tmp && continue") == "allow"
+    assert effect("continue && rm -rf packages") == "ask"
+    assert effect('break; eval "$payload"') == "deny"
+
+
 def test_shell_policy_confines_trusted_native_skill_scripts() -> None:
     root = "/opt/codex/skills"
     policy = ShellPolicy(SHELL_RULES, trusted_script_roots=[root])

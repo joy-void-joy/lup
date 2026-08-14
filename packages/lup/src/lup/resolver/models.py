@@ -100,6 +100,18 @@ class ResolvePhase(StrEnum):
             ResolvePhase.FAILED,
         }
 
+    def released_leases(self) -> bool:
+        """Whether a run in this phase has let go of the branches it leased.
+
+        Only a completed run has: it carried every lease through the join
+        machinery, so what those branches held has landed and a sweep may
+        clear them. A failed or aborted run still has its branches out on
+        lease with nothing answerable for them, which is precisely when a
+        survey must leave them alone — the two verbs it would otherwise
+        offer both destroy work no one has salvaged yet.
+        """
+        return self is ResolvePhase.COMPLETE
+
 
 class ConcernStatus(StrEnum):
     """Persisted lifecycle of one independently scheduled concern."""
@@ -168,6 +180,9 @@ class LeaseRefresh(BaseModel):
 
     concern_id: str
     conflicts: list[Path] = Field(default_factory=list)
+    uncommitted: list[Path] = Field(default_factory=list)
+    """Paths held outside any commit, which is a different stop from a conflict:
+    the merge is clean and the tree is not ready to take it."""
     applied: bool = False
     reason: str = ""
 
@@ -286,6 +301,17 @@ class MaterialQuestion(BaseModel):
         ),
     )
 
+    def restates(self, asked: "MaterialQuestion") -> bool:
+        """Whether this is ``asked`` again, re-rendered from facts that moved.
+
+        An answer binds to the choices, not to the prose around them. The
+        assembly gate names the base it would merge onto and how far behind
+        that base is, and both move while a run is parked — so the gate
+        re-rendering itself is the question staying true, where a moved
+        answer domain would be a different question wearing one id.
+        """
+        return self.model_copy(update={"prompt": asked.prompt}) == asked
+
     @model_validator(mode="after")
     def identity_is_path_safe(self) -> "MaterialQuestion":
         """Each question is one file in the mailbox, so its id is a filename."""
@@ -304,6 +330,28 @@ class MaterialQuestion(BaseModel):
                 f"question {self.id!r} recommendation is not one of its choices"
             )
         return self
+
+
+RECHECK_SUPERSEDED = "superseded"
+"""The ruling that settles a lost criterion: later work replaced it."""
+
+RECHECK_REGRESSION = "regression"
+"""The ruling that does not: the merged tree broke something that held."""
+
+
+class RecheckRuling(BaseModel):
+    """One answered re-check, read where the decision it governs is taken.
+
+    The question is closed over two words that mean opposite things about
+    the review branch, so the answer is only worth asking for if something
+    consults it. This is what integration consults.
+    """
+
+    model_config = FROZEN
+
+    concern_id: str
+    criteria: list[str]
+    ruling: str
 
 
 ALLOWANCE_GRANTED = "grant"
@@ -536,9 +584,25 @@ class HeldLease(BaseModel):
     branch: str
     run_id: str
     standing: str
+    alive: bool = True
 
     def reason(self) -> str:
-        return f"lease of run {self.run_id} ({self.standing})"
+        """Why a sweep leaves this branch alone, and what moves it if dead.
+
+        A lease held by a run that will never move again is the silent
+        bucket this disposition exists to prevent: it reports the same
+        `KEEP` on every sweep, forever, with nothing in the workflow saying
+        what to do about it. A live run needs no instruction — it is
+        working — so only a dead one carries the two commands that end the
+        holding, in the order worth trying them.
+        """
+        if self.alive:
+            return f"lease of run {self.run_id} ({self.standing})"
+        return (
+            f"lease of run {self.run_id} ({self.standing}); resume it with "
+            f"`lup-devtools harness resolve --adapter <a> --run-id {self.run_id}`, "
+            f"or release every lease with `--abort <reason>`"
+        )
 
 
 class DependencyBase(BaseModel):
@@ -751,6 +815,15 @@ class ConcernOutcome(BaseModel):
     """
     verified: bool = False
     integrated: bool = False
+    regressed: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Criteria a human ruled the merged tree broke. Verification is "
+            "about this concern's own lease; this is about the tree its "
+            "siblings built, and only the second can disqualify a branch "
+            "that already passed the first."
+        ),
+    )
     rounds: list[AgentRound] = Field(default_factory=list)
     failure: str | None = None
     notes_cleared: list[ReviewNote] = Field(default_factory=list)

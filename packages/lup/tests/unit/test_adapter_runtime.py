@@ -25,6 +25,7 @@ from lup.adapters.claude.runtime import (
     claude_usage,
     convert_claude_block,
     environmental_fault,
+    needs_a_person,
 )
 from lup.adapters.codex.app_server import CodexAppServer, RpcMessage, RpcNotification
 from lup.adapters.codex.runtime import (
@@ -1752,10 +1753,21 @@ def test_the_faults_that_named_the_host_in_a_real_run_are_classified() -> None:
         "Not logged in · Please run /login",
     ]
 
-    assert all(environmental_fault(RuntimeError(message)) for message in observed)
+    assert all(environmental_fault(message) for message in observed)
 
 
 def test_a_failure_that_names_the_work_is_not_read_as_the_host() -> None:
     """False is the conservative default: a real failure retried forever is worse."""
-    assert not environmental_fault(RuntimeError("the model refused the tool"))
-    assert not environmental_fault(RuntimeError("Command failed with exit code 1"))
+    assert not environmental_fault("the model refused the tool")
+    assert not environmental_fault("Command failed with exit code 1")
+
+
+def test_an_allowance_is_waited_out_where_a_credential_is_handed_back() -> None:
+    """Both stopped the same run; only one of them comes back on its own."""
+    assert not needs_a_person("You've hit your session limit · resets 4pm (Paris)")
+    assert not needs_a_person("API Error: 429 rate_limit_error")
+    assert not needs_a_person("Connection error")
+
+    assert needs_a_person("API Error: 401 OAuth access token has been revoked.")
+    assert needs_a_person("Not logged in · Please run /login")
+    assert needs_a_person("Your credit balance is too low")

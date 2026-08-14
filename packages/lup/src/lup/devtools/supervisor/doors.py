@@ -11,6 +11,7 @@ door is useless for.
 """
 
 from pathlib import Path
+from time import sleep
 
 import typer
 
@@ -18,7 +19,7 @@ from lup.channels.models import utc_now
 from lup.resolver.journal import Journal
 from lup.resolver.models import ConcernRetirement, VerificationAcceptance
 from lup.resolver.state import ResolverStateRepository, StateTransitionError
-from lup.resolver.status import run_status
+from lup.resolver.status import RunStatus, run_status
 from lup.resolver.mailbox import (
     AnswerDoor,
     AnswerOffer,
@@ -195,11 +196,15 @@ def list_actors(
     A redirect sitting here through a whole concern is that concern being
     worked on the instructions it was supposed to abandon.
     """
+    # Before the journal is read, not after. A run directory that is not
+    # there yields no actors, which printed "nothing recorded yet" and exited
+    # zero — indistinguishable from a real run that has not started, and the
+    # answer a sibling worktree with no `.lup` at all gave for every id.
+    mailbox = open_mailbox(run_id)
     actors = Journal(resolve_state_root() / run_id).actors()
     if not actors:
         typer.echo("No actor has recorded anything yet.")
         return
-    mailbox = open_mailbox(run_id)
     for actor in actors:
         typer.echo(actor.label())
         waiting = mailbox.waiting(actor)
@@ -285,13 +290,63 @@ def park_run(
         "parked from the console", "--reason", help="Why the run is being parked"
     ),
 ) -> None:
-    """Ask every open wait in this run to give up now."""
+    """Ask every open wait in this run to give up now.
+
+    This reaches a run sitting on an answer and no other. To stop one that
+    is *working*, use `drain`: a worker inside a model turn waits on
+    nothing, so park does not reach it.
+    """
     open_mailbox(run_id).park(ParkRequest(run_id=run_id, reason=reason))
     typer.echo(f"parked {run_id}: {reason}")
 
 
+@app.command("drain")
+def drain_run(
+    run_id: str = typer.Option(..., "--run-id", help="Run to drain"),
+    reason: str = typer.Option(
+        "drained from the console", "--reason", help="Why the run is being stopped"
+    ),
+) -> None:
+    """Ask a busy run to finish what is in flight and stop, resumably.
+
+    The other half of `park`, and a different request. Park ends every open
+    wait, which never reached a worker mid-turn — so the only way to end a
+    busy run was to kill it, discarding the uncommitted edits of each
+    interrupted round along with its reviewer feedback and round counter.
+
+    A drain is observed at the top of a round, where the previous round is
+    already committed, and at the boundary between dependency batches.
+    Nothing is failed and nothing is written off. It takes effect when the
+    run next reaches one of those, so a long turn finishes first.
+    """
+    open_mailbox(run_id).drain(ParkRequest(run_id=run_id, reason=reason))
+    typer.echo(f"draining {run_id}: {reason}")
+    typer.echo("It stops at its next round or batch boundary; resuming costs nothing.")
+
+
 def show_status(
     run_id: str = typer.Option(..., "--run-id", help="Run to report on"),
+    watch: bool = typer.Option(
+        False,
+        "--watch",
+        help="Keep reporting until the run parks or finishes, instead of "
+        "answering once",
+    ),
+    heartbeat: float = typer.Option(
+        60.0,
+        "--heartbeat",
+        help="Seconds between verdict lines while nothing changes, so silence "
+        "is never ambiguous",
+    ),
+    poll: float = typer.Option(
+        2.0, "--poll", help="Seconds between readings of the run directory"
+    ),
+    startup: float = typer.Option(
+        30.0,
+        "--startup",
+        help="Seconds a watch allows a just-launched run to take its lock "
+        "before an unheld run reads as parked rather than as starting",
+    ),
 ) -> None:
     """Say whether a run is alive, where it stands, and what it last did.
 
@@ -307,6 +362,14 @@ def show_status(
     status = run_status(repository, run_id)
     if not status.exists:
         raise typer.BadParameter(f"no resolver run {run_id!r} under {root}")
+    report_status(status)
+    if not watch:
+        return
+    watch_status(repository, run_id, heartbeat, poll, startup, status)
+
+
+def report_status(status: RunStatus) -> None:
+    """Print one reading of a run, verdict first."""
     typer.echo(status.verdict())
     typer.echo(f"  phase: {status.phase}")
     for count in status.counts:
@@ -318,6 +381,50 @@ def show_status(
             f"  last: {status.last.event} by {status.last.actor} "
             f"at {status.last.at:%Y-%m-%d %H:%M:%S}Z"
         )
+
+
+def watch_status(
+    repository: ResolverStateRepository,
+    run_id: str,
+    heartbeat: float,
+    poll: float,
+    startup: float,
+    first: RunStatus,
+) -> None:
+    """Report a run until it parks or finishes, so nobody hand-rolls the loop.
+
+    The supervisor page serves the same projection, but it is server-sent
+    events to a browser and an agent in a terminal cannot consume it. What
+    an agent reinvented instead was a `tail`, which cannot see a question
+    queued by a worker that keeps its siblings running — the run does not
+    park, prints nothing, and the answer waits indefinitely.
+
+    Both halves are load-bearing. Emitting on change alone leaves a reader
+    unable to tell a quiet run from a dead watch, and the heartbeat alone
+    would report a change up to a minute after it happened.
+    """
+    frame = first.watched()
+    running_yet = first.held
+    quiet = 0.0
+    waited = 0.0
+    while not (status := run_status(repository, run_id)).settled(running_yet):
+        running_yet = running_yet or status.held or waited >= startup
+        sleep(poll)
+        quiet += poll
+        waited += poll
+        if status.watched() != frame:
+            frame = status.watched()
+            quiet = 0.0
+            report_status(status)
+        elif quiet >= heartbeat:
+            quiet = 0.0
+            typer.echo(status.verdict())
+    # Nothing is reported here. Every way this loop ends moves a field the
+    # frame is taken over — the lock is released, or the phase becomes
+    # terminal — so the reading that ended it was already printed as a
+    # change, and a run settled before the first poll was printed by the
+    # caller.
+    typer.echo(f"Watch ended: {run_id} is waiting on you.")
 
 
 def retire_concern(

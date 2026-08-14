@@ -238,6 +238,29 @@ def validate_progress_transition(
                 f"concern {identifier!r} cannot move from {prior.status} "
                 f"to {next_item.status}"
             )
+    validate_settled_outcomes(candidate)
+
+
+def validate_settled_outcomes(candidate: ResolveState) -> None:
+    """Refuse a state whose progress claims a success its outcomes cannot support.
+
+    Progress and outcome are two records of one fact, and a write that
+    carries only the first leaves the run reporting work no integration can
+    consume — the surfaces that count progress read the higher number while
+    the outcome that would have proved it never arrives. Checked here rather
+    than trusted at the one call site that settles a concern, because the
+    next site added would reintroduce the skew silently.
+    """
+    recorded = {outcome.concern_id for outcome in candidate.outcomes}
+    unsupported = sorted(
+        item.concern_id
+        for item in candidate.progress
+        if item.status == ConcernStatus.VERIFIED and item.concern_id not in recorded
+    )
+    if unsupported:
+        raise StateTransitionError(
+            "verified concerns have no recorded outcome: " + ", ".join(unsupported)
+        )
 
 
 class ResolverStateRepository:
@@ -488,13 +511,46 @@ class ResolverStateRepository:
             f"reviews/{identifier}-round-{round_record.round}.json",
             round_record.review,
         )
+        # The whole round as well as its halves. The halves are what a human
+        # reads; this is what a resume re-enters from, and splitting a round
+        # across two documents loses the diff that joins them.
+        self.write_model(
+            f"rounds/{identifier}-round-{round_record.round}.json", round_record
+        )
+
+    def rounds_for(self, concern_id: str) -> list[AgentRound]:
+        """Every round this concern completed, in the order it took them.
+
+        A concern interrupted mid-flight re-entered at round one with its
+        feedback discarded, while its branch still carried the rounds it had
+        already committed — so the worker met its own work with no record of
+        why the reviewer had sent it back, and the review that produced that
+        record was spent for nothing.
+        """
+        directory = self.root / "rounds"
+        if not directory.is_dir():
+            return []
+        rounds = [
+            record
+            for path in sorted(directory.glob(f"{concern_id}-round-*.json"))
+            # The glob is a prefix match, so a concern whose id ends in
+            # `-round-<n>` would collect its neighbour's files. The record
+            # names its own concern, so that is what decides.
+            if (
+                record := AgentRound.model_validate_json(
+                    path.read_text(encoding="utf-8")
+                )
+            ).concern_id
+            == concern_id
+        ]
+        return sorted(rounds, key=lambda record: record.round)
 
     def write_model(self, relative: str, value: PersistedResolverModel) -> None:
         publish_atomic(self.root / relative, value)
 
 
 def held_leases(state_root: Path) -> Iterator[HeldLease]:
-    """Each lease a run that has not finished is still holding.
+    """Each lease a run that has not completed is still holding.
 
     A lease looks exactly like abandoned work to a branch survey: commits the
     integration branch lacks, and no pull request driving them. So a sweep
@@ -507,6 +563,11 @@ def held_leases(state_root: Path) -> Iterator[HeldLease]:
     A run whose state cannot be read holds nothing here, and says so in the
     log. The alternative is a survey that any unreadable resolver directory
     takes down with it.
+
+    Failing is not finishing. A run that died mid-flight still has its
+    branches out on lease, and the hazard above is if anything sharper then:
+    the join machinery it was partway through never ran, and nobody has come
+    back for the work. Only completion releases a lease.
     """
     if not state_root.is_dir():
         return
@@ -519,7 +580,7 @@ def held_leases(state_root: Path) -> Iterator[HeldLease]:
         except (StateCorruptionError, OSError, ValidationError):
             logger.exception("resolver run %s could not be read", run.name)
             continue
-        if state.phase.terminal():
+        if state.phase.released_leases():
             continue
         progress = {record.concern_id: record.status for record in state.progress}
         for lease in state.leases:
@@ -527,9 +588,15 @@ def held_leases(state_root: Path) -> Iterator[HeldLease]:
                 yield HeldLease(
                     branch=lease.branch,
                     run_id=state.run_id,
-                    standing=progress[lease.concern_id]
+                    # A run that died reports that, rather than the per-concern
+                    # status it froze at: the phase is what tells a reader the
+                    # branch is waiting on salvage and not on a working run.
+                    standing=state.phase
+                    if state.phase.terminal()
+                    else progress[lease.concern_id]
                     if lease.concern_id in progress
                     else state.phase,
+                    alive=not state.phase.terminal(),
                 )
 
 

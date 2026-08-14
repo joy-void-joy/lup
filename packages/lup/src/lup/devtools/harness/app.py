@@ -11,6 +11,7 @@ A launch command exists exactly when its adapter is among those targets: a
 project generating one native tree is not offered a launcher for the other.
 """
 
+import sys
 from pathlib import Path
 from typing import Annotated
 
@@ -30,6 +31,7 @@ from lup.devtools.supervisor.app import serve_supervisor
 from lup.devtools.supervisor.doors import (
     accept_verification,
     answer_questions,
+    drain_run,
     list_actors,
     list_questions,
     park_run,
@@ -145,6 +147,7 @@ def create_harness_app(
     resolve_app.command("retire")(retire_concern)
     resolve_app.command("redirect")(redirect_actor)
     resolve_app.command("park")(park_run)
+    resolve_app.command("drain")(drain_run)
     resolve_app.command("refresh")(resolve.refresh_run)
     app.add_typer(resolve_app, name="resolve")
 
@@ -251,6 +254,25 @@ def create_harness_app(
                 help="Leave the supervisor page running after the run exits",
             ),
         ] = False,
+        host_retries: Annotated[
+            int,
+            typer.Option(
+                "--host-retries",
+                help="How many times to come back to a host that refused — an "
+                "exhausted allowance, a rate limit, an unreachable upstream — "
+                "before parking the run for a human. Zero parks on the first "
+                "refusal. A fault only a person can clear, such as a revoked "
+                "credential, parks however this is set.",
+            ),
+        ] = resolve.HOST_RETRIES,
+        host_backoff: Annotated[
+            float,
+            typer.Option(
+                "--host-backoff",
+                help="Seconds to wait after the first refusal; each later wait "
+                "doubles, up to half an hour between probes.",
+            ),
+        ] = resolve.HOST_BACKOFF_SECONDS,
         detach: Annotated[
             bool,
             typer.Option(
@@ -271,7 +293,7 @@ def create_harness_app(
                 raise typer.BadParameter(
                     "--adapter is required to drive a resolver run"
                 )
-            resolve.detach_resolve(adapter, run_id, answer or [])
+            resolve.detach_resolve(run_id, resolve.forwardable_arguments(sys.argv))
             return
         # Ending a run reads its recorded state and frees its worktrees; no turn
         # is taken and no skill invocation is rendered, so the one thing an
@@ -294,6 +316,8 @@ def create_harness_app(
             model,
             adopt_config,
             issues,
+            host_retries,
+            host_backoff,
         )
 
     claude_target = targets.builder("claude")

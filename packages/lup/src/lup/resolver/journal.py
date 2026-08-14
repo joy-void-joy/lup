@@ -151,6 +151,25 @@ class ReviewResidualEvent(BaseModel):
     residual: list[str]
 
 
+class ForeignCriteriaEvent(BaseModel):
+    """An accepted review credited ids the concern never declared.
+
+    Recorded rather than acted on. Every declared criterion was accounted
+    for, so nothing passed unchecked and the verdict stands; the stray label
+    is the reviewer's bookkeeping, and turning an acceptance back over it
+    spent a revision round re-deriving the same verdict until the budget
+    ran out. Journalled so a reviewer that keeps miscrediting is still
+    visible to whoever reads the run.
+    """
+
+    model_config = FROZEN
+
+    type: Literal["foreign_criteria"] = "foreign_criteria"
+    concern_id: str
+    round: int
+    labels: list[str]
+
+
 class VerificationFailedEvent(BaseModel):
     """What one gate saw at the moment it decided a concern's round.
 
@@ -208,6 +227,28 @@ class BaseRefreshedEvent(BaseModel):
     reason: str = ""
 
 
+class LeaseRefreshedEvent(BaseModel):
+    """What bringing the refreshed base into one lease did, or what stopped it.
+
+    The base event above says where the run now starts; it says nothing
+    about which branches actually took it. That answer reached stdout once
+    and was never written down, so a detached run — whose output goes to a
+    file nobody is watching — left no record that three of its leases were
+    refused. A lease still on the old base is the reason its worker reads
+    replaced code, which is the failure the refresh exists to prevent.
+    """
+
+    model_config = FROZEN
+
+    type: Literal["lease_refreshed"] = "lease_refreshed"
+    concern_id: str
+    commit: str
+    applied: bool
+    conflicts: list[str] = Field(default_factory=list)
+    uncommitted: list[str] = Field(default_factory=list)
+    reason: str = ""
+
+
 class LeaseDriftEvent(BaseModel):
     """An abandoned concern's tree does not hold the commit last recorded.
 
@@ -243,9 +284,11 @@ type RunEvent = (
     | JoinCompletedEvent
     | JoinAuditEvent
     | ReviewResidualEvent
+    | ForeignCriteriaEvent
     | VerificationFailedEvent
     | RecheckRepeatedEvent
     | BaseRefreshedEvent
+    | LeaseRefreshedEvent
     | LeaseDriftEvent
     | RunFailedEvent
 )

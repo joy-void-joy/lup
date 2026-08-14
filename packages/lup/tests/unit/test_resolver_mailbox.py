@@ -75,6 +75,33 @@ def test_reasking_a_question_differently_is_refused(tmp_path: Path) -> None:
         mailbox.queue(pending("q1", ["yes", "no"]))
 
 
+def test_a_gate_requoting_facts_that_moved_re_renders_rather_than_conflicts(
+    tmp_path: Path,
+) -> None:
+    """The assembly gate names its base and how far behind that base is.
+
+    Both move while the run is parked on the question, so the gate that
+    re-derives itself on resume was refused by the guard meant for an actor
+    redefining one id — and the run could not reach its own last step.
+    """
+    mailbox = QuestionMailbox(tmp_path)
+    mailbox.queue(pending("integration-assembly", ["approve", "defer"]))
+    moved = pending("integration-assembly", ["approve", "defer"])
+    restated = moved.model_copy(
+        update={
+            "question": moved.question.model_copy(
+                update={"prompt": "Merge 5 concerns onto abc1234, 3 behind dev?"}
+            )
+        }
+    )
+
+    mailbox.queue(restated)
+
+    assert [item.question.prompt for item in mailbox.questions()] == [
+        "Merge 5 concerns onto abc1234, 3 behind dev?"
+    ]
+
+
 def test_an_offer_is_correctable_until_it_is_promoted(tmp_path: Path) -> None:
     mailbox = QuestionMailbox(tmp_path)
     mailbox.offer(offer("q1", "typo"))
@@ -130,6 +157,36 @@ def test_the_park_marker_is_the_only_thing_cleared(tmp_path: Path) -> None:
 
     assert mailbox.parked() is None
     assert [item.question.id for item in mailbox.questions()] == ["q1"]
+
+
+def test_parking_and_draining_are_two_requests(tmp_path: Path) -> None:
+    """Park ends waits, drain ends work; one verb meaning both would surprise.
+
+    A worker inside a model turn waits on nothing, so a run parked while
+    busy kept working — and killing it was the only way to stop one.
+    """
+    mailbox = QuestionMailbox(tmp_path)
+
+    mailbox.park(ParkRequest(run_id="run-1", reason="operator parked"))
+
+    assert mailbox.parked() is not None
+    assert mailbox.draining() is None
+
+    mailbox.drain(ParkRequest(run_id="run-1", reason="operator drained"))
+
+    assert mailbox.draining() is not None
+    assert mailbox.clear_park() is None
+    assert mailbox.draining() is not None
+
+
+def test_a_satisfied_drain_is_cleared_so_a_resume_works(tmp_path: Path) -> None:
+    """Left standing, the run stops again at the first boundary of the resume."""
+    mailbox = QuestionMailbox(tmp_path)
+    mailbox.drain(ParkRequest(run_id="run-1", reason="operator drained"))
+
+    mailbox.clear_drain()
+
+    assert mailbox.draining() is None
 
 
 async def test_an_already_answered_question_never_waits(tmp_path: Path) -> None:

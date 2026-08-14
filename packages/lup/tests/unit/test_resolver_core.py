@@ -11,6 +11,7 @@ from pydantic import BaseModel
 
 from lup.harness.contracts import SkillInvocationRenderer
 from lup.harness.models import ResolveSpec, SkillInvocation
+from lup.harness.ownership import GeneratedArtifacts, OwnedArtifact
 from lup.harness.process import (
     LaunchRequest,
     LocalProcessLauncher,
@@ -28,12 +29,14 @@ from tests.unit.doubles import (
 from lup.resolver.mailbox import (
     AnswerDoor,
     AnswerOffer,
+    ParkRequest,
     PendingQuestion,
     QuestionMailbox,
 )
 from lup.policy.identity import ConcernAllowance
 from lup.resolver.contracts import (
     ResolverAwaitingAnswers,
+    ResolverDrained,
     ResolverEnvironmentFault,
     ResolverObserver,
     WorktreePreparer,
@@ -41,6 +44,7 @@ from lup.resolver.contracts import (
 from lup.runtime.errors import ProviderTurnError, TurnFailure
 from lup.resolver.core import (
     APPROVE,
+    ASSEMBLY_QUESTION_ID,
     DEFER,
     ResolverCore,
     approval_decisions,
@@ -107,7 +111,7 @@ from lup.runtime.models import (
     TurnHandle,
     TurnRequest,
 )
-from lup.types import JsonObject
+from lup.types import JsonObject, JsonValue
 
 
 def concern(
@@ -144,8 +148,17 @@ def seed_offer(core: ResolverCore, question_id: str, value: str) -> None:
 
 
 def seed_approvals(core: ResolverCore, concerns: list[Concern]) -> None:
+    """Approve every concern, and approve assembling what they produce.
+
+    Two decisions, not one: a concern gate authorizes the work, and the
+    assembly gate authorizes merging the results into a review branch. A
+    run seeded with only the first parks before integration, which is the
+    point of that gate — so a test that means to reach COMPLETE says so by
+    answering both.
+    """
     for item in concerns:
         seed_offer(core, approval_question(item).id, APPROVE)
+    seed_offer(core, ASSEMBLY_QUESTION_ID, APPROVE)
 
 
 def worker_asks(mailbox: QuestionMailbox, run_id: str, asked: MaterialQuestion) -> None:
@@ -1617,6 +1630,86 @@ async def test_resume_after_a_kill_past_workers_completes_without_backward_phase
     assert resumed.repository.load().phase == ResolvePhase.COMPLETE
 
 
+@pytest.mark.asyncio
+async def test_a_resume_with_nothing_left_to_lease_still_takes_the_landed_fix(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The base refresh was gated on needing a new lease, which is unrelated.
+
+    A run whose concerns are all leased took that branch never, so it read
+    its original commit for the rest of its life — and every worker resumed
+    into a tree predating the fix the run had parked for, asking the human
+    about a blocker the branch had already settled.
+    """
+    workspace = failure_leg_workspace(tmp_path, LocalProcessLauncher())
+    launcher = LocalProcessLauncher()
+
+    def git(*arguments: str) -> str:
+        status = launcher.launch(
+            LaunchRequest(arguments=["git", *arguments], cwd=workspace)
+        )
+        assert status.code == 0, status.stderr
+        return status.stdout.strip()
+
+    source = SourceSnapshot(
+        branch=git("branch", "--show-current"), commit=git("rev-parse", "HEAD")
+    )
+
+    def worker_response(root: Path, output_name: str) -> JsonObject:
+        if output_name == MergeReport.__name__:
+            return {"completed": True, "summary": "semantic join reviewed"}
+        (root / "a.txt").write_text("a\n", encoding="utf-8")
+        return {
+            "concern_id": "a",
+            "changed": True,
+            "summary": "implemented a",
+            "files_changed": ["a.txt"],
+        }
+
+    def reviewer_response(_root: Path, output_name: str) -> JsonObject:
+        return {
+            "concern_id": "a",
+            "accepted": True,
+            "generalized": True,
+            "reason": "criteria met",
+            "criteria_met": ["a-done"],
+        }
+
+    def build_core() -> ResolverCore:
+        return failure_leg_core(
+            tmp_path,
+            workspace,
+            launcher,
+            "landed-fix",
+            worker_response,
+            reviewer_response,
+        )
+
+    killed = build_core()
+    monkeypatch.setattr(killed, "persist_failure", lambda error: None)
+    acquire = killed.leases.acquire
+
+    def kill_before_integration(concern_id: str, branch: str) -> WritableRootLease:
+        if concern_id == "integration":
+            raise RuntimeError("killed before the integration lease")
+        return acquire(concern_id, branch)
+
+    monkeypatch.setattr(killed.leases, "acquire", kill_before_integration)
+    with pytest.raises(RuntimeError, match="killed before"):
+        seed_approvals(killed, [concern("a")])
+        await killed.run(ResolveInventory(source=source, concerns=[concern("a")]))
+
+    # The whole point of parking: the fix lands on the branch meanwhile.
+    (workspace / "README.md").write_text("base, fixed\n", encoding="utf-8")
+    git("add", "README.md")
+    git("commit", "-m", "the fix the run parked for")
+    landed = git("rev-parse", "HEAD")
+
+    await build_core().resume()
+
+    assert build_core().repository.load().root_base().commit == landed
+
+
 def failure_leg_workspace(tmp_path: Path, launcher: LocalProcessLauncher) -> Path:
     workspace = tmp_path / "source"
     workspace.mkdir()
@@ -1646,6 +1739,7 @@ def failure_leg_core(
     reviewer_response: Callable[[Path, str], JsonObject],
     max_revision_rounds: int = 2,
     max_declaration_attempts: int = 2,
+    environmental_fault: Callable[[str], bool] = lambda _: False,
 ) -> ResolverCore:
     return ResolverCore(
         ResolverConfig(
@@ -1667,6 +1761,7 @@ def failure_leg_core(
         lambda root: resolver_test_factory(root, reviewer_response),
         LiteralInvocationRenderer(),
         launcher,
+        environmental_fault=environmental_fault,
     )
 
 
@@ -1771,6 +1866,53 @@ async def test_a_host_fault_parks_the_run_without_failing_any_concern(
     assert progress["a"].status is not ConcernStatus.FAILED
     assert not [outcome for outcome in persisted.outcomes if outcome.concern_id == "a"]
     assert not persisted.failures
+
+
+@pytest.mark.asyncio
+async def test_a_host_fault_is_recognised_from_its_words_when_the_flag_is_lost(
+    tmp_path: Path,
+) -> None:
+    """The flag is set where an exception is caught; layers above re-wrap it.
+
+    `composition.py` and `wrappers.py` both turn a raw exception into a fresh
+    `TurnFailure(message=str(error))`, so the words survive and the flag does
+    not. A session limit reached six concurrent concerns and every one was
+    recorded as having failed, with the classifier working correctly and its
+    answer discarded two frames above where it was made.
+    """
+    launcher = LocalProcessLauncher()
+    workspace = failure_leg_workspace(tmp_path, launcher)
+    limit = "You've hit your session limit · resets 11:50pm (Europe/Paris)"
+
+    def worker_response(_root: Path, _output_name: str) -> JsonObject:
+        # environmental deliberately unset, as a re-wrapping layer leaves it.
+        raise ProviderTurnError(TurnFailure(message=limit))
+
+    def reviewer_response(_root: Path, _output_name: str) -> JsonObject:
+        raise AssertionError("the reviewer must not run after a host fault")
+
+    core = failure_leg_core(
+        tmp_path,
+        workspace,
+        launcher,
+        "rewrapped-host-fault",
+        worker_response,
+        reviewer_response,
+        environmental_fault=lambda message: "session limit" in message.casefold(),
+    )
+
+    with pytest.raises(ResolverEnvironmentFault):
+        seed_approvals(core, [concern("a")])
+        await core.run(
+            ResolveInventory(
+                source=snapshot(workspace, launcher), concerns=[concern("a")]
+            )
+        )
+
+    persisted = core.repository.load()
+    progress = {item.concern_id: item for item in persisted.progress}
+    assert progress["a"].status is not ConcernStatus.FAILED
+    assert not [outcome for outcome in persisted.outcomes if outcome.concern_id == "a"]
 
 
 @pytest.mark.asyncio
@@ -2419,9 +2561,235 @@ async def test_a_concern_resumed_past_a_committed_round_keeps_that_round_as_its_
     manifest = await resumed.resume()
 
     outcomes = {outcome.concern_id: outcome for outcome in manifest.outcomes}
-    assert [round.diff.reason for round in outcomes["a"].rounds] == [""]
+    # Both rounds, not only the one this process took. A resume re-enters
+    # from what is persisted, so the outcome records the whole history
+    # rather than starting the count again at the interruption.
+    assert [round.round for round in outcomes["a"].rounds] == [1, 2]
+    assert [round.diff.reason for round in outcomes["a"].rounds] == ["", ""]
     assert outcomes["a"].verified is True
     assert all(record.passed for record in manifest.verification)
+
+
+@pytest.mark.asyncio
+async def test_a_resumed_concern_still_knows_why_it_was_sent_back(
+    tmp_path: Path,
+) -> None:
+    """The review that produced the feedback was spent; losing it spends it twice.
+
+    An interrupted concern re-entered at round one with `feedback = ""` while
+    its branch still carried the rounds it had committed — so the worker met
+    its own work with no record of what the reviewer had asked for.
+    """
+    launcher = LocalProcessLauncher()
+    workspace = failure_leg_workspace(tmp_path, launcher)
+    written: list[str] = []  # lup: ignore[empty-collection]
+    running: list[ResolverCore] = []  # lup: ignore[empty-collection]
+
+    def worker_response(root: Path, output_name: str) -> JsonObject:
+        if output_name == MergeReport.__name__:
+            return {"completed": True, "summary": "semantic join reviewed"}
+        written.append("turn")
+        (root / "a.txt").write_text(f"round {len(written)}\n", encoding="utf-8")
+        return {
+            "concern_id": "a",
+            "changed": True,
+            "summary": "implemented a",
+            "files_changed": ["a.txt"],
+        }
+
+    def reviewer_response(_root: Path, _output_name: str) -> JsonObject:
+        if len(running) == 1:
+            running[0].mailbox.drain(
+                ParkRequest(run_id="feedback-survives", reason="stop here")
+            )
+            return {
+                "concern_id": "a",
+                "accepted": False,
+                "generalized": False,
+                "reason": "rename the helper before this can pass",
+                "criteria_met": [],
+            }
+        return {
+            "concern_id": "a",
+            "accepted": True,
+            "generalized": True,
+            "reason": "criteria met",
+            "criteria_met": ["a-done"],
+        }
+
+    def build_core() -> ResolverCore:
+        return failure_leg_core(
+            tmp_path,
+            workspace,
+            launcher,
+            "feedback-survives",
+            worker_response,
+            reviewer_response,
+        )
+
+    stopped = build_core()
+    running.append(stopped)
+    seed_approvals(stopped, [concern("a")])
+    with pytest.raises(ResolverDrained):
+        await stopped.run(
+            ResolveInventory(
+                source=snapshot(workspace, launcher), concerns=[concern("a")]
+            )
+        )
+
+    # The round the interruption left behind, whole rather than split across
+    # its halves — the diff is what joins them and what a re-entry needs.
+    persisted = stopped.repository.rounds_for("a")
+    assert [record.round for record in persisted] == [1]
+    assert "rename the helper" in persisted[0].review.reason
+
+    resumed = build_core()
+    running.append(resumed)
+    manifest = await resumed.resume()
+
+    outcomes = {outcome.concern_id: outcome for outcome in manifest.outcomes}
+    # Two worker turns in total, not three: the resume continued at round two
+    # rather than repeating the round already committed on the branch.
+    assert len(written) == 2
+    assert [record.round for record in outcomes["a"].rounds] == [1, 2]
+    assert outcomes["a"].verified is True
+
+
+@pytest.mark.asyncio
+async def test_a_drained_run_stops_without_failing_anything(tmp_path: Path) -> None:
+    """The only way to end a busy run was to kill it, and killing loses work.
+
+    Park reaches a run sitting on an answer and no other, so a worker inside
+    a model turn was unaffected by it. A drain stops at the top of a round,
+    where the previous round is committed and nothing is in flight.
+    """
+    launcher = LocalProcessLauncher()
+    workspace = failure_leg_workspace(tmp_path, launcher)
+
+    def worker_response(root: Path, output_name: str) -> JsonObject:
+        if output_name == MergeReport.__name__:
+            return {"completed": True, "summary": "semantic join reviewed"}
+        (root / "a.txt").write_text("durable\n", encoding="utf-8")
+        return {
+            "concern_id": "a",
+            "changed": True,
+            "summary": "implemented a",
+            "files_changed": ["a.txt"],
+        }
+
+    asked: list[ResolverCore] = []  # lup: ignore[empty-collection]
+
+    def asking_reviewer(_root: Path, _output_name: str) -> JsonObject:
+        """Reject once, and ask for the drain while round one is being judged.
+
+        The request has to arrive while the run is working, which is the
+        whole case: a marker set before it starts is cleared as stale, the
+        way a park is, so a resume is not stopped by the drain it answered.
+        """
+        asked[0].mailbox.drain(
+            ParkRequest(run_id="drained-run", reason="operator stopped it")
+        )
+        return {
+            "concern_id": "a",
+            "accepted": False,
+            "generalized": False,
+            "reason": "another round, please",
+            "criteria_met": [],
+        }
+
+    core = failure_leg_core(
+        tmp_path,
+        workspace,
+        launcher,
+        "drained-run",
+        worker_response,
+        asking_reviewer,
+    )
+    asked.append(core)
+    seed_approvals(core, [concern("a")])
+
+    with pytest.raises(ResolverDrained) as drained:
+        await core.run(
+            ResolveInventory(
+                source=snapshot(workspace, launcher), concerns=[concern("a")]
+            )
+        )
+
+    assert drained.value.reason == "operator stopped it"
+    state = core.repository.load()
+    # Not failed, not written off: a drain says nothing about the work.
+    assert state.outcomes == []
+    assert state.phase is not ResolvePhase.FAILED
+    assert [item.status for item in state.progress] == [ConcernStatus.ELIGIBLE]
+
+
+@pytest.mark.asyncio
+async def test_a_resume_clears_the_drain_that_stopped_it(tmp_path: Path) -> None:
+    """Left standing, the run stops again at the first boundary of the resume."""
+    launcher = LocalProcessLauncher()
+    workspace = failure_leg_workspace(tmp_path, launcher)
+
+    def worker_response(root: Path, output_name: str) -> JsonObject:
+        if output_name == MergeReport.__name__:
+            return {"completed": True, "summary": "semantic join reviewed"}
+        (root / "a.txt").write_text("durable\n", encoding="utf-8")
+        return {
+            "concern_id": "a",
+            "changed": True,
+            "summary": "implemented a",
+            "files_changed": ["a.txt"],
+        }
+
+    running: list[ResolverCore] = []  # lup: ignore[empty-collection]
+
+    def reviewer_response(_root: Path, _output_name: str) -> JsonObject:
+        """Reject and drain on the first run; accept once resumed."""
+        if len(running) == 1:
+            running[0].mailbox.drain(
+                ParkRequest(run_id="drained-then-resumed", reason="operator stopped it")
+            )
+            return {
+                "concern_id": "a",
+                "accepted": False,
+                "generalized": False,
+                "reason": "another round, please",
+                "criteria_met": [],
+            }
+        return {
+            "concern_id": "a",
+            "accepted": True,
+            "generalized": True,
+            "reason": "criteria met",
+            "criteria_met": ["a-done"],
+        }
+
+    def build_core() -> ResolverCore:
+        return failure_leg_core(
+            tmp_path,
+            workspace,
+            launcher,
+            "drained-then-resumed",
+            worker_response,
+            reviewer_response,
+        )
+
+    stopped = build_core()
+    running.append(stopped)
+    seed_approvals(stopped, [concern("a")])
+    with pytest.raises(ResolverDrained):
+        await stopped.run(
+            ResolveInventory(
+                source=snapshot(workspace, launcher), concerns=[concern("a")]
+            )
+        )
+
+    resumed = build_core()
+    running.append(resumed)
+    manifest = await resumed.resume()
+
+    outcomes = {outcome.concern_id: outcome for outcome in manifest.outcomes}
+    assert outcomes["a"].verified is True
+    assert resumed.mailbox.draining() is None
 
 
 @pytest.mark.asyncio
@@ -2722,18 +3090,33 @@ def implementing_worker(
     return respond
 
 
-def planning_reviewer(plan: JsonObject) -> ResolverResponse:
-    """A reviewer that plans admitted evidence and accepts every concern."""
+def planning_reviewer(plan: JsonObject, *concerns: str) -> ResolverResponse:
+    """A reviewer that plans admitted evidence and accepts every concern.
+
+    A per-concern review runs in that concern's own lease, so the worktree
+    name is the concern id and echoing it reports the criterion met. The
+    post-integration re-check does not: it runs in the integration lease and
+    asks about a concern named only in the prompt, so the same echo reports
+    a foreign label and every criterion lost. Naming this run's concerns
+    tells the two worktrees apart, which is what makes the fixture mean
+    "accepts every concern" at both call sites instead of only the first.
+    """
 
     def respond(root: Path, output_name: str) -> JsonObject:
         if output_name == ConcernInventory.__name__:
             return plan
+        rechecking = bool(concerns) and root.name not in concerns
+        met: list[JsonValue] = (
+            [f"{name}-done" for name in concerns]
+            if rechecking
+            else [f"{root.name}-done"]
+        )
         return {
             "concern_id": root.name,
             "accepted": True,
             "generalized": True,
             "reason": "criteria met",
-            "criteria_met": [f"{root.name}-done"],
+            "criteria_met": met,
         }
 
     return respond
@@ -2835,6 +3218,7 @@ async def test_a_concern_admitted_into_a_parked_run_finishes_beside_the_original
         "a-dynamic",
         "b-shape",
         "integration-approval-b",
+        ASSEMBLY_QUESTION_ID,
     }
     assert [item.status for item in persisted.progress if item.concern_id == "b"] == [
         ConcernStatus.CLEANED
@@ -2935,7 +3319,11 @@ async def test_an_admitted_concern_bases_on_a_completed_concerns_recorded_commit
                 {"b": "b-dynamic"}, tmp_path / "state", "admit-dependent"
             ),
             planning_reviewer(
-                admitted_plan(admitted_concern("c", ["a"]), admitted_concern("d"))
+                admitted_plan(admitted_concern("c", ["a"]), admitted_concern("d")),
+                "a",
+                "b",
+                "c",
+                "d",
             ),
         )
 
@@ -3757,6 +4145,237 @@ async def test_accepted_review_residuals_reach_the_journal(tmp_path: Path) -> No
 
 
 @pytest.mark.asyncio
+async def test_a_revision_carries_its_assignment_and_names_its_round(
+    tmp_path: Path,
+) -> None:
+    """A revising worker is not guaranteed to be the session that was reviewed.
+
+    A resumed run opens a fresh one, and the short prompt handed it only
+    "did not pass" — no concern, no criteria, no skill invocation. Two
+    workers reported spending a whole turn working out whether they had
+    been rejected or merely re-leased.
+    """
+    launcher = LocalProcessLauncher()
+    workspace = failure_leg_workspace(tmp_path, launcher)
+    worker_prompts: list[str] = []
+    handed: list[str] = []
+
+    def reviewer_response(_root: Path, _output_name: str) -> JsonObject:
+        handed.append("turn")
+        met: list[JsonValue] = ["a-done"] if len(handed) > 1 else []
+        return {
+            "concern_id": "a",
+            "accepted": len(handed) > 1,
+            "generalized": True,
+            "reason": "wants another pass",
+            "criteria_met": met,
+        }
+
+    def worker_response(root: Path, output_name: str) -> JsonObject:
+        if output_name == MergeReport.__name__:
+            return {"completed": True, "summary": "joined"}
+        with (root / "a.txt").open("a", encoding="utf-8") as handle:
+            handle.write("implemented\n")
+        return {
+            "concern_id": "a",
+            "changed": True,
+            "summary": "implemented a",
+            "files_changed": ["a.txt"],
+        }
+
+    core = ResolverCore(
+        ResolverConfig(
+            state_root=tmp_path / "state",
+            workspace=workspace,
+            worktree_root=tmp_path / "resolver-worktrees",
+            run_id="revision-carries",
+            integration_branch="resolve/revision-carries/review",
+            verification_commands=[
+                VerificationCommand(
+                    name="combined-diff",
+                    arguments=["git", "diff", "--check", "HEAD"],
+                )
+            ],
+        ),
+        resolve_spec(),
+        lambda context: session_factory(
+            PromptRecordingSession(context.root, worker_response, worker_prompts)
+        ),
+        lambda root: resolver_test_factory(root, reviewer_response),
+        LiteralInvocationRenderer(),
+        launcher,
+    )
+    seed_approvals(core, [concern("a")])
+    manifest = await core.run(
+        ResolveInventory(source=snapshot(workspace, launcher), concerns=[concern("a")])
+    )
+
+    outcome = next(item for item in manifest.outcomes if item.concern_id == "a")
+    assert outcome.verified, outcome.failure
+    revision = next(prompt for prompt in worker_prompts if "Review feedback" in prompt)
+    assert "Round 2" in revision
+    assert "wants another pass" in revision
+    # The record rides along rather than being assumed remembered.
+    assert "Assignment:" in revision
+    assert "a-done" in revision
+
+
+@pytest.mark.asyncio
+async def test_an_answered_question_credited_as_met_is_corrected_not_charged(
+    tmp_path: Path,
+) -> None:
+    """An acceptance naming an id outside the declared list keeps its verdict.
+
+    The reviewer reads its criteria beside the answered questions, so
+    crediting a question id is the slip that shape invites. Charging a
+    revision round for it sent a run's whole budget on re-deriving an
+    acceptance every reviewer had already given.
+    """
+    launcher = LocalProcessLauncher()
+    workspace = failure_leg_workspace(tmp_path, launcher)
+    worker_prompts: list[str] = []
+    handed: list[str] = []
+
+    def reviewer_response(_root: Path, _output_name: str) -> JsonObject:
+        handed.append("turn")
+        # Every declared criterion accounted for, plus a question id.
+        met: list[JsonValue] = ["a-done", "a-q1"] if len(handed) == 1 else ["a-done"]
+        return {
+            "concern_id": "a",
+            "accepted": True,
+            "generalized": True,
+            "reason": "every criterion holds",
+            "criteria_met": met,
+        }
+
+    def worker_response(root: Path, output_name: str) -> JsonObject:
+        if output_name == MergeReport.__name__:
+            return {"completed": True, "summary": "joined"}
+        (root / "a.txt").write_text("implemented\n", encoding="utf-8")
+        return {
+            "concern_id": "a",
+            "changed": True,
+            "summary": "implemented a",
+            "files_changed": ["a.txt"],
+        }
+
+    core = ResolverCore(
+        ResolverConfig(
+            state_root=tmp_path / "state",
+            workspace=workspace,
+            worktree_root=tmp_path / "resolver-worktrees",
+            run_id="foreign-label",
+            integration_branch="resolve/foreign-label/review",
+            verification_commands=[
+                VerificationCommand(
+                    name="combined-diff",
+                    arguments=["git", "diff", "--check", "HEAD"],
+                )
+            ],
+        ),
+        resolve_spec(),
+        lambda context: session_factory(
+            PromptRecordingSession(context.root, worker_response, worker_prompts)
+        ),
+        lambda root: resolver_test_factory(root, reviewer_response),
+        LiteralInvocationRenderer(),
+        launcher,
+    )
+    seed_approvals(core, [concern("a")])
+    manifest = await core.run(
+        ResolveInventory(source=snapshot(workspace, launcher), concerns=[concern("a")])
+    )
+
+    outcome = next(item for item in manifest.outcomes if item.concern_id == "a")
+    assert outcome.verified, outcome.failure
+    # Corrected on the reviewer's own session, so no worker round was spent.
+    assert len(outcome.rounds) == 1
+    assert not any("Review feedback" in prompt for prompt in worker_prompts)
+
+
+@pytest.mark.asyncio
+async def test_a_round_that_commits_nothing_neither_charges_nor_reviews_an_empty_range(
+    tmp_path: Path,
+) -> None:
+    """A worker re-entering finished work leaves the branch where it was.
+
+    `round_base..round_base` is empty, and a reviewer handed it can only
+    accept vacuously or reject for having no content — one run's reviewer
+    reconstructed the real delivery by hand and said so in its report.
+    """
+    launcher = LocalProcessLauncher()
+    workspace = failure_leg_workspace(tmp_path, launcher)
+    reviewer_prompts: list[str] = []
+    turns: list[str] = []
+
+    def worker_response(root: Path, output_name: str) -> JsonObject:
+        if output_name == MergeReport.__name__:
+            return {"completed": True, "summary": "joined"}
+        turns.append("worker")
+        # Only the first turn writes; every later one finds its work done.
+        first = len(turns) == 1
+        if first:
+            (root / "a.txt").write_text("implemented\n", encoding="utf-8")
+        touched: list[JsonValue] = ["a.txt"] if first else []
+        return {
+            "concern_id": "a",
+            "changed": first,
+            "summary": "implemented a",
+            "files_changed": touched,
+        }
+
+    def reviewer_response(_root: Path, _output_name: str) -> JsonObject:
+        # Rejects the first submission, so the second round commits nothing.
+        return {
+            "concern_id": "a",
+            "accepted": len(reviewer_prompts) > 1,
+            "generalized": True,
+            "reason": "needs another look",
+            "criteria_met": ["a-done"] if len(reviewer_prompts) > 1 else [],
+        }
+
+    core = ResolverCore(
+        ResolverConfig(
+            state_root=tmp_path / "state",
+            workspace=workspace,
+            worktree_root=tmp_path / "resolver-worktrees",
+            run_id="empty-round",
+            integration_branch="resolve/empty-round/review",
+            max_revision_rounds=1,
+            verification_commands=[
+                VerificationCommand(
+                    name="combined-diff",
+                    arguments=["git", "diff", "--check", "HEAD"],
+                )
+            ],
+        ),
+        resolve_spec(),
+        lambda context: resolver_test_factory(context.root, worker_response),
+        lambda root: session_factory(
+            PromptRecordingSession(root, reviewer_response, reviewer_prompts)
+        ),
+        LiteralInvocationRenderer(),
+        launcher,
+    )
+    seed_approvals(core, [concern("a")])
+    manifest = await core.run(
+        ResolveInventory(source=snapshot(workspace, launcher), concerns=[concern("a")])
+    )
+
+    outcome = next(item for item in manifest.outcomes if item.concern_id == "a")
+    # With max_revision_rounds=1 the old rule failed here: the empty second
+    # round was charged even though it gave the reviewer nothing new.
+    assert outcome.verified, outcome.failure
+    empty = [prompt for prompt in reviewer_prompts if "Commits under review" in prompt]
+    assert empty and not any(
+        # The range handed over is never a commit against itself.
+        span.split("..")[0].split()[-1] == span.split("..")[1].split()[0]
+        for prompt in empty
+        for span in [prompt.split("Commits under review: ")[1]]
+    )
+
+
+@pytest.mark.asyncio
 async def test_review_prompt_names_the_range_and_the_rulings(tmp_path: Path) -> None:
     """A reviewer handed one commit spent its round discovering the others,
     and three reviews could not verify rulings the workers cited."""
@@ -4375,3 +4994,65 @@ def test_a_worker_that_reported_no_change_and_made_none_is_settled(
 
     assert diff.valid
     assert diff.commit == "origin-sha"
+
+
+def rendered(*paths: str) -> GeneratedArtifacts:
+    """An ownership answer that names exactly these paths as the generator's."""
+    return GeneratedArtifacts(
+        by_path={
+            path: OwnedArtifact(
+                path=Path(path), category="generated", sha256="", semantic_id="plugin"
+            )
+            for path in paths
+        }
+    )
+
+
+def changed_paths_launcher(*paths: str) -> ScriptedLauncher:
+    """Report one changed-path listing for every diff this asks for."""
+    listing = "".join(f"{path}\n" for path in paths)
+    return ScriptedLauncher({"diff --name-only": out(listing)})
+
+
+def test_a_generated_artifact_is_not_a_path_this_repository_authored(
+    tmp_path: Path,
+) -> None:
+    launcher = changed_paths_launcher(
+        "packages/lup/src/lup/policy/vocabulary.py",
+        ".claude/.lup-ownership.json",
+        ".codex/plugins/lup/hooks/runtime/policy_data.py",
+    )
+    orchestrator = WorktreeOrchestrator(
+        launcher,
+        tmp_path,
+        generated=rendered(
+            ".claude/.lup-ownership.json",
+            ".codex/plugins/lup/hooks/runtime/policy_data.py",
+        ),
+    )
+    lease = joined_lease(tmp_path)
+
+    # The join adjudicates what a person wrote. Every lease that touches the
+    # catalog re-renders both plugin trees, so counting those renderings made
+    # every parent overlap every other and asked the merger to justify content
+    # whose only correct value is whatever the generator emits next.
+    assert orchestrator.authored_between(lease, "base", "parent") == [
+        Path("packages/lup/src/lup/policy/vocabulary.py")
+    ]
+    assert orchestrator.changed_between(lease, "base", "parent") == [
+        Path("packages/lup/src/lup/policy/vocabulary.py"),
+        Path(".claude/.lup-ownership.json"),
+        Path(".codex/plugins/lup/hooks/runtime/policy_data.py"),
+    ]
+
+
+def test_a_tree_that_renders_nothing_authors_everything_it_changed(
+    tmp_path: Path,
+) -> None:
+    launcher = changed_paths_launcher("docs/rules.md")
+    orchestrator = WorktreeOrchestrator(launcher, tmp_path, generated=rendered())
+    lease = joined_lease(tmp_path)
+
+    assert orchestrator.authored_between(lease, "base", "parent") == [
+        Path("docs/rules.md")
+    ]

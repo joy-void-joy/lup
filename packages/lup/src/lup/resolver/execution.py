@@ -9,15 +9,31 @@ the concern rather than failing it, so the answer lands on a run that still
 holds everything it had.
 
 Acceptance is checked against what was declared, not against what the
-reviewer says it checked: a report that accepts while its ``criteria_met``
-does not match the persisted criteria is turned back with the exact ids
-named, because the alternative is a concern that passes on criteria nobody
-wrote down.
+reviewer says it checked: a report that accepts while leaving a persisted
+criterion unaccounted for is turned back with the exact ids named, because
+the alternative is a concern that passes on criteria nobody wrote down.
+
+An id from outside the list is the opposite case and is only recorded. It
+leaves every declared criterion as accounted for as it was, and the
+reviewer reads its criteria beside the answered questions, so crediting a
+question id is the slip that shape invites. Charging a revision round for
+it cost a run its budget re-deriving an acceptance it already had.
 """
 
-from lup.resolver.contracts import ResolverAwaitingAnswers, ResolverEnvironmentFault
+from collections.abc import Callable
+
+from lup.resolver.contracts import (
+    ResolverAwaitingAnswers,
+    ResolverDrained,
+    ResolverEnvironmentFault,
+)
 from lup.resolver.joins import Joiner
-from lup.resolver.journal import Journal, ReviewResidualEvent, VerificationFailedEvent
+from lup.resolver.journal import (
+    ForeignCriteriaEvent,
+    Journal,
+    ReviewResidualEvent,
+    VerificationFailedEvent,
+)
 from lup.resolver.models import (
     AgentRound,
     Concern,
@@ -57,6 +73,7 @@ class ConcernExecutor:
         leases: WritableRootLeases,
         repository: ResolverStateRepository,
         journal: Journal,
+        environmental_fault: Callable[[str], bool] = lambda _: False,
     ) -> None:
         self.config = config
         self.run = run
@@ -68,6 +85,21 @@ class ConcernExecutor:
         self.leases = leases
         self.repository = repository
         self.journal = journal
+        self.environmental_fault = environmental_fault
+        """Whether a failure's own words name the host rather than the work.
+
+        Asked of the message rather than read off `TurnFailure.environmental`
+        alone, because the flag is set where an exception is first caught and
+        several layers above re-wrap a raw exception into a fresh failure —
+        the message survives that, the flag does not. A run whose whole batch
+        died on one session limit was recorded as six concerns failing for
+        exactly this reason, with the classifier working and its answer
+        discarded two frames up.
+
+        Defaults to answering no, so a library with no adapter attributes a
+        fault to the work — the conservative direction, since treating a real
+        failure as the host's would retry it forever.
+        """
 
     async def execute_concern(
         self,
@@ -86,13 +118,27 @@ class ConcernExecutor:
                 "parked on material questions",
             )
             raise
+        except ResolverDrained:
+            # Back to the boundary a resume re-enters from. The concern is
+            # not failed and not waiting on anybody: its committed rounds
+            # stand, and the only thing that did not happen is the turn this
+            # would have started.
+            await self.run.transition_concern(
+                concern.id,
+                ConcernStatus.ELIGIBLE,
+                "drained at a round boundary",
+            )
+            raise
         except TurnError as error:
             # A host fault is not this concern's verdict. Transitioning here
             # would write `failed (401 OAuth access token has been revoked)`
             # into a record whose readers cannot tell it from work that did
             # not hold up — and the concern would then have to be re-admitted
             # by somebody who knew which reasons were environmental.
-            if not error.failure.environmental:
+            if not (
+                error.failure.environmental
+                or self.environmental_fault(error.failure.message)
+            ):
                 await self.run.transition_concern(
                     concern.id, ConcernStatus.FAILED, str(error)
                 )
@@ -139,16 +185,48 @@ class ConcernExecutor:
             rendered_skill_invocation=self.runner.worker_invocation(),
             answers=answers,
         )
-        rounds: list[AgentRound] = []  # lup: ignore[empty-collection]
-        feedback = ""
+        # Re-entered rather than restarted. An interruption used to send a
+        # concern back to round one with its feedback discarded, while its
+        # branch still carried the rounds it had already committed — so the
+        # worker met its own work with no record of why it had been sent
+        # back, and the review that produced that record was spent for
+        # nothing. Every round is written whole before the next transition,
+        # so this is a read rather than a reconstruction.
+        rounds = self.repository.rounds_for(concern.id)
+        feedback = (
+            rounds[-1].review.reason + "\n" + "\n".join(rounds[-1].review.residual)
+            if rounds
+            else ""
+        )
         maximum_round = self.config.max_revision_rounds + 1
         # Every attempt is a round on disk, because each one is a real worker
         # turn and its record is keyed by that number. What differs is which
         # allowance it spends: only a round the reviewer could have judged
         # counts against the revision budget.
-        charged = 0
+        # Carried across the interruption with the rounds it was spent on. A
+        # fresh budget would let a concern interrupted often enough revise
+        # without limit, which is the bound this exists to hold.
+        # Reconstructed by the rule the loop below charges by, so a resume
+        # inherits the budget it would have had: a round advanced when it
+        # left a commit the round before it did not hold.
+        before = [base.commit, *(record.diff.commit for record in rounds)][
+            : len(rounds)
+        ]
+        charged = sum(
+            1
+            for record, prior in zip(rounds, before, strict=True)
+            if not record.diff.declaration
+            and record.diff.commit is not None
+            and record.diff.commit != prior
+        )
         attempts = maximum_round + self.config.max_declaration_attempts
-        for round_number in range(1, attempts + 1):
+        for round_number in range(len(rounds) + 1, attempts + 1):
+            # Before the turn rather than after it: everything the previous
+            # round produced is committed by `validate_and_commit`, so this
+            # is the point where stopping costs nothing at all.
+            drain = self.questions.draining()
+            if drain is not None:
+                raise ResolverDrained(drain.reason, [concern.id])
             await self.run.transition_concern(concern.id, ConcernStatus.RUNNING)
             # The commit a turn is measured from is the lease's own head at the
             # moment the turn opens, read rather than carried. A carried value
@@ -157,8 +235,16 @@ class ConcernExecutor:
             # this loop advances the branch — a concern resumed in a second
             # process re-entered at the clearance and failed for the commit the
             # first process had itself made.
+            # A round that advances nothing is measured from the concern's
+            # own base instead, because `round_base..round_base` is empty and
+            # a reviewer handed it can only accept vacuously or reject for
+            # having no content. It happens whenever a worker re-enters
+            # finished work — the branch already holds the delivery, so there
+            # is nothing left to commit and the whole branch is the answer.
             round_base = self.worktrees.head(lease)
-            worker = await self.runner.worker_turn(assignment, feedback, round_number)
+            worker = await self.runner.worker_turn(
+                assignment, feedback, round_number, round_base != base.commit
+            )
             outstanding = await self.questions.unanswered_for(concern.id)
             if outstanding:
                 raise ResolverAwaitingAnswers(outstanding, [])
@@ -215,7 +301,7 @@ class ConcernExecutor:
                     else await self.runner.review_turn(
                         concern,
                         worker,
-                        round_base,
+                        base.commit if diff.commit == round_base else round_base,
                         diff.commit,
                         lease.root,
                         round_number,
@@ -229,18 +315,27 @@ class ConcernExecutor:
                 undeclared = [
                     label for label in review.criteria_met if label not in declared
                 ]
-                if review.accepted and (unaccounted or undeclared):
+                if review.accepted and undeclared:
+                    # Recorded, never charged. An id from outside the list
+                    # leaves every declared criterion exactly as accounted
+                    # for as it was, so the verdict is unaffected and the
+                    # correction turn upstream has already had its try.
+                    self.journal.record(
+                        ForeignCriteriaEvent(
+                            concern_id=concern.id,
+                            round=round_number,
+                            labels=undeclared,
+                        )
+                    )
+                if review.accepted and unaccounted:
                     # The reviewer's own reason survives — the guard's
                     # complaint is appended, never substituted, and it names
                     # the exact ids so the next round can close the gap
                     # instead of re-deriving it.
                     complaint = (
-                        "criteria_met does not match the persisted acceptance criteria"
+                        "criteria_met does not match the persisted acceptance "
+                        "criteria; unaccounted: " + ", ".join(unaccounted)
                     )
-                    if unaccounted:
-                        complaint += "; unaccounted: " + ", ".join(unaccounted)
-                    if undeclared:
-                        complaint += "; never declared: " + ", ".join(undeclared)
                     review = review.model_copy(
                         update={
                             "accepted": False,
@@ -269,25 +364,30 @@ class ConcernExecutor:
                             residual=list(review.residual),
                         )
                     )
-                await self.run.transition_concern(concern.id, ConcernStatus.VERIFIED)
-                return ConcernExecution(
-                    base=base,
-                    outcome=ConcernOutcome(
-                        concern_id=concern.id,
-                        branch=lease.branch,
-                        commit=diff.commit,
-                        head=diff.commit,
-                        verified=True,
-                        rounds=rounds,
-                        notes_cleared=cleared.clearance.cleared,
-                        notes_missing=cleared.clearance.missing,
-                    ),
+                verified = ConcernOutcome(
+                    concern_id=concern.id,
+                    branch=lease.branch,
+                    commit=diff.commit,
+                    head=diff.commit,
+                    verified=True,
+                    rounds=rounds,
+                    notes_cleared=cleared.clearance.cleared,
+                    notes_missing=cleared.clearance.missing,
                 )
+                await self.run.settle_concern(verified, ConcernStatus.VERIFIED)
+                return ConcernExecution(base=base, outcome=verified)
             await self.run.transition_concern(
                 concern.id, ConcernStatus.REVISING, review.reason
             )
             feedback = review.reason + "\n" + "\n".join(review.residual)
-            charged += 0 if diff.declaration else 1
+            # Only a round that moved the branch spends the revision budget.
+            # A round that committed nothing gave the reviewer nothing new to
+            # judge, so charging it retires the concern for work it was never
+            # shown — which is how a run failed a concern whose branch was
+            # complete and whose every criterion the reviewer had accepted.
+            # The loop is still bounded by `attempts`, so this cannot spin.
+            advanced = diff.commit is not None and diff.commit != round_base
+            charged += 1 if advanced and not diff.declaration else 0
             if charged == maximum_round:
                 break
         # A concern that never spent a revision round never had its work
@@ -299,18 +399,16 @@ class ConcernExecutor:
             if charged
             else "declaration contract unmet: no round reached the criteria"
         )
-        await self.run.transition_concern(concern.id, ConcernStatus.FAILED, failure)
-        return ConcernExecution(
-            base=base,
-            outcome=ConcernOutcome(
-                concern_id=concern.id,
-                branch=lease.branch,
-                commit=rounds[-1].diff.commit if rounds else None,
-                head=self.worktrees.head(lease),
-                verified=False,
-                rounds=rounds,
-                failure=failure,
-                notes_cleared=cleared.clearance.cleared,
-                notes_missing=cleared.clearance.missing,
-            ),
+        exhausted = ConcernOutcome(
+            concern_id=concern.id,
+            branch=lease.branch,
+            commit=rounds[-1].diff.commit if rounds else None,
+            head=self.worktrees.head(lease),
+            verified=False,
+            rounds=rounds,
+            failure=failure,
+            notes_cleared=cleared.clearance.cleared,
+            notes_missing=cleared.clearance.missing,
         )
+        await self.run.settle_concern(exhausted, ConcernStatus.FAILED, failure)
+        return ConcernExecution(base=base, outcome=exhausted)

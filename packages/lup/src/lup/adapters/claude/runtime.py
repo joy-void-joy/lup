@@ -213,11 +213,49 @@ credential died, which is the direction worth erring away from.
 
 
 def environmental_fault(
-    error: Exception, signatures: tuple[str, ...] = ENVIRONMENTAL_SIGNATURES
+    message: str, signatures: tuple[str, ...] = ENVIRONMENTAL_SIGNATURES
 ) -> bool:
-    """Whether this failure is the host's rather than the turn's."""
-    message = str(error).casefold()
-    return any(signature in message for signature in signatures)
+    """Whether this failure's own words name the host rather than the turn.
+
+    Takes the message rather than the exception, because the message is what
+    survives: several layers above the adapter re-wrap a raw exception into a
+    fresh failure carrying `str(error)` and nothing else, so a caller reading
+    a failure long after it was raised has the words and not the object.
+    """
+    return any(signature in message.casefold() for signature in signatures)
+
+
+HUMAN_CLEARED_SIGNATURES: tuple[str, ...] = (
+    "oauth access token has been revoked",
+    "failed to authenticate",
+    "authentication_error",
+    "invalid api key",
+    "not logged in",
+    "please run /login",
+    "credit balance is too low",
+    "api error: 401",
+    "api error: 403",
+)
+"""Which host faults stay broken until a person does something.
+
+A dead credential and an empty balance do not come back on their own, so
+waiting one out is waiting forever. Every other refusal here — an exhausted
+allowance, a rate limit, an overloaded or unreachable upstream — clears with
+nobody doing anything, and those are worth waiting for rather than handing
+back to whoever has to notice.
+
+Our judgement rather than the provider's vocabulary, so a caller replaces it
+instead of forking this module. Over-matching costs a run that stops when it
+could have waited; under-matching costs one that sleeps through a credential
+nobody is going to renew, so this errs toward naming what a person must fix.
+"""
+
+
+def needs_a_person(
+    message: str, signatures: tuple[str, ...] = HUMAN_CLEARED_SIGNATURES
+) -> bool:
+    """Whether this host fault stays broken until somebody acts on it."""
+    return any(signature in message.casefold() for signature in signatures)
 
 
 def turn_error(interrupt: "ClaudeInterrupt") -> type[TurnError]:
@@ -293,7 +331,7 @@ class ClaudeConversationState:
                 raise ProviderTurnError(
                     TurnFailure(
                         message=str(error),
-                        environmental=environmental_fault(error),
+                        environmental=environmental_fault(str(error)),
                     )
                 ) from error
             # The provider no longer holds what this state was resuming. A
@@ -315,7 +353,7 @@ class ClaudeConversationState:
                 raise ProviderTurnError(
                     TurnFailure(
                         message=str(fresh_error),
-                        environmental=environmental_fault(fresh_error),
+                        environmental=environmental_fault(str(fresh_error)),
                     )
                 ) from fresh_error
         return self.client
@@ -434,7 +472,7 @@ class ClaudeConversationState:
                         blocks=fold_blocks(durable),
                         duration=timedelta(seconds=perf_counter() - started),
                         identifiers=identifiers,
-                        environmental=environmental_fault(error),
+                        environmental=environmental_fault(str(error)),
                     )
                 ) from error
 

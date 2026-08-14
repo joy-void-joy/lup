@@ -108,6 +108,12 @@ def read_only_rules(
         "true",
         "false",
         "set",
+        "continue",
+        "break",
+        "shift",
+        "return",
+        "local",
+        "exit",
         "sleep",
         "pwd",
         "id",
@@ -136,6 +142,12 @@ def read_only_rules(
     The process and socket listings sit here for the same reason the file
     ones do: establishing that a service came up is a read, and a session
     that just started one is asking about its own process.
+
+    The control-flow builtins report nothing and are here on the second half
+    of that test: they change nothing by running, and nothing they do can
+    reach a later command. `eval`, `exec`, `export`, `declare` and `unset`
+    are deliberately absent — each decides what some later command sees or
+    does, which is the thing this list promises a reader it does not touch.
     """
     return [ShellCommandRule(name=name) for name in commands]
 
@@ -381,11 +393,25 @@ GIT_READ_ONLY_SUBCOMMANDS = (  # lup: ignore[library-default] — git's own quer
     # around it, or reports success from a session that never ran a command.
     # A denial naming the sandbox and the escape costs one turn; this cost a
     # whole planning run whose output looked normal.
-    # lup: `git merge-tree` belongs on this list and is missing, so probing
-    # whether a branch still merges is refused as "not classified as read-only
-    # or reversible". Even with `--write-tree` it only adds objects to the
-    # store: no ref, no index, no working tree. Sweep the rest of git's query
-    # verbs the same way rather than adding this one word.
+    # lup: solved: `git merge-tree` belongs on this list and is missing, so
+    # probing whether a branch still merges is refused as "not classified as
+    # read-only or reversible". Even with `--write-tree` it only adds objects
+    # to the store: no ref, no index, no working tree. Sweep the rest of git's
+    # query verbs the same way rather than adding this one word.
+    # Object-store queries. These reach the store and stop there: no ref
+    # moves, no index entry changes, no file in the working tree is touched.
+    # `merge-tree --write-tree` and `hash-object -w` add loose objects, which
+    # nothing references and gc collects — the same standing as the pack a
+    # fetch already writes unasked.
+    "merge-tree",
+    "hash-object",
+    "patch-id",
+    "verify-pack",
+    "show-index",
+    "pack-redundant",
+    "get-tar-commit-id",
+    "check-ref-format",
+    "stripspace",
     "show-ref",
     "symbolic-ref",
     "for-each-ref",

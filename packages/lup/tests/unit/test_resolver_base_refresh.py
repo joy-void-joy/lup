@@ -15,7 +15,7 @@ import typer
 from lup.devtools.harness import resolve
 from lup.harness.models import ResolveSpec, SkillInvocation
 from lup.harness.process import LaunchRequest, LocalProcessLauncher
-from lup.resolver.journal import Journal
+from lup.resolver.journal import Journal, LeaseRefreshedEvent
 from lup.resolver.models import (
     AcceptanceCriterion,
     BaseRefresh,
@@ -347,6 +347,65 @@ def test_applying_a_refresh_merges_only_what_would_not_conflict(
     assert (contested.root / "a.py").read_text(
         encoding="utf-8"
     ) == "the worker's work\n"
+
+
+def test_a_lease_holding_uncommitted_work_is_refused_rather_than_merged_over(
+    tmp_path: Path,
+) -> None:
+    """The prediction reads commits; the merge it clears runs in the tree.
+
+    Measured on run `resolve-9e060ad9bb53`, where three of the six leases a
+    resume had to refresh held 12, 9 and 1 uncommitted files. `merge-tree`
+    saw none of them and cleared every one.
+    """
+    repository = Repository(tmp_path / "source")
+    started = repository.commit("a.py", "one\n")
+    worktrees = repository.orchestrator()
+    lease = WritableRootLease(
+        concern_id="alpha", root=tmp_path / "leases" / "alpha", branch="resolve/alpha"
+    )
+    worktrees.create(lease, started)
+    (lease.root / "b.py").write_text("work still in flight\n", encoding="utf-8")
+    repository.commit("c.py", "the upstream fix\n")
+    state = run_state(SourceSnapshot(branch="dev", commit=started), [lease])
+
+    report = refresher(repository, state).report(state, apply=True)
+
+    refreshed = report.leases[0]
+    assert not refreshed.applied
+    assert [path.as_posix() for path in refreshed.uncommitted] == ["b.py"]
+    assert "b.py" in refreshed.reason
+    assert not (lease.root / "c.py").exists()
+    assert (lease.root / "b.py").read_text(encoding="utf-8") == "work still in flight\n"
+
+
+def test_a_lease_the_refresh_could_not_bring_forward_is_recorded(
+    tmp_path: Path,
+) -> None:
+    """Stdout is not a record: a detached run writes it where nobody looks."""
+    repository = Repository(tmp_path / "source")
+    started = repository.commit("a.py", "one\n")
+    worktrees = repository.orchestrator()
+    lease = WritableRootLease(
+        concern_id="alpha", root=tmp_path / "leases" / "alpha", branch="resolve/alpha"
+    )
+    worktrees.create(lease, started)
+    (lease.root / "b.py").write_text("work still in flight\n", encoding="utf-8")
+    repository.commit("c.py", "the upstream fix\n")
+    state = run_state(SourceSnapshot(branch="dev", commit=started), [lease])
+    refresh = refresher(repository, state)
+
+    refresh.report(state, apply=True)
+
+    recorded = [
+        entry.event
+        for entry in refresh.journal.read()
+        if isinstance(entry.event, LeaseRefreshedEvent)
+    ]
+    assert len(recorded) == 1
+    assert recorded[0].concern_id == "alpha"
+    assert not recorded[0].applied
+    assert recorded[0].uncommitted == ["b.py"]
 
 
 def test_the_console_refresh_reports_the_move_and_each_lease(

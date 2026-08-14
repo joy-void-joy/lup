@@ -73,6 +73,7 @@ from lup.harness.ownership import (
     OwnershipManifestError,
     build_manifest,
     content_digest,
+    generated_artifacts,
     load_manifest,
     save_manifest,
 )
@@ -403,12 +404,18 @@ def test_generated_resolver_entries_only_launch_the_shared_python_core() -> None
     skill = codex[Path(".codex/plugins/lup/skills/resolve/SKILL.md")]
 
     assert "uv run lup-devtools harness resolve --adapter claude" in command
-    assert "--run-id" in command and "--accept" in command and "--answer" in command
     assert "Triage into concerns" not in command
     assert "Workflow(" not in command
     assert "uv run lup-devtools harness resolve --adapter codex" in skill
-    assert "--run-id" in skill and "--accept" in skill and "--answer" in skill
     assert "scheduling" not in skill
+    for entry in (command, skill):
+        assert "--run-id" in entry and "--answer" in entry
+        # The entry named flags the CLI has never had, and the acceptance
+        # question it pointed at instead does not exist either. An entry
+        # that documents a flag into being is worse than one that omits it:
+        # the reader spends a turn on `No such option`.
+        assert "--accept" not in entry and "--reject" not in entry
+        assert "integration-assembly" in entry
 
 
 def test_invocation_renderers_own_complete_spelling_and_escaping() -> None:
@@ -1146,6 +1153,42 @@ def test_interrupted_exact_write_can_reacquire_prior_ownership(tmp_path: Path) -
     assert proposal.writes == []
 
 
+def test_an_owned_path_the_generator_disagrees_with_is_regenerated(
+    tmp_path: Path,
+) -> None:
+    current = CurrentTree(
+        root=tmp_path,
+        artifacts=[
+            CurrentArtifact(
+                path=Path("owned.txt"),
+                content="what a merge left behind\n",
+                category="backpropagation_candidate",
+                sha256=content_digest("what a merge left behind\n"),
+            )
+        ],
+    )
+    desired = ArtifactTree(
+        artifacts=[
+            Artifact(
+                path=Path("owned.txt"),
+                content="what the generator wants\n",
+                semantic_id="owned",
+            )
+        ]
+    )
+
+    proposal = DeterministicReconciler().propose(current, desired)
+
+    # A resolver join merges both plugin trees and their ownership proof, so
+    # the recorded digest ends up describing neither parent. Read as an edit
+    # nobody made, that refused generation outright and left no recovery a
+    # worker could reach.
+    assert proposal.conflicts == []
+    assert [write.artifact.path.as_posix() for write in proposal.writes] == [
+        "owned.txt"
+    ]
+
+
 def test_native_override_does_not_silently_reown_backpropagation(
     tmp_path: Path,
 ) -> None:
@@ -1747,6 +1790,28 @@ def test_annotated_ownership_manifest_raises_a_typed_recovery_error(
 
     with pytest.raises(OwnershipManifestError, match="repair or remove"):
         load_manifest(path)
+
+
+def test_the_generator_owns_the_proof_it_writes_and_never_lists(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / ".claude"
+    home.mkdir()
+    manifest = build_manifest(
+        portable_harness(),
+        ArtifactTree(artifacts=[]),
+        generator_version="test",
+        target_requirements=[],
+    )
+    save_manifest(home / ".lup-ownership.json", manifest)
+
+    # A manifest lists what it proves and never itself, so every consumer
+    # asking who owns the proof was told "the repository" about the one file
+    # materialization always writes.
+    assert not [item for item in manifest.files if "ownership" in str(item.path)]
+    owned = generated_artifacts(tmp_path, homes=[".claude"])
+    assert owned.owning(".claude/.lup-ownership.json") is not None
+    assert owned.owning("packages/lup/src/lup/harness/ownership.py") is None
 
 
 def test_proven_obsolete_deletion_is_proposed_and_executed(tmp_path: Path) -> None:

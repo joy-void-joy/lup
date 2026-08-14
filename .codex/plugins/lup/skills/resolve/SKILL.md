@@ -5,7 +5,7 @@ description: "Resolve inline feedback through isolated work"
 
 Deferred notes — `# lup: defer: <text>` — are parked work, not open feedback, and the resolver entry excludes them from its inventory, so an editor can never be assigned one. That bare spelling is the default: nothing evaluates a wake condition mechanically, so `defer[<gate>]: <text>` is reserved for a real, externally-checkable gate ("until the v2 API ships") and never restates that this code might change again. Triage them before launching the resolver: read each note against the current state of the repository — its gate where it stated one, its own text where it did not — and when the work reads as due, propose waking it to the user. Waking is an explicit edit that removes the `defer` head so the note re-enters open feedback on the next run; anything still parked carries forward untouched, never re-litigated.
 
-Run `uv run lup-devtools harness resolve --adapter codex`. The command accepts optional flags: `--run-id <id>` resumes a persisted run and `--accept`/`--reject` records the human decision on its review branch. It waits zero seconds by default and parks on material questions, printing each one beside the `# lup:` notes it was raised from, the concern's spec, and its acceptance criteria; rerun with the repeatable `--answer <question-id>=<value>` flag to answer them. `--admit <text>` admits work discovered mid-run in the human's own words and `--admit-note <file>:<line>` admits a note you wrote in the tree, both repeatable. Never pass `--wait` or `--supervise`; both hold a run open for a human instead of parking — `--wait` at the mailbox, `--supervise` at the page it opens.
+Run `uv run lup-devtools harness resolve --adapter codex`. The command accepts optional flags: `--run-id <id>` resumes a persisted run. Assembling the review branch is gated on the reserved `integration-assembly` question, so approving it is `--answer integration-assembly=approve` like any other answer. It waits zero seconds by default and parks on material questions, printing each one beside the `# lup:` notes it was raised from, the concern's spec, and its acceptance criteria; rerun with the repeatable `--answer <question-id>=<value>` flag to answer them. `--admit <text>` admits work discovered mid-run in the human's own words and `--admit-note <file>:<line>` admits a note you wrote in the tree, both repeatable. Never pass `--wait` or `--supervise`; both hold a run open for a human instead of parking — `--wait` at the mailbox, `--supervise` at the page it opens.
 
 ## Relaying a parked question
 
@@ -18,6 +18,16 @@ The run parks rather than guessing, so every material question is a decision tha
 **Give your own recommendation, marked as yours.** It is allowed to differ from the planner's, and it should when your investigation says so. When the option set mis-carves the problem, say that and offer the corrected option instead of defending the list — a wrong framing costs a whole extra round even when every detail in it is accurate. The choices are suggestions, not a menu: say so, and pass an answer in the user's own words whenever they give one.
 
 **Relay the whole batch at once.** A run parks with all of its open questions together; asking them one at a time makes the human re-establish the same context for each.
+
+## Watching a run, and what silence means
+
+A run is built to be left alone, so "is it still going, or did it stop?" is the question you will ask most. Ask it with `uv run lup-devtools harness resolve status --run-id <id>`, which answers from the run directory alone: the phase, the concerns per status, **how many questions are waiting on you**, and the last journal event with its age. Liveness comes from the run's own lock rather than the process table, because under a sandbox `/proc` is PID-isolated — `ps` and `pgrep` list nothing outside the current shell, so a healthy run and a dead one look identical there.
+
+**Do not watch a run by tailing its log.** Two things a log cannot tell you, and both have been missed that way. A worker that queues a question blocks on it while its siblings keep working, so the run does not park and prints nothing — a question can wait on you indefinitely with the log silent. And a tail started mid-run begins at the end of the file, so every event before it is skipped without a trace. Watch the status surface and report when it changes; it is the projection that knows both facts.
+
+Read the verdict rather than the quiet. A held lock is the fact and the last-event age is context on top of it: a run can legitimately record nothing for tens of minutes while a planner works, and judging by silence has produced a confident wrong "it crashed" about a run that was mid-turn. A growing age against a held lock is the shape of a wedged run; silence on its own is not evidence of anything.
+
+`harness resolve supervise` serves the same projection as a live page for a human to sit in front of, and takes answers. It is server-sent events to a browser, so it is the human's surface and not the one to reach for when what you need is a signal you can act on.
 
 ## Work discovered while a run is parked
 

@@ -296,6 +296,27 @@ class DeterministicReconciler(Reconciler):
                         )
                     )
                 continue
+            # An owned path whose content is not what the generator wants is
+            # regenerated rather than adjudicated. The manifest says the
+            # generator owns it, and a divergence is far more often a textual
+            # merge of a derived file than a hand-edit: a resolver join merges
+            # both plugin trees and their ownership proof, leaving digests that
+            # describe neither parent, which read here as an edit nobody made
+            # and refused generation with no recovery a caller could reach.
+            # The equal-content case below keeps its native-override nuance,
+            # since re-owning what already matches is the different question.
+            if (
+                existing.category == "backpropagation_candidate"
+                and existing.content != artifact.content
+            ):
+                writes.append(
+                    ProposedWrite(
+                        artifact=artifact,
+                        previous_sha256=existing.sha256,
+                        previous_executable=existing.executable,
+                    )
+                )
+                continue
             if (
                 existing.category == "unknown_conflict"
                 or (

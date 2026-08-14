@@ -53,9 +53,13 @@ resume its own run.
 
 The doors are `--answer <question-id>=<value>`, the supervisor page,
 `lup-devtools harness resolve answer`, and a worker's own question tools.
-`--accept`/`--reject` is not a separate path: acceptance is the reserved
-`integration-acceptance` question, so every door records it the same way. See
-[supervisor.md](supervisor.md).
+Assembling the review branch has no door of its own: it is the reserved
+`integration-assembly` question, answered `approve` or `defer` through
+whichever of those a human is already at. See [supervisor.md](supervisor.md).
+
+Accepting a concern *over a failing verification* is a different decision and
+has its own command, `lup-devtools harness resolve accept`, because it records
+a reason in place of a green check that was never green.
 
 **Telling an actor something is a stream, and delivery is a position.**
 `resolve say` rides in front of the actor's next tool call; `resolve redirect`
