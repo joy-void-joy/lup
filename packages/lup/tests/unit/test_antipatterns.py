@@ -116,6 +116,79 @@ def test_a_soft_rule_is_still_honoured_by_the_hook() -> None:
     assert decision is None or decision.effect != "deny"
 
 
+def suppression_rows() -> list[AntiPatternRow]:
+    """One soft rule, so the suppression gate is what decides."""
+    return [row for row in bundled_antipattern_rows()[".py"] if row["id"] == "any-type"]
+
+
+def test_relocating_an_approved_marker_is_not_a_new_suppression() -> None:
+    """Concern `suppression-placement-uniformity`, criterion spu-4, verbatim.
+
+    Adopting a placement policy necessarily rewrites the markers the old one
+    allowed. The gate demanded `antipattern-suppression` for the rewrite —
+    an allowance that would equally authorize genuinely new suppressions, so
+    a narrow, checkable action bought a wide, uncheckable permission.
+    """
+    before = (
+        "class NativeSpellings:  # lup: ignore[any-type] — deliberately wider\n"
+        "    first: Any = 1\n"
+        "    second: Any = 2\n"
+    )
+    after = (
+        "class NativeSpellings:\n"
+        "    first: Any = 1  # lup: ignore[any-type] — deliberately wider\n"
+        "    second: Any = 2  # lup: ignore[any-type] — deliberately wider\n"
+    )
+
+    decision = antipattern_decision(
+        before, after, suppression_rows(), python_source=True
+    )
+
+    assert decision is None or decision.effect != "ask"
+
+
+def test_a_rule_this_file_did_not_suppress_before_still_asks() -> None:
+    """The whole point of the gate: a genuinely new suppression is a judgement."""
+    before = "first: Any = 1  # lup: ignore[any-type]\n"
+    after = (
+        "first: Any = 1  # lup: ignore[any-type]\n"
+        "second: Any = 2  # lup: ignore[dict-get]\n"
+    )
+
+    decision = antipattern_decision(
+        before, after, suppression_rows(), python_source=True
+    )
+
+    assert decision is not None
+    assert decision.effect == "ask"
+
+
+def test_a_typed_marker_widened_to_a_bare_one_still_asks() -> None:
+    """Bare covers every rule, so going bare suppresses more than it did."""
+    before = "value: Any = 1  # lup: ignore[any-type]\n"
+    after = "value: Any = 1  # lup: ignore\n"
+
+    decision = antipattern_decision(
+        before, after, suppression_rows(), python_source=True
+    )
+
+    assert decision is not None
+    assert decision.effect == "ask"
+
+
+def test_a_marker_added_where_the_edit_removed_none_still_asks() -> None:
+    """Nothing was re-sited: this is a first suppression, wherever it sits."""
+    decision = antipattern_decision(
+        "value: Any = 1\n",
+        "value: Any = 1  # lup: ignore[any-type]\n",
+        suppression_rows(),
+        python_source=True,
+    )
+
+    assert decision is not None
+    assert decision.effect == "ask"
+
+
 def test_rule_ids_are_unique_kebab_case() -> None:
     """Every rule id is a distinct kebab-case token a typed ignore can target."""
     for table in (PYTHON_ANTI_PATTERNS, TS_ANTI_PATTERNS):
