@@ -833,12 +833,19 @@ class ResolverCore:
                 [item.concern_id for item in eligibility if item.eligible],
                 ConcernStatus.ELIGIBLE,
             )
-            state = self.run_state.progress_state(
-                state,
-                [item.concern_id for item in eligibility if not item.eligible],
-                ConcernStatus.INELIGIBLE,
-                "deferred, unapproved, or blocked by an ancestor",
-            )
+            # Each exclusion keeps the reason its own ruling gave it. One
+            # string covering all of them read as a three-way ambiguity, and
+            # telling "nobody approved this" from "its ancestor was not
+            # approved" meant reading the raw state back — the first is a
+            # decision to revisit, the second only a consequence of one.
+            excluded = [item for item in eligibility if not item.eligible]
+            for reason in dict.fromkeys(item.reason for item in excluded):
+                state = self.run_state.progress_state(
+                    state,
+                    [item.concern_id for item in excluded if item.reason == reason],
+                    ConcernStatus.INELIGIBLE,
+                    reason,
+                )
             self.persist(state)
 
         if state.phase in {
