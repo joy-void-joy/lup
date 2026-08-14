@@ -151,6 +151,21 @@ def test_a_watch_on_a_run_parked_before_it_started_still_ends() -> None:
     assert parked.settled(running_yet=True)
 
 
+def test_a_watch_survives_the_terminal_phase_a_resume_was_started_from() -> None:
+    """The phase on disk is the last process's until this one persists its own.
+
+    A resume is most often started from a terminal phase, because failing is
+    what stopped the run. Read inside the startup window that says finished,
+    so a watch armed on a just-relaunched run announced the failure it was
+    resuming from and ended without polling once — observed against a run
+    that was already integrating by the time it printed.
+    """
+    failed = status_at(ResolvePhase.FAILED, held=False)
+
+    assert not failed.settled(running_yet=False)
+    assert failed.settled(running_yet=True)
+
+
 def test_a_watch_on_a_run_that_does_not_exist_ends_at_once() -> None:
     absent = RunStatus(run_id="absent", exists=False, held=False)
 
