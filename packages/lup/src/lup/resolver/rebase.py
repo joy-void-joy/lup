@@ -15,7 +15,7 @@ concerns most likely to conflict with an upstream fix are exactly the ones
 editing the files it touched.
 """
 
-from lup.resolver.journal import BaseRefreshedEvent, Journal
+from lup.resolver.journal import BaseRefreshedEvent, Journal, LeaseRefreshedEvent
 from lup.resolver.models import (
     INTEGRATION_CONCERN_ID,
     BaseRefresh,
@@ -109,6 +109,23 @@ class BaseRefresher:
 
     def lease(self, lease: WritableRootLease, commit: str, apply: bool) -> LeaseRefresh:
         """Bring one lease's branch up to a commit, or say what stops it."""
+        refreshed = self.attempted(lease, commit, apply)
+        self.journal.record(
+            LeaseRefreshedEvent(
+                concern_id=refreshed.concern_id,
+                commit=commit,
+                applied=refreshed.applied,
+                conflicts=[path.as_posix() for path in refreshed.conflicts],
+                uncommitted=[path.as_posix() for path in refreshed.uncommitted],
+                reason=refreshed.reason,
+            )
+        )
+        return refreshed
+
+    def attempted(
+        self, lease: WritableRootLease, commit: str, apply: bool
+    ) -> LeaseRefresh:
+        """What a refresh of one lease would do, or did."""
         if not lease.root.exists():
             return LeaseRefresh(
                 concern_id=lease.concern_id,
