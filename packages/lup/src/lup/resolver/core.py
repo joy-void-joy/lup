@@ -397,6 +397,7 @@ class ResolverCore:
             self.verifier,
             self.worktrees,
             self.journal,
+            standing_rechecks=config.recheck_standing_per_join,
         )
         self.executor = ConcernExecutor(
             config,

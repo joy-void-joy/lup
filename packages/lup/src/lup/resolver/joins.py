@@ -9,11 +9,16 @@ What makes it one thing rather than a git call is everything that hangs off
 a join. Parents are ordered so contested work meets while a merger is on it;
 a conflict or a dropped hunk is put to that merger and held to what it
 declares; the tree is verified after every parent rather than once at the
-end, so a red result names the join that caused it; and a criterion an
-earlier concern had met is re-checked whenever a later parent touches the
-same files. A criterion that stops holding opens a question rather than
-failing the run, because later work can legitimately supersede an earlier
-one and only a human can say whether this did.
+end, so a red result names the join that caused it; and every concern is
+re-checked against the finished tree. A criterion that stops holding opens
+a question rather than failing the run, because later work can legitimately
+supersede an earlier one and only a human can say whether this did.
+
+The same re-check can also run after each join, against the concerns that
+join touched, which names the merge responsible instead of leaving the
+finding to be attributed among every parent. That is what it buys, and it
+costs a reviewer turn per overlapping pair, so it is asked for rather than
+assumed.
 """
 
 from collections.abc import AsyncIterator
@@ -134,6 +139,7 @@ class Joiner:
         verifier: Verifier,
         worktrees: WorktreeOrchestrator,
         journal: Journal,
+        standing_rechecks: bool = False,
     ) -> None:
         self.run = run
         self.runner = runner
@@ -141,6 +147,7 @@ class Joiner:
         self.verifier = verifier
         self.worktrees = worktrees
         self.journal = journal
+        self.standing_rechecks = standing_rechecks
 
     async def join_commits(
         self,
@@ -225,7 +232,8 @@ class Joiner:
                     broke=failed,
                 )
             )
-            await self.recheck_standing(lease, base, joined[:-1], parent)
+            if self.standing_rechecks:
+                await self.recheck_standing(lease, base, joined[:-1], parent)
             self.record_join_progress(joined, current)
             # After the progress file names a tree that exists, for the same
             # reason the worker round checks before its turn: this is where
@@ -431,7 +439,8 @@ class Joiner:
         holds. Checking that only after the last join reports it with every
         parent a candidate and the merger long past the context; asking it
         here names the join that caused it while the tree is still small
-        enough to read.
+        enough to read. Off unless asked for: the naming is the whole of what
+        it adds, and it costs a reviewer turn for every overlapping pair.
 
         Only concerns this join could have touched are re-examined. A join
         that changes no file an earlier concern changed cannot have broken its

@@ -1125,6 +1125,20 @@ class ResolverConfig(BaseModel):
     both to one allowance let a concern oscillate between under-declaring
     and over-declaring until it failed with its criteria never evaluated.
     """
+    recheck_standing_per_join: bool = False
+    """Whether each join re-checks the concerns already in the tree.
+
+    The per-join pass costs a reviewer turn for every overlapping pair, so
+    it grows quadratically: 21 parents is up to 210 turns, and a measured
+    run spent about fourteen minutes on each. What it buys is attribution —
+    a criterion that stopped holding is reported against the one join that
+    broke it rather than against every parent at once.
+
+    Off by default because the final pass is the one that decides. Every
+    concern is examined there against the finished tree, where an answer can
+    still change what happens, so what this adds is a name for the cause
+    rather than a finding that would otherwise be missed.
+    """
     verification_commands: list["VerificationCommand"] = Field(default_factory=list)
 
     @model_validator(mode="after")

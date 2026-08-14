@@ -1837,6 +1837,7 @@ def failure_leg_core(
     max_revision_rounds: int = 2,
     max_declaration_attempts: int = 2,
     environmental_fault: Callable[[str], bool] = lambda _: False,
+    recheck_standing_per_join: bool = False,
 ) -> ResolverCore:
     return ResolverCore(
         ResolverConfig(
@@ -1852,6 +1853,7 @@ def failure_leg_core(
             ],
             max_revision_rounds=max_revision_rounds,
             max_declaration_attempts=max_declaration_attempts,
+            recheck_standing_per_join=recheck_standing_per_join,
         ),
         resolve_spec(),
         lambda context: resolver_test_factory(context.root, worker_response),
@@ -2887,6 +2889,115 @@ async def test_a_resume_clears_the_drain_that_stopped_it(tmp_path: Path) -> None
     outcomes = {outcome.concern_id: outcome for outcome in manifest.outcomes}
     assert outcomes["a"].verified is True
     assert resumed.mailbox.draining() is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("per_join", "expected"), [(False, 2), (True, 3)], ids=["gated-off", "asked-for"]
+)
+async def test_a_standing_recheck_costs_a_turn_only_when_it_is_asked_for(
+    tmp_path: Path, per_join: bool, expected: int
+) -> None:
+    """One reviewer turn per overlapping pair, which grows quadratically.
+
+    21 parents is up to 210 of them, at about fourteen minutes each in a
+    measured run — against 21 for the final pass, which examines the same
+    concerns against the finished tree. So what the per-join pass adds is
+    the name of the join responsible, and that is worth asking for rather
+    than spending by default.
+    """
+    launcher = LocalProcessLauncher()
+    workspace = tmp_path / "source"
+    workspace.mkdir()
+
+    def git(*arguments: str) -> str:
+        status = launcher.launch(
+            LaunchRequest(arguments=["git", *arguments], cwd=workspace)
+        )
+        assert status.code == 0, status.stderr
+        return status.stdout.strip()
+
+    def commit_shared(name: str, first: str, last: str) -> str:
+        """Edit opposite ends of one file, so the parents overlap but merge."""
+        git("checkout", "-b", name, "source")
+        lines = [first, *["middle"] * 12, last]
+        (workspace / "shared.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
+        git("add", "shared.txt")
+        git("commit", "-m", f"{name} edits shared.txt")
+        return git("rev-parse", "HEAD")
+
+    git("init", "-b", "source")
+    git("config", "user.email", "resolver@example.test")
+    git("config", "user.name", "Resolver Test")
+    (workspace / "shared.txt").write_text(
+        "\n".join(["top", *["middle"] * 12, "bottom"]) + "\n", encoding="utf-8"
+    )
+    git("add", "shared.txt")
+    git("commit", "-m", "base")
+
+    first = commit_shared("one", "one rewrote the top", "bottom")
+    second = commit_shared("two", "top", "two rewrote the bottom")
+    git("checkout", "source")
+
+    reviews: list[str] = []  # lup: ignore[empty-collection] — turn counter
+
+    def reviewer_response(_root: Path, _output_name: str) -> JsonObject:
+        reviews.append("recheck")
+        return {
+            "concern_id": "a",
+            "accepted": True,
+            "generalized": True,
+            "reason": "still holds",
+            "criteria_met": ["held"],
+        }
+
+    def unused_worker(_root: Path, _output_name: str) -> JsonObject:
+        raise AssertionError("these parents merge without adjudication")
+
+    core = failure_leg_core(
+        tmp_path,
+        workspace,
+        launcher,
+        f"standing-{per_join}",
+        unused_worker,
+        reviewer_response,
+        recheck_standing_per_join=per_join,
+    )
+    # One criterion id both declare, so a re-check answers for either without
+    # the unknown-label correction turn muddying what is being counted.
+    concerns = [
+        concern(identifier).model_copy(
+            update={"criteria": [AcceptanceCriterion(id="held", description="done")]}
+        )
+        for identifier in ("a", "b")
+    ]
+    state = ResolveState(
+        config_digest="config-sha",
+        run_id=f"standing-{per_join}",
+        phase=ResolvePhase.REVIEW,
+        source=snapshot(workspace, launcher),
+        spec=resolve_spec(),
+        concerns=concerns,
+        progress=[
+            ConcernProgress(concern_id=item.id, status=ConcernStatus.VERIFIED)
+            for item in concerns
+        ],
+        outcomes=[
+            ConcernOutcome(
+                concern_id="a", branch="one", commit=first, head=first, verified=True
+            ),
+            ConcernOutcome(
+                concern_id="b", branch="two", commit=second, head=second, verified=True
+            ),
+        ],
+    )
+    core.persist(state)
+
+    await core.integrate(state, state.outcomes)
+
+    # Two either way for the final pass, one per integrated concern. The third
+    # is the standing re-check of the parent already in the tree.
+    assert len(reviews) == expected
 
 
 @pytest.mark.asyncio

@@ -993,6 +993,7 @@ def run_resolve(
     take_issues: bool = True,
     host_retries: int = HOST_RETRIES,
     host_backoff: float = HOST_BACKOFF_SECONDS,
+    recheck_standing_per_join: bool = False,
 ) -> None:
     """Drive the shared persisted resolver through one explicit native adapter."""
     provided = parse_answer_flags(answers)
@@ -1395,6 +1396,7 @@ def run_resolve(
                         base_option="--since",
                     ),
                 ],
+                recheck_standing_per_join=recheck_standing_per_join,
             ),
             harness.resolver,
             worker_factory,
