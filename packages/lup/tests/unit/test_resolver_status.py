@@ -4,9 +4,11 @@ from pathlib import Path
 
 from pydantic import TypeAdapter
 
+from lup.channels.models import utc_now
 from lup.channels.stream import Stream
+from lup.resolver.models import ConcernStatus, ResolvePhase
 from lup.resolver.state import ResolverStateRepository
-from lup.resolver.status import run_status
+from lup.resolver.status import LastRecorded, RunStatus, StatusCount, run_status
 
 
 def test_an_unheld_run_reads_as_not_running(tmp_path: Path) -> None:
@@ -65,3 +67,83 @@ def test_an_empty_log_has_no_last_record(tmp_path: Path) -> None:
     adapter: TypeAdapter[dict[str, int]] = TypeAdapter(dict[str, int])
 
     assert Stream(tmp_path / "missing.jsonl", adapter).last() is None
+
+
+def status_at(
+    phase: ResolvePhase, held: bool, unanswered: int = 0, verified: int = 0
+) -> RunStatus:
+    """One projection, built directly rather than through a run on disk."""
+    return RunStatus(
+        run_id="watched",
+        exists=True,
+        held=held,
+        phase=phase,
+        counts=[StatusCount(status=ConcernStatus.VERIFIED, concerns=verified)],
+        unanswered=unanswered,
+    )
+
+
+def test_a_watch_reports_a_change_in_any_of_the_four_facts() -> None:
+    """Phase, per-status counts, questions waiting, and the run stopping."""
+    running = status_at(ResolvePhase.WORKERS, held=True, verified=3)
+
+    assert running.watched() != status_at(
+        ResolvePhase.REVIEW, held=True, verified=3
+    ).watched()
+    assert running.watched() != status_at(
+        ResolvePhase.WORKERS, held=True, verified=4
+    ).watched()
+    assert running.watched() != status_at(
+        ResolvePhase.WORKERS, held=True, verified=3, unanswered=1
+    ).watched()
+    assert running.watched() != status_at(
+        ResolvePhase.WORKERS, held=False, verified=3
+    ).watched()
+
+
+def test_a_watch_does_not_report_the_journal_advancing() -> None:
+    """A run records tens of thousands of events; each is not a change."""
+    quiet = status_at(ResolvePhase.WORKERS, held=True, verified=3)
+    noisy = quiet.model_copy(
+        update={
+            "last": LastRecorded(
+                event="message_posted", actor="worker:alpha", at=utc_now()
+            )
+        }
+    )
+
+    assert quiet.watched() == noisy.watched()
+
+
+def test_a_watch_ends_when_the_run_parks() -> None:
+    """A park is waiting on an answer, which is the reader's turn."""
+    assert status_at(ResolvePhase.WORKERS, held=False).settled(running_yet=True)
+
+
+def test_a_watch_ends_when_the_run_finishes() -> None:
+    assert status_at(ResolvePhase.COMPLETE, held=True).settled(running_yet=True)
+
+
+def test_a_watch_survives_the_seconds_before_a_detached_run_takes_its_lock() -> None:
+    """Spawning returns immediately; the interpreter takes seconds to start."""
+    assert not status_at(ResolvePhase.WORKERS, held=False).settled(running_yet=False)
+
+
+def test_a_watch_on_a_run_parked_before_it_started_still_ends() -> None:
+    """The other direction of the same window, and the one that hung.
+
+    Waiting only for a lock that has been seen means a watch attached to an
+    already-parked run never ends: it is unheld, its phase is not terminal,
+    and no reading will change either. The caller closes the window on
+    elapsed time as well, which is what this asks for.
+    """
+    parked = status_at(ResolvePhase.WORKERS, held=False)
+
+    assert not parked.settled(running_yet=False)
+    assert parked.settled(running_yet=True)
+
+
+def test_a_watch_on_a_run_that_does_not_exist_ends_at_once() -> None:
+    absent = RunStatus(run_id="absent", exists=False, held=False)
+
+    assert absent.settled(running_yet=False)

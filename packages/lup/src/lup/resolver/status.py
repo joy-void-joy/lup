@@ -83,6 +83,48 @@ class RunStatus(BaseModel):
         )
 
 
+    def watched(self) -> str:
+        """The part of this projection a watch reports a change in.
+
+        Deliberately not the last journal entry. A run records tens of
+        thousands of events, so watching that field would emit on each one
+        and drown the four facts a reader is actually waiting for — the
+        phase moving, a concern changing status, a question arriving, and
+        the run stopping.
+        """
+        return "|".join(
+            [
+                str(self.held),
+                str(self.phase),
+                str(self.unanswered),
+                *(f"{count.status}={count.concerns}" for count in self.counts),
+            ]
+        )
+
+    def settled(self, running_yet: bool) -> bool:
+        """Whether nothing more will happen until somebody acts.
+
+        A watch that outlives what it watches is the loop this replaces, so
+        it ends where a reader has to do something: a terminal phase, or a
+        run whose lock nobody holds — a park, which is waiting on an answer.
+
+        ``running_yet`` is what keeps a watch from ending on the run it was
+        started for. A detached run is spawned and returns immediately, so
+        for the seconds its interpreter takes to start there is no lock to
+        hold and an unheld run is indistinguishable from a parked one. The
+        caller answers whether that window has closed — by seeing the lock
+        held, or by waiting long enough that an unheld run is not one that
+        is still starting. Both, because either alone is wrong in one
+        direction: a flag alone spins forever on a run parked before the
+        watch began, and a timer alone ends a slow start.
+        """
+        if not self.exists:
+            return True
+        if self.phase is not None and self.phase.terminal():
+            return True
+        return running_yet and not self.held
+
+
 def run_status(repository: ResolverStateRepository, run_id: str) -> RunStatus:
     """Everything the run directory can say about where this run stands."""
     held = repository.held()
