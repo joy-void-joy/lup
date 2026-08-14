@@ -1,14 +1,16 @@
 """Answering a run's liveness from its directory, where /proc cannot be read."""
 
+from datetime import datetime
 from pathlib import Path
 
 from pydantic import TypeAdapter
 
-from lup.channels.models import utc_now
+from lup.channels.models import LOCAL_STAMP_FORMAT, local_stamp, utc_now
 from lup.channels.stream import Stream
 from lup.resolver.models import ConcernStatus, ResolvePhase
 from lup.resolver.state import ResolverStateRepository
 from lup.resolver.status import LastRecorded, RunStatus, StatusCount, run_status
+from lup.devtools.supervisor.doors import attention_line
 
 
 def test_an_unheld_run_reads_as_not_running(tmp_path: Path) -> None:
@@ -153,3 +155,85 @@ def test_a_watch_on_a_run_that_does_not_exist_ends_at_once() -> None:
     absent = RunStatus(run_id="absent", exists=False, held=False)
 
     assert absent.settled(running_yet=False)
+
+
+def test_a_reading_is_dated_in_the_reader_s_own_zone() -> None:
+    """A run outlasts the attention of whoever started it.
+
+    The run's own ages say how long a worker has been quiet, which is a
+    different question from how long ago the reader was last told anything —
+    and a terminal shows how long a turn took, never when it ended.
+    """
+    stamp = local_stamp()
+
+    assert stamp == datetime.now().astimezone().strftime(LOCAL_STAMP_FORMAT)
+
+
+def test_the_attention_line_carries_progress_losses_and_who_is_held_up() -> None:
+    """Three facts and no fourth: how far, what was lost, who is waiting.
+
+    A per-status breakdown is progress rather than attention — nobody acts
+    on "9 retired" — and finding what needs you among nine figures that do
+    not is the reading this replaces.
+    """
+    counts = [
+        StatusCount(status=ConcernStatus.VERIFIED, concerns=21),
+        StatusCount(status=ConcernStatus.RETIRED, concerns=9),
+        StatusCount(status=ConcernStatus.INELIGIBLE, concerns=7),
+        StatusCount(status=ConcernStatus.FAILED, concerns=1),
+        StatusCount(status=ConcernStatus.REVISING, concerns=1),
+    ]
+    working = RunStatus(
+        run_id="r", exists=True, held=True, phase=ResolvePhase.WORKERS, counts=counts
+    )
+
+    assert attention_line(working).endswith(
+        "workers · 38/39 settled · 1 failed · running"
+    )
+    assert attention_line(working.model_copy(update={"unanswered": 2})).endswith(
+        "38/39 settled · 1 failed · 2 questions waiting"
+    )
+    assert attention_line(working.model_copy(update={"held": False})).endswith(
+        "stopped"
+    )
+    assert "retired" not in attention_line(working)
+
+
+def test_a_run_that_lost_nothing_says_nothing_about_losses() -> None:
+    """The failure field is absent rather than zero, so its presence means it."""
+    clean = RunStatus(
+        run_id="r",
+        exists=True,
+        held=True,
+        phase=ResolvePhase.WORKERS,
+        counts=[StatusCount(status=ConcernStatus.VERIFIED, concerns=4)],
+    )
+
+    assert attention_line(clean).endswith("workers · 4/4 settled · running")
+
+
+def test_the_fraction_can_reach_its_own_total() -> None:
+    """Counting only what produced work leaves a bar that never completes.
+
+    Measured against the plan it stops short by every concern retired or
+    found ineligible, and a progress figure that cannot finish teaches a
+    reader to stop believing it.
+    """
+    ended = RunStatus(
+        run_id="r",
+        exists=True,
+        held=False,
+        phase=ResolvePhase.COMPLETE,
+        counts=[
+            StatusCount(status=ConcernStatus.VERIFIED, concerns=2),
+            StatusCount(status=ConcernStatus.RETIRED, concerns=1),
+            StatusCount(status=ConcernStatus.INELIGIBLE, concerns=1),
+        ],
+    )
+
+    assert "4/4 settled" in attention_line(ended)
+
+
+def test_a_caller_wanting_another_shape_passes_one() -> None:
+    """The format is this project's judgement, so a default and not a law."""
+    assert local_stamp("%Y") == str(datetime.now().astimezone().year)
