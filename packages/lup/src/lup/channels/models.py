@@ -105,8 +105,14 @@ def utc_now() -> datetime:
     return datetime.now(UTC)
 
 
-LOCAL_STAMP_FORMAT = "%H:%M"
-"""How a reported time reads to whoever is deciding whether to come back."""
+LOCAL_STAMP_FORMAT = "%a %H:%M %Z"
+"""How a reported time reads to whoever is deciding whether to come back.
+
+The weekday and the zone both carry because a run spans days and is read
+from wherever its operator is: a bare clock time reads as today, in the
+reader's own zone, and both of those are exactly what a stale report is
+not. A caller wanting another shape passes one rather than forking this.
+"""
 
 
 def local_stamp(fmt: str = LOCAL_STAMP_FORMAT) -> str:
