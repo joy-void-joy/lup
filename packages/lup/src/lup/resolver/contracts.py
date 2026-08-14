@@ -46,6 +46,23 @@ class ResolverEnvironmentFault(Exception):
         self.concerns = concerns
 
 
+class ResolverAssemblyDeferred(Exception):
+    """A human declined, for now, to assemble the review branch.
+
+    Not a failure and not a park: the gate was asked and answered, and the
+    answer was "not yet". Every lease, branch and recorded outcome stays
+    exactly as it is, so resuming re-asks with the same evidence rather than
+    redoing any of the work behind it.
+    """
+
+    def __init__(self, verified: list[str], excluded: list[str]) -> None:
+        super().__init__(
+            f"assembly deferred with {len(verified)} concern(s) ready to merge"
+        )
+        self.verified = verified
+        self.excluded = excluded
+
+
 class ResolverRegression(Exception):
     """A human ruled that the merged tree broke a criterion that had held.
 

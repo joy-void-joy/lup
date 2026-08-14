@@ -26,6 +26,7 @@ from lup.harness.environment import non_interactive_environment
 from lup.harness.ownership import GeneratedArtifacts, generated_artifacts
 from lup.harness.process import LaunchRequest, LocalProcessLauncher, ProcessLauncher
 from lup.resolver.contracts import (
+    ResolverAssemblyDeferred,
     ResolverAwaitingAnswers,
     ResolverEnvironmentFault,
     ResolverRegression,
@@ -33,7 +34,7 @@ from lup.resolver.contracts import (
     WorktreePreparer,
 )
 from lup.resolver.actors import create_inbox_hooks
-from lup.resolver.core import ResolverCore
+from lup.resolver.core import ASSEMBLY_QUESTION_ID, ResolverCore
 from lup.resolver.journal import Journal
 from lup.resolver.orchestrator import WorktreeOrchestrator
 from lup.resolver.rebase import BaseRefresher
@@ -512,6 +513,27 @@ def report_environment_fault(
     typer.echo(
         f"  uv run lup-devtools harness resolve --adapter {adapter} "
         f"--run-id {run_id} --adopt-config"
+    )
+
+
+def report_deferred_assembly(
+    deferred: ResolverAssemblyDeferred, adapter: str, run_id: str
+) -> None:
+    """Print what is waiting to be merged, and how to come back to it.
+
+    Deferring is not failing, and the wording matters: every branch this
+    names is committed, verified and untouched. The run stopped at the one
+    junction where stopping used to mean killing the process.
+    """
+    typer.echo("Assembly deferred. The review branch was not built.")
+    typer.echo(f"  ready to merge: {', '.join(deferred.verified)}")
+    if deferred.excluded:
+        typer.echo(f"  would be excluded: {', '.join(deferred.excluded)}")
+    typer.echo("Every lease, branch and outcome is intact. Assemble later with:")
+    typer.echo(
+        f"  uv run lup-devtools harness resolve --adapter {adapter} "
+        f"--run-id {run_id} --adopt-config "
+        f"--answer {ASSEMBLY_QUESTION_ID}=approve"
     )
 
 
@@ -1334,6 +1356,9 @@ def run_resolve(
             except ResolverRegression as regression:
                 report_regression(regression, adapter, resolved_run_id)
                 raise typer.Exit(code=65)
+            except ResolverAssemblyDeferred as deferred:
+                report_deferred_assembly(deferred, adapter, resolved_run_id)
+                return
             except ResolverAwaitingAnswers as parked:
                 planned = (
                     core.repository.load().concerns if core.repository.exists() else []

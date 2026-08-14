@@ -12,6 +12,7 @@ from lup.harness.contracts import SkillInvocationRenderer
 from lup.harness.models import ResolveSpec
 from lup.harness.process import ProcessLauncher
 from lup.resolver.contracts import (
+    ResolverAssemblyDeferred,
     ResolverAwaitingAnswers,
     ResolverEnvironmentFault,
     ResolverObserver,
@@ -222,6 +223,46 @@ def approval_question(concern: Concern) -> MaterialQuestion:
         id=f"integration-approval-{concern.id}",
         concern_id=concern.id,
         prompt=f"Include {concern.title!r} in this resolver run?{grants}",
+        choices=[APPROVE, DEFER],
+        recommendation=APPROVE,
+        closed_choices=True,
+    )
+
+
+ASSEMBLY_QUESTION_ID = "integration-assembly"
+"""The one gate on assembling the review branch, asked once per run."""
+
+
+def assembly_question(
+    verified: list[ConcernOutcome], excluded: list[ConcernOutcome], base: str
+) -> MaterialQuestion:
+    """Build the gate on assembling the review branch itself.
+
+    Every per-concern approval is cashed here: this is the step that merges
+    the branches they authorized into one tree, and it is the least
+    reversible thing a run does. It used to follow the last worker
+    automatically, in the same invocation, so the only way to stop it was to
+    kill the process in the seconds between.
+
+    It is also the first moment three things are knowable — which concerns
+    verified, which failed and are therefore excluded, and what the branch
+    will be built on — so the prompt names all three instead of asking for a
+    bare yes. A run parking here resumes at no cost, and the recorded answer
+    is who decided to assemble that branch.
+    """
+    merging = "\n".join(f"  merge {outcome.concern_id}" for outcome in verified)
+    dropping = "\n".join(
+        f"  exclude {outcome.concern_id}: {outcome.failure or 'not verified'}"
+        for outcome in excluded
+    )
+    return MaterialQuestion(
+        id=ASSEMBLY_QUESTION_ID,
+        concern_id="integration",
+        prompt=(
+            f"Assemble the review branch from {len(verified)} verified "
+            f"concern(s) onto {base[:12]}?\n{merging}"
+            + (f"\n{dropping}" if dropping else "")
+        ),
         choices=[APPROVE, DEFER],
         recommendation=APPROVE,
         closed_choices=True,
@@ -494,11 +535,16 @@ class ResolverCore:
         self.persist(state)
         try:
             return await self.advance(state)
-        except (ResolverAwaitingAnswers, ResolverEnvironmentFault):
-            # Neither is this run failing. Persisting a failure here would
-            # move the phase to `failed` and make the resume path re-derive
-            # a `resume_from`, when nothing about the run's own state is
-            # wrong — only the host it was running on.
+        except (
+            ResolverAwaitingAnswers,
+            ResolverEnvironmentFault,
+            ResolverAssemblyDeferred,
+        ):
+            # None of these is this run failing. Persisting a failure here
+            # would move the phase to `failed` and make the resume path
+            # re-derive a `resume_from`, when nothing about the run's own
+            # state is wrong — only the host it was running on, or a human
+            # who has not yet said to assemble the branch.
             raise
         except Exception as error:
             self.persist_failure(error)
@@ -598,11 +644,16 @@ class ResolverCore:
         state = self.require_state()
         try:
             return await self.advance(state)
-        except (ResolverAwaitingAnswers, ResolverEnvironmentFault):
-            # Neither is this run failing. Persisting a failure here would
-            # move the phase to `failed` and make the resume path re-derive
-            # a `resume_from`, when nothing about the run's own state is
-            # wrong — only the host it was running on.
+        except (
+            ResolverAwaitingAnswers,
+            ResolverEnvironmentFault,
+            ResolverAssemblyDeferred,
+        ):
+            # None of these is this run failing. Persisting a failure here
+            # would move the phase to `failed` and make the resume path
+            # re-derive a `resume_from`, when nothing about the run's own
+            # state is wrong — only the host it was running on, or a human
+            # who has not yet said to assemble the branch.
             raise
         except Exception as error:
             self.persist_failure(error)
@@ -908,6 +959,7 @@ class ResolverCore:
             self.persist(state)
             state = state.model_copy(update={"phase": ResolvePhase.REVIEW})
             self.persist(state)
+            await self.approve_assembly(state, outcomes)
             state = await self.integrate(state, outcomes)
         elif state.integration is None or not state.integration.completed:
             # A resumed run re-enters integration until the record says it
@@ -1134,6 +1186,29 @@ class ResolverCore:
                         ],
                     }
                 )
+            )
+
+    async def approve_assembly(
+        self, state: ResolveState, outcomes: list[ConcernOutcome]
+    ) -> None:
+        """Put the assembly of the review branch to a human before doing it.
+
+        Asked once per run and only when there is something to merge. The
+        answer parks the run the way every other gate does, so the pause
+        costs nothing and the wait is where a human reads what is about to
+        be assembled.
+        """
+        verified = [outcome for outcome in outcomes if outcome.verified]
+        if not verified:
+            return
+        excluded = [outcome for outcome in outcomes if not outcome.verified]
+        question = assembly_question(verified, excluded, state.root_base().commit)
+        self.questions.queue_questions([question], "integration")
+        answers = await self.questions.await_questions([question])
+        if any(answer.value == DEFER for answer in answers.answers):
+            raise ResolverAssemblyDeferred(
+                [outcome.concern_id for outcome in verified],
+                [outcome.concern_id for outcome in excluded],
             )
 
     async def integrate(

@@ -41,6 +41,7 @@ from lup.resolver.contracts import (
 from lup.runtime.errors import ProviderTurnError, TurnFailure
 from lup.resolver.core import (
     APPROVE,
+    ASSEMBLY_QUESTION_ID,
     DEFER,
     ResolverCore,
     approval_decisions,
@@ -144,8 +145,17 @@ def seed_offer(core: ResolverCore, question_id: str, value: str) -> None:
 
 
 def seed_approvals(core: ResolverCore, concerns: list[Concern]) -> None:
+    """Approve every concern, and approve assembling what they produce.
+
+    Two decisions, not one: a concern gate authorizes the work, and the
+    assembly gate authorizes merging the results into a review branch. A
+    run seeded with only the first parks before integration, which is the
+    point of that gate — so a test that means to reach COMPLETE says so by
+    answering both.
+    """
     for item in concerns:
         seed_offer(core, approval_question(item).id, APPROVE)
+    seed_offer(core, ASSEMBLY_QUESTION_ID, APPROVE)
 
 
 def worker_asks(mailbox: QuestionMailbox, run_id: str, asked: MaterialQuestion) -> None:
@@ -2899,6 +2909,7 @@ async def test_a_concern_admitted_into_a_parked_run_finishes_beside_the_original
         "a-dynamic",
         "b-shape",
         "integration-approval-b",
+        ASSEMBLY_QUESTION_ID,
     }
     assert [item.status for item in persisted.progress if item.concern_id == "b"] == [
         ConcernStatus.CLEANED
