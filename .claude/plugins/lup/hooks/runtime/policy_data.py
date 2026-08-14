@@ -2018,6 +2018,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -2029,6 +2030,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -2040,6 +2042,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -2051,6 +2054,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -2062,6 +2066,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -2073,6 +2078,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -3185,6 +3191,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -3196,6 +3203,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -3207,6 +3215,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -3218,6 +3227,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -3229,6 +3239,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -3240,6 +3251,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -3251,6 +3263,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -3262,6 +3275,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -3273,6 +3287,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
