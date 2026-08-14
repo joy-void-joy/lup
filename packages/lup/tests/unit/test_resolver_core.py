@@ -2480,9 +2480,98 @@ async def test_a_concern_resumed_past_a_committed_round_keeps_that_round_as_its_
     manifest = await resumed.resume()
 
     outcomes = {outcome.concern_id: outcome for outcome in manifest.outcomes}
-    assert [round.diff.reason for round in outcomes["a"].rounds] == [""]
+    # Both rounds, not only the one this process took. A resume re-enters
+    # from what is persisted, so the outcome records the whole history
+    # rather than starting the count again at the interruption.
+    assert [round.round for round in outcomes["a"].rounds] == [1, 2]
+    assert [round.diff.reason for round in outcomes["a"].rounds] == ["", ""]
     assert outcomes["a"].verified is True
     assert all(record.passed for record in manifest.verification)
+
+
+@pytest.mark.asyncio
+async def test_a_resumed_concern_still_knows_why_it_was_sent_back(
+    tmp_path: Path,
+) -> None:
+    """The review that produced the feedback was spent; losing it spends it twice.
+
+    An interrupted concern re-entered at round one with `feedback = ""` while
+    its branch still carried the rounds it had committed — so the worker met
+    its own work with no record of what the reviewer had asked for.
+    """
+    launcher = LocalProcessLauncher()
+    workspace = failure_leg_workspace(tmp_path, launcher)
+    written: list[str] = []  # lup: ignore[empty-collection]
+    running: list[ResolverCore] = []  # lup: ignore[empty-collection]
+
+    def worker_response(root: Path, output_name: str) -> JsonObject:
+        if output_name == MergeReport.__name__:
+            return {"completed": True, "summary": "semantic join reviewed"}
+        written.append("turn")
+        (root / "a.txt").write_text(f"round {len(written)}\n", encoding="utf-8")
+        return {
+            "concern_id": "a",
+            "changed": True,
+            "summary": "implemented a",
+            "files_changed": ["a.txt"],
+        }
+
+    def reviewer_response(_root: Path, _output_name: str) -> JsonObject:
+        if len(running) == 1:
+            running[0].mailbox.drain(
+                ParkRequest(run_id="feedback-survives", reason="stop here")
+            )
+            return {
+                "concern_id": "a",
+                "accepted": False,
+                "generalized": False,
+                "reason": "rename the helper before this can pass",
+                "criteria_met": [],
+            }
+        return {
+            "concern_id": "a",
+            "accepted": True,
+            "generalized": True,
+            "reason": "criteria met",
+            "criteria_met": ["a-done"],
+        }
+
+    def build_core() -> ResolverCore:
+        return failure_leg_core(
+            tmp_path,
+            workspace,
+            launcher,
+            "feedback-survives",
+            worker_response,
+            reviewer_response,
+        )
+
+    stopped = build_core()
+    running.append(stopped)
+    seed_approvals(stopped, [concern("a")])
+    with pytest.raises(ResolverDrained):
+        await stopped.run(
+            ResolveInventory(
+                source=snapshot(workspace, launcher), concerns=[concern("a")]
+            )
+        )
+
+    # The round the interruption left behind, whole rather than split across
+    # its halves — the diff is what joins them and what a re-entry needs.
+    persisted = stopped.repository.rounds_for("a")
+    assert [record.round for record in persisted] == [1]
+    assert "rename the helper" in persisted[0].review.reason
+
+    resumed = build_core()
+    running.append(resumed)
+    manifest = await resumed.resume()
+
+    outcomes = {outcome.concern_id: outcome for outcome in manifest.outcomes}
+    # Two worker turns in total, not three: the resume continued at round two
+    # rather than repeating the round already committed on the branch.
+    assert len(written) == 2
+    assert [record.round for record in outcomes["a"].rounds] == [1, 2]
+    assert outcomes["a"].verified is True
 
 
 @pytest.mark.asyncio
