@@ -19,6 +19,7 @@ one and only a human can say whether this did.
 from collections.abc import AsyncIterator
 from pathlib import Path
 
+from lup.resolver.contracts import ResolverDrained
 from lup.resolver.dag import ConcernGraph
 from lup.resolver.journal import (
     JoinAuditEvent,
@@ -212,6 +213,14 @@ class Joiner:
             )
             await self.recheck_standing(lease, base, joined[:-1], parent)
             self.record_join_progress(joined, current)
+            # After the progress file names a tree that exists, for the same
+            # reason the worker round checks before its turn: this is where
+            # stopping costs nothing. Integration is the longest phase and
+            # held no such boundary, so a drain issued during it was never
+            # observed and `kill` was the only lever left.
+            drain = self.questions.draining()
+            if drain is not None:
+                raise ResolverDrained(drain.reason, [])
         await self.audit_join(lease, base, joined, current, purpose)
         return current
 

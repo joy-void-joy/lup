@@ -2794,6 +2794,79 @@ async def test_a_resume_clears_the_drain_that_stopped_it(tmp_path: Path) -> None
 
 
 @pytest.mark.asyncio
+async def test_a_drain_stops_integration_between_two_parents(tmp_path: Path) -> None:
+    """The longest phase of a run held no boundary a drain could be seen at.
+
+    ``draining()`` was consulted at the top of a worker round and between
+    dependency batches, and integration begins after the last of those — so
+    from that moment neither could occur again. A drain issued during a
+    measured run was still merging eighteen minutes later, and ``kill`` was
+    the only lever, which costs the in-flight parent's merger work.
+    """
+    launcher = LocalProcessLauncher()
+    workspace = failure_leg_workspace(tmp_path, launcher)
+
+    def git(*arguments: str) -> str:
+        status = launcher.launch(
+            LaunchRequest(arguments=["git", *arguments], cwd=workspace)
+        )
+        assert status.code == 0, status.stderr
+        return status.stdout.strip()
+
+    def branch_adding(name: str, filename: str) -> str:
+        git("checkout", "-b", name, "source")
+        (workspace / filename).write_text(f"{name}\n", encoding="utf-8")
+        git("add", filename)
+        git("commit", "-m", f"add {filename}")
+        return git("rev-parse", "HEAD")
+
+    first = branch_adding("one", "one.txt")
+    second = branch_adding("two", "two.txt")
+    git("checkout", "source")
+
+    def unused_actor(_root: Path, _output_name: str) -> JsonObject:
+        raise AssertionError("a clean join spends no actor turn")
+
+    core = failure_leg_core(
+        tmp_path, workspace, launcher, "drained-join", unused_actor, unused_actor
+    )
+    concerns = [concern("a"), concern("b")]
+    state = ResolveState(
+        config_digest="config-sha",
+        run_id="drained-join",
+        phase=ResolvePhase.REVIEW,
+        source=snapshot(workspace, launcher),
+        spec=resolve_spec(),
+        concerns=concerns,
+        progress=[
+            ConcernProgress(concern_id=item.id, status=ConcernStatus.VERIFIED)
+            for item in concerns
+        ],
+        outcomes=[
+            ConcernOutcome(
+                concern_id="a", branch="one", commit=first, head=first, verified=True
+            ),
+            ConcernOutcome(
+                concern_id="b", branch="two", commit=second, head=second, verified=True
+            ),
+        ],
+    )
+    core.persist(state)
+    core.mailbox.drain(ParkRequest(run_id="drained-join", reason="operator stopped it"))
+
+    with pytest.raises(ResolverDrained) as drained:
+        await core.integrate(state, state.outcomes)
+
+    assert drained.value.reason == "operator stopped it"
+    # Stopped after the first parent was committed and its progress written,
+    # so the resume re-enters at the second rather than rebuilding the first.
+    persisted = core.repository.load()
+    assert persisted.join_progress is not None
+    assert persisted.join_progress.joined == [first]
+    assert persisted.integration is None
+
+
+@pytest.mark.asyncio
 async def test_a_finished_run_releases_itself_without_a_human_gate(
     tmp_path: Path,
 ) -> None:
