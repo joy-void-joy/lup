@@ -28,6 +28,7 @@ from lup.harness.process import LaunchRequest, LocalProcessLauncher, ProcessLaun
 from lup.resolver.contracts import (
     ResolverAwaitingAnswers,
     ResolverEnvironmentFault,
+    ResolverRegression,
     ResolverObserver,
     WorktreePreparer,
 )
@@ -508,6 +509,27 @@ def report_environment_fault(
         typer.echo(f"  interrupted: {', '.join(fault.concerns)}")
     typer.echo("No concern was failed and no outcome was recorded.")
     typer.echo("Fix the host, then continue with:")
+    typer.echo(
+        f"  uv run lup-devtools harness resolve --adapter {adapter} "
+        f"--run-id {run_id} --adopt-config"
+    )
+
+
+def report_regression(
+    regression: ResolverRegression, adapter: str, run_id: str
+) -> None:
+    """Print which concerns the merged tree broke, and what the ruling means.
+
+    The re-check's other answer, "superseded", settles a lost criterion and
+    lets the run finish. This one does not, and saying so is the point: the
+    review branch is deliberately left unfinished so the repair happens
+    before anything is landed, rather than after.
+    """
+    typer.echo("Integration regressed criteria that held before the merge.")
+    for ruling in regression.regressed:
+        typer.echo(f"  {ruling.concern_id}: {', '.join(ruling.criteria)}")
+    typer.echo("The review branch was not completed. Every lease and branch is intact.")
+    typer.echo("Repair the merged tree, then continue with:")
     typer.echo(
         f"  uv run lup-devtools harness resolve --adapter {adapter} "
         f"--run-id {run_id} --adopt-config"
@@ -1309,6 +1331,9 @@ def run_resolve(
             except ResolverEnvironmentFault as fault:
                 report_environment_fault(fault, adapter, resolved_run_id)
                 raise typer.Exit(code=75)
+            except ResolverRegression as regression:
+                report_regression(regression, adapter, resolved_run_id)
+                raise typer.Exit(code=65)
             except ResolverAwaitingAnswers as parked:
                 planned = (
                     core.repository.load().concerns if core.repository.exists() else []

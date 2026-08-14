@@ -6,6 +6,7 @@ from pathlib import Path
 from lup.resolver.models import (
     ConcernProgress,
     MaterialQuestion,
+    RecheckRuling,
     ResolvePhase,
     RunTally,
 )
@@ -43,6 +44,31 @@ class ResolverEnvironmentFault(Exception):
         super().__init__(f"resolver run stopped on an environmental fault: {cause}")
         self.cause = cause
         self.concerns = concerns
+
+
+class ResolverRegression(Exception):
+    """A human ruled that the merged tree broke a criterion that had held.
+
+    The re-check asks whether a lost criterion was superseded by later work
+    or is a regression, and the two answers mean opposite things about the
+    review branch. "Superseded" settles it; this is the other one, and it
+    says the assembled tree carries a defect that needs real work rather
+    than a re-read.
+
+    Raised rather than recorded, because recording it is exactly what the
+    run used to do: the answer was written down, the concern stayed
+    verified, and the branch was assembled and completed around it. A run
+    that stops here keeps every lease and branch intact for the repair, and
+    the next resume re-checks rather than trusting the old verdict.
+    """
+
+    def __init__(self, regressed: list["RecheckRuling"]) -> None:
+        detail = "; ".join(
+            f"{ruling.concern_id} lost {', '.join(ruling.criteria)}"
+            for ruling in regressed
+        )
+        super().__init__(f"integration regressed verified criteria: {detail}")
+        self.regressed = regressed
 
 
 class ResolverObserver(ABC):

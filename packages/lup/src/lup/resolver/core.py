@@ -15,6 +15,7 @@ from lup.resolver.contracts import (
     ResolverAwaitingAnswers,
     ResolverEnvironmentFault,
     ResolverObserver,
+    ResolverRegression,
     WorktreePreparer,
 )
 from lup.resolver.actors import ActorSessions
@@ -47,6 +48,8 @@ from lup.resolver.models import (
     IntegrationRecord,
     MaterialQuestion,
     QuestionBatch,
+    RECHECK_REGRESSION,
+    RecheckRuling,
     RefreshReport,
     ResolveInventory,
     ResolveManifest,
@@ -1055,6 +1058,31 @@ class ResolverCore:
         )
         self.persist(state)
 
+    def record_regressions(
+        self, state: ResolveState, regressed: list[RecheckRuling]
+    ) -> ResolveState:
+        """Write the lost criteria onto the outcomes that lost them.
+
+        The ruling is a durable fact about the merged tree, not a detail of
+        the invocation that heard it. Recorded on the outcome, the next
+        session reads which concern broke and which criteria it broke,
+        instead of finding a completed run and an answer file nothing acted
+        on.
+        """
+        lost = {ruling.concern_id: ruling for ruling in regressed}
+        return state.model_copy(
+            update={
+                "outcomes": [
+                    outcome.model_copy(
+                        update={"regressed": lost[outcome.concern_id].criteria}
+                    )
+                    if outcome.concern_id in lost
+                    else outcome
+                    for outcome in state.outcomes
+                ]
+            }
+        )
+
     def persist_failure(self, error: Exception) -> None:
         """Persist both the failure and the exact phase from which to resume."""
         state = self.require_state()
@@ -1195,7 +1223,20 @@ class ResolverCore:
                 raise ResolverInvariantError(
                     "integration verification failed: " + ", ".join(failed)
                 )
-            await self.joiner.recheck_criteria(state, integration)
+            # The re-check's two answers mean opposite things about this
+            # branch, so the run waits for them here rather than completing
+            # around them. "Superseded" settles a lost criterion; a
+            # regression says the assembled tree is wrong, and finishing
+            # anyway is what shipped one.
+            rechecks = await self.joiner.recheck_criteria(state, integration)
+            regressed = [
+                ruling
+                for ruling in await self.joiner.settle_rechecks(rechecks)
+                if ruling.ruling == RECHECK_REGRESSION
+            ]
+            if regressed:
+                self.persist(self.record_regressions(state, regressed))
+                raise ResolverRegression(regressed)
             integrated_ids = {identifier: True for identifier in integration.concerns}
             integration = integration.model_copy(update={"completed": True})
             integrated_outcomes = [
