@@ -754,7 +754,7 @@ def describe_refresh(report: RefreshReport) -> list[str]:
     return lines
 
 
-def detach_resolve(adapter: str, run_id: str | None, answers: list[str]) -> None:
+def detach_resolve(run_id: str | None, forwarded: list[str]) -> None:
     """Start a run that outlives this command, and say where to reach it.
 
     A blocking run holds the launching agent's only turn, so nothing could
@@ -762,6 +762,14 @@ def detach_resolve(adapter: str, run_id: str | None, answers: list[str]) -> None
     design unreachable, however well the channels underneath worked. Once
     launching returns, the run directory is the whole contract: the page and
     an orchestrating agent are peers on it, exactly as two pages would be.
+
+    The child's arguments are *derived* from the ones this process received
+    rather than re-listed from the flags detaching happens to know about. A
+    re-listing drops whatever it was not taught: it forwarded adapter, run
+    id and answers, so `--adopt-config` silently vanished and a moved run
+    could not be resumed detached at all — and `--no-issues`, `--admit*` and
+    `--wait` went the same way. Derived, a flag added to the callback is
+    forwarded because it was typed, not because someone remembered it here.
     """
     root = project_root()
     resolved = run_id or (
@@ -774,27 +782,54 @@ def detach_resolve(adapter: str, run_id: str | None, answers: list[str]) -> None
         "uv",
         "run",
         "lup-devtools",
-        "harness",
-        "resolve",
-        "--adapter",
-        adapter,
-        "--run-id",
-        resolved,
-        *(part for answer in answers for part in ("--answer", answer)),
+        *forwarded,
+        # Named explicitly even when it was defaulted, so parent and child
+        # agree on which run this is rather than each deriving it from a
+        # HEAD that may move between the two.
+        *(() if run_id else ("--run-id", resolved)),
     ]
+    log = detached_log(root, resolved)
     sh.Command(arguments[0])(
         *arguments[1:],
         _cwd=str(root),
         _bg=True,
         _bg_exc=False,
         _new_session=True,
-        _out="/dev/null",
-        _err="/dev/null",
+        # Discarding both streams made a detached run that refused on its
+        # first step indistinguishable from one working quietly: the refusal
+        # went nowhere, and the run directory held no trace of it either.
+        _out=str(log),
+        _err=str(log),
     )
     typer.echo(f"Run {resolved} started detached.")
+    typer.echo(f"Its output: {log}")
     typer.echo(
-        f"Follow it: uv run lup-devtools harness resolve supervise --run-id {resolved}"
+        f"Follow it: uv run lup-devtools harness resolve status "
+        f"--run-id {resolved} --watch"
     )
+
+
+def detached_log(root: Path, run_id: str) -> Path:
+    """Where a detached run's console output is kept, beside its own record."""
+    directory = root / ".lup" / "resolve" / run_id
+    directory.mkdir(parents=True, exist_ok=True)
+    return directory / "detached.log"
+
+
+def forwardable_arguments(argv: list[str]) -> list[str]:
+    """This invocation's own arguments, minus the flag that detached it.
+
+    Taken from the command line rather than rebuilt from parsed values
+    because rebuilding is what loses flags. ``--detach`` is the one thing
+    removed: left in, the child detaches again and nothing ever runs.
+
+    Matched as a token, so an option *value* spelled ``--detach`` would go
+    with it. Every value this command takes is a reason, an id, an answer or
+    a number, and detaching an abort is contradictory anyway — the case is
+    named rather than guarded because a guard would have to re-list the
+    options, which is the coupling this function exists to remove.
+    """
+    return [argument for argument in argv[1:] if argument != "--detach"]
 
 
 def admission_request(
