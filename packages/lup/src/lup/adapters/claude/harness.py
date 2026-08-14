@@ -107,8 +107,12 @@ class ClaudeSpellings(NativeSpellings):
     def resolver_entry(self) -> Instruction:
         return Instruction(
             "Run `uv run lup-devtools harness resolve --adapter claude`. "
-            "The command accepts optional flags: `--run-id <id>` resumes "
-            "a persisted run. Assembling the review branch is gated on the "
+            "Where this project has a run that never finished, it refuses "
+            "rather than starting a second one beside it, and lists them: "
+            "relay that choice — resume with `--run-id <id>`, keeping every "
+            "answer already collected, or start fresh with `--new`, which "
+            "re-derives the inventory and discards them. Never take it "
+            "yourself. Assembling the review branch is gated on the "
             "reserved `integration-assembly` question, so approving it is "
             "`--answer integration-assembly=approve` like any other answer. "
             "It waits zero seconds by "

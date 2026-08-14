@@ -10,6 +10,7 @@ import asyncio
 import os
 from collections.abc import AsyncGenerator, Iterator
 from contextlib import asynccontextmanager
+import sys
 from pathlib import Path
 
 import sh
@@ -41,6 +42,7 @@ from lup.resolver.orchestrator import WorktreeOrchestrator
 from lup.resolver.rebase import BaseRefresher
 from lup.resolver.run import ResolveRun
 from lup.resolver.state import ResolverStateRepository
+from lup.resolver.status import unfinished_runs
 from lup.resolver.models import (
     AdmissionRequest,
     Concern,
@@ -980,6 +982,41 @@ def admitted_issues(numbers: list[int]) -> list[IssueEvidence]:
     return [open_issues[number] for number in numbers]
 
 
+def chosen_run(state_root: Path, fresh: str, *, start_new: bool, ending: bool) -> str:
+    """Which run this invocation means, when it named none.
+
+    A run id defaults to the commit it starts from, so the default moves at
+    every commit and two invocations a day apart never mean the same run.
+    Left to that, entering the resolver from a skill starts a second run
+    beside a parked one holding every answer already collected — the most
+    expensive thing this tool can do, and the one the entry made easiest.
+
+    So an unfinished run is put to whoever ran this rather than guessed at
+    in either direction. Non-interactively it refuses and names both routes,
+    because the caller is then an agent whose job is to relay the choice to
+    a human, not to take it.
+    """
+    if start_new or ending:
+        return fresh
+    unfinished = unfinished_runs(state_root)
+    if not unfinished:
+        return fresh
+    newest = unfinished[0]
+    typer.echo(f"{len(unfinished)} unfinished run(s) under {state_root}:", err=True)
+    for summary in unfinished:
+        typer.echo(f"  {summary.line()}", err=True)
+    if not sys.stdin.isatty():
+        raise typer.BadParameter(
+            f"this project has an unfinished run. Resume it with --run-id "
+            f"{newest.run_id}, or start a fresh one with --new. Resuming keeps "
+            "every answer already collected; starting fresh re-derives the "
+            "inventory and discards them"
+        )
+    if typer.confirm(f"Resume {newest.run_id}?", default=True):
+        return newest.run_id
+    return fresh
+
+
 def run_resolve(
     composition: NativeHarnessComposition,
     run_id: str | None,
@@ -994,6 +1031,7 @@ def run_resolve(
     host_retries: int = HOST_RETRIES,
     host_backoff: float = HOST_BACKOFF_SECONDS,
     recheck_standing_per_join: bool = False,
+    start_new: bool = False,
 ) -> None:
     """Drive the shared persisted resolver through one explicit native adapter."""
     provided = parse_answer_flags(answers)
@@ -1014,10 +1052,13 @@ def run_resolve(
             err=True,
         )
     launcher = LocalProcessLauncher()
-    resolved_run_id = run_id or (
-        "resolve-" + resolver_git(launcher, root, ["rev-parse", "--short=12", "HEAD"])
-    )
     state_root = root / ".lup" / "resolve"
+    resolved_run_id = run_id or chosen_run(
+        state_root,
+        "resolve-" + resolver_git(launcher, root, ["rev-parse", "--short=12", "HEAD"]),
+        start_new=start_new,
+        ending=abort_reason is not None,
+    )
     # Every worktree this run leases lands under here, which is what makes
     # "a checkout lup created" a structural test rather than a judgement.
     worktree_root = root.parent / f"{root.name}-resolve-{resolved_run_id}"

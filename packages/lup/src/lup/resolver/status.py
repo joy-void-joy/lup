@@ -16,6 +16,7 @@ all on the host the resolver most often runs on.
 
 from collections import Counter
 from datetime import datetime, timedelta
+from pathlib import Path
 
 from pydantic import BaseModel, Field
 
@@ -132,6 +133,59 @@ class RunStatus(BaseModel):
         if self.phase is not None and self.phase.terminal():
             return True
         return not self.held
+
+
+class RunSummary(BaseModel):
+    """One run on disk, as far as choosing between them needs to know."""
+
+    model_config = FROZEN
+
+    run_id: str
+    phase: ResolvePhase
+    held: bool
+    last: datetime | None = None
+
+    def line(self) -> str:
+        """This run as one row of the list a chooser is shown."""
+        when = f"{self.last:%Y-%m-%d %H:%M}Z" if self.last is not None else "never"
+        alive = "running" if self.held else "stopped"
+        return f"{self.run_id}  {self.phase}  {alive}  last {when}"
+
+
+def unfinished_runs(state_root: Path) -> list[RunSummary]:
+    """Every run here that is neither finished nor abandoned, newest first.
+
+    A run keyed to the commit it started from gets a different id at every
+    later commit, so "the run for this project" is not a question an id can
+    answer — asking the directory is the only way to find one still owed
+    something. Failed counts as unfinished: a resume re-enters from the phase
+    the failure stopped at, which is the whole reason failing is not the end
+    of a run.
+    """
+    if not state_root.is_dir():
+        return []
+    summaries = [
+        RunSummary(
+            run_id=directory.name,
+            phase=state.phase,
+            held=repository.held(),
+            last=None if entry is None else entry.at,
+        )
+        for directory in sorted(state_root.iterdir())
+        if directory.is_dir()
+        for repository in [ResolverStateRepository(state_root, directory.name)]
+        if repository.exists()
+        for state in [repository.load()]
+        if state.phase not in {ResolvePhase.COMPLETE, ResolvePhase.ABORTED}
+        for entry in [journal_tail(repository.root)]
+    ]
+    # Sorted on the stamp rather than the datetime so a run that has recorded
+    # nothing sorts last without a sentinel date standing in for "never".
+    return sorted(
+        summaries,
+        key=lambda summary: summary.last.isoformat() if summary.last else "",
+        reverse=True,
+    )
 
 
 def run_status(repository: ResolverStateRepository, run_id: str) -> RunStatus:

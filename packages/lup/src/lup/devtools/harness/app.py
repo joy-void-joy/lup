@@ -273,6 +273,17 @@ def create_harness_app(
                 "doubles, up to half an hour between probes.",
             ),
         ] = resolve.HOST_BACKOFF_SECONDS,
+        start_new: Annotated[
+            bool,
+            typer.Option(
+                "--new",
+                help="Start a fresh run even though this project has an "
+                "unfinished one. Without it, an unfinished run is put to you "
+                "rather than left behind: a run id defaults to the commit it "
+                "started from, so the default moves at every commit and a bare "
+                "rerun would otherwise strand every answer already collected.",
+            ),
+        ] = False,
         recheck_standing_per_join: Annotated[
             bool,
             typer.Option(
@@ -330,6 +341,7 @@ def create_harness_app(
             host_retries,
             host_backoff,
             recheck_standing_per_join,
+            start_new,
         )
 
     claude_target = targets.builder("claude")
