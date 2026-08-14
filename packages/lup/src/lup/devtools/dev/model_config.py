@@ -18,6 +18,10 @@ Backs the `lup-devtools dev model-config` commands (wired in
   model, by importing each module and reading `model_config` off the class.
   The declaration is what a rewrite edits; the resolved mapping is what the
   program runs on, and only the second is worth preserving.
+- `declared-at` and `snapshot-at` take those same two readings of a git
+  revision instead of the working tree, so a conversion already committed is
+  still provable — the tree it replaced is read out of history rather than
+  restored over the checkout.
 - `compare` diffs two of either. Equal snapshots mean no model lost, gained,
   or changed a key.
 
@@ -35,18 +39,23 @@ Examples::
     $ uv run lup-devtools dev model-config census
     $ uv run lup-devtools dev model-config census --json
     $ uv run lup-devtools dev model-config snapshot tmp/before.json
+    $ uv run lup-devtools dev model-config snapshot-at HEAD~1 tmp/before.json
     $ uv run lup-devtools dev model-config compare tmp/before.json tmp/after.json
 """
 
 import ast
 import importlib
+import os
 import sys
+import tarfile
+import tempfile
 from abc import abstractmethod
 from collections import Counter
 from collections.abc import Iterator, Sequence
 from pathlib import Path, PurePosixPath
 from typing import Annotated, Literal
 
+import sh
 import typer
 from pydantic import BaseModel
 
@@ -658,6 +667,21 @@ class ParsedFile(BaseModel, frozen=True, arbitrary_types_allowed=True):
     unparsed: str = ""
 
 
+def parse_source(rel: str, text: str) -> ParsedFile:
+    """Parse one file's source under the repository-relative name it carries.
+
+    Separate from :func:`parse_file` because the working tree is not the only
+    source a census reads: proving a conversion kept its keys means parsing
+    the same paths out of history, which must be keyed identically to be
+    comparable at all.
+    """
+    try:
+        tree = ast.parse(text)
+    except SyntaxError as exc:
+        return ParsedFile(unparsed=f"{rel}: {exc}")
+    return ParsedFile(module=ModuleCensus(path=rel, text=text, tree=tree))
+
+
 def parse_file(path: Path) -> ParsedFile:
     """Parse one file, or report why it could not be parsed.
 
@@ -668,10 +692,9 @@ def parse_file(path: Path) -> ParsedFile:
     rel = path.as_posix()
     try:
         text = path.read_text(encoding="utf-8")
-        tree = ast.parse(text)
-    except (OSError, UnicodeDecodeError, SyntaxError) as exc:
+    except (OSError, UnicodeDecodeError) as exc:
         return ParsedFile(unparsed=f"{rel}: {exc}")
-    return ParsedFile(module=ModuleCensus(path=rel, text=text, tree=tree))
+    return parse_source(rel, text)
 
 
 def take_census(paths: Sequence[Path] | None = None) -> Census:
@@ -781,9 +804,19 @@ def declared_snapshot(paths: Sequence[Path] | None = None) -> ModelConfigSnapsho
     merging above all — which is what the importing snapshot checks instead.
     Neither alone is the equivalence proof; together they are.
     """
-    read = [
-        parse_file(path) for path in (paths if paths is not None else python_files())
-    ]
+    return declared_configuration(
+        [parse_file(path) for path in (paths if paths is not None else python_files())]
+    )
+
+
+def declared_configuration(read: Sequence[ParsedFile]) -> ModelConfigSnapshot:
+    """What a set of already-parsed files declares, aliases resolved across them.
+
+    The alias index is built from the same set rather than from the working
+    tree, so a revision's `model_config = FROZEN` resolves against the
+    ``FROZEN`` that revision declared instead of against whatever the current
+    checkout happens to hold.
+    """
     modules = [one.module for one in read if one.module is not None]
     index = {
         f"{dotted_module(one.path)}.{name}": config
@@ -798,6 +831,35 @@ def declared_snapshot(paths: Sequence[Path] | None = None) -> ModelConfigSnapsho
         },
         modules=sorted(one.path for one in modules),
         failures={one.unparsed: "unparsed" for one in read if one.unparsed},
+    )
+
+
+def revision_files(revision: str) -> Iterator[str]:
+    """Every Python file a git revision holds, repository-relative."""
+    for rel in git.lines("ls-tree", "-r", "--name-only", revision):
+        if rel.endswith((".py", ".pyi")):
+            yield rel
+
+
+def revision_source(revision: str, rel: str) -> ParsedFile:
+    """One file's source as of a git revision, or why it could not be read."""
+    try:
+        text = str(git("show", f"{revision}:{rel}"))
+    except (sh.ErrorReturnCode, UnicodeDecodeError) as exc:
+        return ParsedFile(unparsed=f"{rel}: {exc}")
+    return parse_source(rel, text)
+
+
+def declared_snapshot_at(revision: str) -> ModelConfigSnapshot:
+    """Every class's declared configuration as of a git revision.
+
+    What makes an already-committed conversion provable: the tree it replaced
+    is read out of history rather than restored over the checkout, so the
+    before-and-after comparison does not depend on having thought to take a
+    snapshot before starting.
+    """
+    return declared_configuration(
+        [revision_source(revision, rel) for rel in revision_files(revision)]
     )
 
 
@@ -856,6 +918,11 @@ def take_snapshot(paths: Sequence[Path] | None = None) -> ModelConfigSnapshot:
     Importing by path first and reading `BaseModel.__subclasses__` afterwards
     means a model is recorded wherever it was defined, including ones a module
     builds rather than declares.
+
+    Models belonging to `__main__` are left out: the only one that can be is
+    this module read as a script by :func:`snapshot_at`, and a snapshot that
+    recorded the instrument would report it missing from every tree it was not
+    measuring.
     """
     attempts = [
         attempt_import(path)
@@ -873,11 +940,63 @@ def take_snapshot(paths: Sequence[Path] | None = None) -> ModelConfigSnapshot:
                     },
                 )
                 for model in descendant_models()
+                if model.__module__ != "__main__"
             )
         ),
         modules=[one.path for one in attempts if not one.failure],
         failures={one.path: one.failure for one in attempts if one.failure},
     )
+
+
+EMIT_SNAPSHOT = "--emit-snapshot"
+"""The argument this module answers as a script rather than as a command."""
+
+
+def materialize_revision(revision: str, destination: Path) -> None:
+    """Write every file a git revision holds into a directory."""
+    archive = destination / "revision.tar"
+    git("archive", "--format=tar", "--output", str(archive), revision)
+    with tarfile.open(archive) as tar:
+        tar.extractall(destination, filter="data")
+    archive.unlink()
+
+
+def revision_paths(root: Path) -> str:
+    """An extracted revision's import roots, as a `PYTHONPATH` value.
+
+    Every `src` directory the tree holds, so the subprocess resolves `lup` and
+    the application package out of the revision rather than out of whatever is
+    installed in the environment running it.
+    """
+    return os.pathsep.join(
+        sorted(str(one) for one in root.rglob("src") if one.is_dir())
+    )
+
+
+def snapshot_at(revision: str) -> ModelConfigSnapshot:
+    """The configuration pydantic resolves onto every model at a git revision.
+
+    Taken in a subprocess against an extracted copy, because the models being
+    read are `lup` itself: this process has already imported that package from
+    the working tree, so importing the revision's files here would resolve
+    every one of them to the code already loaded and report the working tree's
+    configuration under the revision's name — the one failure that would make
+    a before-and-after comparison agree no matter what the rewrite did.
+    """
+    with tempfile.TemporaryDirectory() as scratch:
+        root = Path(scratch)
+        materialize_revision(revision, root)
+        environment = {
+            **os.environ,  # lup: ignore[os-environ] — inherit the process boundary
+            "PYTHONPATH": revision_paths(root),
+        }
+        return ModelConfigSnapshot.model_validate_json(
+            str(
+                sh.Command(sys.executable)(
+                    __file__, EMIT_SNAPSHOT, _cwd=str(root), _env=environment
+                )
+            )
+        )
 
 
 class SnapshotDiff(BaseModel, frozen=True):
@@ -1023,6 +1142,19 @@ def create_model_config_app() -> typer.Typer:
         for rel in sorted(snapshot.failures):
             typer.echo(f"unparsed {rel}")
 
+    @app.command("declared-at")
+    def declared_at_command(revision: str, destination: Path) -> None:
+        """Record what every class declared as of a git revision."""
+        snapshot = declared_snapshot_at(revision)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(snapshot.model_dump_json(indent=2), encoding="utf-8")
+        typer.echo(
+            f"{len(snapshot.models)} configured classes from "
+            f"{len(snapshot.modules)} files at {revision} -> {destination}"
+        )
+        for rel in sorted(snapshot.failures):
+            typer.echo(f"unparsed {rel}")
+
     @app.command("snapshot")
     def snapshot_command(destination: Path) -> None:
         """Record the configuration pydantic resolved onto every model."""
@@ -1032,6 +1164,19 @@ def create_model_config_app() -> typer.Typer:
         typer.echo(
             f"{len(snapshot.models)} models from {len(snapshot.modules)} modules "
             f"-> {destination}"
+        )
+        for rel, reason in sorted(snapshot.failures.items()):
+            typer.echo(f"unimported {rel}: {reason}")
+
+    @app.command("snapshot-at")
+    def snapshot_at_command(revision: str, destination: Path) -> None:
+        """Record the configuration pydantic resolved at a git revision."""
+        snapshot = snapshot_at(revision)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(snapshot.model_dump_json(indent=2), encoding="utf-8")
+        typer.echo(
+            f"{len(snapshot.models)} models from {len(snapshot.modules)} modules "
+            f"at {revision} -> {destination}"
         )
         for rel, reason in sorted(snapshot.failures.items()):
             typer.echo(f"unimported {rel}: {reason}")
@@ -1051,3 +1196,10 @@ def create_model_config_app() -> typer.Typer:
         raise typer.Exit(1)
 
     return app
+
+
+if __name__ == "__main__" and EMIT_SNAPSHOT in sys.argv:
+    # The other half of `snapshot_at`: this module run against an extracted
+    # revision, whose files are enumerated from the tree rather than from git
+    # because an extracted revision is a directory and not a repository.
+    typer.echo(take_snapshot(sorted(Path().rglob("*.py"))).model_dump_json(indent=2))
