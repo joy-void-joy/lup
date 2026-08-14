@@ -103,3 +103,24 @@ def publish_atomic(
 
 def utc_now() -> datetime:
     return datetime.now(UTC)
+
+
+LOCAL_STAMP_FORMAT = "%a %H:%M %Z"
+"""How a reported time reads to whoever is deciding whether to come back.
+
+The weekday and the zone both carry because a run spans days and is read
+from wherever its operator is: a bare clock time reads as today, in the
+reader's own zone, and both of those are exactly what a stale report is
+not. A caller wanting another shape passes one rather than forking this.
+"""
+
+
+def local_stamp(fmt: str = LOCAL_STAMP_FORMAT) -> str:
+    """Now, in the reader's own zone, for a report they read hours later.
+
+    A run records UTC because a journal is compared against itself. A person
+    deciding how stale a report is compares it against their own clock, and
+    was given a relative age from the run's point of view instead — which
+    says how long a worker has been quiet, never how long ago they were told.
+    """
+    return datetime.now().astimezone().strftime(fmt)

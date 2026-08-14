@@ -59,7 +59,7 @@ from lup.resolver.models import (
     VerificationCommand,
     WorkerContext,
 )
-from lup.channels.models import utc_now
+from lup.channels.models import local_stamp, utc_now
 from lup.resolver.mailbox import (
     AnswerDoor,
     AnswerOffer,
@@ -500,7 +500,7 @@ def report_awaiting(
     is waiting on the run to take it, not on somebody to decide it, and this
     report's whole job is naming what a human still owes.
     """
-    typer.echo("Resolver run parked awaiting material answers.")
+    typer.echo(f"{local_stamp()} — resolver run parked awaiting material answers.")
     for problem in parked.problems:
         typer.echo(f"  problem: {problem}")
     settled = {
@@ -562,7 +562,10 @@ def report_environment_fault(
     a provider's error as its reason, and a reader deciding what to re-admit
     could not tell those from work that did not hold up.
     """
-    typer.echo("Resolver run stopped on an environmental fault, not on its work.")
+    typer.echo(
+        f"{local_stamp()} — resolver run stopped on an environmental fault, "
+        "not on its work."
+    )
     typer.echo(f"  cause: {fault.cause}")
     if fault.concerns:
         typer.echo(f"  interrupted: {', '.join(fault.concerns)}")
@@ -587,7 +590,9 @@ def report_environment_fault(
 
 def report_drained(drained: ResolverDrained, adapter: str, run_id: str) -> None:
     """Print what an operator's stop cost, which is nothing, and how to go on."""
-    typer.echo("Resolver run drained at a safe boundary, on request.")
+    typer.echo(
+        f"{local_stamp()} — resolver run drained at a safe boundary, on request."
+    )
     typer.echo(f"  reason: {drained.reason}")
     if drained.concerns:
         typer.echo(f"  stopped before a turn: {', '.join(drained.concerns)}")
@@ -607,7 +612,7 @@ def report_deferred_assembly(
     names is committed, verified and untouched. The run stopped at the one
     junction where stopping used to mean killing the process.
     """
-    typer.echo("Assembly deferred. The review branch was not built.")
+    typer.echo(f"{local_stamp()} — assembly deferred. The review branch was not built.")
     typer.echo(f"  ready to merge: {', '.join(deferred.verified)}")
     if deferred.excluded:
         typer.echo(f"  would be excluded: {', '.join(deferred.excluded)}")
@@ -629,7 +634,9 @@ def report_regression(
     review branch is deliberately left unfinished so the repair happens
     before anything is landed, rather than after.
     """
-    typer.echo("Integration regressed criteria that held before the merge.")
+    typer.echo(
+        f"{local_stamp()} — integration regressed criteria that held before the merge."
+    )
     for ruling in regression.regressed:
         typer.echo(f"  {ruling.concern_id}: {', '.join(ruling.criteria)}")
     typer.echo("The review branch was not completed. Every lease and branch is intact.")

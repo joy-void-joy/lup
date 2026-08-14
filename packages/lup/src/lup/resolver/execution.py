@@ -29,6 +29,7 @@ from lup.resolver.contracts import (
 )
 from lup.resolver.joins import Joiner
 from lup.resolver.journal import (
+    CriteriaCarriedEvent,
     ForeignCriteriaEvent,
     Journal,
     ReviewResidualEvent,
@@ -40,6 +41,8 @@ from lup.resolver.models import (
     ConcernExecution,
     ConcernOutcome,
     ConcernStatus,
+    MaterialQuestion,
+    ResidualRuling,
     ResolverConfig,
     ReviewReport,
     WorkAssignment,
@@ -149,6 +152,72 @@ class ConcernExecutor:
                 concern.id, ConcernStatus.FAILED, str(error)
             )
             raise
+
+    async def rule_on_residual(
+        self,
+        concern: Concern,
+        review: ReviewReport,
+        unaccounted: list[str],
+        round_number: int,
+    ) -> ReviewReport:
+        """Put a reviewer's accept-with-a-gap to the human who set the bar.
+
+        An accept that leaves a declared criterion unaccounted for used to be
+        turned straight back into a rejection, which sends the disagreement
+        to the worker. Sometimes that is right — a reviewer can accept
+        without having checked. Sometimes it is the one thing the worker
+        cannot act on: the reviewer had checked, found the criterion
+        unreachable from inside the lease, and argued the remainder was a
+        residual to carry. The worker then spends a round failing to close a
+        gap the reviewer has already said no round will close, and the
+        concern dies on its revision limit holding finished work.
+
+        Whose call it is settles it. The criteria are the human's bar, so
+        only they can say whether missing one still passes — which is what
+        the join path already does when a criterion stops holding, for the
+        same reason and in the same words.
+        """
+        question = MaterialQuestion(
+            id=f"{concern.id}-residual-round-{round_number}",
+            concern_id=concern.id,
+            prompt=(
+                f"The reviewer accepted {concern.id} while leaving "
+                f"{', '.join(unaccounted)} unaccounted for. It says: "
+                f"{review.reason}\n\nCarry that as a residual and take the "
+                "acceptance, or send it back for another round?"
+            ),
+            choices=[ruling.value for ruling in ResidualRuling],
+            closed_choices=True,
+            criteria=sorted(unaccounted),
+        )
+        self.questions.queue_questions([question], concern.id)
+        answers = await self.questions.await_questions([question])
+        carried = [
+            answer
+            for answer in answers.answers
+            if answer.question_id == question.id
+            and answer.value == ResidualRuling.CARRY
+        ]
+        if carried:
+            self.journal.record(
+                CriteriaCarriedEvent(
+                    concern_id=concern.id,
+                    round=round_number,
+                    criteria=sorted(unaccounted),
+                )
+            )
+            return review
+        # The reviewer's own reason survives — the refusal is appended, never
+        # substituted, and it names the exact ids so the next round can close
+        # the gap instead of re-deriving it.
+        refusal = (
+            "criteria_met does not match the persisted acceptance criteria, and "
+            "the human declined to carry the gap; unaccounted: "
+            + ", ".join(unaccounted)
+        )
+        return review.model_copy(
+            update={"accepted": False, "reason": review.reason + "\n\n" + refusal}
+        )
 
     async def execute_concern_inner(
         self,
@@ -328,19 +397,8 @@ class ConcernExecutor:
                         )
                     )
                 if review.accepted and unaccounted:
-                    # The reviewer's own reason survives — the guard's
-                    # complaint is appended, never substituted, and it names
-                    # the exact ids so the next round can close the gap
-                    # instead of re-deriving it.
-                    complaint = (
-                        "criteria_met does not match the persisted acceptance "
-                        "criteria; unaccounted: " + ", ".join(unaccounted)
-                    )
-                    review = review.model_copy(
-                        update={
-                            "accepted": False,
-                            "reason": review.reason + "\n\n" + complaint,
-                        }
+                    review = await self.rule_on_residual(
+                        concern, review, unaccounted, round_number
                     )
             rounds.append(
                 AgentRound(

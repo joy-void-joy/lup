@@ -19,6 +19,8 @@ The run parks rather than guessing, so every material question is a decision tha
 
 **Relay the whole batch at once.** A run parks with all of its open questions together; asking them one at a time makes the human re-establish the same context for each.
 
+**End every report with `status --line`.** A run outlasts the attention of whoever started it, and a reader returning to a terminal sees how long your turn took, never when it ended — so two reports an hour apart and two a minute apart read identically. That one line carries the hour, the phase, how far the run has got, what it has lost, and whether it is holding anybody up — and nothing else. A per-status breakdown is progress rather than attention: nobody acts on "9 retired", and putting all nine figures there buries the two that change. Do not restate the counts around it either; a reader who wants the breakdown runs `status` without the flag.
+
 ## Watching a run, and what silence means
 
 A run is built to be left alone, so "is it still going, or did it stop?" is the question you will ask most. Ask it with `uv run lup-devtools harness resolve status --run-id <id>`, which answers from the run directory alone: the phase, the concerns per status, **how many questions are waiting on you**, and the last journal event with its age. Liveness comes from the run's own lock rather than the process table, because under a sandbox `/proc` is PID-isolated — `ps` and `pgrep` list nothing outside the current shell, so a healthy run and a dead one look identical there.

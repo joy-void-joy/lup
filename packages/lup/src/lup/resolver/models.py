@@ -361,6 +361,22 @@ ALLOWANCE_REFUSED = "refuse"
 """The one answer that withholds it."""
 
 
+# lup: A closed gate's answer domain is one fact, and this file spells it four
+# ways: `[APPROVE, DEFER]` twice from constants, `[ALLOWANCE_GRANTED,
+# ALLOWANCE_REFUSED]` from another pair, and `["superseded", "regression"]`
+# inline at joins.py:551 with its reader comparing the same literals by hand.
+# Nothing ties the choices a question publishes to the token its reader tests,
+# which is how the allowance gate once accepted a prose answer that promoted
+# cleanly and then meant refusal. Give every closed gate the shape
+# `ResidualRuling` has — one enum, choices derived from it — so a reader cannot
+# test for a token the question never offered.
+class ResidualRuling(StrEnum):
+    """Whether an acceptance survives a criterion the reviewer left unmet."""
+
+    CARRY = "carry"
+    SEND_BACK = "send back"
+
+
 def allowance_question_id(concern_id: str, allowance: ConcernAllowance) -> str:
     """The composed id a `request_allowance` question is recorded under.
 
@@ -1259,6 +1275,16 @@ def run_tally(state: ResolveState) -> RunTally:
             status: statuses.count(status) for status in dict.fromkeys(statuses)
         },
         joined=len(state.join_progress.joined) if state.join_progress else 0,
+        # lup: This counts every concern holding a commit, but `integrate` joins
+        # only the verified ones, so the total over-reads by each concern that
+        # failed or retired still holding work — and the bar can never reach it.
+        # Measured on resolve-9e060ad9bb53: 22 against 20 real parents, the two
+        # extras being composition-seam-abc (failed) and git-sandbox-lock-diagnosis
+        # (retired), both of which the assembly gate lists as exclusions rather
+        # than merging. Count what that gate will actually join. If the wider
+        # number is worth showing, it is a second figure — "20 of 22 on the
+        # table" says something true, where one number pretending to be both
+        # cannot.
         join_total=(
             len([outcome for outcome in state.outcomes if outcome.commit is not None])
             if state.join_progress
