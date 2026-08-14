@@ -27,6 +27,7 @@ from lup.channels.stream import Stream
 from lup.resolver.models import (
     FROZEN,
     ActorRef,
+    CarriedParent,
     ConcernProgress,
     MaterialQuestion,
     QuestionAnswer,
@@ -121,6 +122,23 @@ class JoinCompletedEvent(BaseModel):
     commit: str
     conflicted: bool
     broke: list[str] = Field(default_factory=list)
+
+
+class JoinPlannedEvent(BaseModel):
+    """Which parents have to be merged, and which already ride inside one.
+
+    Concerns are cut from their dependencies' commits, so the branches stack:
+    a parent contained in another is already in the tree once that one lands,
+    and merging it costs a verification and can cost a merger turn to
+    conclude that nothing happened. Named here rather than left to the skip
+    inside the loop, so what the run declined to merge is on the record.
+    """
+
+    model_config = FROZEN
+
+    type: Literal["join_planned"] = "join_planned"
+    tips: list[str]
+    carried: list["CarriedParent"] = Field(default_factory=list)
 
 
 class JoinAuditEvent(BaseModel):
@@ -298,6 +316,7 @@ type RunEvent = (
     | AnswerSettledEvent
     | MessagePostedEvent
     | MessageOutstandingEvent
+    | JoinPlannedEvent
     | JoinCompletedEvent
     | JoinAuditEvent
     | ReviewResidualEvent

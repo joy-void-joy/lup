@@ -57,6 +57,7 @@ from lup.resolver.models import (
     AdmissionRequest,
     AnswerBatch,
     AcceptanceCriterion,
+    CarriedParent,
     Concern,
     ConcernInventory,
     ConcernOrigin,
@@ -844,6 +845,53 @@ def test_already_joined_reports_containment_from_merge_base(tmp_path: Path) -> N
 
     absent = ancestry_launcher(is_ancestor=False)
     assert not WorktreeOrchestrator(absent, tmp_path).already_joined(lease, "sha")
+
+
+def test_a_parent_inside_another_is_carried_rather_than_merged(
+    tmp_path: Path,
+) -> None:
+    """Concerns cut from their dependencies' commits stack, so parents nest.
+
+    In one measured run 8 of 21 parents sat inside a sibling, and two of the
+    three joins it had spent were on such a parent — one of them contained in
+    five different siblings. Each cost a verification and could cost a merger
+    turn to conclude that git had nothing to do.
+    """
+    launcher = LocalProcessLauncher()
+    workspace = failure_leg_workspace(tmp_path, launcher)
+
+    def git(*arguments: str) -> str:
+        status = launcher.launch(
+            LaunchRequest(arguments=["git", *arguments], cwd=workspace)
+        )
+        assert status.code == 0, status.stderr
+        return status.stdout.strip()
+
+    def commit_file(filename: str) -> str:
+        (workspace / filename).write_text(f"{filename}\n", encoding="utf-8")
+        git("add", filename)
+        git("commit", "-m", f"add {filename}")
+        return git("rev-parse", "HEAD")
+
+    base = git("rev-parse", "HEAD")
+    git("checkout", "-b", "stacked", base)
+    dependency = commit_file("dependency.txt")
+    dependent = commit_file("dependent.txt")
+    git("checkout", "-b", "apart", base)
+    unrelated = commit_file("unrelated.txt")
+
+    def unused_actor(_root: Path, _output_name: str) -> JsonObject:
+        raise AssertionError("planning a join spends no turn")
+
+    core = failure_leg_core(
+        tmp_path, workspace, launcher, "carried", unused_actor, unused_actor
+    )
+    lease = core.leases.acquire("integration", "resolve/carried/review")
+    core.worktrees.create(lease, base)
+
+    carried = core.joiner.carried_parents(lease, [dependency, dependent, unrelated])
+
+    assert carried == [CarriedParent(commit=dependency, inside=dependent)]
 
 
 def test_a_parent_is_credited_only_with_the_paths_it_wrote(tmp_path: Path) -> None:
@@ -2910,7 +2958,10 @@ async def test_a_drain_stops_integration_between_two_parents(tmp_path: Path) -> 
     # so the resume re-enters at the second rather than rebuilding the first.
     persisted = core.repository.load()
     assert persisted.join_progress is not None
-    assert persisted.join_progress.joined == [first]
+    # Exactly one, whichever the ordering picked: the boundary is between two
+    # parents, so the first is committed and recorded and the second is not.
+    assert len(persisted.join_progress.joined) == 1
+    assert persisted.join_progress.joined[0] in {first, second}
     assert persisted.integration is None
 
 

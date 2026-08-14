@@ -863,6 +863,15 @@ class IntegrationRecord(BaseModel):
     completed: bool = False
 
 
+class CarriedParent(BaseModel):
+    """One parent whose commits another parent already contains."""
+
+    model_config = FROZEN
+
+    commit: str
+    inside: str
+
+
 class JoinProgress(BaseModel):
     """How far integration has got, recorded as each parent lands.
 

@@ -24,11 +24,13 @@ from lup.resolver.dag import ConcernGraph
 from lup.resolver.journal import (
     JoinAuditEvent,
     JoinCompletedEvent,
+    JoinPlannedEvent,
     Journal,
     RecheckRepeatedEvent,
 )
 from lup.resolver.models import (
     ActorRef,
+    CarriedParent,
     Concern,
     DropCandidate,
     IntegrationRecord,
@@ -150,9 +152,16 @@ class Joiner:
         """Join parents one at a time, spending a turn only where one is owed.
 
         Every join is pairwise because git cannot merge N branches at once
-        when it matters — octopus refuses on conflict — so the boundary that
-        moves is the session rather than the sequence. One merger sees every
-        parent, and by parent six it has genuinely seen one through five.
+        when it matters — octopus refuses outright on conflict rather than
+        leaving an index to resolve, and 9 of 12 parents measured against one
+        run's part-built tree conflicted — so the boundary that moves is the
+        session rather than the sequence. One merger sees every parent, and
+        by parent six it has genuinely seen one through five.
+
+        Only the parents no other parent contains are merged. The rest are in
+        the tree the moment their container lands, so merging them separately
+        buys a verification and can buy a turn spent concluding that nothing
+        happened.
         """
         if len(commits) < 2:
             raise ValueError("a semantic join requires at least two commits")
@@ -161,7 +170,12 @@ class Joiner:
         base = self.worktrees.head(lease)
         current = base
         joined: list[str] = []  # lup: ignore[empty-collection] — audit input
-        for parent in self.join_order(lease, base, commits[1:]):
+        ordered = self.join_order(lease, base, commits[1:])
+        carried = self.carried_parents(lease, ordered)
+        riding = {item.commit: item.inside for item in carried}
+        tips = [parent for parent in ordered if parent not in riding]
+        self.journal.record(JoinPlannedEvent(tips=tips, carried=carried))
+        for parent in tips:
             # The loop carries no resumption point, so a resumed join re-enters
             # at the first parent. One already contained in HEAD has nothing to
             # merge, and a merge turn spent on it is not free: the session
@@ -221,7 +235,10 @@ class Joiner:
             drain = self.questions.draining()
             if drain is not None:
                 raise ResolverDrained(drain.reason, [])
-        await self.audit_join(lease, base, joined, current, purpose)
+        # A parent that rode inside another was never merged on its own, but
+        # its content is in the tree and is exactly as capable of having been
+        # dropped there, so the final audit answers for it too.
+        await self.audit_join(lease, base, [*joined, *riding], current, purpose)
         return current
 
     def join_order(
@@ -253,6 +270,39 @@ class Joiner:
             ),
         )
         return ranked
+
+    def carried_parents(
+        self, lease: WritableRootLease, parents: list[str]
+    ) -> list[CarriedParent]:
+        """Every parent another parent already contains, and which one does.
+
+        Concerns are cut from their dependencies' commits, so the branches
+        stack rather than fanning out from the base. A parent inside another
+        is in the tree the moment that one lands, and merging it separately
+        buys nothing: a verification, and a merger turn where the session
+        cannot tell "already joined" from "something upstream is wrong". In
+        one measured run, 8 of 21 parents were inside a sibling, and two of
+        the three joins spent before it was stopped were on such a parent —
+        one of them contained in five different siblings.
+        """
+
+        def container_of(parent: str) -> str | None:
+            """The first other parent holding this one, of however many do."""
+            return next(
+                (
+                    other
+                    for other in parents
+                    if other != parent
+                    and self.worktrees.contained_in(lease, parent, other)
+                ),
+                None,
+            )
+
+        return [
+            CarriedParent(commit=parent, inside=container)
+            for parent in parents
+            if (container := container_of(parent)) is not None
+        ]
 
     def authored_by(
         self, lease: WritableRootLease, base: str, commit: str
