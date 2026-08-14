@@ -121,6 +121,17 @@ class BaseRefresher:
                 conflicts=conflicts,
                 reason="this lease edits what the base moved; merge it by hand",
             )
+        held = self.worktrees.uncommitted(lease)
+        if held:
+            return LeaseRefresh(
+                concern_id=lease.concern_id,
+                uncommitted=held,
+                reason=(
+                    "this lease holds uncommitted work the prediction cannot "
+                    "see; commit or discard it, then refresh: "
+                    + ", ".join(path.as_posix() for path in held)
+                ),
+            )
         if not apply:
             return LeaseRefresh(concern_id=lease.concern_id)
         applied = self.worktrees.merge_into(

@@ -549,6 +549,25 @@ class WorktreeOrchestrator:
             return []
         return self.conflicted_names(merged.stdout.splitlines())
 
+    def uncommitted(self, lease: WritableRootLease) -> list[Path]:
+        """Which paths this lease is holding outside any commit.
+
+        ``predicted_merge`` answers from commits, and the merge it clears
+        runs in the working tree — so work in flight is exactly what the
+        prediction cannot see. Read here instead of inferred from a merge
+        that already failed: git refuses only when the incoming commit
+        touches the same paths, so the quieter case is a refresh absorbed
+        into edits no worker chose to commit beside it.
+        """
+        status = self.require(
+            LaunchRequest(
+                arguments=["git", "status", "--porcelain"],
+                cwd=lease.root,
+            ),
+            f"failed to read uncommitted work for {lease.concern_id}",
+        )
+        return [Path(line[3:]) for line in status.stdout.splitlines() if line[3:]]
+
     def merge_into(self, lease: WritableRootLease, commit: str, message: str) -> bool:
         """Bring one commit into a lease's branch, reporting whether it took."""
         merged = self.launcher.launch(

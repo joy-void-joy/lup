@@ -180,6 +180,9 @@ class LeaseRefresh(BaseModel):
 
     concern_id: str
     conflicts: list[Path] = Field(default_factory=list)
+    uncommitted: list[Path] = Field(default_factory=list)
+    """Paths held outside any commit, which is a different stop from a conflict:
+    the merge is clean and the tree is not ready to take it."""
     applied: bool = False
     reason: str = ""
 
