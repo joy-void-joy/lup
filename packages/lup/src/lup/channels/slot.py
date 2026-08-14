@@ -74,6 +74,16 @@ class Slot[T: BaseModel]:
             return
         self.publish(DECLARATION_FILE, record)
 
+    def redeclare(self, record: T) -> None:
+        """Replace what this slot decides, where its writer judged it the same.
+
+        ``declare`` refuses a different record because two writers claiming
+        one slot is the defect it guards. A declaration rendered from facts
+        that move is the other case: the writer is the same one, and what it
+        said went stale while the slot waited to be answered.
+        """
+        self.publish(DECLARATION_FILE, record)
+
     def declared(self) -> T | None:
         return self.read(DECLARATION_FILE)
 

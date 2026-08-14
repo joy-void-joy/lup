@@ -301,6 +301,17 @@ class MaterialQuestion(BaseModel):
         ),
     )
 
+    def restates(self, asked: "MaterialQuestion") -> bool:
+        """Whether this is ``asked`` again, re-rendered from facts that moved.
+
+        An answer binds to the choices, not to the prose around them. The
+        assembly gate names the base it would merge onto and how far behind
+        that base is, and both move while a run is parked — so the gate
+        re-rendering itself is the question staying true, where a moved
+        answer domain would be a different question wearing one id.
+        """
+        return self.model_copy(update={"prompt": asked.prompt}) == asked
+
     @model_validator(mode="after")
     def identity_is_path_safe(self) -> "MaterialQuestion":
         """Each question is one file in the mailbox, so its id is a filename."""

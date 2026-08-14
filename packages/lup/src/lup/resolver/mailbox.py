@@ -199,14 +199,22 @@ class QuestionMailbox:
         )
 
     def queue(self, pending: PendingQuestion) -> None:
-        """Record a question once; re-asking the same question is a no-op."""
+        """Record a question once; re-asking it re-renders what has moved.
+
+        Identical is a no-op, so the first asking keeps its timestamp. A
+        restatement takes, because the facts a gate quotes go stale while
+        the run is parked on it. A moved answer domain is refused, which is
+        the case this guard was built for: an actor redefining one id.
+        """
         slot = self.slots.slot(pending.question.id)
         existing = slot.declared()
         if existing is not None and existing.pending is not None:
-            if existing.pending.question != pending.question:
+            if not pending.question.restates(existing.pending.question):
                 raise MailboxConflictError(
                     f"question {pending.question.id!r} is already asked differently"
                 )
+            if pending.question != existing.pending.question:
+                slot.redeclare(MailboxSlotRecord(pending=pending))
             return
         slot.declare(MailboxSlotRecord(pending=pending))
 

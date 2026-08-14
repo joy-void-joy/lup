@@ -75,6 +75,33 @@ def test_reasking_a_question_differently_is_refused(tmp_path: Path) -> None:
         mailbox.queue(pending("q1", ["yes", "no"]))
 
 
+def test_a_gate_requoting_facts_that_moved_re_renders_rather_than_conflicts(
+    tmp_path: Path,
+) -> None:
+    """The assembly gate names its base and how far behind that base is.
+
+    Both move while the run is parked on the question, so the gate that
+    re-derives itself on resume was refused by the guard meant for an actor
+    redefining one id — and the run could not reach its own last step.
+    """
+    mailbox = QuestionMailbox(tmp_path)
+    mailbox.queue(pending("integration-assembly", ["approve", "defer"]))
+    moved = pending("integration-assembly", ["approve", "defer"])
+    restated = moved.model_copy(
+        update={
+            "question": moved.question.model_copy(
+                update={"prompt": "Merge 5 concerns onto abc1234, 3 behind dev?"}
+            )
+        }
+    )
+
+    mailbox.queue(restated)
+
+    assert [item.question.prompt for item in mailbox.questions()] == [
+        "Merge 5 concerns onto abc1234, 3 behind dev?"
+    ]
+
+
 def test_an_offer_is_correctable_until_it_is_promoted(tmp_path: Path) -> None:
     mailbox = QuestionMailbox(tmp_path)
     mailbox.offer(offer("q1", "typo"))
