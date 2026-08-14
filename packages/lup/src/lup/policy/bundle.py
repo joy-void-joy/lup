@@ -245,6 +245,7 @@ def shell_rule_rows_literal(rows: list[ShellRuleRow]) -> str:
                 lines.append("        ],")
             else:
                 lines.append(f'        "{name}": [],')
+        lines.append(f'        "sandbox": {json.dumps(row["sandbox"])},')
         lines.append(f'        "reason": {json.dumps(row["reason"])},')
         lines.append("    },")
     lines.append("]")

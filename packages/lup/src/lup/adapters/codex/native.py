@@ -174,7 +174,14 @@ class CodexDecisionOutput(BaseModel):
 
 
 class CodexDecisionRenderer(NativeDecisionRenderer[CodexDecisionOutput]):
-    """Render approval when supported and otherwise fail closed."""
+    """Render approval when supported and otherwise fail closed.
+
+    Codex has no per-call sandbox to place anything into — its overrides are
+    session flags on the binary — so every verdict is degraded to its plain
+    effect first. Saying so is what keeps a placement from reading as honoured
+    here: dropped in silence, an escape this boundary cannot perform would
+    look performed to everything upstream of it.
+    """
 
     def __init__(self, supports_ask: bool) -> None:
         if supports_ask:
@@ -184,18 +191,21 @@ class CodexDecisionRenderer(NativeDecisionRenderer[CodexDecisionOutput]):
             )
         self.supports_ask = supports_ask
 
-    def render(self, decision: Decision) -> CodexDecisionOutput:
-        match decision.effect:
+    def render(
+        self, decision: Decision, tool_input: JsonObject | None = None
+    ) -> CodexDecisionOutput:
+        settled = decision.placed(escapable=False)
+        match settled.effect:
             case "allow" | "defer":
                 return CodexDecisionOutput(exit_code=0)
             case "deny":
-                return CodexDecisionOutput(exit_code=2, stderr=decision.reason)
+                return CodexDecisionOutput(exit_code=2, stderr=settled.reason)
             case "ask":
                 return CodexDecisionOutput(
                     exit_code=2,
                     stderr=(
                         f"Approval is required but unavailable at this boundary: "
-                        f"{decision.reason}"
+                        f"{settled.reason}"
                     ),
                     approximation="ask rendered as fail-closed denial",
                 )

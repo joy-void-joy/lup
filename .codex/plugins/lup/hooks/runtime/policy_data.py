@@ -1490,6 +1490,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -1501,6 +1502,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -1512,6 +1514,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -1523,6 +1526,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -1534,6 +1538,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -1545,6 +1550,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -1556,6 +1562,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -1567,6 +1574,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -1578,6 +1586,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -1589,6 +1598,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -1600,6 +1610,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -1611,6 +1622,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -1622,6 +1634,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -1633,6 +1646,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -1644,6 +1658,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -1655,6 +1670,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -1666,6 +1682,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -1677,6 +1694,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -1688,6 +1706,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -1699,6 +1718,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -1710,6 +1730,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -1721,6 +1742,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -1732,6 +1754,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -1743,6 +1766,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -1754,6 +1778,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -1765,6 +1790,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -1776,6 +1802,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -1787,6 +1814,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -1798,6 +1826,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -1809,6 +1838,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -1820,6 +1850,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -1831,6 +1862,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -1842,6 +1874,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -1853,6 +1886,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -1864,6 +1898,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -1875,6 +1910,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -1886,6 +1922,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -1897,6 +1934,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -1908,6 +1946,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -1919,6 +1958,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -1930,6 +1970,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -1941,6 +1982,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -1952,6 +1994,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -1963,6 +2006,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -2040,6 +2084,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -2051,6 +2096,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -2062,6 +2108,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -2073,6 +2120,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -2084,6 +2132,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -2095,6 +2144,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -2106,6 +2156,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -2117,6 +2168,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -2128,6 +2180,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -2139,6 +2192,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -2150,6 +2204,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -2161,6 +2216,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -2172,6 +2228,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -2183,6 +2240,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -2194,6 +2252,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -2205,6 +2264,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -2216,6 +2276,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -2227,6 +2288,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -2238,6 +2300,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -2249,6 +2312,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -2260,6 +2324,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -2271,6 +2336,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "deleting files requires approval",
     },
     {
@@ -2282,6 +2348,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "deleting directories requires approval",
     },
     {
@@ -2293,6 +2360,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "moving files requires approval",
     },
     {
@@ -2304,6 +2372,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "copying over files requires approval",
     },
     {
@@ -2315,6 +2384,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "creating files requires approval \u2014 prefer the Write tool",
     },
     {
@@ -2326,6 +2396,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "changing permissions requires approval",
     },
     {
@@ -2337,6 +2408,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "changing ownership requires approval",
     },
     {
@@ -2348,6 +2420,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "creating links requires approval",
     },
     {
@@ -2359,6 +2432,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "writing files requires approval \u2014 prefer the Write tool",
     },
     {
@@ -2370,6 +2444,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "raw device or file writes require approval",
     },
     {
@@ -2381,6 +2456,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "truncating files requires approval",
     },
     {
@@ -2392,6 +2468,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "terminating processes requires approval",
     },
     {
@@ -2403,6 +2480,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "terminating processes requires approval",
     },
     {
@@ -2423,6 +2501,7 @@ SHELL_RULES: list[ShellRuleRow] = [
             "-tJf",
         ],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "archive operations write files \u2014 requires approval",
     },
     {
@@ -2439,6 +2518,7 @@ SHELL_RULES: list[ShellRuleRow] = [
             "-z",
         ],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "archive extraction writes files \u2014 requires approval",
     },
     {
@@ -2453,6 +2533,7 @@ SHELL_RULES: list[ShellRuleRow] = [
             "--show-files",
         ],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "archive creation writes files \u2014 requires approval",
     },
     {
@@ -2469,6 +2550,7 @@ SHELL_RULES: list[ShellRuleRow] = [
             "--test",
         ],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "compression rewrites files \u2014 requires approval",
     },
     {
@@ -2485,6 +2567,7 @@ SHELL_RULES: list[ShellRuleRow] = [
             "--test",
         ],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "decompression rewrites files \u2014 requires approval",
     },
     {
@@ -2496,6 +2579,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "privilege escalation requires approval",
     },
     {
@@ -2507,6 +2591,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "privilege escalation requires approval",
     },
     {
@@ -2518,6 +2603,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "remote access requires approval",
     },
     {
@@ -2529,6 +2615,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "remote copies require approval",
     },
     {
@@ -2540,6 +2627,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "remote sync requires approval",
     },
     {
@@ -2551,6 +2639,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "downloading files requires approval \u2014 prefer curl or WebFetch",
     },
     {
@@ -2568,6 +2657,7 @@ SHELL_RULES: list[ShellRuleRow] = [
             "--question",
         ],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "make executes arbitrary recipes \u2014 requires approval",
     },
     {
@@ -2586,6 +2676,7 @@ SHELL_RULES: list[ShellRuleRow] = [
             "explain",
         ],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "package tools fetch and execute code \u2014 requires approval",
     },
     {
@@ -2597,6 +2688,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "package tools fetch and execute code \u2014 requires approval",
     },
     {
@@ -2608,6 +2700,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "package tools fetch and execute code \u2014 requires approval",
     },
     {
@@ -2619,6 +2712,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "package tools fetch and execute code \u2014 requires approval",
     },
     {
@@ -2630,6 +2724,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "system package changes require approval",
     },
     {
@@ -2641,6 +2736,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "system package changes require approval",
     },
     {
@@ -2652,6 +2748,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "system package changes require approval",
     },
     {
@@ -2663,6 +2760,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "system package changes require approval",
     },
     {
@@ -2674,6 +2772,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "service management requires approval",
     },
     {
@@ -2685,6 +2784,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "schedule changes require approval",
     },
     {
@@ -2696,6 +2796,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "use uv add / uv remove instead of pip",
     },
     {
@@ -2707,6 +2808,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "use uv add / uv remove instead of pip",
     },
     {
@@ -2718,6 +2820,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -2732,6 +2835,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         ],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "credential-agent changes stay with the user \u2014 ask them to run it",
     },
     {
@@ -2743,6 +2847,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "credential-agent lifecycle stays with the user \u2014 ask them to run it",
     },
     {
@@ -2758,6 +2863,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "a sort flag that writes a file or runs a program requires approval",
     },
     {
@@ -2775,6 +2881,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "a yq flag that edits files in place or splits into files requires approval",
     },
     {
@@ -2791,6 +2898,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "an xmllint flag that writes files or opens a shell requires approval",
     },
     {
@@ -2807,6 +2915,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "a mutating find action requires approval",
     },
     {
@@ -2821,6 +2930,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "killing sockets requires approval",
     },
     {
@@ -2838,6 +2948,7 @@ SHELL_RULES: list[ShellRuleRow] = [
             "-z",
         ],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "netcat moves data unless -z pins it to a port scan",
     },
     {
@@ -2849,6 +2960,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "directory navigation",
     },
     {
@@ -2860,6 +2972,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "reach this toolchain through `uv run lup-devtools`, which guarantees the environment it runs in \u2014 only the conflict workflow, whose commands must start while the manifest does not parse, is documented without it",
     },
     {
@@ -2871,6 +2984,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -2882,6 +2996,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "reach this toolchain through `uv run lup-devtools`, which guarantees the environment it runs in \u2014 only the conflict workflow, whose commands must start while the manifest does not parse, is documented without it",
     },
     {
@@ -2902,6 +3017,7 @@ SHELL_RULES: list[ShellRuleRow] = [
             "--work-tree",
             "--namespace",
         ],
+        "sandbox": "ambient",
         "reason": "this git subcommand is not classified as read-only or reversible",
     },
     {
@@ -2913,6 +3029,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -2924,6 +3041,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -2935,6 +3053,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -2946,6 +3065,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -2957,6 +3077,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "outside",
         "reason": "",
     },
     {
@@ -2968,6 +3089,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -2979,6 +3101,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -2990,6 +3113,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -3001,6 +3125,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -3012,6 +3137,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -3023,6 +3149,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -3034,6 +3161,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -3045,6 +3173,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -3155,6 +3284,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -3166,6 +3296,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -3177,6 +3308,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -3188,6 +3320,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -3199,6 +3332,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -3210,6 +3344,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -3221,6 +3356,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -3232,6 +3368,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -3243,6 +3380,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -3254,6 +3392,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -3265,6 +3404,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -3276,6 +3416,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -3287,6 +3428,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -3298,6 +3440,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -3309,6 +3452,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -3320,6 +3464,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -3331,6 +3476,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -3342,6 +3488,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -3353,6 +3500,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -3364,6 +3512,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -3375,6 +3524,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -3386,6 +3536,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -3397,6 +3548,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -3408,6 +3560,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -3419,6 +3572,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -3430,6 +3584,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -3443,6 +3598,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "writing command output to a file requires approval",
     },
     {
@@ -3456,6 +3612,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "writing command output to a file requires approval",
     },
     {
@@ -3469,6 +3626,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "writing command output to a file requires approval",
     },
     {
@@ -3482,6 +3640,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "writing command output to a file requires approval",
     },
     {
@@ -3496,6 +3655,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "opening matches in an arbitrary program requires approval",
     },
     {
@@ -3510,6 +3670,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "replaying commits through a shell command requires approval",
     },
     {
@@ -3523,6 +3684,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "outside",
         "reason": "overriding the transport program requires approval",
     },
     {
@@ -3536,6 +3698,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "outside",
         "reason": "overriding the transport program requires approval",
     },
     {
@@ -3551,6 +3714,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "outside",
         "reason": "removing a remote ref requires approval",
     },
     {
@@ -3562,6 +3726,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "outside",
         "reason": "cloning fetches external code \u2014 requires approval",
     },
     {
@@ -3576,6 +3741,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "a patch that writes outside the working area requires approval",
     },
     {
@@ -3587,6 +3753,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "restoring files discards working-tree changes",
     },
     {
@@ -3598,6 +3765,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "removing tracked files requires approval",
     },
     {
@@ -3609,6 +3777,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "deleting untracked files is destructive \u2014 requires approval",
     },
     {
@@ -3629,6 +3798,7 @@ SHELL_RULES: list[ShellRuleRow] = [
             "-l",
         ],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "git config can change how commands execute",
     },
     {
@@ -3640,6 +3810,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "use git switch for branches or git restore for files",
     },
     {
@@ -3651,6 +3822,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "expiring reflog entries is destructive \u2014 requires approval",
     },
     {
@@ -3662,6 +3834,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "deleting reflog entries is destructive \u2014 requires approval",
     },
     {
@@ -3673,6 +3846,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -3691,6 +3865,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "deleting or moving a branch requires approval",
     },
     {
@@ -3702,6 +3877,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -3713,6 +3889,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -3724,6 +3901,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "a bisect step moves HEAD across commits",
     },
     {
@@ -3735,6 +3913,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -3746,6 +3925,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -3757,6 +3937,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "submodule operations fetch and check out external code",
     },
     {
@@ -3771,6 +3952,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "deleting a tag requires approval",
     },
     {
@@ -3786,6 +3968,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "a working-tree-destroying reset requires approval",
     },
     {
@@ -3801,6 +3984,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "a force switch can discard working-tree changes",
     },
     {
@@ -3812,6 +3996,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -3823,6 +4008,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -3834,6 +4020,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -3845,6 +4032,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -3856,6 +4044,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "removing a worktree deletes it \u2014 requires approval",
     },
     {
@@ -3867,6 +4056,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "pruning worktrees is destructive \u2014 requires approval",
     },
     {
@@ -3878,6 +4068,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "this worktree operation is not classified",
     },
     {
@@ -3889,6 +4080,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -3900,6 +4092,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -3911,6 +4104,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -3922,6 +4116,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -3933,6 +4128,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -3944,6 +4140,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -3955,6 +4152,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "dropping a stash is destructive \u2014 requires approval",
     },
     {
@@ -3966,6 +4164,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "clearing stashes is destructive \u2014 requires approval",
     },
     {
@@ -3977,6 +4176,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -3988,6 +4188,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "removing a remote requires approval",
     },
     {
@@ -3999,6 +4200,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "removing a remote requires approval",
     },
     {
@@ -4010,6 +4212,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "changing a remote URL requires approval",
     },
     {
@@ -4021,6 +4224,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "pruning a remote is destructive \u2014 requires approval",
     },
     {
@@ -4032,6 +4236,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -4043,6 +4248,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "this gh command is not classified",
     },
     {
@@ -4054,6 +4260,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -4065,6 +4272,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -4076,6 +4284,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -4087,6 +4296,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -4098,6 +4308,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -4109,6 +4320,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -4120,6 +4332,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -4131,6 +4344,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -4142,6 +4356,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -4153,6 +4368,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "gh pr comment changes remote state \u2014 requires approval",
     },
     {
@@ -4164,6 +4380,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "gh pr review changes remote state \u2014 requires approval",
     },
     {
@@ -4175,6 +4392,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "gh pr merge changes remote state \u2014 requires approval",
     },
     {
@@ -4186,6 +4404,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "gh pr close changes remote state \u2014 requires approval",
     },
     {
@@ -4197,6 +4416,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "this gh pr operation is not classified",
     },
     {
@@ -4208,6 +4428,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -4219,6 +4440,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -4230,6 +4452,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -4241,6 +4464,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "gh issue create changes remote state \u2014 requires approval",
     },
     {
@@ -4252,6 +4476,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "gh issue edit changes remote state \u2014 requires approval",
     },
     {
@@ -4263,6 +4488,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "gh issue comment changes remote state \u2014 requires approval",
     },
     {
@@ -4274,6 +4500,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "gh issue close changes remote state \u2014 requires approval",
     },
     {
@@ -4285,6 +4512,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "this gh issue operation is not classified",
     },
     {
@@ -4296,6 +4524,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -4307,6 +4536,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -4318,6 +4548,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -4329,6 +4560,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "gh run rerun changes remote state \u2014 requires approval",
     },
     {
@@ -4340,6 +4572,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "gh run cancel changes remote state \u2014 requires approval",
     },
     {
@@ -4351,6 +4584,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "gh run download changes remote state \u2014 requires approval",
     },
     {
@@ -4362,6 +4596,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "this gh run operation is not classified",
     },
     {
@@ -4373,6 +4608,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -4384,6 +4620,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -4395,6 +4632,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "gh repo clone changes remote state \u2014 requires approval",
     },
     {
@@ -4406,6 +4644,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "gh repo fork changes remote state \u2014 requires approval",
     },
     {
@@ -4417,6 +4656,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "this gh repo operation is not classified",
     },
     {
@@ -4428,6 +4668,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -4439,6 +4680,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -4450,6 +4692,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "gh release create changes remote state \u2014 requires approval",
     },
     {
@@ -4461,6 +4704,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "gh release upload changes remote state \u2014 requires approval",
     },
     {
@@ -4472,6 +4716,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "this gh release operation is not classified",
     },
     {
@@ -4483,6 +4728,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -4494,6 +4740,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "gh cache delete changes remote state \u2014 requires approval",
     },
     {
@@ -4505,6 +4752,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "this gh cache operation is not classified",
     },
     {
@@ -4516,6 +4764,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -4527,6 +4776,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -4538,6 +4788,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "gh workflow run changes remote state \u2014 requires approval",
     },
     {
@@ -4549,6 +4800,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "gh workflow enable changes remote state \u2014 requires approval",
     },
     {
@@ -4560,6 +4812,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "gh workflow disable changes remote state \u2014 requires approval",
     },
     {
@@ -4571,6 +4824,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "this gh workflow operation is not classified",
     },
     {
@@ -4582,6 +4836,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -4593,6 +4848,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "this gh auth operation is not classified",
     },
     {
@@ -4604,6 +4860,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -4615,6 +4872,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -4626,6 +4884,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -4637,6 +4896,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -4648,6 +4908,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -4659,6 +4920,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "this gh search operation is not classified",
     },
     {
@@ -4670,6 +4932,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -4681,6 +4944,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "gh label create changes remote state \u2014 requires approval",
     },
     {
@@ -4692,6 +4956,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "gh label edit changes remote state \u2014 requires approval",
     },
     {
@@ -4703,6 +4968,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "gh label delete changes remote state \u2014 requires approval",
     },
     {
@@ -4714,6 +4980,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "gh label clone changes remote state \u2014 requires approval",
     },
     {
@@ -4725,6 +4992,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "this gh label operation is not classified",
     },
     {
@@ -4736,6 +5004,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -4747,6 +5016,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -4758,6 +5028,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "gh gist create changes remote state \u2014 requires approval",
     },
     {
@@ -4769,6 +5040,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "gh gist edit changes remote state \u2014 requires approval",
     },
     {
@@ -4780,6 +5052,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "gh gist delete changes remote state \u2014 requires approval",
     },
     {
@@ -4791,6 +5064,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "gh gist clone changes remote state \u2014 requires approval",
     },
     {
@@ -4802,6 +5076,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "this gh gist operation is not classified",
     },
     {
@@ -4813,6 +5088,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -4824,6 +5100,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -4835,6 +5112,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -4846,6 +5124,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -4857,6 +5136,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "gh project create changes remote state \u2014 requires approval",
     },
     {
@@ -4868,6 +5148,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "gh project edit changes remote state \u2014 requires approval",
     },
     {
@@ -4879,6 +5160,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "gh project close changes remote state \u2014 requires approval",
     },
     {
@@ -4890,6 +5172,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "gh project delete changes remote state \u2014 requires approval",
     },
     {
@@ -4901,6 +5184,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "gh project item-add changes remote state \u2014 requires approval",
     },
     {
@@ -4912,6 +5196,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "gh project item-delete changes remote state \u2014 requires approval",
     },
     {
@@ -4923,6 +5208,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "this gh project operation is not classified",
     },
     {
@@ -4934,6 +5220,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -4945,6 +5232,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -4956,6 +5244,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "gh variable set changes remote state \u2014 requires approval",
     },
     {
@@ -4967,6 +5256,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "gh variable delete changes remote state \u2014 requires approval",
     },
     {
@@ -4978,6 +5268,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "this gh variable operation is not classified",
     },
     {
@@ -4989,6 +5280,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -5000,6 +5292,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -5011,6 +5304,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -5022,6 +5316,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "this gh ruleset operation is not classified",
     },
     {
@@ -5033,6 +5328,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -5044,6 +5340,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -5055,6 +5352,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "gh config set changes remote state \u2014 requires approval",
     },
     {
@@ -5066,6 +5364,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "this gh config operation is not classified",
     },
     {
@@ -5077,6 +5376,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -5088,6 +5388,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -5107,6 +5408,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "gh api can mutate anything \u2014 requires approval",
     },
     {
@@ -5118,6 +5420,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "container operations require approval",
     },
     {
@@ -5129,6 +5432,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -5140,6 +5444,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -5151,6 +5456,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -5162,6 +5468,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -5173,6 +5480,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -5184,6 +5492,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -5195,6 +5504,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -5206,6 +5516,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -5217,6 +5528,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -5228,6 +5540,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -5239,6 +5552,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -5250,6 +5564,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -5261,6 +5576,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -5272,6 +5588,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -5283,6 +5600,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -5294,6 +5612,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -5305,6 +5624,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -5316,6 +5636,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -5327,6 +5648,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -5338,6 +5660,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "container operations require approval",
     },
     {
@@ -5349,6 +5672,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -5360,6 +5684,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -5371,6 +5696,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -5382,6 +5708,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "container operations require approval",
     },
     {
@@ -5393,6 +5720,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -5404,6 +5732,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -5415,6 +5744,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "container operations require approval",
     },
     {
@@ -5426,6 +5756,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -5437,6 +5768,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -5448,6 +5780,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "container operations require approval",
     },
     {
@@ -5459,6 +5792,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -5470,6 +5804,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -5481,6 +5816,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -5492,6 +5828,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "container operations require approval",
     },
     {
@@ -5503,6 +5840,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -5514,6 +5852,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -5525,6 +5864,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "",
     },
     {
@@ -5536,6 +5876,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "allow_flags": [],
         "read_verbs": [],
         "value_flags": [],
+        "sandbox": "ambient",
         "reason": "container operations require approval",
     },
 ]

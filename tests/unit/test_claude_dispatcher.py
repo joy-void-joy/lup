@@ -267,3 +267,37 @@ def test_an_unreadable_target_asks_instead_of_letting_the_edit_through() -> None
     specific = decision["hookSpecificOutput"]
     assert isinstance(specific, dict)
     assert specific["permissionDecision"] == "ask"
+
+
+def test_a_call_placed_outside_the_sandbox_is_allowed_and_rewritten() -> None:
+    """The unprompted placement, emitted by the script a session really runs.
+
+    A remote read is unusable confined, so the vocabulary places it outside;
+    the verdict stays an allow and the placement rides the rewrite channel.
+    The rewrite has to carry the whole input rather than the flag alone,
+    because it replaces the arguments instead of merging into them.
+    """
+    decision = decide(bash_payload("git ls-remote origin HEAD"))
+
+    specific = decision["hookSpecificOutput"]
+    assert isinstance(specific, dict)
+    assert specific["permissionDecision"] == "allow"
+    assert specific["updatedInput"] == {
+        "command": "git ls-remote origin HEAD",
+        "dangerouslyDisableSandbox": True,
+    }
+
+
+def test_an_unplaced_call_carries_no_rewrite_at_all() -> None:
+    """Saying nothing about the sandbox must not restate the session's own mode.
+
+    An `updatedInput` on every call would make the dispatcher the author of a
+    placement it never decided, and the rewrite replaces the arguments — so a
+    verdict with nothing to say about where the call runs says nothing.
+    """
+    decision = decide(bash_payload("ls"))
+
+    specific = decision["hookSpecificOutput"]
+    assert isinstance(specific, dict)
+    assert specific["permissionDecision"] == "allow"
+    assert "updatedInput" not in specific

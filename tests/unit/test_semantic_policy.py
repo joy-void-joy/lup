@@ -12,7 +12,7 @@ import json
 import sys
 from pathlib import Path
 from types import ModuleType
-from typing import Literal
+from typing import Literal, get_args
 
 import pytest
 import sh
@@ -37,6 +37,7 @@ from lup.adapters.codex.native import (
 )
 from lup.harness.enforcement import declared_path_rules, semantic_policy_for
 from lup.harness.models import HookSet
+from lup.types import JsonObject
 from lup.policy.chain import UnknownToolPolicy
 from lup.policy.bundle import (
     bundled_antipattern_rows,
@@ -45,7 +46,11 @@ from lup.policy.bundle import (
     runtime_path_rules,
     runtime_url_scope,
 )
-from lup.policy.kernel.decision import KernelDecision
+from lup.policy.kernel.decision import (
+    DecisionEffect,
+    KernelDecision,
+    SandboxPlacement,
+)
 from lup.policy.kernel.edit import decide_edit
 from lup.policy.kernel.rows import PathRoleRow
 from lup.policy.kernel.lex import shell_write_targets
@@ -908,6 +913,19 @@ def test_policy_bundle_contains_assembly_but_no_decision_implementation() -> Non
     assert all(not name.startswith("decide_") for name in functions)
 
 
+def test_the_neutral_kernel_never_learns_one_runtime_sandbox_spelling() -> None:
+    """The kernel carries the axis; only an adapter carries a vendor's word for it.
+
+    Codex matches on this same kernel and has no per-call sandbox at all, so a
+    spelling that leaked in here would be one runtime's argument name sitting
+    in the shared verdict every other runtime reads.
+    """
+    kernel = [item.source for item in policy_kernel_modules()]
+
+    assert not [item for item in kernel if "dangerouslyDisableSandbox" in item]
+    assert [item for item in kernel if "SandboxPlacement" in item]
+
+
 def write_kernel_package(runtime: Path) -> Path:
     """Materialize the kernel package a generated runtime directory carries."""
     package = runtime / "kernel"
@@ -1124,6 +1142,83 @@ def test_native_decision_renderers_preserve_or_fail_closed_on_ask() -> None:
     assert codex.approximation == "ask rendered as fail-closed denial"
     with pytest.raises(ValueError, match="not been evidenced"):
         CodexDecisionRenderer(supports_ask=True)
+
+
+def test_the_decision_effect_stays_closed_at_four_members() -> None:
+    """Escaping the sandbox is the other axis, never a fifth effect.
+
+    A member per placement would need an ask-plus-escape next and then a
+    deny-plus-escape, so the two questions stay two fields.
+    """
+    assert sorted(get_args(DecisionEffect.__value__)) == [
+        "allow",
+        "ask",
+        "defer",
+        "deny",
+    ]
+    assert sorted(get_args(SandboxPlacement.__value__)) == [
+        "ambient",
+        "inside",
+        "outside",
+    ]
+    assert Decision(effect="allow", sandbox="outside").effect == "allow"
+
+
+def test_the_settled_sandbox_composition_rows_render_as_decided() -> None:
+    """The five pairs that carry meaning, on a runtime that can place a call.
+
+    The placement is an argument of the call on Claude Code, so an allow that
+    escapes is an allow plus a rewrite; an ask that escapes is asking two
+    things at once, so the reason says both.
+    """
+    shell: JsonObject = {"command": "git ls-remote origin HEAD"}
+    render = ClaudeDecisionRenderer().render
+
+    asked = render(
+        Decision(effect="ask", reason="needs a human", sandbox="outside"), shell
+    )
+    denied = render(Decision(effect="deny", reason="refused", sandbox="outside"), shell)
+    confined = render(Decision(effect="allow", sandbox="inside"), shell)
+    ambient = render(Decision(effect="allow", sandbox="ambient"), shell)
+    escaped = render(Decision(effect="allow", sandbox="outside"), shell)
+
+    assert asked.permission_decision == "ask"
+    assert asked.reason == "needs a human — this will run outside the sandbox"
+    assert asked.updated_input == {**shell, "dangerouslyDisableSandbox": True}
+    assert (denied.permission_decision, denied.updated_input) == ("deny", None)
+    assert confined.updated_input == {**shell, "dangerouslyDisableSandbox": False}
+    assert (ambient.permission_decision, ambient.updated_input) == ("allow", None)
+    assert escaped.updated_input == {**shell, "dangerouslyDisableSandbox": True}
+
+
+def test_a_deny_short_circuits_whatever_the_sandbox_says() -> None:
+    """Where a call would have run cannot soften a refusal.
+
+    Held at construction rather than checked at each renderer, so no boundary
+    can read a placement off a verdict that reached none.
+    """
+    assert KernelDecision("deny", "refused", "outside").sandbox == "ambient"
+    assert Decision(effect="deny", reason="refused", sandbox="outside").sandbox == (
+        "ambient"
+    )
+    assert KernelDecision("defer", "unjudged", "outside").sandbox == "ambient"
+
+
+def test_a_runtime_that_cannot_place_a_call_renders_the_plain_effect() -> None:
+    """Codex has no per-call sandbox, so an intent it cannot perform is dropped.
+
+    Degrading in silence is the failure this pins: an escape rendered into a
+    channel that ignores it reads as honoured to everything upstream, and the
+    call runs confined with nobody told.
+    """
+    escaped = Decision(effect="allow", reason="fine", sandbox="outside")
+    asked = Decision(effect="ask", reason="needs a human", sandbox="outside")
+
+    codex = CodexDecisionRenderer(supports_ask=False)
+
+    assert codex.render(escaped).exit_code == 0
+    assert "outside the sandbox" not in codex.render(asked).stderr
+    assert escaped.placed(escapable=False) == Decision(effect="allow", reason="fine")
 
 
 def test_fetch_policy_normalizes_origin_and_rejects_lookalikes() -> None:

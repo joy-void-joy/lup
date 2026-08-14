@@ -11,6 +11,7 @@ from .decision import (
     KernelDecision,
     RESHAPE_HINT,
     SUBSTITUTION_SENTINEL,
+    SandboxPlacement,
     unjudged,
 )
 from .rows import PathRoleRow, PathRuleRow, ShellRuleRow, UrlScopeRow
@@ -732,6 +733,21 @@ def decide_segment_list(
     return decisions
 
 
+def joined_placement(decisions: list[KernelDecision]) -> SandboxPlacement:
+    """Where a whole command runs, given what each of its segments needs.
+
+    One command line is one process, so its segments cannot be placed
+    apart. Confinement outranks escape: a segment that has to stay inside
+    keeps the whole line inside, and only a line where something needs the
+    outside and nothing needs the inside leaves.
+    """
+    if any(item.sandbox == "inside" for item in decisions):
+        return "inside"
+    if any(item.sandbox == "outside" for item in decisions):
+        return "outside"
+    return "ambient"
+
+
 def classify_shell(
     command: str,
     rows: list[ShellRuleRow],
@@ -766,16 +782,17 @@ def classify_shell(
         runner_targets,
     )
     decisions = decide_segment_list(segments, context)
+    placement = joined_placement(decisions)
     denied = next((item for item in decisions if item.effect == "deny"), None)
     if denied is not None:
         return denied
     asked = next((item for item in decisions if item.effect == "ask"), None)
     if asked is not None:
-        return asked
+        return KernelDecision("ask", asked.reason, placement)
     deferred = next((item for item in decisions if item.effect == "defer"), None)
     if deferred is not None:
         return deferred
-    return KernelDecision("allow", "every shell segment is declared safe")
+    return KernelDecision("allow", "every shell segment is declared safe", placement)
 
 
 def decide_shell(
@@ -845,7 +862,9 @@ def decide_shell(
         )
         if inner.effect == "allow":
             return inner
-        return resolve(KernelDecision("ask", f"escalated ({why}): {inner.reason}"))
+        return resolve(
+            KernelDecision("ask", f"escalated ({why}): {inner.reason}", inner.sandbox)
+        )
     return resolve(
         classify_shell(
             command,

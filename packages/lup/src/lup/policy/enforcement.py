@@ -37,18 +37,25 @@ from lup.policy.models import (
 )
 
 
-def policy_hook_output(decision: Decision) -> LupHookOutput:
+def policy_hook_output(decision: Decision, escapable: bool = False) -> LupHookOutput:
     """Render one policy verdict as the portable hook decision.
 
     ``defer`` carries no decision at all: the kernel declined to judge, so
     the session's ambient permission flow applies rather than this hook
     granting what nothing approved.
+
+    ``escapable`` is whether the runtime this reaches can put a single call
+    outside its sandbox. The composition happens here rather than at each
+    adapter, so what a converter receives is already the placement its own
+    runtime will honour — and a runtime that has no such channel is handed
+    the plain effect instead of an intent it would silently drop.
     """
+    decision = decision.placed(escapable)
     match decision.effect:
         case "allow":
-            return allow_hook()
+            return allow_hook(decision.sandbox)
         case "ask":
-            return ask_hook(decision.reason)
+            return ask_hook(decision.reason, decision.sandbox)
         case "deny":
             return deny_hook(decision.reason)
         case "defer":
@@ -105,6 +112,13 @@ class NativeSemantics(BaseModel):
 
     decode: SemanticDecoder
     routed_tools: list[str] = Field(min_length=1)
+    escapable: bool = False
+    """Whether this runtime can put one call outside its own sandbox.
+
+    An adapter fact rather than a policy one, so it arrives with the decoder
+    and the routed set. Left false, a placement never reaches the wire — the
+    conservative direction, and the right one for a runtime whose sandbox is
+    a session-level flag rather than a per-call argument."""
 
 
 def create_policy_hooks(
@@ -152,7 +166,10 @@ def create_policy_hooks(
         # vocabulary, so this reads a lup spelling rather than a provider's.
         if event.event != "PreToolUse":  # lup: ignore[native-spelling]
             return LupHookOutput()
-        return policy_hook_output(policy.decide(semantics.decode(event).as_documents()))
+        return policy_hook_output(
+            policy.decide(semantics.decode(event).as_documents()),
+            semantics.escapable,
+        )
 
     return LupHooksConfig(
         pre_tool_use=[

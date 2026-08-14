@@ -85,7 +85,10 @@ def main():
             if "hook_event_name" in payload
             else False
         )
-        decision = dispatch(payload, permission_request)
+        # Codex places nothing per call: its sandbox is a session flag on the
+        # binary, so a verdict is degraded to its plain effect rather than
+        # carrying an intent this boundary has no channel to perform.
+        decision = dispatch(payload, permission_request).placed(False)
     # Every way this can fail means one thing — the call went unjudged — and
     # one answer is right for all of them. Naming the exceptions instead is
     # what let a plain unreadable file escape, and a traceback exit is not the
