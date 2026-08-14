@@ -5,7 +5,7 @@ from pathlib import Path
 
 from pydantic import TypeAdapter
 
-from lup.channels.models import LOCAL_STAMP_FORMAT, local_stamp, utc_now
+from lup.channels.models import local_stamp, utc_now
 from lup.channels.stream import Stream
 from lup.resolver.models import ConcernStatus, ResolvePhase
 from lup.resolver.state import ResolverStateRepository
@@ -164,9 +164,15 @@ def test_a_reading_is_dated_in_the_reader_s_own_zone() -> None:
     different question from how long ago the reader was last told anything —
     and a terminal shows how long a turn took, never when it ended.
     """
+    now = datetime.now().astimezone()
     stamp = local_stamp()
 
-    assert stamp == datetime.now().astimezone().strftime(LOCAL_STAMP_FORMAT)
+    # Against the clock rather than against LOCAL_STAMP_FORMAT: comparing the
+    # function to its own constant passes for every format string, including
+    # the bare `%H:%M` that reads as today and names no zone.
+    assert stamp.startswith(now.strftime("%a"))
+    assert now.strftime("%H:%M") in stamp
+    assert stamp.endswith(now.strftime("%Z"))
 
 
 def test_the_attention_line_carries_progress_losses_and_who_is_held_up() -> None:
