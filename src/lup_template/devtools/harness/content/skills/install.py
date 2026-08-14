@@ -1,9 +1,17 @@
 """Canonical declaration for the install skill."""
 
 import lup.harness.models as models
+import lup_template.devtools.harness.content.provenance as provenance
 
 from lup.devtools.subapps import subapp_bullets, subapp_summary
 from lup_template.devtools.subapps import SUBAPP_SPECS
+
+SPELLING = provenance.Provenance(
+    library_git="git -C <source>",
+    project_devtools="uv run --directory <target> lup-devtools",
+    library_checkout="<source>",
+)
+"""Both checkouts spelled out, because this skill stands in one and writes the other."""
 
 SKILL = models.Skill(
     id="skill.install",
@@ -79,22 +87,15 @@ standing on *is* the release you are about to install — a feature branch ports
 unmerged work, and nothing downstream announces that. Resolve both before
 Phase 1:
 
-- `git -C <source> rev-parse --abbrev-ref HEAD` — the branch you would port
-- `git -C <source> symbolic-ref --short refs/remotes/origin/HEAD` — what the
-  remote treats as stable
-
-When they differ, """
+"""
             ),
-            models.AskUser(
-                question="whether to install the source's current branch, which "
-                "carries work the stable branch has not reviewed, or to port from "
-                "the stable branch instead"
-            ),
+            *provenance.branch_probes(SPELLING),
             models.TextPart(
-                text=r"""
-
-Record the branch and commit the answer settles on: every later phase reads
-that checkout, and step 9 baselines the target's sync checkpoint at it.
+                text=r"""Every later phase reads this checkout, and step 9 baselines the target's sync
+checkpoint at its HEAD. Nothing here may move it, so if the answer was the
+stable branch it is standing on the wrong one: stop and say so, and let the
+work be re-run from a checkout of that branch rather than installing one branch
+while recording another.
 
 If `"""
             ),
@@ -152,40 +153,11 @@ capability below exists once per tree:
 
 ### How the Target Obtains Lup
 
-A Python target depends on `lup` as a package; it does not receive a copy of
-the library's source. Which acquisition mode to declare is a fact you look up,
-not a preference — check whether a release exists before deciding:
-
-```
-curl -s -o /dev/null -w '%{http_code}\n' https://pypi.org/pypi/lup/json
-```
-
-| Look-up | Mode | Command |
-| --- | --- | --- |
-| `200` — a release exists | published | `dev library use published --version <release>` |
-| `404` — nothing published yet | **git** | `dev library git --branch <source-branch>` |
-| The user is developing both repos at once | linked | `dev library link <source>` |
-
-Prefer the index the moment it can answer, and the repository until it can:
-both hand the target a real package, so its `packages/lup/` stays absent and
-nothing has to be merged later. Vendoring is not on this list — a vendored copy
-is a fork with all the reconciliation that implies, and is only right for a
-target that genuinely intends to modify library source.
-
-The git mode resolves `subdirectory = "packages/lup"`, because the distribution
-sits inside the repository rather than at its root, and pins whichever ref you
-name. **The ref must be reachable on the remote**: a branch that exists only in
-the source checkout resolves to whatever the remote last saw, so the target
-silently installs an older library. Before declaring a git source, confirm the
-commit you settled on before Phase 1 is actually pushed —
-`git -C <source> ls-remote origin <branch>` — and stop and say so if it is not,
-rather than installing a dependency that cannot see the work being installed.
-
-The extras the target needs come from what it runs: `claude` and/or `codex` for
-the adapters it drives, `docker` for the code-execution sandbox, `web` for the
-session API. Name them in the requirement (`lup[claude,codex,docker]`).
-
-### DevTools CLI
+"""
+            ),
+            *provenance.acquisition(SPELLING),
+            models.TextPart(
+                text=r"""### DevTools CLI
 
 The `lup-devtools` CLI (`src/lup_template/devtools/`) gives the meta-agent structured commands for development tasks that would otherwise require ad-hoc bash one-liners. Without it, an agent resorts to `python -c "..."` snippets or manual shell pipelines for trace analysis, feedback collection, and session management — which are fragile and unrepeatable. The devtools encode these workflows as proper CLI commands with argument parsing, output formatting, and error handling.
 
@@ -474,13 +446,13 @@ Steps 1-4, 6 and 7 repeat per selected tree; step 5 is tree-independent.
             models.TextPart(
                 text=r""" — section-level merge from that tree's template flavor (read template → use `<!-- section: ... -->` markers to identify merge units → adapt for target → compare sections → add missing ones → leave existing untouched)
 8. **Hand off to generation**: everything written in steps 1-4, 6 and 7 becomes a generated artifact once the target's harness runs. From here on, the target edits its declarations under `src/<project>/devtools/harness/content/` and regenerates with `uv run lup-devtools harness generate all`; the installed files are outputs, and a hand edit to one is reverted the next time generation runs. Say so explicitly in the Phase 7 report.
-9. **Initialize upstream sync**: baseline the target at *the commit you ported from*, not at whatever the remote's default branch points to. Run `uv run --directory <target> lup-devtools sync setup lup <source> --branch <source-branch> --synced` — `setup` records the source checkout, the branch settled before Phase 1, and that checkout's HEAD as the checkpoint, so `"""
-            ),
-            models.SkillInvocation(plugin="lup", skill="update"),
-            models.TextPart(
-                text=r"""` only shows commits after installation. Plain `sync mark-synced lup` is wrong here: the shipped `sync.json` entry carries a URL and no branch, so it clones the remote's default branch and checkpoints *that* HEAD — every commit you just installed comes back as unported work once your branch merges.
+9. **Initialize upstream sync**, which comes last because it records what the previous eight steps installed:
 
-## Phase 7: Verify & Report
+"""
+            ),
+            *provenance.sync_baseline(SPELLING),
+            models.TextPart(
+                text=r"""## Phase 7: Verify & Report
 
 After installation:
 
