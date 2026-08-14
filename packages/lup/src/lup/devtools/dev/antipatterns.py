@@ -99,15 +99,18 @@ class AntiPatternScan(BaseModel):
 
 
 def scan_antipatterns(
-    project: DevProject, paths: Sequence[str] = ()
+    project: DevProject, paths: Sequence[str] | None = None
 ) -> AntiPatternScan:
     """Every missing/spurious marker across tracked production `.py`/TS files.
 
     ``paths`` narrows the sweep to the files under the given repository-relative
     prefixes, for the fix-one-file loop where a whole-repository resolve is the
-    dominant cost. It only decides which files are read: each one still audits
-    against the same tables, and the oracle still resolves them against the
-    whole project, so a scoped verdict matches the sweep's verdict for that file.
+    dominant cost, and for a caller answerable only for what it changed. It
+    only decides which files are read: each one still audits against the same
+    tables, and the oracle still resolves them against the whole project, so a
+    scoped verdict matches the sweep's verdict for that file. ``None`` is the
+    whole repository; naming no path scopes the sweep to nothing, which is
+    what a tree that changed nothing is answerable for.
 
     The audit reads the same declared path roles the edit hook does, so a rule
     the hook never enforces in a test or scratch tree is not reported there
@@ -129,7 +132,9 @@ def scan_antipatterns(
         patterns = patterns_for_suffix(path.suffix.lower())
         if patterns is None or path_role(rel, roles) != "production":
             continue
-        if paths and not any(rel == p or rel.startswith(f"{p}/") for p in paths):
+        if paths is not None and not any(
+            rel == p or rel.startswith(f"{p}/") for p in paths
+        ):
             continue
         try:
             text = path.read_text(encoding="utf-8")
@@ -213,7 +218,9 @@ def scan_antipatterns(
 ADVISORY_KINDS = {"untyped"}
 
 
-def summarize(project: DevProject, as_json: bool, paths: Sequence[str] = ()) -> None:
+def summarize(
+    project: DevProject, as_json: bool, paths: Sequence[str] | None = None
+) -> None:
     """Tally anti-pattern findings by rule and kind — the sweep triage view.
 
     A per-rule count (most-frequent first, with how many files each spans) and
@@ -267,7 +274,9 @@ def summarize(project: DevProject, as_json: bool, paths: Sequence[str] = ()) -> 
     typer.echo(f"Rule reference: {RULE_REFERENCE} (`uv run lup-devtools dev rules`)")
 
 
-def report(project: DevProject, as_json: bool, paths: Sequence[str] = ()) -> None:
+def report(
+    project: DevProject, as_json: bool, paths: Sequence[str] | None = None
+) -> None:
     """List anti-pattern findings; exit non-zero when a blocking one remains.
 
     "untyped" findings are advisory (a bare `# lup: ignore` to migrate to a

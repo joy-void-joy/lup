@@ -1,4 +1,4 @@
-"""Branch analysis: containment, PR status, base detection, PR body generation."""
+"""Branch analysis: containment, PR status, base detection, freshness, PR bodies."""
 
 import json
 import logging
@@ -11,8 +11,10 @@ from typing import Literal, NoReturn, Required, TypedDict
 
 import sh
 import typer
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
+from lup.harness.environment import non_interactive_environment
+from lup.harness.process import LaunchRequest, ProcessLauncher
 from lup.devtools.dev.remote_auth import check_remote_auth
 from lup.resolver.models import HeldLease
 from lup.resolver.state import live_lease_branches
@@ -484,10 +486,19 @@ class BaseCandidate(BaseModel):
     source: Literal["recorded", "guessed"] = "guessed"
 
 
+def base_config_key(branch: str) -> str:
+    """Where the base a worktree was cut from is recorded, for one branch.
+
+    Written at creation and read wherever a branch's origin has to be
+    recovered, so the key is named once instead of spelled at each end.
+    """
+    return f"branch.{branch}.lup-base"
+
+
 def recorded_base(branch: str) -> str | None:
     """The base recorded at worktree creation, when one was written."""
     try:
-        value = git.out("config", "--get", f"branch.{branch}.lup-base", _ok_code=[0])
+        value = git.out("config", "--get", base_config_key(branch), _ok_code=[0])
     except sh.ErrorReturnCode:
         return None
     return value or None
@@ -554,6 +565,157 @@ def detect_base_branch(branch: str | None = None) -> BaseCandidate:
         raise typer.Exit(1)
 
     return best
+
+
+class BaseFreshness(BaseModel):
+    """How far a checkout sits behind the remote branch its base answers to."""
+
+    model_config = ConfigDict(frozen=True)
+
+    tracked: str = ""
+    """The remote branch measured against; empty when there is none to measure."""
+
+    behind: int = 0
+    """Commits that branch holds which this checkout does not."""
+
+    unreachable: str = ""
+    """Why the remote could not be asked; empty when it answered."""
+
+    update_command: str = "git pull --ff-only"
+    """What a reader runs to take the commits they are missing."""
+
+    def stale(self) -> bool:
+        """Whether the remote is known to hold commits this checkout does not."""
+        return self.behind > 0
+
+    def report(self) -> str:
+        """One line naming what the probe found, in whichever case it found it.
+
+        An unknown answer says so rather than reading as a clean bill: a
+        checkout that could not reach its remote knows exactly as much about
+        its base as it did before asking.
+        """
+        if self.unreachable:
+            return f"base freshness unknown: {self.unreachable}"
+        if not self.tracked:
+            return "base freshness unknown: this checkout answers to no remote branch"
+        if not self.behind:
+            return f"base is current with {self.tracked}"
+        return (
+            f"base is {self.behind} commit(s) behind {self.tracked}: "
+            f"update with `{self.update_command}`"
+        )
+
+
+def git_line(launcher: ProcessLauncher, root: Path, arguments: list[str]) -> str:
+    """One git probe's single line of output, empty when it had nothing to say.
+
+    The freshness probe runs through the launcher seam rather than this
+    module's own bound git, because one of its steps reaches the network: a
+    launcher merges the non-interactive environment every agent spawn point
+    uses over the console's, so a credential nobody can supply fails fast
+    instead of waiting on a terminal prompt. Each of these probes answers a
+    question that has a blank answer — no upstream, no recorded base, no
+    branch — so a failure and empty output mean the same thing here.
+    """
+    status = launcher.launch(
+        LaunchRequest(
+            arguments=["git", *arguments],
+            cwd=root,
+            environment=non_interactive_environment({}),
+        )
+    )
+    lines = status.stdout.splitlines()
+    return lines[0].strip() if status.code == 0 and lines else ""
+
+
+def tracked_remote_branch(launcher: ProcessLauncher, root: Path) -> str:
+    """The remote branch a checkout answers to, empty when it answers to none.
+
+    A branch that tracks one names it outright. A feature worktree tracks
+    nothing, so the base recorded when it was created is asked what *it*
+    tracks — which is how a worktree cut from an integration branch is still
+    measured against that branch on the remote, the case a plain upstream
+    question answers nothing about.
+    """
+    named = ["rev-parse", "--abbrev-ref", "--symbolic-full-name"]
+    direct = git_line(launcher, root, [*named, "@{upstream}"])
+    if direct:
+        return direct
+    branch = git_line(launcher, root, ["branch", "--show-current"])
+    recorded = (
+        git_line(launcher, root, ["config", "--get", base_config_key(branch)])
+        if branch
+        else ""
+    )
+    return (
+        git_line(launcher, root, [*named, f"{recorded}@{{upstream}}"])
+        if recorded
+        else ""
+    )
+
+
+def probe_base_freshness(launcher: ProcessLauncher, root: Path) -> BaseFreshness:
+    """Fetch, then count what the tracked branch holds and this checkout does not.
+
+    A tree whose base has moved is self-consistent and says nothing about it,
+    so only the remote can answer the question — one fetch and one count. A
+    remote that cannot be reached leaves the answer unknown rather than
+    guessing it either way.
+    """
+    tracked = tracked_remote_branch(launcher, root)
+    if not tracked:
+        return BaseFreshness()
+    fetched = launcher.launch(
+        LaunchRequest(
+            arguments=["git", "fetch", "--quiet"],
+            cwd=root,
+            environment=non_interactive_environment({}),
+        )
+    )
+    if fetched.code != 0:
+        return BaseFreshness(
+            tracked=tracked,
+            unreachable=fetched.stderr.strip() or f"`git fetch` exited {fetched.code}",
+        )
+    counted = git_line(launcher, root, ["rev-list", "--count", f"HEAD..{tracked}"])
+    if not counted.isdigit():
+        return BaseFreshness(
+            tracked=tracked, unreachable=f"git did not count {tracked}"
+        )
+    return BaseFreshness(tracked=tracked, behind=int(counted))
+
+
+def confirm_base_freshness(freshness: BaseFreshness, interactive: bool) -> None:
+    """Report the count, and let whoever is there answer for a moved base.
+
+    A human at the terminal is shown what moved and decides; for an
+    autonomous session nobody is, so the same count refuses to open one
+    rather than scrolling past unread. A remote that could not be reached
+    stops nothing — an offline checkout is still a checkout to work in.
+    """
+    typer.echo(freshness.report())
+    if not freshness.stale():
+        return
+    if interactive and typer.confirm(
+        "Open a session against the moved base anyway?", default=False
+    ):
+        return
+    raise typer.BadParameter(freshness.report())
+
+
+def require_fresh_base(freshness: BaseFreshness) -> None:
+    """Refuse to start work that pins this base for everything it hands out.
+
+    A run captures its base once and cuts every lease from it, so following a
+    base that has already moved means re-basing each lease, re-deriving each
+    diff against the new base, and re-running intake — which can add or drop
+    concerns while work is in flight. Refusing before any of that exists
+    costs a fetch; discovering it afterwards costs the run.
+    """
+    typer.echo(freshness.report())
+    if freshness.stale():
+        raise typer.BadParameter(freshness.report())
 
 
 # -- CLI functions --

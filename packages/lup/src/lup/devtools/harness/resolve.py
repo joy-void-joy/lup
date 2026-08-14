@@ -76,6 +76,7 @@ from lup.resolver.tools import (
 from lup.runtime.factory import SessionFactory
 from lup.types import EnvVars
 from lup.workspace.paths import project_root
+from lup.devtools.dev.branches import probe_base_freshness, require_fresh_base
 from lup.devtools.dev.comments import FoundComment, scan_tracked
 from lup.devtools.dev.issues import comment_on_issues, fetch_open_issues
 from lup.devtools.dev.remote_auth import check_remote_auth
@@ -1021,6 +1022,17 @@ def run_resolve(
     # Every worktree this run leases lands under here, which is what makes
     # "a checkout lup created" a structural test rather than a judgement.
     worktree_root = root.parent / f"{root.name}-resolve-{resolved_run_id}"
+    # A run captures one base and cuts every lease from it, so a base already
+    # behind is planned against code that moved: the pass this refusal exists
+    # for planned thirteen concerns on a tree ten commits stale, where merged
+    # work had already done part of them. Following the move instead would
+    # mean re-basing every lease, re-deriving each diff, and re-running intake
+    # mid-flight, which can add or drop concerns while work is leased. Only a
+    # starting run is refused; one already recorded keeps the base it
+    # recorded, so a pull mid-run never strands it.
+    if not ResolverStateRepository(state_root, resolved_run_id).exists():
+        if abort_reason is None and admission is None:
+            require_fresh_base(probe_base_freshness(launcher, root))
 
     async def execute() -> None:
         from lup.adapters.claude.runtime import (

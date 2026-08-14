@@ -149,7 +149,8 @@ repository's, because its whole job is to be this project's own harness:
 - `reconcile.py` — drift classification and the source-patch flow
 - `doctor.py` — runtime evidence against the `evidence.py` ledger
 - `resolve.py` — persisted-resolver glue: broker, snapshots, factories
-- `launch.py` — runtime preflight and the native launchers
+- `launch.py` — the shared preflight a launcher opens a session past
+  (generation, runtime probes, base freshness) and the native launchers
 
 ## What the plugin ships
 

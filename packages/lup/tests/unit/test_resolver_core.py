@@ -65,6 +65,7 @@ from lup.resolver.models import (
     ConcernProgress,
     ConcernStatus,
     DependencyBase,
+    DiffValidation,
     IntegrationRecord,
     JoinProgress,
     InventoryNote,
@@ -480,6 +481,7 @@ def recording_launcher() -> ScriptedLauncher:
         {
             "rev-parse HEAD": [out("base-sha\n"), out("created-sha\n")],
             "diff --name-only": out("src/module.py\n"),
+            "diff --cached": out(code=1),
             "branch --show-current": out("resolve/a\n"),
         }
     )
@@ -833,17 +835,17 @@ def test_preparing_a_different_join_still_opens_the_merge(tmp_path: Path) -> Non
     ] in launcher.arguments
 
 
-def test_already_joined_reports_containment_from_merge_base(tmp_path: Path) -> None:
+def test_containment_is_reported_from_merge_base(tmp_path: Path) -> None:
     lease = joined_lease(tmp_path)
 
     contained = ancestry_launcher(is_ancestor=True)
-    assert WorktreeOrchestrator(contained, tmp_path).already_joined(lease, "sha")
+    assert WorktreeOrchestrator(contained, tmp_path).contains(lease, "sha")
     assert contained.arguments == [
         ["git", "merge-base", "--is-ancestor", "sha", "HEAD"]
     ]
 
     absent = ancestry_launcher(is_ancestor=False)
-    assert not WorktreeOrchestrator(absent, tmp_path).already_joined(lease, "sha")
+    assert not WorktreeOrchestrator(absent, tmp_path).contains(lease, "sha")
 
 
 def test_join_accepts_a_resolved_path_the_merger_left_unstaged(
@@ -898,9 +900,85 @@ def test_only_orchestrator_creates_commits_and_reads_their_identity(
         ["git", "diff", "--name-only", "base-sha"],
         ["git", "diff", "--check", "base-sha"],
         ["git", "add", "-A"],
+        ["git", "diff", "--cached", "--quiet", "HEAD"],
         ["git", "commit", "-m", "resolve: A"],
         ["git", "rev-parse", "HEAD"],
     ]
+
+
+def moved_head_launcher(contains_base: bool, clean_tree: bool) -> ScriptedLauncher:
+    """A lease whose HEAD has moved off the base this check was handed."""
+    return ScriptedLauncher(
+        {
+            "rev-parse HEAD": [out("moved-sha\n"), out("committed-sha\n")],
+            "branch --show-current": out("resolve/a\n"),
+            "merge-base --is-ancestor": out(code=0 if contains_base else 1),
+            "diff --name-only": out("src/module.py\n"),
+            "diff --cached": out(code=0 if clean_tree else 1),
+        }
+    )
+
+
+def validate_moved(launcher: ScriptedLauncher, tmp_path: Path) -> DiffValidation:
+    """Validate one worker's report against a lease whose HEAD has moved."""
+    leases = WritableRootLeases(tmp_path / "agents")
+    lease = leases.acquire("a", "resolve/a")
+    return WorktreeOrchestrator(launcher, tmp_path).validate_and_commit(
+        concern("a"),
+        WorkerReport(
+            concern_id="a",
+            changed=True,
+            summary="updated module",
+            files_changed=[Path("src/module.py")],
+        ),
+        lease,
+        "base-sha",
+        leases,
+    )
+
+
+def test_a_lease_that_advanced_past_its_base_is_still_measured_from_it(
+    tmp_path: Path,
+) -> None:
+    """A base the check carried while the branch moved on is not a rewrite.
+
+    The base is still in the lease's history, so everything the diff
+    measures from it is intact — failing here spent a concern on the run's
+    own bookkeeping.
+    """
+    diff = validate_moved(
+        moved_head_launcher(contains_base=True, clean_tree=False), tmp_path
+    )
+
+    assert diff.valid
+    assert diff.commit == "committed-sha"
+
+
+def test_a_lease_that_lost_its_base_names_the_authority_that_changed(
+    tmp_path: Path,
+) -> None:
+    """A stale base and a rewritten history no longer share one verdict."""
+    diff = validate_moved(
+        moved_head_launcher(contains_base=False, clean_tree=True), tmp_path
+    )
+
+    assert not diff.valid
+    assert diff.reason == (
+        "worker changed commit authority: base-sha is no longer in the lease's history"
+    )
+
+
+def test_work_already_committed_in_the_lease_is_accepted_where_it_sits(
+    tmp_path: Path,
+) -> None:
+    """`git commit` refuses an empty commit, and the work is present anyway."""
+    launcher = moved_head_launcher(contains_base=True, clean_tree=True)
+
+    diff = validate_moved(launcher, tmp_path)
+
+    assert diff.valid
+    assert diff.commit == "moved-sha"
+    assert ["git", "commit", "-m", "resolve: A"] not in launcher.arguments
 
 
 @pytest.mark.asyncio

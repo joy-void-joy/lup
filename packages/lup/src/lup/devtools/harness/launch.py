@@ -7,6 +7,7 @@ native CLI with the non-interactive environment applied.
 
 import os
 import shutil
+import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -20,6 +21,7 @@ from lup.adapters.codex.harness_runtime import (
 )
 from lup.harness.environment import non_interactive_environment
 from lup.harness.models import Plugin
+from lup.harness.process import LocalProcessLauncher
 from lup.types import EnvVars
 from lup.workspace.paths import project_root
 from lup.adapters.codex.home import (
@@ -27,6 +29,7 @@ from lup.adapters.codex.home import (
     login_state,
     select_codex_home,
 )
+from lup.devtools.dev.branches import confirm_base_freshness, probe_base_freshness
 from lup.devtools.harness.drift import generate_with_report
 from lup.devtools.harness.generate import NativeHarnessComposition
 from lup.devtools.dev.worktree import RelocationHint
@@ -54,6 +57,36 @@ def relocation_hint(worktree_path: Path) -> RelocationHint:
             shell=f"{move}; codex",
         )
     return RelocationHint(agent="", shell=move)
+
+
+def ready_to_open(composition: NativeHarnessComposition, generate_only: bool) -> bool:
+    """Generate this target's artifacts and clear every gate standing before a session.
+
+    Both launchers reach a session through here, so a gate added once is a
+    gate every entry point makes — including one written later, which cannot
+    open a session without first generating the artifacts it opens against.
+    Answers whether to go on: a generate-only invocation has already done
+    everything it was asked for.
+
+    The base check is one of those gates rather than a workflow's own step. A
+    tree whose base has moved is self-consistent and says nothing about it, so
+    a session opened on one plans and edits against code that is no longer
+    there — which cost a planning pass over thirteen concerns on a tree ten
+    commits behind its remote, where two merged pull requests had already done
+    part of the work being planned.
+    """
+    generate_with_report(composition)
+    if generate_only:
+        return False
+    runtime_preflight(composition)
+    confirm_base_freshness(
+        probe_base_freshness(LocalProcessLauncher(), project_root()),
+        # A launcher hands the terminal to a native CLI, so the human who ran
+        # it is the one this count is put to. Nobody is there for a session
+        # spawned from a script, and that is the run the incident happened on.
+        interactive=sys.stdin.isatty(),
+    )
+    return True
 
 
 def runtime_preflight(composition: NativeHarnessComposition) -> None:
@@ -180,16 +213,6 @@ def writable_root_arguments() -> list[str]:
     return ["-c", f'sandbox_workspace_write.writable_roots=["{tree}"]']
 
 
-# lup: Both launches should check the checkout is current before opening a
-# session, and say so when it is not. A session started on a stale base plans and
-# edits against code that already moved: this cost a full resolver planning pass
-# over 13 concerns, where the tree was ten commits behind its remote, two merged
-# PRs had already done part of the planned work, and a merged intake fix would
-# have excluded 16 of the 53 notes as generated copies no worker could edit. The
-# agent cannot see any of that — the tree looks self-consistent. A fetch and a
-# behind-count at launch, reported and refusable, costs one round trip. Put it
-# here rather than in the resolve skill, so every session gets it and not only
-# the one workflow that noticed.
 def launch_claude(
     composition: NativeHarnessComposition,
     extra_args: list[str],
@@ -200,10 +223,8 @@ def launch_claude(
 ) -> None:
     """Generate/reconcile Claude artifacts and launch the verified local plugin."""
     plugin = composition.recipe.source.plugins[0]
-    generate_with_report(composition)
-    if generate_only:
+    if not ready_to_open(composition, generate_only):
         return
-    runtime_preflight(composition)
     arguments: list[str] = []
     if model is not None:
         arguments.extend(["--model", model])
@@ -244,10 +265,8 @@ def launch_codex(
 ) -> None:
     """Generate/reconcile Codex artifacts and launch without updating the CLI."""
     plugin = composition.recipe.source.plugins[0]
-    generate_with_report(composition)
-    if generate_only:
+    if not ready_to_open(composition, generate_only):
         return
-    runtime_preflight(composition)
     environment = non_interactive_environment(os.environ)  # lup: ignore[os-environ]
     envelope = codex_sandbox_arguments(plugin, environment, extra_args)
     store = CodexWorktreeHomeStore()

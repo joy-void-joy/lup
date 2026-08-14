@@ -419,9 +419,9 @@ def create_dev_app(
         declarations = declared()
         if antipatterns:
             if stats:
-                antipatterns_mod.summarize(declarations.project, as_json, path or ())
+                antipatterns_mod.summarize(declarations.project, as_json, path)
             else:
-                antipatterns_mod.report(declarations.project, as_json, path or ())
+                antipatterns_mod.report(declarations.project, as_json, path)
             return
         if boundaries:
             boundaries_mod.report(declarations.project, as_json)

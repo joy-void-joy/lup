@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "53d4d0dc6f010be8ad9f93b29bd513a1d5695f609dab86979badfa56fb6e5a38",
+  "source_digest": "59691bc846968f0404067ecdc3b8229fd93995249c1dfd1110f24b8768b22a96",
   "target_requirements": [
     "claude-code"
   ],
@@ -184,14 +184,14 @@
     {
       "path": ".claude/plugins/lup/commands/init.md",
       "category": "generated",
-      "sha256": "113d339d696989e4e09be28614e3dcc5eb39b3d7c1b322030ff1ff2d68d7c3e7",
+      "sha256": "e4b87025d27c1362da3de4f0b4498945fb16b31874d4d5850a95b781208f4bec",
       "semantic_id": "skill.init",
       "executable": false
     },
     {
       "path": ".claude/plugins/lup/commands/install.md",
       "category": "generated",
-      "sha256": "1a32af95d9ef44b68092e88d75f02b21c5d74b8e46d66a94e01c2884a58225e6",
+      "sha256": "6f7e35bba69d907279063b5b54723ff0b1c3b632648a98536693daf588aa3789",
       "semantic_id": "skill.install",
       "executable": false
     },
@@ -415,7 +415,7 @@
     {
       "path": "docs/contributing.md",
       "category": "generated",
-      "sha256": "c9640d4a8a613e89d31d9f1d0c510aca6be44de90c85a71a2fadbad9abb84923",
+      "sha256": "71265fa1d8e7cd599eaba86089eab1a1702c6ea545fc977ccc70049b90fe2442",
       "semantic_id": "docs.contributing",
       "executable": false
     },
@@ -429,14 +429,14 @@
     {
       "path": "docs/dev-tooling-decisions.md",
       "category": "generated",
-      "sha256": "055f9b342cc35c392d295575084364086e33ce9335fdc3937054ac5eeed3657c",
+      "sha256": "048953dd052c30341b842f3ab4f61b4e88d79d21c85fc8ddb72efe8a34c97719",
       "semantic_id": "docs.dev-tooling-decisions",
       "executable": false
     },
     {
       "path": "docs/harness.md",
       "category": "generated",
-      "sha256": "396f1329ed1f02f439ada590646f31c08fb8014ad88336776da1c98e3f408fd8",
+      "sha256": "52d695dd378c8f64c3c9fd0ffc821a6ca3f52f0c37c8afc0e2e66d6b2953a323",
       "semantic_id": "docs.harness",
       "executable": false
     },
@@ -485,7 +485,7 @@
     {
       "path": "docs/quality-pipeline.md",
       "category": "generated",
-      "sha256": "1b134d24c16482d67f19581fef2529ed08f8678d96c53c357ed4a876d20402b5",
+      "sha256": "4c6998d6340ab4a8013bdcb4adbbed0c63c852d20adb028e1ac7fef55641a502",
       "semantic_id": "docs.quality-pipeline",
       "executable": false
     },

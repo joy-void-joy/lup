@@ -13,10 +13,15 @@ from pathlib import Path
 
 import pytest
 import sh
+import typer
 
+from lup.devtools.dev.antipatterns import scan_antipatterns
+from lup.devtools.dev.check import changed_paths
+from lup.devtools.project import DevProject
 from lup.telemetry.trace import TraceLogger
 from lup.workspace.paths import configure, project_root
 from lup.types import LupTextBlock, LupToolResultBlock, LupToolUseBlock
+from tests.unit.repos import commit_file, git_in, initialized_repo
 
 ORIGINAL_ROOT = project_root()
 
@@ -373,3 +378,79 @@ class TestWorktreePullsAreFastForwardOnly:
             assert "--ff-only" in flags, (
                 f"dev/pr.py:{call.lineno} pulls without --ff-only"
             )
+
+
+class TestTheAntiPatternSweepIsScopedToWhatATreeChanged:
+    """`dev check --since` scopes this gate, as its own docstring says it does.
+
+    Unscoped, it judged a resolver lease against every finding standing in
+    the tree it was cut from: a run rejected otherwise-green work over one
+    finding in a file no lease had touched, and each retry re-derived it.
+    """
+
+    def two_files_that_trip_a_rule(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> DevProject:
+        """A repository whose every tracked file has one finding to report."""
+        work = tmp_path / "repo"
+        git = initialized_repo(work, tmp_path / "no-hooks")
+        for name in ("mine.py", "theirs.py"):
+            (work / name).write_text(
+                "from typing import Any\n\n\ndef f(x: Any) -> None: ...\n",
+                encoding="utf-8",
+            )
+        git("add", "-A")
+        git("commit", "-m", "chore: two files that trip a rule")
+        monkeypatch.chdir(work)
+        return DevProject(package="app")
+
+    def test_naming_no_path_sweeps_the_whole_repository(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        project = self.two_files_that_trip_a_rule(tmp_path, monkeypatch)
+
+        scan = scan_antipatterns(project)
+
+        assert {finding.file for finding in scan.findings} == {"mine.py", "theirs.py"}
+
+    def test_a_scope_leaves_out_what_it_does_not_name(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        project = self.two_files_that_trip_a_rule(tmp_path, monkeypatch)
+
+        scan = scan_antipatterns(project, ["mine.py"])
+
+        assert {finding.file for finding in scan.findings} == {"mine.py"}
+
+    def test_a_tree_that_changed_nothing_is_answerable_for_nothing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """An empty scope is a scope, not an absent one."""
+        project = self.two_files_that_trip_a_rule(tmp_path, monkeypatch)
+
+        scan = scan_antipatterns(project, [])
+
+        assert scan.findings == []
+
+    def test_a_ref_git_cannot_resolve_refuses_instead_of_scoping_to_nothing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Dropping the exit status made a mistyped ref read as "changed nothing".
+
+        That scoped the blocking gates to zero files and reported ok, which
+        is the one answer a gate must never give by accident.
+        """
+        self.two_files_that_trip_a_rule(tmp_path, monkeypatch)
+
+        with pytest.raises(typer.BadParameter, match="does not name a commit"):
+            changed_paths("deadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
+
+    def test_a_ref_that_resolves_names_what_changed_since_it(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self.two_files_that_trip_a_rule(tmp_path, monkeypatch)
+        git = git_in(tmp_path / "repo", tmp_path / "no-hooks")
+        commit_file(git, tmp_path / "repo", "later.py", "x = 1\n", "feat: later")
+
+        assert changed_paths("HEAD~1") == ["later.py"]
+        assert changed_paths("HEAD") == []

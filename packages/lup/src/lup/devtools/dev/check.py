@@ -25,7 +25,7 @@ from lup.devtools.harness.drift import (
     report_stale,
 )
 from lup.devtools.harness.generate import NativeHarnessComposition
-from lup.devtools.utils import git, uv
+from lup.devtools.utils import decode_stderr, git, uv
 
 # The suite waits on git subprocesses and hook scripts far more than it
 # computes, so it parallelizes well — but each worker pays a full interpreter
@@ -85,9 +85,22 @@ def inline_notes_lines(found: list[FoundComment]) -> list[str]:
 
 
 def changed_paths(since: str) -> list[str]:
-    """Every tracked path this tree changed since a ref, as posix strings."""
-    named = sh.Command("git")("diff", "--name-only", since, _ok_code=list(range(256)))
-    return [line for line in str(named).splitlines() if line]
+    """Every tracked path this tree changed since a ref, as posix strings.
+
+    A ref git cannot resolve refuses the run rather than answering nothing.
+    The two readings are indistinguishable once the exit status is dropped —
+    an empty answer is exactly what a tree that changed nothing gives — and
+    the scope this builds decides which files the blocking gates read. A
+    mistyped ref would scope them to none of them and report ok.
+    """
+    try:
+        named = git.lines("diff", "--name-only", since, _ok_code=[0])
+    except sh.ErrorReturnCode as error:
+        raise typer.BadParameter(
+            f"--since {since!r} does not name a commit in this tree: "
+            f"{decode_stderr(error)}"
+        ) from error
+    return [line for line in named if line]
 
 
 def owned_comments(
