@@ -139,6 +139,7 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
         allowed_urls: list[UrlScope] | None = None,
         denied_urls: list[UrlScope] | None = None,
         sandbox_active: bool = False,
+        sandbox_excluded_commands: list[str] | None = None,
         trusted_script_roots: list[str] | None = None,
         interactive: bool = True,
         path_roles: list[PathRoleRow] | None = None,
@@ -154,6 +155,7 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
         self.allowed_scopes = [url_scope_row(scope) for scope in allowed_urls or []]
         self.denied_scopes = [url_scope_row(scope) for scope in denied_urls or []]
         self.sandbox_active = sandbox_active
+        self.sandbox_excluded_commands = sandbox_excluded_commands or []
         self.trusted_script_roots = trusted_script_roots or []
         self.interactive = interactive
 
@@ -167,6 +169,7 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
                 self.allowed_scopes,
                 self.denied_scopes,
                 sandboxed=self.sandbox_active and not event.unsandboxed,
+                excluded_commands=self.sandbox_excluded_commands,
                 trusted_script_roots=self.trusted_script_roots,
                 path_roles=self.path_roles,
                 path_rules=self.path_rules,

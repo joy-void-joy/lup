@@ -7,6 +7,7 @@ from kernel.rows import (
     AntiPatternRow,
     PathRoleRow,
     PathRuleRow,
+    RefusedToolRow,
     ShellRuleRow,
     UrlScopeRow,
 )
@@ -5896,6 +5897,19 @@ SHELL_RULES: list[ShellRuleRow] = [
     },
 ]
 
+REFUSED_TOOLS: list[RefusedToolRow] = [
+    {
+        "tool": "Artifact",
+        "specifier": "",
+        "reason": "publishing a page leaves the repository, and this project already owns surfaces that do not \u2014 run `uv run lup-devtools report` for everything left to implement, or the report skill to write it whole to tmp/report.md",
+    },
+    {
+        "tool": "Skill",
+        "specifier": "artifact-design",
+        "reason": "publishing a page leaves the repository, and this project already owns surfaces that do not \u2014 run `uv run lup-devtools report` for everything left to implement, or the report skill to write it whole to tmp/report.md",
+    },
+]
+
 AUTONOMOUS_AGENT_IDENTITIES: list[str] = [
     "resolver-worker",
 ]
@@ -5918,4 +5932,11 @@ RUNNER_TARGETS: list[str] = [
     "pytest",
     "ruff",
     "lup-devtools",
+]
+
+SANDBOX_EXCLUDED_COMMANDS: list[str] = [
+    "uv run lup-devtools py eval *",
+    "ssh *",
+    "git *",
+    "gh *",
 ]

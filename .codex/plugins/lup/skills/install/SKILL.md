@@ -133,6 +133,7 @@ The `lup-devtools` CLI (`src/lup_template/devtools/`) gives the meta-agent struc
   - `harness` — Generate and launch the native harnesses
   - `hooks` — Query the permission policy
   - `py` — Python module introspection
+  - `report` — Everything left to implement, in one place
   - `setup` — Interactive setup wizard
   - `sync` — Track sync.json repos and review their commits
   - `trace` — Trace display, search, and analysis
@@ -221,7 +222,7 @@ If the target repo builds (or will build) a tool-using SDK agent, the **self-imp
 - **Agent scaffolding**: core.py pattern (orchestration), subagents.py, models.py (structured output), prompts.py, tool_policy.py, config.py (pydantic-settings)
 - **Feedback loop**: feedback collection, trace analysis, metrics aggregation, scoring CSV
 - **Session management**: CLI with `run` + `loop` commands, auto-commit, session storage
-- **DevTools**: The full `lup-devtools` CLI (`agent`, `dashboard`, `dev`, `feedback`, `harness`, `hooks`, `py`, `setup`, `sync`, `trace`, `usage`, `version`)
+- **DevTools**: The full `lup-devtools` CLI (`agent`, `dashboard`, `dev`, `feedback`, `harness`, `hooks`, `py`, `report`, `setup`, `sync`, `trace`, `usage`, `version`)
 - **Version tracking**: `[tool.lup] agent_version` in pyproject.toml + `lup-devtools version bump` for tracking agent behavior changes
 - **Commands**: `init`, `feedback-loop`, `bump`, `update` — the self-improvement workflow
 - **Template guidance**: Section-level merge into each guidance file the target carries, from its matching template flavor (add missing sections, leave existing ones)

@@ -1,6 +1,7 @@
 """Canonical declaration, native rendering, and reconciliation tests."""
 
 import ast
+import errno
 import json
 import os
 import sys
@@ -12,6 +13,7 @@ from typing import Literal, get_args
 import pytest
 import sh
 import typer
+from claude_agent_sdk.types import SandboxNetworkConfig, SandboxSettings
 from pydantic import BaseModel, ConfigDict, Field
 
 from lup.policy.identity import AGENT_IDENTITY_ENV
@@ -36,7 +38,12 @@ from lup.harness.banner import (
     GeneratedBanner,
 )
 from lup.harness.generation import ArtifactValidationError
-from lup.harness.materialization import AtomicMaterializer, MaterializationConflictError
+from lup.harness.materialization import (
+    AtomicMaterializer,
+    MaterializationConflictError,
+    discard_staged_write,
+    refused_write,
+)
 from lup.harness.validation import validated_tree
 from lup.harness.models import (
     GUIDANCE_BYTE_BUDGET,
@@ -112,7 +119,11 @@ from lup_template.devtools.harness.content.docs.catalog import DOCUMENTS
 from lup_template.devtools.harness.content.guidance import DOCUMENT as GUIDANCE
 from lup_template.devtools.harness.content.settings import project_settings
 from lup.devtools.harness import launch
-from lup.devtools.harness.launch import codex_sandbox_arguments
+from lup.devtools.harness.launch import (
+    claude_sandbox_arguments,
+    codex_sandbox_arguments,
+)
+from lup.policy.kernel.shell import sandbox_excluded
 from lup_template.devtools.harness.content.template_claude import (
     DOCUMENT as TEMPLATE_CLAUDE,
 )
@@ -246,7 +257,7 @@ def test_catalog_has_one_portable_skill_per_baseline_command() -> None:
     harness = portable_harness()
     plugin = harness.plugins[0]
 
-    assert len(plugin.skills) == 31
+    assert len(plugin.skills) == 32
     assert len(plugin.agents) == 4
     assert {skill.name for skill in plugin.skills} >= {
         "resolve",
@@ -894,9 +905,9 @@ def test_both_native_trees_compile_deterministically() -> None:
     assert codex == compile_codex(harness)
     assert (
         len([item for item in claude.artifacts if "/commands/" in item.path.as_posix()])
-        == 31
+        == 32
     )
-    assert len([item for item in codex.artifacts if item.path.name == "SKILL.md"]) == 31
+    assert len([item for item in codex.artifacts if item.path.name == "SKILL.md"]) == 32
     assert Path(".codex/plugins/lup/.codex-plugin/plugin.json") in {
         item.path for item in codex.artifacts
     }
@@ -1089,6 +1100,28 @@ def test_materialization_rejects_stale_base(tmp_path: Path) -> None:
 
     with pytest.raises(MaterializationConflictError, match="stale base"):
         AtomicMaterializer().apply(proposal)
+
+
+def test_a_refused_write_names_the_boundary_and_drops_its_staging(
+    tmp_path: Path,
+) -> None:
+    """A runtime protects its own configuration by mounting it, not by mode.
+
+    So a sandboxed session replacing one of those paths is refused with a
+    busy device — an errno about hardware, which sends a reader looking at
+    the disk instead of at the boundary that actually decided.
+    """
+    staged = tmp_path / ".settings.json.abc123.tmp"
+    staged.write_text("staged\n", encoding="utf-8")
+    error = OSError(errno.EBUSY, "Device or resource busy", str(staged))
+    error.filename2 = str(tmp_path / "settings.json")
+
+    discard_staged_write(error)
+    refusal = str(refused_write(error))
+
+    assert not staged.exists()
+    assert "settings.json" in refusal and ".tmp" not in refusal
+    assert "sandbox" in refusal
 
 
 def test_materialization_rejects_symlink_path_escape(tmp_path: Path) -> None:
@@ -1380,6 +1413,36 @@ def test_generated_codex_permission_request_denies_unapproved_code() -> None:
     assert b"interpreters" in result.stderr
 
 
+def test_generated_codex_hook_refuses_the_declared_calls() -> None:
+    """The refusal table is consulted on both runtimes, not only on Claude.
+
+    Everything the refusal is made of is portable — the field on ``HookSet``,
+    the kernel module both trees carry, the rows this renderer emits — so a
+    tree that shipped all of it and never asked would read as a refusal in
+    force while the call went through. These two names are Claude's own
+    spellings and match nothing Codex offers; what is pinned is that the
+    mechanism reaches this dispatcher, for whatever an adopter refuses here.
+    """
+    hook = sh.Command(str(Path(".codex/plugins/lup/hooks/scripts/policy.py").resolve()))
+
+    def run(name: str, payload: JsonObject) -> sh.RunningCommand:
+        body = json.dumps({"tool_name": name, "tool_input": payload})
+        result = hook(_in=body, _ok_code=[0, 2], _return_cmd=True)
+        assert isinstance(result, sh.RunningCommand)
+        return result
+
+    refused = run("Artifact", {"content": "a page"})
+    assert refused.exit_code == 2
+    assert b"lup-devtools report" in refused.stderr
+
+    narrowed = run("Skill", {"skill": "artifact-design"})
+    assert narrowed.exit_code == 2
+
+    other = run("Skill", {"skill": "lup:commit"})
+    assert other.exit_code == 0
+    assert other.stdout == b""
+
+
 def test_generated_codex_hook_allows_managed_skill_scripts(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -1426,6 +1489,47 @@ def test_generated_claude_hook_allows_managed_skill_scripts(
     assert decision("node /tmp/untrusted-script.mjs") == "deny"
     workspace_script = Path(".claude/plugins/lup/scripts/file_suggest.sh").resolve()
     assert decision(f"sh {workspace_script}") == "deny"
+
+
+def test_generated_claude_hook_refuses_the_declared_calls() -> None:
+    """The refusal this repository declares, as the shipped hook enforces it.
+
+    Routing is half the mechanism and the declared rows are the other half,
+    so this goes through the compiled script rather than the kernel beneath
+    it: a row the hook is never handed refuses nothing, and no unit below
+    this level would notice.
+    """
+    script = Path(".claude/plugins/lup/hooks/scripts/policy.py").resolve()
+
+    def decision(name: str, payload: JsonObject) -> ClaudeHookDecision:
+        body = {"tool_name": name, "tool_input": payload}
+        result = sh.Command(str(script))(_in=json.dumps(body), _return_cmd=True)
+        assert isinstance(result, sh.RunningCommand)
+        return ClaudeHookOutput.model_validate_json(result.stdout).hook_specific_output
+
+    refused = decision("Artifact", {"content": "a page"})
+    assert refused.permission_decision == "deny"
+    assert "lup-devtools report" in refused.permission_decision_reason
+
+    narrowed = decision("Skill", {"skill": "artifact-design"})
+    assert narrowed.permission_decision == "deny"
+
+    escalated = decision(
+        "Artifact", {"content": "# lup: escalate: the user asked for a page\npage"}
+    )
+    assert escalated.permission_decision == "ask"
+
+
+def test_generated_claude_hook_leaves_every_other_skill_to_the_runtime() -> None:
+    """Routing `Skill` must not put every skill invocation to a human."""
+    script = Path(".claude/plugins/lup/hooks/scripts/policy.py").resolve()
+    result = sh.Command(str(script))(
+        _in='{"tool_name":"Skill","tool_input":{"skill":"lup:commit"}}',
+        _return_cmd=True,
+    )
+
+    assert isinstance(result, sh.RunningCommand)
+    assert json.loads(result.stdout) == {}
 
 
 def test_generated_claude_hook_executes_the_canonical_kernel() -> None:
@@ -2114,6 +2218,7 @@ def test_project_settings_derive_sandbox_from_hook_declaration() -> None:
     assert "code.claude.com" in domains
     assert "github.com" in domains
     assert "sandbox" not in project_settings(None)
+    assert sandbox["excludedCommands"] == hooks.excluded_commands()
 
 
 def test_a_declared_tool_server_is_granted_rather_than_asked_about() -> None:
@@ -2130,6 +2235,74 @@ def test_a_declared_tool_server_is_granted_rather_than_asked_about() -> None:
     for server in plugin.mcp_servers:
         assert f"mcp__plugin_{plugin.name}_{server.name}" in allowed
     assert "WebSearch" in allowed
+
+
+def test_rendered_sandbox_keys_are_the_runtime_documented_ones() -> None:
+    """The block is checked against the runtime's shape rather than assumed.
+
+    A misspelled sandbox key changes nothing and reports nothing, so every
+    key is drawn from the SDK's published shape. Two are settings-file-only,
+    because the SDK routes filesystem and credential limits through
+    permission rules instead — named here so the split reads as a fact about
+    the two surfaces rather than as a mismatch nobody checked.
+    """
+    sandbox = project_settings(portable_harness().plugins[0])["sandbox"]
+    assert isinstance(sandbox, dict)
+    network = sandbox["network"]
+    assert isinstance(network, dict)
+    session_keys = SandboxSettings.__annotations__
+    network_keys = SandboxNetworkConfig.__annotations__
+
+    assert "excludedCommands" in session_keys
+    assert sorted(key for key in sandbox if key not in session_keys) == [
+        "credentials",
+        "filesystem",
+    ]
+    assert [key for key in network if key not in network_keys] == []
+
+
+def test_declared_exclusions_cover_the_commands_the_boundary_cannot_carry() -> None:
+    """Each pattern is checked against the command as the toolchain spells it.
+
+    A pattern matches on a literal prefix, so one that reads convincingly
+    beside the declaration and misses the invocation as typed excludes
+    nothing — and it fails as whatever the boundary blocks, naming neither
+    the pattern nor the sandbox.
+    """
+    hooks = portable_harness().plugins[0].hooks
+    assert hooks is not None
+    excluded = hooks.excluded_commands()
+    for command in (
+        "uv run lup-devtools py eval 'lup.harness.models.HookSandbox'",
+        "git push origin HEAD",
+        "git fetch --all",
+        "gh pr view 47",
+        "ssh -T git@github.com",
+    ):
+        assert sandbox_excluded(command, excluded), command
+    assert not sandbox_excluded("uv run pytest -q", excluded)
+    assert not sandbox_excluded("uv run lup-devtools py info lup.hooks", excluded)
+
+
+def test_claude_sandbox_widens_the_writable_set_to_sibling_worktrees(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Claude roots writes at the launch cwd, so a second checkout is outside.
+
+    The declared paths ride along with the resolved tree: this key is
+    documented as merging across scopes and as overriding per session, and a
+    list carrying both is the same list under either reading.
+    """
+    monkeypatch.setattr(launch, "get_tree_dir", lambda: tmp_path)
+    plugin = portable_harness().plugins[0]
+    assert plugin.hooks is not None and plugin.hooks.sandbox is not None
+    arguments = claude_sandbox_arguments(plugin)
+    widened = json.loads(arguments[arguments.index("--settings") + 1])
+
+    assert widened["sandbox"]["filesystem"]["allowWrite"] == [
+        *plugin.hooks.sandbox.writable_paths,
+        str(tmp_path),
+    ]
 
 
 def test_codex_sandbox_arguments_establish_the_envelope() -> None:

@@ -49,6 +49,7 @@ from lup.policy.dispatcher import (
     dispatcher_banner,
 )
 from lup.policy.kernel.rows import PathRoleRow
+from lup.policy.refused_tools import routed_for
 from lup.policy.kernel.words import (
     INTERPRETERS,
     PASS_THROUGH_WORDS,
@@ -488,7 +489,9 @@ class CodexHookRenderer(ArtifactRenderer[HookSet]):
         }
         registration = [
             {
-                "matcher": "|".join(CODEX_DISPATCHER.routed_tools),
+                "matcher": "|".join(
+                    routed_for(CODEX_DISPATCHER.routed_tools, source.refused_tools)
+                ),
                 "hooks": [policy_hook],
             }
         ]
@@ -583,8 +586,10 @@ class CodexHookRenderer(ArtifactRenderer[HookSet]):
                             for role in source.path_roles
                         ],
                         shell_rules=list(source.shell_rules),
+                        refused_tools=list(source.refused_tools),
                         recoverable_target_limit=source.recoverable_target_limit,
                         runner_targets=list(source.runner_targets),
+                        sandbox_excluded_commands=source.excluded_commands(),
                     ),
                     semantic_id=source.id,
                 ),

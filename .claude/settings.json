@@ -55,6 +55,12 @@
       ]
     },
     "enabled": true,
+    "excludedCommands": [
+      "uv run lup-devtools py eval *",
+      "ssh *",
+      "git *",
+      "gh *"
+    ],
     "filesystem": {
       "allowWrite": [
         "~/.cache/uv"

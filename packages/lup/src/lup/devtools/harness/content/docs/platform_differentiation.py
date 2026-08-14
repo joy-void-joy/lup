@@ -6,14 +6,22 @@ import lup.harness.models as models
 
 
 def document(
-    skills: list[models.Skill], agents: list[models.Agent]
+    skills: list[models.Skill],
+    agents: list[models.Agent],
+    claude_decodes: list[str],
+    codex_decodes: list[str],
 ) -> models.PromptDocument:
     """The parity audit, counted against the roster it is auditing.
 
     The counts are read from the declarations rather than written down, so a
     skill added on either side of the split cannot leave this table claiming
-    a number that stopped being true.
+    a number that stopped being true. Each decoded set arrives the same way,
+    from the root that composes the runtimes, and is named as what it is: the
+    refusal table widens the rendered matcher past it, by whatever the
+    composing project declared.
     """
+    claude_decoded = r"\|".join(claude_decodes)
+    codex_decoded = r"\|".join(codex_decodes)
     return models.PromptDocument(
         source=__name__,
         parts=[
@@ -65,7 +73,7 @@ each platform's native format — never byte parity.
                 )
             ),
             models.TextPart(
-                text=r"""
+                text=rf"""
 | Prompt compilation | `ClaudeSpellings`: `$ARGUMENTS` for `ArgumentsRef`, the structured-question tool for `AskUser`, a delegation call for `Delegate` | `CodexSpellings`: prose arguments reference, a direct instruction to ask, a custom-agent delegation | One neutral `SpelledPromptRenderer` walks the parts; each runtime supplies a `NativeSpellings` for every native word. A new part adds an abstract method neither runtime can be constructed without answering. |
 | Harness locations in prose | `.claude/CLAUDE.md`, `.claude/settings.json`, `.claude/plugins/lup/commands/`, … | `AGENTS.md`, `.codex/config.toml`, `.codex/plugins/lup/skills/`, … | `NativePath` and `PluginPath` name a location semantically. `scope="this_tree"` resolves to the reader's own tree; `scope="every_tree"` renders every runtime's spelling in one identical string, which is how prose teaches both at once. |
 | Model choice | `model: opus \| sonnet \| haiku \| inherit` in agent frontmatter | row omitted | Agent declarations carry a portable `ModelTier`. Recorded evidence for Codex custom agents covers TOML parsing only, so no alias is proven to spell a tier in; omitting the row inherits the session model. |
@@ -74,7 +82,7 @@ each platform's native format — never byte parity.
 | Agents | `.claude/plugins/lup/agents/<name>.md` (Markdown frontmatter) | `.codex/agents/<name>.toml` (custom-agent TOML) | Native agent formats and locations. |
 | Plugin manifest + marketplace | `.claude/plugins/lup/.claude-plugin/plugin.json`, `.claude/plugins/.claude-plugin/marketplace.json` | `.codex/plugins/lup/.codex-plugin/plugin.json`, `.agents/plugins/marketplace.json` | Native manifest schemas and marketplace registries. |
 | Repository guidance | `.claude/CLAUDE.md` | `AGENTS.md` at the repository root, plus `.codex/config.toml` (`[features] hooks`) | Same guidance document, rendered to each platform's documented location; Codex additionally needs the hooks feature flag. |
-| Hook dispatch | Matcher `WebFetch\|Bash\|Edit\|Write`; dispatcher returns structured allow/ask/deny JSON, or no decision to defer a size-only edit to the client's permission mode; edit preimages are inspected (protected paths, marker counts, size, anti-patterns) | Matcher `Bash\|apply_patch\|web_fetch` on both `PermissionRequest` and `PreToolUse`; a `PermissionRequest` returns a structured allow or, for `ask`, no decision at all so native approval prompts the operator; under `PreToolUse` there is nobody to ask, so `ask` joins `deny` at fail-closed exit code 2; a deferred edit is exit 0; `apply_patch` input is opaque and always asks | Both runtimes reach a real approval prompt, and both run the same semantic kernel (`lup.policy`, identical generated `runtime/kernel.py`). What differs is edit introspection: Claude sees the preimage and can judge markers, size, and anti-patterns, while Codex sees an opaque patch. |
+| Hook dispatch | Decodes `{claude_decoded}`; dispatcher returns structured allow/ask/deny JSON, or no decision to defer a size-only edit to the client's permission mode; edit preimages are inspected (protected paths, marker counts, size, anti-patterns) | Decodes `{codex_decoded}` on both `PermissionRequest` and `PreToolUse`; a `PermissionRequest` returns a structured allow or, for `ask`, no decision at all so native approval prompts the operator; under `PreToolUse` there is nobody to ask, so `ask` joins `deny` at fail-closed exit code 2; a deferred edit is exit 0; `apply_patch` input is opaque and always asks | Both runtimes reach a real approval prompt, and both run the same semantic kernel (`lup.policy`, identical generated `runtime/kernel.py`). Each rendered matcher is the decoded set above widened by `routed_for` with every tool the composing project's refusal table names, on both runtimes alike — a refusal reaches nothing it was not routed for, so the declaration that states one is what registers it. What differs is edit introspection: Claude sees the preimage and can judge markers, size, and anti-patterns, while Codex sees an opaque patch. |
 | Autonomous edit identities | `policy_data.py` grants the resolver's `worker_identity`, bare and plugin-qualified, from the hook payload or the session environment | Same identity, from the session environment only | Both lists are derived from `ResolveSpec.worker_identity`, so neither runtime can ship an empty one by omission. Codex hook payloads carry no agent identity, which is why the environment is the channel that reaches every session on both runtimes. |
 | OS sandbox boundary | The `HookSandbox` declaration compiles into the `settings.json` `sandbox` block (bwrap network allowlist, human-owned write denials, credential read denials); the launcher verifies `bwrap`/`socat` before exporting `LUP_SANDBOX_ACTIVE` | The launcher establishes an explicit `--sandbox workspace-write` envelope on the interactive command line and exports the flag only for an envelope it set itself; a caller-supplied sandbox flag keeps the deny lattice active | Codex sandbox config has no per-path write denials or domain allowlist, so its envelope is the declaration's strict subset (network off); the resolver paths carry their own explicit envelopes on both platforms. |
 """

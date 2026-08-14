@@ -33,6 +33,7 @@ from lup.policy.models import (
     ToolIdentity,
     UnknownTool,
 )
+from lup.policy.refused_tools import RefusedTool
 from lup.policy.rules import EditPolicy, FetchPolicy, ShellPolicy, UrlScope
 from lup_template.devtools.harness.content.shell_vocabulary import SHELL_RULES
 
@@ -198,6 +199,47 @@ def test_hook_is_scoped_to_the_tools_the_policy_has_rules_for() -> None:
     assert set(matched.split("|")) == set(CLAUDE_DISPATCHER.routed_tools)
     for unruled in ("Read", "Skill", "mcp__lup-output__submit_output"):
         assert unruled not in matched.split("|")
+
+
+def test_a_refusal_is_what_widens_the_routed_set() -> None:
+    """A refused tool is routed, and refusing none routes nothing extra.
+
+    Both halves matter. Unrouted, a declared refusal judges nothing and the
+    reflex it exists to stop goes through; routed by a runtime that merely
+    anticipates the name, every adopter refusing nothing pays the
+    unclassified ``ask`` for a tool they have no opinion about.
+    """
+    refusal = RefusedTool(tool="Artifact", reason="publishing leaves the repository")
+
+    assert "Artifact" not in CLAUDE_SEMANTICS.routed_tools
+    assert "Artifact" in CLAUDE_SEMANTICS.also_refusing([refusal]).routed_tools
+    assert CLAUDE_SEMANTICS.also_refusing([]).routed_tools == (
+        CLAUDE_SEMANTICS.routed_tools
+    )
+
+
+def test_a_refused_tool_is_routed_exactly_once() -> None:
+    """A refusal narrowed by specifier still names one tool to register."""
+    refusals = [
+        RefusedTool(tool="Skill", specifier="artifact-design", reason="leaves it"),
+        RefusedTool(tool="Skill", specifier="page-design", reason="leaves it too"),
+    ]
+
+    routed = CLAUDE_SEMANTICS.also_refusing(refusals).routed_tools
+
+    assert routed.count("Skill") == 1
+
+
+def test_refusing_a_tool_the_runtime_decodes_is_refused_outright() -> None:
+    """An unreachable refusal is a declaration that lies about being in force.
+
+    ``Bash`` is judged by the shell lattice before the table is ever consulted,
+    so a row naming it would read as a ban while every command went through.
+    """
+    with pytest.raises(ValueError, match="answer first"):
+        CLAUDE_SEMANTICS.also_refusing(
+            [RefusedTool(tool="Bash", reason="shells leave the repository")]
+        )
 
 
 def test_a_decoder_cannot_be_enforced_over_no_tools_at_all() -> None:

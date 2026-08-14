@@ -27,6 +27,7 @@ from kernel.edit import decide_edit
 from kernel.fetch import decide_fetch
 from kernel.lex import shell_path_verb_targets, shell_write_targets
 from kernel.shell import decide_shell
+from kernel.tools import decide_tool
 from policy_data import (
     ALLOWANCE_GRANTS_ENV,
     ALLOWED_FETCH_SCOPES,
@@ -37,7 +38,9 @@ from policy_data import (
     PATH_ROLES,
     PATH_RULES,
     RECOVERABLE_TARGET_LIMIT,
+    REFUSED_TOOLS,
     RUNNER_TARGETS,
+    SANDBOX_EXCLUDED_COMMANDS,
     SHELL_RULES,
 )
 
@@ -230,6 +233,7 @@ def bash_decision(
         ALLOWED_FETCH_SCOPES,
         DENIED_FETCH_SCOPES,
         sandboxed=sandboxed,
+        excluded_commands=SANDBOX_EXCLUDED_COMMANDS,
         trusted_script_roots=managed_script_roots(managed_root),
         path_roles=PATH_ROLES,
         path_rules=PATH_RULES,
@@ -249,6 +253,16 @@ def bash_decision(
 def fetch_decision(url: str) -> KernelDecision:
     """Judge one outbound fetch against the declared scopes."""
     return decide_fetch(url, ALLOWED_FETCH_SCOPES, DENIED_FETCH_SCOPES)
+
+
+def refused_tool_decision(name: str, values: list[str]) -> KernelDecision | None:
+    """Judge one native call against the calls this project refuses outright.
+
+    ``None`` leaves the routing runtime's own answer for a tool no refusal
+    mentions, because the table says what a project decided against and never
+    what it approved — an unmentioned tool is still unclassified.
+    """
+    return decide_tool(name, values, REFUSED_TOOLS)
 
 
 def edit_decision(
@@ -330,6 +344,16 @@ def dispatch(payload, permission_request=False):
                 for change in patched_files(tool_input["command"], read_document)
             ]
         )
+    # Asked of whatever reached here rather than of a listed few, exactly as
+    # the Claude half asks it: which tools are worth refusing is the
+    # declaration's answer, and a runtime that shipped the table without
+    # consulting it would read as a refusal in force while the call went
+    # through. The branches above keep their calls, which have semantics.
+    refused = refused_tool_decision(
+        name, [value for value in tool_input.values() if isinstance(value, str)]
+    )
+    if refused is not None:
+        return refused
     return KernelDecision("ask", f"unknown tool {name!r} is not covered by policy")
 
 

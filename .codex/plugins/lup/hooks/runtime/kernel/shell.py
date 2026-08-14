@@ -795,12 +795,47 @@ def classify_shell(
     return KernelDecision("allow", "every shell segment is declared safe", placement)
 
 
+def excluded_prefix(pattern: str) -> list[str]:
+    """The literal words a sandbox-exclusion pattern matches a segment by.
+
+    Reading a pattern down to its literal head is the conservative half of
+    its meaning: whatever a wildcard goes on to match, the boundary drops at
+    least everything the head covers, so taking the head for the whole rule
+    can only classify more commands as unconfined, never fewer.
+    """
+    words = pattern.split()
+    wildcards = [index for index, word in enumerate(words) if "*" in word]
+    return words[: wildcards[0]] if wildcards else words
+
+
+def sandbox_excluded(command: str, patterns: list[str]) -> bool:
+    """Whether the boundary was told to leave this command out of isolation.
+
+    Exclusion is the sandbox's only per-command lever, and it removes the
+    command entirely rather than lifting one rule — so a command that
+    matches runs with nothing beneath it, and work the policy would have
+    handed to the boundary has to be judged here instead. Every segment is
+    tested, because a compound command carries an exclusion as a whole, and
+    one the lexer cannot read falls back to a single segment, which is what
+    the boundary does with it too.
+    """
+    prefixes = [excluded_prefix(pattern) for pattern in patterns]
+    segments = parse_shell_words(command)
+    lexed = segments if isinstance(segments, list) else [command.split()]
+    return any(
+        bool(prefix) and segment[: len(prefix)] == prefix
+        for segment in lexed
+        for prefix in prefixes
+    )
+
+
 def decide_shell(
     command: str,
     rows: list[ShellRuleRow],
     allowed_scopes: list[UrlScopeRow] | None = None,
     denied_scopes: list[UrlScopeRow] | None = None,
     sandboxed: bool = False,
+    excluded_commands: list[str] | None = None,
     trusted_script_roots: list[str] | None = None,
     path_roles: list[PathRoleRow] | None = None,
     path_rules: list[PathRuleRow] | None = None,
@@ -820,7 +855,9 @@ def decide_shell(
     reshapes it into the allowed vocabulary or deliberately promotes it.
     When the execution is sandboxed, unjudged work defers instead: the OS
     boundary confines it, and only an unsandboxed escape returns to the
-    deny lattice.
+    deny lattice. A command the declaration excludes from the sandbox is
+    such an escape without saying so — the boundary was told to leave it
+    alone — so it is judged as though no sandbox were running at all.
 
     A non-interactive host has no approval channel, so a question it cannot
     put to a human is not a question — sandboxed, it rides the same OS
@@ -829,6 +866,7 @@ def decide_shell(
     deny is never rescued by the sandbox in either mode.
     """
     hint = ESCALATE_HINT if interactive else RESHAPE_HINT
+    confined = sandboxed and not sandbox_excluded(command, excluded_commands or [])
 
     def resolve(decision: KernelDecision) -> KernelDecision:
         match decision.effect:
@@ -836,7 +874,7 @@ def decide_shell(
                 return decision
             case "ask" if interactive:
                 return decision
-            case "defer" | "ask" if sandboxed:
+            case "defer" | "ask" if confined:
                 return KernelDecision("defer", decision.reason)
             case _:
                 return KernelDecision("deny", decision.reason + hint)

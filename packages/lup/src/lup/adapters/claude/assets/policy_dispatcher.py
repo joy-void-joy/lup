@@ -4,8 +4,14 @@
 host half into the plugin's `hooks/scripts/policy.py`, so this is not itself
 a script. It holds only what Claude Code spells for itself: the environment
 naming the root it installs trusted packages beneath, relativization against
-the launch directory, the four tools it routes, and the conservative ask it
+the launch directory, the tools it routes, and the conservative ask it
 returns through its own decision channel for input nothing can decide from.
+
+A call none of those four decode is put to the refusal table before it earns
+the unclassified ask, so this file never names a tool it has no semantics for.
+Which names a runtime offers is that runtime's own fact; which of them a
+project has decided against is the application's — so the tools a refusal adds
+to the routed set come from the declaration rather than from a list here.
 
 The imports below resolve against the generated runtime the compiled script
 sits beside, which is why this file is type-checked against that tree rather
@@ -23,7 +29,12 @@ from pathlib import Path
 # distribution. Naming it as a search path is what lets the imports below
 # resolve, for the interpreter and for a type checker alike.
 sys.path.insert(0, str(Path(__file__).parents[1] / "runtime"))
-from decisions import bash_decision, edit_decision, fetch_decision
+from decisions import (
+    bash_decision,
+    edit_decision,
+    fetch_decision,
+    refused_tool_decision,
+)
 from host import declared_identity, read_document, sandbox_active
 from kernel.decision import KernelDecision
 from policy_data import AGENT_IDENTITY_ENV, AUTONOMOUS_AGENT_IDENTITIES
@@ -102,6 +113,15 @@ def dispatch(payload):
             Path(path).exists(),
             autonomous,
         )
+    # Asked of whatever reached here rather than of a listed few: which tools
+    # are worth refusing is the declaration's answer, and naming any of them
+    # here would be this file holding a second, narrower copy of it. The
+    # branches above keep their calls, which have semantics to be judged by.
+    refused = refused_tool_decision(
+        name, [value for value in tool_input.values() if isinstance(value, str)]
+    )
+    if refused is not None:
+        return refused
     return KernelDecision("ask", "tool is not classified")
 
 

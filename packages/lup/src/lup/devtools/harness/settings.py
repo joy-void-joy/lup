@@ -89,7 +89,9 @@ def project_settings(declared: Settings, plugin: Plugin | None) -> JsonObject:
     The sandbox stays permissive where the semantic policy already judges
     (escapes re-enter the deny lattice) and hardens what shell writers could
     otherwise bypass: human-owned files become OS-level write denials and the
-    declared credential paths become sandbox read denials.
+    declared credential paths become sandbox read denials. Both are array
+    keys the runtime merges across settings scopes, so a repository states
+    its own requirement without displacing the user's or the organization's.
     """
     settings: JsonObject = dict(declared.base)
     settings["enabledPlugins"] = dict(declared.official_plugins)
@@ -118,6 +120,7 @@ def project_settings(declared: Settings, plugin: Plugin | None) -> JsonObject:
     domains: list[JsonValue] = list(allowed_network_domains(hooks))
     settings["sandbox"] = {
         "enabled": True,
+        "excludedCommands": list(hooks.sandbox.excluded_commands),
         "network": {"allowedDomains": domains},
         "filesystem": {
             "denyWrite": [path.as_posix() for path in hooks.human_owned_files],

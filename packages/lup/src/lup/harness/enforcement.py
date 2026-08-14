@@ -103,6 +103,10 @@ def semantic_policy_for(
     Every family is supplied. An undeclared family asks on every call, which
     is the right default and a useless composition: a session that must stop
     at a human for each shell command it runs is not bounded, it is stopped.
+
+    The declared refusals travel with them, so a call this project decided
+    against is refused by a session composed in process exactly as the
+    generated plugin refuses it.
     """
     allowed = [declared_scope(scope) for scope in hooks.allowed_fetch]
     denied = [declared_scope(scope) for scope in hooks.denied_fetch]
@@ -114,6 +118,7 @@ def semantic_policy_for(
             allowed_urls=allowed,
             denied_urls=denied,
             sandbox_active=sandbox_active,
+            sandbox_excluded_commands=hooks.excluded_commands(),
             trusted_script_roots=trusted_script_roots,
             interactive=interactive,
             path_roles=roles,
@@ -127,4 +132,5 @@ def semantic_policy_for(
             path_roles=roles,
             grants=grants,
         ),
+        refused_tools=list(hooks.refused_tools),
     )
