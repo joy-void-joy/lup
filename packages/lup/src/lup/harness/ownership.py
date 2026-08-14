@@ -125,6 +125,23 @@ class GeneratedArtifacts(BaseModel):
         return self.by_path.get(path)  # lup: ignore[dict-get] — open registry
 
 
+def proof_artifact(root: Path, proof: Path) -> OwnedArtifact:
+    """The manifest, as the generated artifact it is but never lists.
+
+    No manifest records itself, so a consumer asking whether the generator
+    owns a path got "no" for the one file materialization always writes.
+    That answer reached a resolver join as an obligation to justify keeping
+    or dropping ownership proof, which is not a choice anybody makes: the
+    proof is whatever the next generation emits.
+    """
+    return OwnedArtifact(
+        path=proof,
+        category="generated",
+        sha256=content_digest((root / proof).read_text(encoding="utf-8")),
+        semantic_id=f"ownership.{proof.parts[0]}",
+    )
+
+
 def generated_artifacts(
     root: Path, homes: Collection[str] = ADAPTER_HOMES
 ) -> GeneratedArtifacts:
@@ -133,9 +150,11 @@ def generated_artifacts(
     def owned() -> Iterator[OwnedArtifact]:
         """Each generated artifact, across every tree that kept proof."""
         for home in homes:
-            manifest = load_manifest(root / home / OWNERSHIP_FILENAME)
+            proof = Path(home) / OWNERSHIP_FILENAME
+            manifest = load_manifest(root / proof)
             if manifest is None:
                 continue
+            yield proof_artifact(root, proof)
             for artifact in manifest.files:
                 if artifact.category == "generated":
                     yield artifact
