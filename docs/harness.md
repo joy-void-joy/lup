@@ -311,7 +311,7 @@ generated data, policy control flow is one copied module.
 ### Change the shell classification
 
 The shell auto-allow vocabulary is data too. The baseline lives in
-`lup.policy.shell_rules` (`BASE_SHELL_RULES`) as a readable table: a read-only
+`lup.policy.vocabulary` (`default_vocabulary()`) as a readable table: a read-only
 command allows unless a listed `ask_flags` writer flag appears, and a
 subcommand command allows only the subcommands and operations it lists. To
 teach the fleet a downstream toolchain, append rules through the `HookSet` in
@@ -320,19 +320,27 @@ teach the fleet a downstream toolchain, append rules through the `HookSet` in
 ```python
 shell_rules=[
     ShellCommandRule(name="cargo", default_effect="ask", subcommands=[
-        ShellSubcommandRule(name="check"),
-        ShellSubcommandRule(name="build"),
-        ShellSubcommandRule(name="test"),
+        ShellSubcommandRule(name="check", effect="allow"),
+        ShellSubcommandRule(name="build", effect="allow"),
+        ShellSubcommandRule(name="test", effect="allow"),
     ]),
 ]
 ```
 
 The extension is concatenated onto the baseline and erased into the same
 `SHELL_RULES` rows the kernel interprets. A universal command every repository
-should trust belongs in `BASE_SHELL_RULES` instead. Regenerate and run the
+should trust belongs in a `lup.policy.vocabulary` group instead. Regenerate and run the
 policy fixtures exactly as above. Destructive forms stay `ask`: guard a writer
 flag with `ask_flags`, or a destructive sub-operation with an `ask`
 `ShellOperationRule`, rather than widening a `default_effect`.
+
+Both axes cascade, so each subcommand above says `effect="allow"` rather than
+leaving it out — omitting a field means "inherit from the level above", never
+"allow". The same cascade is what lets `sandbox="outside"` be declared once on
+a command and reach every verb beneath it. Run
+`uv run lup-devtools dev vocabulary --provenance` to see which level supplied
+each half of every rule, and `dev vocabulary --json --output <path>` before and
+after a reshaping to confirm no verdict moved that you did not move.
 
 ## Resolving a conflict
 

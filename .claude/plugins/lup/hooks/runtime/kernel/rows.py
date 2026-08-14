@@ -13,6 +13,14 @@ type PathRuleKind = Literal[
     "new_devtools",
 ]
 
+type RuleLevel = Literal["root", "command", "subcommand", "operation"]
+"""Which nesting level of a shell table a resolved value was declared at.
+
+A row's own level is the deepest name it carries; anything shallower means the
+value was inherited. ``root`` is the fallback beneath every table, which a
+command declaring its own effect always shadows.
+"""
+
 
 class UrlScopeRow(TypedDict):
     """One erased fetch scope: an origin, the path beneath it, and its reason.
@@ -116,13 +124,20 @@ class ShellRuleRow(TypedDict):
     decides it: a verb that reaches a remote is unusable confined however the
     effect reads, and a verb whose blast radius wants the OS boundary keeps it
     however ordinary the effect reads.
+
+    Both axes arrive already resolved down the nesting, so matching one row is
+    the whole answer. ``effect_source`` and ``sandbox_source`` say which level
+    supplied each value, which is what a reader needs at a verdict they did not
+    expect; neither is consulted in reaching one.
     """
 
     command: str
     subcommand: str
     operation: str
     effect: DecisionEffect
+    effect_source: RuleLevel
     sandbox: SandboxPlacement
+    sandbox_source: RuleLevel
     ask_flags: list[str]
     allow_flags: list[str]
     read_verbs: list[str]

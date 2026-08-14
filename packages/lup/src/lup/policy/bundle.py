@@ -246,6 +246,7 @@ def shell_rule_rows_literal(rows: list[ShellRuleRow]) -> str:
         lines.append(f'        "subcommand": {json.dumps(row["subcommand"])},')
         lines.append(f'        "operation": {json.dumps(row["operation"])},')
         lines.append(f'        "effect": {json.dumps(row["effect"])},')
+        lines.append(f'        "effect_source": {json.dumps(row["effect_source"])},')
         for name, flags in (
             ("ask_flags", row["ask_flags"]),
             ("allow_flags", row["allow_flags"]),
@@ -259,6 +260,7 @@ def shell_rule_rows_literal(rows: list[ShellRuleRow]) -> str:
             else:
                 lines.append(f'        "{name}": [],')
         lines.append(f'        "sandbox": {json.dumps(row["sandbox"])},')
+        lines.append(f'        "sandbox_source": {json.dumps(row["sandbox_source"])},')
         lines.append(f'        "reason": {json.dumps(row["reason"])},')
         lines.append("    },")
     lines.append("]")

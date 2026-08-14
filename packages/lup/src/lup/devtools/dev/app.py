@@ -35,6 +35,7 @@ from lup.devtools.harness.drift import RepositoryWriter
 from lup.devtools.harness.launch import relocation_hint
 from lup.devtools.project import DevProject
 from lup.harness.models import HookSet, Plugin, PromptDocument
+from lup.policy.vocabulary import default_vocabulary
 from lup.workspace.paths import project_root
 
 
@@ -631,6 +632,28 @@ def create_dev_app(
         policy_explain.explain(
             subjects, kind, sandbox, autonomous, as_json, declared().hooks
         )
+
+    @app.command("vocabulary")
+    def vocabulary_cmd(
+        offered: Annotated[
+            bool,
+            typer.Option("--offered", help="Survey lup's offered defaults instead"),
+        ] = False,
+        as_json: Annotated[bool, typer.Option("--json", help="Emit JSON")] = False,
+        output: Annotated[
+            Path | None,
+            typer.Option("--output", help="Write the survey here instead of stdout"),
+        ] = None,
+        provenance: Annotated[
+            bool,
+            typer.Option(
+                "--provenance", help="List rules and where each axis came from"
+            ),
+        ] = False,
+    ) -> None:
+        """Show every shell form the declared vocabulary judges, and how."""
+        rules = default_vocabulary() if offered else list(declared().hooks.shell_rules)
+        policy_explain.survey(rules, as_json, output, provenance)
 
     # -- plugin commands --
 

@@ -54,7 +54,7 @@ from lup.policy.kernel.words import (
     INTERPRETERS,
     PASS_THROUGH_WORDS,
 )
-from lup.policy.shell_rules import ShellCommandRule
+from lup.policy.shell_rules import ShellCommandRule, erase_shell_rules
 
 
 class CodexSpellings(NativeSpellings):
@@ -430,32 +430,39 @@ def codex_allow_prefixes(
     """Compile semantic allows that stay allowed for every suffix.
 
     Codex prefix rules bypass the sandbox, so flag-guarded rows cannot be
-    widened into a native allow. The runtime hook continues to classify those
-    forms, along with every command whose safety depends on parsed content.
+    widened into a native allow, and neither can one placed ``inside``, whose
+    whole statement is that the call runs confined however the session is
+    running. The runtime hook continues to classify those forms, along with
+    every command whose safety depends on parsed content.
+
+    The erased rows are what this reads rather than the declarations they came
+    from, because the rows are where both axes have been resolved down the
+    nesting: a level that inherited its effect is native-allowed on exactly the
+    terms of one that spelled it out, which is the same reading the dispatcher
+    and the canonical policy take.
     """
 
     def add(prefix: list[str]) -> None:
         if prefix not in prefixes:
             prefixes.append(prefix)
 
+    rows = erase_shell_rules(rules)
+    gated = dict.fromkeys(row["command"] for row in rows if row["subcommand"])
+    operational = dict.fromkeys(
+        f"{row['command']} {row['subcommand']}" for row in rows if row["operation"]
+    )
     prefixes: list[list[str]] = []
-    for command in rules:
-        if not command.subcommands:
-            if (
-                command.name not in CODEX_DYNAMIC_COMMANDS
-                and command.default_effect == "allow"
-                and not command.ask_flags
-            ):
-                add([command.name])
+    for row in rows:
+        if row["effect"] != "allow" or row["ask_flags"] or row["sandbox"] == "inside":
             continue
-        for subcommand in command.subcommands:
-            if subcommand.operations:
-                for operation in subcommand.operations:
-                    if operation.effect == "allow" and not operation.ask_flags:
-                        add([command.name, subcommand.name, operation.name])
-                continue
-            if subcommand.effect == "allow" and not subcommand.ask_flags:
-                add([command.name, subcommand.name])
+        if not row["subcommand"]:
+            dynamic = row["command"] in CODEX_DYNAMIC_COMMANDS
+            if row["command"] not in gated and not dynamic:
+                add([row["command"]])
+        elif row["operation"]:
+            add([row["command"], row["subcommand"], row["operation"]])
+        elif f"{row['command']} {row['subcommand']}" not in operational:
+            add([row["command"], row["subcommand"]])
     for target in runner_targets:
         add(["uv", "run", target])
     return sorted(prefixes)

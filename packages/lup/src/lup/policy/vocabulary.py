@@ -150,7 +150,7 @@ def read_only_rules(
     are deliberately absent — each decides what some later command sees or
     does, which is the thing this list promises a reader it does not touch.
     """
-    return [ShellCommandRule(name=name) for name in commands]
+    return [ShellCommandRule(name=name, default_effect="allow") for name in commands]
 
 
 def judged_ask_rules(
@@ -299,6 +299,7 @@ def guarded_tool_rules() -> list[ShellCommandRule]:
             # nothing to run. Everything landing inside it still passes the
             # write and edit gates on its own path.
             name="mkdir",
+            default_effect="allow",
         ),
         ShellCommandRule(
             # -l/-L print fingerprints and public keys — the read-only
@@ -316,11 +317,13 @@ def guarded_tool_rules() -> list[ShellCommandRule]:
         ),
         ShellCommandRule(
             name="sort",
+            default_effect="allow",
             ask_flags=["-o", "--output", "--compress-program"],
             reason="a sort flag that writes a file or runs a program requires approval",
         ),
         ShellCommandRule(
             name="yq",
+            default_effect="allow",
             ask_flags=["-i", "--inplace", "--in-place", "-s", "--split-exp"],
             reason=(
                 "a yq flag that edits files in place or splits into files"
@@ -333,6 +336,7 @@ def guarded_tool_rules() -> list[ShellCommandRule]:
             # cluster-match benign words like -noout, and no bare "-o" option
             # exists.
             name="xmllint",
+            default_effect="allow",
             ask_flags=["--output", "-output", "--shell", "-shell"],
             reason=(
                 "an xmllint flag that writes files or opens a shell requires approval"
@@ -343,12 +347,14 @@ def guarded_tool_rules() -> list[ShellCommandRule]:
             # screen; only the file-writing and deleting actions remain
             # flag-guarded.
             name="find",
+            default_effect="allow",
             ask_flags=["-delete", "-fprint", "-fprintf", "-fls"],
             reason="a mutating find action requires approval",
         ),
         ShellCommandRule(
             # `ss -K` closes established sockets; every other form reports.
             name="ss",
+            default_effect="allow",
             ask_flags=["-K", "--kill"],
             reason="killing sockets requires approval",
         ),
@@ -363,7 +369,9 @@ def guarded_tool_rules() -> list[ShellCommandRule]:
             ask_flags=["-l", "-e", "-c"],
             reason="netcat moves data unless -z pins it to a port scan",
         ),
-        ShellCommandRule(name="cd", reason="directory navigation"),
+        ShellCommandRule(
+            name="cd", default_effect="allow", reason="directory navigation"
+        ),
     ]
 
 
@@ -448,14 +456,7 @@ GIT_REVERSIBLE_SUBCOMMANDS = (  # lup: ignore[library-default] — git subcomman
 def git_rule(
     guard_force_push: bool = True,
     redirect_checkout: bool = False,
-    remote_subcommands: Sequence[str] = (
-        "ls-remote",
-        "fetch",
-        "pull",
-        "push",
-        "clone",
-    ),
-    remote_sandbox: SandboxPlacement = "outside",
+    sandbox: SandboxPlacement = "outside",
 ) -> ShellCommandRule:
     """Compile the git surface: reads and reversible work allow, losses ask.
 
@@ -477,19 +478,15 @@ def git_rule(
     ahead of this row either way, because committed content stays
     recoverable.
 
-    ``remote_subcommands`` are the verbs that open a transport, and
-    ``remote_sandbox`` is where they run. They are the other axis rather than
-    another effect: a fetch confined to a sandbox with no route to the remote
-    fails however freely it was allowed, and asking about that every time
-    teaches an agent to escalate rather than to read the verdict.
+    ``sandbox`` is where git runs, stated once here and inherited by every
+    subcommand. It is the other axis rather than another effect: a fetch
+    confined to a sandbox with no route to the remote fails however freely it
+    was allowed, and a worktree or config write confined away from the
+    repository's own locks fails the same way, so the placement follows the
+    tool rather than a list of its verbs.
     """
-
-    def placement(name: str) -> SandboxPlacement:
-        """Where one git subcommand runs — outside, for the ones needing a remote."""
-        return remote_sandbox if name in remote_subcommands else "ambient"
-
     leaf = [
-        ShellSubcommandRule(name=name, sandbox=placement(name))
+        ShellSubcommandRule(name=name, effect="allow")
         for name in (*GIT_READ_ONLY_SUBCOMMANDS, *GIT_REVERSIBLE_SUBCOMMANDS)
     ]
     push_flags = ["--delete", "--mirror", "--prune"]
@@ -497,6 +494,7 @@ def git_rule(
         *[
             ShellSubcommandRule(
                 name=name,
+                effect="allow",
                 ask_flags=["--output"],
                 reason="writing command output to a file requires approval",
             )
@@ -504,34 +502,36 @@ def git_rule(
         ],
         ShellSubcommandRule(
             name="grep",
+            effect="allow",
             ask_flags=["-O", "--open-files-in-pager"],
             reason="opening matches in an arbitrary program requires approval",
         ),
         ShellSubcommandRule(
             name="rebase",
+            effect="allow",
             ask_flags=["-x", "--exec"],
             reason="replaying commits through a shell command requires approval",
         ),
         ShellSubcommandRule(
             name="fetch",
+            effect="allow",
             ask_flags=["--upload-pack"],
-            sandbox=placement("fetch"),
             reason="overriding the transport program requires approval",
         ),
         ShellSubcommandRule(
             name="pull",
+            effect="allow",
             ask_flags=["--upload-pack"],
-            sandbox=placement("pull"),
             reason="overriding the transport program requires approval",
         ),
         ShellSubcommandRule(
             name="push",
+            effect="allow",
             ask_flags=(
                 [*push_flags, "-f", "--force", "--force-with-lease"]
                 if guard_force_push
                 else push_flags
             ),
-            sandbox=placement("push"),
             reason=(
                 "rewriting or removing a remote ref requires approval"
                 if guard_force_push
@@ -541,11 +541,11 @@ def git_rule(
         ShellSubcommandRule(
             name="clone",
             effect="ask",
-            sandbox=placement("clone"),
             reason="cloning fetches external code — requires approval",
         ),
         ShellSubcommandRule(
             name="apply",
+            effect="allow",
             ask_flags=["--unsafe-paths", "--build-fake-ancestor"],
             reason="a patch that writes outside the working area requires approval",
         ),
@@ -590,6 +590,7 @@ def git_rule(
         ),
         ShellSubcommandRule(
             name="reflog",
+            effect="allow",
             operations=[
                 ShellOperationRule(
                     name="expire",
@@ -605,6 +606,7 @@ def git_rule(
         ),
         ShellSubcommandRule(
             name="branch",
+            effect="allow",
             ask_flags=["-d", "-D", "--delete", "-m", "-M", "--move"],
             reason="deleting or moving a branch requires approval",
         ),
@@ -628,16 +630,19 @@ def git_rule(
         ),
         ShellSubcommandRule(
             name="tag",
+            effect="allow",
             ask_flags=["-d", "--delete"],
             reason="deleting a tag requires approval",
         ),
         ShellSubcommandRule(
             name="reset",
+            effect="allow",
             ask_flags=["--hard", "--merge", "--keep"],
             reason="a working-tree-destroying reset requires approval",
         ),
         ShellSubcommandRule(
             name="switch",
+            effect="allow",
             ask_flags=["-f", "--force", "--discard-changes"],
             reason="a force switch can discard working-tree changes",
         ),
@@ -664,6 +669,7 @@ def git_rule(
         ),
         ShellSubcommandRule(
             name="stash",
+            effect="allow",
             operations=[
                 ShellOperationRule(name="list", effect="allow"),
                 ShellOperationRule(name="show", effect="allow"),
@@ -685,6 +691,7 @@ def git_rule(
         ),
         ShellSubcommandRule(
             name="remote",
+            effect="allow",
             operations=[
                 ShellOperationRule(
                     name="remove",
@@ -714,6 +721,7 @@ def git_rule(
         default_effect="deny",
         ask_flags=["-c", "--config-env", "--exec-path"],
         value_flags=["-C", "--git-dir", "--work-tree", "--namespace"],
+        sandbox=sandbox,
         subcommands=[*leaf, *guarded],
         reason="this git subcommand is not classified as read-only or reversible",
     )
@@ -801,8 +809,8 @@ def gh_rule(allow_authoring: bool = True) -> ShellCommandRule:
             group("variable", ["list", "get"], ["set", "delete"]),
             group("ruleset", ["list", "view", "check"]),
             group("config", ["get", "list"], ["set"]),
-            ShellSubcommandRule(name="status"),
-            ShellSubcommandRule(name="browse"),
+            ShellSubcommandRule(name="status", effect="allow"),
+            ShellSubcommandRule(name="browse", effect="allow"),
             ShellSubcommandRule(
                 # The default method is GET, so the unguarded form is a read.
                 # Every way of making it something else — naming a method,
@@ -810,6 +818,7 @@ def gh_rule(allow_authoring: bool = True) -> ShellCommandRule:
                 # which leaves the mutation ask exactly where it belongs
                 # instead of on every query that shares the subcommand.
                 name="api",
+                effect="allow",
                 ask_flags=[
                     "-X",
                     "--method",
@@ -846,7 +855,7 @@ def docker_rule() -> ShellCommandRule:
         )
 
     queries = [
-        ShellSubcommandRule(name=name)
+        ShellSubcommandRule(name=name, effect="allow")
         for name in (
             "info",
             "version",
