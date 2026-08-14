@@ -17,7 +17,11 @@ wrote down.
 
 from collections.abc import Callable
 
-from lup.resolver.contracts import ResolverAwaitingAnswers, ResolverEnvironmentFault
+from lup.resolver.contracts import (
+    ResolverAwaitingAnswers,
+    ResolverDrained,
+    ResolverEnvironmentFault,
+)
 from lup.resolver.joins import Joiner
 from lup.resolver.journal import Journal, ReviewResidualEvent, VerificationFailedEvent
 from lup.resolver.models import (
@@ -104,6 +108,17 @@ class ConcernExecutor:
                 "parked on material questions",
             )
             raise
+        except ResolverDrained:
+            # Back to the boundary a resume re-enters from. The concern is
+            # not failed and not waiting on anybody: its committed rounds
+            # stand, and the only thing that did not happen is the turn this
+            # would have started.
+            await self.run.transition_concern(
+                concern.id,
+                ConcernStatus.ELIGIBLE,
+                "drained at a round boundary",
+            )
+            raise
         except TurnError as error:
             # A host fault is not this concern's verdict. Transitioning here
             # would write `failed (401 OAuth access token has been revoked)`
@@ -170,6 +185,12 @@ class ConcernExecutor:
         charged = 0
         attempts = maximum_round + self.config.max_declaration_attempts
         for round_number in range(1, attempts + 1):
+            # Before the turn rather than after it: everything the previous
+            # round produced is committed by `validate_and_commit`, so this
+            # is the point where stopping costs nothing at all.
+            drain = self.questions.draining()
+            if drain is not None:
+                raise ResolverDrained(drain.reason, [concern.id])
             await self.run.transition_concern(concern.id, ConcernStatus.RUNNING)
             # The commit a turn is measured from is the lease's own head at the
             # moment the turn opens, read rather than carried. A carried value

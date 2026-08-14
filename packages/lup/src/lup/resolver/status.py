@@ -82,7 +82,6 @@ class RunStatus(BaseModel):
             f"{int(self.last.quiet_for().total_seconds())}s ago"
         )
 
-
     def watched(self) -> str:
         """The part of this projection a watch reports a change in.
 

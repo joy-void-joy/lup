@@ -14,6 +14,7 @@ from lup.harness.process import ProcessLauncher
 from lup.resolver.contracts import (
     ResolverAssemblyDeferred,
     ResolverAwaitingAnswers,
+    ResolverDrained,
     ResolverEnvironmentFault,
     ResolverObserver,
     ResolverRegression,
@@ -208,6 +209,18 @@ def merge_faults(faults: list[ResolverEnvironmentFault]) -> ResolverEnvironmentF
     return ResolverEnvironmentFault(
         faults[0].cause,
         sorted({concern for fault in faults for concern in fault.concerns}),
+    )
+
+
+def merge_drained(drained: list[ResolverDrained]) -> ResolverDrained:
+    """Combine sibling drains into the one request they all answered.
+
+    One operator asked once, so the reason is theirs and is stated once. The
+    concerns are named because each is a turn that will be taken again.
+    """
+    return ResolverDrained(
+        drained[0].reason,
+        sorted({concern for stop in drained for concern in stop.concerns}),
     )
 
 
@@ -539,12 +552,14 @@ class ResolverCore:
             ResolverAwaitingAnswers,
             ResolverEnvironmentFault,
             ResolverAssemblyDeferred,
+            ResolverDrained,
         ):
             # None of these is this run failing. Persisting a failure here
             # would move the phase to `failed` and make the resume path
             # re-derive a `resume_from`, when nothing about the run's own
-            # state is wrong — only the host it was running on, or a human
-            # who has not yet said to assemble the branch.
+            # state is wrong — only the host it was running on, a human who
+            # has not yet said to assemble the branch, or one who asked it
+            # to stop.
             raise
         except Exception as error:
             self.persist_failure(error)
@@ -648,12 +663,14 @@ class ResolverCore:
             ResolverAwaitingAnswers,
             ResolverEnvironmentFault,
             ResolverAssemblyDeferred,
+            ResolverDrained,
         ):
             # None of these is this run failing. Persisting a failure here
             # would move the phase to `failed` and make the resume path
             # re-derive a `resume_from`, when nothing about the run's own
-            # state is wrong — only the host it was running on, or a human
-            # who has not yet said to assemble the branch.
+            # state is wrong — only the host it was running on, a human who
+            # has not yet said to assemble the branch, or one who asked it
+            # to stop.
             raise
         except Exception as error:
             self.persist_failure(error)
@@ -686,6 +703,10 @@ class ResolverCore:
         ``promoter_problems``, which every park report carries.
         """
         self.mailbox.clear_park()
+        # A satisfied drain goes the same way, and for the same reason: left
+        # standing, the run it was asked of stops again at the first
+        # boundary of the resume that answered it.
+        self.mailbox.clear_drain()
         self.promoter_problems.clear()
         stop = asyncio.Event()
         promoter = asyncio.create_task(self.questions.promote_until(stop))
@@ -952,7 +973,21 @@ class ResolverCore:
                     ]
                     if parked and len(parked) == len(errors):
                         raise merge_parked(parked)
+                    # A drain reaches every concern in the batch the same way
+                    # a host fault does, and says as little about any of
+                    # them: an operator asked, and each one stopped where
+                    # stopping was free.
+                    drained = [
+                        error for error in errors if isinstance(error, ResolverDrained)
+                    ]
+                    if drained and len(drained) == len(errors):
+                        raise merge_drained(drained)
                     raise ExceptionGroup("parallel concern failures", errors)
+                if (request := self.questions.draining()) is not None:
+                    # The other junction the issue names. Concerns already
+                    # settled keep their outcomes; what does not happen is
+                    # the next batch being started.
+                    raise ResolverDrained(request.reason, [])
 
             state = self.require_state()
             state = state.model_copy(update={"phase": ResolvePhase.DEPENDENCY_BASES})

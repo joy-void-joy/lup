@@ -797,6 +797,8 @@
             return `<div class="entry note">${head}<div><strong>${escapeHtml(event.concern_id)}</strong> reproduced a settled finding (${escapeHtml(event.criteria.join(", "))}) at ${escapeHtml(event.occasion)}</div></div>`;
           case "base_refreshed":
             return `<div class="entry note">${head}<div>${event.commit === event.was ? `base unchanged on <strong>${escapeHtml(event.branch)}</strong>${event.reason ? ` — ${escapeHtml(event.reason)}` : ""}${event.conflicts.length ? ` (${escapeHtml(event.conflicts.join(", "))})` : ""}` : `base refreshed onto <strong>${escapeHtml(event.branch)}</strong>: <span class="mono">${escapeHtml(event.was.slice(0, 12))}</span> → <span class="mono">${escapeHtml(event.commit.slice(0, 12))}</span>`}</div></div>`;
+          case "lease_refreshed":
+            return `<div class="entry note">${head}<div>${event.applied ? `<strong>${escapeHtml(event.concern_id)}</strong> took the refreshed base <span class="mono">${escapeHtml(event.commit.slice(0, 12))}</span>` : `<strong>${escapeHtml(event.concern_id)}</strong> stayed where it was${event.reason ? ` — ${escapeHtml(event.reason)}` : ""}${event.conflicts.length ? ` (conflicts: ${escapeHtml(event.conflicts.join(", "))})` : ""}${event.uncommitted.length ? ` (uncommitted: ${escapeHtml(event.uncommitted.join(", "))})` : ""}`}</div></div>`;
           case "lease_drift":
             return `<div class="entry note">${head}<div><strong>${escapeHtml(event.concern_id)}</strong> left work on its branch: recorded <span class="mono">${escapeHtml(event.expected.slice(0, 12))}</span>, found <span class="mono">${escapeHtml(event.found.slice(0, 12))}</span></div></div>`;
           case "run_failed":

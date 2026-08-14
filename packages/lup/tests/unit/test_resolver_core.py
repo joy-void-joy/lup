@@ -28,12 +28,14 @@ from tests.unit.doubles import (
 from lup.resolver.mailbox import (
     AnswerDoor,
     AnswerOffer,
+    ParkRequest,
     PendingQuestion,
     QuestionMailbox,
 )
 from lup.policy.identity import ConcernAllowance
 from lup.resolver.contracts import (
     ResolverAwaitingAnswers,
+    ResolverDrained,
     ResolverEnvironmentFault,
     ResolverObserver,
     WorktreePreparer,
@@ -2481,6 +2483,143 @@ async def test_a_concern_resumed_past_a_committed_round_keeps_that_round_as_its_
     assert [round.diff.reason for round in outcomes["a"].rounds] == [""]
     assert outcomes["a"].verified is True
     assert all(record.passed for record in manifest.verification)
+
+
+@pytest.mark.asyncio
+async def test_a_drained_run_stops_without_failing_anything(tmp_path: Path) -> None:
+    """The only way to end a busy run was to kill it, and killing loses work.
+
+    Park reaches a run sitting on an answer and no other, so a worker inside
+    a model turn was unaffected by it. A drain stops at the top of a round,
+    where the previous round is committed and nothing is in flight.
+    """
+    launcher = LocalProcessLauncher()
+    workspace = failure_leg_workspace(tmp_path, launcher)
+
+    def worker_response(root: Path, output_name: str) -> JsonObject:
+        if output_name == MergeReport.__name__:
+            return {"completed": True, "summary": "semantic join reviewed"}
+        (root / "a.txt").write_text("durable\n", encoding="utf-8")
+        return {
+            "concern_id": "a",
+            "changed": True,
+            "summary": "implemented a",
+            "files_changed": ["a.txt"],
+        }
+
+    asked: list[ResolverCore] = []  # lup: ignore[empty-collection]
+
+    def asking_reviewer(_root: Path, _output_name: str) -> JsonObject:
+        """Reject once, and ask for the drain while round one is being judged.
+
+        The request has to arrive while the run is working, which is the
+        whole case: a marker set before it starts is cleared as stale, the
+        way a park is, so a resume is not stopped by the drain it answered.
+        """
+        asked[0].mailbox.drain(
+            ParkRequest(run_id="drained-run", reason="operator stopped it")
+        )
+        return {
+            "concern_id": "a",
+            "accepted": False,
+            "generalized": False,
+            "reason": "another round, please",
+            "criteria_met": [],
+        }
+
+    core = failure_leg_core(
+        tmp_path,
+        workspace,
+        launcher,
+        "drained-run",
+        worker_response,
+        asking_reviewer,
+    )
+    asked.append(core)
+    seed_approvals(core, [concern("a")])
+
+    with pytest.raises(ResolverDrained) as drained:
+        await core.run(
+            ResolveInventory(
+                source=snapshot(workspace, launcher), concerns=[concern("a")]
+            )
+        )
+
+    assert drained.value.reason == "operator stopped it"
+    state = core.repository.load()
+    # Not failed, not written off: a drain says nothing about the work.
+    assert state.outcomes == []
+    assert state.phase is not ResolvePhase.FAILED
+    assert [item.status for item in state.progress] == [ConcernStatus.ELIGIBLE]
+
+
+@pytest.mark.asyncio
+async def test_a_resume_clears_the_drain_that_stopped_it(tmp_path: Path) -> None:
+    """Left standing, the run stops again at the first boundary of the resume."""
+    launcher = LocalProcessLauncher()
+    workspace = failure_leg_workspace(tmp_path, launcher)
+
+    def worker_response(root: Path, output_name: str) -> JsonObject:
+        if output_name == MergeReport.__name__:
+            return {"completed": True, "summary": "semantic join reviewed"}
+        (root / "a.txt").write_text("durable\n", encoding="utf-8")
+        return {
+            "concern_id": "a",
+            "changed": True,
+            "summary": "implemented a",
+            "files_changed": ["a.txt"],
+        }
+
+    running: list[ResolverCore] = []  # lup: ignore[empty-collection]
+
+    def reviewer_response(_root: Path, _output_name: str) -> JsonObject:
+        """Reject and drain on the first run; accept once resumed."""
+        if len(running) == 1:
+            running[0].mailbox.drain(
+                ParkRequest(run_id="drained-then-resumed", reason="operator stopped it")
+            )
+            return {
+                "concern_id": "a",
+                "accepted": False,
+                "generalized": False,
+                "reason": "another round, please",
+                "criteria_met": [],
+            }
+        return {
+            "concern_id": "a",
+            "accepted": True,
+            "generalized": True,
+            "reason": "criteria met",
+            "criteria_met": ["a-done"],
+        }
+
+    def build_core() -> ResolverCore:
+        return failure_leg_core(
+            tmp_path,
+            workspace,
+            launcher,
+            "drained-then-resumed",
+            worker_response,
+            reviewer_response,
+        )
+
+    stopped = build_core()
+    running.append(stopped)
+    seed_approvals(stopped, [concern("a")])
+    with pytest.raises(ResolverDrained):
+        await stopped.run(
+            ResolveInventory(
+                source=snapshot(workspace, launcher), concerns=[concern("a")]
+            )
+        )
+
+    resumed = build_core()
+    running.append(resumed)
+    manifest = await resumed.resume()
+
+    outcomes = {outcome.concern_id: outcome for outcome in manifest.outcomes}
+    assert outcomes["a"].verified is True
+    assert resumed.mailbox.draining() is None
 
 
 @pytest.mark.asyncio

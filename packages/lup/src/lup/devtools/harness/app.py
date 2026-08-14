@@ -272,9 +272,7 @@ def create_harness_app(
                 raise typer.BadParameter(
                     "--adapter is required to drive a resolver run"
                 )
-            resolve.detach_resolve(
-                run_id, resolve.forwardable_arguments(sys.argv)
-            )
+            resolve.detach_resolve(run_id, resolve.forwardable_arguments(sys.argv))
             return
         # Ending a run reads its recorded state and frees its worktrees; no turn
         # is taken and no skill invocation is rendered, so the one thing an

@@ -87,18 +87,24 @@ def test_a_watch_reports_a_change_in_any_of_the_four_facts() -> None:
     """Phase, per-status counts, questions waiting, and the run stopping."""
     running = status_at(ResolvePhase.WORKERS, held=True, verified=3)
 
-    assert running.watched() != status_at(
-        ResolvePhase.REVIEW, held=True, verified=3
-    ).watched()
-    assert running.watched() != status_at(
-        ResolvePhase.WORKERS, held=True, verified=4
-    ).watched()
-    assert running.watched() != status_at(
-        ResolvePhase.WORKERS, held=True, verified=3, unanswered=1
-    ).watched()
-    assert running.watched() != status_at(
-        ResolvePhase.WORKERS, held=False, verified=3
-    ).watched()
+    assert (
+        running.watched()
+        != status_at(ResolvePhase.REVIEW, held=True, verified=3).watched()
+    )
+    assert (
+        running.watched()
+        != status_at(ResolvePhase.WORKERS, held=True, verified=4).watched()
+    )
+    assert (
+        running.watched()
+        != status_at(
+            ResolvePhase.WORKERS, held=True, verified=3, unanswered=1
+        ).watched()
+    )
+    assert (
+        running.watched()
+        != status_at(ResolvePhase.WORKERS, held=False, verified=3).watched()
+    )
 
 
 def test_a_watch_does_not_report_the_journal_advancing() -> None:

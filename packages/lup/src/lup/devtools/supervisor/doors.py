@@ -286,9 +286,38 @@ def park_run(
         "parked from the console", "--reason", help="Why the run is being parked"
     ),
 ) -> None:
-    """Ask every open wait in this run to give up now."""
+    """Ask every open wait in this run to give up now.
+
+    This reaches a run sitting on an answer and no other. To stop one that
+    is *working*, use `drain`: a worker inside a model turn waits on
+    nothing, so park does not reach it.
+    """
     open_mailbox(run_id).park(ParkRequest(run_id=run_id, reason=reason))
     typer.echo(f"parked {run_id}: {reason}")
+
+
+@app.command("drain")
+def drain_run(
+    run_id: str = typer.Option(..., "--run-id", help="Run to drain"),
+    reason: str = typer.Option(
+        "drained from the console", "--reason", help="Why the run is being stopped"
+    ),
+) -> None:
+    """Ask a busy run to finish what is in flight and stop, resumably.
+
+    The other half of `park`, and a different request. Park ends every open
+    wait, which never reached a worker mid-turn — so the only way to end a
+    busy run was to kill it, discarding the uncommitted edits of each
+    interrupted round along with its reviewer feedback and round counter.
+
+    A drain is observed at the top of a round, where the previous round is
+    already committed, and at the boundary between dependency batches.
+    Nothing is failed and nothing is written off. It takes effect when the
+    run next reaches one of those, so a long turn finishes first.
+    """
+    open_mailbox(run_id).drain(ParkRequest(run_id=run_id, reason=reason))
+    typer.echo(f"draining {run_id}: {reason}")
+    typer.echo("It stops at its next round or batch boundary; resuming costs nothing.")
 
 
 def show_status(

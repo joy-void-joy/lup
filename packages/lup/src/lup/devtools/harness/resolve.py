@@ -28,6 +28,7 @@ from lup.harness.process import LaunchRequest, LocalProcessLauncher, ProcessLaun
 from lup.resolver.contracts import (
     ResolverAssemblyDeferred,
     ResolverAwaitingAnswers,
+    ResolverDrained,
     ResolverEnvironmentFault,
     ResolverRegression,
     ResolverObserver,
@@ -543,6 +544,19 @@ def report_environment_fault(
     typer.echo(
         f"  uv run lup-devtools harness resolve --adapter {adapter} "
         f"--run-id {run_id} --adopt-config"
+    )
+
+
+def report_drained(drained: ResolverDrained, adapter: str, run_id: str) -> None:
+    """Print what an operator's stop cost, which is nothing, and how to go on."""
+    typer.echo("Resolver run drained at a safe boundary, on request.")
+    typer.echo(f"  reason: {drained.reason}")
+    if drained.concerns:
+        typer.echo(f"  stopped before a turn: {', '.join(drained.concerns)}")
+    typer.echo("No concern failed and every committed round stands.")
+    typer.echo("Continue with:")
+    typer.echo(
+        f"  uv run lup-devtools harness resolve --adapter {adapter} --run-id {run_id}"
     )
 
 
@@ -1418,6 +1432,11 @@ def run_resolve(
             except ResolverEnvironmentFault as fault:
                 report_environment_fault(fault, adapter, resolved_run_id)
                 raise typer.Exit(code=75)
+            except ResolverDrained as drained:
+                # Exit zero: an operator asked for this and got it, which is
+                # the command succeeding rather than the run failing.
+                report_drained(drained, adapter, resolved_run_id)
+                return
             except ResolverRegression as regression:
                 report_regression(regression, adapter, resolved_run_id)
                 raise typer.Exit(code=65)
