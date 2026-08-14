@@ -1630,6 +1630,86 @@ async def test_resume_after_a_kill_past_workers_completes_without_backward_phase
     assert resumed.repository.load().phase == ResolvePhase.COMPLETE
 
 
+@pytest.mark.asyncio
+async def test_a_resume_with_nothing_left_to_lease_still_takes_the_landed_fix(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The base refresh was gated on needing a new lease, which is unrelated.
+
+    A run whose concerns are all leased took that branch never, so it read
+    its original commit for the rest of its life — and every worker resumed
+    into a tree predating the fix the run had parked for, asking the human
+    about a blocker the branch had already settled.
+    """
+    workspace = failure_leg_workspace(tmp_path, LocalProcessLauncher())
+    launcher = LocalProcessLauncher()
+
+    def git(*arguments: str) -> str:
+        status = launcher.launch(
+            LaunchRequest(arguments=["git", *arguments], cwd=workspace)
+        )
+        assert status.code == 0, status.stderr
+        return status.stdout.strip()
+
+    source = SourceSnapshot(
+        branch=git("branch", "--show-current"), commit=git("rev-parse", "HEAD")
+    )
+
+    def worker_response(root: Path, output_name: str) -> JsonObject:
+        if output_name == MergeReport.__name__:
+            return {"completed": True, "summary": "semantic join reviewed"}
+        (root / "a.txt").write_text("a\n", encoding="utf-8")
+        return {
+            "concern_id": "a",
+            "changed": True,
+            "summary": "implemented a",
+            "files_changed": ["a.txt"],
+        }
+
+    def reviewer_response(_root: Path, output_name: str) -> JsonObject:
+        return {
+            "concern_id": "a",
+            "accepted": True,
+            "generalized": True,
+            "reason": "criteria met",
+            "criteria_met": ["a-done"],
+        }
+
+    def build_core() -> ResolverCore:
+        return failure_leg_core(
+            tmp_path,
+            workspace,
+            launcher,
+            "landed-fix",
+            worker_response,
+            reviewer_response,
+        )
+
+    killed = build_core()
+    monkeypatch.setattr(killed, "persist_failure", lambda error: None)
+    acquire = killed.leases.acquire
+
+    def kill_before_integration(concern_id: str, branch: str) -> WritableRootLease:
+        if concern_id == "integration":
+            raise RuntimeError("killed before the integration lease")
+        return acquire(concern_id, branch)
+
+    monkeypatch.setattr(killed.leases, "acquire", kill_before_integration)
+    with pytest.raises(RuntimeError, match="killed before"):
+        seed_approvals(killed, [concern("a")])
+        await killed.run(ResolveInventory(source=source, concerns=[concern("a")]))
+
+    # The whole point of parking: the fix lands on the branch meanwhile.
+    (workspace / "README.md").write_text("base, fixed\n", encoding="utf-8")
+    git("add", "README.md")
+    git("commit", "-m", "the fix the run parked for")
+    landed = git("rev-parse", "HEAD")
+
+    await build_core().resume()
+
+    assert build_core().repository.load().root_base().commit == landed
+
+
 def failure_leg_workspace(tmp_path: Path, launcher: LocalProcessLauncher) -> Path:
     workspace = tmp_path / "source"
     workspace.mkdir()

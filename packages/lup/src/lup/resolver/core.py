@@ -864,8 +864,14 @@ class ResolverCore:
         unleased = [
             concern for concern in approved if concern.id not in lease_by_concern
         ]
+        # A resume is when the branch has moved: the run parked, the fix that
+        # unblocks it landed, and the base is what carries that fix to every
+        # lease cut afterwards. Conditioning this on needing a new lease left
+        # a run whose concerns were all leased reading its original commit for
+        # the rest of its life, and asking the human, once per lease, about a
+        # blocker the branch had already fixed.
+        state = self.rebaser.refreshed(state)
         if unleased:
-            state = self.rebaser.refreshed(state)
             fresh = [
                 self.leases.acquire(concern.id, self.concern_branch(concern.id))
                 for concern in unleased
