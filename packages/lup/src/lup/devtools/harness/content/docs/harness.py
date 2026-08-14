@@ -46,11 +46,10 @@ uv run lup-devtools harness check all      # read-only drift check; what CI runs
 ```
 
 `harness claude` and `harness codex` regenerate one target and launch it;
-`--generate-only` stops before launching. A pre-commit hook runs generation for
-commits that touch generation inputs or owned trees and fails when that changes
-tracked files, so omitted generated output is visible before the commit exists
-rather than minutes later in CI. [quality-pipeline.md](quality-pipeline.md)
-maps all three layers.
+`--generate-only` stops before launching. `dev commit-guard install` installs
+the drift check as a git pre-commit hook, so omitted generated output is
+refused before the commit exists rather than minutes later in CI.
+[quality-pipeline.md](quality-pipeline.md) maps all three layers.
 
 ## Generated output is never hand-edited
 

@@ -9,6 +9,7 @@ import sh
 import typer
 from pydantic import BaseModel
 
+from lup.devtools.dev.commit_guard import CommitGuard, arm, read_guard
 from lup.devtools.layout import get_tree_dir
 from lup.devtools.utils import (
     copy_to_clipboard,
@@ -161,6 +162,27 @@ class MergeDriver(SetupStep, frozen=True):
 
     def run(self) -> None:
         register_merge_driver()
+
+
+class ArmedCommitGuard(SetupStep, frozen=True):
+    """The commit-time refusal of stale generated output, installed here.
+
+    A worktree is where a commit is made, so it is where the guard has to be
+    armed: a check that only runs when somebody remembers to run it is what
+    let two artifact-stale commits land.
+    """
+
+    guard: CommitGuard = CommitGuard()
+    worktree: Path
+
+    def label(self) -> str:
+        return f"the {self.guard.hook} commit guard"
+
+    def satisfied(self) -> bool:
+        return read_guard(self.guard, self.worktree).armed
+
+    def run(self) -> None:
+        typer.echo(arm(self.guard, self.worktree))
 
 
 class RecordedBase(SetupStep, frozen=True):
@@ -335,6 +357,7 @@ def create(
     def setup() -> Iterator[SetupStep]:
         """Everything that has to hold before this worktree can be used."""
         yield MergeDriver()
+        yield ArmedCommitGuard(worktree=worktree_path)
         # lup: `lup-devtools sync base` often reports "Base guessed", because this is
         # where the record fails to happen: the fallback reads the *cwd's* current
         # branch, which is not the branch being worked in once EnterWorktree has

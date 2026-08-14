@@ -153,11 +153,11 @@ uv run lup-devtools dev rules --check      # the generated rule reference
 ```
 
 [quality-pipeline.md](quality-pipeline.md) explains which of the three
-automated layers catches what, and why commit-time regeneration is
-path-scoped. The short version: the per-push CI workflow is the gate that
-binds, the pre-commit hook only stops harness-relevant commits from landing
-without their regenerated output, and the nightly lane owns everything that
-needs a real native CLI.
+automated layers catches what. The short version: `dev commit-guard install`
+refuses a commit whose generated artifacts are behind their source, the
+per-push CI workflow runs that same check plus the full bar and binds whether
+or not anyone armed the hook, and the nightly lane owns everything that needs
+a real native CLI.
 
 Two conventions catch most first-time review comments:
 

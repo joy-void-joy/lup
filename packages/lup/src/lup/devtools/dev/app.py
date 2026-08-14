@@ -19,6 +19,7 @@ import lup.devtools.dev.boundaries as boundaries_mod
 import lup.devtools.dev.branches as branches
 import lup.devtools.dev.check as check
 import lup.devtools.dev.comments as comments
+import lup.devtools.dev.commit_guard as commit_guard
 import lup.devtools.dev.conflicts as conflicts
 import lup.devtools.dev.issues as issues_mod
 import lup.devtools.dev.plugin as plugin_mod
@@ -66,12 +67,18 @@ def create_dev_app(
     pr_app = typer.Typer(no_args_is_help=True)
     conflict_app = typer.Typer(no_args_is_help=True)
     plugin_app = typer.Typer(no_args_is_help=True)
+    guard_app = typer.Typer(no_args_is_help=True)
     app.add_typer(worktree_app, name="worktree", help="Worktree management")
     app.add_typer(pr_app, name="pr", help="PR lifecycle (status, merge, push, checks)")
     app.add_typer(
         conflict_app, name="conflict", help="Merge/rebase conflict resolution"
     )
     app.add_typer(plugin_app, name="plugin", help="Local plugin marketplace wiring")
+    app.add_typer(
+        guard_app,
+        name="commit-guard",
+        help="The pre-commit hook refusing stale generated artifacts",
+    )
 
     # -- worktree commands --
 
@@ -306,6 +313,39 @@ def create_dev_app(
     ) -> None:
         """Finalize the merge/rebase/cherry-pick after all conflicts are resolved."""
         conflicts.conflict_complete(dry_run)
+
+    # -- commit-guard commands --
+
+    GUARD = commit_guard.CommitGuard()
+
+    @guard_app.command("install")
+    def guard_install_cmd(
+        force: Annotated[
+            bool,
+            typer.Option("--force", help="Replace a pre-commit hook written elsewhere"),
+        ] = False,
+    ) -> None:
+        """Install the pre-commit hook that refuses stale generated artifacts.
+
+        Idempotent, and shared by every worktree of the clone it is run from,
+        so re-running it after a library upgrade refreshes an older body.
+        """
+        try:
+            state = commit_guard.install_guard(GUARD, project_root(), force=force)
+        except commit_guard.GuardConflict as error:
+            typer.echo(str(error), err=True)
+            raise typer.Exit(1) from error
+        typer.echo(state.describe())
+
+    @guard_app.command("status")
+    def guard_status_cmd() -> None:
+        """Report whether this clone refuses a stale artifact at commit time."""
+        typer.echo(commit_guard.read_guard(GUARD, project_root()).describe())
+
+    @guard_app.command("uninstall")
+    def guard_uninstall_cmd() -> None:
+        """Remove the hook, leaving a pre-commit hook written elsewhere alone."""
+        typer.echo(commit_guard.uninstall_guard(GUARD, project_root()).describe())
 
     # -- check command --
 

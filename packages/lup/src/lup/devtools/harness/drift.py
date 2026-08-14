@@ -5,13 +5,20 @@ summaries, generation summaries, and conflict-aborted generation. Owns the
 bodies of the ``generate`` and ``check`` commands, and reaches the rule
 reference alongside them so one command settles every generated artifact
 rather than leaving the repository-wide one to be remembered separately.
+
+:class:`DriftVerdict` is the single reading every refusing path shares: the
+commit hook, continuous integration, and ``dev check`` all ask
+:func:`inspect_drift` rather than composing the same two halves themselves,
+so no tree can be stale to one of them and current to another.
 """
 
 from typing import Protocol
 from pathlib import Path
 
 import typer
+from pydantic import BaseModel, ConfigDict
 
+from lup.harness.banner import REGENERATE_COMMAND
 from lup.devtools.harness.generate import (
     DriftReport,
     HarnessGenerationConflict,
@@ -68,16 +75,35 @@ def generate_with_report(composition: NativeHarnessComposition) -> None:
     report_generation(recipe.label, materialized.changed, materialized.removed)
 
 
-def clean_repository_artifacts(writers: list[RepositoryWriter]) -> bool:
-    """Whether every generated file outside the native trees is up to date."""
-    stale = []
-    for write in writers:
-        try:
-            write(check=True)
-        except RuntimeError as error:
-            typer.echo(str(error), err=True)
-            stale.append(write)
-    return not stale
+def repository_staleness(write: RepositoryWriter) -> list[str]:
+    """Why one generated file outside the native trees is behind, if it is."""
+    try:
+        write(check=True)
+    except RuntimeError as error:
+        return [str(error)]
+    return []
+
+
+class DriftVerdict(BaseModel):
+    """One reading of whether every generated artifact is what its source renders."""
+
+    model_config = ConfigDict(frozen=True)
+
+    reports: list[DriftReport]
+    """Ownership-aware drift for each native tree inspected."""
+
+    stale_repository: list[str]
+    """Why each generated file outside a native tree is behind its source."""
+
+    @property
+    def stale_trees(self) -> list[DriftReport]:
+        """Every inspected tree holding an artifact its source no longer renders."""
+        return [report for report in self.reports if not report.clean]
+
+    @property
+    def clean(self) -> bool:
+        """Whether nothing generated is behind the source that renders it."""
+        return not self.stale_trees and not self.stale_repository
 
 
 def generate_targets(
@@ -91,17 +117,42 @@ def generate_targets(
         typer.echo(f"repository artifact ready: {write()}")
 
 
-def drift_reports(
+def inspect_drift(
     compositions: list[NativeHarnessComposition],
-) -> list[DriftReport]:
-    """Ownership-aware drift for every composition the selector names.
+    repository_writers: list[RepositoryWriter],
+) -> DriftVerdict:
+    """Read every generated artifact against the source that renders it.
 
-    A library upgrade changes what the desired tree compiles to, so this is
-    what tells an adopter their generated trees are behind — which is why
-    ``dev check`` asks it too, rather than leaving it to a workflow file no
-    initialization installs.
+    A library upgrade changes what the desired tree compiles to, and a comment
+    edited in a source copied verbatim changes it without changing anything it
+    does. Both are read the same way, over the bytes on disk rather than over
+    what they mean, so an edit that only rewords a kernel comment is as stale
+    as one that rewrites its logic.
     """
-    return [inspect_generation(composition.recipe) for composition in compositions]
+    return DriftVerdict(
+        reports=[inspect_generation(item.recipe) for item in compositions],
+        stale_repository=[
+            message
+            for write in repository_writers
+            for message in repository_staleness(write)
+        ],
+    )
+
+
+def report_stale(verdict: DriftVerdict) -> None:
+    """Name every stale artifact, then the one command that settles them all."""
+    for report in verdict.stale_trees:
+        for write in report.proposal.writes:
+            typer.echo(f"  stale: {write.artifact.path}", err=True)
+        for delete in report.proposal.deletes:
+            typer.echo(f"  orphaned: {delete.path}", err=True)
+    for message in verdict.stale_repository:
+        typer.echo(f"  {message}", err=True)
+    typer.echo(
+        f"generated artifacts are behind their source; run `{REGENERATE_COMMAND}` "
+        "and include what it writes in this commit",
+        err=True,
+    )
 
 
 def check_targets(
@@ -109,9 +160,9 @@ def check_targets(
     repository_writers: list[RepositoryWriter],
 ) -> None:
     """Report drift for every selected composition; exit nonzero when dirty."""
-    reports = drift_reports(compositions)
-    for report in reports:
+    verdict = inspect_drift(compositions, repository_writers)
+    for report in verdict.reports:
         report_drift(report)
-    stale = not clean_repository_artifacts(repository_writers)
-    if stale or any(not report.clean for report in reports):
+    if not verdict.clean:
+        report_stale(verdict)
         raise typer.Exit(1)
