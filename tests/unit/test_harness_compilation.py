@@ -403,12 +403,18 @@ def test_generated_resolver_entries_only_launch_the_shared_python_core() -> None
     skill = codex[Path(".codex/plugins/lup/skills/resolve/SKILL.md")]
 
     assert "uv run lup-devtools harness resolve --adapter claude" in command
-    assert "--run-id" in command and "--accept" in command and "--answer" in command
     assert "Triage into concerns" not in command
     assert "Workflow(" not in command
     assert "uv run lup-devtools harness resolve --adapter codex" in skill
-    assert "--run-id" in skill and "--accept" in skill and "--answer" in skill
     assert "scheduling" not in skill
+    for entry in (command, skill):
+        assert "--run-id" in entry and "--answer" in entry
+        # The entry named flags the CLI has never had, and the acceptance
+        # question it pointed at instead does not exist either. An entry
+        # that documents a flag into being is worse than one that omits it:
+        # the reader spends a turn on `No such option`.
+        assert "--accept" not in entry and "--reject" not in entry
+        assert "integration-assembly" in entry
 
 
 def test_invocation_renderers_own_complete_spelling_and_escaping() -> None:

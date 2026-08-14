@@ -132,6 +132,36 @@ def test_the_park_marker_is_the_only_thing_cleared(tmp_path: Path) -> None:
     assert [item.question.id for item in mailbox.questions()] == ["q1"]
 
 
+def test_parking_and_draining_are_two_requests(tmp_path: Path) -> None:
+    """Park ends waits, drain ends work; one verb meaning both would surprise.
+
+    A worker inside a model turn waits on nothing, so a run parked while
+    busy kept working — and killing it was the only way to stop one.
+    """
+    mailbox = QuestionMailbox(tmp_path)
+
+    mailbox.park(ParkRequest(run_id="run-1", reason="operator parked"))
+
+    assert mailbox.parked() is not None
+    assert mailbox.draining() is None
+
+    mailbox.drain(ParkRequest(run_id="run-1", reason="operator drained"))
+
+    assert mailbox.draining() is not None
+    assert mailbox.clear_park() is None
+    assert mailbox.draining() is not None
+
+
+def test_a_satisfied_drain_is_cleared_so_a_resume_works(tmp_path: Path) -> None:
+    """Left standing, the run stops again at the first boundary of the resume."""
+    mailbox = QuestionMailbox(tmp_path)
+    mailbox.drain(ParkRequest(run_id="run-1", reason="operator drained"))
+
+    mailbox.clear_drain()
+
+    assert mailbox.draining() is None
+
+
 async def test_an_already_answered_question_never_waits(tmp_path: Path) -> None:
     mailbox = QuestionMailbox(tmp_path)
     mailbox.record(recorded("q1", "yes"))

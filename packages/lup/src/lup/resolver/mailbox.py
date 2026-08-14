@@ -43,6 +43,7 @@ QUESTION_DIR = "questions"
 MESSAGE_FILE = "messages.jsonl"
 DELIVERY_DIR = "delivery"
 PARK_DIR = "park"
+DRAIN_DIR = "drain"
 RESUME_DIR = "resume"
 ANSWER_POLL_SECONDS = POLL_SECONDS
 
@@ -182,6 +183,14 @@ class QuestionMailbox:
         )
         self.cursors = StreamCursors(root / DELIVERY_DIR)
         self.park_slot: Slot[ParkRequest] = Slot(root / PARK_DIR, ParkRequest)
+        # Two verbs, because they are two requests. Park ends every open
+        # *wait*, which reaches a run sitting on an answer and no other; a
+        # worker inside a model turn is not waiting on anything, so a busy
+        # run was unaffected by it and killing was the only way to stop one.
+        # Draining ends the *work*, at the next boundary where stopping
+        # costs nothing. One verb meaning both would surprise whoever
+        # wanted the first.
+        self.drain_slot: Slot[ParkRequest] = Slot(root / DRAIN_DIR, ParkRequest)
         # Pause and resume are asymmetric on purpose. Pausing is a directive
         # any door may issue; resuming is a decision, and excluding AGENT
         # makes it one the orchestrator physically cannot take for itself.
@@ -302,6 +311,18 @@ class QuestionMailbox:
     def clear_park(self) -> None:
         """Drop a stale park marker so a resumed run can wait again."""
         self.park_slot.clear()
+
+    def drain(self, request: ParkRequest) -> None:
+        """Ask this run to stop taking new work at its next safe boundary."""
+        self.drain_slot.clear()
+        self.drain_slot.settle(request)
+
+    def draining(self) -> ParkRequest | None:
+        return self.drain_slot.settled()
+
+    def clear_drain(self) -> None:
+        """Drop a satisfied drain marker so a resumed run works again."""
+        self.drain_slot.clear()
 
     def request_resume(self, request: ParkRequest, door: AnswerDoor) -> bool:
         """Release a paused run. Refused for ``AGENT`` by the slot's own policy."""

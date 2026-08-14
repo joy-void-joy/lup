@@ -17,7 +17,11 @@ wrote down.
 
 from collections.abc import Callable
 
-from lup.resolver.contracts import ResolverAwaitingAnswers, ResolverEnvironmentFault
+from lup.resolver.contracts import (
+    ResolverAwaitingAnswers,
+    ResolverDrained,
+    ResolverEnvironmentFault,
+)
 from lup.resolver.joins import Joiner
 from lup.resolver.journal import Journal, ReviewResidualEvent, VerificationFailedEvent
 from lup.resolver.models import (
@@ -104,6 +108,17 @@ class ConcernExecutor:
                 "parked on material questions",
             )
             raise
+        except ResolverDrained:
+            # Back to the boundary a resume re-enters from. The concern is
+            # not failed and not waiting on anybody: its committed rounds
+            # stand, and the only thing that did not happen is the turn this
+            # would have started.
+            await self.run.transition_concern(
+                concern.id,
+                ConcernStatus.ELIGIBLE,
+                "drained at a round boundary",
+            )
+            raise
         except TurnError as error:
             # A host fault is not this concern's verdict. Transitioning here
             # would write `failed (401 OAuth access token has been revoked)`
@@ -160,16 +175,36 @@ class ConcernExecutor:
             rendered_skill_invocation=self.runner.worker_invocation(),
             answers=answers,
         )
-        rounds: list[AgentRound] = []  # lup: ignore[empty-collection]
-        feedback = ""
+        # Re-entered rather than restarted. An interruption used to send a
+        # concern back to round one with its feedback discarded, while its
+        # branch still carried the rounds it had already committed — so the
+        # worker met its own work with no record of why it had been sent
+        # back, and the review that produced that record was spent for
+        # nothing. Every round is written whole before the next transition,
+        # so this is a read rather than a reconstruction.
+        rounds = self.repository.rounds_for(concern.id)
+        feedback = (
+            rounds[-1].review.reason + "\n" + "\n".join(rounds[-1].review.residual)
+            if rounds
+            else ""
+        )
         maximum_round = self.config.max_revision_rounds + 1
         # Every attempt is a round on disk, because each one is a real worker
         # turn and its record is keyed by that number. What differs is which
         # allowance it spends: only a round the reviewer could have judged
         # counts against the revision budget.
-        charged = 0
+        # Carried across the interruption with the rounds it was spent on. A
+        # fresh budget would let a concern interrupted often enough revise
+        # without limit, which is the bound this exists to hold.
+        charged = sum(0 if record.diff.declaration else 1 for record in rounds)
         attempts = maximum_round + self.config.max_declaration_attempts
-        for round_number in range(1, attempts + 1):
+        for round_number in range(len(rounds) + 1, attempts + 1):
+            # Before the turn rather than after it: everything the previous
+            # round produced is committed by `validate_and_commit`, so this
+            # is the point where stopping costs nothing at all.
+            drain = self.questions.draining()
+            if drain is not None:
+                raise ResolverDrained(drain.reason, [concern.id])
             await self.run.transition_concern(concern.id, ConcernStatus.RUNNING)
             # The commit a turn is measured from is the lease's own head at the
             # moment the turn opens, read rather than carried. A carried value

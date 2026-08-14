@@ -50,6 +50,25 @@ def test_the_gate_names_the_base_the_branch_will_be_built_on() -> None:
     assert BASE[:12] in question.prompt
 
 
+def test_the_gate_says_when_the_base_has_been_superseded() -> None:
+    """A run parks for hours and its branch moves underneath it.
+
+    Assembling onto a base that has been superseded is exactly the moment a
+    human wants to know, and the gate said nothing about it.
+    """
+    question = assembly_question([verified("alpha")], [], BASE, behind=7, branch="dev")
+
+    assert "7 commit(s) behind dev" in question.prompt
+    assert "resolve refresh --apply" in question.prompt
+
+
+def test_a_current_base_is_not_remarked_on() -> None:
+    """The ordinary case stays quiet, or the warning stops being one."""
+    question = assembly_question([verified("alpha")], [], BASE, behind=0, branch="dev")
+
+    assert "behind" not in question.prompt
+
+
 def test_the_gate_names_what_is_excluded_and_why() -> None:
     """A concern that failed is dropped from the branch, which is a decision too."""
     question = assembly_question(

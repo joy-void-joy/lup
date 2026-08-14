@@ -180,6 +180,9 @@ class LeaseRefresh(BaseModel):
 
     concern_id: str
     conflicts: list[Path] = Field(default_factory=list)
+    uncommitted: list[Path] = Field(default_factory=list)
+    """Paths held outside any commit, which is a different stop from a conflict:
+    the merge is clean and the tree is not ready to take it."""
     applied: bool = False
     reason: str = ""
 
@@ -573,7 +576,22 @@ class HeldLease(BaseModel):
     alive: bool = True
 
     def reason(self) -> str:
-        return f"lease of run {self.run_id} ({self.standing})"
+        """Why a sweep leaves this branch alone, and what moves it if dead.
+
+        A lease held by a run that will never move again is the silent
+        bucket this disposition exists to prevent: it reports the same
+        `KEEP` on every sweep, forever, with nothing in the workflow saying
+        what to do about it. A live run needs no instruction — it is
+        working — so only a dead one carries the two commands that end the
+        holding, in the order worth trying them.
+        """
+        if self.alive:
+            return f"lease of run {self.run_id} ({self.standing})"
+        return (
+            f"lease of run {self.run_id} ({self.standing}); resume it with "
+            f"`lup-devtools harness resolve --adapter <a> --run-id {self.run_id}`, "
+            f"or release every lease with `--abort <reason>`"
+        )
 
 
 class DependencyBase(BaseModel):

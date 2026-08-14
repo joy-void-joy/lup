@@ -42,6 +42,32 @@ def test_the_offered_defaults_produce_an_agent_that_can_read() -> None:
     assert verdict("ls -la", []).effect == "deny"
 
 
+def test_git_s_object_store_queries_are_reads() -> None:
+    """Probing a merge is how an agent checks a branch before touching it.
+
+    `git merge-tree` was refused as "not classified as read-only or
+    reversible" while the resolver's own refresh ran it to predict every
+    lease merge — so nothing an agent could run reproduced what the tool
+    it was operating had just decided.
+    """
+    rules = default_vocabulary()
+
+    assert verdict("git merge-tree --write-tree dev HEAD", rules).effect == "allow"
+    assert verdict("git hash-object -w blob.py", rules).effect == "allow"
+    assert verdict("git patch-id --stable", rules).effect == "allow"
+    assert verdict("git check-ref-format --branch x", rules).effect == "allow"
+    assert verdict("git verify-pack -v pack.idx", rules).effect == "allow"
+
+
+def test_sweeping_the_queries_left_what_loses_work_alone() -> None:
+    """A read-only sweep that widened a destructive verb would be a bug."""
+    rules = default_vocabulary()
+
+    assert verdict("git push --delete origin dev", rules).effect == "ask"
+    assert verdict("git reset --hard HEAD~1", rules).effect == "ask"
+    assert verdict("git clean -fdx", rules).effect == "ask"
+
+
 def test_an_empty_group_replaces_the_offered_words_rather_than_adding_to_them() -> None:
     """The words are a parameter default, so passing any replaces all of them."""
     assert verdict("ls", read_only_rules()).effect == "allow"

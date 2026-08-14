@@ -535,8 +535,8 @@ def removed_lines(before: str | None, after: str | None) -> list[str]:
     return removed
 
 
-def narrows_a_suppression(line: str, gone: list[str]) -> bool:
-    """Whether this added directive only shrinks one the edit replaced.
+def resites_a_suppression(line: str, gone: list[str]) -> bool:
+    """Whether this added directive only re-sites one the same edit removed.
 
     A suppression gate that reads the added line alone cannot tell
     `# lup: ignore[a, b]` becoming `# lup: ignore[a]` from a suppression
@@ -545,19 +545,31 @@ def narrows_a_suppression(line: str, gone: list[str]) -> bool:
     it makes one gate request what the other grants — the same split
     `refined_exempt_lines` exists to avoid.
 
-    A narrowing is a removed line whose code is character-identical and whose
-    ids are a superset, ``None`` being the bare directive that covers every
-    rule. Anything else — a new site, a widened list, a typed list going bare
-    — is left to the gate.
+    Moving one is the same shape and was refused for the same reason. Adopting
+    a placement policy necessarily rewrites the markers the old policy allowed,
+    so a concern approved to do exactly that met a gate demanding
+    `antipattern-suppression` — an allowance that also authorizes genuinely new
+    suppressions, which is a narrow action buying a wide permission.
+
+    So the question asked is which *rules* this file suppresses, not which
+    lines carry the directives: an added directive naming only ids some removed
+    directive named suppresses nothing here that was not already suppressed.
+    ``None`` is the bare directive, covering every rule. A new id, a widened
+    list and a typed list going bare all still reach the gate.
+
+    Two limits, named rather than implied. Re-siting a rule's directive onto a
+    *different* violation of that same rule passes, because rule ids are the
+    granularity a per-file text gate can honestly compute — the audit reports
+    that one afterwards. And both halves must be one edit: split across two,
+    the adding half sees nothing removed and asks.
     """
     match = IGNORE_RE.search(line)
     if match is None:
         return False
     kept = ignore_rule_ids(match)
-    code = line[: match.start()]
     for previous in gone:
         earlier = IGNORE_RE.search(previous)
-        if earlier is None or previous[: earlier.start()] != code:
+        if earlier is None:
             continue
         covered = ignore_rule_ids(earlier)
         if covered is None:
@@ -758,7 +770,7 @@ def antipattern_decision(
         directive = IGNORE_RE.search(original)
         if (
             directive is not None
-            and not narrows_a_suppression(original, gone)
+            and not resites_a_suppression(original, gone)
             and (
                 not python_source
                 or comment_columns is None
@@ -795,6 +807,12 @@ def antipattern_decision(
         if directive is not None:
             covered = ignore_rule_ids(directive)
             if covered is None or rule_id in covered:
+                # Both suppression asks need the same exemption. A re-sited
+                # marker lands on the very line it was moved to cover, so
+                # that line is added, trips its rule, and reaches here even
+                # when the declaration gate above let it through.
+                if resites_a_suppression(original, gone):
+                    continue
                 return KernelDecision(
                     suppression,
                     suppression_reason([suppression_site(number, original)]),

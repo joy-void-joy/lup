@@ -22,6 +22,7 @@ from lup.resolver.journal import (
 )
 from lup.resolver.mailbox import (
     ANSWER_POLL_SECONDS,
+    ParkRequest,
     PendingQuestion,
     QuestionMailbox,
     RecordedAnswer,
@@ -60,6 +61,10 @@ class QuestionBroker:
         self.answer_wait_seconds = answer_wait_seconds
         self.poll_interval_seconds = poll_interval_seconds
         self.problems: list[str] = []
+
+    def draining(self) -> ParkRequest | None:
+        """Whether an operator has asked this run to stop taking new work."""
+        return self.mailbox.draining()
 
     async def unanswered_for(self, concern_id: str) -> list[MaterialQuestion]:
         """Questions this concern asked that no door has answered yet.

@@ -14,6 +14,7 @@ from lup.harness.process import ProcessLauncher
 from lup.resolver.contracts import (
     ResolverAssemblyDeferred,
     ResolverAwaitingAnswers,
+    ResolverDrained,
     ResolverEnvironmentFault,
     ResolverObserver,
     ResolverRegression,
@@ -211,6 +212,18 @@ def merge_faults(faults: list[ResolverEnvironmentFault]) -> ResolverEnvironmentF
     )
 
 
+def merge_drained(drained: list[ResolverDrained]) -> ResolverDrained:
+    """Combine sibling drains into the one request they all answered.
+
+    One operator asked once, so the reason is theirs and is stated once. The
+    concerns are named because each is a turn that will be taken again.
+    """
+    return ResolverDrained(
+        drained[0].reason,
+        sorted({concern for stop in drained for concern in stop.concerns}),
+    )
+
+
 def approval_question(concern: Concern) -> MaterialQuestion:
     """Build the persisted human integration gate for one planned concern.
 
@@ -234,7 +247,11 @@ ASSEMBLY_QUESTION_ID = "integration-assembly"
 
 
 def assembly_question(
-    verified: list[ConcernOutcome], excluded: list[ConcernOutcome], base: str
+    verified: list[ConcernOutcome],
+    excluded: list[ConcernOutcome],
+    base: str,
+    behind: int = 0,
+    branch: str = "",
 ) -> MaterialQuestion:
     """Build the gate on assembling the review branch itself.
 
@@ -249,18 +266,30 @@ def assembly_question(
     will be built on — so the prompt names all three instead of asking for a
     bare yes. A run parking here resumes at no cost, and the recorded answer
     is who decided to assemble that branch.
+
+    How far the base has fallen behind is the fourth. A run parks for hours
+    and its branch moves underneath; assembling onto a superseded base is
+    exactly the moment a human wants to know, and it said nothing. Reported
+    rather than acted on, because refreshing here would move every lease
+    under work already verified against where it stood.
     """
     merging = "\n".join(f"  merge {outcome.concern_id}" for outcome in verified)
     dropping = "\n".join(
         f"  exclude {outcome.concern_id}: {outcome.failure or 'not verified'}"
         for outcome in excluded
     )
+    stale = (
+        f"\n  this base is {behind} commit(s) behind {branch}; "
+        "`harness resolve refresh --apply` moves it before you approve"
+        if behind and branch
+        else ""
+    )
     return MaterialQuestion(
         id=ASSEMBLY_QUESTION_ID,
         concern_id="integration",
         prompt=(
             f"Assemble the review branch from {len(verified)} verified "
-            f"concern(s) onto {base[:12]}?\n{merging}"
+            f"concern(s) onto {base[:12]}?{stale}\n{merging}"
             + (f"\n{dropping}" if dropping else "")
         ),
         choices=[APPROVE, DEFER],
@@ -539,12 +568,14 @@ class ResolverCore:
             ResolverAwaitingAnswers,
             ResolverEnvironmentFault,
             ResolverAssemblyDeferred,
+            ResolverDrained,
         ):
             # None of these is this run failing. Persisting a failure here
             # would move the phase to `failed` and make the resume path
             # re-derive a `resume_from`, when nothing about the run's own
-            # state is wrong — only the host it was running on, or a human
-            # who has not yet said to assemble the branch.
+            # state is wrong — only the host it was running on, a human who
+            # has not yet said to assemble the branch, or one who asked it
+            # to stop.
             raise
         except Exception as error:
             self.persist_failure(error)
@@ -648,12 +679,14 @@ class ResolverCore:
             ResolverAwaitingAnswers,
             ResolverEnvironmentFault,
             ResolverAssemblyDeferred,
+            ResolverDrained,
         ):
             # None of these is this run failing. Persisting a failure here
             # would move the phase to `failed` and make the resume path
             # re-derive a `resume_from`, when nothing about the run's own
-            # state is wrong — only the host it was running on, or a human
-            # who has not yet said to assemble the branch.
+            # state is wrong — only the host it was running on, a human who
+            # has not yet said to assemble the branch, or one who asked it
+            # to stop.
             raise
         except Exception as error:
             self.persist_failure(error)
@@ -686,6 +719,10 @@ class ResolverCore:
         ``promoter_problems``, which every park report carries.
         """
         self.mailbox.clear_park()
+        # A satisfied drain goes the same way, and for the same reason: left
+        # standing, the run it was asked of stops again at the first
+        # boundary of the resume that answered it.
+        self.mailbox.clear_drain()
         self.promoter_problems.clear()
         stop = asyncio.Event()
         promoter = asyncio.create_task(self.questions.promote_until(stop))
@@ -952,7 +989,21 @@ class ResolverCore:
                     ]
                     if parked and len(parked) == len(errors):
                         raise merge_parked(parked)
+                    # A drain reaches every concern in the batch the same way
+                    # a host fault does, and says as little about any of
+                    # them: an operator asked, and each one stopped where
+                    # stopping was free.
+                    drained = [
+                        error for error in errors if isinstance(error, ResolverDrained)
+                    ]
+                    if drained and len(drained) == len(errors):
+                        raise merge_drained(drained)
                     raise ExceptionGroup("parallel concern failures", errors)
+                if (request := self.questions.draining()) is not None:
+                    # The other junction the issue names. Concerns already
+                    # settled keep their outcomes; what does not happen is
+                    # the next batch being started.
+                    raise ResolverDrained(request.reason, [])
 
             state = self.require_state()
             state = state.model_copy(update={"phase": ResolvePhase.DEPENDENCY_BASES})
@@ -1202,7 +1253,14 @@ class ResolverCore:
         if not verified:
             return
         excluded = [outcome for outcome in outcomes if not outcome.verified]
-        question = assembly_question(verified, excluded, state.root_base().commit)
+        source = state.root_base()
+        question = assembly_question(
+            verified,
+            excluded,
+            source.commit,
+            self.worktrees.behind(source.commit, source.branch),
+            source.branch,
+        )
         self.questions.queue_questions([question], "integration")
         answers = await self.questions.await_questions([question])
         if any(answer.value == DEFER for answer in answers.answers):

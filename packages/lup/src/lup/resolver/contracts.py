@@ -46,6 +46,27 @@ class ResolverEnvironmentFault(Exception):
         self.concerns = concerns
 
 
+class ResolverDrained(Exception):
+    """An operator asked a busy run to stop, and it reached a safe boundary.
+
+    Park ends every open *wait*, which is a run sitting on an answer and no
+    other. A worker inside a model turn waits on nothing, so a busy run was
+    unaffected by it and the only way to end one was to kill it — which
+    discards the uncommitted edits of every interrupted round, and the
+    reviewer feedback and round counter with them.
+
+    Draining stops at the junctions where stopping is free: the top of a
+    round, after the previous one is committed, and the boundary between
+    dependency batches. Nothing is failed and nothing is written off, so
+    resuming costs only the turns that had not finished.
+    """
+
+    def __init__(self, reason: str, concerns: list[str]) -> None:
+        super().__init__(f"resolver run drained at a safe boundary: {reason}")
+        self.reason = reason
+        self.concerns = concerns
+
+
 class ResolverAssemblyDeferred(Exception):
     """A human declined, for now, to assemble the review branch.
 

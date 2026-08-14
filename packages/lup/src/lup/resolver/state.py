@@ -511,6 +511,39 @@ class ResolverStateRepository:
             f"reviews/{identifier}-round-{round_record.round}.json",
             round_record.review,
         )
+        # The whole round as well as its halves. The halves are what a human
+        # reads; this is what a resume re-enters from, and splitting a round
+        # across two documents loses the diff that joins them.
+        self.write_model(
+            f"rounds/{identifier}-round-{round_record.round}.json", round_record
+        )
+
+    def rounds_for(self, concern_id: str) -> list[AgentRound]:
+        """Every round this concern completed, in the order it took them.
+
+        A concern interrupted mid-flight re-entered at round one with its
+        feedback discarded, while its branch still carried the rounds it had
+        already committed — so the worker met its own work with no record of
+        why the reviewer had sent it back, and the review that produced that
+        record was spent for nothing.
+        """
+        directory = self.root / "rounds"
+        if not directory.is_dir():
+            return []
+        rounds = [
+            record
+            for path in sorted(directory.glob(f"{concern_id}-round-*.json"))
+            # The glob is a prefix match, so a concern whose id ends in
+            # `-round-<n>` would collect its neighbour's files. The record
+            # names its own concern, so that is what decides.
+            if (
+                record := AgentRound.model_validate_json(
+                    path.read_text(encoding="utf-8")
+                )
+            ).concern_id
+            == concern_id
+        ]
+        return sorted(rounds, key=lambda record: record.round)
 
     def write_model(self, relative: str, value: PersistedResolverModel) -> None:
         publish_atomic(self.root / relative, value)

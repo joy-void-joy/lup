@@ -383,6 +383,24 @@ class WorktreeOrchestrator:
             == 0
         )
 
+    def behind(self, commit: str, branch: str) -> int:
+        """How many commits ``branch`` holds that ``commit`` does not.
+
+        Zero when the branch cannot be read, because this decorates a
+        question rather than deciding anything: a run whose remote is
+        unreachable still has an assembly to approve, and a count nobody
+        could take is not worth refusing over.
+        """
+        counted = self.launcher.launch(
+            LaunchRequest(
+                arguments=["git", "rev-list", "--count", f"{commit}..{branch}"],
+                cwd=self.workspace,
+            )
+        )
+        if counted.code != 0:
+            return 0
+        return int(counted.stdout.strip() or 0)
+
     def conflicted_names(self, lines: list[str]) -> list[Path]:
         """The paths a ``merge-tree`` refusal named, before its prose.
 
@@ -548,6 +566,25 @@ class WorktreeOrchestrator:
         if merged.code == 0:
             return []
         return self.conflicted_names(merged.stdout.splitlines())
+
+    def uncommitted(self, lease: WritableRootLease) -> list[Path]:
+        """Which paths this lease is holding outside any commit.
+
+        ``predicted_merge`` answers from commits, and the merge it clears
+        runs in the working tree — so work in flight is exactly what the
+        prediction cannot see. Read here instead of inferred from a merge
+        that already failed: git refuses only when the incoming commit
+        touches the same paths, so the quieter case is a refresh absorbed
+        into edits no worker chose to commit beside it.
+        """
+        status = self.require(
+            LaunchRequest(
+                arguments=["git", "status", "--porcelain"],
+                cwd=lease.root,
+            ),
+            f"failed to read uncommitted work for {lease.concern_id}",
+        )
+        return [Path(line[3:]) for line in status.stdout.splitlines() if line[3:]]
 
     def merge_into(self, lease: WritableRootLease, commit: str, message: str) -> bool:
         """Bring one commit into a lease's branch, reporting whether it took."""

@@ -208,6 +208,28 @@ class BaseRefreshedEvent(BaseModel):
     reason: str = ""
 
 
+class LeaseRefreshedEvent(BaseModel):
+    """What bringing the refreshed base into one lease did, or what stopped it.
+
+    The base event above says where the run now starts; it says nothing
+    about which branches actually took it. That answer reached stdout once
+    and was never written down, so a detached run — whose output goes to a
+    file nobody is watching — left no record that three of its leases were
+    refused. A lease still on the old base is the reason its worker reads
+    replaced code, which is the failure the refresh exists to prevent.
+    """
+
+    model_config = FROZEN
+
+    type: Literal["lease_refreshed"] = "lease_refreshed"
+    concern_id: str
+    commit: str
+    applied: bool
+    conflicts: list[str] = Field(default_factory=list)
+    uncommitted: list[str] = Field(default_factory=list)
+    reason: str = ""
+
+
 class LeaseDriftEvent(BaseModel):
     """An abandoned concern's tree does not hold the commit last recorded.
 
@@ -246,6 +268,7 @@ type RunEvent = (
     | VerificationFailedEvent
     | RecheckRepeatedEvent
     | BaseRefreshedEvent
+    | LeaseRefreshedEvent
     | LeaseDriftEvent
     | RunFailedEvent
 )

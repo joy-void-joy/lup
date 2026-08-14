@@ -108,8 +108,10 @@ class ClaudeSpellings(NativeSpellings):
         return Instruction(
             "Run `uv run lup-devtools harness resolve --adapter claude`. "
             "The command accepts optional flags: `--run-id <id>` resumes "
-            "a persisted run and `--accept`/`--reject` records the human "
-            "decision on its review branch. It waits zero seconds by "
+            "a persisted run. Assembling the review branch is gated on the "
+            "reserved `integration-assembly` question, so approving it is "
+            "`--answer integration-assembly=approve` like any other answer. "
+            "It waits zero seconds by "
             "default and parks on material questions, printing each one "
             "beside the `# lup:` notes it was raised from, the concern's "
             "spec, and its acceptance criteria; rerun with the repeatable "

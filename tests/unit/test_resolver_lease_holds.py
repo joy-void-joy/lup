@@ -107,6 +107,27 @@ def test_an_inactive_lease_is_never_held(tmp_path: Path) -> None:
     assert held(tmp_path, run_state(ResolvePhase.FAILED, active=False)) == {}
 
 
+def test_a_dead_run_s_hold_names_what_ends_it(tmp_path: Path) -> None:
+    """`KEEP (failed)` on every sweep, forever, is the silent bucket itself.
+
+    The hold is right and the branches must not be swept, but a reason that
+    names no command leaves 23 branches reporting the same line with nothing
+    in the workflow saying what to do about them.
+    """
+    reason = held(tmp_path, run_state(ResolvePhase.FAILED))[BRANCH]
+
+    assert f"--run-id {RUN_ID}" in reason
+    assert "--abort" in reason
+
+
+def test_a_working_run_s_hold_names_no_command(tmp_path: Path) -> None:
+    """A live run needs no instruction: it is working."""
+    reason = held(tmp_path, run_state(ResolvePhase.WORKERS))[BRANCH]
+
+    assert "--abort" not in reason
+    assert "resume" not in reason
+
+
 def test_a_dead_run_reports_its_phase_not_a_frozen_concern_status(
     tmp_path: Path,
 ) -> None:
