@@ -11,6 +11,7 @@ from pydantic import BaseModel
 
 from lup.harness.contracts import SkillInvocationRenderer
 from lup.harness.models import ResolveSpec, SkillInvocation
+from lup.harness.ownership import GeneratedArtifacts, OwnedArtifact
 from lup.harness.process import (
     LaunchRequest,
     LocalProcessLauncher,
@@ -4682,3 +4683,65 @@ def test_a_worker_that_reported_no_change_and_made_none_is_settled(
 
     assert diff.valid
     assert diff.commit == "origin-sha"
+
+
+def rendered(*paths: str) -> GeneratedArtifacts:
+    """An ownership answer that names exactly these paths as the generator's."""
+    return GeneratedArtifacts(
+        by_path={
+            path: OwnedArtifact(
+                path=Path(path), category="generated", sha256="", semantic_id="plugin"
+            )
+            for path in paths
+        }
+    )
+
+
+def changed_paths_launcher(*paths: str) -> ScriptedLauncher:
+    """Report one changed-path listing for every diff this asks for."""
+    listing = "".join(f"{path}\n" for path in paths)
+    return ScriptedLauncher({"diff --name-only": out(listing)})
+
+
+def test_a_generated_artifact_is_not_a_path_this_repository_authored(
+    tmp_path: Path,
+) -> None:
+    launcher = changed_paths_launcher(
+        "packages/lup/src/lup/policy/vocabulary.py",
+        ".claude/.lup-ownership.json",
+        ".codex/plugins/lup/hooks/runtime/policy_data.py",
+    )
+    orchestrator = WorktreeOrchestrator(
+        launcher,
+        tmp_path,
+        generated=rendered(
+            ".claude/.lup-ownership.json",
+            ".codex/plugins/lup/hooks/runtime/policy_data.py",
+        ),
+    )
+    lease = joined_lease(tmp_path)
+
+    # The join adjudicates what a person wrote. Every lease that touches the
+    # catalog re-renders both plugin trees, so counting those renderings made
+    # every parent overlap every other and asked the merger to justify content
+    # whose only correct value is whatever the generator emits next.
+    assert orchestrator.authored_between(lease, "base", "parent") == [
+        Path("packages/lup/src/lup/policy/vocabulary.py")
+    ]
+    assert orchestrator.changed_between(lease, "base", "parent") == [
+        Path("packages/lup/src/lup/policy/vocabulary.py"),
+        Path(".claude/.lup-ownership.json"),
+        Path(".codex/plugins/lup/hooks/runtime/policy_data.py"),
+    ]
+
+
+def test_a_tree_that_renders_nothing_authors_everything_it_changed(
+    tmp_path: Path,
+) -> None:
+    launcher = changed_paths_launcher("docs/rules.md")
+    orchestrator = WorktreeOrchestrator(launcher, tmp_path, generated=rendered())
+    lease = joined_lease(tmp_path)
+
+    assert orchestrator.authored_between(lease, "base", "parent") == [
+        Path("docs/rules.md")
+    ]

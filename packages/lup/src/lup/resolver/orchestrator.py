@@ -5,6 +5,7 @@ from pathlib import Path
 
 from lup.codescan.symbols import DefinedSymbol, defined_symbols, symbols_lost
 from lup.gitlocks import admin_dirs, diagnose_git_admin
+from lup.harness.ownership import GeneratedArtifacts, generated_artifacts
 from lup.harness.process import ExitStatus, LaunchRequest, ProcessLauncher
 from lup.resolver.contracts import WorktreePreparer
 from lup.resolver.declaration import declaration_delta, inspect_changes
@@ -101,10 +102,12 @@ class WorktreeOrchestrator:
         launcher: ProcessLauncher,
         workspace: Path,
         preparer: WorktreePreparer | None = None,
+        generated: GeneratedArtifacts | None = None,
     ) -> None:
         self.launcher = launcher
         self.workspace = workspace
         self.preparer = preparer
+        self.generated = generated or generated_artifacts(workspace)
 
     def config_lock_note(self, root: Path) -> str:
         """What a failed step's mount state says that git's words cannot.
@@ -830,6 +833,16 @@ class WorktreeOrchestrator:
         )
         return [Path(line) for line in named.stdout.splitlines() if line]
 
+    def authored_between(
+        self, lease: WritableRootLease, base: str, commit: str
+    ) -> list[Path]:
+        """Every changed path this repository writes rather than renders."""
+        return [
+            path
+            for path in self.changed_between(lease, base, commit)
+            if self.generated.owning(path.as_posix()) is None
+        ]
+
     def added_lines(
         self, lease: WritableRootLease, base: str, parent: str, path: Path
     ) -> list[str]:
@@ -873,9 +886,17 @@ class WorktreeOrchestrator:
         moved code within its file still reads as kept. A line that was
         genuinely rewritten does read as missing — which is the point, since
         a rewrite is exactly the choice the merger has to declare.
+
+        A generated artifact is exempt, because the question this asks does
+        not apply to it. Every lease that touches the catalog re-renders both
+        plugin trees, so each parent "contributes" lines to files the joined
+        tree derives rather than holds, and the merger is asked to justify
+        keeping or dropping content whose only correct value is whatever the
+        generator emits next. The source those artifacts are rendered from is
+        adjudicated normally, which is where the decision actually lives.
         """
         found: list[DropCandidate] = []  # lup: ignore[empty-collection]
-        for path in self.changed_between(lease, base, parent):
+        for path in self.authored_between(lease, base, parent):
             contributed = self.added_lines(lease, base, parent, path)
             lost = self.lost_symbols(lease, base, parent, result, path)
             if not contributed and not lost:

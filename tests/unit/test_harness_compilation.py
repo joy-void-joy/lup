@@ -73,6 +73,7 @@ from lup.harness.ownership import (
     OwnershipManifestError,
     build_manifest,
     content_digest,
+    generated_artifacts,
     load_manifest,
     save_manifest,
 )
@@ -1753,6 +1754,28 @@ def test_annotated_ownership_manifest_raises_a_typed_recovery_error(
 
     with pytest.raises(OwnershipManifestError, match="repair or remove"):
         load_manifest(path)
+
+
+def test_the_generator_owns_the_proof_it_writes_and_never_lists(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / ".claude"
+    home.mkdir()
+    manifest = build_manifest(
+        portable_harness(),
+        ArtifactTree(artifacts=[]),
+        generator_version="test",
+        target_requirements=[],
+    )
+    save_manifest(home / ".lup-ownership.json", manifest)
+
+    # A manifest lists what it proves and never itself, so every consumer
+    # asking who owns the proof was told "the repository" about the one file
+    # materialization always writes.
+    assert not [item for item in manifest.files if "ownership" in str(item.path)]
+    owned = generated_artifacts(tmp_path, homes=[".claude"])
+    assert owned.owning(".claude/.lup-ownership.json") is not None
+    assert owned.owning("packages/lup/src/lup/harness/ownership.py") is None
 
 
 def test_proven_obsolete_deletion_is_proposed_and_executed(tmp_path: Path) -> None:

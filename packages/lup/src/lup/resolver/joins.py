@@ -230,7 +230,7 @@ class Joiner:
         touched = {
             parent: {
                 path.as_posix()
-                for path in self.worktrees.changed_between(lease, base, parent)
+                for path in self.worktrees.authored_between(lease, base, parent)
             }
             for parent in parents
         }
@@ -371,7 +371,7 @@ class Joiner:
             return
         changed = {
             path.as_posix()
-            for path in self.worktrees.changed_between(lease, base, parent)
+            for path in self.worktrees.authored_between(lease, base, parent)
         }
         owners = {
             outcome.commit: outcome.concern_id
@@ -383,7 +383,7 @@ class Joiner:
                 continue
             overlap = changed & {
                 path.as_posix()
-                for path in self.worktrees.changed_between(lease, base, earlier)
+                for path in self.worktrees.authored_between(lease, base, earlier)
             }
             if not overlap:
                 continue
