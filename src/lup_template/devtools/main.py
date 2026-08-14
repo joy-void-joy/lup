@@ -45,7 +45,6 @@ from lup_template.agent.config import engine_for_model, settings
 from lup_template.devtools.harness.composition import REPOSITORY_WIDE, TARGETS
 from lup_template.devtools.setup import INTEGRATIONS
 from lup_template.devtools.hooks.app import app as hooks_app
-from lup.devtools.layout import DASHBOARD_PORT
 from lup_template.devtools.setup import app as setup_app
 from lup_template.devtools.subapps import APPLICATION_SPECS, INHERITED
 
@@ -65,7 +64,7 @@ def assembled_prompt() -> AgentPrompt:
 
 APPLICATION_APPS = {
     "agent": agent_app,
-    "dashboard": create_dashboard_app(INTEGRATIONS, DASHBOARD_PORT),
+    "dashboard": create_dashboard_app(INTEGRATIONS),
     "dev": dev_app,
     "feedback": create_feedback_app(assembled_prompt),
     "harness": create_harness_app(

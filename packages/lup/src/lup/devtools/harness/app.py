@@ -28,6 +28,7 @@ from lup.devtools.harness.profile_app import create_profile_app
 from lup.runtime.profiles import ProfileDirectory
 from lup.devtools.harness.drift import RepositoryWriter
 from lup.devtools.supervisor.app import serve_supervisor
+from lup.devtools.supervisor.page import SUPERVISOR_PORT
 from lup.devtools.supervisor.doors import (
     accept_verification,
     answer_questions,
@@ -246,7 +247,7 @@ def create_harness_app(
         ] = False,
         supervise_port: Annotated[
             int, typer.Option("--supervise-port", help="Port for the supervisor page")
-        ] = 8766,
+        ] = SUPERVISOR_PORT,
         supervise_linger: Annotated[
             bool,
             typer.Option(

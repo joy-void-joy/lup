@@ -84,6 +84,7 @@ from lup.devtools.dev.worktree import (
     sync_dependencies,
 )
 from lup.devtools.harness.generate import NativeHarnessComposition
+from lup.devtools.supervisor.page import SUPERVISOR_PORT
 from lup.devtools.supervisor.projection import answer_recipe as rerun_recipe
 from lup.devtools.supervisor.projection import PendingQuestionView, question_views
 
@@ -403,7 +404,7 @@ class SupervisorSpawn(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     enabled: bool = False
-    port: int = 8766
+    port: int = SUPERVISOR_PORT
     linger: bool = False
 
 
