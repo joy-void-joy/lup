@@ -817,15 +817,18 @@ class ResolverCore:
                         for parent in concern.dependencies
                     )
                 ]
+                unmet = "a dependency did not produce a verified commit"
                 for blocked in selected:
                     if blocked in runnable:
                         continue
-                    outcomes.append(
+                    await self.run_state.settle_concern(
                         ConcernOutcome(
                             concern_id=blocked.id,
                             branch=lease_by_concern[blocked.id].branch,
-                            failure="a dependency did not produce a verified commit",
-                        )
+                            failure=unmet,
+                        ),
+                        ConcernStatus.FAILED,
+                        unmet,
                     )
                     completed_ids.add(blocked.id)
                 results = await asyncio.gather(
@@ -849,27 +852,20 @@ class ResolverCore:
                     if not isinstance(result, BaseException)
                 ]
                 for execution in executions:
-                    outcomes.append(execution.outcome)
                     if (
                         execution.outcome.verified
                         and execution.outcome.commit is not None
                     ):
                         commits[execution.outcome.concern_id] = execution.outcome.commit
                     completed_ids.add(execution.outcome.concern_id)
+                # Every outcome above was persisted beside its own terminal
+                # transition, so the batch reads the record back rather than
+                # keeping a second copy that an interruption could contradict.
                 state = self.require_state()
+                outcomes = list(state.outcomes)
                 bases = list(state.bases)
                 state = state.model_copy(
-                    update={
-                        "phase": ResolvePhase.WORKERS,
-                        "bases": bases,
-                        "outcomes": outcomes,
-                    }
-                )
-                state = self.run_state.progress_state(
-                    state,
-                    [blocked.id for blocked in selected if blocked not in runnable],
-                    ConcernStatus.FAILED,
-                    "a dependency did not produce a verified commit",
+                    update={"phase": ResolvePhase.WORKERS, "bases": bases}
                 )
                 self.persist(state)
                 self.repository.write_agent_round(state)
