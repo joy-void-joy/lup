@@ -1218,11 +1218,12 @@ def test_the_decision_effect_stays_closed_at_four_members() -> None:
 
 
 def test_the_settled_sandbox_composition_rows_render_as_decided() -> None:
-    """The five pairs that carry meaning, on a runtime that can place a call.
+    """Every settled pair a rewrite renders, on a runtime that can place a call.
 
     The placement is an argument of the call on Claude Code, so an allow that
     escapes is an allow plus a rewrite; an ask that escapes is asking two
-    things at once, so the reason says both.
+    things at once, so the reason says both. The two escalable pairs answer on
+    a second channel as well, and are pinned where that offer is.
     """
     shell: JsonObject = {"command": "git ls-remote origin HEAD"}
     render = ClaudeDecisionRenderer().render

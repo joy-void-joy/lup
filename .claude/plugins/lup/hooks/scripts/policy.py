@@ -19,7 +19,7 @@ from pathlib import Path
 # distribution. Naming it as a search path is what lets the imports below
 # resolve, for the interpreter and for a type checker alike.
 sys.path.insert(0, str(Path(__file__).parents[1] / "runtime"))
-from kernel.decision import KernelDecision
+from kernel.decision import KernelDecision, escalation_offer
 from policy_data import AGENT_IDENTITY_ENV, AUTONOMOUS_AGENT_IDENTITIES
 import subprocess  # lup: ignore[subprocess] — `sh` is third-party and this half is compiled into a bare script that has no virtual environment to resolve it from
 from kernel.edit import decide_edit
@@ -368,12 +368,11 @@ def rendered(decision, payload):
     Both sandbox questions are answered yes here, from that one field: the
     rewrite is how a verdict places a call, and the same field on the call the
     agent writes is how the agent places its own — which is what an
-    ``escalable`` verdict offers it. The offer goes out as context and not
-    only as the permission reason, because the reason on a grant is shown to
-    the human rather than to the agent, and this offer is the agent's to
-    spend. That is the shape `lup_hook_output_to_claude` already renders for
-    the in-process seam; two emitters disagreeing about one field is how the
-    offer went undelivered here in the first place.
+    ``escalable`` verdict offers it. That offer goes out as context as well as
+    on the permission channel, and `escalation_offer` is what decides so —
+    the same answer `lup_hook_output_to_claude` renders from for the
+    in-process seam, because one field two boundaries fill from two
+    conditions is a field they can fill differently.
     """
     settled = decision.placed(escapable=True, agent_escalates=True)
     if settled.effect == "defer":
@@ -383,8 +382,9 @@ def rendered(decision, payload):
         "permissionDecision": settled.effect,
         "permissionDecisionReason": settled.reason,
     }
-    if settled.sandbox == "escalable":
-        answer["additionalContext"] = settled.reason
+    offer = escalation_offer(settled.sandbox, settled.reason)
+    if offer:
+        answer["additionalContext"] = offer
     if settled.sandbox == "ambient" or payload["tool_name"] != "Bash":
         return {"hookSpecificOutput": answer}
     return {

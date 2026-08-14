@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "137e4b9240ea1ea577c7c419c9a65a6b016ca37ae80461d0047c2004581d376b",
+  "source_digest": "923b7ff3a11e3ee94bc68fa4c63cccaaba9af28176bdf5b6fd1eb86971244f5c",
   "target_requirements": [
     "codex-cli>=0.144"
   ],
@@ -100,14 +100,14 @@
     {
       "path": ".codex/plugins/lup/hooks/runtime/kernel/decision.py",
       "category": "generated",
-      "sha256": "2571af911ead84b0b701897b5ccee8420b6d42a3d4bc1d693b7b68b2e0ed9439",
+      "sha256": "4186cfa5e1447d779fe28ea0da19447f897e868a917610277eafb33e791a8512",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
     {
       "path": ".codex/plugins/lup/hooks/runtime/kernel/edit.py",
       "category": "generated",
-      "sha256": "c2dd757eb3829800f82115c04270b018817d9362137109940cc313dcd686c7b8",
+      "sha256": "3fe415e75af6bdcd8d145011186d4d1e3a0a507ff4382043d41021dcbb3ed890",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -352,7 +352,7 @@
     {
       "path": ".codex/plugins/lup/skills/resolve-reviewer/SKILL.md",
       "category": "generated",
-      "sha256": "1ac811e30cec23d9e8beae0b48fe899be035ffeb40990d8a88388c275e248cc5",
+      "sha256": "aec274ddf097fe3f647a7c4180d98e6ccaef4c97b83a8605b3eb918c192cb4a7",
       "semantic_id": "skill.resolve-reviewer",
       "executable": false
     },
@@ -380,7 +380,7 @@
     {
       "path": ".codex/plugins/lup/skills/verify-solved/SKILL.md",
       "category": "generated",
-      "sha256": "96187e76e2f54045a2a71fcc9298c5c77ae505cd01c23caf437c3665da11e721",
+      "sha256": "6b339d56fa22aca124434379145e90e074a287986732fe6984e3722b0df43691",
       "semantic_id": "skill.verify-solved",
       "executable": false
     },
@@ -394,7 +394,7 @@
     {
       "path": "AGENTS.md",
       "category": "generated",
-      "sha256": "860e12172a4efa1c2a1d4f2e218493cbc584751ec7ed0b0f1a74520aaca24397",
+      "sha256": "db42d1e40c28b090a862b47784d9ce2e4e46590067a6c3c8419e3dec5158d708",
       "semantic_id": "harness.guidance",
       "executable": false
     }

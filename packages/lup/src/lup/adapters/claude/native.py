@@ -24,7 +24,7 @@ from lup.policy.models import (
     ToolIdentity,
     UnknownTool,
 )
-from lup.policy.kernel.decision import SandboxPlacement
+from lup.policy.kernel.decision import SandboxPlacement, escalation_offer
 from lup.policy.native import NativeDecisionRenderer, NativeEventDecoder
 from lup.types import JsonObject
 
@@ -211,21 +211,6 @@ def claude_sandbox_input(
     return {**tool_input, "dangerouslyDisableSandbox": escaped}
 
 
-def escalation_context(decision: Decision) -> str:
-    """What the verdict has to say to the agent rather than about it.
-
-    A permission channel carries two reasons to two readers: on a refusal the
-    agent is told, and on a grant the human is. So a grant whose reason exists
-    for the agent — an offer to escalate is the one — reaches nobody through
-    that channel, and says itself again on the one an agent reads.
-
-    Only that placement, because everything else a verdict says about an
-    allowed call is bookkeeping, and a context line per allowed call is how a
-    channel meant for what matters stops being read.
-    """
-    return decision.reason if decision.sandbox == "escalable" else ""
-
-
 class ClaudeDecisionOutput(BaseModel):
     """Claude PreToolUse hook-specific decision payload."""
 
@@ -272,5 +257,5 @@ class ClaudeDecisionRenderer(NativeDecisionRenderer[ClaudeDecisionOutput]):
             permissionDecision=settled.effect,
             permissionDecisionReason=settled.reason,
             updatedInput=claude_sandbox_input(tool_input, settled.sandbox),
-            additionalContext=escalation_context(settled),
+            additionalContext=escalation_offer(settled.sandbox, settled.reason),
         )

@@ -14,6 +14,7 @@ forces an ask-plus-escape member next, and then a deny-plus-escape. Composed,
 the pairs that carry meaning read:
 
 * ``ask`` + ``outside`` — ask, warning the call will run out of the sandbox
+* ``ask`` + ``escalable`` — ask, and once granted the caller may take it out
 * ``deny`` — deny, whatever the placement says
 * ``allow`` + ``inside`` — run confined, whatever the session's own mode is
 * ``allow`` + ``ambient`` — run, deferring to the session's sandbox status
@@ -79,6 +80,28 @@ fails on whatever it happened to write first, and the agent cannot tell that
 from a repository in a bad state, so it retries, works around it, or reports
 success from a session that never ran a command.
 """
+
+
+def escalation_offer(sandbox: SandboxPlacement, reason: str) -> str:
+    """What a verdict says to the agent rather than about it, if anything.
+
+    A permission channel's reason reaches whoever was asked, and that is never
+    the agent: on a grant nobody was asked and it reaches the record, and on
+    an approval question a human reads it. So an offer addressed to the agent
+    making the call has to say itself again on the channel an agent reads, and
+    the escalable placement carries the only such offer — everything else a
+    verdict says about a call it permits is bookkeeping, and a context line
+    per permitted call is how a channel meant for what matters stops being
+    read.
+
+    The effect is not part of the question, because neither of the effects a
+    placement survives puts this reason in front of the agent: it reaches the
+    record on one and a human on the other. One function because four
+    boundaries deliver it — both hook factories, the in-process renderer, and
+    the compiled dispatcher — and a condition spelled out at each is one that
+    can be spelled differently at each.
+    """
+    return reason if sandbox == "escalable" else ""
 
 
 KERNEL_IMPORT_ALLOWLIST = (  # lup: ignore[library-default] — the stdlib the kernel actually imports; the hermetic guarantee it exists to hold

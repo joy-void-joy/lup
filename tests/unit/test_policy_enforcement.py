@@ -376,6 +376,43 @@ def test_the_offer_goes_where_the_agent_reads_and_not_only_where_a_human_does() 
     assert ordinary.additional_context == ""
 
 
+async def test_an_approval_question_carries_the_offer_on_the_agent_channel_too() -> (
+    None
+):
+    """The human answering a question is no more the agent than nobody is.
+
+    A grant's reason reaches the record and a question's reaches whoever was
+    asked, so on neither of the effects a placement survives does the
+    permission channel put the offer in front of the agent holding it. Both
+    boundaries that render one are pinned together here, because one field
+    filled from two conditions is one they can fill differently — and an
+    offer delivered on one path and dropped on the other is invisible from
+    either.
+    """
+    guarded = [
+        ShellCommandRule(name="guarded", default_effect="ask", sandbox="escalable")
+    ]
+    posture = SandboxPosture(active=False, escapable=True)
+    policy = ShellPolicy(guarded, sandbox_active=False, escapable=True)
+    call: JsonObject = {"command": "guarded --run"}
+
+    asked = policy.decide(ShellCommand(command="guarded --run"))
+    assert (asked.effect, asked.sandbox) == ("ask", "escalable")
+
+    rendered = ClaudeDecisionRenderer().render(asked, call)
+    hooks = create_policy_hooks(
+        SemanticToolPolicy(shell=policy), CLAUDE_SEMANTICS, sandbox=posture
+    )
+    seam = await hooks.pre_tool_use[0].hook(
+        LupHookInput(event="PreToolUse", tool_name="Bash", tool_input=call)
+    )
+
+    assert rendered.permission_decision == "ask"
+    assert SANDBOX_ESCALATION_OFFER in rendered.additional_context
+    assert (seam.decision, seam.additional_context) == ("ask", seam.reason)
+    assert SANDBOX_ESCALATION_OFFER in seam.additional_context
+
+
 def test_the_agent_spends_the_offer_and_the_whole_call_goes_with_it() -> None:
     """An offer the agent takes has to survive the hook that made it.
 

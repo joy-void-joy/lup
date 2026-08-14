@@ -173,6 +173,12 @@ def lup_hook_output_to_claude(
     ``placed_input`` is the separate case: a verdict that also says where the
     call runs, which Claude Code takes as an argument, so the decision and the
     rewrite go out together.
+
+    A verdict carrying something for the agent rather than for whoever the
+    permission channel reaches goes out on the context channel beside it, and
+    on both the effects a placement survives — an approval question puts its
+    reason to a human, which is no more the agent than a grant's record is.
+    :func:`~lup.policy.kernel.decision.escalation_offer` decides what that is.
     """
     from claude_agent_sdk import types as claude_types
 
@@ -215,6 +221,16 @@ def lup_hook_output_to_claude(
                     permissionDecision="ask",
                     permissionDecisionReason=output.reason,
                     updatedInput=placed_input,
+                    additionalContext=output.additional_context,
+                )
+            )
+        case "PreToolUse", "ask" if output.additional_context:
+            return claude_types.SyncHookJSONOutput(
+                hookSpecificOutput=claude_types.PreToolUseHookSpecificOutput(
+                    hookEventName="PreToolUse",
+                    permissionDecision="ask",
+                    permissionDecisionReason=output.reason,
+                    additionalContext=output.additional_context,
                 )
             )
         case "PreToolUse", "ask":
