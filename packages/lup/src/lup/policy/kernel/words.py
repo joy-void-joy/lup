@@ -53,8 +53,8 @@ DANGEROUS_ENV_NAMES = (  # lup: ignore[library-default] — variables the shell 
     "RUBYLIB",
     "RUBYOPT",
 )
-# lup: ignore[library-default] — loader and interpreter variable prefixes fixed by the OS and those runtimes
-DANGEROUS_ENV_PREFIXES = ("LD_", "DYLD_", "PYTHON", "GIT_", "BASH_FUNC_")
+# lup: ignore[library-default] — variable prefixes the OS, those runtimes, and these tools read to redirect execution or retarget a command
+DANGEROUS_ENV_PREFIXES = ("LD_", "DYLD_", "PYTHON", "GIT_", "GH_", "BASH_FUNC_")
 # lup: ignore[library-default] — the native runtimes' own plugin directory names
 GENERATED_PLUGIN_ROOTS = (".claude/plugins", ".codex/plugins")
 INTERPRETERS = (  # lup: ignore[library-default] — real interpreter executables; omitting one is a hole, not a preference

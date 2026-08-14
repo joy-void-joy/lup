@@ -163,3 +163,9 @@ def test_allow_authoring_moves_only_the_author_describing_their_own_work() -> No
     assert verdict("gh pr view 12", publishing).effect == "allow"
     assert verdict("gh pr merge 12", authoring).effect == "ask"
     assert verdict("gh pr merge 12", publishing).effect == "ask"
+    # The grant says the work is the author's own and the branch is already
+    # pushed. Pointing the verb at another repository denies both, under either
+    # setting of the parameter — and a read there is still just a read.
+    assert verdict("gh pr create -R other/victim --fill", authoring).effect == "ask"
+    assert verdict("gh pr create -R other/victim --fill", publishing).effect == "ask"
+    assert verdict("gh pr view -R other/repo 12", authoring).effect == "allow"

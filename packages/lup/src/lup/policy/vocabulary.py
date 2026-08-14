@@ -867,11 +867,29 @@ def gh_rule(allow_authoring: bool = True) -> ShellCommandRule:
     join the verbs that reach other people. Commenting, reviewing, merging
     and closing ask either way: those reach reviewers, or change what the
     repository is.
+
+    Both halves of that grant are claims about *this* repository — the work is
+    the author's own, and the branch is already pushed — and ``--repo`` is what
+    makes them someone else's, so the authoring verbs carry it as a guard the
+    way git's redirecting globals do. Spelled as a flag, the redirect is judged
+    per verb, so reading another repository keeps its grant: a read is a read
+    wherever it points.
+
+    The flag is only half of it. ``GH_REPO`` and ``GH_HOST`` reach the same
+    retarget through the environment, and that spelling is caught by the
+    dangerous-assignment prefixes in :mod:`lup.policy.kernel.words` rather than
+    here — a guard that reads the assignment before any verb is known, so
+    unlike the flag it stops a redirected read as well. The asymmetry is the
+    price of catching the variable gh has not learned yet.
     """
     authoring = ["create", "edit", "ready"]
+    elsewhere = ["-R", "--repo"]
 
     def group(
-        name: str, allowed: list[str], asked: list[str] | None = None
+        name: str,
+        allowed: list[str],
+        asked: list[str] | None = None,
+        authored: list[str] | None = None,
     ) -> ShellSubcommandRule:
         return ShellSubcommandRule(
             name=name,
@@ -880,6 +898,16 @@ def gh_rule(allow_authoring: bool = True) -> ShellCommandRule:
                 *[
                     ShellOperationRule(name=operation, effect="allow")
                     for operation in allowed
+                ],
+                *[
+                    ShellOperationRule(
+                        name=operation,
+                        effect="allow",
+                        ask_flags=elsewhere,
+                        reason=f"gh {name} {operation} against another"
+                        " repository requires approval",
+                    )
+                    for operation in authored or []
                 ],
                 *[
                     ShellOperationRule(
@@ -900,15 +928,7 @@ def gh_rule(allow_authoring: bool = True) -> ShellCommandRule:
         subcommands=[
             group(
                 "pr",
-                [
-                    "list",
-                    "view",
-                    "diff",
-                    "status",
-                    "checks",
-                    "checkout",
-                    *(authoring if allow_authoring else []),
-                ],
+                ["list", "view", "diff", "status", "checks", "checkout"],
                 [
                     "comment",
                     "review",
@@ -916,6 +936,7 @@ def gh_rule(allow_authoring: bool = True) -> ShellCommandRule:
                     "close",
                     *([] if allow_authoring else authoring),
                 ],
+                authoring if allow_authoring else [],
             ),
             group(
                 "issue",
