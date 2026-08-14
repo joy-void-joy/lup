@@ -108,6 +108,12 @@ def read_only_rules(
         "true",
         "false",
         "set",
+        "continue",
+        "break",
+        "shift",
+        "return",
+        "local",
+        "exit",
         "sleep",
         "pwd",
         "id",
@@ -136,6 +142,12 @@ def read_only_rules(
     The process and socket listings sit here for the same reason the file
     ones do: establishing that a service came up is a read, and a session
     that just started one is asking about its own process.
+
+    The control-flow builtins report nothing and are here on the second half
+    of that test: they change nothing by running, and nothing they do can
+    reach a later command. `eval`, `exec`, `export`, `declare` and `unset`
+    are deliberately absent — each decides what some later command sees or
+    does, which is the thing this list promises a reader it does not touch.
     """
     return [ShellCommandRule(name=name) for name in commands]
 
