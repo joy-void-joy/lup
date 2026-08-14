@@ -151,6 +151,25 @@ class ReviewResidualEvent(BaseModel):
     residual: list[str]
 
 
+class ForeignCriteriaEvent(BaseModel):
+    """An accepted review credited ids the concern never declared.
+
+    Recorded rather than acted on. Every declared criterion was accounted
+    for, so nothing passed unchecked and the verdict stands; the stray label
+    is the reviewer's bookkeeping, and turning an acceptance back over it
+    spent a revision round re-deriving the same verdict until the budget
+    ran out. Journalled so a reviewer that keeps miscrediting is still
+    visible to whoever reads the run.
+    """
+
+    model_config = FROZEN
+
+    type: Literal["foreign_criteria"] = "foreign_criteria"
+    concern_id: str
+    round: int
+    labels: list[str]
+
+
 class VerificationFailedEvent(BaseModel):
     """What one gate saw at the moment it decided a concern's round.
 
@@ -265,6 +284,7 @@ type RunEvent = (
     | JoinCompletedEvent
     | JoinAuditEvent
     | ReviewResidualEvent
+    | ForeignCriteriaEvent
     | VerificationFailedEvent
     | RecheckRepeatedEvent
     | BaseRefreshedEvent

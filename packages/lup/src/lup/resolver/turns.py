@@ -83,6 +83,21 @@ DECLARATION_PREAMBLE = (
 )
 
 
+ANSWERED_ARE_NOT_CRITERIA = (
+    "Those rulings are context for judging the work, not criteria in their own "
+    "right. Report criteria_met using exactly the declared criterion ids — echo "
+    "an id verbatim when its criterion holds, and omit it when it does not. A "
+    "question id is never one of them."
+)
+"""Why an answered question must not be echoed as a criterion.
+
+The rulings above it are the only other list of ids in the prompt, and a
+reviewer that credits one as met sends a clean acceptance through a
+correction turn it did not need. `Joiner.recheck_concern` carries the same
+instruction for the same reason.
+"""
+
+
 def format_paths(paths: list[Path]) -> str:
     return "\n".join(f"- {path.as_posix()}" for path in paths) or "- (none)"
 
@@ -181,7 +196,11 @@ class TurnRunner:
         return self.invocation_renderer.render(self.spec.worker_skill)
 
     async def worker_turn(
-        self, assignment: WorkAssignment, feedback: str, round_number: int
+        self,
+        assignment: WorkAssignment,
+        feedback: str,
+        round_number: int,
+        holds_prior_work: bool = False,
     ) -> WorkerReport:
         prompt = (
             "Execute the portable worker skill below. You may edit only the assigned "
@@ -201,14 +220,31 @@ class TurnRunner:
             f"Assignment:\n{assignment.model_dump_json(indent=2)}"
         )
         if round_number > 1:
-            # The worker holds the session that produced the work under
-            # review, so the assignment and its own reasoning are already in
-            # front of it. Restating both would invite it to start over
-            # instead of revising what a reviewer just read.
+            # The assignment rides along rather than being assumed
+            # remembered. This session is usually the one that produced the
+            # work under review, but a resumed run opens a fresh one, and a
+            # worker handed only "did not pass" with no concern and no
+            # criteria has nothing to revise against.
             prompt = (
-                "Your submitted work was reviewed and did not pass. Revise it in "
-                "the same worktree and submit an updated report.\n\n"
-                f"Review feedback:\n{feedback}"
+                f"Round {round_number}. Your submitted work was reviewed and did "
+                "not pass. Revise it in the same worktree and submit an updated "
+                "report — this is a revision, not a fresh start, and the "
+                "assignment below is the one you already worked.\n\n"
+                f"Review feedback:\n{feedback}\n\n"
+                f"Assignment:\n{assignment.model_dump_json(indent=2)}"
+            )
+        elif holds_prior_work:
+            # A lease whose branch already carries commits is a re-entry that
+            # lost its round record, not a fresh concern. Two workers reported
+            # spending a whole turn re-deriving a verification an earlier
+            # session had already done, because a re-lease and a rejection
+            # arrive as byte-identical assignments.
+            prompt = (
+                "Round 1, re-entered. This lease's branch already carries "
+                "committed work for this concern from an earlier session, and no "
+                "review of it survived. Read what is there before you change "
+                "anything: if it already satisfies the criteria, submit it as it "
+                "stands and say so rather than redoing it.\n\n" + prompt
             )
         result = await self.worker_session(
             ActorRef(kind="worker", id=assignment.concern.id, round=round_number),
@@ -236,6 +272,7 @@ class TurnRunner:
         rulings = self.rulings_for(concern.id)
         answered = (
             f"\n\nQuestions this concern has had answered:\n{rulings}"
+            f"\n\n{ANSWERED_ARE_NOT_CRITERIA}"
             if rulings
             else ""
         )
@@ -257,12 +294,13 @@ class TurnRunner:
                 f"Worker report:\n{worker.model_dump_json(indent=2)}\n\n"
                 f"{span}{answered}"
             )
-        result = await self.reviewer_session(
+        reviewer = self.reviewer_session(
             ActorRef(kind="reviewer", id=concern.id, round=round_number), worktree
-        ).turn(turn_request(TurnInput(text=prompt), ReviewReport))
+        )
+        result = await reviewer.turn(turn_request(TurnInput(text=prompt), ReviewReport))
         if result.output.concern_id != concern.id:
             raise ResolverInvariantError("reviewer returned a foreign concern id")
-        return result.output
+        return await self.declared_labels_only(reviewer, concern, result.output)
 
     async def merge_turn(
         self,
@@ -465,6 +503,42 @@ class TurnRunner:
             + "\n".join(recited)
             + "\n"
         )
+
+    async def declared_labels_only(
+        self, reviewer: ActorSession, concern: Concern, report: ReviewReport
+    ) -> ReviewReport:
+        """Correct a report crediting an id this concern never declared.
+
+        Put back to the same session, which still holds what it just judged,
+        so the correction costs one turn instead of the revision round the
+        acceptance guard would otherwise spend. The reviewer reads its
+        criteria beside the answered questions, and crediting a question id
+        as met is the mistake that shape invites: a run reached its revision
+        limit re-deriving an acceptance every reviewer had already given.
+
+        Only the labels are re-asked, and only once. A verdict is the
+        reviewer's to hold, so a report that still names an undeclared id
+        after this keeps both the id and the verdict: the guard records it
+        rather than charging for it. This is what keeps the record honest,
+        not what makes the acceptance safe.
+        """
+        declared = {criterion.id: True for criterion in concern.criteria}
+        unknown = [label for label in report.criteria_met if label not in declared]
+        if not unknown:
+            return report
+        correction = (
+            "Your report labelled criteria this concern never declared: "
+            + ", ".join(unknown)
+            + ". Those are answered questions or ids from elsewhere, not "
+            "acceptance criteria. Resubmit the same verdict with criteria_met "
+            "drawn only from the declared ids: " + ", ".join(declared)
+        )
+        result = await reviewer.turn(
+            turn_request(TurnInput(text=correction), ReviewReport)
+        )
+        if result.output.concern_id != concern.id:
+            raise ResolverInvariantError("reviewer returned a foreign concern id")
+        return result.output
 
     def rulings_for(self, concern_id: str) -> str:
         """The concern's mid-run Q&A, rendered for an actor's prompt.
