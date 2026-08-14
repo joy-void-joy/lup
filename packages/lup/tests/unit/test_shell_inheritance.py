@@ -45,6 +45,18 @@ ALLOWED_UNDER_A_RESTRICTIVE_PARENT = (
     "git rev-list",
     "git name-rev",
     "git merge-base",
+    # Object-store queries. They reach the store and stop there — no ref
+    # moves, no index entry changes, no working-tree file is touched — so the
+    # vocabulary sweeps them read-only beside the rest of git's query verbs.
+    "git merge-tree",
+    "git hash-object",
+    "git patch-id",
+    "git verify-pack",
+    "git show-index",
+    "git pack-redundant",
+    "git get-tar-commit-id",
+    "git check-ref-format",
+    "git stripspace",
     "git show-ref",
     "git symbolic-ref",
     "git for-each-ref",
