@@ -4065,6 +4065,237 @@ async def test_accepted_review_residuals_reach_the_journal(tmp_path: Path) -> No
 
 
 @pytest.mark.asyncio
+async def test_a_revision_carries_its_assignment_and_names_its_round(
+    tmp_path: Path,
+) -> None:
+    """A revising worker is not guaranteed to be the session that was reviewed.
+
+    A resumed run opens a fresh one, and the short prompt handed it only
+    "did not pass" — no concern, no criteria, no skill invocation. Two
+    workers reported spending a whole turn working out whether they had
+    been rejected or merely re-leased.
+    """
+    launcher = LocalProcessLauncher()
+    workspace = failure_leg_workspace(tmp_path, launcher)
+    worker_prompts: list[str] = []
+    handed: list[str] = []
+
+    def reviewer_response(_root: Path, _output_name: str) -> JsonObject:
+        handed.append("turn")
+        met: list[JsonValue] = ["a-done"] if len(handed) > 1 else []
+        return {
+            "concern_id": "a",
+            "accepted": len(handed) > 1,
+            "generalized": True,
+            "reason": "wants another pass",
+            "criteria_met": met,
+        }
+
+    def worker_response(root: Path, output_name: str) -> JsonObject:
+        if output_name == MergeReport.__name__:
+            return {"completed": True, "summary": "joined"}
+        with (root / "a.txt").open("a", encoding="utf-8") as handle:
+            handle.write("implemented\n")
+        return {
+            "concern_id": "a",
+            "changed": True,
+            "summary": "implemented a",
+            "files_changed": ["a.txt"],
+        }
+
+    core = ResolverCore(
+        ResolverConfig(
+            state_root=tmp_path / "state",
+            workspace=workspace,
+            worktree_root=tmp_path / "resolver-worktrees",
+            run_id="revision-carries",
+            integration_branch="resolve/revision-carries/review",
+            verification_commands=[
+                VerificationCommand(
+                    name="combined-diff",
+                    arguments=["git", "diff", "--check", "HEAD"],
+                )
+            ],
+        ),
+        resolve_spec(),
+        lambda context: session_factory(
+            PromptRecordingSession(context.root, worker_response, worker_prompts)
+        ),
+        lambda root: resolver_test_factory(root, reviewer_response),
+        LiteralInvocationRenderer(),
+        launcher,
+    )
+    seed_approvals(core, [concern("a")])
+    manifest = await core.run(
+        ResolveInventory(source=snapshot(workspace, launcher), concerns=[concern("a")])
+    )
+
+    outcome = next(item for item in manifest.outcomes if item.concern_id == "a")
+    assert outcome.verified, outcome.failure
+    revision = next(prompt for prompt in worker_prompts if "Review feedback" in prompt)
+    assert "Round 2" in revision
+    assert "wants another pass" in revision
+    # The record rides along rather than being assumed remembered.
+    assert "Assignment:" in revision
+    assert "a-done" in revision
+
+
+@pytest.mark.asyncio
+async def test_an_answered_question_credited_as_met_is_corrected_not_charged(
+    tmp_path: Path,
+) -> None:
+    """An acceptance naming an id outside the declared list keeps its verdict.
+
+    The reviewer reads its criteria beside the answered questions, so
+    crediting a question id is the slip that shape invites. Charging a
+    revision round for it sent a run's whole budget on re-deriving an
+    acceptance every reviewer had already given.
+    """
+    launcher = LocalProcessLauncher()
+    workspace = failure_leg_workspace(tmp_path, launcher)
+    worker_prompts: list[str] = []
+    handed: list[str] = []
+
+    def reviewer_response(_root: Path, _output_name: str) -> JsonObject:
+        handed.append("turn")
+        # Every declared criterion accounted for, plus a question id.
+        met: list[JsonValue] = ["a-done", "a-q1"] if len(handed) == 1 else ["a-done"]
+        return {
+            "concern_id": "a",
+            "accepted": True,
+            "generalized": True,
+            "reason": "every criterion holds",
+            "criteria_met": met,
+        }
+
+    def worker_response(root: Path, output_name: str) -> JsonObject:
+        if output_name == MergeReport.__name__:
+            return {"completed": True, "summary": "joined"}
+        (root / "a.txt").write_text("implemented\n", encoding="utf-8")
+        return {
+            "concern_id": "a",
+            "changed": True,
+            "summary": "implemented a",
+            "files_changed": ["a.txt"],
+        }
+
+    core = ResolverCore(
+        ResolverConfig(
+            state_root=tmp_path / "state",
+            workspace=workspace,
+            worktree_root=tmp_path / "resolver-worktrees",
+            run_id="foreign-label",
+            integration_branch="resolve/foreign-label/review",
+            verification_commands=[
+                VerificationCommand(
+                    name="combined-diff",
+                    arguments=["git", "diff", "--check", "HEAD"],
+                )
+            ],
+        ),
+        resolve_spec(),
+        lambda context: session_factory(
+            PromptRecordingSession(context.root, worker_response, worker_prompts)
+        ),
+        lambda root: resolver_test_factory(root, reviewer_response),
+        LiteralInvocationRenderer(),
+        launcher,
+    )
+    seed_approvals(core, [concern("a")])
+    manifest = await core.run(
+        ResolveInventory(source=snapshot(workspace, launcher), concerns=[concern("a")])
+    )
+
+    outcome = next(item for item in manifest.outcomes if item.concern_id == "a")
+    assert outcome.verified, outcome.failure
+    # Corrected on the reviewer's own session, so no worker round was spent.
+    assert len(outcome.rounds) == 1
+    assert not any("Review feedback" in prompt for prompt in worker_prompts)
+
+
+@pytest.mark.asyncio
+async def test_a_round_that_commits_nothing_neither_charges_nor_reviews_an_empty_range(
+    tmp_path: Path,
+) -> None:
+    """A worker re-entering finished work leaves the branch where it was.
+
+    `round_base..round_base` is empty, and a reviewer handed it can only
+    accept vacuously or reject for having no content — one run's reviewer
+    reconstructed the real delivery by hand and said so in its report.
+    """
+    launcher = LocalProcessLauncher()
+    workspace = failure_leg_workspace(tmp_path, launcher)
+    reviewer_prompts: list[str] = []
+    turns: list[str] = []
+
+    def worker_response(root: Path, output_name: str) -> JsonObject:
+        if output_name == MergeReport.__name__:
+            return {"completed": True, "summary": "joined"}
+        turns.append("worker")
+        # Only the first turn writes; every later one finds its work done.
+        first = len(turns) == 1
+        if first:
+            (root / "a.txt").write_text("implemented\n", encoding="utf-8")
+        touched: list[JsonValue] = ["a.txt"] if first else []
+        return {
+            "concern_id": "a",
+            "changed": first,
+            "summary": "implemented a",
+            "files_changed": touched,
+        }
+
+    def reviewer_response(_root: Path, _output_name: str) -> JsonObject:
+        # Rejects the first submission, so the second round commits nothing.
+        return {
+            "concern_id": "a",
+            "accepted": len(reviewer_prompts) > 1,
+            "generalized": True,
+            "reason": "needs another look",
+            "criteria_met": ["a-done"] if len(reviewer_prompts) > 1 else [],
+        }
+
+    core = ResolverCore(
+        ResolverConfig(
+            state_root=tmp_path / "state",
+            workspace=workspace,
+            worktree_root=tmp_path / "resolver-worktrees",
+            run_id="empty-round",
+            integration_branch="resolve/empty-round/review",
+            max_revision_rounds=1,
+            verification_commands=[
+                VerificationCommand(
+                    name="combined-diff",
+                    arguments=["git", "diff", "--check", "HEAD"],
+                )
+            ],
+        ),
+        resolve_spec(),
+        lambda context: resolver_test_factory(context.root, worker_response),
+        lambda root: session_factory(
+            PromptRecordingSession(root, reviewer_response, reviewer_prompts)
+        ),
+        LiteralInvocationRenderer(),
+        launcher,
+    )
+    seed_approvals(core, [concern("a")])
+    manifest = await core.run(
+        ResolveInventory(source=snapshot(workspace, launcher), concerns=[concern("a")])
+    )
+
+    outcome = next(item for item in manifest.outcomes if item.concern_id == "a")
+    # With max_revision_rounds=1 the old rule failed here: the empty second
+    # round was charged even though it gave the reviewer nothing new.
+    assert outcome.verified, outcome.failure
+    empty = [prompt for prompt in reviewer_prompts if "Commits under review" in prompt]
+    assert empty and not any(
+        # The range handed over is never a commit against itself.
+        span.split("..")[0].split()[-1] == span.split("..")[1].split()[0]
+        for prompt in empty
+        for span in [prompt.split("Commits under review: ")[1]]
+    )
+
+
+@pytest.mark.asyncio
 async def test_review_prompt_names_the_range_and_the_rulings(tmp_path: Path) -> None:
     """A reviewer handed one commit spent its round discovering the others,
     and three reviews could not verify rulings the workers cited."""

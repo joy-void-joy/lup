@@ -9,10 +9,15 @@ the concern rather than failing it, so the answer lands on a run that still
 holds everything it had.
 
 Acceptance is checked against what was declared, not against what the
-reviewer says it checked: a report that accepts while its ``criteria_met``
-does not match the persisted criteria is turned back with the exact ids
-named, because the alternative is a concern that passes on criteria nobody
-wrote down.
+reviewer says it checked: a report that accepts while leaving a persisted
+criterion unaccounted for is turned back with the exact ids named, because
+the alternative is a concern that passes on criteria nobody wrote down.
+
+An id from outside the list is the opposite case and is only recorded. It
+leaves every declared criterion as accounted for as it was, and the
+reviewer reads its criteria beside the answered questions, so crediting a
+question id is the slip that shape invites. Charging a revision round for
+it cost a run its budget re-deriving an acceptance it already had.
 """
 
 from collections.abc import Callable
@@ -23,7 +28,12 @@ from lup.resolver.contracts import (
     ResolverEnvironmentFault,
 )
 from lup.resolver.joins import Joiner
-from lup.resolver.journal import Journal, ReviewResidualEvent, VerificationFailedEvent
+from lup.resolver.journal import (
+    ForeignCriteriaEvent,
+    Journal,
+    ReviewResidualEvent,
+    VerificationFailedEvent,
+)
 from lup.resolver.models import (
     AgentRound,
     Concern,
@@ -196,7 +206,19 @@ class ConcernExecutor:
         # Carried across the interruption with the rounds it was spent on. A
         # fresh budget would let a concern interrupted often enough revise
         # without limit, which is the bound this exists to hold.
-        charged = sum(0 if record.diff.declaration else 1 for record in rounds)
+        # Reconstructed by the rule the loop below charges by, so a resume
+        # inherits the budget it would have had: a round advanced when it
+        # left a commit the round before it did not hold.
+        before = [base.commit, *(record.diff.commit for record in rounds)][
+            : len(rounds)
+        ]
+        charged = sum(
+            1
+            for record, prior in zip(rounds, before, strict=True)
+            if not record.diff.declaration
+            and record.diff.commit is not None
+            and record.diff.commit != prior
+        )
         attempts = maximum_round + self.config.max_declaration_attempts
         for round_number in range(len(rounds) + 1, attempts + 1):
             # Before the turn rather than after it: everything the previous
@@ -213,8 +235,16 @@ class ConcernExecutor:
             # this loop advances the branch — a concern resumed in a second
             # process re-entered at the clearance and failed for the commit the
             # first process had itself made.
+            # A round that advances nothing is measured from the concern's
+            # own base instead, because `round_base..round_base` is empty and
+            # a reviewer handed it can only accept vacuously or reject for
+            # having no content. It happens whenever a worker re-enters
+            # finished work — the branch already holds the delivery, so there
+            # is nothing left to commit and the whole branch is the answer.
             round_base = self.worktrees.head(lease)
-            worker = await self.runner.worker_turn(assignment, feedback, round_number)
+            worker = await self.runner.worker_turn(
+                assignment, feedback, round_number, round_base != base.commit
+            )
             outstanding = await self.questions.unanswered_for(concern.id)
             if outstanding:
                 raise ResolverAwaitingAnswers(outstanding, [])
@@ -271,7 +301,7 @@ class ConcernExecutor:
                     else await self.runner.review_turn(
                         concern,
                         worker,
-                        round_base,
+                        base.commit if diff.commit == round_base else round_base,
                         diff.commit,
                         lease.root,
                         round_number,
@@ -285,18 +315,27 @@ class ConcernExecutor:
                 undeclared = [
                     label for label in review.criteria_met if label not in declared
                 ]
-                if review.accepted and (unaccounted or undeclared):
+                if review.accepted and undeclared:
+                    # Recorded, never charged. An id from outside the list
+                    # leaves every declared criterion exactly as accounted
+                    # for as it was, so the verdict is unaffected and the
+                    # correction turn upstream has already had its try.
+                    self.journal.record(
+                        ForeignCriteriaEvent(
+                            concern_id=concern.id,
+                            round=round_number,
+                            labels=undeclared,
+                        )
+                    )
+                if review.accepted and unaccounted:
                     # The reviewer's own reason survives — the guard's
                     # complaint is appended, never substituted, and it names
                     # the exact ids so the next round can close the gap
                     # instead of re-deriving it.
                     complaint = (
-                        "criteria_met does not match the persisted acceptance criteria"
+                        "criteria_met does not match the persisted acceptance "
+                        "criteria; unaccounted: " + ", ".join(unaccounted)
                     )
-                    if unaccounted:
-                        complaint += "; unaccounted: " + ", ".join(unaccounted)
-                    if undeclared:
-                        complaint += "; never declared: " + ", ".join(undeclared)
                     review = review.model_copy(
                         update={
                             "accepted": False,
@@ -341,7 +380,14 @@ class ConcernExecutor:
                 concern.id, ConcernStatus.REVISING, review.reason
             )
             feedback = review.reason + "\n" + "\n".join(review.residual)
-            charged += 0 if diff.declaration else 1
+            # Only a round that moved the branch spends the revision budget.
+            # A round that committed nothing gave the reviewer nothing new to
+            # judge, so charging it retires the concern for work it was never
+            # shown — which is how a run failed a concern whose branch was
+            # complete and whose every criterion the reviewer had accepted.
+            # The loop is still bounded by `attempts`, so this cannot spin.
+            advanced = diff.commit is not None and diff.commit != round_base
+            charged += 1 if advanced and not diff.declaration else 0
             if charged == maximum_round:
                 break
         # A concern that never spent a revision round never had its work
