@@ -18,6 +18,16 @@ The run parks rather than guessing, so every material question is a decision tha
 
 **Relay the whole batch at once.** A run parks with all of its open questions together; asking them one at a time makes the human re-establish the same context for each.
 
+## Watching a run, and what silence means
+
+A run is built to be left alone, so "is it still going, or did it stop?" is the question you will ask most. Ask it with `uv run lup-devtools harness resolve status --run-id <id>`, which answers from the run directory alone: the phase, the concerns per status, **how many questions are waiting on you**, and the last journal event with its age. Liveness comes from the run's own lock rather than the process table, because under a sandbox `/proc` is PID-isolated — `ps` and `pgrep` list nothing outside the current shell, so a healthy run and a dead one look identical there.
+
+**Do not watch a run by tailing its log.** Two things a log cannot tell you, and both have been missed that way. A worker that queues a question blocks on it while its siblings keep working, so the run does not park and prints nothing — a question can wait on you indefinitely with the log silent. And a tail started mid-run begins at the end of the file, so every event before it is skipped without a trace. Watch the status surface and report when it changes; it is the projection that knows both facts.
+
+Read the verdict rather than the quiet. A held lock is the fact and the last-event age is context on top of it: a run can legitimately record nothing for tens of minutes while a planner works, and judging by silence has produced a confident wrong "it crashed" about a run that was mid-turn. A growing age against a held lock is the shape of a wedged run; silence on its own is not evidence of anything.
+
+`harness resolve supervise` serves the same projection as a live page for a human to sit in front of, and takes answers. It is server-sent events to a browser, so it is the human's surface and not the one to reach for when what you need is a signal you can act on.
+
 ## Work discovered while a run is parked
 
 A parked run is when the most is known about what else needs doing. Admit that work into the run that found it: hand the run the new evidence and only that evidence is planned, so the run keeps its id, every answer already recorded, and every concern already completed. The admitted concern then passes the same approval and material-question gates as one from intake, and may depend on a concern this run has already finished.
