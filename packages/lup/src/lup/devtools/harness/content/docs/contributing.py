@@ -193,7 +193,10 @@ approved — it silences nothing, so the approval would buy an exemption the
 auditor already calls spurious. The refusal names the rule that does not fire,
 and what the line trips instead where it trips something. Rules another
 scanner owns are not judged this way: the edit gate carries the anti-pattern
-table alone, and a verdict it cannot reach is not one it refuses over.
+table alone, and a verdict it cannot reach is not one it refuses over. Nor is
+the bare form, which names no rule and so silences every rule there is — the
+auditor still reports one that guards nothing, so a bare marker the gate
+admits can still be a marker `dev check` refuses.
 
 In a file's opening comment block the marker goes file-wide — a standalone
 `# lup: ignore` disables anti-pattern checks for the whole file, and

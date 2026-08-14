@@ -1110,8 +1110,12 @@ def antipattern_decision(
     for number in judged:
         directive = IGNORE_RE.search(original_lines[number - 1])
         named = ignore_rule_ids(directive) if directive is not None else None
-        # A directive standing at the end of the text guards a line the text
-        # does not carry, so what it silences is not visible from here.
+        # Two directives are skipped, both because what they silence is not
+        # visible from here. A bare one names no rule and covers every rule
+        # there is, including those another scanner owns and these rows cannot
+        # see, so nothing here can prove it guards nothing. One standing at the
+        # end of the text is the same limit in a different form: the line it
+        # guards is not in the text this gate was handed.
         alone = standalone_suppression(original_lines[number - 1]) is not None
         if named is None or (alone and number == len(original_lines)):
             continue
