@@ -75,6 +75,7 @@ from lup.resolver.models import (
     ResolveInventory,
     ResolveRequest,
     ResolverConfig,
+    ResidualRuling,
     ResolvePhase,
     ResolveState,
     ReviewNote,
@@ -4024,8 +4025,13 @@ async def test_an_identical_standing_finding_is_recorded_not_reasked(
 
 @pytest.mark.asyncio
 async def test_completeness_guard_appends_and_names_the_gap(tmp_path: Path) -> None:
-    """The reviewer's substantive reason survives the guard, and the exact
-    unmatched ids ride with it into the next round's feedback."""
+    """The human sends it back, and the exact unmatched ids ride with it.
+
+    The guard no longer decides this alone — the criteria are the human's
+    bar, so whether missing one still passes is theirs to say. Refusing to
+    carry the gap reaches the worker exactly as the automatic rejection
+    used to, which is what this pins.
+    """
     launcher = LocalProcessLauncher()
     workspace = failure_leg_workspace(tmp_path, launcher)
     worker_prompts: list[str] = []
@@ -4086,6 +4092,7 @@ async def test_completeness_guard_appends_and_names_the_gap(tmp_path: Path) -> N
         launcher,
     )
     seed_approvals(core, [concern("a")])
+    seed_offer(core, "a-residual-round-1", ResidualRuling.SEND_BACK)
     manifest = await core.run(
         ResolveInventory(source=snapshot(workspace, launcher), concerns=[concern("a")])
     )
@@ -4095,6 +4102,83 @@ async def test_completeness_guard_appends_and_names_the_gap(tmp_path: Path) -> N
     revision = next(prompt for prompt in worker_prompts if "Review feedback" in prompt)
     assert "solid work overall" in revision
     assert "unaccounted: a-done" in revision
+
+
+@pytest.mark.asyncio
+async def test_a_carried_residual_takes_the_acceptance_the_reviewer_wrote(
+    tmp_path: Path,
+) -> None:
+    """The reported run: an accept the guard turned back on the worker.
+
+    `headless-consent-route` was reviewed twice. Both times the reviewer
+    wrote an accept — the second under a heading reading "WHY THIS IS AN
+    ACCEPT RATHER THAN A REJECT" — and honestly declined to claim one
+    criterion whose text asked for verification on a real session, which no
+    round inside the lease could supply. The guard flipped both to
+    rejections and spent the revision budget sending the worker back for a
+    gap the reviewer had already said no round would close.
+
+    So the human rules, and carrying the gap keeps the verdict its author
+    wrote. One round, not three, and no worker turn spent on it.
+    """
+    launcher = LocalProcessLauncher()
+    workspace = failure_leg_workspace(tmp_path, launcher)
+    worker_prompts: list[str] = []
+
+    def reviewer_response(_root: Path, _output_name: str) -> JsonObject:
+        return {
+            "concern_id": "a",
+            "accepted": True,
+            "generalized": True,
+            "reason": "every criterion but a-done, which no round here can reach",
+            "criteria_met": [],
+        }
+
+    def worker_response(root: Path, output_name: str) -> JsonObject:
+        if output_name == MergeReport.__name__:
+            return {"completed": True, "summary": "joined"}
+        with (root / "a.txt").open("a", encoding="utf-8") as handle:
+            handle.write("implemented\n")
+        return {
+            "concern_id": "a",
+            "changed": True,
+            "summary": "implemented a",
+            "files_changed": ["a.txt"],
+        }
+
+    core = ResolverCore(
+        ResolverConfig(
+            state_root=tmp_path / "state",
+            workspace=workspace,
+            worktree_root=tmp_path / "resolver-worktrees",
+            run_id="residual-carried",
+            integration_branch="resolve/residual-carried/review",
+            verification_commands=[
+                VerificationCommand(
+                    name="combined-diff",
+                    arguments=["git", "diff", "--check", "HEAD"],
+                )
+            ],
+        ),
+        resolve_spec(),
+        lambda context: session_factory(
+            PromptRecordingSession(context.root, worker_response, worker_prompts)
+        ),
+        lambda root: resolver_test_factory(root, reviewer_response),
+        LiteralInvocationRenderer(),
+        launcher,
+    )
+    seed_approvals(core, [concern("a")])
+    seed_offer(core, "a-residual-round-1", ResidualRuling.CARRY)
+    manifest = await core.run(
+        ResolveInventory(source=snapshot(workspace, launcher), concerns=[concern("a")])
+    )
+
+    outcome = next(item for item in manifest.outcomes if item.concern_id == "a")
+    assert outcome.verified, outcome.failure
+    assert not [prompt for prompt in worker_prompts if "Review feedback" in prompt]
+    carried = journal_events(core, "criteria_carried")
+    assert [event["criteria"] for event in carried] == [["a-done"]]
 
 
 @pytest.mark.asyncio

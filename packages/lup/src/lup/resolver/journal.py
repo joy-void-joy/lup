@@ -151,6 +151,23 @@ class ReviewResidualEvent(BaseModel):
     residual: list[str]
 
 
+class CriteriaCarriedEvent(BaseModel):
+    """A human took an acceptance over criteria the reviewer left unmet.
+
+    The bar is theirs, so waiving part of it is theirs too, and the waiver
+    is worth more than the verdict it produced: whoever lands this concern
+    inherits work that does not meet everything it was admitted against,
+    and only this says which parts and on whose word.
+    """
+
+    model_config = FROZEN
+
+    type: Literal["criteria_carried"] = "criteria_carried"
+    concern_id: str
+    round: int
+    criteria: list[str]
+
+
 class ForeignCriteriaEvent(BaseModel):
     """An accepted review credited ids the concern never declared.
 
@@ -284,6 +301,7 @@ type RunEvent = (
     | JoinCompletedEvent
     | JoinAuditEvent
     | ReviewResidualEvent
+    | CriteriaCarriedEvent
     | ForeignCriteriaEvent
     | VerificationFailedEvent
     | RecheckRepeatedEvent
