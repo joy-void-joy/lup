@@ -41,6 +41,7 @@ from lup.resolver.contracts import (
 from lup.runtime.errors import ProviderTurnError, TurnFailure
 from lup.resolver.core import (
     APPROVE,
+    ASSEMBLY_QUESTION_ID,
     DEFER,
     ResolverCore,
     approval_decisions,
@@ -107,7 +108,7 @@ from lup.runtime.models import (
     TurnHandle,
     TurnRequest,
 )
-from lup.types import JsonObject
+from lup.types import JsonObject, JsonValue
 
 
 def concern(
@@ -144,8 +145,17 @@ def seed_offer(core: ResolverCore, question_id: str, value: str) -> None:
 
 
 def seed_approvals(core: ResolverCore, concerns: list[Concern]) -> None:
+    """Approve every concern, and approve assembling what they produce.
+
+    Two decisions, not one: a concern gate authorizes the work, and the
+    assembly gate authorizes merging the results into a review branch. A
+    run seeded with only the first parks before integration, which is the
+    point of that gate — so a test that means to reach COMPLETE says so by
+    answering both.
+    """
     for item in concerns:
         seed_offer(core, approval_question(item).id, APPROVE)
+    seed_offer(core, ASSEMBLY_QUESTION_ID, APPROVE)
 
 
 def worker_asks(mailbox: QuestionMailbox, run_id: str, asked: MaterialQuestion) -> None:
@@ -2771,18 +2781,33 @@ def implementing_worker(
     return respond
 
 
-def planning_reviewer(plan: JsonObject) -> ResolverResponse:
-    """A reviewer that plans admitted evidence and accepts every concern."""
+def planning_reviewer(plan: JsonObject, *concerns: str) -> ResolverResponse:
+    """A reviewer that plans admitted evidence and accepts every concern.
+
+    A per-concern review runs in that concern's own lease, so the worktree
+    name is the concern id and echoing it reports the criterion met. The
+    post-integration re-check does not: it runs in the integration lease and
+    asks about a concern named only in the prompt, so the same echo reports
+    a foreign label and every criterion lost. Naming this run's concerns
+    tells the two worktrees apart, which is what makes the fixture mean
+    "accepts every concern" at both call sites instead of only the first.
+    """
 
     def respond(root: Path, output_name: str) -> JsonObject:
         if output_name == ConcernInventory.__name__:
             return plan
+        rechecking = bool(concerns) and root.name not in concerns
+        met: list[JsonValue] = (
+            [f"{name}-done" for name in concerns]
+            if rechecking
+            else [f"{root.name}-done"]
+        )
         return {
             "concern_id": root.name,
             "accepted": True,
             "generalized": True,
             "reason": "criteria met",
-            "criteria_met": [f"{root.name}-done"],
+            "criteria_met": met,
         }
 
     return respond
@@ -2884,6 +2909,7 @@ async def test_a_concern_admitted_into_a_parked_run_finishes_beside_the_original
         "a-dynamic",
         "b-shape",
         "integration-approval-b",
+        ASSEMBLY_QUESTION_ID,
     }
     assert [item.status for item in persisted.progress if item.concern_id == "b"] == [
         ConcernStatus.CLEANED
@@ -2984,7 +3010,11 @@ async def test_an_admitted_concern_bases_on_a_completed_concerns_recorded_commit
                 {"b": "b-dynamic"}, tmp_path / "state", "admit-dependent"
             ),
             planning_reviewer(
-                admitted_plan(admitted_concern("c", ["a"]), admitted_concern("d"))
+                admitted_plan(admitted_concern("c", ["a"]), admitted_concern("d")),
+                "a",
+                "b",
+                "c",
+                "d",
             ),
         )
 

@@ -22,6 +22,7 @@ from lup.resolver.journal import (
     PhaseChangedEvent,
 )
 from lup.resolver.models import (
+    ConcernOutcome,
     ConcernStatus,
     DependencyBase,
     ResolvePhase,
@@ -129,6 +130,32 @@ class ResolveRun:
         async with self.lock:
             state = self.require()
             self.persist(self.progress_state(state, [concern_id], status, reason))
+
+    async def settle_concern(
+        self, outcome: ConcernOutcome, status: ConcernStatus, reason: str = ""
+    ) -> None:
+        """Persist one concern's terminal transition and its outcome together.
+
+        Progress and outcome are two records of the same fact, and writing
+        them apart let an interruption land between: the run then claimed a
+        success it could not integrate, because every surface that counts
+        progress read the higher number while the batch that would have
+        gathered the outcome never returned. Recorded under one lock, the
+        two cannot disagree.
+
+        Replace-or-append by concern id, because a resumed run re-executes a
+        concern whose outcome was already written and must overwrite that
+        record rather than shadow it with a second one.
+        """
+        async with self.lock:
+            state = self.require()
+            kept = [
+                item for item in state.outcomes if item.concern_id != outcome.concern_id
+            ]
+            progressed = self.progress_state(
+                state, [outcome.concern_id], status, reason
+            )
+            self.persist(progressed.model_copy(update={"outcomes": [*kept, outcome]}))
 
     async def record_note_clearance(
         self, base: DependencyBase, commit: str

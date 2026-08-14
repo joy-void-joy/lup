@@ -100,6 +100,18 @@ class ResolvePhase(StrEnum):
             ResolvePhase.FAILED,
         }
 
+    def released_leases(self) -> bool:
+        """Whether a run in this phase has let go of the branches it leased.
+
+        Only a completed run has: it carried every lease through the join
+        machinery, so what those branches held has landed and a sweep may
+        clear them. A failed or aborted run still has its branches out on
+        lease with nothing answerable for them, which is precisely when a
+        survey must leave them alone — the two verbs it would otherwise
+        offer both destroy work no one has salvaged yet.
+        """
+        return self is ResolvePhase.COMPLETE
+
 
 class ConcernStatus(StrEnum):
     """Persisted lifecycle of one independently scheduled concern."""
@@ -304,6 +316,28 @@ class MaterialQuestion(BaseModel):
                 f"question {self.id!r} recommendation is not one of its choices"
             )
         return self
+
+
+RECHECK_SUPERSEDED = "superseded"
+"""The ruling that settles a lost criterion: later work replaced it."""
+
+RECHECK_REGRESSION = "regression"
+"""The ruling that does not: the merged tree broke something that held."""
+
+
+class RecheckRuling(BaseModel):
+    """One answered re-check, read where the decision it governs is taken.
+
+    The question is closed over two words that mean opposite things about
+    the review branch, so the answer is only worth asking for if something
+    consults it. This is what integration consults.
+    """
+
+    model_config = FROZEN
+
+    concern_id: str
+    criteria: list[str]
+    ruling: str
 
 
 ALLOWANCE_GRANTED = "grant"
@@ -536,6 +570,7 @@ class HeldLease(BaseModel):
     branch: str
     run_id: str
     standing: str
+    alive: bool = True
 
     def reason(self) -> str:
         return f"lease of run {self.run_id} ({self.standing})"
@@ -751,6 +786,15 @@ class ConcernOutcome(BaseModel):
     """
     verified: bool = False
     integrated: bool = False
+    regressed: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Criteria a human ruled the merged tree broke. Verification is "
+            "about this concern's own lease; this is about the tree its "
+            "siblings built, and only the second can disqualify a branch "
+            "that already passed the first."
+        ),
+    )
     rounds: list[AgentRound] = Field(default_factory=list)
     failure: str | None = None
     notes_cleared: list[ReviewNote] = Field(default_factory=list)
