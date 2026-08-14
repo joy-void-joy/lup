@@ -398,6 +398,7 @@ class ResolverCore:
             self.worktrees,
             self.journal,
             standing_rechecks=config.recheck_standing_per_join,
+            regeneration=config.regeneration_command,
         )
         self.executor = ConcernExecutor(
             config,

@@ -804,6 +804,44 @@ def joined_lease(tmp_path: Path) -> WritableRootLease:
     return WritableRootLeases(tmp_path / "agents").acquire("integration", "resolve/i")
 
 
+def test_a_conflict_only_in_rendered_artifacts_is_settled_by_rendering(
+    tmp_path: Path,
+) -> None:
+    """The generator decides these, so a merger choosing between them cannot.
+
+    Every lease touching a catalog re-renders both plugin trees, so nearly
+    every join disagrees about them — one measured join carried 852 changed
+    lines of `policy_data.py`, twice over. Rendering again takes a second and
+    settles it exactly; putting it to a merger took minutes and asked for a
+    judgement about content that is nobody's to make.
+    """
+    launcher = ScriptedLauncher(
+        {"diff --name-only": out(".claude/plugins/lup/policy_data.py\n")}
+    )
+    orchestrator = WorktreeOrchestrator(
+        launcher, tmp_path, generated=rendered(".claude/plugins/lup/policy_data.py")
+    )
+
+    assert orchestrator.settle_generated(joined_lease(tmp_path), ["render", "all"])
+
+    ran = [" ".join(call) for call in launcher.arguments]
+    assert any("checkout --ours" in command for command in ran)
+    assert "render all" in ran
+
+
+def test_a_conflict_outside_the_rendered_set_is_left_to_the_merger(
+    tmp_path: Path,
+) -> None:
+    """Rendering settles what a generator owns, and decides nothing else."""
+    launcher = ScriptedLauncher({"diff --name-only": out("src/module.py\n")})
+    orchestrator = WorktreeOrchestrator(
+        launcher, tmp_path, generated=rendered(".claude/plugins/lup/policy_data.py")
+    )
+
+    assert not orchestrator.settle_generated(joined_lease(tmp_path), ["render", "all"])
+    assert not any("render" in " ".join(call) for call in launcher.arguments)
+
+
 def test_preparing_the_same_join_twice_leaves_the_open_merge_alone(
     tmp_path: Path,
 ) -> None:

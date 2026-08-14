@@ -781,6 +781,52 @@ class WorktreeOrchestrator:
             )
         return status.code == 1
 
+    def settle_generated(self, lease: WritableRootLease, regenerate: list[str]) -> bool:
+        """Take either side of a rendered conflict, then render it again.
+
+        A generated artifact has one correct content and it is whatever the
+        generator emits, so asking a merger to choose between two stale
+        renderings is asking it to justify a decision that is not its to
+        take — the same argument :meth:`drop_candidates` already makes for
+        exempting them from what a merger must account for, applied to what
+        it must resolve. Every lease that touches a catalog re-renders both
+        plugin trees, so these are most of what a join conflicts over: one
+        measured join carried 852 changed lines of `policy_data.py`, twice.
+
+        Taking `--ours` is not a judgement either. It settles the index so
+        git can proceed, and the render that follows overwrites whichever
+        side was taken.
+        """
+        rendered = [
+            path
+            for path in self.conflicted_paths(lease)
+            if self.generated.owning(path.as_posix()) is not None
+        ]
+        if not rendered:
+            return False
+        self.require(
+            LaunchRequest(
+                arguments=[
+                    "git",
+                    "checkout",
+                    "--ours",
+                    "--",
+                    *(str(p) for p in rendered),
+                ],
+                cwd=lease.root,
+            ),
+            f"failed to settle rendered conflicts for {lease.concern_id}",
+        )
+        self.require(
+            LaunchRequest(arguments=regenerate, cwd=lease.root),
+            f"failed to regenerate artifacts for {lease.concern_id}",
+        )
+        self.require(
+            LaunchRequest(arguments=["git", "add", "-A"], cwd=lease.root),
+            f"failed to stage regenerated artifacts for {lease.concern_id}",
+        )
+        return True
+
     def conflicted_paths(self, lease: WritableRootLease) -> list[Path]:
         """Every path git left unmerged, which git already knows exactly."""
         unmerged = self.launcher.launch(

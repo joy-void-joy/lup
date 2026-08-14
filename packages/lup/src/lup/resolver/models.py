@@ -1149,6 +1149,15 @@ class ResolverConfig(BaseModel):
     still change what happens, so what this adds is a name for the cause
     rather than a finding that would otherwise be missed.
     """
+    regeneration_command: list[str] = Field(default_factory=list)
+    """How this project re-renders whatever it generates, if it generates.
+
+    A join conflicting in a rendered artifact is settled by running this
+    rather than by a merger choosing between two stale renderings. Named by
+    the application because no library can know it: one project renders with
+    its own CLI, another with a build tool, and most render nothing at all.
+    Empty leaves every conflict to the merger, as before.
+    """
     verification_commands: list["VerificationCommand"] = Field(default_factory=list)
 
     @model_validator(mode="after")

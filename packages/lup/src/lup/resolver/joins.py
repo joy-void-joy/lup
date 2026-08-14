@@ -30,6 +30,7 @@ from lup.resolver.journal import (
     JoinAuditEvent,
     JoinCompletedEvent,
     JoinPlannedEvent,
+    JoinRenderedEvent,
     Journal,
     RecheckRepeatedEvent,
 )
@@ -158,6 +159,7 @@ class Joiner:
         worktrees: WorktreeOrchestrator,
         journal: Journal,
         standing_rechecks: bool = False,
+        regeneration: list[str] | None = None,
     ) -> None:
         self.run = run
         self.runner = runner
@@ -166,6 +168,7 @@ class Joiner:
         self.worktrees = worktrees
         self.journal = journal
         self.standing_rechecks = standing_rechecks
+        self.regeneration = regeneration or []
 
     async def join_commits(
         self,
@@ -212,6 +215,15 @@ class Joiner:
                 continue
             before = current
             conflicted = self.worktrees.prepare_join(lease, [before, parent])
+            if conflicted and self.regeneration:
+                # Settled before the merger is called rather than by it, so a
+                # join whose only disagreement was in rendered artifacts costs
+                # no turn at all — and the merger is never handed a file whose
+                # correct content it could not have decided.
+                rendered = self.worktrees.settle_generated(lease, self.regeneration)
+                conflicted = bool(self.worktrees.conflicted_paths(lease))
+                if rendered and not conflicted:
+                    self.journal.record(JoinRenderedEvent(parent=parent))
             if conflicted:
                 await self.adjudicate(lease, parent, purpose, [])
             current = self.worktrees.commit_join(lease, title)
