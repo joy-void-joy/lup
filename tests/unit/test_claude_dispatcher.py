@@ -12,7 +12,9 @@ from pathlib import Path
 import pytest
 import sh
 
-from lup.types import JsonObject
+from lup.policy.grants import allowance_grants_environment, write_allowance_grants
+from lup.policy.identity import AGENT_IDENTITY_ENV, ConcernAllowance
+from lup.types import EnvVars, JsonObject
 from tests.unit.repos import initialized_repo
 
 DISPATCHER = Path(".claude/plugins/lup/hooks/scripts/policy.py")
@@ -301,3 +303,123 @@ def test_an_unplaced_call_carries_no_rewrite_at_all() -> None:
     assert isinstance(specific, dict)
     assert specific["permissionDecision"] == "allow"
     assert "updatedInput" not in specific
+
+
+NEW_DEVTOOLS_MODULE = write_payload(
+    "src/lup_template/devtools/harness/newborn_probe.py", '"""Newborn."""\n'
+)
+"""Creating a devtools module: the gate a `new-devtools-module` grant opens."""
+
+
+def session_environment(document: Path | None) -> EnvVars:
+    """The whole environment one worker session is launched with, and keeps.
+
+    Nothing is inherited, so an operator with either variable exported cannot
+    decide the outcome of an assertion below. The grants variable names a
+    document; what that document says is not part of the environment, and is
+    free to change while the session runs.
+    """
+    return {
+        AGENT_IDENTITY_ENV: "resolver-worker",
+        **allowance_grants_environment(document),
+    }
+
+
+def effect_under(payload: JsonObject, environment: EnvVars) -> str:
+    """The verdict the deployed dispatcher returns for one launched session."""
+    output = str(
+        sh.Command("python3")(
+            "-I",
+            "-S",
+            str(DISPATCHER),
+            _in=json.dumps(payload),
+            _env=environment,
+        )
+    )
+    specific = json.loads(output)["hookSpecificOutput"]
+    assert isinstance(specific, dict)
+    return str(specific["permissionDecision"])
+
+
+def test_a_grant_made_after_a_session_started_releases_its_very_next_call(
+    tmp_path: Path,
+) -> None:
+    """The environment never changes here; only the human's answer does.
+
+    This is the whole point of reading at judgment. A worker that discovers
+    mid-flight that it needs a gate asks, a human answers while that session
+    is still running, and the answer has to reach the process that asked —
+    which an allowance rendered into the environment at launch could not do.
+    """
+    document = tmp_path / "grants.json"
+    launched = session_environment(document)
+    assert effect_under(NEW_DEVTOOLS_MODULE, launched) == "ask"
+
+    write_allowance_grants(document, [ConcernAllowance.NEW_DEVTOOLS_MODULE])
+
+    assert effect_under(NEW_DEVTOOLS_MODULE, launched) == "allow"
+
+
+def test_a_grant_taken_back_stops_releasing_its_gate_just_as_immediately(
+    tmp_path: Path,
+) -> None:
+    """Symmetric by construction: the document is read, not remembered."""
+    document = tmp_path / "grants.json"
+    launched = session_environment(document)
+    write_allowance_grants(document, [ConcernAllowance.NEW_DEVTOOLS_MODULE])
+    assert effect_under(NEW_DEVTOOLS_MODULE, launched) == "allow"
+
+    write_allowance_grants(document, [])
+
+    assert effect_under(NEW_DEVTOOLS_MODULE, launched) == "ask"
+
+
+def test_a_grant_made_before_the_session_started_is_honoured_too(
+    tmp_path: Path,
+) -> None:
+    """A gate approved with the plan reaches the lease by the same route."""
+    document = tmp_path / "grants.json"
+    write_allowance_grants(document, [ConcernAllowance.NEW_DEVTOOLS_MODULE])
+
+    assert effect_under(NEW_DEVTOOLS_MODULE, session_environment(document)) == "allow"
+
+
+def test_a_session_holding_no_grant_sees_the_unchanged_lattice(
+    tmp_path: Path,
+) -> None:
+    """Naming no document, and naming an empty one, both grant nothing."""
+    empty = tmp_path / "grants.json"
+    write_allowance_grants(empty, [])
+
+    assert effect_under(NEW_DEVTOOLS_MODULE, session_environment(None)) == "ask"
+    assert effect_under(NEW_DEVTOOLS_MODULE, session_environment(empty)) == "ask"
+
+
+def test_one_leases_grant_cannot_release_a_siblings_gate(tmp_path: Path) -> None:
+    """A session reads the document it was pointed at and no other."""
+    write_allowance_grants(
+        tmp_path / "sibling.json", [ConcernAllowance.NEW_DEVTOOLS_MODULE]
+    )
+
+    launched = session_environment(tmp_path / "mine.json")
+
+    assert effect_under(NEW_DEVTOOLS_MODULE, launched) == "ask"
+
+
+def test_a_stale_environment_cannot_grant_what_the_document_does_not(
+    tmp_path: Path,
+) -> None:
+    """The retired variable is inert, so there is one answer and not two.
+
+    An allowance carried as a value in the environment outlives whatever
+    decided it. Left readable it would be a second source for a fact that has
+    one, and the one it disagreed with would be the live one.
+    """
+    document = tmp_path / "grants.json"
+    write_allowance_grants(document, [])
+    launched = {
+        **session_environment(document),
+        "LUP_CONCERN_ALLOWANCES": '["new-devtools-module"]',
+    }
+
+    assert effect_under(NEW_DEVTOOLS_MODULE, launched) == "ask"

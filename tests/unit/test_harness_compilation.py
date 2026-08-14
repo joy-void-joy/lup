@@ -1524,6 +1524,9 @@ def test_both_dispatchers_are_compiled_from_one_shared_host_half() -> None:
 
     assert "sandbox_active" in shared and "existing_write_targets" in shared
     assert "granted_allowances" in shared and "declared_identity" in shared
+    # What a lease currently holds has one reader as well as one document:
+    # two readings of the same file is the same drift as two files.
+    assert "document_allowances" in shared
     # Every kernel call site is shared, which is what stops one runtime from
     # passing a fact the other has quietly stopped passing.
     assert "bash_decision" in shared and "edit_decision" in shared

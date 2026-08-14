@@ -15,6 +15,7 @@ from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field
 
 from lup.codescan.antipatterns import AntiPattern, patterns_for_suffix
 from lup.policy.contracts import DecisionPolicy
+from lup.policy.grants import LeaseGrants
 from lup.policy.kernel.decision import KernelDecision
 from lup.policy.kernel.edit import (
     decide_edit,
@@ -269,7 +270,14 @@ def antipattern_rows(change: EditChange) -> list[AntiPatternRow]:
 
 
 class EditPolicy(DecisionPolicy[EditBatch]):
-    """Apply the shared marker, anti-pattern, path, deletion, and size gates."""
+    """Apply the shared marker, anti-pattern, path, deletion, and size gates.
+
+    ``grants`` is asked what the lease holds per change rather than read into
+    a list when the policy is built, which is what lets a gate granted while
+    this session runs release the very next edit — and what makes one taken
+    back stop releasing it. The generated dispatchers read the same document,
+    so a lease has one answer wherever it is asked.
+    """
 
     def __init__(
         self,
@@ -277,10 +285,10 @@ class EditPolicy(DecisionPolicy[EditBatch]):
         maximum_added_lines: int = 3,
         autonomous: bool = False,
         path_roles: list[PathRoleRow] | None = None,
-        allowances: list[str] | None = None,
+        grants: LeaseGrants | None = None,
     ) -> None:
         self.path_roles = path_roles or []
-        self.allowances = allowances or []
+        self.grants = LeaseGrants() if grants is None else grants
         self.protected = list(protected)
         self.maximum_added_lines = maximum_added_lines
         self.autonomous = autonomous
@@ -311,7 +319,7 @@ class EditPolicy(DecisionPolicy[EditBatch]):
                 path_roles=self.path_roles,
                 maximum_added_lines=self.maximum_added_lines,
                 autonomous=self.autonomous,
-                allowances=self.allowances,
+                allowances=self.grants.granted(),
                 python_source=suffix in (".py", ".pyi"),
             )
         )

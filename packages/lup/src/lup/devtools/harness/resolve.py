@@ -18,10 +18,8 @@ from pydantic import BaseModel, ConfigDict
 
 from lup.codescan.markers import find_feedback
 from lup.mcp import create_mcp_server, serve_stdio, server_tool_names
-from lup.policy.identity import (
-    agent_identity_environment,
-    concern_allowances_environment,
-)
+from lup.policy.grants import LeaseGrants, allowance_grants_environment
+from lup.policy.identity import agent_identity_environment
 from lup.harness.environment import non_interactive_environment
 from lup.harness.ownership import GeneratedArtifacts, generated_artifacts
 from lup.harness.process import LaunchRequest, LocalProcessLauncher, ProcessLauncher
@@ -1121,7 +1119,7 @@ def run_resolve(
         reviewer_environment = {
             **session_environment,
             **agent_identity_environment(""),
-            **concern_allowances_environment([]),
+            **allowance_grants_environment(None),
         }
         for environment in (worker_environment, reviewer_environment):
             environment.update(codex_policy_environment(adapter, session_environment))
@@ -1231,12 +1229,13 @@ def run_resolve(
                 concern_id=context.concern_id,
                 lease_root=cwd,
             )
-            # Grants are per-concern: a lease carries only what the human
-            # approved with the concern it was leased for.
-            granted = [allowance.value for allowance in context.allowances]
+            # Grants are per-concern, and the environment names where this
+            # lease's are written rather than carrying them: a gate granted
+            # after this session starts reaches it, and one taken back stops
+            # applying, without the restart the environment would have needed.
             concern_environment = {
                 **worker_environment,
-                **concern_allowances_environment(granted),
+                **allowance_grants_environment(context.grants.document),
             }
             if adapter == "claude":
                 server = create_mcp_server(
@@ -1269,7 +1268,9 @@ def run_resolve(
                             merge_hooks(
                                 merge_hooks(
                                     create_permission_hooks([cwd], []),
-                                    worker_policy_hooks(granted, CLAUDE_SEMANTICS),
+                                    worker_policy_hooks(
+                                        context.grants, CLAUDE_SEMANTICS
+                                    ),
                                 ),
                                 create_git_inspection_hook(),
                             ),
@@ -1291,7 +1292,7 @@ def run_resolve(
                     # because its generated plugin hook is not reached either.
                     approval_policy="onRequest",
                     hooks=merge_hooks(
-                        worker_policy_hooks(granted, CODEX_SEMANTICS),
+                        worker_policy_hooks(context.grants, CODEX_SEMANTICS),
                         create_inbox_hooks(inbox),
                     ),
                     environment=concern_environment,
@@ -1312,7 +1313,7 @@ def run_resolve(
             )
 
         def worker_policy_hooks(
-            granted: list[str], semantics: NativeSemantics
+            grants: LeaseGrants, semantics: NativeSemantics
         ) -> LupHooksConfig:
             """Judge a worker's calls by the policy every plugin enforces.
 
@@ -1328,9 +1329,10 @@ def run_resolve(
             actor of this run, which is the same fact the generated tree
             derives its autonomous list from.
 
-            ``granted`` carries the concern's approved allowances, the same
-            list the session environment declares — so this judge and the
-            lease's deployed dispatcher release exactly the same gates.
+            ``grants`` is asked what the lease holds at each judgment, over
+            the same document the session environment names — so this judge
+            and the lease's deployed dispatcher release exactly the same
+            gates, including one granted after both were built.
 
             ``semantics`` is how one runtime's calls become the vocabulary
             this policy judges. It is a parameter rather than a constant
@@ -1342,7 +1344,7 @@ def run_resolve(
                     harness.declared_hooks,
                     autonomous=True,
                     interactive=False,
-                    allowances=granted,
+                    grants=grants,
                 ),
                 semantics,
             )

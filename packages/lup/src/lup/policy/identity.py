@@ -14,7 +14,6 @@ CLI's own environment, so an agent exporting this inside a shell tool call
 cannot reach the dispatcher that judges it.
 """
 
-import json
 from enum import StrEnum
 
 from lup.types import EnvVars
@@ -22,35 +21,28 @@ from lup.types import EnvVars
 AGENT_IDENTITY_ENV = "LUP_AGENT_IDENTITY"
 """Environment variable naming the declared identity of a launched session."""
 
-CONCERN_ALLOWANCES_ENV = "LUP_CONCERN_ALLOWANCES"
-"""Environment variable listing, as a JSON array, the edit gates granted."""
-
 
 class ConcernAllowance(StrEnum):
-    """One edit gate a concern's plan needs, granted with the concern itself.
+    """One edit gate a concern needs, which only a human can grant it.
 
-    These gates exist because the decision is a human's. Naming them at plan
-    time moves that decision to where the human is already deciding, instead
-    of parking the run to ask again for work they just approved.
+    These gates exist because the decision is a human's. Naming what a plan
+    needs at plan time moves that decision to where the human is already
+    deciding, instead of parking the run to ask again for work they just
+    approved — and a need nobody could have foreseen is asked for mid-lease
+    and granted to the session that asked.
 
-    This enum is the vocabulary's single source of truth: launchers declare
-    grants from it, the compiled dispatchers honour exactly its members, and
-    a name outside it in the environment is dropped rather than trusted.
+    This enum is the vocabulary's single source of truth: whoever grants a
+    gate names it from here, the compiled dispatchers honour exactly its
+    members, and a name outside it is dropped rather than trusted.
+
+    Where a lease's current grants live, and why they cannot live here, is
+    :mod:`lup.policy.grants`: a gate is granted while the session it is
+    granted to is already running, so unlike an identity it is not something
+    a launcher can settle in advance.
     """
 
     NEW_DEVTOOLS_MODULE = "new-devtools-module"
     ANTIPATTERN_SUPPRESSION = "antipattern-suppression"
-
-
-def concern_allowances_environment(allowances: list[str]) -> EnvVars:
-    """Declare the gates a human granted this session, or none at all.
-
-    Written on every session for the same reason an identity is: a silent
-    one would inherit grants made to somebody else's run. The value is a
-    JSON array so the dispatchers read it with the parser they already have
-    rather than splitting a delimiter.
-    """
-    return {CONCERN_ALLOWANCES_ENV: json.dumps(allowances)}
 
 
 def agent_identity_environment(identity: str) -> EnvVars:

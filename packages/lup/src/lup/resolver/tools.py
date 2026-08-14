@@ -386,7 +386,10 @@ def create_question_tools(
         "allowance is granted when a concern is planned, and a need nobody "
         "could have foreseen — a rule that only meets its exception once two "
         "branches are joined — has no other route. This asks a human and "
-        "waits, like any other question.",
+        "waits, like any other question. A grant takes effect in this "
+        "session, from the moment it is answered: retry the call that was "
+        "refused and carry on from where you stopped. Nothing restarts, and "
+        "nothing you have already done needs doing again.",
         name="request_allowance",
     )
     async def request_allowance(params: RequestAllowanceInput) -> AwaitAnswersOutput:
