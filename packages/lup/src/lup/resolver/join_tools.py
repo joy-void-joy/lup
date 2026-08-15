@@ -411,7 +411,6 @@ def create_join_tools(
     mailbox = QuestionMailbox(run_dir)
     process = launcher if launcher is not None else LocalProcessLauncher()
     worktrees = WorktreeOrchestrator(process, lease_root)
-    # lup: ignore[dict-str-payload] — open index keyed by commit sha
     prepared: dict[str, PreparedJoin] = {}
     """What preparing each parent found, as start_parent found it.
 
