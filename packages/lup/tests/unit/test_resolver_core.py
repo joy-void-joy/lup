@@ -18,12 +18,10 @@ from lup.harness.process import (
     ProcessLauncher,
 )
 from lup.resolver.dag import ConcernGraph, ConcernGraphError
+from lup.resolver.join_desk import JoinDesk, JoinPlan, JoinTip
 from lup.resolver.join_tools import (
-    JoinDesk,
-    JoinPlan,
     JoinReport,
     JoinStatusInput,
-    JoinTip,
     LandParentInput,
     StartParentInput,
     create_join_tools,

@@ -37,13 +37,13 @@ from lup.resolver.journal import (
     Journal,
     RecheckRepeatedEvent,
 )
-from lup.resolver.join_tools import (
+from lup.resolver.join_desk import (
     JoinDesk,
     JoinPlan,
     JoinProgressRecord,
     JoinTip,
-    merge_problems,
 )
+from lup.resolver.join_tools import merge_problems
 from lup.resolver.models import (
     ActorRef,
     CarriedParent,
