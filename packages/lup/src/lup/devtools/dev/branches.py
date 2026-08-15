@@ -912,7 +912,11 @@ def survey(as_json: bool) -> None:
     if has_remote and not as_json:
         typer.echo("Querying PR status...", err=True)
     pr_map: dict[str, PRStatus] = fetch_pr_status(branch_names) if has_remote else {}
-    leased = live_lease_branches(project_root() / ".lup" / "resolve")
+    # A run records every branch it ever leased, and a completed run keeps
+    # reporting the ones its cleanup did not delete. Only what is still on
+    # disk is a branch this sweep can say anything about.
+    lease_of = live_lease_branches(project_root() / ".lup" / "resolve")
+    leased = {name: lease_of[name] for name in branch_names if name in lease_of}
 
     def info(b: ParsedBranch) -> BranchInfo:
         name = b["name"]
