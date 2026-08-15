@@ -334,6 +334,29 @@ def test_defer_note_parses_kind_condition_and_text() -> None:
     assert note.text == "rework the cache layer"
 
 
+def test_a_wake_condition_may_run_past_the_line_it_starts_on() -> None:
+    """A gate worth stating is often longer than one line leaves room for.
+
+    The head is parsed from a note's assembled text and continuation lines
+    join it with a space, so a condition spanning them is one condition — the
+    same reason a note's own message may run on. A gate that has to fit on one
+    line is a gate written shorter than it needed to be, which is how a real
+    externally-checkable condition decays into restating that this code might
+    change again.
+    """
+    source = (
+        "# lup: defer[until the v2 API ships and every caller of the old\n"
+        "# endpoint has migrated off it]: rework the cache layer\n"
+    )
+    (note,) = find_feedback(source, ScanMode.PYTHON)
+    assert note.kind == "defer"
+    assert note.condition == (
+        "until the v2 API ships and every caller of the old endpoint has "
+        "migrated off it"
+    )
+    assert note.text == "rework the cache layer"
+
+
 def test_bare_defer_parks_without_a_condition() -> None:
     source = "# lup: defer: rework the cache layer\n"
     (note,) = find_feedback(source, ScanMode.PYTHON)

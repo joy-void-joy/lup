@@ -60,7 +60,12 @@ MARKER_RE = re.compile(r"(#|//)\s*lup\s*:", re.IGNORECASE)
 # never closes with `]:` is malformed and the note stays an ordinary (red,
 # visible) review note. The head is matched against a note's text (the part
 # after the marker), so the `ignore` keyword — which never reaches note
-# classification — is untouched.
+# classification — is untouched, and a condition may run past the line it
+# starts on: continuation lines join with a space before this sees them, the
+# same way a note's own message runs on. A gate that had to fit one line
+# would be written shorter than it needed to be, which is how a real
+# externally-checkable condition decays into restating that this code might
+# change again.
 DEFER_HEAD_RE = re.compile(
     r"^defer\s*(?:\[(?P<condition>.+?)\])?\s*:\s*", re.IGNORECASE
 )
