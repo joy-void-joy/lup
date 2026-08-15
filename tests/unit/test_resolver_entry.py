@@ -15,11 +15,18 @@ from lup.resolver.mailbox import (
     QuestionMailbox,
     RecordedAnswer,
 )
+from lup.resolver.core import planned_evidence
 from lup.resolver.models import (
+    AcceptanceCriterion,
     AdmissionRequest,
+    Concern,
+    ConcernInventory,
+    InventoryPlanner,
     MaterialQuestion,
+    PlannedConcern,
     QuestionAnswer,
     QuestionBatch,
+    ResolveInventory,
     ResolveRequest,
     SourceSnapshot,
 )
@@ -598,9 +605,11 @@ def test_the_preview_starts_no_run_and_leases_nothing(
 def seeded(
     comments: list[FoundComment], admission: AdmissionRequest | None
 ) -> ResolveRequest:
-    return seed_request(
+    request = seed_request(
         SourceSnapshot(branch="feature", commit="source-sha"), comments, [], admission
     )
+    assert request is not None
+    return request
 
 
 def test_the_preview_lists_exactly_what_a_run_would_plan_from(
@@ -667,6 +676,80 @@ def test_a_note_named_explicitly_reaches_a_fresh_run_once() -> None:
     request = seeded([scanned], AdmissionRequest(notes=named))
 
     assert [(note.file, note.line) for note in request.notes] == [
+        (Path("parked.py"), 2)
+    ]
+
+
+def test_an_invocation_carrying_no_evidence_of_any_kind_seeds_nothing() -> None:
+    """The one rule that decides whether a fresh run starts, asked once.
+
+    Seeding folds together exactly the evidence a request refuses to exist
+    without, so nothing to plan from is answered here rather than restated by
+    the caller. A second copy of this in the entry would be the copy that
+    drifts: no test can reach it, so dropping a term from it — the term that
+    lets words alone start a run — leaves a green suite behind.
+    """
+    assert (
+        seed_request(
+            SourceSnapshot(branch="feature", commit="source-sha"), [], [], None
+        )
+        is None
+    )
+
+
+async def test_a_statement_seeded_run_reaches_a_planned_inventory() -> None:
+    """Words alone have to arrive as a concern, not merely as a request.
+
+    Positions are the whole join between what was said and what gets worked
+    on: a planner cites indexes and never echoes content, so a statement that
+    seeds a run but resolves back as a note — or as nothing — is the failure
+    this pins. The tree's note is mixed in because the ordering is what makes
+    the citation ambiguous, and a request holding statements alone would pass
+    with the arithmetic wrong.
+    """
+    request = seeded(
+        [intake_note()], AdmissionRequest(statements=["the relay must investigate"])
+    )
+
+    async def plan(evidence: ResolveRequest) -> ResolveInventory:
+        """Stand in for the planning turn, citing every position it was given."""
+        inventory = ConcernInventory(
+            concerns=[
+                PlannedConcern(
+                    id="relay-investigation",
+                    title="Relay investigation",
+                    spec="Investigate what the relay does when nobody is waiting",
+                    criteria=[
+                        AcceptanceCriterion(id="rel-1", description="it is answered")
+                    ],
+                    evidence_indexes=list(range(evidence.evidence_count())),
+                )
+            ]
+        )
+        return ResolveInventory(
+            source=evidence.source,
+            concerns=[
+                Concern(
+                    id=planned.id,
+                    title=planned.title,
+                    spec=planned.spec,
+                    criteria=planned.criteria,
+                    notes=cited.notes,
+                    evidence=cited.evidence,
+                    issues=cited.issues,
+                )
+                for planned in inventory.concerns
+                for cited in [planned_evidence(evidence, planned.evidence_indexes)]
+            ],
+        )
+
+    planner: InventoryPlanner = plan
+    concerns = (await request.inventory(planner)).concerns
+
+    assert [concern.evidence for concern in concerns] == [
+        "the relay must investigate"
+    ]
+    assert [(note.file, note.line) for note in concerns[0].notes] == [
         (Path("parked.py"), 2)
     ]
 

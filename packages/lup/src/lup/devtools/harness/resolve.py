@@ -1162,7 +1162,7 @@ def seed_request(
     comments: list[FoundComment],
     issues: list[IssueEvidence],
     admission: AdmissionRequest | None,
-) -> ResolveRequest:
+) -> ResolveRequest | None:
     """The evidence a fresh run plans from: what the tree holds and what was said.
 
     A statement has nowhere else to come from — somebody arriving with the
@@ -1175,6 +1175,12 @@ def seed_request(
     Evidence named explicitly is folded in rather than appended, because a
     note or an issue reaches a fresh run through the scan as well, and the
     same work described twice is planned as two concerns.
+
+    Having nothing to plan from is answered here, as ``None``, rather than by
+    whoever calls this: the evidence folded together here is exactly the
+    evidence a request refuses to exist without, so a caller deciding it
+    separately is a second copy of one rule — and the copy that drifts is the
+    one a suite stays green through, because no test can reach it.
     """
     named = admission.notes if admission is not None else []
     statements = admission.statements if admission is not None else []
@@ -1190,6 +1196,8 @@ def seed_request(
     ]
     notes = {(note.file, note.line): note for note in [*scanned, *named]}
     numbered = {issue.number: issue for issue in [*issues, *admitted]}
+    if not notes and not statements and not numbered:
+        return None
     return ResolveRequest(
         source=source,
         notes=list(notes.values()),
@@ -1354,7 +1362,7 @@ def run_resolve(
     # starting run is refused; one already recorded keeps the base it
     # recorded, so a pull mid-run never strands it.
     if not ResolverStateRepository(state_root, resolved_run_id).exists():
-        if abort_reason is None and admission is None:
+        if abort_reason is None:
             require_fresh_base(probe_base_freshness(launcher, root))
 
     async def execute() -> None:
@@ -1790,13 +1798,6 @@ def run_resolve(
                         typer.echo(
                             f"taking as evidence: {issue.reference()} {issue.title}"
                         )
-                    if not comments and not open_issues and admission is None:
-                        typer.echo(
-                            "No unresolved # lup: comments, and no open issues. "
-                            "Seed a run with what you want done instead: "
-                            '--admit "<the work, in your own words>".'
-                        )
-                        return
                     note_paths = sorted({Path(comment.file) for comment in comments})
                     source = resolver_source_snapshot(
                         launcher,
@@ -1804,9 +1805,15 @@ def run_resolve(
                         core.repository.root,
                         note_paths,
                     )
-                    manifest = await core.run(
-                        seed_request(source, comments, open_issues, admission)
-                    )
+                    seeded = seed_request(source, comments, open_issues, admission)
+                    if seeded is None:
+                        typer.echo(
+                            "No unresolved # lup: comments, and no open issues. "
+                            "Seed a run with what you want done instead: "
+                            '--admit "<the work, in your own words>".'
+                        )
+                        return
+                    manifest = await core.run(seeded)
             except ResolverDrained as drained:
                 # Exit zero: an operator asked for this and got it, which is
                 # the command succeeding rather than the run failing.
