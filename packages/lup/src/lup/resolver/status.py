@@ -141,23 +141,23 @@ class RunStatus(BaseModel):
     """The current phase's iterator, where the phase has one worth drawing."""
 
     def verdict(self) -> str:
-        """One line a reader can act on without interpreting the rest.
+        """Whether anything is driving this run, in the words to say it in.
 
         The held lock is the fact; quiet time is context on top of it, never
         the verdict on its own. Judging by silence produced a confident
         wrong "it crashed" about a run that was mid-turn, because a long
         model turn looks exactly like a stall from outside.
+
+        Short enough to sit at the end of a line that already carries the
+        phase, so the phase is not named twice.
         """
         if not self.exists:
             return "no such run under this project's .lup/resolve"
         if not self.held:
-            return f"not running — parked or finished in phase {self.phase}"
+            return "stopped"
         if self.last is None:
-            return "running — a process holds the lock, nothing recorded yet"
-        return (
-            "running — a process holds the lock, last recorded "
-            f"{int(self.last.quiet_for().total_seconds())}s ago"
-        )
+            return "running"
+        return f"running, last {int(self.last.quiet_for().total_seconds())}s ago"
 
     def watched(self) -> str:
         """The part of this projection a watch reports a change in.

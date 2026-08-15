@@ -3,6 +3,7 @@
 from datetime import datetime, timedelta
 from pathlib import Path
 
+import pytest
 from pydantic import TypeAdapter
 
 from lup.channels.models import local_stamp, utc_now
@@ -17,7 +18,7 @@ from lup.resolver.status import (
     elapsed_per_item,
     run_status,
 )
-from lup.devtools.supervisor.doors import attention_line
+from lup.devtools.supervisor.doors import report_status, status_header
 
 
 def test_a_bar_reports_the_rate_of_the_stretches_actually_worked() -> None:
@@ -251,7 +252,7 @@ def test_a_reading_is_dated_in_the_reader_s_own_zone() -> None:
     assert stamp.endswith(now.strftime("%Z"))
 
 
-def test_the_attention_line_carries_progress_losses_and_who_is_held_up() -> None:
+def test_the_header_carries_progress_losses_and_who_is_held_up() -> None:
     """Three facts and no fourth: how far, what was lost, who is waiting.
 
     A per-status breakdown is progress rather than attention — nobody acts
@@ -269,16 +270,56 @@ def test_the_attention_line_carries_progress_losses_and_who_is_held_up() -> None
         run_id="r", exists=True, held=True, phase=ResolvePhase.WORKERS, counts=counts
     )
 
-    assert attention_line(working).endswith(
+    assert status_header(working).endswith(
         "workers · 38/39 settled · 1 failed · running"
     )
-    assert attention_line(working.model_copy(update={"unanswered": 2})).endswith(
-        "38/39 settled · 1 failed · 2 questions waiting"
+    assert status_header(working.model_copy(update={"unanswered": 2})).endswith(
+        "38/39 settled · 1 failed · 2 questions waiting · running"
     )
-    assert attention_line(working.model_copy(update={"held": False})).endswith(
-        "stopped"
+    assert status_header(working.model_copy(update={"held": False})).endswith("stopped")
+    assert "retired" not in status_header(working)
+
+
+def test_the_header_is_the_report_it_heads(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """One composition, so the compact form cannot drift from the full one.
+
+    Two renderers over the same projection is what let a flag go on saying
+    what it carried after the line it described had moved on.
+    """
+    working = RunStatus(
+        run_id="r",
+        exists=True,
+        held=True,
+        phase=ResolvePhase.INTEGRATION,
+        counts=[StatusCount(status=ConcernStatus.VERIFIED, concerns=4)],
+        progress=PhaseProgress(label="joins", done=5, total=13),
     )
-    assert "retired" not in attention_line(working)
+
+    report_status(working)
+
+    printed = capsys.readouterr().out.splitlines()
+    assert printed[0] == status_header(working)
+    assert not any(line.startswith(status_header(working)) for line in printed[1:])
+
+
+def test_the_header_says_how_much_longer_the_phase_it_is_in_should_take() -> None:
+    """The figure a reader plans around, on the line they are handed."""
+    joining = RunStatus(
+        run_id="r",
+        exists=True,
+        held=True,
+        phase=ResolvePhase.INTEGRATION,
+        counts=[StatusCount(status=ConcernStatus.INTEGRATING, concerns=13)],
+        progress=PhaseProgress(
+            label="joins", done=5, total=13, per_item=timedelta(minutes=2)
+        ),
+    )
+
+    assert "joins " in status_header(joining)
+    assert "5/13" in status_header(joining)
+    assert "ETA 16m00s" in status_header(joining)
 
 
 def test_a_run_that_lost_nothing_says_nothing_about_losses() -> None:
@@ -291,7 +332,7 @@ def test_a_run_that_lost_nothing_says_nothing_about_losses() -> None:
         counts=[StatusCount(status=ConcernStatus.VERIFIED, concerns=4)],
     )
 
-    assert attention_line(clean).endswith("workers · 4/4 settled · running")
+    assert status_header(clean).endswith("workers · 4/4 settled · running")
 
 
 def test_the_fraction_can_reach_its_own_total() -> None:
@@ -313,7 +354,7 @@ def test_the_fraction_can_reach_its_own_total() -> None:
         ],
     )
 
-    assert "4/4 settled" in attention_line(ended)
+    assert "4/4 settled" in status_header(ended)
 
 
 def test_a_caller_wanting_another_shape_passes_one() -> None:
