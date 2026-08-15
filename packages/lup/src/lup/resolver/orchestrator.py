@@ -166,6 +166,41 @@ class WorktreeOrchestrator:
         if self.preparer is not None:
             self.preparer.prepare(lease.root)
 
+    def read_only_checkout(self, root: Path, commit: str) -> None:
+        """A detached worktree at one commit, for actors that only read it.
+
+        Detached and unnamed because nothing here owns a branch: these exist
+        so several readers can examine one tree at once without sharing a
+        directory. Reviewers are denied Write and Edit, but a criterion is
+        often "the gate is green" or "the drift check settles", and running
+        those writes caches and re-renders artifacts. Sharing one checkout
+        would have concurrent readers regenerating into each other, and into
+        the integration tree the audit depends on being clean.
+        """
+        self.require(
+            LaunchRequest(
+                arguments=["git", "worktree", "add", "--detach", str(root), commit],
+                cwd=self.workspace,
+            ),
+            f"failed to check out {commit[:12]} for reading",
+        )
+        if self.preparer is not None:
+            self.preparer.prepare(root)
+
+    def discard_checkout(self, root: Path) -> None:
+        """Drop a read-only checkout and whatever running the gate left in it.
+
+        Forced because that is the point: a reader's caches and regenerated
+        artifacts are exactly what makes it dirty, and none of it is work
+        anybody wanted kept.
+        """
+        self.launcher.launch(
+            LaunchRequest(
+                arguments=["git", "worktree", "remove", "--force", str(root)],
+                cwd=self.workspace,
+            )
+        )
+
     def clear_notes(
         self, lease: WritableRootLease, concern: Concern, base_commit: str
     ) -> NoteClearanceCommit:

@@ -21,7 +21,9 @@ costs a reviewer turn per overlapping pair, so it is asked for rather than
 assumed.
 """
 
-from collections.abc import AsyncIterator
+import asyncio
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from lup.channels.models import utc_now
@@ -93,6 +95,7 @@ class Joiner:
         journal: Journal,
         standing_rechecks: bool = False,
         regeneration: list[str] | None = None,
+        parallel_rechecks: int = 4,
     ) -> None:
         self.run = run
         self.runner = runner
@@ -102,6 +105,15 @@ class Joiner:
         self.journal = journal
         self.standing_rechecks = standing_rechecks
         self.regeneration = regeneration or []
+        self.parallel_rechecks = parallel_rechecks
+        """How many concerns re-check the finished tree at once.
+
+        The final pass is one reviewer turn per integrated concern and they
+        are wholly independent — each reads the same tree and answers only
+        about its own criteria. Run in sequence, one measured run's 21
+        concerns at 16.3 minutes a turn is most of a working day for a phase
+        with no ordering in it at all.
+        """
 
     async def join_commits(
         self,
@@ -565,32 +577,81 @@ class Joiner:
         about to act on instead of completing around them.
         """
         integrated = {identifier: True for identifier in integration.concerns}
+        examining = [concern for concern in state.concerns if concern.id in integrated]
+        if not examining:
+            return []
+        async with self.reading_pool(integration, len(examining)) as trees:
 
-        async def asked() -> AsyncIterator[MaterialQuestion]:
-            """Each concern whose criteria no longer hold in the merged tree."""
-            for concern in state.concerns:
-                if concern.id not in integrated:
+            async def examine(concern: Concern) -> MaterialQuestion | None:
+                tree = await trees.get()
+                try:
+                    return await self.recheck_one(concern, tree, integration)
+                finally:
+                    trees.put_nowait(tree)
+
+            asked = await asyncio.gather(*[examine(concern) for concern in examining])
+        return [question for question in asked if question is not None]
+
+    @asynccontextmanager
+    async def reading_pool(
+        self, integration: IntegrationRecord, wanted: int
+    ) -> AsyncGenerator["asyncio.Queue[Path]"]:
+        """A few checkouts of the finished tree, handed round by the readers.
+
+        One checkout per concern would be dozens of copies of the repository
+        for a phase that only reads; one shared between them has concurrent
+        gates regenerating into each other. A pool of the same width the
+        workers run at is the middle, and it is the width the host's
+        allowance was already sized for.
+
+        The integration worktree itself is never lent out. It is what the
+        audit and the review branch are read from, and a reader running the
+        project's gate in it would leave it dirty.
+        """
+        trees: asyncio.Queue[Path] = asyncio.Queue()
+        commit = integration.commit
+        width = min(self.parallel_rechecks, wanted)
+        roots = [
+            integration.worktree.parent / f"{integration.worktree.name}-reading-{index}"
+            for index in range(width)
+        ]
+        made: list[Path] = []  # lup: ignore[empty-collection] — cleanup ledger
+        try:
+            for root in roots:
+                if commit is None:
+                    # Nothing to check out from, so the readers share the tree
+                    # they would otherwise have copied. Only reachable before
+                    # the join has committed anything.
+                    trees.put_nowait(integration.worktree)
                     continue
-                question = await self.recheck_concern(
-                    concern,
-                    integration.worktree,
-                    situation=(
-                        "Every concern in this run is now integrated into one "
-                        "tree. Re-check your concern's acceptance criteria "
-                        "against that tree rather than the worktree you "
-                        "reviewed. A criterion you passed before may no "
-                        "longer hold now that a sibling has landed; say so "
-                        "plainly if it does not.\n\n"
-                        f"Integrated concerns: {', '.join(integration.concerns)}\n"
-                        f"Worktree: {integration.worktree}"
-                    ),
-                    occasion="integrated",
-                    lost_because="once every sibling is integrated",
-                )
-                if question is not None:
-                    yield question
+                self.worktrees.discard_checkout(root)
+                self.worktrees.read_only_checkout(root, commit)
+                made.append(root)
+                trees.put_nowait(root)
+            yield trees
+        finally:
+            for root in made:
+                self.worktrees.discard_checkout(root)
 
-        return [question async for question in asked()]
+    async def recheck_one(
+        self, concern: Concern, tree: Path, integration: IntegrationRecord
+    ) -> MaterialQuestion | None:
+        """Ask one concern's reviewer whether it still holds in the merged tree."""
+        return await self.recheck_concern(
+            concern,
+            tree,
+            situation=(
+                "Every concern in this run is now integrated into one tree. "
+                "Re-check your concern's acceptance criteria against that "
+                "tree rather than the worktree you reviewed. A criterion you "
+                "passed before may no longer hold now that a sibling has "
+                "landed; say so plainly if it does not.\n\n"
+                f"Integrated concerns: {', '.join(integration.concerns)}\n"
+                f"Worktree: {tree}"
+            ),
+            occasion="integrated",
+            lost_because="once every sibling is integrated",
+        )
 
     async def settle_rechecks(
         self, asked: list[MaterialQuestion]

@@ -5673,6 +5673,104 @@ def test_a_tree_that_renders_nothing_authors_everything_it_changed(
 
 
 @pytest.mark.asyncio
+async def test_the_final_recheck_reads_the_tree_from_a_checkout_of_its_own(
+    tmp_path: Path,
+) -> None:
+    """The last phase is a reviewer turn per concern, with no order between them.
+
+    Serially, one measured run's 21 integrated concerns at 16.3 minutes a
+    turn is most of a working day spent on a phase where nothing waits for
+    anything. They run together instead — but not in one directory: a
+    reviewer is denied Write and Edit, and still runs the project's gate,
+    which writes caches and re-renders artifacts. Concurrent readers sharing
+    the integration worktree would regenerate into each other, and into the
+    tree the audit and the review branch are read from.
+    """
+    launcher = LocalProcessLauncher()
+    workspace = failure_leg_workspace(tmp_path, launcher)
+
+    def git(*arguments: str) -> str:
+        status = launcher.launch(
+            LaunchRequest(arguments=["git", *arguments], cwd=workspace)
+        )
+        assert status.code == 0, status.stderr
+        return status.stdout.strip()
+
+    read_from: list[Path] = []
+
+    def reviewer_response(root: Path, _output_name: str) -> JsonObject:
+        read_from.append(root)
+        return {
+            "concern_id": "a",
+            "accepted": True,
+            "generalized": True,
+            "reason": "criteria hold",
+            "criteria_met": ["held"],
+        }
+
+    run_id = "recheck-pool"
+    core = ResolverCore(
+        ResolverConfig(
+            state_root=tmp_path / "state",
+            workspace=workspace,
+            worktree_root=tmp_path / "resolver-worktrees",
+            run_id=run_id,
+            integration_branch=f"resolve/{run_id}/review",
+            max_parallel_workers=3,
+            verification_commands=[
+                VerificationCommand(name="verify", arguments=["git", "diff", "--check"])
+            ],
+        ),
+        resolve_spec(),
+        worker_recipe(tmp_path / "state", launcher, reviewer_response),
+        lambda root: resolver_test_factory(root, reviewer_response),
+        LiteralInvocationRenderer(),
+        launcher,
+    )
+    # One criterion id across the three, so a single scripted reviewer answers
+    # for whichever concern reaches it — the pool decides that, not the test.
+    concerns = [
+        Concern(
+            id=identifier,
+            title=identifier.title(),
+            spec=f"Resolve {identifier}",
+            criteria=[AcceptanceCriterion(id="held", description="done")],
+            integration_approved=True,
+        )
+        for identifier in ("a", "b", "c")
+    ]
+    state = ResolveState(
+        config_digest="config-sha",
+        run_id=run_id,
+        phase=ResolvePhase.INTEGRATION,
+        source=snapshot(workspace, launcher),
+        spec=resolve_spec(),
+        concerns=concerns,
+        progress=[
+            ConcernProgress(concern_id=item.id, status=ConcernStatus.VERIFIED)
+            for item in concerns
+        ],
+    )
+    core.persist(state)
+    integration = IntegrationRecord(
+        branch=f"resolve/{run_id}/review",
+        worktree=tmp_path / "resolver-worktrees" / "integration",
+        concerns=[item.id for item in concerns],
+        commit=git("rev-parse", "HEAD"),
+    )
+
+    asked = await core.joiner.recheck_criteria(state, integration)
+
+    assert asked == [], "every concern's criteria still hold"
+    assert len(read_from) == 3, "one reviewer turn per integrated concern"
+    # A checkout each, and never the integration worktree itself.
+    assert len(set(read_from)) == 3
+    assert integration.worktree not in read_from
+    # Nothing left behind: the pool discards what it made.
+    assert not [path for path in read_from if path.exists()]
+
+
+@pytest.mark.asyncio
 async def test_a_capped_wave_holds_the_cap_and_resumes_what_it_never_started(
     tmp_path: Path,
 ) -> None:

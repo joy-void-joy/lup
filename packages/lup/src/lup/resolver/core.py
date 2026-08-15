@@ -400,6 +400,7 @@ class ResolverCore:
             self.journal,
             standing_rechecks=config.recheck_standing_per_join,
             regeneration=config.regeneration_command,
+            parallel_rechecks=config.max_parallel_workers,
         )
         self.executor = ConcernExecutor(
             config,
