@@ -2,7 +2,7 @@
 
 import asyncio
 from collections import Counter
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from contextlib import AbstractAsyncContextManager
 from datetime import UTC, datetime
 from pathlib import Path
@@ -15,8 +15,16 @@ from lup.harness.ownership import GeneratedArtifacts, OwnedArtifact
 from lup.harness.process import (
     LaunchRequest,
     LocalProcessLauncher,
+    ProcessLauncher,
 )
 from lup.resolver.dag import ConcernGraph, ConcernGraphError
+from lup.resolver.join_tools import (
+    JoinReport,
+    JoinStatusInput,
+    LandParentInput,
+    StartParentInput,
+    create_join_tools,
+)
 from tests.unit.doubles import (
     FailingLauncher,
     ScriptedLauncher,
@@ -86,6 +94,7 @@ from lup.resolver.models import (
     SourceSnapshot,
     VerificationAcceptance,
     VerificationCommand,
+    HunkDisposition,
     WorkerContext,
     WorkerReport,
     WritableRootLease,
@@ -522,12 +531,134 @@ class UnusedInvocationRenderer(SkillInvocationRenderer):
 
 
 type ResolverResponse = Callable[[Path, str], JsonObject]
+type JoinDriver = Callable[[], Awaitable[None]]
+
+
+def merger_that_keeps_everything(
+    run_dir: Path, lease_root: Path, concern_id: str, launcher: ProcessLauncher
+) -> JoinDriver:
+    """A merger that lands every parent and accounts for whatever it is asked.
+
+    Written as a driver rather than a canned report because the merger now
+    owns its own sequence: a double that only answers with a report would
+    land nothing, and the checkpoint the run reads is written by the verbs,
+    not by the answer. Dispositioning every candidate as kept is the
+    simplest complete account — the point under test is that the gate is
+    reached and satisfied, not what a real merger would decide.
+    """
+    tools = {
+        tool.name: tool
+        for tool in create_join_tools(
+            run_dir, lease_root, concern_id, launcher=launcher
+        )
+    }
+
+    async def drive() -> None:
+        status = await tools["join_status"](JoinStatusInput())
+        if status.drain_requested:
+            return
+        for tip in status.remaining:
+            await tools["start_parent"](StartParentInput(commit=tip.commit))
+            landing = await tools["land_parent"](
+                LandParentInput(commit=tip.commit, summary=f"joined {tip.commit[:12]}")
+            )
+            if not landing.landed:
+                landing = await tools["land_parent"](
+                    LandParentInput(
+                        commit=tip.commit,
+                        summary=f"joined {tip.commit[:12]}",
+                        dispositions=[
+                            HunkDisposition(
+                                path=candidate.path,
+                                parent=candidate.parent,
+                                fate="kept",
+                                rationale="carried through the join",
+                            )
+                            for candidate in landing.unaccounted
+                        ],
+                    )
+                )
+            if landing.drain_requested:
+                return
+
+    return drive
+
+
+def recording_worker_recipe(
+    state_root: Path,
+    launcher: ProcessLauncher,
+    response: ResolverResponse,
+    log: list[str],
+) -> Callable[[WorkerContext], SessionFactory]:
+    """``worker_recipe``, for the tests that also read back every prompt."""
+
+    def run_dir() -> Path:
+        runs = sorted(path for path in state_root.iterdir() if path.is_dir())
+        if len(runs) != 1:
+            raise AssertionError(f"expected one run under {state_root}, found {runs}")
+        return runs[0]
+
+    def recipe(context: WorkerContext) -> SessionFactory:
+        return session_factory(
+            PromptRecordingSession(
+                context.root,
+                response,
+                log,
+                merger_that_keeps_everything(
+                    run_dir(), context.root, context.concern_id, launcher
+                )
+                if context.actor.kind == "merger"
+                else None,
+            )
+        )
+
+    return recipe
+
+
+def merger_draining_after_one_parent(
+    run_dir: Path, launcher: ProcessLauncher, response: ResolverResponse
+) -> Callable[[WorkerContext], SessionFactory]:
+    """A merger that lands one parent, then finds the run asked to stop.
+
+    The drain arrives mid-sequence rather than before the join, because
+    that is the boundary worth pinning: one already waiting stops the join
+    before a session is opened, which exercises a different path.
+    """
+
+    def recipe(context: WorkerContext) -> SessionFactory:
+        if context.actor.kind != "merger":
+            return resolver_test_factory(context.root, response)
+        tools = {
+            tool.name: tool
+            for tool in create_join_tools(
+                run_dir, context.root, context.concern_id, launcher=launcher
+            )
+        }
+
+        async def drive() -> None:
+            status = await tools["join_status"](JoinStatusInput())
+            first = status.remaining[0]
+            await tools["start_parent"](StartParentInput(commit=first.commit))
+            QuestionMailbox(run_dir).drain(
+                ParkRequest(run_id=run_dir.name, reason="operator stopped it")
+            )
+            landed = await tools["land_parent"](
+                LandParentInput(commit=first.commit, summary="joined the first")
+            )
+            assert landed.drain_requested, "the landing verb reports a waiting drain"
+
+        return resolver_test_factory(context.root, response, drive)
+
+    return recipe
 
 
 class ResolverTestSession(Session):
-    def __init__(self, root: Path, response: ResolverResponse) -> None:
+    def __init__(
+        self, root: Path, response: ResolverResponse, joining: JoinDriver | None = None
+    ) -> None:
         self.root = root
         self.response = response
+        self.joining = joining
         self.sequence = 0
 
     async def start[T: BaseModel | None](
@@ -537,9 +668,15 @@ class ResolverTestSession(Session):
         if not is_output_model(output_type):
             raise AssertionError("resolver turns must request typed output")
         self.sequence += 1
-        output = output_type.model_validate(
-            self.response(self.root, output_type.__name__)
-        )
+        if output_type is JoinReport and self.joining is not None:
+            await self.joining()
+            output = output_type.model_validate(
+                {"plan": "in the order given", "summary": "joined every parent"}
+            )
+        else:
+            output = output_type.model_validate(
+                self.response(self.root, output_type.__name__)
+            )
         result = turn_result(
             output,
             identifiers(f"resolver-{self.root.name}", f"turn-{self.sequence}"),
@@ -547,8 +684,46 @@ class ResolverTestSession(Session):
         return TurnHandle[T](turn=StaticTurn(result))
 
 
-def resolver_test_factory(root: Path, response: ResolverResponse) -> SessionFactory:
-    return session_factory(ResolverTestSession(root, response))
+def resolver_test_factory(
+    root: Path, response: ResolverResponse, joining: JoinDriver | None = None
+) -> SessionFactory:
+    return session_factory(ResolverTestSession(root, response, joining))
+
+
+def worker_recipe(
+    state_root: Path,
+    launcher: ProcessLauncher,
+    response: ResolverResponse,
+) -> Callable[[WorkerContext], SessionFactory]:
+    """The worker factory a test core gets, with a merger that drives its join.
+
+    One recipe opens both a concern's worker and the merger that joins into
+    it, and only the second is handed the verbs that land a parent — the
+    same split the real factory makes, for the same reason.
+
+    The run directory is found rather than named, because a test builds its
+    core with the run id inline and there is exactly one run under a test's
+    state root. Resolved at session time, when the directory exists.
+    """
+
+    def run_dir() -> Path:
+        runs = sorted(path for path in state_root.iterdir() if path.is_dir())
+        if len(runs) != 1:
+            raise AssertionError(f"expected one run under {state_root}, found {runs}")
+        return runs[0]
+
+    def recipe(context: WorkerContext) -> SessionFactory:
+        return resolver_test_factory(
+            context.root,
+            response,
+            merger_that_keeps_everything(
+                run_dir(), context.root, context.concern_id, launcher
+            )
+            if context.actor.kind == "merger"
+            else None,
+        )
+
+    return recipe
 
 
 class LiteralInvocationRenderer(SkillInvocationRenderer):
@@ -694,7 +869,7 @@ async def test_one_note_raising_two_issues_reaches_both_concerns(
             ],
         ),
         resolve_spec(),
-        lambda context: resolver_test_factory(context.root, reviewer_response),
+        worker_recipe(tmp_path / "state", recording_launcher(), reviewer_response),
         lambda root: resolver_test_factory(root, reviewer_response),
         LiteralInvocationRenderer(),
         recording_launcher(),
@@ -754,7 +929,7 @@ async def test_inventory_planner_clusters_every_contextual_note_once(
             ],
         ),
         resolve_spec(),
-        lambda context: resolver_test_factory(context.root, reviewer_response),
+        worker_recipe(tmp_path / "state", recording_launcher(), reviewer_response),
         lambda root: resolver_test_factory(root, reviewer_response),
         LiteralInvocationRenderer(),
         recording_launcher(),
@@ -1595,7 +1770,7 @@ async def test_complete_resolver_lifecycle_uses_real_isolated_git_worktrees(
             ],
         ),
         resolve_spec(),
-        lambda context: resolver_test_factory(context.root, worker_response),
+        worker_recipe(tmp_path / "state", launcher, worker_response),
         lambda root: resolver_test_factory(root, reviewer_response),
         LiteralInvocationRenderer(),
         launcher,
@@ -1758,7 +1933,7 @@ async def test_resume_after_a_kill_past_workers_completes_without_backward_phase
                 ],
             ),
             resolve_spec(),
-            lambda context: resolver_test_factory(context.root, worker_response),
+            worker_recipe(tmp_path / "state", launcher, worker_response),
             lambda root: resolver_test_factory(root, reviewer_response),
             LiteralInvocationRenderer(),
             launcher,
@@ -1916,7 +2091,7 @@ def failure_leg_core(
             recheck_standing_per_join=recheck_standing_per_join,
         ),
         resolve_spec(),
-        lambda context: resolver_test_factory(context.root, worker_response),
+        worker_recipe(tmp_path / "state", launcher, worker_response),
         lambda root: resolver_test_factory(root, reviewer_response),
         LiteralInvocationRenderer(),
         launcher,
@@ -2507,7 +2682,7 @@ async def test_aborting_a_parked_run_frees_its_leases_and_refuses_resumption(
                 ],
             ),
             resolve_spec(),
-            lambda context: resolver_test_factory(context.root, worker_response),
+            worker_recipe(tmp_path / "state", launcher, worker_response),
             lambda root: resolver_test_factory(root, lambda *_: {}),
             LiteralInvocationRenderer(),
             launcher,
@@ -2590,7 +2765,7 @@ async def test_midrun_question_parks_the_concern_and_resumes_after_answers(
                 ],
             ),
             resolve_spec(),
-            lambda context: resolver_test_factory(context.root, worker_response),
+            worker_recipe(tmp_path / "state", launcher, worker_response),
             lambda root: resolver_test_factory(root, reviewer_response),
             LiteralInvocationRenderer(),
             launcher,
@@ -3092,10 +3267,16 @@ async def test_a_drain_stops_integration_between_two_parents(tmp_path: Path) -> 
     git("checkout", "source")
 
     def unused_actor(_root: Path, _output_name: str) -> JsonObject:
-        raise AssertionError("a clean join spends no actor turn")
+        raise AssertionError("a drained join spends no turn past the merger's")
 
     core = failure_leg_core(
         tmp_path, workspace, launcher, "drained-join", unused_actor, unused_actor
+    )
+    # Asked for while the merger is mid-sequence, which is the boundary under
+    # test. A drain already waiting when integration begins stops the join
+    # before a session is opened at all, so it never reaches this boundary.
+    core.turns.worker_factory = merger_draining_after_one_parent(
+        tmp_path / "state" / "drained-join", launcher, unused_actor
     )
     concerns = [concern("a"), concern("b")]
     state = ResolveState(
@@ -3119,8 +3300,6 @@ async def test_a_drain_stops_integration_between_two_parents(tmp_path: Path) -> 
         ],
     )
     core.persist(state)
-    core.mailbox.drain(ParkRequest(run_id="drained-join", reason="operator stopped it"))
-
     with pytest.raises(ResolverDrained) as drained:
         await core.integrate(state, state.outcomes)
 
@@ -3184,7 +3363,7 @@ async def test_a_finished_run_releases_itself_without_a_human_gate(
                 ],
             ),
             resolve_spec(),
-            lambda context: resolver_test_factory(context.root, worker_response),
+            worker_recipe(tmp_path / "state", launcher, worker_response),
             lambda root: resolver_test_factory(root, reviewer_response),
             LiteralInvocationRenderer(),
             launcher,
@@ -3218,7 +3397,7 @@ async def test_an_offer_outside_a_closed_gate_never_decides(
             verification_commands=[VerificationCommand(name="v", arguments=["git"])],
         ),
         resolve_spec(),
-        lambda context: resolver_test_factory(context.root, lambda *_: {}),
+        worker_recipe(tmp_path / "state", launcher, lambda *_: {}),
         lambda root: resolver_test_factory(root, lambda *_: {}),
         LiteralInvocationRenderer(),
         launcher,
@@ -3263,7 +3442,7 @@ async def test_a_design_question_records_an_answer_in_the_humans_own_words(
             verification_commands=[VerificationCommand(name="v", arguments=["git"])],
         ),
         resolve_spec(),
-        lambda context: resolver_test_factory(context.root, lambda *_: {}),
+        worker_recipe(tmp_path / "state", launcher, lambda *_: {}),
         lambda root: resolver_test_factory(root, lambda *_: {}),
         LiteralInvocationRenderer(),
         launcher,
@@ -3311,7 +3490,7 @@ def test_an_allowance_answered_in_prose_is_refused_rather_than_read_as_no(
             verification_commands=[VerificationCommand(name="v", arguments=["git"])],
         ),
         resolve_spec(),
-        lambda context: resolver_test_factory(context.root, lambda *_: {}),
+        worker_recipe(tmp_path / "state", launcher, lambda *_: {}),
         lambda root: resolver_test_factory(root, lambda *_: {}),
         LiteralInvocationRenderer(),
         launcher,
@@ -3382,7 +3561,7 @@ def admitting_core(
             ],
         ),
         resolve_spec(),
-        lambda context: resolver_test_factory(context.root, worker_response),
+        worker_recipe(tmp_path / "state", launcher, worker_response),
         lambda root: resolver_test_factory(root, reviewer_response),
         LiteralInvocationRenderer(),
         launcher,
@@ -3912,7 +4091,7 @@ async def test_observer_receives_every_persisted_transition_in_order(
             ],
         ),
         resolve_spec(),
-        lambda context: resolver_test_factory(context.root, worker_response),
+        worker_recipe(tmp_path / "state", launcher, worker_response),
         lambda root: resolver_test_factory(root, reviewer_response),
         LiteralInvocationRenderer(),
         launcher,
@@ -4149,9 +4328,11 @@ async def test_a_granted_allowance_reaches_the_sessions_launched_next(
             "files_changed": ["a.txt"],
         }
 
+    granting = worker_recipe(tmp_path / "state", launcher, worker_response)
+
     def recording_worker_factory(context: WorkerContext) -> SessionFactory:
         carried.append(list(context.allowances))
-        return resolver_test_factory(context.root, worker_response)
+        return granting(context)
 
     core = ResolverCore(
         ResolverConfig(
@@ -4202,8 +4383,14 @@ async def test_a_granted_allowance_reaches_the_sessions_launched_next(
 class PromptRecordingSession(ResolverTestSession):
     """A scripted session that also records every prompt it was handed."""
 
-    def __init__(self, root: Path, response: ResolverResponse, log: list[str]) -> None:
-        super().__init__(root, response)
+    def __init__(
+        self,
+        root: Path,
+        response: ResolverResponse,
+        log: list[str],
+        joining: JoinDriver | None = None,
+    ) -> None:
+        super().__init__(root, response, joining)
         self.log = log
 
     async def start[T: BaseModel | None](
@@ -4233,7 +4420,7 @@ def recheck_core(
             ],
         ),
         resolve_spec(),
-        lambda context: resolver_test_factory(context.root, reviewer_response),
+        worker_recipe(tmp_path / "state", recording_launcher(), reviewer_response),
         lambda root: session_factory(
             PromptRecordingSession(root, reviewer_response, log)
         ),
@@ -4427,8 +4614,8 @@ async def test_completeness_guard_appends_and_names_the_gap(tmp_path: Path) -> N
             ],
         ),
         resolve_spec(),
-        lambda context: session_factory(
-            PromptRecordingSession(context.root, worker_response, worker_prompts)
+        recording_worker_recipe(
+            tmp_path / "state", launcher, worker_response, worker_prompts
         ),
         lambda root: resolver_test_factory(root, reviewer_response),
         LiteralInvocationRenderer(),
@@ -4504,8 +4691,8 @@ async def test_a_carried_residual_takes_the_acceptance_the_reviewer_wrote(
             ],
         ),
         resolve_spec(),
-        lambda context: session_factory(
-            PromptRecordingSession(context.root, worker_response, worker_prompts)
+        recording_worker_recipe(
+            tmp_path / "state", launcher, worker_response, worker_prompts
         ),
         lambda root: resolver_test_factory(root, reviewer_response),
         LiteralInvocationRenderer(),
@@ -4625,8 +4812,8 @@ async def test_a_revision_carries_its_assignment_and_names_its_round(
             ],
         ),
         resolve_spec(),
-        lambda context: session_factory(
-            PromptRecordingSession(context.root, worker_response, worker_prompts)
+        recording_worker_recipe(
+            tmp_path / "state", launcher, worker_response, worker_prompts
         ),
         lambda root: resolver_test_factory(root, reviewer_response),
         LiteralInvocationRenderer(),
@@ -4701,8 +4888,8 @@ async def test_an_answered_question_credited_as_met_is_corrected_not_charged(
             ],
         ),
         resolve_spec(),
-        lambda context: session_factory(
-            PromptRecordingSession(context.root, worker_response, worker_prompts)
+        recording_worker_recipe(
+            tmp_path / "state", launcher, worker_response, worker_prompts
         ),
         lambda root: resolver_test_factory(root, reviewer_response),
         LiteralInvocationRenderer(),
@@ -4777,7 +4964,7 @@ async def test_a_round_that_commits_nothing_neither_charges_nor_reviews_an_empty
             ],
         ),
         resolve_spec(),
-        lambda context: resolver_test_factory(context.root, worker_response),
+        worker_recipe(tmp_path / "state", launcher, worker_response),
         lambda root: session_factory(
             PromptRecordingSession(root, reviewer_response, reviewer_prompts)
         ),
@@ -4845,7 +5032,7 @@ async def test_review_prompt_names_the_range_and_the_rulings(tmp_path: Path) -> 
             ],
         ),
         resolve_spec(),
-        lambda context: resolver_test_factory(context.root, worker_response),
+        worker_recipe(tmp_path / "state", launcher, worker_response),
         lambda root: session_factory(
             PromptRecordingSession(root, reviewer_response, reviewer_prompts)
         ),
@@ -4898,7 +5085,7 @@ async def test_plan_prompt_states_the_marker_stripping_rule(tmp_path: Path) -> N
             ],
         ),
         resolve_spec(),
-        lambda context: resolver_test_factory(context.root, planner_response),
+        worker_recipe(tmp_path / "state", recording_launcher(), planner_response),
         lambda root: session_factory(
             PromptRecordingSession(root, planner_response, log)
         ),

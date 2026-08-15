@@ -35,6 +35,13 @@ from lup.resolver.journal import (
     Journal,
     RecheckRepeatedEvent,
 )
+from lup.resolver.join_tools import (
+    JoinDesk,
+    JoinPlan,
+    JoinProgressRecord,
+    JoinTip,
+    merge_problems,
+)
 from lup.resolver.models import (
     ActorRef,
     CarriedParent,
@@ -43,7 +50,6 @@ from lup.resolver.models import (
     IntegrationRecord,
     JoinProgress,
     MaterialQuestion,
-    MergeReport,
     QuestionAnswer,
     RecheckRuling,
     ResolveState,
@@ -56,80 +62,6 @@ from lup.resolver.run import ResolveRun, ResolverInvariantError
 from lup.resolver.turns import TurnRunner
 from lup.resolver.verification import Verifier
 from lup.runtime.models import TurnInput, turn_request
-
-
-def names_parent(declared: str, parent: str) -> bool:
-    """Whether a disposition's commit names this candidate's parent.
-
-    Prefix rather than equality, because the merger is shown each candidate
-    abbreviated and keyed the full sha against it. Echoing back the twelve
-    characters it was given then read as having said nothing, and the refusal
-    quoted those same twelve characters at it, so there was no revision that
-    could converge: one observed merger dispositioned all three candidates
-    with correct rationales, twice, and the run failed on the second.
-    """
-    return bool(declared) and (
-        parent.startswith(declared) or declared.startswith(parent)
-    )
-
-
-def merge_problems(
-    merge: MergeReport, conflicted: list[Path], owed: list[DropCandidate]
-) -> list[str]:
-    """Every obligation this merge report left unmet.
-
-    Two obligations rather than two prohibitions. Every candidate the
-    detector raised must be dispositioned — containment, never equality,
-    because a legitimate resolution rewrites hunks and requiring the exact
-    candidate set back would reject the right answer. That holds for how a
-    disposition is keyed as much as for which ones are owed: it is matched
-    against the abbreviation the merger was shown rather than the sha it was
-    not. And every edit outside
-    the conflict set must be declared, because that is where a silent
-    override lives: the merger is handed an already-correct tree with
-    unrestricted write access, and the canonical joint failure is fixed in a
-    file that never conflicted.
-    """
-    undispositioned = sorted(
-        f"{candidate.path.as_posix()} from {candidate.parent[:12]}"
-        for candidate in owed
-        if not any(
-            disposition.path.as_posix() == candidate.path.as_posix()
-            and names_parent(disposition.parent, candidate.parent)
-            for disposition in merge.dispositions
-        )
-    )
-    unreasoned = sorted(
-        disposition.path.as_posix()
-        for disposition in merge.dispositions
-        if not disposition.rationale.strip()
-    )
-    declared = {edit.path.as_posix() for edit in merge.out_of_conflict_edits}
-    conflicting = {path.as_posix() for path in conflicted}
-    undeclared = sorted(
-        disposition.path.as_posix()
-        for disposition in merge.dispositions
-        if disposition.fate in {"rewritten", "superseded", "dropped"}
-        and disposition.path.as_posix() not in conflicting
-        and disposition.path.as_posix() not in declared
-    )
-    return [
-        *(
-            [f"content lost with nothing said about it: {', '.join(undispositioned)}"]
-            if undispositioned
-            else []
-        ),
-        *(
-            [f"dispositioned without a rationale: {', '.join(unreasoned)}"]
-            if unreasoned
-            else []
-        ),
-        *(
-            [f"changed outside the conflict set undeclared: {', '.join(undeclared)}"]
-            if undeclared
-            else []
-        ),
-    ]
 
 
 def asked_rulings(
@@ -178,107 +110,195 @@ class Joiner:
         purpose: str,
         title: str,
     ) -> str:
-        """Join parents one at a time, spending a turn only where one is owed.
+        """Hand the merger every parent at once, and let it drive the sequence.
 
         Every join is pairwise because git cannot merge N branches at once
         when it matters — octopus refuses outright on conflict rather than
         leaving an index to resolve, and 9 of 12 parents measured against one
-        run's part-built tree conflicted — so the boundary that moves is the
-        session rather than the sequence. One merger sees every parent, and
-        by parent six it has genuinely seen one through five.
+        run's part-built tree conflicted. What that argues for is a sequence,
+        not an orchestrator owning it: a merger handed one parent per turn
+        discovers the shape of the work as it goes, and meets the fact that
+        three branches all rewrite one module at the ninth of them, with two
+        already resolved in ways it would not have chosen knowing the third.
 
-        Only the parents no other parent contains are merged. The rest are in
-        the tree the moment their container lands, so merging them separately
-        buys a verification and can buy a turn spent concluding that nothing
-        happened.
+        So the plan goes over in full — every tip, the concern behind it and
+        the paths it wrote — and the merger sequences its own work through
+        ``start_parent`` and ``land_parent``. Those verbs keep what the loop
+        used to: the accounting gate refuses a short account while the merger
+        is still on the parent it belongs to, verification runs per parent so
+        a red gate names one, the checkpoint is written as each lands, and a
+        drain is reported on the way out of every landing.
+
+        Only the parents no other parent contains are on the table. The rest
+        are in the tree the moment their container lands, so naming them
+        separately buys a verification and can buy a turn spent concluding
+        that nothing happened.
         """
         if len(commits) < 2:
             raise ValueError("a semantic join requires at least two commits")
         if not lease.root.exists():
             self.worktrees.create(lease, commits[0])
         base = self.worktrees.head(lease)
-        current = base
-        joined: list[str] = []  # lup: ignore[empty-collection] — audit input
         ordered = self.join_order(lease, base, commits[1:])
         carried = self.carried_parents(lease, ordered)
         riding = {item.commit: item.inside for item in carried}
         tips = [parent for parent in ordered if parent not in riding]
         self.journal.record(JoinPlannedEvent(tips=tips, carried=carried))
-        for parent in tips:
-            # The loop carries no resumption point, so a resumed join re-enters
-            # at the first parent. One already contained in HEAD has nothing to
-            # merge, and a merge turn spent on it is not free: the session
-            # cannot tell "already joined" from "something upstream is wrong",
-            # so it reasonably asks rather than reporting success, and every
-            # such round costs a question and a resume. Skip what is already in.
-            if self.worktrees.already_joined(lease, parent):
-                joined.append(parent)
-                continue
-            before = current
-            conflicted = self.worktrees.prepare_join(lease, [before, parent])
-            if conflicted and self.regeneration:
-                # Settled before the merger is called rather than by it, so a
-                # join whose only disagreement was in rendered artifacts costs
-                # no turn at all — and the merger is never handed a file whose
-                # correct content it could not have decided.
-                rendered = self.worktrees.settle_generated(lease, self.regeneration)
-                conflicted = bool(self.worktrees.conflicted_paths(lease))
-                if rendered and not conflicted:
-                    self.journal.record(JoinRenderedEvent(parent=parent))
-            if conflicted:
-                await self.adjudicate(lease, parent, purpose, [])
-            current = self.worktrees.commit_join(lease, title)
-            # What this parent added since it forked, and whether the join
-            # still holds it. Asking against the fork point rather than the
-            # previous head is what keeps a dependency's own content out of
-            # the obligation list.
-            fork = self.worktrees.merge_base(lease, before, parent)
-            owed = self.worktrees.drop_candidates(lease, fork, parent, current)
-            if owed:
-                await self.adjudicate(lease, parent, purpose, owed)
-                current = self.worktrees.commit_join(lease, title)
-            joined.append(parent)
-            # Verifying after every join is what makes a red result name a
-            # join. Running it once over the finished tree gave the same
-            # failure with twelve candidates and no way to tell which one
-            # introduced it.
-            failed = [
-                record.name
-                for record in self.verifier.verify(lease.root, base)
-                if not record.passed
-            ]
-            if failed:
-                await self.adjudicate(
-                    lease,
-                    parent,
-                    f"{purpose} — joining {parent[:12]} broke: {', '.join(failed)}",
-                    [],
-                )
-                current = self.worktrees.commit_join(lease, title)
-            self.journal.record(
-                JoinCompletedEvent(
-                    parent=parent,
-                    commit=current,
-                    conflicted=conflicted,
-                    broke=failed,
-                )
+        desk = JoinDesk(self.run.repository.root)
+        desk.write_plan(
+            JoinPlan(
+                concern_id=lease.concern_id,
+                worktree=lease.root,
+                base=base,
+                title=title,
+                purpose=purpose,
+                tips=[self.tip_of(lease, base, parent) for parent in tips],
+                carried=carried,
+                regeneration=list(self.regeneration),
+                verification=list(self.verifier.commands),
             )
-            if self.standing_rechecks:
-                await self.recheck_standing(lease, base, joined[:-1], parent)
-            self.record_join_progress(joined, current, len(tips))
-            # After the progress file names a tree that exists, for the same
-            # reason the worker round checks before its turn: this is where
-            # stopping costs nothing. Integration is the longest phase and
-            # held no such boundary, so a drain issued during it was never
-            # observed and `kill` was the only lever left.
+        )
+        blocked = await self.drive_join(lease, desk, purpose)
+        progress = desk.progress()
+        current = progress.commit or self.worktrees.head(lease)
+        self.record_join_progress(progress.joined, current, len(tips))
+        outstanding = [tip for tip in tips if tip not in progress.joined]
+        if outstanding:
+            # A drain is the one way to leave parents on the table, and it is
+            # observed at a landing, so what is recorded is a tree that
+            # exists and a resume re-enters at the next parent.
             drain = self.questions.draining()
-            if drain is not None:
-                raise ResolverDrained(drain.reason, [])
+            if drain is None:
+                raise ResolverInvariantError(
+                    f"semantic join failed for {lease.concern_id}: "
+                    f"{len(outstanding)} parent(s) unjoined with nothing asking "
+                    "it to stop" + (f" — {blocked}" if blocked else "")
+                )
+            raise ResolverDrained(drain.reason, [])
         # A parent that rode inside another was never merged on its own, but
         # its content is in the tree and is exactly as capable of having been
         # dropped there, so the final audit answers for it too.
-        await self.audit_join(lease, base, [*joined, *riding], current, purpose)
+        await self.audit_join(
+            lease, base, [*progress.joined, *riding], current, purpose
+        )
+        desk.clear()
         return current
+
+    def tip_of(self, lease: WritableRootLease, base: str, parent: str) -> JoinTip:
+        """One parent as the merger meets it: whose work, and which files.
+
+        The files are what make the set worth handing over whole — two tips
+        rewriting one module are visible here before either is merged, where
+        the loop only ever revealed it by conflicting on the second.
+        """
+        state = self.run.state
+        owner = next(
+            (
+                outcome.concern_id
+                for outcome in (state.outcomes if state is not None else [])
+                if outcome.commit == parent
+            ),
+            "",
+        )
+        concern = next(
+            (
+                item
+                for item in (state.concerns if state is not None else [])
+                if item.id == owner
+            ),
+            None,
+        )
+        return JoinTip(
+            commit=parent,
+            concern_id=owner,
+            summary=concern.title if concern is not None else "",
+            files=self.authored_by(lease, base, parent),
+        )
+
+    async def drive_join(
+        self, lease: WritableRootLease, desk: JoinDesk, purpose: str
+    ) -> str:
+        """Put the whole plan to the merger, and let it come back when done.
+
+        Re-entered rather than assumed one-shot: a merger that stops with
+        parents outstanding and no drain asked for is given the remaining
+        plan again, because its tools have already recorded everything it
+        did land and the tree it left is the one the next turn continues
+        from. The bound is the plan itself — a turn that lands nothing new
+        is not asked a third time.
+        """
+        plan = desk.plan()
+        if plan is None:
+            raise ResolverInvariantError("a join was driven with no plan on the table")
+        if self.questions.draining() is not None:
+            # Before the turn rather than only inside the landing verb: a
+            # drain that arrived while the previous phase finished would
+            # otherwise buy a whole merger session that stops at its first
+            # landing, and the boundary before the first parent is as good
+            # a place to resume from as the one after it.
+            return ""
+        blocked = ""
+        for _attempt in plan.tips:
+            before = desk.progress()
+            report = await self.runner.join_turn(lease, plan, before, purpose)
+            blocked = report.blocked
+            progress = desk.progress()
+            self.record_landings(before, progress)
+            await self.recheck_landed(lease, plan, before, progress)
+            # Every parent landed, nothing landed this turn, or the run was
+            # asked to stop. The last is checked here as well as inside the
+            # landing verb, because a merger that ends its turn holding a
+            # drain must not be handed the remaining plan again.
+            if len(progress.joined) in {len(plan.tips), len(before.joined)}:
+                return blocked
+            if self.questions.draining() is not None:
+                return blocked
+        return blocked
+
+    async def recheck_landed(
+        self,
+        lease: WritableRootLease,
+        plan: JoinPlan,
+        before: JoinProgressRecord,
+        after: JoinProgressRecord,
+    ) -> None:
+        """Ask whether the parents landed this turn broke an earlier one.
+
+        Off unless asked for, and the argument for it is unchanged: what it
+        buys is attribution, and it costs a reviewer turn per overlapping
+        pair. What moved is when it can run — the merger lands several
+        parents in one turn, so each is examined against the concerns that
+        were standing before it landed rather than at the moment it did.
+        """
+        if not self.standing_rechecks:
+            return
+        standing = list(before.joined)
+        for landing in after.landings[len(before.landings) :]:
+            await self.recheck_standing(lease, plan.base, standing, landing.commit)
+            standing = [*standing, landing.commit]
+
+    def record_landings(
+        self, before: JoinProgressRecord, after: JoinProgressRecord
+    ) -> None:
+        """Journal each parent the merger landed during its turn.
+
+        Written here rather than by the tool that landed them: the journal
+        numbers its entries, so a second writer appending from the merger's
+        own process would have to agree with this one about the sequence.
+        The checkpoint is what has to survive an interruption, and that is a
+        file the tool owns; the journal is the run's account of it.
+        """
+        for landing in after.landings[len(before.landings) :]:
+            if landing.rendered and not landing.conflicted:
+                self.journal.record(JoinRenderedEvent(parent=landing.commit))
+            self.journal.record(
+                JoinCompletedEvent(
+                    parent=landing.commit,
+                    commit=landing.head,
+                    conflicted=landing.conflicted,
+                    broke=landing.broke,
+                )
+            )
 
     def join_order(
         self, lease: WritableRootLease, base: str, parents: list[str]

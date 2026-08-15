@@ -75,6 +75,7 @@ from lup.resolver.tools import (
     create_question_tools,
     read_resolver_tool_context,
 )
+from lup.resolver.join_tools import create_join_tools
 from lup.runtime.factory import SessionFactory
 from lup.types import EnvVars
 from lup.workspace.paths import project_root
@@ -386,12 +387,21 @@ def run_resolver_tool_server() -> None:
     serve_stdio(
         create_mcp_server(
             "resolver",
-            tools=create_question_tools(
-                QuestionMailbox(context.run_dir),
-                context.concern_id,
-                run_id=context.run_dir.name,
-                lease_root=context.lease_root,
-            ),
+            tools=[
+                *create_question_tools(
+                    QuestionMailbox(context.run_dir),
+                    context.concern_id,
+                    run_id=context.run_dir.name,
+                    lease_root=context.lease_root,
+                ),
+                *(
+                    create_join_tools(
+                        context.run_dir, context.lease_root, context.concern_id
+                    )
+                    if context.actor_kind == "merger"
+                    else []
+                ),
+            ],
         )
     )
 
@@ -1269,6 +1279,7 @@ def run_resolve(
                 run_dir=state_root / resolved_run_id,
                 concern_id=context.concern_id,
                 lease_root=cwd,
+                actor_kind=context.actor.kind,
             )
             # Grants are per-concern: a lease carries only what the human
             # approved with the concern it was leased for.
@@ -1277,17 +1288,31 @@ def run_resolve(
                 **worker_environment,
                 **concern_allowances_environment(granted),
             }
-            if adapter == "claude":
-                server = create_mcp_server(
-                    "resolver",
-                    tools=create_question_tools(
-                        QuestionMailbox(tool_context.run_dir),
+            # A merger sequences its own join, so it carries the verbs that
+            # do it. They are added by actor kind rather than granted to
+            # every session, because commit authority over the integration
+            # tree is exactly what a worker must not have.
+            actor_tools = [
+                *create_question_tools(
+                    QuestionMailbox(tool_context.run_dir),
+                    context.concern_id,
+                    run_id=resolved_run_id,
+                    lease_root=tool_context.lease_root,
+                    wake=core.wake,
+                ),
+                *(
+                    create_join_tools(
+                        tool_context.run_dir,
+                        tool_context.lease_root,
                         context.concern_id,
-                        run_id=resolved_run_id,
-                        lease_root=tool_context.lease_root,
-                        wake=core.wake,
-                    ),
-                )
+                        launcher=launcher,
+                    )
+                    if context.actor.kind == "merger"
+                    else []
+                ),
+            ]
+            if adapter == "claude":
+                server = create_mcp_server("resolver", tools=actor_tools)
                 return create_claude_session_factory(
                     ClaudeSessionConfig(
                         model=session_model,
