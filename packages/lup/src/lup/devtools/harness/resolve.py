@@ -1049,6 +1049,7 @@ def run_resolve(
     host_retries: int = HOST_RETRIES,
     host_backoff: float = HOST_BACKOFF_SECONDS,
     auth_probe_delay: float = AUTH_PROBE_SECONDS,
+    max_parallel_workers: int = 4,
     recheck_standing_per_join: bool = False,
     start_new: bool = False,
 ) -> None:
@@ -1472,6 +1473,7 @@ def run_resolve(
                         base_option="--since",
                     ),
                 ],
+                max_parallel_workers=max_parallel_workers,
                 recheck_standing_per_join=recheck_standing_per_join,
                 # Both plugin trees are rendered from the catalogs a lease
                 # edits, so nearly every join disagrees about them. Rendering

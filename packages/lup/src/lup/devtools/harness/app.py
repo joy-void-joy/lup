@@ -285,6 +285,17 @@ def create_harness_app(
                 "is what separates them.",
             ),
         ] = resolve.AUTH_PROBE_SECONDS,
+        max_parallel_workers: Annotated[
+            int,
+            typer.Option(
+                "--max-parallel-workers",
+                help="How many concerns may hold a session at once. Uncapped, a "
+                "batch opens one per runnable concern — a measured run reached "
+                "eleven in the same second, which spends the host's allowance "
+                "at the width of the batch, races the credential file every "
+                "session shares, and loses all of it to one interruption.",
+            ),
+        ] = 4,
         start_new: Annotated[
             bool,
             typer.Option(
@@ -353,6 +364,7 @@ def create_harness_app(
             host_retries,
             host_backoff,
             auth_probe_delay,
+            max_parallel_workers,
             recheck_standing_per_join,
             start_new,
         )

@@ -5670,3 +5670,130 @@ def test_a_tree_that_renders_nothing_authors_everything_it_changed(
     assert orchestrator.authored_between(lease, "base", "parent") == [
         Path("docs/rules.md")
     ]
+
+
+@pytest.mark.asyncio
+async def test_a_capped_wave_holds_the_cap_and_resumes_what_it_never_started(
+    tmp_path: Path,
+) -> None:
+    """The cap is what a cut wave costs, so what it queues has to survive one.
+
+    Uncapped, a batch opened a session per runnable concern — eleven within
+    the same second in a measured run — which spends the host's allowance at
+    the width of the batch and races the credential file every session
+    shares. Capping is the instrument, and it introduces a state that did
+    not exist before: a concern leased but never started, because the cap
+    was full when the run died.
+
+    Such a concern has recorded nothing, so the next batch selects it again
+    exactly as the lease phase left it. That is the property here — the run
+    dies mid-wave with two concerns never begun, and the resume finishes all
+    three rather than shipping one.
+    """
+    launcher = LocalProcessLauncher()
+    workspace = failure_leg_workspace(tmp_path, launcher)
+
+    def git(*arguments: str) -> str:
+        status = launcher.launch(
+            LaunchRequest(arguments=["git", *arguments], cwd=workspace)
+        )
+        assert status.code == 0, status.stderr
+        return status.stdout.strip()
+
+    run_id = "capped-wave"
+    live: list[str] = []
+    widest = 0
+    started: list[str] = []
+    stopping = True
+
+    def worker_response(root: Path, output_name: str) -> JsonObject:
+        nonlocal widest, stopping
+        identifier = root.name
+        if output_name != WorkerReport.__name__:
+            raise AssertionError(output_name)
+        started.append(identifier)
+        live.append(identifier)
+        widest = max(widest, len(live))
+        live.remove(identifier)
+        if stopping:
+            # Stopped while the wave is one concern deep. The other two are
+            # leased and queued behind the cap, having run nothing at all.
+            stopping = False
+            QuestionMailbox(tmp_path / "state" / run_id).drain(
+                ParkRequest(run_id=run_id, reason="stopped mid-wave")
+            )
+        (root / f"{identifier}.txt").write_text("done\n", encoding="utf-8")
+        return {
+            "concern_id": identifier,
+            "changed": True,
+            "summary": f"implemented {identifier}",
+            "files_changed": [f"{identifier}.txt"],
+        }
+
+    def reviewer_response(root: Path, output_name: str) -> JsonObject:
+        if output_name != ReviewReport.__name__:
+            raise AssertionError(output_name)
+        return {
+            "concern_id": root.name,
+            "accepted": True,
+            "generalized": True,
+            "reason": "criteria met",
+            "criteria_met": [f"{root.name}-done"],
+        }
+
+    def build() -> ResolverCore:
+        return ResolverCore(
+            ResolverConfig(
+                state_root=tmp_path / "state",
+                workspace=workspace,
+                worktree_root=tmp_path / "resolver-worktrees",
+                run_id=run_id,
+                integration_branch=f"resolve/{run_id}/review",
+                max_parallel_workers=1,
+                verification_commands=[
+                    VerificationCommand(
+                        name="combined-diff",
+                        arguments=["git", "diff", "--check", "HEAD"],
+                    )
+                ],
+            ),
+            resolve_spec(),
+            worker_recipe(tmp_path / "state", launcher, worker_response),
+            lambda root: resolver_test_factory(root, reviewer_response),
+            LiteralInvocationRenderer(),
+            launcher,
+        )
+
+    inventory = ResolveInventory(
+        source=SourceSnapshot(
+            branch=git("branch", "--show-current"), commit=git("rev-parse", "HEAD")
+        ),
+        concerns=[concern("a"), concern("b"), concern("c")],
+    )
+
+    core = build()
+    seed_approvals(core, inventory.concerns)
+    with pytest.raises(ResolverDrained):
+        await core.run(inventory)
+
+    # One ran; the other two were still behind the cap and recorded nothing.
+    assert started == ["a"]
+    assert widest == 1, "never more than the cap in flight"
+
+    resumed = build()
+    seed_approvals(resumed, inventory.concerns)
+    # Parks at the final re-check: it asks each concern's reviewer about the
+    # integrated tree, and one shared double cannot answer as three different
+    # concerns. Beside the point here, which is what the worker phase did.
+    with pytest.raises(ResolverAwaitingAnswers):
+        await resumed.resume()
+
+    outcomes = resumed.repository.load().outcomes
+    assert {outcome.concern_id for outcome in outcomes if outcome.verified} == {
+        "a",
+        "b",
+        "c",
+    }
+    # Both concerns the stopped wave never began were started by the resume.
+    assert {"b", "c"} <= set(started)
+    assert widest == 1

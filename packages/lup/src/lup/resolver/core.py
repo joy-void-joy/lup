@@ -45,6 +45,7 @@ from lup.resolver.models import (
     ConcernInventory,
     ConcernOrigin,
     ConcernProgress,
+    ConcernExecution,
     ConcernStatus,
     ConcernOutcome,
     IntegrationRecord,
@@ -937,16 +938,26 @@ class ResolverCore:
                         unmet,
                     )
                     completed_ids.add(blocked.id)
-                results = await asyncio.gather(
-                    *[
-                        self.executor.execute_concern(
+                # Capped rather than gathered wholesale. A concern still
+                # waiting on the cap has started nothing and recorded
+                # nothing, so an interruption leaves it exactly as the lease
+                # phase left it and the next batch selects it again — which
+                # is what makes a cut wave resumable rather than lost.
+                admitted = asyncio.Semaphore(self.config.max_parallel_workers)
+
+                async def execute_when_admitted(
+                    concern: Concern,
+                ) -> ConcernExecution:
+                    async with admitted:
+                        return await self.executor.execute_concern(
                             concern,
                             lease_by_concern[concern.id],
                             commits,
                             builder,
                         )
-                        for concern in runnable
-                    ],
+
+                results = await asyncio.gather(
+                    *[execute_when_admitted(concern) for concern in runnable],
                     return_exceptions=True,
                 )
                 failures = [
