@@ -18,9 +18,15 @@ Parse the raw arguments into a list of **branch names**: split on whitespace and
 
 ## Process
 
-### 1. Commit pending changes
+### 1. Settle the working tree
 
-Invoke `/lup:commit` to commit any uncommitted work before the sweep.
+Read a dirty tree before writing it, because only one of the three cases it can be is a commit:
+
+- **On the integration branch.** Committing code here is forbidden. Survey first, then check the dirty paths against every branch that could already carry them — `git diff <branch> -- <paths>` reports nothing where one does. Work a branch already holds is a stale duplicate, to discard or stash rather than commit; work no branch holds belongs on a branch of its own.
+- **On a feature branch, where the work is that branch's own.** Invoke `/lup:commit`.
+- **Anything else.** Ask.
+
+Report which case it is and what the comparison showed, and let the user settle it. A sweep is about to act on every branch in the repository; opening it with a commit nobody asked for is the one move no later disposition can undo.
 
 ## Targeted Mode (branch names provided)
 
@@ -51,7 +57,9 @@ Do not present a dead run's branches as a to-do list. One decision about the run
 
 One table covering every branch, ordered `LAND` first (that is the work at risk), then `DELETE`/`STALE`, then `KEEP`/`CURRENT`:
 
-| Branch | Disposition | Unique | Diff | PR | Proposed action |
+| Branch | Disposition | Unique | Diff | Dirt | PR | Proposed action |
+
+`Dirt` is the survey's `changes` — what that branch's worktree holds uncommitted. It never changes a disposition, only what carrying one out costs: a dirty worktree makes a delete refuse until forced, and forcing discards those files, so a dirty row is one to read before proposing anything.
 
 **Group the `LAND` rows by the run holding them**, where `runs` gives one, and label the group with the run rather than repeating it per row. Branches from one run are one situation; listed flat they read as unrelated work that happens to share a prefix.
 
@@ -66,7 +74,7 @@ One table covering every branch, ordered `LAND` first (that is the work at risk)
 | Disposition | Meaning | Action |
 | --- | --- | --- |
 | `LAND` | Holds commits the integration branch lacks, with no PR driving it | Land it — step 6 |
-| `DELETE` | Reached the integration branch, or its PR merged | `uv run lup-devtools dev delete <branch>` |
+| `DELETE` | Reached the integration branch, or its PR merged | `uv run lup-devtools dev delete <branch>`; where `Dirt` is set it refuses, so compare that worktree against the integration branch and report what forcing would discard before asking |
 | `STALE` | Every commit already cherry-picked into the integration branch | Confirm, then delete |
 | `KEEP` | Protected, an open PR is already driving it, or a resolver run holds its lease | Leave alone — but a run with `alive: false` holds it forever, which step 3 is for |
 | `CURRENT` | The branch checked out here | Never delete; warn if it would otherwise qualify |
