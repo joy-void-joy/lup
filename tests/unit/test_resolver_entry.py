@@ -14,13 +14,23 @@ from lup.resolver.mailbox import (
     QuestionMailbox,
     RecordedAnswer,
 )
-from lup.resolver.models import MaterialQuestion, QuestionAnswer, QuestionBatch
+from lup.resolver.models import (
+    MaterialQuestion,
+    QuestionAnswer,
+    QuestionBatch,
+    ResolvePhase,
+    ResolveState,
+    SourceSnapshot,
+)
+from lup.resolver.state import ResolverStateRepository
+from lup.harness.models import ResolveSpec, SkillInvocation
 from lup.devtools.dev.comments import FoundComment
 from lup.harness.ownership import GeneratedArtifacts, OwnedArtifact
 from lup.devtools.harness.resolve import (
     NoteTargetRef,
     admission_notes,
     admission_request,
+    chosen_run,
     inert_offers,
     offer_flag_answers,
     parse_answer_flags,
@@ -46,6 +56,90 @@ def material_question(
 
 def question_batch(questions: list[MaterialQuestion]) -> QuestionBatch:
     return QuestionBatch(run_id="run-7", questions=questions)
+
+
+def persisted_run(state_root: Path, run_id: str, phase: ResolvePhase) -> None:
+    """One run on disk, far enough along to have a phase worth reading."""
+    repository = ResolverStateRepository(state_root, run_id)
+    repository.save(
+        ResolveState(
+            config_digest="digest",
+            run_id=run_id,
+            phase=phase,
+            source=SourceSnapshot(branch="dev", commit="source"),
+            spec=ResolveSpec(
+                id="resolve",
+                worker_identity="resolver-worker",
+                worker_skill=SkillInvocation(plugin="lup", skill="worker"),
+                review_skill=SkillInvocation(plugin="lup", skill="review"),
+                merge_skill=SkillInvocation(plugin="lup", skill="merge"),
+            ),
+            concerns=[],
+            progress=[],
+        )
+    )
+
+
+def test_an_unfinished_run_is_never_left_behind_silently(tmp_path: Path) -> None:
+    """A run id defaults to the commit it starts from, so the default moves.
+
+    Two invocations a day apart therefore never mean the same run, and a
+    skill that enters the resolver bare starts a second one beside a parked
+    one holding every answer already collected — which the skill's own text
+    calls the most expensive thing you can do, while the entry made it the
+    easy path.
+    """
+    persisted_run(tmp_path, "resolve-older", ResolvePhase.QUESTIONS)
+
+    with pytest.raises(typer.BadParameter) as refused:
+        chosen_run(tmp_path, "resolve-fresh", start_new=False, ending=False)
+
+    assert "resolve-older" in str(refused.value)
+    assert "--new" in str(refused.value)
+
+
+def test_a_finished_or_abandoned_run_does_not_stand_in_the_way(
+    tmp_path: Path,
+) -> None:
+    """Only a run still owed something is a choice; the rest are history."""
+    persisted_run(tmp_path, "resolve-done", ResolvePhase.COMPLETE)
+    persisted_run(tmp_path, "resolve-dropped", ResolvePhase.ABORTED)
+
+    assert (
+        chosen_run(tmp_path, "resolve-fresh", start_new=False, ending=False)
+        == "resolve-fresh"
+    )
+
+
+def test_a_failed_run_still_counts_as_unfinished(tmp_path: Path) -> None:
+    """A resume re-enters from the phase the failure stopped at.
+
+    That is the whole reason failing is not the end of a run, and this one
+    failed twice tonight and carried on both times.
+    """
+    persisted_run(tmp_path, "resolve-stumbled", ResolvePhase.FAILED)
+
+    with pytest.raises(typer.BadParameter):
+        chosen_run(tmp_path, "resolve-fresh", start_new=False, ending=False)
+
+
+def test_asking_for_a_new_run_is_taken_at_its_word(tmp_path: Path) -> None:
+    persisted_run(tmp_path, "resolve-older", ResolvePhase.QUESTIONS)
+
+    assert (
+        chosen_run(tmp_path, "resolve-fresh", start_new=True, ending=False)
+        == "resolve-fresh"
+    )
+
+
+def test_ending_a_run_is_not_a_choice_between_runs(tmp_path: Path) -> None:
+    """`--abort` names what it ends, so nothing here has anything to pick."""
+    persisted_run(tmp_path, "resolve-older", ResolvePhase.QUESTIONS)
+
+    assert (
+        chosen_run(tmp_path, "resolve-fresh", start_new=False, ending=True)
+        == "resolve-fresh"
+    )
 
 
 def test_parse_answer_flags_maps_ids_and_keeps_values_with_equals() -> None:
