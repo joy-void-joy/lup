@@ -14,9 +14,7 @@ command fills in, the way the sub-app roster is recited rather than restated.
 from collections.abc import Sequence
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict
-
-FROZEN = ConfigDict(frozen=True)
+from pydantic import BaseModel
 
 DEFAULT_REPORT_PATH = Path("tmp/report.md")
 """Where a written report goes unless a composition says otherwise.
