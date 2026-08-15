@@ -69,8 +69,13 @@ class ResolveRun:
             and PHASE_ORDER[state.phase] < PHASE_ORDER[current.phase]
         ):
             state = state.model_copy(update={"phase": current.phase})
-        self.state = state
+        # Only after the save, so a rejected candidate cannot stay behind as
+        # what this believes. A failure handler reads this back to record the
+        # phase to resume from, so a poisoned copy makes persisting the
+        # failure fail the same way the failure did — and the run reports the
+        # second raise, from inside its own handler, instead of the first.
         self.repository.save(state)
+        self.state = state
         self.emit_transitions(current, state)
 
     def emit_transitions(

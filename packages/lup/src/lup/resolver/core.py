@@ -1633,10 +1633,12 @@ class ResolverCore:
             )
         )
 
-    def concern_failed(self, state: ResolveState, concern_id: str) -> bool:
-        return any(
-            item.concern_id == concern_id and item.status == ConcernStatus.FAILED
-            for item in state.progress
+    def concern_status(
+        self, state: ResolveState, concern_id: str
+    ) -> ConcernStatus | None:
+        return next(
+            (item.status for item in state.progress if item.concern_id == concern_id),
+            None,
         )
 
     def release(self, state: ResolveState) -> ResolveState:
@@ -1664,10 +1666,15 @@ class ResolverCore:
                 )
                 continue
             removal = self.worktrees.remove(lease)
-            # A concern that failed keeps saying so. Cleaning its worktree is
-            # housekeeping, and relabelling it CLEANED would erase the one
-            # thing the run is evidence of.
-            if not self.concern_failed(progress, lease.concern_id):
+            # Cleaning a worktree is housekeeping, and says nothing about what
+            # was decided — `CleanupRecord` below already carries whether the
+            # tree went. So only the one status that is provisional on cleanup
+            # moves: a concern that failed keeps saying so, a retired one keeps
+            # the human's word, and a status added later stays put rather than
+            # crashing on a transition its table never declared.
+            if self.concern_status(progress, lease.concern_id) == (
+                ConcernStatus.INTEGRATED
+            ):
                 progress = self.run_state.progress_state(
                     progress,
                     [lease.concern_id],
