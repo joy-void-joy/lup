@@ -117,7 +117,6 @@ def architecture_violations(
                     RuleViolation(
                         path=symbol.path,
                         line=symbol.member_lines[member],
-                        suppression_lines=[symbol.line],
                         message=f"capability {symbol.name} declares abstract property {member}",
                     )
                 )
@@ -126,7 +125,6 @@ def architecture_violations(
                     RuleViolation(
                         path=symbol.path,
                         line=symbol.member_lines[member],
-                        suppression_lines=[symbol.line],
                         message=f"capability {symbol.name} has concrete callable {member}",
                     )
                 )

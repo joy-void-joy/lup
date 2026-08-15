@@ -21,7 +21,7 @@ from lup.policy.kernel.edit import (
     antipattern_decision,
     dict_get_exempt_lines,
     empty_collection_exempt_lines,
-    refiner_for,
+    refiner_named,
 )
 from lup.policy.kernel.rows import AntiPatternRow
 from lup.policy.rules import antipattern_row
@@ -147,8 +147,18 @@ def test_relocating_an_approved_marker_is_not_a_new_suppression() -> None:
     assert decision is None or decision.effect != "ask"
 
 
-def test_a_rule_this_file_did_not_suppress_before_still_asks() -> None:
-    """The whole point of the gate: a genuinely new suppression is a judgement."""
+def test_a_violation_no_directive_covers_outranks_the_suppression_beside_it() -> None:
+    """A new directive buys no approval for the violation it does not silence.
+
+    The added line declares `dict-get` and trips `any-type`, so the directive
+    covers nothing and the violation stands unsuppressed. Approving the edit
+    for the suppression it declared would carry that violation through on a
+    reason naming only the directive.
+
+    That a genuinely new suppression is itself a judgement is unchanged, and
+    the two tests beside this one pin it — each declares a directive that does
+    cover the line it sits on, and each still asks.
+    """
     before = "first: Any = 1  # lup: ignore[any-type]\n"
     after = (
         "first: Any = 1  # lup: ignore[any-type]\n"
@@ -160,7 +170,7 @@ def test_a_rule_this_file_did_not_suppress_before_still_asks() -> None:
     )
 
     assert decision is not None
-    assert decision.effect == "ask"
+    assert decision.effect == "deny"
 
 
 def test_a_typed_marker_widened_to_a_bare_one_still_asks() -> None:
@@ -471,16 +481,16 @@ def test_refiner_survives_a_fragment_it_cannot_parse() -> None:
 
 
 def test_declared_refiners_are_the_kernel_refiners() -> None:
-    """A rule's refiner is the same object the hook applies under its id.
+    """A rule's refiner is the same object the hook applies from its row.
 
-    The rule holds the function and the kernel holds an id map, because a row
+    The rule holds the function and its row carries the name, because a row
     projected into the hermetic runtime cannot carry a callable. Nothing but
     this keeps them the same: a rule refined on one side only is how a marker
     becomes one the audit demands gone and the hook refuses to remove.
     """
     for rule in PYTHON_ANTI_PATTERNS:
         expected = None if rule.refiner is None else rule.refiner.exempt
-        assert refiner_for(rule.id) is expected, rule.id
+        assert refiner_named(antipattern_row(rule)["refiner"]) is expected, rule.id
 
 
 def test_refiner_exempts_deliberate_defaults() -> None:

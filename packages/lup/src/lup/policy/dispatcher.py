@@ -33,6 +33,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict
 
 from lup.harness.banner import REGENERATE_COMMAND, GeneratedBanner
+from lup.policy.kernel.edit import file_level_line, suppression_reaches
 
 SHARED_PACKAGE = "lup.policy"
 SHARED_MEMBER = "host"
@@ -48,7 +49,8 @@ generated runtime. Both are shared, so neither is a place a runtime can
 diverge — which is the whole reason the kernel call sites live here.
 """
 
-SPLICED_MEMBERS = (  # lup: ignore[library-default] — the two members this compiler itself defines; a caller cannot splice a half the compiler does not read
+# lup: ignore[library-default] — the two members this compiler itself defines; a caller cannot splice a half the compiler does not read
+SPLICED_MEMBERS = (
     SHARED_MEMBER,
     DECISIONS_MEMBER,
 )
@@ -58,13 +60,14 @@ RUNTIME_MEMBER = "policy_dispatcher"
 """The half one adapter owns: its own words, and nothing another repeats."""
 
 KERNEL_PACKAGE = "kernel"
+# lup: ignore[library-default] — the stdlib a compiled dispatcher actually imports; widening it is the hazard the pin exists to prevent
 DISPATCHER_STDLIB = (
     "json",
     "os",
     "sys",
     "pathlib",
     "subprocess",
-)  # lup: ignore[library-default] — the stdlib a compiled dispatcher actually imports; widening it is the hazard the pin exists to prevent
+)
 """The standard library a compiled dispatcher may reach.
 
 Pinned rather than open: the script starts through a native CLI with
@@ -428,22 +431,37 @@ def spliced_prologue(half: SourceHalf, emitted: str) -> list[str]:
     """A spliced half's own imports, less its links and what is already there.
 
     Emitted as whole source lines rather than as the parsed statement, so a
-    trailing marker stays attached to the import it answers for: the rules the
+    marker stays attached to the import it answers for: the rules the
     generated tree is scanned against read the line, and a marker the compiler
-    dropped is a violation nobody declared. A half that needs something the
-    runtime half never imports —
+    dropped is a violation nobody declared. That holds for either placement —
+    a marker whose reason outgrew the import's line stands above it, and
+    slicing from the import alone would leave it behind. Such a segment opens
+    with a comment on its own line, which the formatter separates from the
+    statement before it, so the blank line goes in here: what this compiler
+    emits has to be formatted source and not merely correct source, since the
+    generated tree is checked by the same formatter as the rest. A half that
+    needs something the runtime half never imports —
     the standard library module the host half asks Git with, the kernel names
     the decisions half calls — carries it in rather than obliging every
     adapter to import what it does not use.
     """
     lines = half.text.splitlines()
+    file_level = file_level_line(half.text)
+
+    def opens_at(node: ast.Import | ast.ImportFrom) -> int:
+        """The first line one import needs, a directive above it included."""
+        above = node.lineno - 1
+        if above != file_level and suppression_reaches(lines, above, node.lineno):
+            return above
+        return node.lineno
+
     return [
-        segment
+        f"\n{segment}" if segment.lstrip().startswith("#") else segment
         for node in half.tree.body
         if isinstance(node, (ast.Import, ast.ImportFrom))
         if not (isinstance(node, ast.ImportFrom) and node.module in SPLICED_MEMBERS)
         for segment in [
-            "\n".join(lines[node.lineno - 1 : (node.end_lineno or node.lineno)])
+            "\n".join(lines[opens_at(node) - 1 : (node.end_lineno or node.lineno)])
         ]
         if segment and segment not in emitted
     ]

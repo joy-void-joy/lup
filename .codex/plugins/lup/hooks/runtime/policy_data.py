@@ -251,6 +251,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "\\bas\\s+any\\b",
             "message": "Never use `as any` \u2014 use proper types or type guards",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -258,6 +259,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "\\bas\\s+unknown\\b",
             "message": "Never use `as unknown` \u2014 use type guards or proper types",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -265,6 +267,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": ":\\s*any\\b",
             "message": "Never use `any` type annotation \u2014 use specific types, generics, or `unknown`",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -272,6 +275,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "<any>",
             "message": "Never use `<any>` type assertion \u2014 use proper types",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -279,6 +283,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "@ts-ignore",
             "message": "Never use @ts-ignore \u2014 fix the type error properly",
             "context": "comment",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -286,6 +291,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "@ts-expect-error",
             "message": "Never use @ts-expect-error \u2014 fix the type error properly",
             "context": "comment",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -293,6 +299,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "@ts-nocheck",
             "message": "Never use @ts-nocheck \u2014 fix the type errors in the file",
             "context": "comment",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -300,6 +307,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "//\\s*eslint-disable",
             "message": "Never use eslint-disable \u2014 fix the lint issue properly",
             "context": "comment",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -307,6 +315,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "/\\*\\s*eslint-disable",
             "message": "Never use eslint-disable \u2014 fix the lint issue properly",
             "context": "comment",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -314,6 +323,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "//\\s*tslint:disable",
             "message": "Never use tslint:disable \u2014 migrate to eslint and fix the issue",
             "context": "comment",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -321,6 +331,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "[\\w\\)\\]]!\\.",
             "message": "Postfix `!.` non-null assertion hides a possible null/undefined \u2014 narrow the type or handle the missing case",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -328,6 +339,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "\\bvar\\s+[A-Za-z_$]",
             "message": "Use `const` or `let` instead of `var` \u2014 var is function-scoped and hoisted",
             "context": "code",
+            "refiner": "",
             "strength": "strong",
         },
         {
@@ -335,6 +347,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": ":\\s*(?:Function|Object)\\b",
             "message": "Never use `Function` or `Object` as a type \u2014 declare the call signature or the object shape",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -342,6 +355,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "\\bconsole\\.log\\s*\\(",
             "message": "console.log is a debug leftover \u2014 remove it or route through a logger",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
     ],
@@ -351,6 +365,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "\\bas\\s+any\\b",
             "message": "Never use `as any` \u2014 use proper types or type guards",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -358,6 +373,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "\\bas\\s+unknown\\b",
             "message": "Never use `as unknown` \u2014 use type guards or proper types",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -365,6 +381,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": ":\\s*any\\b",
             "message": "Never use `any` type annotation \u2014 use specific types, generics, or `unknown`",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -372,6 +389,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "<any>",
             "message": "Never use `<any>` type assertion \u2014 use proper types",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -379,6 +397,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "@ts-ignore",
             "message": "Never use @ts-ignore \u2014 fix the type error properly",
             "context": "comment",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -386,6 +405,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "@ts-expect-error",
             "message": "Never use @ts-expect-error \u2014 fix the type error properly",
             "context": "comment",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -393,6 +413,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "@ts-nocheck",
             "message": "Never use @ts-nocheck \u2014 fix the type errors in the file",
             "context": "comment",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -400,6 +421,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "//\\s*eslint-disable",
             "message": "Never use eslint-disable \u2014 fix the lint issue properly",
             "context": "comment",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -407,6 +429,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "/\\*\\s*eslint-disable",
             "message": "Never use eslint-disable \u2014 fix the lint issue properly",
             "context": "comment",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -414,6 +437,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "//\\s*tslint:disable",
             "message": "Never use tslint:disable \u2014 migrate to eslint and fix the issue",
             "context": "comment",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -421,6 +445,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "[\\w\\)\\]]!\\.",
             "message": "Postfix `!.` non-null assertion hides a possible null/undefined \u2014 narrow the type or handle the missing case",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -428,6 +453,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "\\bvar\\s+[A-Za-z_$]",
             "message": "Use `const` or `let` instead of `var` \u2014 var is function-scoped and hoisted",
             "context": "code",
+            "refiner": "",
             "strength": "strong",
         },
         {
@@ -435,6 +461,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": ":\\s*(?:Function|Object)\\b",
             "message": "Never use `Function` or `Object` as a type \u2014 declare the call signature or the object shape",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -442,6 +469,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "\\bconsole\\.log\\s*\\(",
             "message": "console.log is a debug leftover \u2014 remove it or route through a logger",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
     ],
@@ -451,6 +479,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "\\bAny\\b",
             "message": "Never use Any \u2014 use specific types, TypedDict, or BaseModel",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -458,6 +487,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "#\\s*type:\\s*ignore",
             "message": "Never use # type: ignore \u2014 fix the type error properly",
             "context": "comment",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -465,6 +495,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "#\\s*pyright:\\s*ignore",
             "message": "Never use # pyright: ignore \u2014 fix the type error properly",
             "context": "comment",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -472,6 +503,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "#\\s*noqa\\b",
             "message": "Never use # noqa \u2014 fix the lint issue properly",
             "context": "comment",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -479,6 +511,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "\\bGeneric\\[",
             "message": "Use Python 3.12+ class[T] syntax instead of Generic[T]",
             "context": "code",
+            "refiner": "",
             "strength": "strong",
         },
         {
@@ -486,6 +519,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "\\b(?:Optional|Union)\\[",
             "message": "Use PEP 604 unions \u2014 X | None instead of Optional, X | Y instead of Union",
             "context": "code",
+            "refiner": "",
             "strength": "strong",
         },
         {
@@ -493,6 +527,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "\\b(?:List|Dict|Tuple|Set)\\[",
             "message": "Use lowercase builtin generics \u2014 list, dict, tuple, set \u2014 instead of the capitalized typing aliases",
             "context": "code",
+            "refiner": "",
             "strength": "strong",
         },
         {
@@ -500,6 +535,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "__all__\\s*[=:]",
             "message": "No __all__ \u2014 import directly from the defining module",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -507,6 +543,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "\\b(?:dict|Mapping)\\[\\s*str\\s*,\\s*object\\s*\\]",
             "message": "Never use dict[str, object] or Mapping[str, object] \u2014 use TypedDict or BaseModel",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -514,6 +551,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "\\b(?:dict|Mapping|MutableMapping)\\[\\s*str\\s*,\\s*(?:str|int|float|bool|bytes|complex)\\b",
             "message": "String-keyed dict with a scalar value hides shape when the keys are a CLOSED, enumerable set \u2014 use a BaseModel or dict[Literal[...], V]. When the keys are open and data-driven (a registry/cache/counter keyed by external data) this is legitimate: add `# lup: ignore[dict-str-payload]`. Concrete class/callable value types (dict[str, SessionFactory]) are already accepted; JsonValue covers arbitrary JSON",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -521,6 +559,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "\\.get\\s*\\(",
             "message": "`.get(` on payload/TypedDict-shaped data hides the schema \u2014 use typed attribute access (BaseModel/TypedDict). On a genuinely open dict (registry, cache) add `# lup: ignore[dict-get]`. On a typed non-mapping receiver (an SDK client, a route decorator) add nothing \u2014 the audit resolves the declaration and refutes it, and a marker here is reported spurious",
             "context": "code",
+            "refiner": "dict_get_exempt_lines",
             "strength": "soft",
         },
         {
@@ -528,6 +567,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "(?:(?<!\\w)(?!_)\\w+\\s*:|->)\\s*object\\b",
             "message": "Bare `object` says nothing about the value \u2014 use a concrete type, TypedDict, or BaseModel, and narrow at untyped boundaries",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -535,6 +575,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "(?:(?<!\\[)\\b\\w+\\s*:|->)\\s*BaseModel\\b(?!\\s*[\\]|])",
             "message": "A parameter or return annotated exactly BaseModel accepts any model \u2014 name the concrete union of models or make the function generic",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -542,6 +583,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "\\btuple\\[",
             "message": "A fixed-arity `tuple[...]` hides what each position means \u2014 name the fields with a BaseModel. Fall back to a TypedDict only where a model cannot go: the hermetic kernel, which has no pydantic, or a field that must stay the caller's own object, which validation would copy. `tuple[X, ...]` is a sequence and never trips this",
             "context": "code",
+            "refiner": "tuple_shape_exempt_lines",
             "strength": "strong",
         },
         {
@@ -549,6 +591,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "\\bfrozenset\\b",
             "message": "A declared `frozenset[...]` shape or constant is usually overkill \u2014 use a dict or a purpose-built structure. For a genuinely immutable default argument add `# lup: ignore[frozenset-shape]`",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -556,6 +599,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "(?<!\\.)\\bset[\\[(]|(?::|->)\\s*set\\b",
             "message": "A declared `set` is usually better as a dict, when the members key something, or as a `list[BaseModel]`, when each member carries more than its own name \u2014 a bare set of strings is often a record that lost its other fields. Reach for membership on a local set comprehension instead of declaring the set as the interface. For a genuinely set-shaped value add `# lup: ignore[set-shape]`",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -563,6 +607,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "(?<![=!<>])=\\s*(?:\\{\\}|\\[\\]|set\\(\\))",
             "message": "Empty-collection literals (`= {}`, `= []`, `= set()`) usually seed an append/mutate loop \u2014 build the collection with a comprehension, or, when the loop carries control flow a comprehension cannot, `yield` the items from a nested function and let its caller collect them. Add `# lup: ignore[empty-collection]` only for a fold neither expresses",
             "context": "code",
+            "refiner": "empty_collection_exempt_lines",
             "strength": "soft",
         },
         {
@@ -570,6 +615,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "\\bcast\\s*\\(",
             "message": "`cast(...)` is a code smell \u2014 narrow with isinstance or a type guard, or fix the annotation so the cast is unnecessary",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -577,6 +623,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "\\bimport\\s+re\\b|\\bfrom\\s+re\\s+import\\b",
             "message": "`import re` / `from re import` is a code smell \u2014 parse structured data with its own API instead: JSON -> json.loads, paths -> pathlib.Path, URLs -> urllib.parse, XML/HTML -> xml.etree.ElementTree / lxml, dates -> datetime",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -584,6 +631,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "\\bre\\.(compile|search|match|fullmatch|sub|findall|split)\\s*\\(",
             "message": "Avoid regex for structured data \u2014 reach for its parser instead: JSON -> json.loads, paths -> pathlib.Path, URLs -> urllib.parse, XML/HTML -> xml.etree.ElementTree / lxml, dates -> datetime",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -591,6 +639,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "(?<!\\bos)(?<![Pp]ath)\\.replace\\s*\\(",
             "message": "Avoid .replace() for structured data \u2014 edit it through its parser instead (pathlib.Path for paths, urllib.parse for URLs, json for JSON)",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -598,6 +647,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "\\.r?split\\s*\\((?!\\s*\\))|\\.r?partition\\s*\\(",
             "message": "Avoid .split(sep)/.rsplit/.partition for structured data \u2014 parse it instead (urllib.parse for URLs, pathlib.Path for paths, json for JSON, datetime for dates)",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -605,6 +655,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "\\.[lr]?strip\\s*\\((?!\\s*\\))",
             "message": "Avoid .strip(chars)/.lstrip/.rstrip for structured data \u2014 parse it instead (urllib.parse for URLs, pathlib.Path for paths, json for JSON, datetime for dates)",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -612,6 +663,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "\\bexcept\\s*:",
             "message": "Bare `except:` catches SystemExit/KeyboardInterrupt \u2014 name the exception",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -619,6 +671,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "\\bexcept\\s+BaseException\\b",
             "message": "except BaseException catches KeyboardInterrupt \u2014 use Exception or narrower",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -626,6 +679,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "\\bcontextlib\\.suppress\\b",
             "message": "contextlib.suppress silently swallows exceptions \u2014 log, handle, or re-raise",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -633,6 +687,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "\\bfrom\\s+contextlib\\s+import\\b.*\\bsuppress\\b",
             "message": "contextlib.suppress silently swallows exceptions \u2014 log, handle, or re-raise",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -640,6 +695,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "@dataclass|\\bimport\\s+dataclasses\\b|\\bfrom\\s+dataclasses\\s+import\\b",
             "message": "Use Pydantic BaseModel (or TypedDict) instead of dataclasses",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -647,6 +703,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "\\bNamedTuple\\b|\\bnamedtuple\\b",
             "message": "Use Pydantic BaseModel (or TypedDict) instead of NamedTuple/namedtuple",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -654,6 +711,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "\\bimport\\s+subprocess\\b|\\bfrom\\s+subprocess\\s+import\\b",
             "message": "Use the `sh` library instead of subprocess",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -661,6 +719,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "\\bos\\.(?:system|popen|exec[lv]\\w*)\\s*\\(",
             "message": "Use the `sh` library instead of os.system()/os.popen()/os.exec*()",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -668,6 +727,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "\\bimport\\s+argparse\\b|\\bfrom\\s+argparse\\s+import\\b",
             "message": "Use `typer` instead of argparse",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -675,6 +735,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "\\brich\\.progress\\b|\\bfrom\\s+rich\\.progress\\s+import\\b",
             "message": "Use `tqdm` instead of rich progress bars",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -682,6 +743,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "\\bos\\.path\\b",
             "message": "Use pathlib.Path instead of os.path",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -689,6 +751,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "\\bos\\.(?:getcwd|chdir|listdir|scandir|walk|mkdir|makedirs|rmdir|removedirs|remove|unlink|rename|renames|replace|link|symlink|readlink|stat|lstat|chmod|chown)\\s*\\(",
             "message": "Use pathlib.Path for file/dir operations instead of os.* (Path.iterdir/mkdir/unlink/rename/replace/stat/...)",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -696,6 +759,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "\\bos\\.(?:environ|getenv)\\b",
             "message": "Read configuration through pydantic-settings, not os.environ/os.getenv",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -703,6 +767,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "(?<![.\\w])(?:eval|exec)\\s*\\(",
             "message": "Never use eval()/exec() \u2014 parse the data (ast.literal_eval for literals) or dispatch explicitly",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -710,6 +775,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "\\butcnow\\s*\\(",
             "message": "datetime.utcnow() is naive and deprecated \u2014 use datetime.now(timezone.utc)",
             "context": "code",
+            "refiner": "",
             "strength": "strong",
         },
         {
@@ -717,6 +783,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "^global\\s+\\w",
             "message": "No `global` statements \u2014 mutate a module-level holder object or pass state explicitly",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -724,6 +791,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "\\bdef\\s+_[a-zA-Z]",
             "message": "No `_` prefix on functions/methods \u2014 nothing is private (nest inside caller if needed)",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -731,6 +799,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "\\bclass\\s+_[A-Z]",
             "message": "No `_` prefix on classes \u2014 nothing is private",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -738,6 +807,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "^_[a-zA-Z]\\w*\\s*(?::[^=]*)?=(?!=)(?!.*,\\s*$)",
             "message": "No `_` prefix on variables/constants \u2014 nothing is private (unused `_` function parameters are exempt)",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
     ],
@@ -747,6 +817,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "\\bAny\\b",
             "message": "Never use Any \u2014 use specific types, TypedDict, or BaseModel",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -754,6 +825,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "#\\s*type:\\s*ignore",
             "message": "Never use # type: ignore \u2014 fix the type error properly",
             "context": "comment",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -761,6 +833,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "#\\s*pyright:\\s*ignore",
             "message": "Never use # pyright: ignore \u2014 fix the type error properly",
             "context": "comment",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -768,6 +841,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "#\\s*noqa\\b",
             "message": "Never use # noqa \u2014 fix the lint issue properly",
             "context": "comment",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -775,6 +849,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "\\bGeneric\\[",
             "message": "Use Python 3.12+ class[T] syntax instead of Generic[T]",
             "context": "code",
+            "refiner": "",
             "strength": "strong",
         },
         {
@@ -782,6 +857,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "\\b(?:Optional|Union)\\[",
             "message": "Use PEP 604 unions \u2014 X | None instead of Optional, X | Y instead of Union",
             "context": "code",
+            "refiner": "",
             "strength": "strong",
         },
         {
@@ -789,6 +865,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "\\b(?:List|Dict|Tuple|Set)\\[",
             "message": "Use lowercase builtin generics \u2014 list, dict, tuple, set \u2014 instead of the capitalized typing aliases",
             "context": "code",
+            "refiner": "",
             "strength": "strong",
         },
         {
@@ -796,6 +873,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "__all__\\s*[=:]",
             "message": "No __all__ \u2014 import directly from the defining module",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -803,6 +881,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "\\b(?:dict|Mapping)\\[\\s*str\\s*,\\s*object\\s*\\]",
             "message": "Never use dict[str, object] or Mapping[str, object] \u2014 use TypedDict or BaseModel",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -810,6 +889,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "\\b(?:dict|Mapping|MutableMapping)\\[\\s*str\\s*,\\s*(?:str|int|float|bool|bytes|complex)\\b",
             "message": "String-keyed dict with a scalar value hides shape when the keys are a CLOSED, enumerable set \u2014 use a BaseModel or dict[Literal[...], V]. When the keys are open and data-driven (a registry/cache/counter keyed by external data) this is legitimate: add `# lup: ignore[dict-str-payload]`. Concrete class/callable value types (dict[str, SessionFactory]) are already accepted; JsonValue covers arbitrary JSON",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -817,6 +897,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "\\.get\\s*\\(",
             "message": "`.get(` on payload/TypedDict-shaped data hides the schema \u2014 use typed attribute access (BaseModel/TypedDict). On a genuinely open dict (registry, cache) add `# lup: ignore[dict-get]`. On a typed non-mapping receiver (an SDK client, a route decorator) add nothing \u2014 the audit resolves the declaration and refutes it, and a marker here is reported spurious",
             "context": "code",
+            "refiner": "dict_get_exempt_lines",
             "strength": "soft",
         },
         {
@@ -824,6 +905,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "(?:(?<!\\w)(?!_)\\w+\\s*:|->)\\s*object\\b",
             "message": "Bare `object` says nothing about the value \u2014 use a concrete type, TypedDict, or BaseModel, and narrow at untyped boundaries",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -831,6 +913,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "(?:(?<!\\[)\\b\\w+\\s*:|->)\\s*BaseModel\\b(?!\\s*[\\]|])",
             "message": "A parameter or return annotated exactly BaseModel accepts any model \u2014 name the concrete union of models or make the function generic",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -838,6 +921,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "\\btuple\\[",
             "message": "A fixed-arity `tuple[...]` hides what each position means \u2014 name the fields with a BaseModel. Fall back to a TypedDict only where a model cannot go: the hermetic kernel, which has no pydantic, or a field that must stay the caller's own object, which validation would copy. `tuple[X, ...]` is a sequence and never trips this",
             "context": "code",
+            "refiner": "tuple_shape_exempt_lines",
             "strength": "strong",
         },
         {
@@ -845,6 +929,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "\\bfrozenset\\b",
             "message": "A declared `frozenset[...]` shape or constant is usually overkill \u2014 use a dict or a purpose-built structure. For a genuinely immutable default argument add `# lup: ignore[frozenset-shape]`",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -852,6 +937,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "(?<!\\.)\\bset[\\[(]|(?::|->)\\s*set\\b",
             "message": "A declared `set` is usually better as a dict, when the members key something, or as a `list[BaseModel]`, when each member carries more than its own name \u2014 a bare set of strings is often a record that lost its other fields. Reach for membership on a local set comprehension instead of declaring the set as the interface. For a genuinely set-shaped value add `# lup: ignore[set-shape]`",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -859,6 +945,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "(?<![=!<>])=\\s*(?:\\{\\}|\\[\\]|set\\(\\))",
             "message": "Empty-collection literals (`= {}`, `= []`, `= set()`) usually seed an append/mutate loop \u2014 build the collection with a comprehension, or, when the loop carries control flow a comprehension cannot, `yield` the items from a nested function and let its caller collect them. Add `# lup: ignore[empty-collection]` only for a fold neither expresses",
             "context": "code",
+            "refiner": "empty_collection_exempt_lines",
             "strength": "soft",
         },
         {
@@ -866,6 +953,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "\\bcast\\s*\\(",
             "message": "`cast(...)` is a code smell \u2014 narrow with isinstance or a type guard, or fix the annotation so the cast is unnecessary",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -873,6 +961,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "\\bimport\\s+re\\b|\\bfrom\\s+re\\s+import\\b",
             "message": "`import re` / `from re import` is a code smell \u2014 parse structured data with its own API instead: JSON -> json.loads, paths -> pathlib.Path, URLs -> urllib.parse, XML/HTML -> xml.etree.ElementTree / lxml, dates -> datetime",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -880,6 +969,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "\\bre\\.(compile|search|match|fullmatch|sub|findall|split)\\s*\\(",
             "message": "Avoid regex for structured data \u2014 reach for its parser instead: JSON -> json.loads, paths -> pathlib.Path, URLs -> urllib.parse, XML/HTML -> xml.etree.ElementTree / lxml, dates -> datetime",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -887,6 +977,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "(?<!\\bos)(?<![Pp]ath)\\.replace\\s*\\(",
             "message": "Avoid .replace() for structured data \u2014 edit it through its parser instead (pathlib.Path for paths, urllib.parse for URLs, json for JSON)",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -894,6 +985,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "\\.r?split\\s*\\((?!\\s*\\))|\\.r?partition\\s*\\(",
             "message": "Avoid .split(sep)/.rsplit/.partition for structured data \u2014 parse it instead (urllib.parse for URLs, pathlib.Path for paths, json for JSON, datetime for dates)",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -901,6 +993,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "\\.[lr]?strip\\s*\\((?!\\s*\\))",
             "message": "Avoid .strip(chars)/.lstrip/.rstrip for structured data \u2014 parse it instead (urllib.parse for URLs, pathlib.Path for paths, json for JSON, datetime for dates)",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -908,6 +1001,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "\\bexcept\\s*:",
             "message": "Bare `except:` catches SystemExit/KeyboardInterrupt \u2014 name the exception",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -915,6 +1009,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "\\bexcept\\s+BaseException\\b",
             "message": "except BaseException catches KeyboardInterrupt \u2014 use Exception or narrower",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -922,6 +1017,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "\\bcontextlib\\.suppress\\b",
             "message": "contextlib.suppress silently swallows exceptions \u2014 log, handle, or re-raise",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -929,6 +1025,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "\\bfrom\\s+contextlib\\s+import\\b.*\\bsuppress\\b",
             "message": "contextlib.suppress silently swallows exceptions \u2014 log, handle, or re-raise",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -936,6 +1033,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "@dataclass|\\bimport\\s+dataclasses\\b|\\bfrom\\s+dataclasses\\s+import\\b",
             "message": "Use Pydantic BaseModel (or TypedDict) instead of dataclasses",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -943,6 +1041,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "\\bNamedTuple\\b|\\bnamedtuple\\b",
             "message": "Use Pydantic BaseModel (or TypedDict) instead of NamedTuple/namedtuple",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -950,6 +1049,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "\\bimport\\s+subprocess\\b|\\bfrom\\s+subprocess\\s+import\\b",
             "message": "Use the `sh` library instead of subprocess",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -957,6 +1057,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "\\bos\\.(?:system|popen|exec[lv]\\w*)\\s*\\(",
             "message": "Use the `sh` library instead of os.system()/os.popen()/os.exec*()",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -964,6 +1065,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "\\bimport\\s+argparse\\b|\\bfrom\\s+argparse\\s+import\\b",
             "message": "Use `typer` instead of argparse",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -971,6 +1073,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "\\brich\\.progress\\b|\\bfrom\\s+rich\\.progress\\s+import\\b",
             "message": "Use `tqdm` instead of rich progress bars",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -978,6 +1081,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "\\bos\\.path\\b",
             "message": "Use pathlib.Path instead of os.path",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -985,6 +1089,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "\\bos\\.(?:getcwd|chdir|listdir|scandir|walk|mkdir|makedirs|rmdir|removedirs|remove|unlink|rename|renames|replace|link|symlink|readlink|stat|lstat|chmod|chown)\\s*\\(",
             "message": "Use pathlib.Path for file/dir operations instead of os.* (Path.iterdir/mkdir/unlink/rename/replace/stat/...)",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -992,6 +1097,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "\\bos\\.(?:environ|getenv)\\b",
             "message": "Read configuration through pydantic-settings, not os.environ/os.getenv",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -999,6 +1105,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "(?<![.\\w])(?:eval|exec)\\s*\\(",
             "message": "Never use eval()/exec() \u2014 parse the data (ast.literal_eval for literals) or dispatch explicitly",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -1006,6 +1113,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "\\butcnow\\s*\\(",
             "message": "datetime.utcnow() is naive and deprecated \u2014 use datetime.now(timezone.utc)",
             "context": "code",
+            "refiner": "",
             "strength": "strong",
         },
         {
@@ -1013,6 +1121,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "^global\\s+\\w",
             "message": "No `global` statements \u2014 mutate a module-level holder object or pass state explicitly",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -1020,6 +1129,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "\\bdef\\s+_[a-zA-Z]",
             "message": "No `_` prefix on functions/methods \u2014 nothing is private (nest inside caller if needed)",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -1027,6 +1137,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "\\bclass\\s+_[A-Z]",
             "message": "No `_` prefix on classes \u2014 nothing is private",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -1034,6 +1145,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "^_[a-zA-Z]\\w*\\s*(?::[^=]*)?=(?!=)(?!.*,\\s*$)",
             "message": "No `_` prefix on variables/constants \u2014 nothing is private (unused `_` function parameters are exempt)",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
     ],
@@ -1043,6 +1155,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "\\bas\\s+any\\b",
             "message": "Never use `as any` \u2014 use proper types or type guards",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -1050,6 +1163,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "\\bas\\s+unknown\\b",
             "message": "Never use `as unknown` \u2014 use type guards or proper types",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -1057,6 +1171,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": ":\\s*any\\b",
             "message": "Never use `any` type annotation \u2014 use specific types, generics, or `unknown`",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -1064,6 +1179,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "<any>",
             "message": "Never use `<any>` type assertion \u2014 use proper types",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -1071,6 +1187,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "@ts-ignore",
             "message": "Never use @ts-ignore \u2014 fix the type error properly",
             "context": "comment",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -1078,6 +1195,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "@ts-expect-error",
             "message": "Never use @ts-expect-error \u2014 fix the type error properly",
             "context": "comment",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -1085,6 +1203,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "@ts-nocheck",
             "message": "Never use @ts-nocheck \u2014 fix the type errors in the file",
             "context": "comment",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -1092,6 +1211,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "//\\s*eslint-disable",
             "message": "Never use eslint-disable \u2014 fix the lint issue properly",
             "context": "comment",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -1099,6 +1219,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "/\\*\\s*eslint-disable",
             "message": "Never use eslint-disable \u2014 fix the lint issue properly",
             "context": "comment",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -1106,6 +1227,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "//\\s*tslint:disable",
             "message": "Never use tslint:disable \u2014 migrate to eslint and fix the issue",
             "context": "comment",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -1113,6 +1235,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "[\\w\\)\\]]!\\.",
             "message": "Postfix `!.` non-null assertion hides a possible null/undefined \u2014 narrow the type or handle the missing case",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -1120,6 +1243,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "\\bvar\\s+[A-Za-z_$]",
             "message": "Use `const` or `let` instead of `var` \u2014 var is function-scoped and hoisted",
             "context": "code",
+            "refiner": "",
             "strength": "strong",
         },
         {
@@ -1127,6 +1251,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": ":\\s*(?:Function|Object)\\b",
             "message": "Never use `Function` or `Object` as a type \u2014 declare the call signature or the object shape",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -1134,6 +1259,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "\\bconsole\\.log\\s*\\(",
             "message": "console.log is a debug leftover \u2014 remove it or route through a logger",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
     ],
@@ -1143,6 +1269,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "\\bas\\s+any\\b",
             "message": "Never use `as any` \u2014 use proper types or type guards",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -1150,6 +1277,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "\\bas\\s+unknown\\b",
             "message": "Never use `as unknown` \u2014 use type guards or proper types",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -1157,6 +1285,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": ":\\s*any\\b",
             "message": "Never use `any` type annotation \u2014 use specific types, generics, or `unknown`",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -1164,6 +1293,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "<any>",
             "message": "Never use `<any>` type assertion \u2014 use proper types",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -1171,6 +1301,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "@ts-ignore",
             "message": "Never use @ts-ignore \u2014 fix the type error properly",
             "context": "comment",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -1178,6 +1309,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "@ts-expect-error",
             "message": "Never use @ts-expect-error \u2014 fix the type error properly",
             "context": "comment",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -1185,6 +1317,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "@ts-nocheck",
             "message": "Never use @ts-nocheck \u2014 fix the type errors in the file",
             "context": "comment",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -1192,6 +1325,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "//\\s*eslint-disable",
             "message": "Never use eslint-disable \u2014 fix the lint issue properly",
             "context": "comment",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -1199,6 +1333,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "/\\*\\s*eslint-disable",
             "message": "Never use eslint-disable \u2014 fix the lint issue properly",
             "context": "comment",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -1206,6 +1341,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "//\\s*tslint:disable",
             "message": "Never use tslint:disable \u2014 migrate to eslint and fix the issue",
             "context": "comment",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -1213,6 +1349,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "[\\w\\)\\]]!\\.",
             "message": "Postfix `!.` non-null assertion hides a possible null/undefined \u2014 narrow the type or handle the missing case",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -1220,6 +1357,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "\\bvar\\s+[A-Za-z_$]",
             "message": "Use `const` or `let` instead of `var` \u2014 var is function-scoped and hoisted",
             "context": "code",
+            "refiner": "",
             "strength": "strong",
         },
         {
@@ -1227,6 +1365,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": ":\\s*(?:Function|Object)\\b",
             "message": "Never use `Function` or `Object` as a type \u2014 declare the call signature or the object shape",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -1234,6 +1373,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "\\bconsole\\.log\\s*\\(",
             "message": "console.log is a debug leftover \u2014 remove it or route through a logger",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
     ],
@@ -1243,6 +1383,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "\\bas\\s+any\\b",
             "message": "Never use `as any` \u2014 use proper types or type guards",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -1250,6 +1391,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "\\bas\\s+unknown\\b",
             "message": "Never use `as unknown` \u2014 use type guards or proper types",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -1257,6 +1399,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": ":\\s*any\\b",
             "message": "Never use `any` type annotation \u2014 use specific types, generics, or `unknown`",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -1264,6 +1407,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "<any>",
             "message": "Never use `<any>` type assertion \u2014 use proper types",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -1271,6 +1415,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "@ts-ignore",
             "message": "Never use @ts-ignore \u2014 fix the type error properly",
             "context": "comment",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -1278,6 +1423,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "@ts-expect-error",
             "message": "Never use @ts-expect-error \u2014 fix the type error properly",
             "context": "comment",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -1285,6 +1431,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "@ts-nocheck",
             "message": "Never use @ts-nocheck \u2014 fix the type errors in the file",
             "context": "comment",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -1292,6 +1439,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "//\\s*eslint-disable",
             "message": "Never use eslint-disable \u2014 fix the lint issue properly",
             "context": "comment",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -1299,6 +1447,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "/\\*\\s*eslint-disable",
             "message": "Never use eslint-disable \u2014 fix the lint issue properly",
             "context": "comment",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -1306,6 +1455,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "//\\s*tslint:disable",
             "message": "Never use tslint:disable \u2014 migrate to eslint and fix the issue",
             "context": "comment",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -1313,6 +1463,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "[\\w\\)\\]]!\\.",
             "message": "Postfix `!.` non-null assertion hides a possible null/undefined \u2014 narrow the type or handle the missing case",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -1320,6 +1471,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "\\bvar\\s+[A-Za-z_$]",
             "message": "Use `const` or `let` instead of `var` \u2014 var is function-scoped and hoisted",
             "context": "code",
+            "refiner": "",
             "strength": "strong",
         },
         {
@@ -1327,6 +1479,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": ":\\s*(?:Function|Object)\\b",
             "message": "Never use `Function` or `Object` as a type \u2014 declare the call signature or the object shape",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -1334,6 +1487,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "\\bconsole\\.log\\s*\\(",
             "message": "console.log is a debug leftover \u2014 remove it or route through a logger",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
     ],
@@ -1343,6 +1497,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "\\bas\\s+any\\b",
             "message": "Never use `as any` \u2014 use proper types or type guards",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -1350,6 +1505,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "\\bas\\s+unknown\\b",
             "message": "Never use `as unknown` \u2014 use type guards or proper types",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -1357,6 +1513,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": ":\\s*any\\b",
             "message": "Never use `any` type annotation \u2014 use specific types, generics, or `unknown`",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -1364,6 +1521,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "<any>",
             "message": "Never use `<any>` type assertion \u2014 use proper types",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -1371,6 +1529,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "@ts-ignore",
             "message": "Never use @ts-ignore \u2014 fix the type error properly",
             "context": "comment",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -1378,6 +1537,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "@ts-expect-error",
             "message": "Never use @ts-expect-error \u2014 fix the type error properly",
             "context": "comment",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -1385,6 +1545,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "@ts-nocheck",
             "message": "Never use @ts-nocheck \u2014 fix the type errors in the file",
             "context": "comment",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -1392,6 +1553,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "//\\s*eslint-disable",
             "message": "Never use eslint-disable \u2014 fix the lint issue properly",
             "context": "comment",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -1399,6 +1561,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "/\\*\\s*eslint-disable",
             "message": "Never use eslint-disable \u2014 fix the lint issue properly",
             "context": "comment",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -1406,6 +1569,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "//\\s*tslint:disable",
             "message": "Never use tslint:disable \u2014 migrate to eslint and fix the issue",
             "context": "comment",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -1413,6 +1577,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "[\\w\\)\\]]!\\.",
             "message": "Postfix `!.` non-null assertion hides a possible null/undefined \u2014 narrow the type or handle the missing case",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -1420,6 +1585,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "\\bvar\\s+[A-Za-z_$]",
             "message": "Use `const` or `let` instead of `var` \u2014 var is function-scoped and hoisted",
             "context": "code",
+            "refiner": "",
             "strength": "strong",
         },
         {
@@ -1427,6 +1593,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": ":\\s*(?:Function|Object)\\b",
             "message": "Never use `Function` or `Object` as a type \u2014 declare the call signature or the object shape",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
         {
@@ -1434,6 +1601,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "pattern": "\\bconsole\\.log\\s*\\(",
             "message": "console.log is a debug leftover \u2014 remove it or route through a logger",
             "context": "code",
+            "refiner": "",
             "strength": "soft",
         },
     ],

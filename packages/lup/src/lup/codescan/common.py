@@ -28,6 +28,7 @@ from pydantic import BaseModel, ConfigDict
 
 from lup.policy.kernel.edit import (
     FILE_IGNORE_RE,
+    file_level_line,
     docstring_lines as python_docstring_lines,
     mask_python_string_literals,
     python_code_lines,
@@ -85,20 +86,20 @@ class FileIgnore(BaseModel):
 
 
 def file_level_ignore(text: str, max_lines: int = 10) -> FileIgnore | None:
-    """The file-level `# lup: ignore` in the first `max_lines`, or ``None``.
+    """The file-level `# lup: ignore` in the header block, or ``None``.
 
     A standalone bare `# lup: ignore` opts the whole file out of anti-pattern
     checks; the typed `# lup: ignore[rule-id]` form opts out only the named
     rules. Feedback-note scanning never consults this — an opted-out file still
     surfaces its `# lup:` notes (see `lup.codescan.markers.find_feedback`).
     """
-    for i, line in enumerate(text.splitlines()):
-        if i >= max_lines:
-            break
-        match = FILE_IGNORE_RE.match(line)
-        if match is not None:
-            return FileIgnore(line=i + 1, rule_ids=ignore_rule_ids(match))
-    return None
+    number = file_level_line(text, max_lines)
+    if number == 0:
+        return None
+    match = FILE_IGNORE_RE.match(text.splitlines()[number - 1])
+    return FileIgnore(
+        line=number, rule_ids=ignore_rule_ids(match) if match is not None else None
+    )
 
 
 # lup: ignore[library-default] — this library's own import root, fixed by the

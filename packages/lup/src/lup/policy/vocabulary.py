@@ -458,7 +458,8 @@ def runner_target_rules(
 # `read-tree` and `update-index` write the index, `update-ref` and `pack-refs`
 # move refs, and `format-patch`, `unpack-file`, and `difftool --dir-diff` each
 # land files in the working tree.
-GIT_READ_ONLY_SUBCOMMANDS = (  # lup: ignore[library-default] — git's own query and object-construction verbs, taken by the criterion above; which of them reaches a ref is a fact about git rather than a choice made for an adopter
+# lup: ignore[library-default] — git's own query and object-construction verbs, taken by the criterion above; which of them reaches a ref is a fact about git rather than a choice made for an adopter
+GIT_READ_ONLY_SUBCOMMANDS = (
     # Reporting on the object store, the refs, the index, and the config.
     "status",
     "rev-parse",
@@ -523,7 +524,8 @@ GIT_READ_ONLY_SUBCOMMANDS = (  # lup: ignore[library-default] — git's own quer
     "write-tree",
 )
 
-GIT_REVERSIBLE_SUBCOMMANDS = (  # lup: ignore[library-default] — git subcommands the reflog or a second invocation undoes; fixed by what git records rather than by taste
+# lup: ignore[library-default] — git subcommands the reflog or a second invocation undoes; fixed by what git records rather than by taste
+GIT_REVERSIBLE_SUBCOMMANDS = (
     "add",
     "commit",
     "mv",

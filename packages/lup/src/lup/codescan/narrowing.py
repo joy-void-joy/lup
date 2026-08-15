@@ -116,7 +116,6 @@ def source_violations(source: PythonSource) -> Iterator[RuleViolation]:
         repeated = [count for count in deciding.values() if count > 1]
         if not repeated:
             continue
-        end = arms[-1].end_lineno or node.lineno
         yield RuleViolation(
             path=source.path,
             line=node.lineno,
@@ -124,7 +123,6 @@ def source_violations(source: PythonSource) -> Iterator[RuleViolation]:
                 f"{max(repeated)} {NARROWING_CALL} arms decide between one "
                 f"subject's types — {REMEDY}"
             ),
-            suppression_lines=list(range(node.lineno, end + 1)),
         )
 
 

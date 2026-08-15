@@ -165,11 +165,13 @@ class NativeSpellings(SkillInvocationRenderer):  # lup: ignore[abc-capability]
     spells.
     """
 
+    # lup: ignore[abc-capability] — NativeSpellings owns one runtime's whole vocabulary, deliberately wider than the three-method shape; the class docstring carries the argument
     @property
     @abstractmethod
     def runtime_name(self) -> Atom:
         """Name the runtime the way prose addresses it."""
 
+    # lup: ignore[abc-capability] — NativeSpellings owns one runtime's whole vocabulary, deliberately wider than the three-method shape; the class docstring carries the argument
     @property
     @abstractmethod
     def native_identifiers(self) -> list[Atom]:

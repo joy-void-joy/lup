@@ -124,7 +124,8 @@ def sandbox_escaped(sandbox: SandboxPlacement, agent_escaped: bool) -> bool:
     return sandbox == "outside" or (sandbox == "escalable" and agent_escaped)
 
 
-KERNEL_IMPORT_ALLOWLIST = (  # lup: ignore[library-default] — the stdlib the kernel actually imports; the hermetic guarantee it exists to hold
+# lup: ignore[library-default] — the stdlib the kernel actually imports; the hermetic guarantee it exists to hold
+KERNEL_IMPORT_ALLOWLIST = (
     "ast",
     "collections.abc",
     "io",

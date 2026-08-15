@@ -19,7 +19,8 @@ from .words import (
 from .fetch import decide_fetch
 
 SED_SAFE_SHORT_FLAGS = "nErsuz"
-SED_SAFE_LONG_OPTIONS = (  # lup: ignore[library-default] — sed's own long spellings of the short flags above
+# lup: ignore[library-default] — sed's own long spellings of the short flags above
+SED_SAFE_LONG_OPTIONS = (
     "--quiet",
     "--silent",
     "--regexp-extended",
@@ -457,7 +458,8 @@ def curl_safe_flag(word: str) -> bool:
     )
 
 
-CURL_VALUE_FLAGS = (  # lup: ignore[library-default] — curl's own value-taking flags; misreading one shifts the argument scan
+# lup: ignore[library-default] — curl's own value-taking flags; misreading one shifts the argument scan
+CURL_VALUE_FLAGS = (
     "-H",
     "--header",
     "-m",

@@ -21,8 +21,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parents[1] / "runtime"))
 from kernel.decision import KernelDecision, escalation_offer, sandbox_escaped
 from policy_data import AGENT_IDENTITY_ENV, AUTONOMOUS_AGENT_IDENTITIES
-import subprocess  # lup: ignore[subprocess] — `sh` is third-party and this half is compiled into a bare script that has no virtual environment to resolve it from
-from kernel.edit import decide_edit
+
+# lup: ignore[subprocess] — `sh` is third-party and this half is compiled into a bare script that has no virtual environment to resolve it from
+import subprocess
+from kernel.edit import decide_edit, relocated_edit_text, relocated_suppressions
 from kernel.fetch import decide_fetch
 from kernel.lex import shell_path_verb_targets, shell_write_targets
 from kernel.shell import decide_shell
@@ -274,6 +276,25 @@ def refused_tool_decision(name: str, values: list[str]) -> KernelDecision | None
     return decide_tool(name, values, REFUSED_TOOLS)
 
 
+def placed_document(path_text: str, after: str) -> str:
+    """One file's text with every suppression at its canonical placement.
+
+    Only Python has a placement to settle here: the policy is written in terms
+    of a comment the formatter cannot wrap, and the tokenizer that says where
+    a comment really opens is Python's.
+    """
+    if Path(path_text).suffix.lower() not in (".py", ".pyi"):
+        return after
+    return relocated_suppressions(after)
+
+
+def placed_edit_text(path_text: str, after: str, start: int, end: int) -> str | None:
+    """The replacement for an edit's own span, or ``None`` to place nothing."""
+    if Path(path_text).suffix.lower() not in (".py", ".pyi"):
+        return None
+    return relocated_edit_text(after, start, end)
+
+
 def edit_decision(
     path_text: str,
     before: str | None,
@@ -357,6 +378,43 @@ def spent_escape(tool_input):
     )
 
 
+def placed_input(payload):
+    """The tool arguments that land the same edit with its directives placed.
+
+    The correcting route rather than the refusing one: where a directive was
+    written somewhere the placement policy does not keep it, the call goes out
+    rewritten instead of coming back as a complaint, so nobody weighs a reason
+    against a column count while writing one. This is what `ruff --add-noqa`
+    does for its own directives, moved to the gate that already reads the
+    edit.
+
+    ``None`` says place nothing. An edit can only rewrite the text it supplies,
+    so a move reaching outside that text declines rather than guesses — and a
+    `replace_all` edit has no single span to read a move back out of.
+    """
+    name = payload["tool_name"]
+    tool_input = payload["tool_input"]
+    if name not in ("Edit", "Write"):
+        return None
+    path = tool_input["file_path"]
+    if Path(path).suffix.lower() not in (".py", ".pyi"):
+        return None
+    if name == "Write":
+        content = tool_input["content"]
+        revised = placed_document(path, content)
+        return None if revised == content else {**tool_input, "content": revised}
+    if "replace_all" in tool_input and tool_input["replace_all"] is True:
+        return None
+    before, after = edit_documents(
+        path, tool_input["old_string"], tool_input["new_string"], False
+    )
+    start = before.find(tool_input["old_string"])
+    revised = placed_edit_text(
+        path, after, start, start + len(tool_input["new_string"])
+    )
+    return None if revised is None else {**tool_input, "new_string": revised}
+
+
 def dispatch(payload):
     name = payload["tool_name"]
     tool_input = payload["tool_input"]
@@ -408,7 +466,7 @@ def dispatch(payload):
     return KernelDecision("ask", "tool is not classified")
 
 
-def rendered(decision, payload):
+def rendered(decision, payload, placed):
     """Answer one call on the permission channel, and place it on the other.
 
     Claude Code takes a call's sandbox as an argument of the call rather than
@@ -432,6 +490,16 @@ def rendered(decision, payload):
     whole input is carried through. A deferral is placed nowhere, which is
     also why nothing here reads a payload a deferral may not have parsed.
 
+    ``placed`` carries the other rewrite this channel can hand back: the same
+    edit with its suppression directives at their canonical placement. It
+    rides along with the verdict rather than replacing it — placing a
+    directive settles where it is written and says nothing about whether the
+    edit may happen, so an ask still asks, over the placed text, which is what
+    the approver should be reading. A denied call runs nothing, so there is
+    nothing to place. The two rewrites never contend for the one
+    ``updatedInput`` field: a directive is placed only in an ``Edit`` or
+    ``Write``, and the sandbox argument belongs only to ``Bash``.
+
     Both sandbox questions are answered yes here, from that one field: the
     rewrite is how a verdict places a call, and the same field on the call the
     agent writes is how the agent places its own — which is what an
@@ -453,6 +521,8 @@ def rendered(decision, payload):
     offer = escalation_offer(settled.sandbox, settled.reason)
     if offer:
         answer["additionalContext"] = offer
+    if placed is not None and settled.effect != "deny":
+        return {"hookSpecificOutput": {**answer, "updatedInput": placed}}
     if settled.sandbox == "ambient" or payload["tool_name"] != "Bash":
         return {"hookSpecificOutput": answer}
     return {
@@ -470,9 +540,11 @@ def rendered(decision, payload):
 
 def main():
     payload = {}
+    placed = None
     try:
         payload = json.load(sys.stdin)
         decision = dispatch(payload)
+        placed = placed_input(payload)
     # Every way this can fail means one thing — the call went unjudged — and
     # one answer is right for all of them. Naming the exceptions instead is
     # what let a plain unreadable file escape, and the traceback exit reaches
@@ -483,7 +555,7 @@ def main():
         decision = KernelDecision(
             "ask", f"Malformed hook input requires approval: {error}"
         )
-    json.dump(rendered(decision, payload), sys.stdout)
+    json.dump(rendered(decision, payload, placed), sys.stdout)
 
 
 if __name__ == "__main__":

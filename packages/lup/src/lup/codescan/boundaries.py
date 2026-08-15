@@ -18,16 +18,20 @@ offending line or as a file-level directive, with a reason.
 import ast
 from collections.abc import Collection, Sequence
 from pathlib import Path
-from typing import Self, get_args
+from typing import get_args
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field
 
 from lup.codescan.common import (
     PythonContext,
     file_level_ignore,
     ignore_rule_ids,
 )
-from lup.policy.kernel.edit import IGNORE_RE
+from lup.policy.kernel.edit import (
+    IGNORE_RE,
+    suppression_placement,
+    suppression_reaches,
+)
 from lup.harness.contracts import NativeSpellings
 from lup.harness.models import PluginLocation, TreeLocation
 from lup.policy.kernel.decision import KERNEL_IMPORT_ALLOWLIST
@@ -201,27 +205,17 @@ class BoundaryAuditFinding(BaseModel):
 class SourceViolation(BaseModel):
     """One unsuppressed source shape before ordinary suppression auditing.
 
-    ``line`` is where the violation is reported; ``directive_from`` and
-    ``directive_to`` bound the lines where its suppression may sit. Both
-    default to ``line`` — an import or a spelling is one line, and the repo
-    convention puts its directive on exactly that line. A rule whose subject
-    is a whole declaration widens the bound instead, so a fifty-line table can
-    be excused by a directive heading it rather than one crammed onto the
-    opening line, where a real reason would not fit.
+    ``line`` is where the violation is reported, and it is the only thing this
+    rule gets to say about its suppression: a declaration heading a fifty-line
+    table is excused from the line above it, exactly as every other rule is,
+    because a reason that does not fit inline goes to the same place whatever
+    is being excused.
     """
 
     line: int
-    directive_from: int = 0
-    directive_to: int = 0
     text: str
     subject: str
     message: str
-
-    @model_validator(mode="after")
-    def default_zone_to_the_reported_line(self) -> Self:
-        self.directive_from = self.directive_from or self.line
-        self.directive_to = max(self.directive_to, self.line)
-        return self
 
 
 class TableConstant(BaseModel):
@@ -481,8 +475,6 @@ def library_default_violations(
     return [
         SourceViolation(
             line=constant.line,
-            directive_from=constant.line - 1,
-            directive_to=constant.end_line,
             text=constant.text,
             subject=constant.name,
             message=(
@@ -501,6 +493,7 @@ def audit_rule(
     """Apply ordinary inline/file suppression auditing to one boundary rule."""
     context = PythonContext.parse(text)
     file_ignore = file_level_ignore(text)
+    lines = text.splitlines()
     directives: list[BoundaryDirective] = []  # lup: ignore[empty-collection]
     if file_ignore is not None:
         directives.append(
@@ -510,7 +503,7 @@ def audit_rule(
                 file_level=True,
             )
         )
-    for line_number, line in enumerate(text.splitlines(), start=1):
+    for line_number, line in enumerate(lines, start=1):
         if file_ignore is not None and line_number == file_ignore.line:
             continue
         match = IGNORE_RE.search(line)
@@ -532,7 +525,7 @@ def audit_rule(
             for index, directive in enumerate(directives)
             if (
                 directive.file_level
-                or violation.directive_from <= directive.line <= violation.directive_to
+                or suppression_reaches(lines, directive.line, violation.line)
             )
             and (directive.rule_ids is None or rule_id in directive.rule_ids)
         ]
@@ -542,7 +535,10 @@ def audit_rule(
                     kind="missing",
                     line=violation.line,
                     text=violation.text,
-                    message=violation.message,
+                    message=(
+                        f"{violation.message} — suppress on "
+                        f"{suppression_placement(violation.line)}"
+                    ),
                     rule_id=rule_id,
                     module=violation.subject,
                 )

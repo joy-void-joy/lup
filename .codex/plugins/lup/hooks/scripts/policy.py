@@ -22,8 +22,10 @@ sys.path.insert(0, str(Path(__file__).parents[1] / "runtime"))
 from codex_patch import patched_files
 from kernel.decision import KernelDecision
 from policy_data import AGENT_IDENTITY_ENV, AUTONOMOUS_AGENT_IDENTITIES
-import subprocess  # lup: ignore[subprocess] — `sh` is third-party and this half is compiled into a bare script that has no virtual environment to resolve it from
-from kernel.edit import decide_edit
+
+# lup: ignore[subprocess] — `sh` is third-party and this half is compiled into a bare script that has no virtual environment to resolve it from
+import subprocess
+from kernel.edit import decide_edit, relocated_edit_text, relocated_suppressions
 from kernel.fetch import decide_fetch
 from kernel.lex import shell_path_verb_targets, shell_write_targets
 from kernel.shell import decide_shell
@@ -273,6 +275,25 @@ def refused_tool_decision(name: str, values: list[str]) -> KernelDecision | None
     what it approved — an unmentioned tool is still unclassified.
     """
     return decide_tool(name, values, REFUSED_TOOLS)
+
+
+def placed_document(path_text: str, after: str) -> str:
+    """One file's text with every suppression at its canonical placement.
+
+    Only Python has a placement to settle here: the policy is written in terms
+    of a comment the formatter cannot wrap, and the tokenizer that says where
+    a comment really opens is Python's.
+    """
+    if Path(path_text).suffix.lower() not in (".py", ".pyi"):
+        return after
+    return relocated_suppressions(after)
+
+
+def placed_edit_text(path_text: str, after: str, start: int, end: int) -> str | None:
+    """The replacement for an edit's own span, or ``None`` to place nothing."""
+    if Path(path_text).suffix.lower() not in (".py", ".pyi"):
+        return None
+    return relocated_edit_text(after, start, end)
 
 
 def edit_decision(

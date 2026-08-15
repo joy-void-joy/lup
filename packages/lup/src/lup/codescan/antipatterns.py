@@ -69,6 +69,8 @@ from lup.policy.kernel.edit import (
     IGNORE_RE,
     dict_get_exempt_lines,
     empty_collection_exempt_lines,
+    suppression_placement,
+    suppression_reaches,
     tuple_shape_exempt_lines,
 )
 
@@ -108,12 +110,12 @@ class AntiPattern(BaseModel):
     ``refiner`` is present when the regex is wider than the defect the rule
     names and an AST context settles the difference. It carries the function
     itself, so reading the rule tells you what narrows it rather than only
-    that something does. The kernel reaches the same functions through
-    :data:`lup.policy.kernel.edit.REFINERS`, because a row projected into the
-    hermetic runtime is primitive and cannot carry a callable;
-    ``test_declared_refiners_are_the_kernel_refiners`` pins the two to the
-    same objects, since a rule refined on one side only is exactly the split
-    that makes a marker unremovable.
+    that something does. The row carries its name, which
+    :func:`lup.policy.kernel.edit.refiner_named` resolves back to the function,
+    because a row projected into the hermetic runtime is primitive and cannot
+    carry a callable; ``test_declared_refiners_are_the_kernel_refiners`` pins
+    the two to the same objects, since a rule refined on one side only is
+    exactly the split that makes a marker unremovable.
     """
 
     model_config = {"arbitrary_types_allowed": True}
@@ -747,6 +749,14 @@ def audit_text(
     tokenizer), so a docstring or string literal that merely *mentions*
     `# lup: ignore` — and a note whose prose quotes it — guards nothing. Text
     that does not tokenize as Python falls back to a plain substring check.
+
+    Where it may be written is one policy for every rule, line-shaped and
+    AST-shaped alike: the line it guards, or standing alone directly above —
+    the placement a reason too long for the column budget needs, since a
+    comment is the one thing the formatter cannot wrap. A directive is graded
+    against the lines it reaches rather than the line it sits on, so the
+    overflow placement is read where it applies instead of being reported as
+    guarding nothing.
     """
     file_ignore = file_level_ignore(text)
     file_disabled: set[str] = set()
@@ -769,36 +779,77 @@ def audit_text(
         for refutation in refined_refutations(text, patterns) + (refutations or [])
     }
 
-    def inline_directive(line_no: int, line: str) -> re.Match[str] | None:
-        match = IGNORE_RE.search(line)
-        if match is None:
-            return None
-        if not context.comment_at(line_no, match.start()):
-            return None
-        return match
-
     file_ignore_line = file_ignore.line if file_ignore is not None else 0
     original_lines = text.splitlines()
     projections = LineProjections.parse(text)
 
+    def written_directive(line_no: int) -> re.Match[str] | None:
+        """The directive actually written on one line, if a comment opens it.
+
+        The whole-file opt-out is not one of these. It stands alone like the
+        overflow placement does, so reading it as one would quietly make it
+        the guard for whatever line happens to follow the header.
+        """
+        if line_no < 1 or line_no > len(original_lines) or line_no == file_ignore_line:
+            return None
+        match = IGNORE_RE.search(original_lines[line_no - 1])
+        if match is None or not context.comment_at(line_no, match.start()):
+            return None
+        return match
+
+    def guarding_directive(line_no: int) -> re.Match[str] | None:
+        """The directive covering `line_no`, from its own line or the one above.
+
+        The same placement every project-wide rule accepts, so a marker that
+        reads correctly against an AST rule reads correctly here. A directive
+        found above is the overflow placement: the line it guards had no room
+        left for the reason that justifies it.
+        """
+        return next(
+            (
+                match
+                for candidate in (line_no, line_no - 1)
+                if (match := written_directive(candidate)) is not None
+                and suppression_reaches(original_lines, candidate, line_no)
+            ),
+            None,
+        )
+
+    def guarded_lines(line_no: int) -> list[int]:
+        """Every audited line the directive written on `line_no` reaches.
+
+        The mirror of :func:`guarding_directive`, and what keeps the reported
+        failure from recurring: a directive is judged against the lines it
+        actually covers, so one standing above its violation is read there
+        rather than reported as guarding nothing where it sits.
+        """
+        return [
+            candidate
+            for candidate in (line_no, line_no + 1)
+            if candidate in hits_by_line
+            and suppression_reaches(original_lines, line_no, candidate)
+        ]
+
+    hits_by_line = {
+        number: [
+            ap
+            for ap in line_hits(projections, number, patterns)
+            if (ap.id, number) not in refuted
+        ]
+        for number in range(1, len(original_lines) + 1)
+        # The file-level directive line is not itself audited, and docstring
+        # prose is not code — no comment can open inside a string to guard it.
+        if number != file_ignore_line and number not in context.docstring_lines
+    }
+
+    def preview_of(line_no: int) -> str:
+        return original_lines[line_no - 1].strip()[:80]
+
     file_live: set[str] = set()
     findings: list[AntiPatternFinding] = []
-    for index, line in enumerate(original_lines, start=1):
-        if index == file_ignore_line:
-            continue  # the file-level directive line is not itself audited
-        if index in context.docstring_lines:
-            continue  # docstring prose is not code, and no comment can guard it
-        preview = line.strip()[:80]
-        hits = [
-            ap
-            for ap in line_hits(projections, index, patterns)
-            if (ap.id, index) not in refuted
-        ]
-        hit_ids = {ap.id for ap in hits}
-        directive = inline_directive(index, line)
-        inline_ids = ignore_rule_ids(directive) if directive is not None else None
-
-        silenced_by_bare = False
+    for index, hits in hits_by_line.items():
+        directive = guarding_directive(index)
+        covered_ids = ignore_rule_ids(directive) if directive is not None else None
         for ap in hits:
             if ap.strength == "strong":
                 # No directive reaches this one. A soft rule's suppression is a
@@ -809,7 +860,7 @@ def audit_text(
                     AntiPatternFinding(
                         kind="missing",
                         line=index,
-                        text=preview,
+                        text=preview_of(index),
                         message=f"{ap.message} (no suppression: write the replacement)",
                         rule_id=ap.id,
                     )
@@ -818,57 +869,74 @@ def audit_text(
             if ap.id in file_disabled:
                 # Live only when the file-level directive is the sole silencer;
                 # an inline-covered hit does not keep the file-wide id alive.
-                if directive is None or not (inline_ids is None or ap.id in inline_ids):
+                if directive is None or not (
+                    covered_ids is None or ap.id in covered_ids
+                ):
                     file_live.add(ap.id)
                 continue
-            if directive is not None and (inline_ids is None or ap.id in inline_ids):
-                silenced_by_bare = silenced_by_bare or inline_ids is None
+            if directive is not None and (covered_ids is None or ap.id in covered_ids):
                 continue
             findings.append(
                 AntiPatternFinding(
                     kind="missing",
                     line=index,
-                    text=preview,
-                    message=ap.message,
+                    text=preview_of(index),
+                    message=f"{ap.message} — suppress on {suppression_placement(index)}",
                     rule_id=ap.id,
                 )
             )
 
+    # Every directive is graded where it is written, against the lines it
+    # reaches rather than the one it sits on. Those differ for exactly the
+    # overflow placement, and conflating them is what reported a marker
+    # standing above its violation as guarding nothing.
+    for index in range(1, len(original_lines) + 1):
+        directive = written_directive(index)
         if directive is None:
             continue
-        if inline_ids is None:
-            if silenced_by_bare:
-                covered = sorted(i for i in hit_ids if i not in file_disabled)
-                findings.append(
-                    AntiPatternFinding(
-                        kind="untyped",
-                        line=index,
-                        text=preview,
-                        message="`# lup: ignore` is untyped — name the rule(s) it silences: "
-                        f"`# lup: ignore[{', '.join(covered)}]`",
-                        rule_id=covered[0] if covered else "",
-                    )
+        named = ignore_rule_ids(directive)
+        guarded = [
+            ap for line_no in guarded_lines(index) for ap in hits_by_line[line_no]
+        ]
+        reached = {ap.id for ap in guarded}
+        silenced = {
+            ap.id
+            for ap in guarded
+            if ap.strength != "strong" and ap.id not in file_disabled
+        }
+        if named is not None:
+            findings.extend(
+                AntiPatternFinding(
+                    kind="spurious",
+                    line=index,
+                    text=preview_of(index),
+                    message=f"`# lup: ignore[{rid}]` guards a line that does not trip `{rid}` — remove it",
+                    rule_id=rid,
                 )
-            else:
-                findings.append(
-                    AntiPatternFinding(
-                        kind="spurious",
-                        line=index,
-                        text=preview,
-                        message="`# lup: ignore` guards a line that matches no anti-pattern — remove it",
-                    )
+                for rid in sorted(named - reached - FOREIGN_RULE_IDS)
+            )
+            continue
+        covered = sorted(rid for rid in reached if rid not in file_disabled)
+        if silenced:
+            findings.append(
+                AntiPatternFinding(
+                    kind="untyped",
+                    line=index,
+                    text=preview_of(index),
+                    message="`# lup: ignore` is untyped — name the rule(s) it silences: "
+                    f"`# lup: ignore[{', '.join(covered)}]`",
+                    rule_id=covered[0] if covered else "",
                 )
+            )
         else:
-            for rid in sorted(inline_ids - hit_ids - FOREIGN_RULE_IDS):
-                findings.append(
-                    AntiPatternFinding(
-                        kind="spurious",
-                        line=index,
-                        text=preview,
-                        message=f"`# lup: ignore[{rid}]` guards a line that does not trip `{rid}` — remove it",
-                        rule_id=rid,
-                    )
+            findings.append(
+                AntiPatternFinding(
+                    kind="spurious",
+                    line=index,
+                    text=preview_of(index),
+                    message="`# lup: ignore` guards a line that matches no anti-pattern — remove it",
                 )
+            )
 
     if file_ignore is not None:
         directive_text = text.splitlines()[file_ignore.line - 1].strip()[:80]

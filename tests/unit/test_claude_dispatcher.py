@@ -122,6 +122,48 @@ def test_a_declared_test_root_is_not_judged_against_production_conventions() -> 
     assert allowed["permissionDecision"] == "allow"
 
 
+def test_an_overwide_suppression_is_placed_rather_than_left_to_the_author() -> None:
+    """The gate rewrites the call instead of making the author budget columns.
+
+    An inline directive whose reason outgrows the line is what pushes an agent
+    to shorten an identifier to buy room. The hook moves it onto the line
+    above, so the reason survives whole and nobody had to choose.
+    """
+    reason = "a justification long enough that keeping it inline outgrows the line"
+    decision = decide(
+        edit_payload(
+            "packages/lup/src/lup/devtools/dev/antipatterns.py",
+            "from lup.devtools.utils import git, output_json",
+            f"from typing import Any  # lup: ignore[any-type] — {reason}",
+            False,
+        )
+    )
+
+    specific = decision["hookSpecificOutput"]
+    assert isinstance(specific, dict)
+    placed = specific["updatedInput"]
+    assert isinstance(placed, dict)
+    assert placed["new_string"] == (
+        f"# lup: ignore[any-type] — {reason}\nfrom typing import Any"
+    )
+
+
+def test_a_suppression_that_fits_is_left_exactly_where_it_was_written() -> None:
+    """Placing is a normal form, so what is already canonical is not touched."""
+    decision = decide(
+        edit_payload(
+            "packages/lup/src/lup/devtools/dev/antipatterns.py",
+            "from lup.devtools.utils import git, output_json",
+            "from typing import Any  # lup: ignore[any-type] — at a boundary",
+            False,
+        )
+    )
+
+    specific = decision["hookSpecificOutput"]
+    assert isinstance(specific, dict)
+    assert "updatedInput" not in specific
+
+
 def write_payload(path: str, content: str) -> JsonObject:
     """One Write hook payload, the way a live session sends it."""
     return {"tool_name": "Write", "tool_input": {"file_path": path, "content": content}}
@@ -488,6 +530,7 @@ def dispatcher_rewrite(placement: SandboxPlacement, call: JsonObject) -> JsonObj
     answer = dispatcher.rendered(
         dispatcher.KernelDecision("allow", "placed", placement),
         {"tool_name": "Bash", "tool_input": call},
+        None,
     )
     specific = answer["hookSpecificOutput"]
     assert isinstance(specific, dict)

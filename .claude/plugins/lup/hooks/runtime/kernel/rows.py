@@ -79,6 +79,15 @@ class AntiPatternRow(TypedDict):
     pattern: str
     message: str
     context: str
+    refiner: str
+    """The exemption function this rule declares, or ``""`` where it declares none.
+
+    Named rather than carried, because a row crossing into the hermetic
+    runtime is primitive and a callable is not. The association lives at the
+    declaration and travels here, so the gate resolves a rule's refiner from
+    the row it is already matching on instead of from a second list of ids
+    that has to be kept in step with it.
+    """
     strength: str
     """"strong" when no directive may silence this rule, "soft" when one may.
 
