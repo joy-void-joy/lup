@@ -27,7 +27,7 @@ from collections.abc import Sequence, Set as AbstractSet
 from pathlib import Path
 
 import typer
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
 from lup.codescan.antipatterns import (
     AntiPattern,
@@ -75,16 +75,14 @@ class FoundAntiPattern(AntiPatternFinding):
     file: str
 
 
-class FoundRefutation(Refutation):
+class FoundRefutation(Refutation, frozen=True):
     """A :class:`~lup.codescan.common.Refutation` tagged with its file."""
 
     file: str
 
 
-class ScannedFile(BaseModel):
+class ScannedFile(BaseModel, arbitrary_types_allowed=True):
     """One tracked file the sweep reads once and audits against its table."""
-
-    model_config = ConfigDict(arbitrary_types_allowed=True)
 
     rel: str
     path: Path

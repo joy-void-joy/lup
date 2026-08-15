@@ -56,7 +56,7 @@ from collections.abc import Callable, Iterator
 from datetime import datetime
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict, Field, SerializeAsAny, ValidationError
+from pydantic import BaseModel, Field, SerializeAsAny, ValidationError
 
 from lup.types import JsonObject, JsonValue, Usage
 from lup.telemetry.metrics import MetricsSummary
@@ -109,7 +109,7 @@ class SessionResult[OutputT: BaseModel](BaseModel):
     outcome: str | None = Field(default=None, description="Outcome after resolution")
 
 
-class SessionRecord(BaseModel):
+class SessionRecord(BaseModel, extra="allow"):
     """A session result read back from disk, tolerant of domain variation.
 
     The read-side counterpart of :class:`SessionResult`: every core field
@@ -117,8 +117,6 @@ class SessionRecord(BaseModel):
     because the domain's output model is not known at read time, and
     fields a domain adds to its result model survive via ``extra="allow"``.
     """
-
-    model_config = ConfigDict(extra="allow")
 
     session_id: str = ""
     task_id: str | None = None

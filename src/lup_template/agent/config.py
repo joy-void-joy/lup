@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Annotated, Literal, Self
 
 from pydantic import Field, field_validator, model_validator
-from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode
 
 logger = logging.getLogger(__name__)
 
@@ -28,16 +28,11 @@ type Engine = Literal["claude", "codex", "openai", "openai-compat", "claude-comp
 resolves which one a session runs."""
 
 
-class Settings(BaseSettings):
+class Settings(BaseSettings, env_file=(".env", ".env.local"), extra="ignore"):
     """Application settings loaded from environment variables.
 
     Agent-specific settings use a prefix (e.g., AGENT_MODEL).
     """
-
-    model_config = SettingsConfigDict(
-        env_file=(".env", ".env.local"),
-        extra="ignore",
-    )
 
     @model_validator(mode="after")
     def warn_missing_optional_keys(self) -> Self:

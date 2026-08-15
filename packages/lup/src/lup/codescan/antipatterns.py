@@ -54,7 +54,7 @@ consumers and the auditor import directly.
 import re
 from collections.abc import Callable
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field
 
 from lup.codescan.behaviour import RULE_ID as MODEL_FREE_FUNCTION_RULE_ID
 from lup.codescan.boundaries import (
@@ -83,7 +83,7 @@ from lup.policy.kernel.edit import (
 )
 
 
-class Refiner(BaseModel):
+class Refiner(BaseModel, arbitrary_types_allowed=True):
     """An AST context that narrows one rule, and what a cleared match really is.
 
     ``exempt`` returns the lines the context clears, and ``evidence`` says why
@@ -93,13 +93,11 @@ class Refiner(BaseModel):
     the rule is declared.
     """
 
-    model_config = {"arbitrary_types_allowed": True}
-
     exempt: Callable[[str], set[int]]
     evidence: str
 
 
-class AntiPattern(BaseModel):
+class AntiPattern(BaseModel, arbitrary_types_allowed=True):
     """One forbidden code shape: a stable id, the regex that detects it, and why.
 
     ``id`` is a stable kebab-case name a typed `# lup: ignore[id]` directive
@@ -125,8 +123,6 @@ class AntiPattern(BaseModel):
     same objects, since a rule refined on one side only is exactly the split
     that makes a marker unremovable.
     """
-
-    model_config = {"arbitrary_types_allowed": True}
 
     id: str
     pattern: re.Pattern[str]
@@ -421,6 +417,18 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         message="Use Pydantic BaseModel (or TypedDict) instead of NamedTuple/namedtuple",
     ),
     AntiPattern(
+        # Also catches the alias-bound spelling — `model_config = FROZEN` names
+        # a shared ConfigDict, which is the same statement one indirection out.
+        id="model-config-assign",
+        pattern=re.compile(r"\bmodel_config\s*="),
+        message="A `model_config` assignment states in the class body what the class "
+        "header declares — write the keys as class keywords, "
+        "`class A(BaseModel, frozen=True, extra='forbid')`, which pydantic collects "
+        "into the same config and which reads beside the base being configured. A "
+        "shared `FROZEN = ConfigDict(frozen=True)` alias is the same assignment one "
+        "indirection out: inline its keys rather than binding them",
+    ),
+    AntiPattern(
         id="subprocess",
         pattern=re.compile(r"\bimport\s+subprocess\b|\bfrom\s+subprocess\s+import\b"),
         message="Use the `sh` library instead of subprocess",
@@ -702,7 +710,7 @@ def refined_refutations(text: str, patterns: list[AntiPattern]) -> list[Refutati
     ]
 
 
-class AntiPatternSet(BaseModel):
+class AntiPatternSet(BaseModel, frozen=True, arbitrary_types_allowed=True):
     """Which anti-patterns a project checks, by the language they read.
 
     The rules a project holds itself to are its own conventions written down,
@@ -711,8 +719,6 @@ class AntiPatternSet(BaseModel):
     audit, and the generated rule reference together, so a project that
     replaces it replaces all three at once.
     """
-
-    model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
 
     python: list[AntiPattern] = Field(default_factory=lambda: PYTHON_ANTI_PATTERNS)
     typescript: list[AntiPattern] = Field(default_factory=lambda: TS_ANTI_PATTERNS)

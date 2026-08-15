@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 import sh
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field
 
 from lup.adapters.claude.harness import ClaudeSpellings
 from lup.adapters.claude.runtime import (
@@ -291,10 +291,8 @@ async def test_miniature_resolver_run_on_a_fixture_repository(tmp_path: Path) ->
     assert manifest.review_branch in branches
 
 
-class CodexEditFixture(BaseModel):
+class CodexEditFixture(BaseModel, frozen=True):
     """Paths participating in the blocked-edit smoke."""
-
-    model_config = ConfigDict(frozen=True)
 
     repository: Path
     module: Path

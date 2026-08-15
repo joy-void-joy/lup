@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Literal
 
 import httpx
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ValidationError
 
 from lup.adapters.claude.harness import ClaudeSpellings
 from lup.adapters.claude.profile_store import AccountFile
@@ -38,8 +38,6 @@ from lup.usage.models import (
 )
 from lup.usage.render import breakdown_window
 
-FROZEN = ConfigDict(frozen=True)
-
 type BucketKey = Literal[
     "seven_day",
     "five_hour",
@@ -51,10 +49,8 @@ type BucketKey = Literal[
 """Every window the OAuth usage endpoint publishes that the display renders."""
 
 
-class BucketSpec(BaseModel):
+class BucketSpec(BaseModel, frozen=True):
     """One rate-limit window: the field it arrives in, its label, its length."""
-
-    model_config = FROZEN
 
     key: BucketKey
     label: str
@@ -71,10 +67,8 @@ BUCKET_SPECS: list[BucketSpec] = [
 ]
 
 
-class ModelName(BaseModel):
+class ModelName(BaseModel, frozen=True):
     """What one model id is called where a human reads it."""
-
-    model_config = FROZEN
 
     model_id: str
     label: str
@@ -92,10 +86,8 @@ MODEL_NAMES: list[ModelName] = [
 """An open list: an id newer than this table shows under its own name."""
 
 
-class ModelFamily(BaseModel):
+class ModelFamily(BaseModel, frozen=True):
     """One family's word inside a model id, and the colour it renders in."""
-
-    model_config = FROZEN
 
     word: str
     style: str
@@ -108,10 +100,8 @@ MODEL_FAMILIES: list[ModelFamily] = [
 ]
 
 
-class ModelRate(BaseModel):
+class ModelRate(BaseModel, frozen=True):
     """What one token cost on one model, as the local cache has priced it."""
-
-    model_config = FROZEN
 
     model_id: str
     usd_per_token: float

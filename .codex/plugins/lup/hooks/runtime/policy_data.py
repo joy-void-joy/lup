@@ -655,6 +655,13 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "strength": "soft",
         },
         {
+            "id": "model-config-assign",
+            "pattern": "\\bmodel_config\\s*=",
+            "message": "A `model_config` assignment states in the class body what the class header declares \u2014 write the keys as class keywords, `class A(BaseModel, frozen=True, extra='forbid')`, which pydantic collects into the same config and which reads beside the base being configured. A shared `FROZEN = ConfigDict(frozen=True)` alias is the same assignment one indirection out: inline its keys rather than binding them",
+            "context": "code",
+            "strength": "soft",
+        },
+        {
             "id": "subprocess",
             "pattern": "\\bimport\\s+subprocess\\b|\\bfrom\\s+subprocess\\s+import\\b",
             "message": "Use the `sh` library instead of subprocess",
@@ -961,6 +968,13 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "id": "namedtuple",
             "pattern": "\\bNamedTuple\\b|\\bnamedtuple\\b",
             "message": "Use Pydantic BaseModel (or TypedDict) instead of NamedTuple/namedtuple",
+            "context": "code",
+            "strength": "soft",
+        },
+        {
+            "id": "model-config-assign",
+            "pattern": "\\bmodel_config\\s*=",
+            "message": "A `model_config` assignment states in the class body what the class header declares \u2014 write the keys as class keywords, `class A(BaseModel, frozen=True, extra='forbid')`, which pydantic collects into the same config and which reads beside the base being configured. A shared `FROZEN = ConfigDict(frozen=True)` alias is the same assignment one indirection out: inline its keys rather than binding them",
             "context": "code",
             "strength": "soft",
         },

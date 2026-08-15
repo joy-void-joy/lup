@@ -10,15 +10,13 @@ persisted proposal and applies it explicitly.
 import hashlib
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
 from lup.channels.models import write_atomic
 from lup.harness.reconciliation import source_patch_base_digest
 
 
-class ReconciliationMetadata(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class ReconciliationMetadata(BaseModel, frozen=True):
     proposal_id: str
     base_digest: str
     source_patch_sha256: str

@@ -6,19 +6,17 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, Field, model_validator
 
 from lup.codescan.symbols import DefinedSymbol
 from lup.harness.models import ResolveSpec
 from lup.policy.identity import ConcernAllowance
 
-FROZEN = ConfigDict(frozen=True)
-FROZEN_STRICT = ConfigDict(frozen=True, extra="forbid")
 
 type ActorKind = Literal["worker", "reviewer", "merger", "planner", "run"]
 
 
-class ActorRef(BaseModel):
+class ActorRef(BaseModel, frozen=True):
     """Which actor something belongs to.
 
     A round is part of the identity because the same concern's worker is a
@@ -30,8 +28,6 @@ class ActorRef(BaseModel):
     the same identity, and the two disagreeing about what named an actor is
     what made a redirect reach nobody.
     """
-
-    model_config = FROZEN
 
     kind: ActorKind
     id: str
@@ -128,14 +124,12 @@ class ConcernOrigin(StrEnum):
     ADMITTED = "admitted"
 
 
-class SourceSnapshot(BaseModel):
-    model_config = FROZEN
-
+class SourceSnapshot(BaseModel, frozen=True):
     branch: str
     commit: str
 
 
-class BaseRefresh(BaseModel):
+class BaseRefresh(BaseModel, frozen=True):
     """What bringing a run's base up to its branch would do, or did.
 
     Reported rather than performed silently, because a lease cut from a
@@ -145,8 +139,6 @@ class BaseRefresh(BaseModel):
     per path so the answer to "what would this cost" is available before
     anything moves.
     """
-
-    model_config = FROZEN
 
     branch: str = ""
     """Which branch the base was brought up to, empty when it was another
@@ -160,10 +152,8 @@ class BaseRefresh(BaseModel):
         return self.commit != self.was
 
 
-class LeaseRefresh(BaseModel):
+class LeaseRefresh(BaseModel, frozen=True):
     """What bringing one lease up to a refreshed base would do, or did."""
-
-    model_config = FROZEN
 
     concern_id: str
     conflicts: list[Path] = []
@@ -171,7 +161,7 @@ class LeaseRefresh(BaseModel):
     reason: str = ""
 
 
-class RefreshReport(BaseModel):
+class RefreshReport(BaseModel, frozen=True):
     """A refresh as it stands: what the base would become, lease by lease.
 
     Answering before acting is the whole point, because the concerns most
@@ -179,47 +169,39 @@ class RefreshReport(BaseModel):
     it touched — and those are branches with work in flight.
     """
 
-    model_config = FROZEN
-
     base: BaseRefresh
     leases: list[LeaseRefresh] = []
     applied: bool = False
 
 
-class ReviewNote(BaseModel):
-    model_config = FROZEN
-
+class ReviewNote(BaseModel, frozen=True):
     file: Path
     line: int = Field(ge=1)
     text: str
 
 
-class NoteClearance(BaseModel):
+class NoteClearance(BaseModel, frozen=True):
     """What one lease's pre-worker note clearance removed and could not find."""
-
-    model_config = FROZEN
 
     concern_id: str
     cleared: list[ReviewNote] = []
     missing: list[ReviewNote] = []
 
 
-class NoteClearanceCommit(BaseModel):
+class NoteClearanceCommit(BaseModel, frozen=True):
     """A clearance and the commit the worker should treat as its base."""
-
-    model_config = FROZEN
 
     clearance: NoteClearance
     commit: str
 
 
-class InventoryNote(ReviewNote):
+class InventoryNote(ReviewNote, frozen=True):
     """One review note together with the source context used for planning."""
 
     context: str
 
 
-class IssueEvidence(BaseModel):
+class IssueEvidence(BaseModel, frozen=True):
     """One tracker issue offered to a run as evidence.
 
     Forge-neutral by construction: a number, where to read it, and what it
@@ -232,8 +214,6 @@ class IssueEvidence(BaseModel):
     of work and several issues routinely describe one.
     """
 
-    model_config = FROZEN
-
     number: int = Field(ge=1)
     url: str
     title: str
@@ -243,16 +223,12 @@ class IssueEvidence(BaseModel):
         return f"#{self.number}"
 
 
-class AcceptanceCriterion(BaseModel):
-    model_config = FROZEN
-
+class AcceptanceCriterion(BaseModel, frozen=True):
     id: str
     description: str
 
 
-class MaterialQuestion(BaseModel):
-    model_config = FROZEN
-
+class MaterialQuestion(BaseModel, frozen=True):
     id: str
     concern_id: str
     prompt: str
@@ -314,9 +290,7 @@ def allowance_question_id(concern_id: str, allowance: ConcernAllowance) -> str:
     return f"{concern_id}-allow-{allowance}"
 
 
-class QuestionBatch(BaseModel):
-    model_config = FROZEN
-
+class QuestionBatch(BaseModel, frozen=True):
     run_id: str
     questions: list[MaterialQuestion]
 
@@ -328,16 +302,12 @@ class QuestionBatch(BaseModel):
         return self
 
 
-class QuestionAnswer(BaseModel):
-    model_config = FROZEN
-
+class QuestionAnswer(BaseModel, frozen=True):
     question_id: str
     value: str
 
 
-class AnswerBatch(BaseModel):
-    model_config = FROZEN
-
+class AnswerBatch(BaseModel, frozen=True):
     run_id: str
     answers: list[QuestionAnswer]
 
@@ -352,10 +322,8 @@ class AnswerBatch(BaseModel):
 INTEGRATION_CONCERN_ID = "integration"
 
 
-class ConcernShape(BaseModel):
+class ConcernShape(BaseModel, frozen=True):
     """Planning fields shared by a planned concern and its materialization."""
-
-    model_config = FROZEN
 
     id: str = Field(min_length=1)
     title: str
@@ -418,7 +386,7 @@ class ConcernShape(BaseModel):
         return self
 
 
-class Concern(ConcernShape):
+class Concern(ConcernShape, frozen=True):
     """One generalized concern and its complete dependency/acceptance inputs."""
 
     notes: list[ReviewNote] = []
@@ -452,7 +420,7 @@ class Concern(ConcernShape):
         return self
 
 
-class PlannedConcern(ConcernShape):
+class PlannedConcern(ConcernShape, frozen=True):
     """One planned concern referencing its evidence by zero-based position.
 
     The planner never echoes evidence content — positional references make
@@ -470,35 +438,29 @@ class PlannedConcern(ConcernShape):
         return self
 
 
-class ConcernEligibility(BaseModel):
-    model_config = FROZEN
-
+class ConcernEligibility(BaseModel, frozen=True):
     concern_id: str
     eligible: bool
     integration_approved: bool
     reason: str = ""
 
 
-class ConcernProgress(BaseModel):
+class ConcernProgress(BaseModel, frozen=True):
     """Atomic persisted status for one concern in the resolver DAG."""
-
-    model_config = FROZEN
 
     concern_id: str
     status: ConcernStatus = ConcernStatus.DISCOVERED
     reason: str = ""
 
 
-class WritableRootLease(BaseModel):
-    model_config = FROZEN
-
+class WritableRootLease(BaseModel, frozen=True):
     concern_id: str
     root: Path
     branch: str
     active: bool = True
 
 
-class HeldLease(BaseModel):
+class HeldLease(BaseModel, frozen=True):
     """One branch a run that has not finished is still holding.
 
     What a branch survey needs in order to leave it alone: which run, and
@@ -506,8 +468,6 @@ class HeldLease(BaseModel):
     the run directory rather than being a bare assertion that something is
     using this.
     """
-
-    model_config = FROZEN
 
     branch: str
     run_id: str
@@ -517,9 +477,7 @@ class HeldLease(BaseModel):
         return f"lease of run {self.run_id} ({self.standing})"
 
 
-class DependencyBase(BaseModel):
-    model_config = FROZEN
-
+class DependencyBase(BaseModel, frozen=True):
     concern_id: str
     parent_concerns: list[str]
     parent_commits: list[str]
@@ -527,9 +485,7 @@ class DependencyBase(BaseModel):
     semantic_join: bool = False
 
 
-class WorkAssignment(BaseModel):
-    model_config = FROZEN
-
+class WorkAssignment(BaseModel, frozen=True):
     run_id: str
     concern: Concern
     lease: WritableRootLease
@@ -538,7 +494,7 @@ class WorkAssignment(BaseModel):
     answers: list[QuestionAnswer] = []
 
 
-class WorkerContext(BaseModel):
+class WorkerContext(BaseModel, frozen=True):
     """What one worker session needs to know about its own assignment.
 
     The concern id is supplied rather than derived from the lease directory
@@ -546,8 +502,6 @@ class WorkerContext(BaseModel):
     is wrong for the integration lease. The question tools bind whatever id
     they are given as the identity a worker cannot post outside of.
     """
-
-    model_config = FROZEN
 
     root: Path
     concern_id: str
@@ -560,7 +514,7 @@ class WorkerContext(BaseModel):
     integration leases carry none: no concern approved them."""
 
 
-class WorkerReport(BaseModel):
+class WorkerReport(BaseModel, frozen=True, extra="forbid"):
     """One worker's account of its turn.
 
     Extra fields are forbidden rather than ignored: a model still emitting
@@ -568,8 +522,6 @@ class WorkerReport(BaseModel):
     and the question simply lost. Forbidding makes that a loud correction
     the reprompt wrapper can fix.
     """
-
-    model_config = FROZEN_STRICT
 
     concern_id: str
     changed: bool
@@ -588,9 +540,7 @@ class WorkerReport(BaseModel):
     )
 
 
-class DiffValidation(BaseModel):
-    model_config = FROZEN
-
+class DiffValidation(BaseModel, frozen=True):
     concern_id: str
     valid: bool
     commit: str | None = None
@@ -603,9 +553,7 @@ class DiffValidation(BaseModel):
     """
 
 
-class ReviewReport(BaseModel):
-    model_config = FROZEN
-
+class ReviewReport(BaseModel, frozen=True):
     concern_id: str
     accepted: bool
     generalized: bool
@@ -614,7 +562,7 @@ class ReviewReport(BaseModel):
     criteria_met: list[str] = []
 
 
-class DropCandidate(BaseModel):
+class DropCandidate(BaseModel, frozen=True):
     """Content one parent contributed that the joined tree does not hold.
 
     A candidate is an obligation, never a verdict. A legitimate resolution
@@ -622,8 +570,6 @@ class DropCandidate(BaseModel):
     be correct as to be a loss — which is why the merger has to say which,
     and why nothing here decides on its own.
     """
-
-    model_config = FROZEN
 
     parent: str
     path: Path
@@ -641,7 +587,7 @@ class DropCandidate(BaseModel):
 type HunkFate = Literal["kept", "rewritten", "superseded", "dropped"]
 
 
-class HunkDisposition(BaseModel):
+class HunkDisposition(BaseModel, frozen=True):
     """What became of one candidate hunk, and why.
 
     Containment rather than equality is the gate: a legitimate resolution
@@ -650,15 +596,13 @@ class HunkDisposition(BaseModel):
     disappearing with nothing said about it.
     """
 
-    model_config = FROZEN
-
     path: Path
     parent: str
     fate: HunkFate
     rationale: str
 
 
-class DeclaredEdit(BaseModel):
+class DeclaredEdit(BaseModel, frozen=True):
     """One edit made outside the conflict set, and the reason for it.
 
     A hard subset rule — changed files within conflicted files — is wrong,
@@ -669,21 +613,17 @@ class DeclaredEdit(BaseModel):
     rejection.
     """
 
-    model_config = FROZEN
-
     path: Path
     rationale: str
 
 
-class MergeReport(BaseModel):
+class MergeReport(BaseModel, frozen=True, extra="forbid"):
     """What one join did, declared in a form the orchestrator can check.
 
     Strict for the same reason ``WorkerReport`` is: a retired field must
     fail loudly rather than vanish, and the whole point of this report is
     that a semantic choice cannot go unrecorded.
     """
-
-    model_config = FROZEN_STRICT
 
     completed: bool
     summary: str
@@ -700,9 +640,7 @@ class MergeReport(BaseModel):
     )
 
 
-class AgentRound(BaseModel):
-    model_config = FROZEN
-
+class AgentRound(BaseModel, frozen=True):
     concern_id: str
     round: int = Field(ge=1)
     worker: WorkerReport
@@ -710,9 +648,7 @@ class AgentRound(BaseModel):
     review: ReviewReport
 
 
-class ConcernOutcome(BaseModel):
-    model_config = FROZEN
-
+class ConcernOutcome(BaseModel, frozen=True):
     concern_id: str
     branch: str
     commit: str | None = None
@@ -733,16 +669,12 @@ class ConcernOutcome(BaseModel):
     notes_missing: list[ReviewNote] = []
 
 
-class ConcernExecution(BaseModel):
-    model_config = FROZEN
-
+class ConcernExecution(BaseModel, frozen=True):
     base: DependencyBase
     outcome: ConcernOutcome
 
 
-class IntegrationRecord(BaseModel):
-    model_config = FROZEN
-
+class IntegrationRecord(BaseModel, frozen=True):
     branch: str
     worktree: Path
     concerns: list[str]
@@ -750,7 +682,7 @@ class IntegrationRecord(BaseModel):
     completed: bool = False
 
 
-class JoinProgress(BaseModel):
+class JoinProgress(BaseModel, frozen=True):
     """How far integration has got, recorded as each parent lands.
 
     :class:`IntegrationRecord` is written once every join is done, so until
@@ -764,22 +696,18 @@ class JoinProgress(BaseModel):
     join sequence got to, the record says the sequence finished.
     """
 
-    model_config = FROZEN
-
     joined: list[str]
     commit: str
 
 
-class VerificationRecord(BaseModel):
-    model_config = FROZEN
-
+class VerificationRecord(BaseModel, frozen=True):
     name: str
     arguments: list[str]
     passed: bool
     exit_code: int
 
 
-class VerificationAcceptance(BaseModel):
+class VerificationAcceptance(BaseModel, frozen=True):
     """One human's decision to accept a concern over a failing verification.
 
     A verification verdict is an exit code, and some failures are true and
@@ -793,26 +721,20 @@ class VerificationAcceptance(BaseModel):
     instead of a green check that was never green.
     """
 
-    model_config = FROZEN
-
     concern_id: str
     verification: str
     """The verification this accepts, by the name it fails under."""
     reason: str
 
 
-class WorktreeRemoval(BaseModel):
+class WorktreeRemoval(BaseModel, frozen=True):
     """Whether a lease's worktree is gone, and what stands in the way if not."""
-
-    model_config = FROZEN
 
     freed: bool
     detail: str = ""
 
 
-class CleanupRecord(BaseModel):
-    model_config = FROZEN
-
+class CleanupRecord(BaseModel, frozen=True):
     path: Path
     branch: str
     action: Literal["removed", "retained"]
@@ -823,7 +745,7 @@ type InventoryPlanner = Callable[["ResolveRequest"], Awaitable["ResolveInventory
 """How a source carrying raw evidence has it organized into concerns."""
 
 
-class ResolverSource(BaseModel):
+class ResolverSource(BaseModel, frozen=True):
     """What a resolver run starts from, able to yield the inventory it runs.
 
     A run begins either from concerns already organized or from the review
@@ -832,14 +754,12 @@ class ResolverSource(BaseModel):
     of starting point is one class rather than an edit to the entry point.
     """
 
-    model_config = FROZEN
-
     @abstractmethod
     async def inventory(self, planner: InventoryPlanner) -> "ResolveInventory":
         """The concerns this run executes, planned first if they are not yet."""
 
 
-class ResolveInventory(ResolverSource):
+class ResolveInventory(ResolverSource, frozen=True):
     source: SourceSnapshot
     concerns: list[Concern]
 
@@ -854,7 +774,7 @@ class ResolveInventory(ResolverSource):
         return self
 
 
-class ResolveRequest(ResolverSource):
+class ResolveRequest(ResolverSource, frozen=True):
     """Unorganized review evidence supplied to the shared inventory phase.
 
     Evidence is positional across the lists in declaration order: notes
@@ -896,15 +816,13 @@ class ResolveRequest(ResolverSource):
         return await planner(self)
 
 
-class ConcernInventory(BaseModel):
+class ConcernInventory(BaseModel, frozen=True):
     """Structured concern plan produced by the read-only inventory turn.
 
     Concerns reference the request's notes by position; the resolver
     materializes them into :class:`Concern` objects with the authoritative
     note content, so nothing the planner writes can drift from the evidence.
     """
-
-    model_config = FROZEN
 
     concerns: list[PlannedConcern] = Field(min_length=1)
 
@@ -916,7 +834,7 @@ class ConcernInventory(BaseModel):
         return self
 
 
-class AdmissionRequest(BaseModel):
+class AdmissionRequest(BaseModel, frozen=True):
     """Evidence discovered while a run was already moving.
 
     Only this evidence is planned; the run's existing concerns, recorded
@@ -924,8 +842,6 @@ class AdmissionRequest(BaseModel):
     moment a run is most informative about what else needs doing is the
     moment it can least afford to be re-derived.
     """
-
-    model_config = FROZEN
 
     notes: list[InventoryNote] = []
     statements: list[str] = []
@@ -938,10 +854,8 @@ class AdmissionRequest(BaseModel):
         return self
 
 
-class ConcernAdmission(BaseModel):
+class ConcernAdmission(BaseModel, frozen=True):
     """What one mid-run admission added to a live run."""
-
-    model_config = FROZEN
 
     run_id: str
     phase: ResolvePhase
@@ -951,9 +865,7 @@ class ConcernAdmission(BaseModel):
     rejected: list[str] = []
 
 
-class ResolverConfig(BaseModel):
-    model_config = FROZEN
-
+class ResolverConfig(BaseModel, frozen=True):
     state_root: Path
     workspace: Path
     worktree_root: Path
@@ -980,9 +892,7 @@ class ResolverConfig(BaseModel):
         return self
 
 
-class VerificationCommand(BaseModel):
-    model_config = FROZEN
-
+class VerificationCommand(BaseModel, frozen=True):
     name: str
     arguments: list[str]
     base_option: str = ""
@@ -1007,28 +917,20 @@ class VerificationCommand(BaseModel):
         return [*self.arguments, self.base_option, base]
 
 
-class ConcernsDocument(BaseModel):
-    model_config = FROZEN
-
+class ConcernsDocument(BaseModel, frozen=True):
     concerns: list[Concern]
 
 
-class LeasesDocument(BaseModel):
-    model_config = FROZEN
-
+class LeasesDocument(BaseModel, frozen=True):
     leases: list[WritableRootLease]
 
 
-class BasesDocument(BaseModel):
-    model_config = FROZEN
-
+class BasesDocument(BaseModel, frozen=True):
     bases: list[DependencyBase]
 
 
-class ResolveState(BaseModel):
+class ResolveState(BaseModel, frozen=True):
     """Complete resumable run state written atomically after every transition."""
-
-    model_config = FROZEN
 
     schema_version: int = 2
     config_digest: str
@@ -1109,15 +1011,13 @@ class ResolveState(BaseModel):
         return self
 
 
-class RunTally(BaseModel):
+class RunTally(BaseModel, frozen=True):
     """Aggregate progress a watcher reads at a glance.
 
     Reconstructing "how far along is this run" took a full read of the
     record and the worktrees; every piece is already in state, so the
     aggregation lives beside it and every surface prints the same one.
     """
-
-    model_config = FROZEN
 
     phase: ResolvePhase
     total: int
@@ -1136,9 +1036,7 @@ class RunTally(BaseModel):
         return line
 
 
-class ResolveManifest(BaseModel):
-    model_config = FROZEN
-
+class ResolveManifest(BaseModel, frozen=True):
     schema_version: int = 1
     run_id: str
     source: SourceSnapshot

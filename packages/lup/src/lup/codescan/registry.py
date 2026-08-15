@@ -17,7 +17,7 @@ type oracle has resolved what the spelling refers to.
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
 import lup.codescan.antipatterns as antipatterns
 import lup.codescan.behaviour as behaviour
@@ -36,7 +36,7 @@ RULE_REFERENCE = "docs/rules.md"
 """Repository-relative path of the generated reference deny messages cite."""
 
 
-class RegisteredRule(BaseModel):
+class RegisteredRule(BaseModel, frozen=True):
     """One rule's discovery card: identity, family, diagnostic, and home.
 
     ``refinement`` is empty for a rule that decides the same way everywhere.
@@ -45,8 +45,6 @@ class RegisteredRule(BaseModel):
     contributor who meets a denial the repository sweep does not report can
     tell which surface is speaking.
     """
-
-    model_config = ConfigDict(frozen=True)
 
     id: str
     family: RuleFamily

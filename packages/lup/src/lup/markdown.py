@@ -17,7 +17,7 @@ import html
 from abc import abstractmethod
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Discriminator
+from pydantic import BaseModel, Discriminator
 
 
 def contained(value: str) -> str:
@@ -35,15 +35,13 @@ def escaped(value: str) -> str:
     return contained(html.escape(value))
 
 
-class MarkdownCell(BaseModel):
+class MarkdownCell(BaseModel, frozen=True):
     """One cell of a generated table, holding the value it displays.
 
     Every kind answers :meth:`render`, and every answer runs the value it
     holds through :func:`escaped`, so a new kind of formatting is one class
     and cannot be the one that forgot to escape.
     """
-
-    model_config = ConfigDict(frozen=True)
 
     text: str
 
@@ -52,7 +50,7 @@ class MarkdownCell(BaseModel):
         """This cell's Markdown, with the value it holds escaped."""
 
 
-class PlainCell(MarkdownCell):
+class PlainCell(MarkdownCell, frozen=True):
     """A value shown as it reads."""
 
     type: Literal["plain"] = "plain"
@@ -61,7 +59,7 @@ class PlainCell(MarkdownCell):
         return escaped(self.text)
 
 
-class CodeCell(MarkdownCell):
+class CodeCell(MarkdownCell, frozen=True):
     """A value marked as code by the fence Markdown spells with backticks."""
 
     type: Literal["code"] = "code"
@@ -70,7 +68,7 @@ class CodeCell(MarkdownCell):
         return f"`{escaped(self.text)}`"
 
 
-class HtmlCodeCell(MarkdownCell):
+class HtmlCodeCell(MarkdownCell, frozen=True):
     """A value marked as code by the HTML element rather than the fence.
 
     For a value that may itself hold a backtick — a rule's matching shape, a
@@ -83,7 +81,7 @@ class HtmlCodeCell(MarkdownCell):
         return f"<code>{escaped(self.text)}</code>"
 
 
-class LinkCell(MarkdownCell):
+class LinkCell(MarkdownCell, frozen=True):
     """A cell naming a page rather than describing one.
 
     The destination is held to the row's structure but not otherwise escaped:

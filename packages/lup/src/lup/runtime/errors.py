@@ -2,24 +2,20 @@
 
 from datetime import timedelta
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field
 
 from lup.runtime.models import AnyTurnBlock, TurnIdentifiers
 from lup.types import Usage
 
 
-class ValidationAttempt(BaseModel):
+class ValidationAttempt(BaseModel, frozen=True):
     """One rejected structured-output submission."""
-
-    model_config = ConfigDict(frozen=True)
 
     message: str
 
 
-class TurnFailure(BaseModel):
+class TurnFailure(BaseModel, frozen=True):
     """Partial evidence available when a logical turn fails."""
-
-    model_config = ConfigDict(frozen=True)
 
     message: str
     blocks: list[AnyTurnBlock] = []

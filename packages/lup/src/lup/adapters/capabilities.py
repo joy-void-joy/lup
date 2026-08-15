@@ -15,25 +15,21 @@ installed on one machine to trigger the doctor's drift check. This records
 what a contract can do; that records what is currently sitting on disk.
 """
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
 from lup.harness.models import MarkdownTable
 from lup.markdown import PlainCell, TableCell
 
 
-class CapabilityCell(BaseModel):
+class CapabilityCell(BaseModel, frozen=True):
     """One supported, absent, or qualified capability fact."""
-
-    model_config = ConfigDict(frozen=True)
 
     capability: str
     value: bool | str
 
 
-class AdapterCapabilities(BaseModel):
+class AdapterCapabilities(BaseModel, frozen=True):
     """One adapter evidence column at its tested native contract version."""
-
-    model_config = ConfigDict(frozen=True)
 
     name: str
     cells: list[CapabilityCell]

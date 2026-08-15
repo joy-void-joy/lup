@@ -11,13 +11,13 @@ from collections.abc import Callable
 from typing import Annotated
 
 import typer
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
 from lup.usage.display import WATCH_INTERVAL_SECONDS, UsageDisplay
 from lup.usage.models import UsageReader
 
 
-class UsageEntry(BaseModel):
+class UsageEntry(BaseModel, frozen=True):
     """One runtime's place in the display: what it is called, and how to read it.
 
     ``open`` takes the profile the invocation named, or nothing for whichever
@@ -26,8 +26,6 @@ class UsageEntry(BaseModel):
     to read — which is the same failure as a request that does not arrive, and
     reaches the caller by the same route.
     """
-
-    model_config = ConfigDict(frozen=True)
 
     name: str
     """The command word, which is the adapter's own name for its runtime."""

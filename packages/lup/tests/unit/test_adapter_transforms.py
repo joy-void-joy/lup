@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import TypeAliasType, get_args
 
 import pytest
-from pydantic import AnyHttpUrl, BaseModel, ConfigDict, SecretStr
+from pydantic import AnyHttpUrl, BaseModel, SecretStr
 
 from lup.adapters.claude.config import (
     ClaudeCompatibilityTransform,
@@ -92,10 +92,8 @@ from lup.types import JsonObject
 from tests.unit.test_background_runtime import RecordingOpener
 
 
-class DecoderArm(BaseModel):
+class DecoderArm(BaseModel, frozen=True):
     """One ``case`` arm of a vendor-facing decoder, named by what it accepts."""
-
-    model_config = ConfigDict(frozen=True)
 
     discriminators: list[str]
     """Every vendor string the arm pins — a method, a tool name, an item type."""
@@ -364,10 +362,8 @@ def test_model_router_uses_explicit_recipe_then_first_match() -> None:
         router.resolve("other")
 
 
-class HookCase(BaseModel):
+class HookCase(BaseModel, frozen=True):
     """One native hook payload and the whole ``BeforeTool`` it decodes to."""
-
-    model_config = ConfigDict(frozen=True)
 
     name: str
     arm: str
@@ -378,20 +374,16 @@ class HookCase(BaseModel):
     expected: BeforeTool
 
 
-class ClaudeOperationCase(BaseModel):
+class ClaudeOperationCase(BaseModel, frozen=True):
     """One decoded Claude operation and the ``BeforeTool`` it becomes."""
-
-    model_config = ConfigDict(frozen=True)
 
     name: str
     operation: ClaudeOperation
     expected: BeforeTool
 
 
-class CodexOperationCase(BaseModel):
+class CodexOperationCase(BaseModel, frozen=True):
     """One decoded Codex operation and the ``BeforeTool`` it becomes."""
-
-    model_config = ConfigDict(frozen=True)
 
     name: str
     operation: CodexOperation

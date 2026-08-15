@@ -20,7 +20,7 @@ from collections.abc import Collection, Sequence
 from pathlib import Path
 from typing import Self, get_args
 
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, model_validator
 
 from lup.codescan.common import (
     PythonContext,
@@ -97,7 +97,7 @@ def generated_tree_paths(
     )
 
 
-class ApplicationRoots(BaseModel):
+class ApplicationRoots(BaseModel, frozen=True):
     """Where one application composes concrete implementations of the seams.
 
     The library guards its own package and can name nothing beyond it: an
@@ -105,8 +105,6 @@ class ApplicationRoots(BaseModel):
     written down here would go on naming a package that no longer exists and
     silently sanction nothing.
     """
-
-    model_config = ConfigDict(frozen=True)
 
     composition: list[str] = []
     """Repository-relative files, or directory prefixes ending in ``/``."""

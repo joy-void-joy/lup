@@ -15,7 +15,7 @@ already carries.
 
 from collections.abc import Callable
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field
 
 from lup.hooks import (
     LupHookInput,
@@ -88,7 +88,7 @@ composition root supplies this — ``lup.adapters.claude.hooks`` has the
 decoder for Claude sessions."""
 
 
-class NativeSemantics(BaseModel):
+class NativeSemantics(BaseModel, frozen=True):
     """One runtime's call decoder together with the tools it has rules for.
 
     The two are one fact, and a caller asked for them separately can supply
@@ -100,8 +100,6 @@ class NativeSemantics(BaseModel):
     that disables enforcement while looking like configuration — is refused
     at construction.
     """
-
-    model_config = ConfigDict(frozen=True)
 
     decode: SemanticDecoder
     routed_tools: list[str] = Field(min_length=1)

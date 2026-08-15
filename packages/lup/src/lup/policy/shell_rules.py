@@ -31,17 +31,15 @@ Three nesting levels mirror how real tools are shaped:
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
 from lup.policy.kernel.rows import ShellRuleRow
 
 type CommandEffect = Literal["allow", "ask", "deny"]
 
 
-class ShellOperationRule(BaseModel):
+class ShellOperationRule(BaseModel, frozen=True):
     """One operation word under a subcommand — e.g. ``worktree remove``."""
-
-    model_config = ConfigDict(frozen=True)
 
     name: str
     effect: CommandEffect
@@ -49,15 +47,13 @@ class ShellOperationRule(BaseModel):
     reason: str = ""
 
 
-class ShellSubcommandRule(BaseModel):
+class ShellSubcommandRule(BaseModel, frozen=True):
     """One subcommand under a command — e.g. ``git worktree``, ``gh pr``.
 
     ``read_verbs`` name action-selecting flags that pin a one-action-at-a-time
     subcommand to its query form (``git config --get``); their presence among
     literal, unguarded words de-escalates a non-allow effect to allow.
     """
-
-    model_config = ConfigDict(frozen=True)
 
     name: str
     effect: CommandEffect = "allow"
@@ -67,7 +63,7 @@ class ShellSubcommandRule(BaseModel):
     reason: str = ""
 
 
-class ShellCommandRule(BaseModel):
+class ShellCommandRule(BaseModel, frozen=True):
     """One executable — a read-only tool, or a subcommand-gated command.
 
     On a subcommand-gated command, ``value_flags`` name the global options that
@@ -80,8 +76,6 @@ class ShellCommandRule(BaseModel):
     operands, so no all-flags test can recognize it (``nc -z host port``): a
     declared verb among otherwise literal, unguarded words pins the action.
     """
-
-    model_config = ConfigDict(frozen=True)
 
     name: str
     default_effect: CommandEffect = "allow"

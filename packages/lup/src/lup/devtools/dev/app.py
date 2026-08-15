@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Annotated
 
 import typer
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
 import lup.devtools.dev.antipatterns as antipatterns_mod
 import lup.devtools.dev.boundaries as boundaries_mod
@@ -36,15 +36,13 @@ from lup.harness.models import HookSet, Plugin, PromptDocument
 from lup.workspace.paths import project_root
 
 
-class DevDeclarations(BaseModel):
+class DevDeclarations(BaseModel, frozen=True):
     """Everything the dev tree reads about the repository it is running in.
 
     Read when a command runs rather than when the CLI is composed: each of
     these resolves against the working directory, and a CLI is imported long
     before anyone knows which repository it will be pointed at.
     """
-
-    model_config = ConfigDict(frozen=True)
 
     project: DevProject
     hooks: HookSet

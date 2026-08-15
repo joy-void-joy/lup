@@ -8,22 +8,20 @@ The loaders live in ``state``, aggregation in ``metrics``, presentation in
 from pathlib import Path
 from typing import TypedDict
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
 from lup.telemetry.metrics import MetricsSummary, ToolMetricsDict
 from lup.types import JsonValue
 from lup.workspace.history import SessionRecord
 
 
-class AgentPrompt(BaseModel):
+class AgentPrompt(BaseModel, frozen=True):
     """One application's assembled system prompt, as a health report reads it.
 
     The report weighs what a session actually receives, so the rendered text
     arrives already assembled rather than as a source file this side would
     have to know how to render.
     """
-
-    model_config = ConfigDict(frozen=True)
 
     sections: list[str]
     rendered: str

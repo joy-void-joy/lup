@@ -19,13 +19,11 @@ coordinates `ast` reports, so the library never speaks a protocol's encoding.
 from abc import ABC, abstractmethod
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
 
-class SourcePosition(BaseModel):
+class SourcePosition(BaseModel, frozen=True):
     """One symbol's position in one Python file, in `ast` coordinates."""
-
-    model_config = ConfigDict(frozen=True)
 
     path: Path
     line: int
@@ -35,15 +33,13 @@ class SourcePosition(BaseModel):
     """0-based UTF-8 column offset, as `ast` reports `col_offset`."""
 
 
-class DefinitionSite(BaseModel):
+class DefinitionSite(BaseModel, frozen=True):
     """Where a resolved symbol is declared, as the oracle reports it.
 
     The path may lead anywhere the checker looks — a project module, an
     installed package, a typeshed stub — and the grammar reads the declaring
     class out of it rather than trusting a rendered type name.
     """
-
-    model_config = ConfigDict(frozen=True)
 
     path: Path
     line: int

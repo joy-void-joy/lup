@@ -31,7 +31,7 @@ import tokenize
 from collections.abc import Collection, Iterator
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
 SOURCE_SUFFIXES = (".py", ".pyi")
 """Which files a sweep reads, for a caller that does not say.
@@ -68,7 +68,7 @@ def name_parts(dotted: str) -> list[str] | None:
         return None
 
 
-class Relocation(BaseModel):
+class Relocation(BaseModel, frozen=True):
     """One module path that moved, and where it moved to, as name tokens.
 
     Held as parts rather than as dotted text because that is what the rewrite
@@ -77,16 +77,12 @@ class Relocation(BaseModel):
     where somebody typed one.
     """
 
-    model_config = ConfigDict(frozen=True)
-
     old: list[str]
     new: list[str]
 
 
-class ModuleRun(BaseModel):
+class ModuleRun(BaseModel, frozen=True):
     """The token span naming one module path, as indexes into the token list."""
-
-    model_config = ConfigDict(frozen=True)
 
     start: int
     end: int
@@ -112,10 +108,8 @@ class ModuleRun(BaseModel):
         return None
 
 
-class ModuleEdit(BaseModel):
+class ModuleEdit(BaseModel, frozen=True):
     """One module path to respell, as a span on one line of the source."""
-
-    model_config = ConfigDict(frozen=True)
 
     row: int
     start: int
@@ -123,10 +117,8 @@ class ModuleEdit(BaseModel):
     text: str
 
 
-class RelocationEdit(BaseModel):
+class RelocationEdit(BaseModel, frozen=True):
     """One file the rewrite changed, and how many imports it repointed."""
-
-    model_config = ConfigDict(frozen=True)
 
     path: Path
     imports: int

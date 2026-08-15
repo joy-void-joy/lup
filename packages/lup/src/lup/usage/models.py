@@ -10,12 +10,10 @@ rather than by growing a second display that drifts from the first.
 from abc import ABC, abstractmethod
 from datetime import date, datetime
 
-from pydantic import BaseModel, ConfigDict
-
-FROZEN = ConfigDict(frozen=True)
+from pydantic import BaseModel
 
 
-class PacingWindow(BaseModel):
+class PacingWindow(BaseModel, frozen=True):
     """One metered window: how much of it is spent, and when it clears.
 
     ``window_hours`` is what makes a bar say more than a percentage: knowing
@@ -23,18 +21,14 @@ class PacingWindow(BaseModel):
     is the difference between "62% used" and "62% used, and half way through".
     """
 
-    model_config = FROZEN
-
     label: str
     utilization_pct: float
     resets_at: datetime
     window_hours: float
 
 
-class SpendWindow(BaseModel):
+class SpendWindow(BaseModel, frozen=True):
     """Metered spend past the plan, in whatever the account is billed in."""
-
-    model_config = FROZEN
 
     label: str
     used: float
@@ -42,16 +36,14 @@ class SpendWindow(BaseModel):
     utilization_pct: float
 
 
-class ModelTokens(BaseModel):
+class ModelTokens(BaseModel, frozen=True):
     """What one model moved, under the id its own runtime reports it by."""
-
-    model_config = FROZEN
 
     model: str
     tokens: int
 
 
-class ModelShare(BaseModel):
+class ModelShare(BaseModel, frozen=True):
     """One model's share of the period, named and coloured by its own runtime.
 
     A model family's display name and colour are the runtime's judgement about
@@ -59,14 +51,12 @@ class ModelShare(BaseModel):
     display would need a table of its own to recognise.
     """
 
-    model_config = FROZEN
-
     label: str
     style: str
     tokens: int
 
 
-class DayUsage(BaseModel):
+class DayUsage(BaseModel, frozen=True):
     """One day's usage, weighted the way the runtime reporting it prices work.
 
     ``weight`` is what the day cost against the plan and ``total_tokens`` is
@@ -75,8 +65,6 @@ class DayUsage(BaseModel):
     token count so the same bars still mean something.
     """
 
-    model_config = FROZEN
-
     day: date
     total_tokens: int
     weight: float
@@ -84,10 +72,8 @@ class DayUsage(BaseModel):
     message_count: int = 0
 
 
-class UsageReport(BaseModel):
+class UsageReport(BaseModel, frozen=True):
     """One account's usage, in the terms every runtime's display renders."""
-
-    model_config = FROZEN
 
     runtime_name: str
     windows: list[PacingWindow] = []

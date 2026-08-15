@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, get_args
 from uuid import UUID
 
 import pytest
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, Field, ValidationError
 
 from lup.adapters.claude.runtime import (
     SESSION_THINKING_TOKENS,
@@ -1072,10 +1072,8 @@ def published(channel: CodexTurnChannel) -> list[LiveTurnEvent]:
     return list(events())
 
 
-class TurnIdentityCase(BaseModel):
+class TurnIdentityCase(BaseModel, frozen=True):
     """One shape ``notification_turn_id`` reads a native turn identity from."""
-
-    model_config = ConfigDict(frozen=True)
 
     name: str
     arm: str
@@ -1083,10 +1081,8 @@ class TurnIdentityCase(BaseModel):
     turn_id: str | None = None
 
 
-class NotificationCase(BaseModel):
+class NotificationCase(BaseModel, frozen=True):
     """One app-server notification and everything its channel does with it."""
-
-    model_config = ConfigDict(frozen=True)
 
     name: str
     method: str
@@ -1095,10 +1091,8 @@ class NotificationCase(BaseModel):
     usage: Usage = Usage()
 
 
-class CompletedItemCase(BaseModel):
+class CompletedItemCase(BaseModel, frozen=True):
     """One completed app-server item and the blocks it decodes into."""
-
-    model_config = ConfigDict(frozen=True)
 
     name: str
     arm: str

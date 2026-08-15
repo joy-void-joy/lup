@@ -12,7 +12,7 @@ from typing import Literal, get_args
 import pytest
 import sh
 import typer
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field
 
 from lup.policy.identity import AGENT_IDENTITY_ENV
 from lup.types import JsonObject
@@ -127,10 +127,8 @@ from lup.devtools.harness.generate import (
 )
 
 
-class ClaudeHookDecision(BaseModel):
+class ClaudeHookDecision(BaseModel, frozen=True):
     """Validated decision emitted by the generated Claude dispatcher."""
-
-    model_config = ConfigDict(frozen=True)
 
     hook_event_name: Literal["PreToolUse"] = Field(alias="hookEventName")
     permission_decision: Literal["allow", "ask", "deny"] = Field(
@@ -139,43 +137,33 @@ class ClaudeHookDecision(BaseModel):
     permission_decision_reason: str = Field(alias="permissionDecisionReason")
 
 
-class ClaudeHookOutput(BaseModel):
+class ClaudeHookOutput(BaseModel, frozen=True):
     """Generated Claude hook output envelope."""
-
-    model_config = ConfigDict(frozen=True)
 
     hook_specific_output: ClaudeHookDecision = Field(alias="hookSpecificOutput")
 
 
-class CodexPermissionDecision(BaseModel):
+class CodexPermissionDecision(BaseModel, frozen=True):
     """Validated permission decision emitted by the Codex dispatcher."""
-
-    model_config = ConfigDict(frozen=True)
 
     behavior: Literal["allow", "deny"]
 
 
-class CodexPermissionHookOutput(BaseModel):
+class CodexPermissionHookOutput(BaseModel, frozen=True):
     """Codex PermissionRequest hook-specific output."""
-
-    model_config = ConfigDict(frozen=True)
 
     hook_event_name: Literal["PermissionRequest"] = Field(alias="hookEventName")
     decision: CodexPermissionDecision
 
 
-class CodexPermissionOutput(BaseModel):
+class CodexPermissionOutput(BaseModel, frozen=True):
     """Generated Codex permission hook output envelope."""
-
-    model_config = ConfigDict(frozen=True)
 
     hook_specific_output: CodexPermissionHookOutput = Field(alias="hookSpecificOutput")
 
 
-class ShippedDispatcher(BaseModel):
+class ShippedDispatcher(BaseModel, frozen=True):
     """One hook dispatcher: its declaration, its half, its script, its runtime."""
-
-    model_config = ConfigDict(frozen=True)
 
     declaration: DispatcherDeclaration
     asset: Path
@@ -217,19 +205,15 @@ def compiled_functions(script: str) -> dict[str, str]:  # lup: ignore[dict-str-p
     }
 
 
-class PyrightExecutionEnvironment(BaseModel):
+class PyrightExecutionEnvironment(BaseModel, frozen=True):
     """One type-checking scope and the search paths it resolves imports on."""
-
-    model_config = ConfigDict(frozen=True)
 
     root: Path
     extra_paths: list[Path] = Field(alias="extraPaths", default=[])
 
 
-class PyrightConfiguration(BaseModel):
+class PyrightConfiguration(BaseModel, frozen=True):
     """The workspace type-checking scope, as pyproject.toml declares it."""
-
-    model_config = ConfigDict(frozen=True)
 
     include: list[Path]
     exclude: list[Path] = []
@@ -440,10 +424,8 @@ def test_argument_reference_has_one_semantic_part_and_native_renderings() -> Non
     )
 
 
-class PartExpectation(BaseModel):
+class PartExpectation(BaseModel, frozen=True):
     """One prompt part and whether its two native renderings must differ."""
-
-    model_config = ConfigDict(frozen=True)
 
     part: PromptPart
     diverges: bool
@@ -519,10 +501,8 @@ def test_each_prompt_part_keeps_its_cross_runtime_promise(name: str) -> None:
     assert (claude != codex) is expectation.diverges
 
 
-class PartQuestion(BaseModel):
+class PartQuestion(BaseModel, frozen=True):
     """One question the harness asks a part, and the kinds that answer it."""
-
-    model_config = ConfigDict(frozen=True)
 
     ask: Callable[[SemanticPart], bool]
     answered_by: list[str]
@@ -611,13 +591,13 @@ def test_an_undeclared_plugin_behind_an_invocation_names_the_invocation() -> Non
         Harness.model_validate(source)
 
 
-class UnansweredPart(SemanticPart):
+class UnansweredPart(SemanticPart, frozen=True):
     """A thirteenth kind that declines to say how it should be spelled."""
 
     type: Literal["unanswered"] = "unanswered"
 
 
-class AnsweredPart(SemanticPart):
+class AnsweredPart(SemanticPart, frozen=True):
     """A thirteenth kind that answers the base and declines everything else."""
 
     type: Literal["answered"] = "answered"

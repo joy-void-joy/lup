@@ -14,24 +14,20 @@ same one before it submits.
 
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
 from lup.harness.process import LaunchRequest, ProcessLauncher
 
-FROZEN = ConfigDict(frozen=True)
 
-
-class InspectedChanges(BaseModel):
+class InspectedChanges(BaseModel, frozen=True):
     """What git reports one worktree has changed against one commit."""
-
-    model_config = FROZEN
 
     paths: list[Path] = []
     failure: str = ""
     """Why the reading did not happen, empty when it did."""
 
 
-class DeclarationDelta(BaseModel):
+class DeclarationDelta(BaseModel, frozen=True):
     """The two ways an account can disagree with the worktree it describes.
 
     Both directions are carried together because satisfying one is what
@@ -40,8 +36,6 @@ class DeclarationDelta(BaseModel):
     over-declaration a round later. Reporting one at a time is what turned
     a two-sided contract into an oscillation.
     """
-
-    model_config = FROZEN
 
     undeclared: list[str] = []
     """Changed, and named in no part of the account."""

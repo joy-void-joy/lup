@@ -11,14 +11,12 @@ import logging
 from datetime import date, datetime, timezone
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field
 
 from lup.adapters.codex.app_server import AppServerError, CodexAppServer
 from lup.types import EnvVars, JsonValue
 
 logger = logging.getLogger(__name__)
-
-FROZEN = ConfigDict(frozen=True, extra="ignore", populate_by_name=True)
 
 RATE_LIMITS_METHOD = "account/rateLimits/read"
 TOKEN_USAGE_METHOD = "account/usage/read"
@@ -34,10 +32,8 @@ METHOD_NOT_FOUND = -32601
 """JSON-RPC's own code for a method this runtime does not have."""
 
 
-class RateLimitWindow(BaseModel):
+class RateLimitWindow(BaseModel, frozen=True, extra="ignore", populate_by_name=True):
     """One metered window: how much is spent, how long it runs, when it clears."""
-
-    model_config = FROZEN
 
     used_percent: float = Field(default=0, alias="usedPercent")
     resets_at: int | None = Field(default=None, alias="resetsAt")
@@ -50,7 +46,7 @@ class RateLimitWindow(BaseModel):
         return datetime.fromtimestamp(self.resets_at, tz=timezone.utc)
 
 
-class RateLimitSnapshot(BaseModel):
+class RateLimitSnapshot(BaseModel, frozen=True, extra="ignore", populate_by_name=True):
     """Every window one plan meters, as one reading of them.
 
     The credit balance beside these is deliberately not modelled. Nothing
@@ -59,27 +55,21 @@ class RateLimitSnapshot(BaseModel):
     display never reads into a validation error that costs the panel.
     """
 
-    model_config = FROZEN
-
     plan_type: str | None = Field(default=None, alias="planType")
     primary: RateLimitWindow | None = None
     secondary: RateLimitWindow | None = None
 
 
-class AccountRateLimits(BaseModel):
+class AccountRateLimits(BaseModel, frozen=True, extra="ignore", populate_by_name=True):
     """The rate-limit reading, whose single-bucket view is the one rendered."""
-
-    model_config = FROZEN
 
     rate_limits: RateLimitSnapshot = Field(
         default_factory=RateLimitSnapshot, alias="rateLimits"
     )
 
 
-class TokenUsageDay(BaseModel):
+class TokenUsageDay(BaseModel, frozen=True, extra="ignore", populate_by_name=True):
     """One day's tokens, under the date the account's own billing day starts."""
-
-    model_config = FROZEN
 
     start_date: str = Field(default="", alias="startDate")
     tokens: int = 0
@@ -98,20 +88,16 @@ class TokenUsageDay(BaseModel):
             return None
 
 
-class AccountTokenUsage(BaseModel):
+class AccountTokenUsage(BaseModel, frozen=True, extra="ignore", populate_by_name=True):
     """The daily buckets behind the windows, where the account reports any."""
-
-    model_config = FROZEN
 
     daily_usage_buckets: list[TokenUsageDay] | None = Field(
         default=None, alias="dailyUsageBuckets"
     )
 
 
-class AccountUsage(BaseModel):
+class AccountUsage(BaseModel, frozen=True):
     """One complete reading of an account: its windows, and its daily buckets."""
-
-    model_config = ConfigDict(frozen=True)
 
     limits: AccountRateLimits
     tokens: AccountTokenUsage

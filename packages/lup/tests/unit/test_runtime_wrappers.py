@@ -10,7 +10,7 @@ from datetime import timedelta
 from pathlib import Path
 
 import pytest
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
 from lup.runtime.composition import (
     AcceptedTurn,
@@ -58,9 +58,7 @@ from lup.types import Usage
 from tests.unit.test_capability_runtime import RecordingBinder, RecordingInterrupt
 
 
-class WrappedOutput(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class WrappedOutput(BaseModel, frozen=True):
     value: int
 
 

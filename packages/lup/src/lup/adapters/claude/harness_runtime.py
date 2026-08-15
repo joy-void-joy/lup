@@ -3,15 +3,13 @@
 from pathlib import Path
 
 import sh
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
 from lup.harness.contracts import CapabilityProbe
 from lup.harness.models import CapabilityEvidence
 
 
-class ClaudeCliEvidence(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class ClaudeCliEvidence(BaseModel, frozen=True):
     executable: Path
     arguments: list[str] = []
     output: str = ""

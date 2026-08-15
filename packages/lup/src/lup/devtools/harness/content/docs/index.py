@@ -11,25 +11,21 @@ stays with the group that lists it. The preamble and epilogue are a project's
 own words about its own repository, and pass through untouched.
 """
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
 import lup.harness.models as models
 from lup.markdown import LinkCell, PlainCell
 
 
-class IndexEntry(BaseModel):
+class IndexEntry(BaseModel, frozen=True):
     """One row of the index: a page, and the question it answers."""
-
-    model_config = ConfigDict(frozen=True)
 
     link: str
     answers: str
 
 
-class IndexGroup(BaseModel):
+class IndexGroup(BaseModel, frozen=True):
     """One heading of the index, and the pages listed beneath it."""
-
-    model_config = ConfigDict(frozen=True)
 
     title: str
     entries: list[IndexEntry]

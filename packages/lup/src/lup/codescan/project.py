@@ -20,7 +20,7 @@ import ast
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
 from lup.codescan.common import (
     PythonContext,
@@ -35,10 +35,8 @@ type FindingKind = Literal["missing", "untyped", "spurious"]
 """How a violation and the suppressions around it ended up related."""
 
 
-class ClassSymbol(BaseModel):
+class ClassSymbol(BaseModel, frozen=True):
     """Resolved class shape retained by the project-wide symbol index."""
-
-    model_config = ConfigDict(frozen=True)
 
     qualified_name: str
     module: str
@@ -52,7 +50,7 @@ class ClassSymbol(BaseModel):
     member_lines: dict[str, int] = {}
 
 
-class RuleViolation(BaseModel):
+class RuleViolation(BaseModel, frozen=True):
     """One mechanical shape violation before suppression auditing.
 
     ``suppression_lines`` names the extra lines a directive may legitimately
@@ -60,18 +58,14 @@ class RuleViolation(BaseModel):
     against one of its members, for instance.
     """
 
-    model_config = ConfigDict(frozen=True)
-
     path: Path
     line: int
     message: str
     suppression_lines: list[int] = []
 
 
-class RuleFinding(BaseModel):
+class RuleFinding(BaseModel, frozen=True):
     """One missing, untyped, or spurious suppression verdict for a rule."""
-
-    model_config = ConfigDict(frozen=True)
 
     kind: FindingKind
     path: Path
@@ -80,10 +74,8 @@ class RuleFinding(BaseModel):
     rule_id: str
 
 
-class Directive(BaseModel):
+class Directive(BaseModel, frozen=True):
     """One actual comment suppression that may cover a rule's violations."""
-
-    model_config = ConfigDict(frozen=True)
 
     path: Path
     line: int

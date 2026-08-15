@@ -14,7 +14,7 @@ from pathlib import Path
 
 import sh
 import typer
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
 from lup.codescan.markers import find_feedback
 from lup.mcp import create_mcp_server, serve_stdio, server_tool_names
@@ -83,15 +83,13 @@ from lup.devtools.harness.generate import NativeHarnessComposition
 from lup.devtools.supervisor.projection import answer_recipe as rerun_recipe
 
 
-class ConfiguredModel(BaseModel):
+class ConfiguredModel(BaseModel, frozen=True):
     """The model an application is configured to run, and where it routes.
 
     A resolver session runs through one native adapter, and a model reaches
     only the backend its vendor prefix names. Naming both here lets the
     driver say which one it declined rather than silently taking a default.
     """
-
-    model_config = ConfigDict(frozen=True)
 
     name: str
     adapter: str
@@ -232,10 +230,8 @@ def parse_answer_flags(
     return {pair[0]: pair[1] for pair in pairs}
 
 
-class NoteTargetRef(BaseModel):
+class NoteTargetRef(BaseModel, frozen=True):
     """One `file:line` target naming a note already written in the tree."""
-
-    model_config = ConfigDict(frozen=True)
 
     file: Path
     line: int
@@ -392,10 +388,8 @@ def run_resolver_tool_server() -> None:
 SUPERVISED_WAIT_SECONDS = 3600.0
 
 
-class SupervisorSpawn(BaseModel):
+class SupervisorSpawn(BaseModel, frozen=True):
     """Whether a run opens a page beside itself, and on which port."""
-
-    model_config = ConfigDict(frozen=True)
 
     enabled: bool = False
     port: int = 8766
