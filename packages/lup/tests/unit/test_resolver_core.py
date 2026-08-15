@@ -60,8 +60,8 @@ from lup.resolver.core import (
     approval_question,
     resolver_config_digest,
 )
-from lup.resolver.run import ResolverInvariantError
-from lup.resolver.journal import LeaseDriftEvent
+from lup.resolver.run import ResolveRun, ResolverInvariantError
+from lup.resolver.journal import Journal, LeaseDriftEvent
 from lup.resolver.models import (
     AdmissionRequest,
     AnswerBatch,
@@ -381,6 +381,43 @@ def test_state_repository_records_and_replaces_an_acceptance(tmp_path: Path) -> 
         ("a", "second"),
         ("b", "other"),
     ]
+
+
+def test_a_refused_save_leaves_behind_no_belief_in_what_it_refused(
+    tmp_path: Path,
+) -> None:
+    """What a run believes is what is durable, so a rejected write leaves none.
+
+    The failure handler reads this back to record the phase to resume from. A
+    candidate kept in memory after its save was refused therefore gets written
+    a second time, fails the same validation, and the run reports the raise
+    from inside its own handler rather than the one that stopped it — two
+    identical tracebacks, and the real cause established by hand.
+    """
+    settled = ResolveState(
+        config_digest="config-sha",
+        run_id="run-1",
+        phase=ResolvePhase.INVENTORY,
+        source=SourceSnapshot(branch="feature", commit="source-sha"),
+        spec=resolve_spec(),
+        concerns=[concern("a")],
+        progress=[ConcernProgress(concern_id="a", status=ConcernStatus.RETIRED)],
+    )
+    run = ResolveRun(ResolverStateRepository(tmp_path, "run-1"), Journal(tmp_path))
+    run.persist(settled)
+
+    with pytest.raises(StateTransitionError):
+        run.persist(
+            settled.model_copy(
+                update={
+                    "progress": [
+                        ConcernProgress(concern_id="a", status=ConcernStatus.CLEANED)
+                    ]
+                }
+            )
+        )
+
+    assert run.require().progress[0].status == ConcernStatus.RETIRED
 
 
 def test_state_repository_adopts_a_moved_composition(tmp_path: Path) -> None:
@@ -1682,6 +1719,73 @@ def test_releasing_a_run_cleans_concern_branches_and_keeps_the_review_one(
     assert persisted.phase == ResolvePhase.COMPLETE
     assert all(not lease.active for lease in persisted.leases)
     assert persisted.progress[0].status == ConcernStatus.CLEANED
+    assert [record.action for record in persisted.cleanup] == ["removed", "retained"]
+
+
+def test_releasing_a_run_keeps_the_decision_a_retired_concern_carries(
+    tmp_path: Path,
+) -> None:
+    """Retiring settles the decision; it does not hand back the worktree.
+
+    So a retired concern still holds its lease when cleanup arrives, and
+    cleanup used to move it on — into a status the transition table declares
+    unreachable, because retiring is a human's word and nothing overwrites it.
+    That crashed the run at its last step, with every concern integrated and
+    re-checked and 25 of 27 worktrees already removed.
+    """
+    run_id = "acceptance"
+    retired_lease = WritableRootLease(
+        concern_id="r",
+        root=tmp_path / "worktrees" / "r",
+        branch="resolve/acceptance/r",
+    )
+    integration_lease = WritableRootLease(
+        concern_id="integration",
+        root=tmp_path / "worktrees" / "integration",
+        branch="resolve/acceptance/review",
+    )
+    state = ResolveState(
+        config_digest="config-sha",
+        run_id=run_id,
+        phase=ResolvePhase.VERIFICATION,
+        source=SourceSnapshot(branch="feature", commit="source-sha"),
+        spec=resolve_spec(),
+        concerns=[concern("r")],
+        progress=[ConcernProgress(concern_id="r", status=ConcernStatus.RETIRED)],
+        leases=[retired_lease, integration_lease],
+        integration=IntegrationRecord(
+            branch=integration_lease.branch,
+            worktree=integration_lease.root,
+            concerns=[],
+            commit="integration-sha",
+            completed=True,
+        ),
+    )
+    core = ResolverCore(
+        ResolverConfig(
+            state_root=tmp_path / "state",
+            workspace=tmp_path,
+            worktree_root=tmp_path / "worktrees",
+            run_id=run_id,
+            integration_branch=integration_lease.branch,
+            verification_commands=[
+                VerificationCommand(name="tests", arguments=["pytest"])
+            ],
+        ),
+        resolve_spec(),
+        lambda _cwd: unused_session_factory(),
+        lambda _cwd: unused_session_factory(),
+        UnusedInvocationRenderer(),
+        successful_launcher(),
+    )
+    core.persist(state)
+
+    core.release(state)
+
+    persisted = core.repository.load()
+    assert persisted.phase == ResolvePhase.COMPLETE
+    # The worktree still went, and the record of that is where it belongs.
+    assert persisted.progress[0].status == ConcernStatus.RETIRED
     assert [record.action for record in persisted.cleanup] == ["removed", "retained"]
 
 
