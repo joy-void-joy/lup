@@ -212,6 +212,7 @@ sibling answers.
 | `workspace` | Where a run's data lives: version-aware paths, the `SessionContext` that crosses a process boundary, session history, and the note directories a session may touch. |
 | `realtime` | The wake/act/sleep lifecycle for persistent agents. `scheduler.py` stands alone; `relay.py` layers a subprocess mailbox transport on top and is never imported by it. |
 | `telemetry` | What a run records about itself: markdown trace plus machine-readable sidecar, console rendering, per-tool metrics with a file-backed flush for subprocess tools. |
+| `usage` | One account's metered usage, whichever runtime billed it: the windows a plan meters and when each clears, where the tokens went day by day, and the display that draws both. Ships no roster — each adapter declares the entry that reads its own runtime into this shape, so a runtime joins the display by being read rather than by growing a command beside it. |
 | `sandbox` | A Docker-isolated Python REPL — mount topology, container lifecycle, and the exec-multiplexed socket protocol. Requires the `docker` extra. |
 | `resilience` | `throttle` bounds concurrency and minimum call interval; `retry` re-runs a coroutine with exponential backoff. |
 | `hooks` | SDK-agnostic hook models and factories: permission hooks, tool allowlists, gates, nudges, capture. |
@@ -227,11 +228,14 @@ so it is part of the harness subject rather than a sibling of it, and the
 downward question stops it at the library edge — following the driver into
 `devtools/` would move provider-neutral code into the tooling layer.
 
-`adapters/claude/usage/` is the other placement worth naming, because it is
-the one module that reads the wrong way in both directions at once: a Typer
-sub-app inside the vendor-edge tier, and the only module above `devtools/`
-that imports it. Where it lands is settled by the parity sweep splitting its
-runtime-neutral half from its account-specific fetch, not by this table.
+`usage/` and the `usage/` beside each adapter are worth naming next to it as
+the placement rule worked all the way through. What an account publishes is
+the only thing that differs between runtimes — which windows it meters,
+whether it splits a day's tokens by model — so that is what stays at the
+vendor edge, and the report shape, the pacing bars and the rendering are
+decided once above it. Neither reader carries a command of its own: each
+declares an entry, and an application composes the ones it wants, so no Typer
+app sits under `adapters/` and nothing above `devtools/` imports one.
 
 The outward question also runs the other way, and `dev check` asks it on every
 run: the `application placement` row names each module under the application's
