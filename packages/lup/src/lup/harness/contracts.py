@@ -14,6 +14,8 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
 
+from pydantic import BaseModel, ConfigDict
+
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -48,6 +50,33 @@ class SkillInvocationRenderer(ABC):
         """Render qualification, escaping, and arguments together."""
 
 
+class Spelling(BaseModel):
+    """What one runtime says for a portable idea, or why it has nothing to say.
+
+    A portable idea one runtime cannot express is the case absence handles
+    worst: a method left off a vocabulary, or one returning nothing, reads
+    exactly like a method nobody has written yet, and the reason it is missing
+    lives wherever the reader happens to look. Both answers are values of this
+    type instead, so declining is a thing a runtime states rather than a thing
+    it omits, and the seam stays closed by construction.
+
+    Both operations are total, so neither answer is a case a caller has to
+    remember to check for. Prose places what :meth:`in_prose` returns and a
+    declined answer contributes nothing there; a parity audit reads
+    :meth:`audited`, which is where a declined answer says why.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    @abstractmethod
+    def in_prose(self) -> str:
+        """The words a prompt places here, and none where the runtime declines."""
+
+    @abstractmethod
+    def audited(self) -> str:
+        """How a parity audit reports this answer, declined answers included."""
+
+
 class Atom(str):
     """One native name spelled whole: a path, a product name, a reference.
 
@@ -64,6 +93,47 @@ class Instruction(str):
     belongs to whoever declared it — so vocabulary is the identifier-shaped
     tokens rather than the whole sentence.
     """
+
+
+class Spelled(Spelling):
+    """The runtime's own words for the idea, ready to be placed in prose.
+
+    What a runtime hands over is an :class:`Instruction`, since these
+    sentences all frame text their caller supplied; the field is a plain
+    string because a validated model copies what it is given, and the
+    distinction the two str types carry is about which words a rule may
+    judge, not about the object that survives validation.
+    """
+
+    words: str
+
+    def in_prose(self) -> str:
+        return self.words
+
+    def audited(self) -> str:
+        return self.words
+
+
+class Unsupported(Spelling):
+    """One portable idea this runtime has no way to say, and why not.
+
+    The reason is the whole point: a runtime declines because of something
+    true about it — a roster with no such tool, an override that only exists
+    at session scope — and that fact is what a reader needs, whether they are
+    auditing the two vocabularies against each other or wondering why a
+    sentence they expected is not in their prompt. Approximating the idea
+    would be worse than declining it, because a reader cannot tell an
+    approximation from the real thing until it fails.
+    """
+
+    reason: str
+    """Why this runtime cannot say it, in words that stand on their own."""
+
+    def in_prose(self) -> str:
+        return ""
+
+    def audited(self) -> str:
+        return f"unsupported — {self.reason}"
 
 
 class NativeSpellings(SkillInvocationRenderer):  # lup: ignore[abc-capability]
@@ -87,6 +157,12 @@ class NativeSpellings(SkillInvocationRenderer):  # lup: ignore[abc-capability]
     runtime's own word end to end, an :class:`Instruction` wraps words the
     caller supplied. A method returning a bare ``str`` spells into an artifact
     rather than into prose, and no prose is judged against it.
+
+    A method returning :class:`Spelling` names an idea a runtime may not be
+    able to express at all. It still has to answer, and the answer it gives
+    when it cannot is an :class:`Unsupported` carrying the reason — which is
+    what keeps a runtime from being silently absent on an idea the other one
+    spells.
     """
 
     @property
@@ -137,6 +213,36 @@ class NativeSpellings(SkillInvocationRenderer):  # lup: ignore[abc-capability]
     @abstractmethod
     def relocate_session(self, path: str) -> Instruction:
         """Spell the move into an already-created worktree this runtime allows."""
+
+    @abstractmethod
+    def escape_sandbox(self, reason: str) -> Spelling:
+        """Spell how one command this runtime runs escapes its own sandbox.
+
+        The test is whether an agent can be told words that take one call
+        out, not whether the runtime ever crosses the boundary. A runtime
+        that crosses it only through configuration written before the session
+        started has nothing a prompt could ask for — and naming a flag the
+        reader cannot pass would read as an instruction. Declining is the
+        honest answer there, which is why this returns a :class:`Spelling`
+        rather than a sentence every runtime must invent.
+
+        This is the question the decision seam asks as ``agent_escalates``,
+        and the answers have to agree, because they are one fact: this seam
+        supplies the words and that one lets an ``escalable`` verdict offer
+        them. It is *not* the question ``escapable`` asks, which is whether a
+        verdict can place a call itself — a runtime can hand the agent a way
+        out while giving a hook no channel to take it.
+        """
+
+    @abstractmethod
+    def read_document(self, path: str) -> Spelling:
+        """Name the tool this runtime hands a whole document to, path and all.
+
+        A document a text extractor cannot read — a scanned page, a slide, an
+        image-only PDF — comes back from one as an empty string that reads
+        like an empty document, so prose steers to the runtime's own reader
+        instead. A roster with nothing that takes a document declines.
+        """
 
     @abstractmethod
     def resolver_entry(self) -> Instruction:

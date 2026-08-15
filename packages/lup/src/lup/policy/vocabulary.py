@@ -565,7 +565,9 @@ def git_rule(
     confined to a sandbox with no route to the remote fails however freely it
     was allowed, and a worktree or config write confined away from the
     repository's own locks fails the same way, so the placement follows the
-    tool rather than a list of its verbs.
+    tool rather than a list of its verbs. A project whose sandbox does reach
+    its remotes answers ``escalable`` instead, which keeps the ordinary fetch
+    confined and leaves the way out to the agent that finds it needs one.
     """
     leaf = [
         ShellSubcommandRule(name=name, effect="allow")

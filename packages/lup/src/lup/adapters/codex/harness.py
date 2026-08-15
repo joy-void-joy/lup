@@ -19,9 +19,16 @@ from lup.harness.contracts import (
     Instruction,
     NativeSpellings,
     PromptRenderer,
+    Spelled,
+    Spelling,
+    Unsupported,
 )
 from lup.harness.generation import argument_text
-from lup.harness.prompts import guidance_banner
+from lup.harness.prompts import (
+    SPAWNED_SESSION_LOSES_SHELL,
+    guidance_banner,
+    sentences,
+)
 from lup.harness.models import (
     GUIDANCE_BYTE_BUDGET,
     Agent,
@@ -68,6 +75,11 @@ class CodexSpellings(NativeSpellings):
     plugin name is deliberately unused there. The model tier is declined
     outright: recorded evidence for Codex custom agents covers TOML parsing
     only, so there is no proven alias to spell a tier in.
+
+    Reading a document whole is declined outright rather than approximated,
+    saying why: nothing in this roster does it, and an approximation would
+    read as an instruction the agent can follow and cost it a turn to find
+    out otherwise.
     """
 
     @property
@@ -112,40 +124,74 @@ class CodexSpellings(NativeSpellings):
             "carried on here would land in the checkout it started from"
         )
 
-    # lup: The Claude entry now tells the agent to launch the run outside the
-    # sandbox, because a session spawned inside it loses every shell call. This
-    # one says nothing, and inventing a flag would be worse than the silence:
-    # the Codex overrides this repository knows are session-level flags on the
-    # binary, not a per-call escape a skill can ask for. "Run this outside the
-    # sandbox" is a portable idea with a per-runtime spelling, so it wants a
-    # `NativeSpellings` method beside `ask_user` — and if Codex has no per-call
-    # escape, the explicit unsupported declaration the adapter-parity concern
-    # asks for, carrying the reason.
+    def escape_sandbox(self, reason: str) -> Spelling:
+        """Spell the per-call escape Codex puts in the model's own hands.
+
+        Read out of the source at tag ``rust-v0.145.0`` — the release
+        ``docs/native-capabilities.md`` pins — rather than out of the prose
+        pages, which describe the session-level flags and leave this one
+        unmentioned. ``codex-rs/core/src/tools/handlers/shell_spec.rs`` puts
+        ``sandbox_permissions`` on the shell tool the model calls, describing
+        it to the model as a per-command sandbox override whose
+        ``require_escalated`` value means unsandboxed execution, beside a
+        ``justification`` field that becomes the approval question a human
+        answers; the value is pushed into that enum unconditionally, so it is
+        offered on every session.
+        ``codex-rs/core/src/tools/sandboxing.rs`` is where it lands, mapping
+        ``requires_escalated_permissions()`` to a first attempt that bypasses
+        the sandbox. Both paths are re-derivable at that tag, which is the
+        point of naming them: the finding is checkable rather than inherited.
+
+        This is the agent's route and not a hook's — a Codex policy verdict
+        still places nothing, which is why
+        :data:`~lup.adapters.codex.hooks.CODEX_SEMANTICS` splits the two.
+        """
+        return Spelled(
+            words=Instruction(
+                "Re-issue it with `sandbox_permissions` set to "
+                "`require_escalated`, and a `justification` saying why, which "
+                f"is the approval question the user answers. {reason}"
+            )
+        )
+
+    def read_document(self, path: str) -> Spelling:
+        return Unsupported(
+            reason=(
+                "Codex's tool roster reads a document only by running a shell "
+                "command over it, and `view_image` — the one tool that takes a "
+                "file whole — accepts images alone, so nothing here can be "
+                "handed a PDF or an office document"
+            )
+        )
+
     def resolver_entry(self) -> Instruction:
         return Instruction(
-            "Run `uv run lup-devtools harness resolve --adapter codex`. "
-            "`uv run lup-devtools harness resolve intake` first prints what a "
-            "run started now would plan from — every actionable note at its "
-            "file and line, the deferred ones it would carry, and the ones it "
-            "would leave to their generator — creating no run and leasing no "
-            "worktree, so the inventory can be read before committing to it. "
-            "The command accepts optional flags: `--run-id <id>` resumes "
-            "a persisted run. Assembling the review branch is gated on the "
-            "reserved `integration-assembly` question, so approving it is "
-            "`--answer integration-assembly=approve` like any other answer. "
-            "It waits zero seconds by "
-            "default and parks on material questions, printing each one "
-            "beside the `# lup:` notes it was raised from, the concern's "
-            "spec, and its acceptance criteria; rerun with the repeatable "
-            "`--answer <question-id>=<value>` flag to answer them. "
-            "`--admit <text>` carries work in the human's own words: it seeds "
-            "a run that does not exist yet, beside whatever notes the tree "
-            "holds, and joins one already moving. `--admit-note <file>:<line>` "
-            "names a note written in the tree and `--admit-issue <number>` an "
-            "open issue; all three are repeatable. "
-            "Never pass `--wait` or `--supervise`; both hold a run open "
-            "for a human instead of parking — `--wait` at the mailbox, "
-            "`--supervise` at the page it opens."
+            sentences(
+                "Run `uv run lup-devtools harness resolve --adapter codex`. "
+                "`uv run lup-devtools harness resolve intake` first prints what a "
+                "run started now would plan from — every actionable note at its "
+                "file and line, the deferred ones it would carry, and the ones it "
+                "would leave to their generator — creating no run and leasing no "
+                "worktree, so the inventory can be read before committing to it. "
+                "The command accepts optional flags: `--run-id <id>` resumes "
+                "a persisted run. Assembling the review branch is gated on the "
+                "reserved `integration-assembly` question, so approving it is "
+                "`--answer integration-assembly=approve` like any other answer. "
+                "It waits zero seconds by "
+                "default and parks on material questions, printing each one "
+                "beside the `# lup:` notes it was raised from, the concern's "
+                "spec, and its acceptance criteria; rerun with the repeatable "
+                "`--answer <question-id>=<value>` flag to answer them. "
+                "`--admit <text>` carries work in the human's own words: it seeds "
+                "a run that does not exist yet, beside whatever notes the tree "
+                "holds, and joins one already moving. `--admit-note <file>:<line>` "
+                "names a note written in the tree and `--admit-issue <number>` an "
+                "open issue; all three are repeatable. "
+                "Never pass `--wait` or `--supervise`; both hold a run open "
+                "for a human instead of parking — `--wait` at the mailbox, "
+                "`--supervise` at the page it opens.",
+                self.escape_sandbox(SPAWNED_SESSION_LOSES_SHELL).in_prose(),
+            )
         )
 
     def arguments_ref(self) -> Atom:
@@ -452,12 +498,15 @@ def codex_allow_prefixes(
     terms of one that spelled it out, which is the same reading the dispatcher
     and the canonical policy take.
 
-    That bypass is also the whole of this runtime's escape, which is why a
-    runner target's placement does not narrow what is emitted here: a target
-    declared ``outside`` reaches the outside through its prefix rule or not at
-    all. The forms this cannot widen — a target behind a global flag, or one
-    joined into a compound command — reach the hook, where a confined session
-    is stopped with the reason rather than left to fail on the first write.
+    That bypass is the whole of the escape this compiler can declare, which is
+    why a runner target's placement does not narrow what is emitted here: a
+    target declared ``outside`` reaches the outside through its prefix rule or
+    not at all. What a rule cannot reach is the escape the model spends on its
+    own call, which exists but is chosen a call at a time rather than compiled
+    in advance — :meth:`CodexSpellings.escape_sandbox` carries it. The forms
+    this cannot widen — a target behind a global flag, or one joined into a
+    compound command — reach the hook, where a confined session is stopped
+    with the reason rather than left to fail on the first write.
     """
 
     def add(prefix: list[str]) -> None:

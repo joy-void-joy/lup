@@ -51,8 +51,11 @@ from lup.policy.bundle import (
 from lup.policy.kernel.decision import (
     DecisionEffect,
     KernelDecision,
+    SANDBOX_ESCALATION_OFFER,
+    SANDBOX_ESCALATION_UNSUPPORTED,
     SANDBOX_TRAPPED_REASON,
     SandboxPlacement,
+    sandbox_escaped,
 )
 from lup.policy.kernel.edit import decide_edit
 from lup.policy.kernel.rows import PathRoleRow
@@ -1403,6 +1406,7 @@ def test_the_decision_effect_stays_closed_at_four_members() -> None:
     ]
     assert sorted(get_args(SandboxPlacement.__value__)) == [
         "ambient",
+        "escalable",
         "inside",
         "outside",
     ]
@@ -1410,11 +1414,12 @@ def test_the_decision_effect_stays_closed_at_four_members() -> None:
 
 
 def test_the_settled_sandbox_composition_rows_render_as_decided() -> None:
-    """The five pairs that carry meaning, on a runtime that can place a call.
+    """Every settled pair a rewrite renders, on a runtime that can place a call.
 
     The placement is an argument of the call on Claude Code, so an allow that
     escapes is an allow plus a rewrite; an ask that escapes is asking two
-    things at once, so the reason says both.
+    things at once, so the reason says both. The two escalable pairs answer on
+    a second channel as well, and are pinned where that offer is.
     """
     shell: JsonObject = {"command": "git ls-remote origin HEAD"}
     render = ClaudeDecisionRenderer().render
@@ -1448,9 +1453,13 @@ def test_a_deny_short_circuits_whatever_the_sandbox_says() -> None:
     )
     assert KernelDecision("defer", "unjudged", "outside").sandbox == "ambient"
 
+    refused = KernelDecision("deny", "refused", "escalable")
+    placed = refused.placed(escapable=True, agent_escalates=True)
+    assert (refused.sandbox, placed.reason) == ("ambient", "refused")
+
 
 def test_a_runtime_that_cannot_place_a_call_renders_the_plain_effect() -> None:
-    """Codex has no per-call sandbox, so an intent it cannot perform is dropped.
+    """A Codex verdict rewrites nothing, so an intent it cannot perform is dropped.
 
     Degrading in silence is the failure this pins: an escape rendered into a
     channel that ignores it reads as honoured to everything upstream, and the
@@ -1463,7 +1472,58 @@ def test_a_runtime_that_cannot_place_a_call_renders_the_plain_effect() -> None:
 
     assert codex.render(escaped).exit_code == 0
     assert "outside the sandbox" not in codex.render(asked).stderr
-    assert escaped.placed(escapable=False) == Decision(effect="allow", reason="fine")
+    assert escaped.placed(escapable=False, agent_escalates=True) == Decision(
+        effect="allow", reason="fine"
+    )
+
+
+def test_a_permission_to_escalate_turns_on_the_agent_and_not_on_the_channel() -> None:
+    """The offer is addressed to the agent, so it is the agent that decides it.
+
+    Which is why it survives on a runtime whose verdicts place nothing: the
+    middle case here is Codex, where a hook rewrites no call — so no placement
+    reaches the wire — while the agent still has words for taking its own call
+    out, and the reason carries them. Reading that case off the placement
+    channel is what would drop an offer the agent could have spent.
+
+    Where the agent has no way out the call runs confined, and says so as
+    ``inside`` rather than as the session-deferring placement: withdrawing an
+    offer is not the same act as handing the question back to the session,
+    and on an unconfined session the two differ by the whole sandbox. The
+    reason says the offer is not available, because an agent that spends a
+    turn discovering that learns nothing it can act on.
+    """
+    offered = Decision(effect="allow", reason="fine", sandbox="escalable")
+
+    placed = offered.placed(escapable=True, agent_escalates=True)
+    carried = offered.placed(escapable=False, agent_escalates=True)
+    degraded = offered.placed(escapable=True, agent_escalates=False)
+
+    assert (placed.sandbox, placed.reason) == (
+        "escalable",
+        "fine" + SANDBOX_ESCALATION_OFFER,
+    )
+    assert (carried.sandbox, carried.reason) == (
+        "ambient",
+        "fine" + SANDBOX_ESCALATION_OFFER,
+    )
+    assert (degraded.sandbox, degraded.effect) == ("inside", "allow")
+    assert degraded.reason == "fine" + SANDBOX_ESCALATION_UNSUPPORTED
+    assert CodexDecisionRenderer(supports_ask=False).render(offered).exit_code == 0
+
+
+def test_only_an_escalable_placement_reads_what_the_call_already_asked() -> None:
+    """Which placements leave is one answer, so two renderers cannot differ.
+
+    ``outside`` leaves and ``inside`` stays whatever the call said, because
+    those are the verdict's to decide. Only ``escalable`` reads the second
+    argument, which is what makes it a permission the agent spends rather
+    than a placement done to it.
+    """
+    for spent in (True, False):
+        assert sandbox_escaped("outside", spent) is True
+        assert sandbox_escaped("inside", spent) is False
+        assert sandbox_escaped("escalable", spent) is spent
 
 
 def test_fetch_policy_normalizes_origin_and_rejects_lookalikes() -> None:

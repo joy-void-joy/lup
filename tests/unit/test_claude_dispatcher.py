@@ -6,14 +6,18 @@ run the emitted script on a fresh interpreter with JSON on stdin, the way
 the harness invokes it.
 """
 
+import importlib.util
 import json
 from pathlib import Path
+from types import ModuleType
 
 import pytest
 import sh
 
+from lup.adapters.claude.hooks import claude_placed_input
 from lup.policy.grants import allowance_grants_environment, write_allowance_grants
 from lup.policy.identity import AGENT_IDENTITY_ENV, ConcernAllowance
+from lup.policy.kernel.decision import SandboxPlacement
 from lup.types import EnvVars, JsonObject
 from tests.unit.repos import initialized_repo
 
@@ -296,9 +300,9 @@ def test_the_toolchain_reaches_the_outside_with_no_flag_from_its_caller() -> Non
     Every `lup-devtools` command that opens an agent session is unusable
     confined: the runtime creates per-session state under its configuration
     directory, and a session spawned inside a sandbox that does not grant that
-    path loses its shell entirely. The instruction that used to ask an agent
-    for the flag reached one skill on one runtime; the declaration reaches
-    every invocation of the toolchain, whichever entry point started it.
+    path loses its shell entirely. An instruction asking an agent for the flag
+    reaches one skill on one runtime; the declaration reaches every invocation
+    of the toolchain, whichever entry point started it.
     """
     decision = decide(bash_payload("uv run lup-devtools harness resolve"))
 
@@ -458,3 +462,85 @@ def test_a_stale_environment_cannot_grant_what_the_document_does_not(
     }
 
     assert effect_under(NEW_DEVTOOLS_MODULE, launched) == "ask"
+
+
+def bundled_dispatcher() -> ModuleType:
+    """Import the emitted dispatcher so its own `rendered` can be called.
+
+    A placement reaches that function on a decision, and no rule declares
+    `escalable` yet — the placement exists so `toolchain-sandbox-escalation`
+    can declare one. Driving it from a command would therefore pin nothing
+    until the first rule lands, which is exactly when a silent revocation
+    would stop being catchable.
+    """
+    spec = importlib.util.spec_from_file_location(
+        "bundled_claude_policy", DISPATCHER.resolve()
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def dispatcher_rewrite(placement: SandboxPlacement, call: JsonObject) -> JsonObject:
+    """What the emitted dispatcher rewrites one placed Bash call to."""
+    dispatcher = bundled_dispatcher()
+    answer = dispatcher.rendered(
+        dispatcher.KernelDecision("allow", "placed", placement),
+        {"tool_name": "Bash", "tool_input": call},
+    )
+    specific = answer["hookSpecificOutput"]
+    assert isinstance(specific, dict)
+    rewritten = specific["updatedInput"]
+    assert isinstance(rewritten, dict)
+    return rewritten
+
+
+def spent_call(spent: bool) -> JsonObject:
+    """One Bash call, with or without the escape its agent already asked for."""
+    call: JsonObject = {"command": "uv run lup-devtools dev check"}
+    if spent:
+        call["dangerouslyDisableSandbox"] = True
+    return call
+
+
+def test_the_dispatcher_lets_the_agent_spend_the_escalation_it_was_offered() -> None:
+    """An offer the same hook revokes on the rewrite is one nobody can take.
+
+    The permission channel grants the escape and the rewrite replaces the
+    call's arguments outright, so a rewrite answering a plain `False` hands
+    back what the reason just offered — and the agent cannot tell, because
+    the grant it read still says it may leave. Unspent, the same placement
+    confines the call: that half is what makes this a permission rather than
+    a placement, and one predicate answers both so neither can drift.
+    """
+    spent = dispatcher_rewrite("escalable", spent_call(True))
+    unspent = dispatcher_rewrite("escalable", spent_call(False))
+
+    assert spent == {**spent_call(True), "dangerouslyDisableSandbox": True}
+    assert unspent == {**spent_call(False), "dangerouslyDisableSandbox": False}
+
+
+@pytest.mark.parametrize("placement", ["inside", "escalable", "outside"])
+@pytest.mark.parametrize("spent", [True, False])
+def test_both_boundaries_place_one_call_the_same_way(
+    placement: SandboxPlacement, spent: bool
+) -> None:
+    """One field two boundaries fill is one they can fill differently.
+
+    The in-process seam and the emitted dispatcher render the same rewrite
+    for two different readers, and only the second is what a native session
+    runs — so a suite exercising the first alone reports a placement working
+    while the shipped path strips it. They are compared against each other
+    rather than each against its own expectation, because what went wrong was
+    never either one alone.
+
+    Both sides are the entry a session reaches: `claude_placed_input` is what
+    the in-process handler calls, so a renderer nothing constructs cannot
+    stand in for it here.
+    """
+    call = spent_call(spent)
+
+    assert dispatcher_rewrite(placement, call) == claude_placed_input(
+        "Bash", call, placement
+    )

@@ -106,12 +106,20 @@ def codex_approval_semantic_tool(event: LupHookInput) -> SemanticTool:
 CODEX_SEMANTICS = NativeSemantics(
     decode=codex_approval_semantic_tool,
     routed_tools=list(APPROVAL_METHODS),
+    agent_escalates=True,
 )
 """What an in-process Codex session hands a semantic policy.
 
 The routed set is the approval methods themselves, because that is the whole
 vocabulary this boundary speaks: unlike the Claude hook, which sees a tool
 roster, the app-server asks about acts.
+
+That is also why the two sandbox facts split here. An approval reply accepts
+or declines and rewrites nothing, so no verdict of this seam's places a call
+and ``escapable`` stays false. The agent's own escape is a different matter
+and it has one: Codex puts ``sandbox_permissions`` on the shell tool the
+model calls — see :meth:`~lup.adapters.codex.harness.CodexSpellings.escape_sandbox`
+for the source it was read from.
 """
 
 

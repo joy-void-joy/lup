@@ -65,7 +65,7 @@ from typing import Literal, TypedDict
 
 from pydantic import BaseModel, Field
 
-from lup.policy.kernel.decision import SandboxPlacement
+from lup.policy.kernel.decision import SandboxPlacement, escalation_offer
 from lup.workspace.paths import path_is_under
 from lup.types import JsonObject, ToolName
 
@@ -192,14 +192,37 @@ class LupHooksConfig(BaseModel):
         return {event: matchers for event, matchers in events.items() if matchers}
 
 
-def allow_hook(sandbox: SandboxPlacement = "ambient") -> LupHookOutput:
-    """Create a generic allow decision, optionally placed."""
-    return LupHookOutput(decision="allow", sandbox=sandbox)
+def allow_hook(
+    sandbox: SandboxPlacement = "ambient", reason: str = ""
+) -> LupHookOutput:
+    """Create a generic allow decision, optionally placed and optionally said.
+
+    An ``escalable`` grant says its reason twice, on both channels a grant
+    has, because the two reach different readers and only one of them can act
+    on it — :func:`~lup.policy.kernel.decision.escalation_offer` is where that
+    is decided, for every boundary that delivers it.
+    """
+    return LupHookOutput(
+        decision="allow",
+        sandbox=sandbox,
+        reason=reason,
+        additional_context=escalation_offer(sandbox, reason),
+    )
 
 
 def ask_hook(reason: str, sandbox: SandboxPlacement = "ambient") -> LupHookOutput:
-    """Create a decision that defers to whoever is entitled to make it."""
-    return LupHookOutput(decision="ask", reason=reason, sandbox=sandbox)
+    """Create a decision that defers to whoever is entitled to make it.
+
+    An ``escalable`` approval question says its reason twice for the same
+    reason a grant does: the human answering it is not the agent holding the
+    offer.
+    """
+    return LupHookOutput(
+        decision="ask",
+        reason=reason,
+        sandbox=sandbox,
+        additional_context=escalation_offer(sandbox, reason),
+    )
 
 
 def deny_hook(reason: str) -> LupHookOutput:

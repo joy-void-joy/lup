@@ -12,9 +12,15 @@ from lup.harness.contracts import (
     Instruction,
     NativeSpellings,
     PromptRenderer,
+    Spelled,
+    Spelling,
 )
 from lup.harness.generation import argument_text
-from lup.harness.prompts import guidance_banner
+from lup.harness.prompts import (
+    SPAWNED_SESSION_LOSES_SHELL,
+    guidance_banner,
+    sentences,
+)
 from lup.harness.models import (
     Agent,
     Artifact,
@@ -105,31 +111,48 @@ class ClaudeSpellings(NativeSpellings):
             'with `ExitWorktree(action="keep")`'
         )
 
+    def escape_sandbox(self, reason: str) -> Spelling:
+        return Spelled(
+            words=Instruction(
+                f"Launch it with `dangerouslyDisableSandbox: true`. {reason}"
+            )
+        )
+
+    def read_document(self, path: str) -> Spelling:
+        return Spelled(
+            words=Instruction(
+                f"Hand {path} to the `Read` tool, which takes the document itself"
+            )
+        )
+
     def resolver_entry(self) -> Instruction:
         return Instruction(
-            "Run `uv run lup-devtools harness resolve --adapter claude`. "
-            "`uv run lup-devtools harness resolve intake` first prints what a "
-            "run started now would plan from — every actionable note at its "
-            "file and line, the deferred ones it would carry, and the ones it "
-            "would leave to their generator — creating no run and leasing no "
-            "worktree, so the inventory can be read before committing to it. "
-            "The command accepts optional flags: `--run-id <id>` resumes "
-            "a persisted run. Assembling the review branch is gated on the "
-            "reserved `integration-assembly` question, so approving it is "
-            "`--answer integration-assembly=approve` like any other answer. "
-            "It waits zero seconds by "
-            "default and parks on material questions, printing each one "
-            "beside the `# lup:` notes it was raised from, the concern's "
-            "spec, and its acceptance criteria; rerun with the repeatable "
-            "`--answer <question-id>=<value>` flag to answer them. "
-            "`--admit <text>` carries work in the human's own words: it seeds "
-            "a run that does not exist yet, beside whatever notes the tree "
-            "holds, and joins one already moving. `--admit-note <file>:<line>` "
-            "names a note written in the tree and `--admit-issue <number>` an "
-            "open issue; all three are repeatable. "
-            "Never pass `--wait` or `--supervise`; both hold a run open "
-            "for a human instead of parking — `--wait` at the mailbox, "
-            "`--supervise` at the page it opens."
+            sentences(
+                "Run `uv run lup-devtools harness resolve --adapter claude`. "
+                "`uv run lup-devtools harness resolve intake` first prints what a "
+                "run started now would plan from — every actionable note at its "
+                "file and line, the deferred ones it would carry, and the ones it "
+                "would leave to their generator — creating no run and leasing no "
+                "worktree, so the inventory can be read before committing to it. "
+                "The command accepts optional flags: `--run-id <id>` resumes "
+                "a persisted run. Assembling the review branch is gated on the "
+                "reserved `integration-assembly` question, so approving it is "
+                "`--answer integration-assembly=approve` like any other answer. "
+                "It waits zero seconds by "
+                "default and parks on material questions, printing each one "
+                "beside the `# lup:` notes it was raised from, the concern's "
+                "spec, and its acceptance criteria; rerun with the repeatable "
+                "`--answer <question-id>=<value>` flag to answer them. "
+                "`--admit <text>` carries work in the human's own words: it seeds "
+                "a run that does not exist yet, beside whatever notes the tree "
+                "holds, and joins one already moving. `--admit-note <file>:<line>` "
+                "names a note written in the tree and `--admit-issue <number>` an "
+                "open issue; all three are repeatable. "
+                "Never pass `--wait` or `--supervise`; both hold a run open "
+                "for a human instead of parking — `--wait` at the mailbox, "
+                "`--supervise` at the page it opens.",
+                self.escape_sandbox(SPAWNED_SESSION_LOSES_SHELL).in_prose(),
+            )
         )
 
     def arguments_ref(self) -> Atom:

@@ -753,6 +753,8 @@ def joined_placement(decisions: list[KernelDecision]) -> SandboxPlacement:
         return "inside"
     if any(item.sandbox == "outside" for item in decisions):
         return "outside"
+    if any(item.sandbox == "escalable" for item in decisions):
+        return "escalable"
     return "ambient"
 
 

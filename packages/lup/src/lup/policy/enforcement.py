@@ -38,7 +38,9 @@ from lup.policy.models import (
 )
 
 
-def policy_hook_output(decision: Decision, escapable: bool = False) -> LupHookOutput:
+def policy_hook_output(
+    decision: Decision, escapable: bool = False, agent_escalates: bool = False
+) -> LupHookOutput:
     """Render one policy verdict as the portable hook decision.
 
     ``defer`` carries no decision at all: the kernel declined to judge, so
@@ -46,15 +48,17 @@ def policy_hook_output(decision: Decision, escapable: bool = False) -> LupHookOu
     granting what nothing approved.
 
     ``escapable`` is whether the runtime this reaches can put a single call
-    outside its sandbox. The composition happens here rather than at each
-    adapter, so what a converter receives is already the placement its own
-    runtime will honour — and a runtime that has no such channel is handed
-    the plain effect instead of an intent it would silently drop.
+    outside its sandbox, and ``agent_escalates`` whether the agent making the
+    call can put its own call outside. The composition happens here rather
+    than at each adapter, so what a converter receives is already the
+    placement its own runtime will honour — and a runtime missing either
+    channel is handed the plain effect instead of an intent it would silently
+    drop.
     """
-    decision = decision.placed(escapable)
+    decision = decision.placed(escapable, agent_escalates)
     match decision.effect:
         case "allow":
-            return allow_hook(decision.sandbox)
+            return allow_hook(decision.sandbox, decision.reason)
         case "ask":
             return ask_hook(decision.reason, decision.sandbox)
         case "deny":
@@ -159,12 +163,21 @@ class NativeSemantics(BaseModel):
     decode: SemanticDecoder
     routed_tools: list[str] = Field(min_length=1)
     escapable: bool = False
-    """Whether this runtime can put one call outside its own sandbox.
+    """Whether a verdict from this seam can put one call outside the sandbox.
 
     An adapter fact rather than a policy one, so it arrives with the decoder
     and the routed set. Left false, a placement never reaches the wire — the
-    conservative direction, and the right one for a runtime whose sandbox is
-    a session-level flag rather than a per-call argument."""
+    conservative direction, and the right one for a seam that answers with a
+    verdict alone and never rewrites the call it judges."""
+
+    agent_escalates: bool = False
+    """Whether the agent making a call can take that call out of the sandbox.
+
+    The other question, and a runtime can answer the two differently: one is
+    about the channel this seam writes into, the other about words the agent
+    already has. It is the fact an ``escalable`` placement turns on, and the
+    same fact :meth:`~lup.harness.contracts.NativeSpellings.escape_sandbox`
+    answers for prose."""
 
     def also_refusing(self, refused: list[RefusedTool]) -> "NativeSemantics":
         """The same decoder, registered for the refused tools as well.
@@ -190,6 +203,15 @@ class NativeSemantics(BaseModel):
         session that would drop it.
         """
         return self.escapable and sandbox.escapable
+
+    def escalates_from(self, sandbox: SandboxPosture) -> bool:
+        """Whether the agent in this session can take one of its calls outside.
+
+        The session is the same second half it is for a placement: a host
+        that refuses an unsandboxed command refuses the agent's own attempt
+        too, so an offer made there is one nobody can spend.
+        """
+        return self.agent_escalates and sandbox.escapable
 
 
 def create_policy_hooks(
@@ -245,6 +267,7 @@ def create_policy_hooks(
         return policy_hook_output(
             policy.decide(semantics.decode(event).as_documents()),
             semantics.escapes_from(sandbox),
+            semantics.escalates_from(sandbox),
         )
 
     return LupHooksConfig(

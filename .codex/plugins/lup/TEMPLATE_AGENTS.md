@@ -518,7 +518,7 @@ src/
     │   ├── dev/                # Worktrees, branches, PRs, and pre-flight checks
     │   ├── feedback/           # Feedback state, metrics, and session commits
     │   ├── trace/              # Trace display, search, and analysis
-    │   ├── usage/              # Claude Code usage display (api/render/app)
+    │   ├── usage/              # Usage display, filled by each backend's reader
     │   ├── setup.py            # Shared integration registry + terminal wizard
     │   ├── dashboard/          # Local setup API and packaged zero-build web UI
     │   ├── supervisor/         # Live and read-only web supervision of resolver runs
@@ -714,7 +714,8 @@ Run `uv run lup-devtools --help` for the full command tree.
 installs a separately cached copy of the plugin after a digest check, and
 launches the Codex CLI in a persistent per-worktree home seeded from personal
 Codex authentication and settings.
-`lup-devtools usage claude` reports Claude usage; profiles are managed with
+`lup-devtools usage codex` reports this backend's usage and
+`lup-devtools usage claude` the other's; profiles are managed with
 `lup-devtools setup profile`.
 `--codex-home` or an inherited `CODEX_HOME` selects an explicit home instead.
 

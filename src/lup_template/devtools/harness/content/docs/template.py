@@ -85,9 +85,11 @@ it is taken. `devtools/subapps.py` names the ones this project takes and
 declares the ones only it has; `devtools/main.py` is where each name meets
 the app answering to it.
 
-That is also where `usage` is decided. It reads Claude Code's own OAuth
-credentials, so it lives in `lup.adapters.claude` and a project on another
-backend simply leaves it out of the roster.
+That is also where `usage` is decided, twice over: whether to serve it, and
+which backends' accounts it reads. The display, the pacing bars, and the
+snapshot live in `lup.usage`; each adapter contributes a reader that turns
+its own account call into the one report shape, and the roster composes the
+display around the readers it names.
 
 """
         ),

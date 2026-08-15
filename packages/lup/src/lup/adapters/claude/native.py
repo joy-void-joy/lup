@@ -24,7 +24,11 @@ from lup.policy.models import (
     ToolIdentity,
     UnknownTool,
 )
-from lup.policy.kernel.decision import SandboxPlacement
+from lup.policy.kernel.decision import (
+    SandboxPlacement,
+    escalation_offer,
+    sandbox_escaped,
+)
 from lup.policy.native import NativeDecisionRenderer, NativeEventDecoder
 from lup.types import JsonObject
 
@@ -192,10 +196,21 @@ def claude_sandbox_input(
     written. The rewrite replaces the arguments outright rather than merging
     into them, which is why the whole input is carried through; an unplaced
     verdict rewrites nothing at all.
+
+    Which placements leave is :func:`~lup.policy.kernel.decision.sandbox_escaped`
+    and not this function, because the compiled dispatcher renders the same
+    rewrite and cannot import this one. What stays here is the field name,
+    which is Claude Code's own and reaches no other runtime.
     """
     if tool_input is None or sandbox == "ambient":
         return None
-    return {**tool_input, "dangerouslyDisableSandbox": sandbox == "outside"}
+    match tool_input:
+        case {"dangerouslyDisableSandbox": True}:
+            spent = True
+        case _:
+            spent = False
+    escaped = sandbox_escaped(sandbox, spent)
+    return {**tool_input, "dangerouslyDisableSandbox": escaped}
 
 
 class ClaudeDecisionOutput(BaseModel):
@@ -211,6 +226,12 @@ class ClaudeDecisionOutput(BaseModel):
     )
     reason: str = Field(default="", alias="permissionDecisionReason")
     updated_input: JsonObject | None = Field(default=None, alias="updatedInput")
+    additional_context: str = Field(default="", alias="additionalContext")
+    """What the agent reads, as against what the human asked is shown.
+
+    The two are separate channels and a grant only travels on this one: a
+    permission reason on an allow reaches the user, so a verdict with
+    something for the agent to act on has to say it here as well."""
 
 
 class ClaudeDecisionRenderer(NativeDecisionRenderer[ClaudeDecisionOutput]):
@@ -231,11 +252,12 @@ class ClaudeDecisionRenderer(NativeDecisionRenderer[ClaudeDecisionOutput]):
     def render(
         self, decision: Decision, tool_input: JsonObject | None = None
     ) -> ClaudeDecisionOutput:
-        settled = decision.placed(escapable=True)
+        settled = decision.placed(escapable=True, agent_escalates=True)
         if settled.effect == "defer":
             return ClaudeDecisionOutput(permissionDecisionReason=settled.reason)
         return ClaudeDecisionOutput(
             permissionDecision=settled.effect,
             permissionDecisionReason=settled.reason,
             updatedInput=claude_sandbox_input(tool_input, settled.sandbox),
+            additionalContext=escalation_offer(settled.sandbox, settled.reason),
         )

@@ -19,7 +19,7 @@ from pathlib import Path
 # distribution. Naming it as a search path is what lets the imports below
 # resolve, for the interpreter and for a type checker alike.
 sys.path.insert(0, str(Path(__file__).parents[1] / "runtime"))
-from kernel.decision import KernelDecision
+from kernel.decision import KernelDecision, escalation_offer, sandbox_escaped
 from policy_data import AGENT_IDENTITY_ENV, AUTONOMOUS_AGENT_IDENTITIES
 import subprocess  # lup: ignore[subprocess] — `sh` is third-party and this half is compiled into a bare script that has no virtual environment to resolve it from
 from kernel.edit import decide_edit
@@ -344,6 +344,19 @@ def edit_documents(path, old_text, new_text, replace_all):
     return current, updated
 
 
+def spent_escape(tool_input):
+    """Whether the call as written already asked to run outside the sandbox.
+
+    Claude Code's own spelling of the escape, read here rather than compared
+    against in two places: what it means is the kernel's `sandbox_escaped`,
+    which both this boundary and the in-process seam ask.
+    """
+    return (
+        "dangerouslyDisableSandbox" in tool_input
+        and tool_input["dangerouslyDisableSandbox"] is True
+    )
+
+
 def dispatch(payload):
     name = payload["tool_name"]
     tool_input = payload["tool_input"]
@@ -353,10 +366,7 @@ def dispatch(payload):
         or declared_identity(AGENT_IDENTITY_ENV) in AUTONOMOUS_AGENT_IDENTITIES
     )
     if name == "Bash":
-        unsandboxed = (
-            "dangerouslyDisableSandbox" in tool_input
-            and tool_input["dangerouslyDisableSandbox"] is True
-        )
+        unsandboxed = spent_escape(tool_input)
         return bash_decision(
             tool_input["command"],
             managed_root(),
@@ -421,8 +431,18 @@ def rendered(decision, payload):
     The rewrite replaces the arguments rather than merging into them, so the
     whole input is carried through. A deferral is placed nowhere, which is
     also why nothing here reads a payload a deferral may not have parsed.
+
+    Both sandbox questions are answered yes here, from that one field: the
+    rewrite is how a verdict places a call, and the same field on the call the
+    agent writes is how the agent places its own — which is what an
+    ``escalable`` verdict offers it. Both halves of that offer are decided in
+    the kernel rather than spelled here: `escalation_offer` says whether it is
+    extended, and `sandbox_escaped` whether a call that spent it still leaves.
+    The in-process seam asks the same two, because one field two boundaries
+    fill from two conditions is a field they can fill differently — which is
+    how the rewrite once revoked an offer the permission channel had granted.
     """
-    settled = decision.placed(True)
+    settled = decision.placed(escapable=True, agent_escalates=True)
     if settled.effect == "defer":
         return {}
     answer = {
@@ -430,6 +450,9 @@ def rendered(decision, payload):
         "permissionDecision": settled.effect,
         "permissionDecisionReason": settled.reason,
     }
+    offer = escalation_offer(settled.sandbox, settled.reason)
+    if offer:
+        answer["additionalContext"] = offer
     if settled.sandbox == "ambient" or payload["tool_name"] != "Bash":
         return {"hookSpecificOutput": answer}
     return {
@@ -437,7 +460,9 @@ def rendered(decision, payload):
             **answer,
             "updatedInput": {
                 **payload["tool_input"],
-                "dangerouslyDisableSandbox": settled.sandbox == "outside",
+                "dangerouslyDisableSandbox": sandbox_escaped(
+                    settled.sandbox, spent_escape(payload["tool_input"])
+                ),
             },
         }
     }

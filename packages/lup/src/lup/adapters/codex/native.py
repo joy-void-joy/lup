@@ -8,11 +8,6 @@
 # added.
 """Codex-private native event parsing and capability-aware decisions."""
 
-# lup: Please ensure there is full Codex parity. `lup-devtools usage` is
-# Claude-only right now — `lup.adapters.claude` ships a whole `usage/` package
-# (api, app, render) and this adapter has no equivalent at all. Sweep the two
-# adapter surfaces against each other rather than fixing only this one.
-
 from pathlib import Path
 from typing import Literal
 
@@ -176,11 +171,19 @@ class CodexDecisionOutput(BaseModel):
 class CodexDecisionRenderer(NativeDecisionRenderer[CodexDecisionOutput]):
     """Render approval when supported and otherwise fail closed.
 
-    Codex has no per-call sandbox to place anything into — its overrides are
-    session flags on the binary — so every verdict is degraded to its plain
-    effect first. Saying so is what keeps a placement from reading as honoured
-    here: dropped in silence, an escape this boundary cannot perform would
-    look performed to everything upstream of it.
+    A placement is degraded away here, because what this boundary returns is
+    an accept or a decline and nothing else: the call it judges runs with the
+    arguments the model wrote, so a verdict of its own has no way to move one
+    outside the sandbox. Saying so is what keeps a placement from reading as
+    honoured — dropped in silence, an escape this boundary cannot perform
+    would look performed to everything upstream of it. The ``outside`` Codex
+    does have is compiled ahead of the session as a prefix rule, in
+    :func:`~lup.adapters.codex.harness.codex_allow_prefixes`, not decided here.
+
+    A permission to escalate survives the degrading, because it was never
+    addressed to this boundary: the agent spends it on its own next call, with
+    the words :meth:`~lup.adapters.codex.harness.CodexSpellings.escape_sandbox`
+    carries.
     """
 
     def __init__(self, supports_ask: bool) -> None:
@@ -194,7 +197,7 @@ class CodexDecisionRenderer(NativeDecisionRenderer[CodexDecisionOutput]):
     def render(
         self, decision: Decision, tool_input: JsonObject | None = None
     ) -> CodexDecisionOutput:
-        settled = decision.placed(escapable=False)
+        settled = decision.placed(escapable=False, agent_escalates=True)
         match settled.effect:
             case "allow" | "defer":
                 return CodexDecisionOutput(exit_code=0)
