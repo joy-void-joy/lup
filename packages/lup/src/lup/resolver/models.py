@@ -2,6 +2,7 @@
 
 from abc import abstractmethod
 from collections.abc import Awaitable, Callable
+from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
 from typing import Literal
@@ -890,6 +891,15 @@ class JoinProgress(BaseModel):
 
     joined: list[str]
     commit: str
+    completions: list[datetime] = Field(default_factory=list)
+    """When each join this run actually performed landed.
+
+    Not parallel to ``joined``: a parent already contained in the tree is
+    appended there without a join happening, so pairing them would time
+    merges that never ran. These are the samples a rate is taken from, kept
+    beside the progress rather than scanned out of the journal, which
+    reaches tens of megabytes and is read by a status view that runs often.
+    """
     planned: int = 0
     """How many parents this join set out to merge.
 

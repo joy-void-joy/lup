@@ -24,6 +24,7 @@ assumed.
 from collections.abc import AsyncIterator
 from pathlib import Path
 
+from lup.channels.models import utc_now
 from lup.resolver.contracts import ResolverDrained
 from lup.resolver.dag import ConcernGraph
 from lup.resolver.journal import (
@@ -359,11 +360,15 @@ class Joiner:
         state = self.run.state
         if state is None:
             return
+        before = state.join_progress.completions if state.join_progress else []
         self.run.persist(
             state.model_copy(
                 update={
                     "join_progress": JoinProgress(
-                        joined=list(joined), commit=commit, planned=planned
+                        joined=list(joined),
+                        commit=commit,
+                        planned=planned,
+                        completions=[*before, utc_now()],
                     )
                 }
             )
