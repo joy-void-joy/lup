@@ -101,6 +101,8 @@ def load_manifest(path: Path) -> OwnershipManifest | None:
         ) from error
 
 
+# lup: ignore[constant-declaration] — the proof file's own name, which every
+# generator and the merge driver that reads it must spell alike
 OWNERSHIP_FILENAME = ".lup-ownership.json"
 """What proof is called inside whichever tree a native adapter materializes."""
 
@@ -164,6 +166,9 @@ def generated_artifacts(
     )
 
 
+# This is `publish_atomic` with an unchanged-content guard, and the pair to
+# `load_manifest`: both are about the file, which is why neither is on the proof.
+# lup: ignore[model-free-function] — the file at that path is the subject
 def save_manifest(path: Path, manifest: OwnershipManifest) -> None:
     """Atomically replace ownership proof after successful materialization."""
     content = manifest.model_dump_json(indent=2) + "\n"

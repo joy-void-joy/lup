@@ -102,7 +102,7 @@ class LupHookInput(BaseModel):
 
     event: LupHookEvent
     tool_name: str = ""
-    tool_input: JsonObject = Field(default_factory=dict)
+    tool_input: JsonObject = {}
     tool_path: str = ""
     tool_result: str = ""
     stop_hook_active: bool = False
@@ -168,9 +168,9 @@ class LupHooksConfig(BaseModel):
     each event's matchers into their native form.
     """
 
-    pre_tool_use: list[LupHookMatcher] = Field(default_factory=list)
-    post_tool_use: list[LupHookMatcher] = Field(default_factory=list)
-    stop: list[LupHookMatcher] = Field(default_factory=list)
+    pre_tool_use: list[LupHookMatcher] = []
+    post_tool_use: list[LupHookMatcher] = []
+    stop: list[LupHookMatcher] = []
 
     def for_event(self, event: LupHookEvent) -> list[LupHookMatcher]:
         """Return the matchers registered for *event*."""
@@ -235,6 +235,7 @@ def block_hook(reason: str) -> LupHookOutput:
     return LupHookOutput(decision="block", reason=reason)
 
 
+# lup: ignore[model-free-function] — a merge of two configs, neither the subject
 def merge_hooks(base: LupHooksConfig, additional: LupHooksConfig) -> LupHooksConfig:
     """Merge two hook configurations. Base hooks run first."""
     return LupHooksConfig(

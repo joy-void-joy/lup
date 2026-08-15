@@ -1,3 +1,7 @@
+# lup: ignore[constant-declaration]
+# Every constant here is one env var name in the relay contract below, which
+# the producer and the consumer must spell identically. A caller replacing one
+# would be naming a variable the other half does not read.
 """Session context relay: parent process to a tool-serving subprocess.
 
 Backends whose tools run outside the agent process expose lup's MCP

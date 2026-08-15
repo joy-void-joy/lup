@@ -5,13 +5,15 @@ from pathlib import Path
 import lup.harness.models as models
 from lup.adapters.harness import claude_prompt_renderer
 from lup.codescan.common import RuleStrength
-from lup.codescan.registry import RegisteredRule, all_rules
+from lup.codescan.registry import RULE_REFERENCE, RegisteredRule, all_rules
 from lup.harness.banner import GeneratedBanner
 from lup.harness.materialization import write_generated_file
 from lup.harness.models import Artifact
 from lup.markdown import CodeCell, HtmlCodeCell, PlainCell, TableCell
 from lup.workspace.paths import project_root
 
+# lup: ignore[constant-declaration] — the rule reference's own prose, which is
+# the document this module exists to render rather than an input it takes
 INTRODUCTION = (
     "# Lup rule reference\n\n"
     "Every executable Lup rule family — anti-pattern, boundary, spelling, and "
@@ -46,8 +48,11 @@ INTRODUCTION = (
     "## Structural rules\n\n"
 )
 
+# lup: ignore[constant-declaration] — a heading of that same document
 ANTI_PATTERN_HEADING = "\n## Edit anti-patterns\n\n"
 
+# lup: ignore[constant-declaration] — the section of that document explaining
+# why the audit decides more narrowly than the hook
 REFINEMENT_INTRODUCTION = (
     "\n## Audit-side refinements\n\n"
     "The edit hook sees a fragment of a proposed edit: no parse tree, no "
@@ -130,7 +135,12 @@ def rule_reference_document() -> models.PromptDocument:
     )
 
 
-RULE_REFERENCE_PATH = Path("docs/rules.md")
+RULE_REFERENCE_PATH = Path(RULE_REFERENCE)
+"""Where this writes the reference, taken from the path deny messages cite so
+the two cannot name different files."""
+
+# lup: ignore[constant-declaration] — the command a reader types, whose words
+# are the CLI's own rather than a preference this module holds
 RULE_REFERENCE_COMMAND = "uv run lup-devtools dev rules"
 
 

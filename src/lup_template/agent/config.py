@@ -239,7 +239,7 @@ class Settings(BaseSettings):
     )
 
     extra_dirs: Annotated[list[Path], NoDecode] = Field(
-        default_factory=list,
+        default=[],
         validation_alias="AGENT_EXTRA_DIRS",
         description=(
             "Additional directories the agent may read beyond the session "
@@ -365,6 +365,7 @@ if settings.notes_path != "./notes" or settings.logs_path != "./logs":
         logs_dir=Path(settings.logs_path).resolve(),
     )
 
+# lup: ignore[constant-declaration] — the endpoint OpenRouter publishes
 OPENROUTER_BASE_URL = "https://openrouter.ai/api"
 """OpenRouter's Anthropic-protocol endpoint, selected by OPENROUTER_API_KEY."""
 

@@ -38,6 +38,7 @@ LOOPBACK_HOSTS = [
 ]
 """Every spelling of this machine, as a browser or a bind address writes it."""
 
+# lup: ignore[constant-declaration] — HTTP's own status code for the condition
 MISDIRECTED_REQUEST = 421
 """The status for a request whose authority this server does not answer for."""
 

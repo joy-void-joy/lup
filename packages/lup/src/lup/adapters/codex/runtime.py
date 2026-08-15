@@ -69,10 +69,10 @@ class CodexSessionConfig(BaseModel):
     approval_policy: Literal["unlessTrusted", "onRequest", "never"] | None = None
     hooks: LupHooksConfig | None = None
     effort: Literal["none", "minimal", "low", "medium", "high", "xhigh"] | None = None
-    environment: EnvVars = Field(default_factory=dict)
+    environment: EnvVars = {}
     submission_gate_resolver: SubmissionGateResolver | None = None
-    mcp_servers: dict[str, "CodexMcpServerConfig"] = Field(default_factory=dict)
-    writable_roots: list[Path] = Field(default_factory=list)
+    mcp_servers: dict[str, "CodexMcpServerConfig"] = {}
+    writable_roots: list[Path] = []
 
     @model_validator(mode="after")
     def reject_unanswerable_approvals(self) -> "CodexSessionConfig":
@@ -99,8 +99,8 @@ class CodexMcpServerConfig(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     command: str
-    args: list[str] = Field(default_factory=list)
-    env: EnvVars = Field(default_factory=dict)
+    args: list[str] = []
+    env: EnvVars = {}
 
 
 class CodexThreadRef(BaseModel):
@@ -372,6 +372,7 @@ class CodexLiveEventStream(EventStream):
         return self.iterate()
 
 
+# lup: ignore[constant-declaration] — what the app-server advertises the tool as
 SUBMISSION_TOOL = "submit_output"
 """What the app-server advertises this turn's dynamic submission tool as."""
 
@@ -649,6 +650,7 @@ class CodexSessionOpener:
                 await server.close()
 
 
+# lup: ignore[model-free-function] — composition root over the session config
 def create_codex_session_factory(config: CodexSessionConfig) -> SessionFactory:
     """Create the named Codex runtime composition root."""
     return SessionFactory(CodexSessionOpener(config).open_session)

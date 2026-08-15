@@ -1,3 +1,7 @@
+# lup: ignore[constant-declaration]
+# Both constants here are this application's own composition — which sub-apps
+# its CLI takes. A composition root is where a judgement is finally made rather
+# than passed on, so there is no caller above it to take these from.
 """This application's sub-app roster: what it inherits, and what only it has.
 
 The library ships no roster — each of its sub-apps declares itself beside its

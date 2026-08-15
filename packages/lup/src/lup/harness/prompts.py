@@ -25,6 +25,8 @@ def sentences(*parts: str) -> str:
     return " ".join(part for part in parts if part)
 
 
+# lup: ignore[constant-declaration] — one reason every tree renders identically,
+# declared with the prompt it belongs to rather than chosen per caller
 SPAWNED_SESSION_LOSES_SHELL = (
     "Every session the run opens is a child of this call, and a session "
     "spawned inside a sandbox cannot create the per-session state its own "

@@ -88,6 +88,8 @@ Taken as the library offers it: the checkers are this project's, and
 """
 
 
+# lup: ignore[constant-declaration] — which vocabulary groups this project takes
+# and what it passes them, decided here because nothing sits above it to be asked
 SHELL_RULES: list[ShellCommandRule] = [
     *read_only_rules(),
     *judged_ask_rules(),

@@ -36,6 +36,24 @@ class IndexGroup(BaseModel):
     blurb: str = ""
     """Prose between the heading and the table, for a group that needs it."""
 
+    def parts(self) -> list[models.PromptPart]:
+        """This heading, its blurb, and its rows as a table part."""
+        blurb = f"{self.blurb}\n\n" if self.blurb else ""
+        return [
+            models.TextPart(text=f"## {self.title}\n\n{blurb}"),
+            models.MarkdownTable(
+                headers=["Page", "Answers"],
+                rows=[
+                    [
+                        LinkCell(text=item.link, target=item.link),
+                        PlainCell(text=item.answers),
+                    ]
+                    for item in self.entries
+                ],
+            ),
+            models.TextPart(text="\n"),
+        ]
+
 
 def entry(document: models.Document, answers: str) -> IndexEntry:
     """An index row for a declared document, linked by where it renders.
@@ -44,25 +62,6 @@ def entry(document: models.Document, answers: str) -> IndexEntry:
     outliving a rename: a page that moved moves its own row.
     """
     return IndexEntry(link=document.path.name, answers=answers)
-
-
-def group_parts(group: IndexGroup) -> list[models.PromptPart]:
-    """One heading, its blurb, and its rows as a table part."""
-    blurb = f"{group.blurb}\n\n" if group.blurb else ""
-    return [
-        models.TextPart(text=f"## {group.title}\n\n{blurb}"),
-        models.MarkdownTable(
-            headers=["Page", "Answers"],
-            rows=[
-                [
-                    LinkCell(text=item.link, target=item.link),
-                    PlainCell(text=item.answers),
-                ]
-                for item in group.entries
-            ],
-        ),
-        models.TextPart(text="\n"),
-    ]
 
 
 def document_index(
@@ -75,7 +74,7 @@ def document_index(
         source=__name__,
         parts=[
             *preamble,
-            *[part for group in groups for part in group_parts(group)],
+            *[part for group in groups for part in group.parts()],
             *epilogue,
         ],
     )

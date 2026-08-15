@@ -85,8 +85,10 @@ from lup.runtime.models import TurnInput, turn_request
 
 logger = logging.getLogger(__name__)
 
-APPROVE = "approve"
-DEFER = "defer"
+# The two words an approval answer may carry: a closed vocabulary this module
+# offers the human and then reads back, so both ends spell it the same.
+APPROVE = "approve"  # lup: ignore[constant-declaration] — answer vocabulary
+DEFER = "defer"  # lup: ignore[constant-declaration] — answer vocabulary
 
 
 class ApprovalDecisions(BaseModel):
@@ -243,6 +245,9 @@ def approval_question(concern: Concern) -> MaterialQuestion:
     )
 
 
+# lup: ignore[constant-declaration] — a reserved question id a human answers by
+# name on the command line, so the word is part of the interface rather than a
+# setting behind it
 ASSEMBLY_QUESTION_ID = "integration-assembly"
 """The one gate on assembling the review branch, asked once per run."""
 
@@ -458,6 +463,7 @@ class ResolverCore:
         request: ResolveRequest,
         origin: ConcernOrigin = ConcernOrigin.INVENTORY,
         taken: list[str] | None = None,
+        attempts: int = INVENTORY_PLAN_ATTEMPTS,
     ) -> ResolveInventory:
         """Organize raw review evidence into concerns in a read-only turn.
 
@@ -512,7 +518,7 @@ class ResolverCore:
         # re-derive from scratch what it should be revising.
         attempt = prompt
         complaint: str | None = None
-        for _ in range(INVENTORY_PLAN_ATTEMPTS):
+        for _ in range(attempts):
             result = await planner.turn(
                 turn_request(TurnInput(text=attempt), ConcernInventory)
             )
@@ -533,7 +539,7 @@ class ResolverCore:
         else:
             raise ResolverInvariantError(
                 "inventory planner left review evidence unaccounted for across "
-                f"{INVENTORY_PLAN_ATTEMPTS} attempts — {complaint}"
+                f"{attempts} attempts — {complaint}"
             )
         concerns = [
             Concern(

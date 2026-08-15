@@ -102,7 +102,7 @@ def file_level_ignore(text: str, max_lines: int = 10) -> FileIgnore | None:
     )
 
 
-# lup: ignore[library-default] — this library's own import root, fixed by the
+# lup: ignore[constant-declaration] — this library's own import root, fixed by the
 # name it is distributed under rather than by any adopter's taste.
 LIBRARY_PACKAGE_ROOT = "lup"
 

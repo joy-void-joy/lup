@@ -73,6 +73,8 @@ ASK_PREAMBLE = (
     "guessing or ending your turn to report it. " + WAIT_CONTRACT
 )
 
+# lup: ignore[constant-declaration] — one instruction every worker prompt states
+# identically, declared beside the turn that renders it
 DECLARATION_PREAMBLE = (
     "Before you submit, put the file account you are about to report through "
     "check_declaration and act on what it says. It runs the same reading that "
@@ -83,6 +85,8 @@ DECLARATION_PREAMBLE = (
 )
 
 
+# lup: ignore[constant-declaration] — instruction prose a worker is handed, and
+# what it instructs is this codebase's own criterion protocol
 ANSWERED_ARE_NOT_CRITERIA = (
     "Those rulings are context for judging the work, not criteria in their own "
     "right. Report criteria_met using exactly the declared criterion ids — echo "

@@ -20,7 +20,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, Field, TypeAdapter
+from pydantic import BaseModel, TypeAdapter
 
 from lup.channels.models import utc_now
 from lup.channels.stream import Stream
@@ -34,6 +34,8 @@ from lup.resolver.models import (
 )
 from lup.runtime.models import TurnEvent
 
+# lup: ignore[constant-declaration] — the journal's own file name, which the
+# writing run and every reader of it must spell alike to meet at all
 JOURNAL_FILE = "journal.jsonl"
 
 
@@ -120,7 +122,7 @@ class JoinCompletedEvent(BaseModel):
     parent: str
     commit: str
     conflicted: bool
-    broke: list[str] = Field(default_factory=list)
+    broke: list[str] = []
 
 
 class JoinAuditEvent(BaseModel):
@@ -240,7 +242,7 @@ class BaseRefreshedEvent(BaseModel):
     branch: str
     was: str
     commit: str
-    conflicts: list[str] = Field(default_factory=list)
+    conflicts: list[str] = []
     reason: str = ""
 
 
@@ -261,8 +263,8 @@ class LeaseRefreshedEvent(BaseModel):
     concern_id: str
     commit: str
     applied: bool
-    conflicts: list[str] = Field(default_factory=list)
-    uncommitted: list[str] = Field(default_factory=list)
+    conflicts: list[str] = []
+    uncommitted: list[str] = []
     reason: str = ""
 
 

@@ -7,7 +7,7 @@ from pathlib import Path
 from queue import Queue
 
 import sh
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict
 
 from lup.types import EnvVars, JsonObject, JsonValue
 
@@ -27,7 +27,7 @@ class RpcMessage(BaseModel):
 
     id: int | str | None = None
     method: str | None = None
-    params: JsonObject = Field(default_factory=dict)
+    params: JsonObject = {}
     result: JsonValue = None
     error: RpcError | None = None
 
@@ -44,7 +44,7 @@ class RpcNotification(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     method: str
-    params: JsonObject = Field(default_factory=dict)
+    params: JsonObject = {}
 
 
 class RpcSuccess(BaseModel):

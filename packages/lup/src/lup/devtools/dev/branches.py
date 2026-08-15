@@ -88,7 +88,7 @@ class SurveyResult(BaseModel):
     integration_branch: str
     current_branch: str
     branches: list[BranchInfo]
-    runs: list[RunHold] = Field(default_factory=list)
+    runs: list[RunHold] = []
 
 
 def runs_holding(leased: dict[str, HeldLease]) -> list[RunHold]:
@@ -318,6 +318,7 @@ forking the functions that consult this one.
 """
 
 
+# lup: ignore[model-free-function] — subject is the branch; the PR is one signal
 def disposition_for(
     name: str,
     *,
@@ -686,6 +687,8 @@ def probe_base_freshness(launcher: ProcessLauncher, root: Path) -> BaseFreshness
     return BaseFreshness(tracked=tracked, behind=int(counted))
 
 
+# lup: ignore[model-free-function] — driver: it puts a question to whoever is at
+# the terminal, which is the command's business rather than the reading's
 def confirm_base_freshness(freshness: BaseFreshness, interactive: bool) -> None:
     """Report the count, and let whoever is there answer for a moved base.
 
@@ -704,6 +707,8 @@ def confirm_base_freshness(freshness: BaseFreshness, interactive: bool) -> None:
     raise typer.BadParameter(freshness.report())
 
 
+# lup: ignore[model-free-function] — driver: it ends the command, so what it
+# does is refuse an invocation rather than answer anything about the reading
 def require_fresh_base(freshness: BaseFreshness) -> None:
     """Refuse to start work that pins this base for everything it hands out.
 
@@ -996,7 +1001,7 @@ class DeletionPlan(BaseModel):
     worktree: str | None = None
     stranded: bool = False
     has_remote: bool = False
-    actions: list[PlannedAction] = Field(default_factory=list)
+    actions: list[PlannedAction] = []
 
     def blocked(self) -> list[PlannedAction]:
         return [action for action in self.actions if action.verdict == "blocked"]
@@ -1095,6 +1100,7 @@ def plan_deletion(name: str, force: bool) -> DeletionPlan:
     )
 
 
+# lup: ignore[model-free-function] — driver: it prunes, reports, and exits
 def abort_deletion(plan: DeletionPlan, completed: list[str], failure: str) -> NoReturn:
     """Report a mid-deletion failure, repairing a stranded registration first.
 
@@ -1129,6 +1135,7 @@ def abort_deletion(plan: DeletionPlan, completed: list[str], failure: str) -> No
     raise typer.Exit(1)
 
 
+# lup: ignore[model-free-function] — driver: the plan describes, this runs git
 def run_deletion(plan: DeletionPlan, force: bool) -> None:
     """Carry out a plan whose preflight passed, reporting what actually ran."""
     completed: list[str] = []

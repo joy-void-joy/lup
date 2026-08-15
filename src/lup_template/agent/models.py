@@ -59,7 +59,7 @@ class AgentOutput(BaseModel):
     """
 
     summary: str = Field(description="Summary of the output/decision")
-    factors: list[Factor] = Field(default_factory=list, description="Key factors")
+    factors: list[Factor] = Field(default=[], description="Key factors")
     confidence: float = Field(
         default=0.5,
         ge=0.0,

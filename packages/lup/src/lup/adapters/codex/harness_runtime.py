@@ -17,7 +17,7 @@ class CodexCliEvidence(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     executable: Path
-    arguments: list[str] = Field(default_factory=list)
+    arguments: list[str] = []
     installed: bool
     output: str = ""
 
@@ -77,6 +77,7 @@ def plugin_manifest_version(source_root: Path) -> str:
     raise ValueError(f"Codex plugin manifest lacks a version: {manifest}")
 
 
+# lup: ignore[model-free-function] — digests the source tree the config locates
 def plugin_cache_evidence(
     source_root: Path, config: PluginCacheConfig
 ) -> PluginCacheEvidence:

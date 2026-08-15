@@ -7,6 +7,7 @@ session runtime in to get them.
 
 from lup.runtime.login import ProviderLogin
 
+# lup: ignore[constant-declaration] — the environment variable Codex reads
 CODEX_HOME = "CODEX_HOME"
 
 CODEX_LOGIN = ProviderLogin(

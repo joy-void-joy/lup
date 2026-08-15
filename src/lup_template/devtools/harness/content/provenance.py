@@ -44,6 +44,9 @@ class Provenance(BaseModel):
     """That library checkout, as ``sync setup`` is handed it."""
 
 
+# lup: ignore[model-free-function] — the section is the subject and Provenance is
+# how it spells the commands inside it: behaviour goes on a model when the model
+# is what the operation is about, not when it is how the prose calls in
 def branch_probes(spelling: Provenance) -> list[models.PromptPart]:
     """The two refs that settle which library this is, and the ask between them."""
     return [
@@ -71,6 +74,8 @@ standing there before you go on.
     ]
 
 
+# lup: ignore[model-free-function] — the same: a section of the skill, spelled
+# with those commands rather than describing them
 def acquisition(spelling: Provenance) -> list[models.PromptPart]:
     """The look-up that settles which mode the project resolves ``lup`` through."""
     return [
@@ -106,6 +111,8 @@ session API. Name them in the requirement (`lup[claude,codex,docker]`).
     ]
 
 
+# lup: ignore[model-free-function] — likewise the checkpoint section, which the
+# spellings are rendered into rather than being about
 def sync_baseline(spelling: Provenance) -> list[models.PromptPart]:
     """Where the upstream checkpoint is taken, and why the short way misses it."""
     return [

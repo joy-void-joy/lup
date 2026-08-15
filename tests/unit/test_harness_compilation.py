@@ -74,7 +74,6 @@ from lup.harness.models import (
     SpellingExample,
     TextPart,
     document_byte_size,
-    document_text_size,
 )
 from lup.harness.contracts import PromptRenderer
 from lup.markdown import CodeCell, PlainCell
@@ -102,8 +101,6 @@ from lup.policy.dispatcher import (
     DispatcherDeclaration,
     SourceHalf,
     compile_dispatcher,
-    half_functions,
-    half_imports,
     resolvable,
     source_half,
 )
@@ -327,7 +324,7 @@ def test_guidance_stays_within_its_always_loaded_budget() -> None:
     wherever the document uses non-ASCII punctuation, and would pass a
     document the runtime would silently truncate.
     """
-    declared = document_text_size(GUIDANCE)
+    declared = GUIDANCE.text_size()
     rendered = {
         "claude": claude_prompt_renderer().render(GUIDANCE),
         "codex": codex_prompt_renderer().render(GUIDANCE),
@@ -669,7 +666,7 @@ def test_a_new_kind_of_part_renders_without_editing_a_renderer_or_walk() -> None
     assert codex_prompt_renderer().render(document) == (
         f"{CodexSpellings().runtime_name} answered\n"
     )
-    assert document_text_size(document) == 0
+    assert document.text_size() == 0
 
 
 def test_every_tree_paths_read_the_same_under_either_runtime() -> None:
@@ -1621,7 +1618,7 @@ def test_both_dispatchers_are_compiled_from_one_shared_host_half() -> None:
     shared = [
         node.name
         for member in SPLICED_MEMBERS
-        for node in half_functions(source_half(SHARED_PACKAGE, member))
+        for node in source_half(SHARED_PACKAGE, member).functions()
     ]
     claude = compiled_functions(compile_dispatcher(CLAUDE_DISPATCHER))
     codex = compiled_functions(compile_dispatcher(CODEX_DISPATCHER))
@@ -1658,9 +1655,9 @@ def test_compiled_dispatcher_reaches_only_what_a_bare_script_resolves(
     script = compile_dispatcher(dispatcher.declaration)
     modules = [
         item.module
-        for item in half_imports(
-            SourceHalf(module=target, text=script, tree=ast.parse(script))
-        )
+        for item in SourceHalf(
+            module=target, text=script, tree=ast.parse(script)
+        ).imports()
     ]
 
     assert modules

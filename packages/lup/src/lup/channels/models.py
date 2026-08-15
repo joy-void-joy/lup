@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict
 
 FROZEN = ConfigDict(frozen=True)
 
@@ -54,7 +54,7 @@ class DoorPolicy(BaseModel):
 
     model_config = FROZEN
 
-    excluded: list[Door] = Field(default_factory=list)
+    excluded: list[Door] = []
 
     def accepts(self, door: Door) -> bool:
         return door not in self.excluded

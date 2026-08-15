@@ -133,9 +133,9 @@ Resolve open feedback by fixing what it points at, or, for a question, by answer
 
 ### A Constant Should Be an Overridable Default
 
-The placement test applies to values, not only to code. `packages/lup` may declare a value only when it could not have chosen otherwise — a language's file suffixes, a provider's wire spelling, a closed enum the library itself defines. Ask: *could a second implementer with the same intent have written a different value?* If yes it is a judgement, and the library takes the caller's instead of making it for every adopter.
+The placement test applies to values, not only to code, and it applies everywhere: `packages/lup` freezes a choice for every adopter and `src/lup_template` freezes one for its own callers, so both may declare a value only when they could not have chosen otherwise — a language's file suffixes, a provider's wire spelling, a closed enum the code itself defines. Ask: *could a second implementer with the same intent have written a different value?* If yes it is a judgement, and it reaches a caller as an overridable default instead of being made for them.
 
-**Having defaults is fine; assuming a non-canonical choice with no parameter to replace it is the defect.** `HookSet` is the shape. The audited `library-default` rule checks the mechanical half; canonicity it cannot, so declare that at the site with `# lup: ignore[library-default]` and a reason. `docs/library.md` carries the criterion, every library table's classification, and the target layout.
+**Having defaults is fine; assuming a non-canonical choice with no parameter to replace it is the defect.** `HookSet` is the shape. Two audited rules check the mechanical half and partition the subject between them: `library-default` judges the library's own multi-entry tables, `constant-declaration` every other module-level constant, wherever it sits. Canonicity neither can see, so declare that at the site with `# lup: ignore[<the rule that fired>]` and a reason. Where the constant only exists because a value was carved out of text by hand, the fix is the parser, not a parameter — the rule says so and names it. `docs/library.md` carries the criterion, every library table's classification, and the target layout.
 
 """
         ),

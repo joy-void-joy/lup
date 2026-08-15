@@ -1,3 +1,8 @@
+# lup: ignore[constant-declaration]
+# Every constant here is this repository's own composition — which runtimes it
+# builds for, and what it calls its own harness session. A composition root is
+# where a judgement is finally made rather than passed on, so there is no
+# caller above it to take these from.
 """Root of the project-owned harness declaration graph.
 
 The declaration leaves — skills, agents, prompt documents, settings, and
@@ -177,9 +182,11 @@ def application_roots() -> ApplicationRoots:
     package = Path(__file__).resolve().parents[2].relative_to(project_root()).as_posix()
     harness = f"{package}/devtools/harness/"
     plugins = [plugin.name for plugin in portable_harness().plugins]
+    generated = generated_tree_paths(NATIVE_RUNTIMES, plugins)
     return ApplicationRoots(
+        generated=generated,
         composition=[
-            *generated_tree_paths(NATIVE_RUNTIMES, plugins),
+            *generated,
             "tests/",
             "packages/lup/tests/",
             "examples/",

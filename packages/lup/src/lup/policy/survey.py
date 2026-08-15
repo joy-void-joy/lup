@@ -18,6 +18,9 @@ from lup.policy.kernel.rows import RuleLevel, ShellRuleRow
 from lup.policy.kernel.shell import classify_shell
 from lup.policy.shell_rules import ShellCommandRule, erase_shell_rules
 
+# lup: ignore[constant-declaration] — a probe word chosen so that no table can
+# declare it; its whole job is to be absent, which a caller supplying their own
+# could only break
 UNJUDGED_SUBCOMMAND = "lup-survey-unjudged"
 """A subcommand word no table declares, so every table answers it as unlisted.
 

@@ -139,6 +139,8 @@ def inspect_drift(
     )
 
 
+# lup: ignore[model-free-function] — driver: it prints to the terminal, which is
+# the command's surface and not something a verdict does to itself
 def report_stale(verdict: DriftVerdict) -> None:
     """Name every stale artifact, then the one command that settles them all."""
     for report in verdict.stale_trees:

@@ -32,9 +32,14 @@ almost every verdict means, and a runtime that cannot place a single call
 renders the plain effect instead — see :meth:`KernelDecision.placed`.
 """
 
+# lup: ignore[constant-declaration] — the words this gate says, in a kernel
+# compiled hermetically into a bare dispatcher that takes no arguments
 SANDBOX_ESCAPE_NOTICE = " — this will run outside the sandbox"
 """What an approval question adds when the call it approves also escapes."""
 
+# lup: ignore[constant-declaration] — the offer's own wording, which every
+# runtime carries unchanged because the reason text is the one channel they
+# share; a caller replacing it would be replacing the offer, not configuring it
 SANDBOX_ESCALATION_OFFER = (
     " — you may re-issue this outside the sandbox if it needs to be there"
 )
@@ -52,6 +57,9 @@ placement the call follows the session, so prose promising confinement would
 be false in exactly the unconfined session that matters.
 """
 
+# lup: ignore[constant-declaration] — what that same offer degrades to, which
+# has to say the outcome rather than the cause because two different absences
+# reach it and the agent can act on neither
 SANDBOX_ESCALATION_UNSUPPORTED = (
     " — the escalation offered here is not available, because nothing in this"
     " session takes a single call out of the sandbox"
@@ -66,6 +74,9 @@ silence it would read as an offer, and an agent that spends a turn finding out
 otherwise learns nothing it can act on.
 """
 
+# lup: ignore[constant-declaration] — the refusal a trapped call is stopped
+# with, naming the bare filesystem error it would otherwise die on; the whole
+# value of the words is that they are the same ones every time
 SANDBOX_TRAPPED_REASON = (
     "this has to run outside the sandbox, and this runtime puts no single call"
     " outside its own — run from inside one it would reach the shell and die on"
@@ -135,19 +146,27 @@ KERNEL_IMPORT_ALLOWLIST = (
     "typing",
     "urllib.parse",
 )
+# The five below are sentences and one sentinel the kernel's own decisions
+# carry: each is declared beside the verdict that returns it, so a caller
+# passing different words would be returning a different verdict.
+# lup: ignore[constant-declaration] — refusal wording, declared with its verdict
 ESCALATE_HINT = (
     " — reshape the command into the allowed vocabulary, or resubmit with a"
     " leading '# lup: escalate: <why>' line to request approval"
 )
-RESHAPE_HINT = " — reshape the command into the allowed vocabulary"
+RESHAPE_HINT = " — reshape the command into the allowed vocabulary"  # lup: ignore[constant-declaration] — refusal wording
+# lup: ignore[constant-declaration] — refusal wording, declared with its verdict
 SUBSTITUTION_REASON = (
     "command substitution is denied — run the inner command in its own call"
     " and splice its literal output, or read it through <(...) or a pipe"
 )
+# lup: ignore[constant-declaration] — refusal wording, declared with its verdict
 BACKTICK_REASON = (
     "backtick substitution is denied — use $(...) so the inner command"
     " can be classified"
 )
+# lup: ignore[constant-declaration] — a spelling chosen to sit outside identifier
+# space, which is the property the substitution proof below rests on
 SUBSTITUTION_SENTINEL = "$~sub~"
 """Spliced into a word where a real ``$(...)`` stood.
 

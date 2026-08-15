@@ -85,7 +85,7 @@ class ClaudeUnknownOperation(BaseModel):
 
     type: Literal["unknown"] = "unknown"
     name: str
-    input: JsonObject = Field(default_factory=dict)
+    input: JsonObject = {}
 
 
 type ClaudeOperation = (
@@ -111,9 +111,10 @@ class ClaudeHookPayload(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     tool_name: str
-    tool_input: JsonObject = Field(default_factory=dict)
+    tool_input: JsonObject = {}
 
 
+# lup: ignore[model-free-function] — boundary decoder off Claude's wire payload
 def parse_claude_before_tool(payload: ClaudeHookPayload) -> ClaudeBeforeToolEvent:
     """Decode Claude names and payload fields at the adapter boundary."""
     match payload.tool_name, payload.tool_input:

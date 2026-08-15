@@ -32,6 +32,9 @@ from lup.policy.assets.host import document_allowances
 from lup.policy.identity import ConcernAllowance
 from lup.types import EnvVars
 
+# lup: ignore[constant-declaration] — the launcher that sets it and the hook
+# that reads it are different processes, so the name is an identity the two
+# have to spell alike, not a preference either of them holds
 ALLOWANCE_GRANTS_ENV = "LUP_ALLOWANCE_GRANTS"
 """Environment variable naming the document a session's grants are read from.
 

@@ -18,6 +18,8 @@ from enum import StrEnum
 
 from lup.types import EnvVars
 
+# lup: ignore[constant-declaration] — the launcher that sets it and the hook that
+# reads it are different processes, so the name is an identity, not a preference
 AGENT_IDENTITY_ENV = "LUP_AGENT_IDENTITY"
 """Environment variable naming the declared identity of a launched session."""
 

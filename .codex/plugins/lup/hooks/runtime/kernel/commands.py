@@ -18,6 +18,7 @@ from .words import (
 )
 from .fetch import decide_fetch
 
+# lup: ignore[constant-declaration] — sed's own short flags, spelled as sed does
 SED_SAFE_SHORT_FLAGS = "nErsuz"
 # lup: ignore[library-default] — sed's own long spellings of the short flags above
 SED_SAFE_LONG_OPTIONS = (
@@ -27,6 +28,7 @@ SED_SAFE_LONG_OPTIONS = (
     "--separate",
     "--null-data",
 )
+# lup: ignore[constant-declaration] — the flag characters sed's own `s///` takes
 SED_SUBSTITUTE_FLAG_CHARS = "0123456789gpiImM"
 
 

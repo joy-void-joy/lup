@@ -31,6 +31,8 @@ from lup.resolver.models import (
     allowance_question_id,
 )
 
+# lup: ignore[constant-declaration] — one leaf of the run directory layout,
+# which is the record's own shape rather than a value a caller supplies
 GRANT_DIR = "grants"
 
 

@@ -83,7 +83,7 @@ class DocumentSymbol(BaseModel):
     name: str
     kind: int
     range: Range
-    children: list["DocumentSymbol"] = Field(default_factory=list)
+    children: list["DocumentSymbol"] = []
 
     def declared(self) -> list[DeclaredSymbol]:
         """This symbol and every symbol nested beneath it, depth first."""
@@ -142,7 +142,7 @@ class TextDocumentEdit(BaseModel):
     """The edits one document receives, in the versioned shape."""
 
     text_document: TextDocumentIdentifier = Field(alias="textDocument")
-    edits: list[TextEdit] = Field(default_factory=list)
+    edits: list[TextEdit] = []
 
 
 class WorkspaceEdit(BaseModel):
@@ -154,9 +154,9 @@ class WorkspaceEdit(BaseModel):
     reading only one is a rename that silently reports touching no files.
     """
 
-    changes: dict[str, list[TextEdit]] = Field(default_factory=dict)
+    changes: dict[str, list[TextEdit]] = {}
     document_changes: list[TextDocumentEdit] = Field(
-        alias="documentChanges", default_factory=list
+        alias="documentChanges", default=[]
     )
 
     def touched(self) -> list[EditedFile]:

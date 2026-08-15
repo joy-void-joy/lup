@@ -55,6 +55,8 @@ from lup.runtime.models import (
 
 logger = logging.getLogger(__name__)
 
+# lup: ignore[constant-declaration] — the run directory's own layout, which a
+# resumed run must spell exactly as the run that wrote it
 SESSION_DIR = "sessions"
 
 

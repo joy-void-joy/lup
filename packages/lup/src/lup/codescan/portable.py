@@ -16,13 +16,10 @@ from typing import get_args
 from pydantic import BaseModel, ConfigDict
 
 from lup.harness.contracts import NativeSpellings
-from lup.harness.models import (
-    Harness,
-    PluginLocation,
-    TreeLocation,
-    document_prose,
-)
+from lup.harness.models import Harness, PluginLocation, TreeLocation
 
+# lup: ignore[constant-declaration] — the rule's own identity, what a typed
+# directive and every deny message name it by
 RULE_ID = "portable-content"
 
 
@@ -78,7 +75,7 @@ def prose_breaches(
     prose = [
         (declaration_id, text)
         for declaration_id, document in documents
-        for text in document_prose(document)
+        for text in document.prose()
     ]
     prose.extend(
         (declaration.id, declaration.description)

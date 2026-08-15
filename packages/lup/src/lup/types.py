@@ -334,7 +334,7 @@ class SubagentSpec(BaseModel):
     name: str
     description: str
     prompt: str
-    tools: list[str] = Field(default_factory=list)
+    tools: list[str] = []
     model: str | None = Field(
         default=None,
         description="Model for this subagent; None inherits the session's "

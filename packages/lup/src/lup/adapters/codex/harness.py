@@ -2,11 +2,13 @@
 
 import json
 import shlex
+from collections.abc import Collection
 from importlib import resources
 from pathlib import Path
 
 import tomlkit
 from lup.adapters.codex.login import CODEX_LOGIN
+from lup.codescan.antipatterns import DOCUMENT_IN_HAND, antipattern_set_for
 from lup.harness.banner import (
     PROMPT_TEXT,
     REGENERATE_COMMAND,
@@ -482,7 +484,9 @@ CODEX_DYNAMIC_COMMANDS = (
 
 
 def codex_allow_prefixes(
-    rules: list[ShellCommandRule], runner_targets: list[RunnerTargetRule]
+    rules: list[ShellCommandRule],
+    runner_targets: list[RunnerTargetRule],
+    dynamic: Collection[str] = CODEX_DYNAMIC_COMMANDS,
 ) -> list[list[str]]:
     """Compile semantic allows that stay allowed for every suffix.
 
@@ -523,8 +527,7 @@ def codex_allow_prefixes(
         if row["effect"] != "allow" or row["ask_flags"] or row["sandbox"] == "inside":
             continue
         if not row["subcommand"]:
-            dynamic = row["command"] in CODEX_DYNAMIC_COMMANDS
-            if row["command"] not in gated and not dynamic:
+            if row["command"] not in gated and row["command"] not in dynamic:
                 add([row["command"]])
         elif row["operation"]:
             add([row["command"], row["subcommand"], row["operation"]])
@@ -550,9 +553,12 @@ def render_codex_rules(source: HookSet) -> str:
 class CodexHookRenderer(ArtifactRenderer[HookSet]):
     """Render Codex hooks, canonical kernel, and application policy rows."""
 
-    def __init__(self, plugin_name: str, worker_identity: str) -> None:
+    def __init__(
+        self, plugin_name: str, worker_identity: str, spellings: NativeSpellings
+    ) -> None:
         self.plugin_name = plugin_name
         self.worker_identity = worker_identity
+        self.spellings = spellings
 
     def render(self, source: HookSet) -> ArtifactTree:
         policy_hook = {
@@ -664,6 +670,9 @@ class CodexHookRenderer(ArtifactRenderer[HookSet]):
                         recoverable_target_limit=source.recoverable_target_limit,
                         runner_targets=list(source.runner_targets),
                         sandbox_excluded_commands=source.excluded_commands(),
+                        rules=antipattern_set_for(
+                            self.spellings.read_document(DOCUMENT_IN_HAND)
+                        ),
                     ),
                     semantic_id=source.id,
                 ),

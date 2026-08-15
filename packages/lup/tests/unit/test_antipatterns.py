@@ -15,10 +15,13 @@ from lup.codescan.antipatterns import (
     TS_ANTI_PATTERNS,
     AntiPattern,
     audit_text,
+    python_anti_patterns,
 )
+from lup.harness.contracts import Spelled, Unsupported
 from lup.policy.bundle import bundled_antipattern_rows
 from lup.policy.kernel.edit import (
     antipattern_decision,
+    default_factory_exempt_lines,
     dict_get_exempt_lines,
     empty_collection_exempt_lines,
     refiner_named,
@@ -29,6 +32,10 @@ from lup.policy.rules import antipattern_row
 
 def lib_rows(patterns: list[AntiPattern]) -> list[AntiPatternRow]:
     return [antipattern_row(ap) for ap in patterns]
+
+
+def rule_named(patterns: list[AntiPattern], rule_id: str) -> AntiPattern:
+    return next(rule for rule in patterns if rule.id == rule_id)
 
 
 def test_python_table_matches_generated_bundle() -> None:
@@ -921,3 +928,142 @@ def test_audit_file_level_typed_ignore_disables_only_that_rule() -> None:
     findings = audit_text(source, PYTHON_ANTI_PATTERNS)
     assert [f.kind for f in findings] == ["missing"]
     assert findings[0].rule_id == "any-type"
+
+
+DEFAULT_FACTORY_FIELD = (
+    "from pydantic import BaseModel, Field\n"
+    "\n"
+    "\n"
+    "class Record(BaseModel):\n"
+    "    items: list[int] = Field(default_factory=list)\n"
+)
+
+LITERAL_DEFAULT_FIELD = (
+    "from pydantic import BaseModel\n"
+    "\n"
+    "\n"
+    "class Record(BaseModel):\n"
+    "    items: list[int] = []\n"
+)
+
+WORKING_FACTORY_FIELD = (
+    "from pydantic import BaseModel, Field\n"
+    "\n"
+    "\n"
+    "class Record(BaseModel):\n"
+    "    stamp: Moment = Field(default_factory=Moment)\n"
+)
+
+
+def test_default_factory_flags_the_empty_collection_form() -> None:
+    findings = audit_text(DEFAULT_FACTORY_FIELD, PYTHON_ANTI_PATTERNS)
+    assert [(f.kind, f.line, f.rule_id) for f in findings] == [
+        ("missing", 5, "default-factory")
+    ]
+
+
+def test_default_factory_clears_a_factory_that_does_work() -> None:
+    """The near miss: a factory no annotated literal could have said."""
+    assert audit_text(WORKING_FACTORY_FIELD, PYTHON_ANTI_PATTERNS) == []
+    assert default_factory_exempt_lines(WORKING_FACTORY_FIELD) == {5}
+    assert default_factory_exempt_lines(DEFAULT_FACTORY_FIELD) == set()
+
+
+def test_default_factory_and_empty_collection_never_share_a_line() -> None:
+    """The two divide pydantic's ground; neither doubles up on the other's.
+
+    The rule prescribes the literal default, and that literal sits on an
+    annotated class declaration — precisely what the other rule's refiner
+    clears. Were it otherwise, the replacement one gate demands would be the
+    line the other refuses.
+    """
+    for source in (DEFAULT_FACTORY_FIELD, LITERAL_DEFAULT_FIELD):
+        rules = {
+            finding.rule_id for finding in audit_text(source, PYTHON_ANTI_PATTERNS)
+        }
+        assert rules <= {"default-factory"}, source
+
+
+def test_the_prescribed_literal_default_is_an_edit_the_hook_admits() -> None:
+    """Writing the replacement must pass the gate that judged the original.
+
+    A rule whose remedy the edit hook denies is unfollowable: the audit asks
+    for a change the point of writing refuses, and no revision converges.
+    """
+    decision = antipattern_decision(
+        DEFAULT_FACTORY_FIELD,
+        LITERAL_DEFAULT_FIELD,
+        bundled_antipattern_rows()[".py"],
+        python_source=True,
+    )
+
+    assert decision is None or decision.effect == "allow", decision
+
+
+def test_the_set_shapes_name_the_structure_they_collapse() -> None:
+    """Both messages have to say what is lost, not that the type is too much.
+
+    A reader told a `set` is overkill reaches for a `list`, which loses the
+    same field the set did. The reason is the `dict[...]` the members were
+    keying, so the message that carries it is the one that gets the rewrite
+    right.
+    """
+    messages = {
+        rule.id: rule.message
+        for rule in PYTHON_ANTI_PATTERNS
+        if rule.id in ("set-shape", "frozenset-shape")
+    }
+
+    assert set(messages) == {"set-shape", "frozenset-shape"}  # lup: ignore[set-shape]
+    for rule_id, message in messages.items():
+        assert "dict[" in message, rule_id
+        assert "overkill" not in message, rule_id
+
+
+def test_pdf_extraction_flags_every_text_extractor() -> None:
+    for line in (
+        "import fitz\n",
+        "import pymupdf\n",
+        "from pypdf import PdfReader\n",
+        "import PyPDF2\n",
+        "import pdfplumber\n",
+        "from pdfminer.high_level import extract_text\n",
+    ):
+        rule_ids = {f.rule_id for f in audit_text(line, PYTHON_ANTI_PATTERNS)}
+        assert "pdf-extraction" in rule_ids, line
+
+
+def test_pdf_extraction_leaves_the_neighbouring_pdf_names_alone() -> None:
+    """The near miss: naming a PDF is not extracting text from one.
+
+    The rule is about the libraries that pull text out of a document, so a
+    module of our own with `pdf` in its name and a path that ends in one are
+    both untouched — flagging those would teach that PDFs are the problem
+    rather than the silent empty extraction.
+    """
+    clean = "import pdf_report\nfrom lup.pdfs import stamp\nname = 'fitz.pdf'\n"
+
+    assert audit_text(clean, PYTHON_ANTI_PATTERNS) == []
+
+
+def test_pdf_extraction_names_no_tool_until_a_runtime_spells_one() -> None:
+    """The rule ships into every plugin tree, so the reader is asked for.
+
+    Naming one runtime's tool in the portable message would tell the other to
+    use something it does not have; a runtime that declines contributes no
+    sentence, and the failure mode still reads on its own.
+    """
+    neutral = rule_named(PYTHON_ANTI_PATTERNS, "pdf-extraction")
+    spelled = rule_named(
+        python_anti_patterns(Spelled(words="Hand the path to the Read tool.")),
+        "pdf-extraction",
+    )
+    declined = rule_named(
+        python_anti_patterns(Unsupported(reason="no tool takes a document")),
+        "pdf-extraction",
+    )
+
+    assert "Read" not in neutral.message
+    assert neutral.message == declined.message
+    assert spelled.message.endswith("Hand the path to the Read tool.")
+    assert spelled.message.startswith(declined.message)

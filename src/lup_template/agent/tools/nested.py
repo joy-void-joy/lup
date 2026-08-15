@@ -46,6 +46,11 @@ class CritiqueOutput(BaseModel):
     )
 
 
+# The handler is the context boundary, and that is the operation here: opening
+# a session, bounding its output, folding it into CritiqueOutput. CritiqueInput
+# is the schema `lup_tool` infers the tool's arguments from, so it names how the
+# agent calls in rather than a subject the critique could be declared on.
+# lup: ignore[model-free-function] — MCP tool handler; CritiqueInput is its input schema
 @lup_tool(
     "Get an independent second opinion on a draft from a nested agent. Use when "
     "the main agent wants a fresh critique without spending its own context on a "
@@ -74,5 +79,7 @@ async def critique(params: CritiqueInput) -> CritiqueOutput:
     return CritiqueOutput(critique=text[:limit], truncated=len(text) > limit)
 
 
+# lup: ignore[constant-declaration] — which tools this module defines, which is
+# the module's own roster rather than a value a caller supplies
 NESTED_TOOLS = [critique]
 """Nested-agent tools — add to a server group in ``toolsets.py`` to serve them."""

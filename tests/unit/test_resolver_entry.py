@@ -39,7 +39,6 @@ from lup.devtools.harness.resolve import (
     SupervisorSpawn,
     admission_notes,
     admission_request,
-    describe_intake,
     inert_offers,
     missing_run_refusal,
     offer_flag_answers,
@@ -576,7 +575,7 @@ def test_the_preview_names_every_bucket_at_its_own_file_and_line(
     intake_tree: Path,
 ) -> None:
     """Reconstructing this by hand took a dozen calls and ended in a guess."""
-    assert describe_intake(scanned_intake(intake_tree)) == [
+    assert scanned_intake(intake_tree).describe() == [
         "1 to plan, 1 carried, 1 left to a generator",
         "planning from mine.py:2-2",
         "carrying deferred[until v2 lands] parked.py:1-1",
@@ -590,7 +589,7 @@ def test_the_preview_starts_no_run_and_leases_nothing(
     """Seeing an inventory used to mean committing to a worktree per concern."""
     beside = sorted(path.name for path in tmp_path.iterdir())
 
-    describe_intake(scanned_intake(intake_tree))
+    scanned_intake(intake_tree).describe()
 
     assert not (intake_tree / ".lup").exists()
     assert sorted(path.name for path in tmp_path.iterdir()) == beside
@@ -615,9 +614,9 @@ def test_the_preview_lists_exactly_what_a_run_would_plan_from(
     assert [(str(note.file), note.line) for note in planned.notes] == [
         (note.file, note.start_line) for note in intake.actionable
     ]
-    assert [
-        line for line in describe_intake(intake) if line.startswith("planning from")
-    ] == ["planning from mine.py:2-2"]
+    assert [line for line in intake.describe() if line.startswith("planning from")] == [
+        "planning from mine.py:2-2"
+    ]
 
 
 def test_statements_offered_to_no_named_run_seed_one_rather_than_refusing() -> None:

@@ -79,7 +79,7 @@ class SleepResult(BaseModel):
     """Result returned by Scheduler.sleep()."""
 
     reason: str = "timer"
-    fired_reminders: list[str] = Field(default_factory=list)
+    fired_reminders: list[str] = []
     time: str = ""
 
 

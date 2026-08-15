@@ -15,6 +15,8 @@ from importlib.metadata import version as installed_package_version
 
 from pydantic import BaseModel, ConfigDict
 
+# lup: ignore[constant-declaration] — the date this evidence was last read from
+# the vendors, which is a fact about the reading rather than a value to pick
 EVIDENCE_REFRESHED = "2026-08-05"
 
 

@@ -47,7 +47,7 @@ same reason.
 
 from typing import Literal, TypedDict
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict
 
 from lup.policy.kernel.decision import DecisionEffect, SandboxPlacement
 from lup.policy.kernel.rows import RunnerTargetRow, RuleLevel, ShellRuleRow
@@ -167,7 +167,7 @@ class ShellOperationRule(BaseModel):
 
     name: str
     effect: CommandEffect = ROOT_EFFECT
-    ask_flags: list[str] = Field(default_factory=list)
+    ask_flags: list[str] = []
     sandbox: SandboxPlacement = ROOT_SANDBOX
     reason: str = ""
 
@@ -192,9 +192,9 @@ class ShellSubcommandRule(BaseModel):
 
     name: str
     effect: CommandEffect = ROOT_EFFECT
-    ask_flags: list[str] = Field(default_factory=list)
-    read_verbs: list[str] = Field(default_factory=list)
-    operations: list[ShellOperationRule] = Field(default_factory=list)
+    ask_flags: list[str] = []
+    read_verbs: list[str] = []
+    operations: list[ShellOperationRule] = []
     sandbox: SandboxPlacement = ROOT_SANDBOX
     reason: str = ""
 
@@ -235,11 +235,11 @@ class ShellCommandRule(BaseModel):
 
     name: str
     default_effect: CommandEffect
-    ask_flags: list[str] = Field(default_factory=list)
-    allow_flags: list[str] = Field(default_factory=list)
-    read_verbs: list[str] = Field(default_factory=list)
-    value_flags: list[str] = Field(default_factory=list)
-    subcommands: list[ShellSubcommandRule] = Field(default_factory=list)
+    ask_flags: list[str] = []
+    allow_flags: list[str] = []
+    read_verbs: list[str] = []
+    value_flags: list[str] = []
+    subcommands: list[ShellSubcommandRule] = []
     sandbox: SandboxPlacement = ROOT_SANDBOX
     reason: str = ""
 

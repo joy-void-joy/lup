@@ -27,7 +27,7 @@ from lup.devtools.dev.commit_guard import (
     read_guard,
     uninstall_guard,
 )
-from lup.devtools.dev.workflow import WorkflowSpec, workflow_body
+from lup.devtools.dev.workflow import WorkflowSpec
 from lup.harness.banner import REGENERATE_COMMAND
 from tests.unit.repos import initialized_repo
 
@@ -223,4 +223,4 @@ def test_arming_a_checkout_it_cannot_write_reports_instead_of_failing(
 
 def test_the_pipeline_runs_the_command_the_hook_installs() -> None:
     """A contributor who never armed the hook meets the same command in CI."""
-    assert DRIFT_COMMAND in workflow_body(WorkflowSpec())
+    assert DRIFT_COMMAND in WorkflowSpec().body()

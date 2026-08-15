@@ -7,6 +7,7 @@ The display itself knows none of it.
 """
 
 from collections import Counter
+from collections.abc import Sequence
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Literal
@@ -23,7 +24,6 @@ from lup.adapters.claude.usage.api import (
     UsageResponse,
     creds_path,
     fetch_usage,
-    get_daily_breakdown,
     load_stats,
 )
 from lup.usage.app import UsageEntry
@@ -62,6 +62,8 @@ class BucketSpec(BaseModel):
     window_hours: float
 
 
+# lup: ignore[constant-declaration] — one row per window the usage payload
+# actually carries, so the vendor's key set decides which rows exist
 BUCKET_SPECS: list[BucketSpec] = [
     BucketSpec(key="seven_day", label="weekly", window_hours=7 * 24),
     BucketSpec(key="five_hour", label="5-hour", window_hours=5),
@@ -81,6 +83,8 @@ class ModelName(BaseModel):
     label: str
 
 
+# lup: ignore[constant-declaration] — the vendor's own model ids, spelled the
+# way it publishes them; an id this table lacks renders under its own name
 MODEL_NAMES: list[ModelName] = [
     ModelName(model_id="claude-opus-5", label="Opus 5"),
     ModelName(model_id="claude-opus-4-8", label="Opus 4.8"),
@@ -146,10 +150,10 @@ def model_label(model_id: str) -> str:
     )
 
 
-def model_style(model_id: str) -> str:
+def model_style(model_id: str, families: Sequence[ModelFamily] = MODEL_FAMILIES) -> str:
     """The family colour this id belongs to, and plain white outside them."""
     return next(
-        (family.style for family in MODEL_FAMILIES if family.word in model_id), "white"
+        (family.style for family in families if family.word in model_id), "white"
     )
 
 
@@ -180,6 +184,7 @@ def priced(rates: list[ModelRate], model_id: str, tokens: int) -> float:
     return tokens * rate
 
 
+# lup: ignore[model-free-function] — the bucket is the subject; the spec names it
 def pacing_window(spec: BucketSpec, bucket: UsageBucket | None) -> PacingWindow | None:
     """One published window, dropped where it does not say when it clears."""
     if bucket is None:
@@ -216,17 +221,19 @@ def spend_from(usage: UsageResponse) -> SpendWindow | None:
     )
 
 
-def days_from(stats: StatsCache, window_end: datetime) -> list[DayUsage]:
+def days_from(
+    stats: StatsCache, window_end: datetime, trailing_days: int = TRAILING_DAYS
+) -> list[DayUsage]:
     """The trailing week of the window, priced by what each model costs.
 
     A cache with no prices in it weighs a day by its raw tokens: the bars
     still rank the days against each other, which is most of what they say.
     """
-    breakdown = get_daily_breakdown(
-        stats, window_end - timedelta(days=TRAILING_DAYS), window_end
+    breakdown = stats.daily_breakdown(
+        window_end - timedelta(days=trailing_days), window_end
     )
     # A 168-hour window can span eight calendar dates; keep the most recent.
-    recent = breakdown[-TRAILING_DAYS:]
+    recent = breakdown[-trailing_days:]
     rates = model_rates(stats)
     costs = [
         sum(

@@ -22,9 +22,8 @@ class DraftState(BaseModel):
 
     text: str
 
-
-def request_for(state: DraftState) -> TurnRequest[Summary]:
-    return turn_request(f"Summarize the latest draft:\n\n{state.text}", Summary)
+    def request(self) -> TurnRequest[Summary]:
+        return turn_request(f"Summarize the latest draft:\n\n{self.text}", Summary)
 
 
 async def main() -> None:
@@ -44,7 +43,7 @@ async def main() -> None:
 
     agent = BackgroundAgent[DraftState, Summary](
         factory,
-        request_for,
+        DraftState.request,
         completed,
         failed,
         BackgroundConfig(debounce_seconds=0.1),

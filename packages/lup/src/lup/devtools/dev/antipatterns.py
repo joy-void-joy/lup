@@ -35,7 +35,8 @@ from lup.codescan.antipatterns import (
     audit_text,
     patterns_for_suffix,
 )
-from lup.codescan.boundaries import audit_path_boundaries
+from lup.codescan.behaviour import audit_model_free_functions
+from lup.codescan.boundaries import audit_constant_declarations, audit_path_boundaries
 from lup.codescan.capabilities import audit_capabilities
 from lup.codescan.common import (
     PACKAGE_ROOTS,
@@ -107,11 +108,15 @@ class AntiPatternScan(BaseModel):
     refuted: list[FoundRefutation]
 
 
-def scanned_files(project: DevProject, paths: Sequence[str] = ()) -> list[ScannedFile]:
+def scanned_files(
+    project: DevProject, paths: Sequence[str] | None = None
+) -> list[ScannedFile]:
     """Every tracked production file the audits read, with its table and text.
 
     ``paths`` narrows the walk to files under the given repository-relative
-    prefixes. The declared path roles decide the rest: a rule the edit hook
+    prefixes; ``None`` is the whole repository, and an empty scope is a scope
+    rather than an absent one, so a tree that changed nothing is read for
+    nothing. The declared path roles decide the rest: a rule the edit hook
     never enforces in a test or scratch tree is not read there either.
     """
     roles = project.path_roles
@@ -122,7 +127,9 @@ def scanned_files(project: DevProject, paths: Sequence[str] = ()) -> list[Scanne
             patterns = patterns_for_suffix(path.suffix.lower())
             if patterns is None or path_role(rel, roles) != "production":
                 continue
-            if paths and not any(rel == p or rel.startswith(f"{p}/") for p in paths):
+            if paths is not None and not any(
+                rel == p or rel.startswith(f"{p}/") for p in paths
+            ):
                 continue
             try:
                 text = path.read_text(encoding="utf-8")
@@ -159,7 +166,7 @@ def scan_antipatterns(
     it every run; where the checker is absent the grammar refutes nothing and
     every broad regex verdict stands.
     """
-    scanned = scanned_files(project, paths or ())
+    scanned = scanned_files(project, paths)
     sources = [
         PythonSource(
             path=item.path,
@@ -190,8 +197,10 @@ def scan_antipatterns(
         )
         for finding in [
             *audit_capabilities(sources),
+            *audit_model_free_functions(sources),
             *audit_own_model_dispatch(sources),
             *audit_isinstance_chains(sources),
+            *audit_constant_declarations(sources, project.roots),
         ]
     )
     boundary_findings = [
@@ -363,7 +372,10 @@ ADVISORY_KINDS = {"untyped"}
 
 
 def summarize(
-    project: DevProject, as_json: bool, paths: Sequence[str] | None = None
+    project: DevProject,
+    as_json: bool,
+    paths: Sequence[str] | None = None,
+    advisory: AbstractSet[str] = ADVISORY_KINDS,
 ) -> None:
     """Tally anti-pattern findings by rule and kind — the sweep triage view.
 
@@ -384,7 +396,7 @@ def summarize(
         if finding.file not in files_by_rule[rule]:
             files_by_rule[rule].append(finding.file)
 
-    blocking = sum(1 for finding in found if finding.kind not in ADVISORY_KINDS)
+    blocking = sum(1 for finding in found if finding.kind not in advisory)
     file_count = len(dict.fromkeys(finding.file for finding in found))
 
     if as_json:
@@ -419,7 +431,10 @@ def summarize(
 
 
 def report(
-    project: DevProject, as_json: bool, paths: Sequence[str] | None = None
+    project: DevProject,
+    as_json: bool,
+    paths: Sequence[str] | None = None,
+    advisory: AbstractSet[str] = ADVISORY_KINDS,
 ) -> None:
     """List anti-pattern findings; exit non-zero when a blocking one remains.
 
@@ -430,7 +445,7 @@ def report(
     """
     scan = scan_antipatterns(project, paths)
     found = scan.findings
-    blocking = [finding for finding in found if finding.kind not in ADVISORY_KINDS]
+    blocking = [finding for finding in found if finding.kind not in advisory]
     if as_json:
         output_json(
             {
@@ -453,8 +468,8 @@ def report(
         typer.echo(f"{finding.file}:{finding.line} [{finding.kind}] {finding.message}")
         typer.echo(f"    {finding.text}")
     files = {finding.file for finding in found}
-    advisory = len(found) - len(blocking)
-    tail = f" (+{advisory} untyped, advisory)" if advisory else ""
+    reported = len(found) - len(blocking)
+    tail = f" (+{reported} untyped, advisory)" if reported else ""
     typer.echo(f"\n{len(blocking)} blocking finding(s){tail} in {len(files)} file(s)")
     typer.echo(f"Rule reference: {RULE_REFERENCE} (`uv run lup-devtools dev rules`)")
     if blocking:

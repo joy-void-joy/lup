@@ -5,6 +5,7 @@ import shlex
 from collections.abc import Sequence
 from pathlib import Path
 from lup.adapters.claude.login import CLAUDE_LOGIN
+from lup.codescan.antipatterns import DOCUMENT_IN_HAND, antipattern_set_for
 from lup.harness.banner import PROMPT_TEXT, VERBATIM_COPY
 from lup.harness.contracts import (
     ArtifactRenderer,
@@ -50,6 +51,8 @@ from lup.policy.kernel.rows import PathRoleRow
 from lup.policy.refused_tools import routed_for
 
 
+# lup: ignore[constant-declaration] — each value is Claude Code's own alias for
+# the tier beside it, over a tier vocabulary this library closes
 CLAUDE_MODEL_ALIASES: dict[ModelTier, str] = {
     "inherit": "inherit",
     "strongest": "opus",
@@ -208,6 +211,8 @@ class ClaudeSpellings(NativeSpellings):
                 return Atom(f"{root}/TEMPLATE_CLAUDE.md")
 
 
+# lup: ignore[constant-declaration] — which built-ins Claude Code ships is the
+# runtime's fact to state, not a preference a caller holds
 CLAUDE_ABSENT_TOOLS = ("Glob", "Grep")
 """Built-ins the portable vocabulary names that Claude Code does not ship.
 
@@ -417,9 +422,12 @@ to the hook without a branch that decides it.
 class ClaudeHookRenderer(ArtifactRenderer[HookSet]):
     """Render Claude hooks, canonical kernel, and application policy rows."""
 
-    def __init__(self, plugin_name: str, worker_identity: str) -> None:
+    def __init__(
+        self, plugin_name: str, worker_identity: str, spellings: NativeSpellings
+    ) -> None:
         self.plugin_name = plugin_name
         self.worker_identity = worker_identity
+        self.spellings = spellings
 
     def render(self, source: HookSet) -> ArtifactTree:
         registration = [
@@ -515,6 +523,9 @@ class ClaudeHookRenderer(ArtifactRenderer[HookSet]):
                         recoverable_target_limit=source.recoverable_target_limit,
                         runner_targets=list(source.runner_targets),
                         sandbox_excluded_commands=source.excluded_commands(),
+                        rules=antipattern_set_for(
+                            self.spellings.read_document(DOCUMENT_IN_HAND)
+                        ),
                     ),
                     semantic_id=source.id,
                 ),

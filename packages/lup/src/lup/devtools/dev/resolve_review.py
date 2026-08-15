@@ -14,7 +14,7 @@ from importlib import resources
 from pathlib import Path
 
 import typer
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, ValidationError
 
 from lup.devtools.utils import git
 
@@ -51,10 +51,22 @@ class ManifestEntry(BaseModel):
     reason: str = ""
     residual: str = ""
     summary: str = ""
-    files_changed: list[str] = Field(default_factory=list)
-    swept_beyond_scope: list[str] = Field(default_factory=list)
-    note_findings: list[NoteFinding] = Field(default_factory=list)
-    notes: list[NoteRef] = Field(default_factory=list)
+    files_changed: list[str] = []
+    swept_beyond_scope: list[str] = []
+    note_findings: list[NoteFinding] = []
+    notes: list[NoteRef] = []
+
+    def finding_for(self, note: NoteRef) -> NoteFinding:
+        """What the verifier recorded about one of this concern's notes."""
+        for finding in self.note_findings:
+            if finding.file == note.file and finding.line == note.line:
+                return finding
+        return NoteFinding(
+            file=note.file,
+            line=note.line,
+            addressed=False,
+            how="(verifier recorded no finding for this note)",
+        )
 
 
 def load_manifest(path: Path) -> list[ManifestEntry]:
@@ -127,18 +139,7 @@ def render_diff(text: str) -> str:
     return "\n".join(render_line(line) for line in text.splitlines())
 
 
-def finding_for(entry: ManifestEntry, note: NoteRef) -> NoteFinding:
-    for finding in entry.note_findings:
-        if finding.file == note.file and finding.line == note.line:
-            return finding
-    return NoteFinding(
-        file=note.file,
-        line=note.line,
-        addressed=False,
-        how="(verifier recorded no finding for this note)",
-    )
-
-
+# lup: ignore[model-free-function] — renderer over a declaration, reading git
 def render_concern(entry: ManifestEntry, base: str) -> str:
     branch = entry.branch or "(none)"
     badges: list[str] = []
@@ -156,7 +157,7 @@ def render_concern(entry: ManifestEntry, base: str) -> str:
     )
 
     def note_row(note: NoteRef) -> str:
-        finding = finding_for(entry, note)
+        finding = entry.finding_for(note)
         state = "✅" if finding.addressed else "⚠️"
         return (
             "<tr>"

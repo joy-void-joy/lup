@@ -50,13 +50,19 @@ from packaging.requirements import Requirement
 from lup.workspace.paths import find_project_root
 from lup.devtools.utils import git
 
-VENDORED_ROOT = "packages/lup"
-VENDORED_SRC = "packages/lup/src"
+# The three below spell where the vendored copy sits, which is a fact about
+# lup's own layout and this repository's, not a choice either end makes.
+VENDORED_ROOT = "packages/lup"  # lup: ignore[constant-declaration] — fixed layout
+VENDORED_SRC = "packages/lup/src"  # lup: ignore[constant-declaration] — fixed layout
+# lup: ignore[constant-declaration] — fixed layout
 VENDORED_SIBLINGS = {"src": VENDORED_SRC, "tests": f"{VENDORED_ROOT}/tests"}
 """Each plain search root and the vendored one that shadows it. A search path
 naming the plain root wants its vendored twin exactly while the package is
 there, and wants it gone the moment the package is not."""
+# lup: ignore[constant-declaration] — the name the library is published under
 DISTRIBUTION = "lup"
+# lup: ignore[constant-declaration] — the glob this repository's own uv workspace
+# is laid out as, which the manifest below already states
 WORKSPACE_MEMBERS = ["packages/*"]
 REPOSITORY_URL = "https://github.com/joy-void-joy/lup"
 """Where the library is published as source. Overridable: a fork, a mirror, or
@@ -77,6 +83,8 @@ class ExecutionEnvironment(TypedDict):
 # Type-checking a vendored adapter's dispatcher asset needs the generated
 # runtime beside it on the search path. Both halves live under the package, so
 # the pair exists exactly when the library is vendored.
+# lup: ignore[constant-declaration] — the adapter packages lup actually ships,
+# so the value follows lup.adapters rather than any taste
 RUNTIMES = ("claude", "codex")
 VENDORED_EXECUTION_ENVIRONMENTS = [
     ExecutionEnvironment(
@@ -247,6 +255,9 @@ def apply_dependency(document: tomlkit.TOMLDocument, version: str | None) -> lis
     raise KeyError(f"no {DISTRIBUTION} requirement in [project].dependencies")
 
 
+# GitSource's own share of this is `git.entry()`; what is left is the edit to
+# `[tool.uv.sources]`, which the document owns and one mode's argument does not.
+# lup: ignore[model-free-function] — the TOML document is the subject
 def apply_source(
     document: tomlkit.TOMLDocument,
     mode: LibraryMode,
@@ -396,6 +407,9 @@ def guard_leaving_local(root: Path, force: bool) -> None:
     )
 
 
+# Rewriting `pyproject.toml` is about the checkout, and `git` is the argument
+# exactly one mode reads — beside `version` and `checkout`, which the others do.
+# lup: ignore[model-free-function] — the checkout is the subject, git one mode's input
 def set_mode(
     root: Path,
     mode: LibraryMode,
@@ -467,6 +481,9 @@ def use_library(
     report(changes, dry_run, f"Already resolving {DISTRIBUTION} as {mode}.")
 
 
+# The body of `dev library git`, beside the other three command entries: its
+# subject is the command line, and GitSource is what the flags parsed into.
+# lup: ignore[model-free-function] — CLI command body over its parsed flags
 def git_library(
     source: GitSource, keep_vendored: bool, force: bool, dry_run: bool
 ) -> None:

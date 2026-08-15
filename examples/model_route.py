@@ -13,7 +13,7 @@ from lup.runtime.routing import ModelRoute, ModelRouter, PrefixModelMatcher
 
 from examples.common import Summary
 
-MODEL = "claude-opus-5"
+MODEL = "claude-opus-5"  # lup: ignore[constant-declaration] — a vendor's model id
 
 
 def claude_factory() -> SessionFactory:

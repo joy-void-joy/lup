@@ -12,7 +12,7 @@ import logging
 from collections.abc import Iterator
 
 import sh
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from lup.devtools.utils import decode_stderr, gh, repository_slug
 from lup.resolver.models import IssueEvidence
@@ -27,6 +27,8 @@ unlabelled goes unfixed. The name is this project's choice and no more, so a
 caller passes its own.
 """
 
+# lup: ignore[constant-declaration] — the fields the models below parse, spelled
+# as `gh issue list --json` names them
 ISSUE_FIELDS = "number,url,title,body,labels"
 
 
@@ -43,7 +45,7 @@ class IssueRow(BaseModel):
     url: str
     title: str
     body: str = ""
-    labels: list[IssueLabel] = Field(default_factory=list)
+    labels: list[IssueLabel] = []
 
     def excluded_by(self, label: str) -> bool:
         return any(applied.name == label for applied in self.labels)

@@ -68,22 +68,31 @@ def suppression_reaches(
     """Whether a directive on `directive_line` may silence `violation_line`.
 
     One policy, for every rule alike: a directive sits on the violation's own
-    line — the canonical placement — or stands alone on the line directly
-    above, which is where a reason too long for the column budget goes. No
-    rule widens this and none narrows it, so a marker shape valid against one
-    rule is valid against all of them.
+    line — the canonical placement — or heads the comment block standing
+    directly above it, which is where a reason too long for the column budget
+    goes. No rule widens this and none narrows it, so a marker shape valid
+    against one rule is valid against all of them.
 
     Standing alone is what makes the line above a placement rather than an
     accident: an inline directive guards the line it was written on, and a
     rule tripping the line below cannot quietly borrow it.
+
+    A reason worth reading often outruns one line, so the directive may be
+    followed by its own continuation comments before what it guards. They are
+    continuations rather than neighbours because a directive of their own ends
+    the block: two markers cannot share one, and the nearer takes its lines.
     """
     if directive_line == violation_line:
         return True
-    if directive_line != violation_line - 1:
+    if directive_line < 1 or directive_line >= violation_line:
         return False
-    if directive_line < 1 or directive_line > len(lines):
+    if standalone_suppression(lines[directive_line - 1]) is None:
         return False
-    return standalone_suppression(lines[directive_line - 1]) is not None
+    return all(
+        lines[number - 1].lstrip().startswith(("#", "//"))
+        and IGNORE_RE.search(lines[number - 1]) is None
+        for number in range(directive_line + 1, violation_line)
+    )
 
 
 def inline_suppression(code: str, directive: str) -> str:
@@ -235,13 +244,20 @@ def covering_suppression_line(lines: list[str], violation_line: int) -> int:
 
     Both accepted placements, nearest first, so an inline directive is
     preferred over one standing above and the site a refusal quotes is the one
-    whoever wrote it would recognize.
+    whoever wrote it would recognize. Above means the head of the comment
+    block, which a multi-line reason puts further up than the line itself.
     """
-    for candidate in (violation_line, violation_line - 1):
-        if candidate < 1 or IGNORE_RE.search(lines[candidate - 1]) is None:
-            continue
-        if suppression_reaches(lines, candidate, violation_line):
-            return candidate
+    for candidate in range(violation_line, 0, -1):
+        if IGNORE_RE.search(lines[candidate - 1]) is not None:
+            return (
+                candidate
+                if suppression_reaches(lines, candidate, violation_line)
+                else 0
+            )
+        if candidate != violation_line and not lines[candidate - 1].lstrip().startswith(
+            ("#", "//")
+        ):
+            return 0
     return 0
 
 
@@ -495,20 +511,29 @@ def marker_decision(
     return None
 
 
+def empty_collection_literal(node: ast.expr | None) -> bool:
+    """Whether an expression builds an empty dict, list, or set on the spot.
+
+    The one question two rules ask: `empty-collection` to tell a deliberate
+    default from a build-then-append seed, and `default-factory` to tell a
+    factory an annotated literal could replace from one that does real work.
+    Answering it in one place is what keeps the two from disagreeing about the
+    same line.
+    """
+    match node:
+        case ast.Dict(keys=[]) | ast.List(elts=[]):
+            return True
+        case ast.Call(func=ast.Name(id="set"), args=[], keywords=[]):
+            return True
+    return False
+
+
 def empty_collection_exempt_lines(source: str) -> set[int]:
     """Return empty-collection lines whose AST context makes the seed deliberate."""
     try:
         tree = ast.parse(source)
     except SyntaxError:
         return set()
-
-    def is_empty_literal(node: ast.expr | None) -> bool:
-        match node:
-            case ast.Dict(keys=[]) | ast.List(elts=[]):
-                return True
-            case ast.Call(func=ast.Name(id="set"), args=[], keywords=[]):
-                return True
-        return False
 
     def is_self_attribute(node: ast.expr) -> bool:
         return (
@@ -520,7 +545,7 @@ def empty_collection_exempt_lines(source: str) -> set[int]:
     exempt: set[int] = set()
 
     def mark(value: ast.expr | None) -> None:
-        if value is not None and is_empty_literal(value):
+        if value is not None and empty_collection_literal(value):
             exempt.add(value.lineno)
 
     def is_loop(node: ast.AST) -> bool:
@@ -573,7 +598,7 @@ def empty_collection_exempt_lines(source: str) -> set[int]:
                     case (
                         ast.Assign(targets=[ast.Name(id=name)], value=value)
                         | ast.AnnAssign(target=ast.Name(id=name), value=value)
-                    ) if is_empty_literal(value):
+                    ) if empty_collection_literal(value):
                         loops = feeding[name] if name in feeding else None
                         if in_loop:
                             if loops is not None:
@@ -612,6 +637,44 @@ def empty_collection_exempt_lines(source: str) -> set[int]:
                                 mark(value)
                 exempt_scope_seeds(node)
     return exempt
+
+
+def empty_collection_factory(node: ast.expr) -> bool:
+    """Whether a ``default_factory=`` argument only ever returns an empty collection.
+
+    ``list``/``dict``/``set`` named as the factory, and the lambda spellings of
+    the same thing, are what an annotated literal default says instead. The
+    literal question is :func:`empty_collection_literal`'s, asked once.
+    """
+    match node:
+        case ast.Name(id="list" | "dict" | "set"):
+            return True
+        case ast.Lambda(body=body):
+            return empty_collection_literal(body)
+    return False
+
+
+def default_factory_exempt_lines(source: str) -> set[int]:
+    """Return ``default_factory=`` lines an annotated literal could not replace.
+
+    The rule's replacement is ``items: list[B] = []``: the annotation carries
+    the type and pydantic copies the literal per instance. That says the same
+    thing only where the factory builds an empty collection — a factory that
+    reads another declaration, stamps a value, or constructs a model does work
+    no literal expresses, so its line is cleared rather than suppressed.
+    """
+    try:
+        tree = ast.parse(source)
+    except (SyntaxError, ValueError):
+        return set()
+    return {
+        keyword.lineno
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        for keyword in node.keywords
+        if keyword.arg == "default_factory"
+        and not empty_collection_factory(keyword.value)
+    }
 
 
 def dict_get_exempt_lines(source: str) -> set[int]:
@@ -690,6 +753,8 @@ def refiner_named(name: str) -> Callable[[str], set[int]] | None:
     remembering to widen a list of ids here.
     """
     match name:
+        case "default_factory_exempt_lines":
+            return default_factory_exempt_lines
         case "empty_collection_exempt_lines":
             return empty_collection_exempt_lines
         case "dict_get_exempt_lines":

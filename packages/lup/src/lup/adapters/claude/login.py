@@ -7,6 +7,7 @@ runtime in to get them.
 
 from lup.runtime.login import ProviderLogin
 
+# lup: ignore[constant-declaration] — the environment variable Claude Code reads
 CLAUDE_CONFIG_DIR = "CLAUDE_CONFIG_DIR"
 
 CLAUDE_LOGIN = ProviderLogin(

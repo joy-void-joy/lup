@@ -14,7 +14,7 @@ same one before it submits.
 
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict
 
 from lup.harness.process import LaunchRequest, ProcessLauncher
 
@@ -26,7 +26,7 @@ class InspectedChanges(BaseModel):
 
     model_config = FROZEN
 
-    paths: list[Path] = Field(default_factory=list)
+    paths: list[Path] = []
     failure: str = ""
     """Why the reading did not happen, empty when it did."""
 
@@ -43,10 +43,10 @@ class DeclarationDelta(BaseModel):
 
     model_config = FROZEN
 
-    undeclared: list[str] = Field(default_factory=list)
+    undeclared: list[str] = []
     """Changed, and named in no part of the account."""
 
-    unswept: list[str] = Field(default_factory=list)
+    unswept: list[str] = []
     """Claimed as swept beyond scope, and not changed at all."""
 
     @property

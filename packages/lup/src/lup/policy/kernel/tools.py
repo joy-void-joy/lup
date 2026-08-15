@@ -11,6 +11,8 @@ from .decision import KernelDecision
 from .rows import RefusedToolRow
 from .shell import ESCALATE_RE
 
+# lup: ignore[constant-declaration] — it quotes the marker's own spelling, so
+# the words are fixed by what the kernel parses rather than by anyone's taste
 TOOL_ESCALATE_HINT = (
     " — or resubmit with a leading '# lup: escalate: <why>' line in one of the"
     " call's own inputs to request approval"

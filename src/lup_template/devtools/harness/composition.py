@@ -59,6 +59,8 @@ TARGETS = NativeTargets(builders={"claude": claude_target, "codex": codex_target
 """Every native runtime this project generates a tree for, by CLI selector."""
 
 
+# lup: ignore[constant-declaration] — which files outside a runtime tree this
+# project generates, decided here because nothing sits above it to be asked
 REPOSITORY_WIDE: list[RepositoryWriter] = [
     write_rule_reference,
     partial(write_workflow, WORKFLOW),

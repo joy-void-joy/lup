@@ -29,7 +29,6 @@ from lup.resolver.models import (
     ResolvePhase,
     ResolveState,
     VerificationRecord,
-    run_tally,
 )
 
 LIVENESS_WINDOW_SECONDS = 90.0
@@ -39,6 +38,8 @@ A judgement, not a fact about the resolver: it trades how quickly a killed
 run stops claiming to be live against how long a slow phase may go quiet
 without being called parked. Callers that know their own runs' rhythm pass
 their own."""
+# lup: ignore[constant-declaration] — the projection's own file name, which the
+# writer and every reader must spell alike to meet at all
 STATE_FILE = "state.json"
 
 
@@ -434,6 +435,6 @@ def supervisor_state(
         review=review,
         failures=state.failures,
         rerun_recipe=answer_recipe(adapter, state.run_id, unanswered_questions(views)),
-        progress_line=run_tally(state).concerns_line(),
+        progress_line=state.tally().concerns_line(),
         last_activity=activity,
     )

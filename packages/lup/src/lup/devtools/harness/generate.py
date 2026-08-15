@@ -243,6 +243,8 @@ def current_reader(
     )
 
 
+# Compiler, prompt renderers, ownership reader, and reconciler in one place.
+# lup: ignore[model-free-function] — composition root building a recipe
 def claude_generation_recipe(
     root: Path, content: ProjectContent, guidance: PromptDocument | None = None
 ) -> GenerationRecipe:
@@ -294,6 +296,7 @@ def claude_generation_recipe(
     )
 
 
+# lup: ignore[model-free-function] — composition root building a recipe
 def codex_generation_recipe(
     root: Path, content: ProjectContent, guidance: PromptDocument | None = None
 ) -> GenerationRecipe:
@@ -326,6 +329,7 @@ def codex_generation_recipe(
     )
 
 
+# lup: ignore[model-free-function] — recipe is a transparent capability carrier
 def inspect_generation(recipe: GenerationRecipe) -> DriftReport:
     """Compute ownership-aware drift without changing the working tree."""
     current = recipe.reader.read(recipe.root)
@@ -336,6 +340,7 @@ def inspect_generation(recipe: GenerationRecipe) -> DriftReport:
     )
 
 
+# lup: ignore[model-free-function] — driver: it materializes and saves proof
 def generate(recipe: GenerationRecipe) -> GenerationReport:
     """Compile, reconcile, materialize, then update proof—never source prompts."""
     drift = inspect_generation(recipe)

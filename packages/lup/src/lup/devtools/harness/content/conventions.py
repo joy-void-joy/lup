@@ -1,4 +1,4 @@
-# lup: ignore[library-default]
+# lup: ignore[library-default, constant-declaration]
 # Every constant here is a block of prose offered for composition, not a
 # table of judgements imposed on a reader: a project that wants different
 # words composes different blocks, or writes its own beside these. The

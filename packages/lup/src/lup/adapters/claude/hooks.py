@@ -190,13 +190,23 @@ def lup_hook_output_to_claude(
                     updatedInput=output.updated_input,
                 )
             )
-        case "PreToolUse", "allow" if placed_input is not None:
+        case "PreToolUse", "allow" if (
+            placed_input is not None and output.additional_context
+        ):
             return claude_types.SyncHookJSONOutput(
                 hookSpecificOutput=claude_types.PreToolUseHookSpecificOutput(
                     hookEventName="PreToolUse",
                     permissionDecision="allow",
                     updatedInput=placed_input,
                     additionalContext=output.additional_context,
+                )
+            )
+        case "PreToolUse", "allow" if placed_input is not None:
+            return claude_types.SyncHookJSONOutput(
+                hookSpecificOutput=claude_types.PreToolUseHookSpecificOutput(
+                    hookEventName="PreToolUse",
+                    permissionDecision="allow",
+                    updatedInput=placed_input,
                 )
             )
         case "PreToolUse", "allow" if output.additional_context:
@@ -214,7 +224,9 @@ def lup_hook_output_to_claude(
                     permissionDecision="allow",
                 )
             )
-        case "PreToolUse", "ask" if placed_input is not None:
+        case "PreToolUse", "ask" if (
+            placed_input is not None and output.additional_context
+        ):
             return claude_types.SyncHookJSONOutput(
                 hookSpecificOutput=claude_types.PreToolUseHookSpecificOutput(
                     hookEventName="PreToolUse",
@@ -222,6 +234,15 @@ def lup_hook_output_to_claude(
                     permissionDecisionReason=output.reason,
                     updatedInput=placed_input,
                     additionalContext=output.additional_context,
+                )
+            )
+        case "PreToolUse", "ask" if placed_input is not None:
+            return claude_types.SyncHookJSONOutput(
+                hookSpecificOutput=claude_types.PreToolUseHookSpecificOutput(
+                    hookEventName="PreToolUse",
+                    permissionDecision="ask",
+                    permissionDecisionReason=output.reason,
+                    updatedInput=placed_input,
                 )
             )
         case "PreToolUse", "ask" if output.additional_context:

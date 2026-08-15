@@ -17,7 +17,7 @@ all on the host the resolver most often runs on.
 from collections import Counter
 from datetime import datetime, timedelta
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from lup.channels.models import utc_now
 from lup.resolver.journal import journal_tail
@@ -59,7 +59,7 @@ class RunStatus(BaseModel):
     """Whether a process holds the run lock — the liveness answer."""
 
     phase: ResolvePhase | None = None
-    counts: list[StatusCount] = Field(default_factory=list)
+    counts: list[StatusCount] = []
     unanswered: int = 0
     last: LastRecorded | None = None
 

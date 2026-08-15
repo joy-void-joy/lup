@@ -75,6 +75,10 @@ class UrlScope(BaseModel):
     any_port: bool = False
 
 
+# The three erasures to the kernel's primitive rows read alike on purpose, and
+# `antipattern_row` erases a model another module declares, so it could not be
+# a method even if these two were.
+# lup: ignore[model-free-function] — one of that erasure family
 def url_scope_row(scope: UrlScope) -> UrlScopeRow:
     """Erase a validated URL scope into the kernel's primitive row."""
     parsed = urlsplit(str(scope.origin))
@@ -228,7 +232,14 @@ class PathRule(BaseModel):
     reason: str
     allow_autonomous: bool = False
 
+    def matches(self, path: Path) -> bool:
+        """Compare a path with this rule through the canonical kernel matcher."""
+        return kernel_path_rule_matches(
+            path.as_posix(), path.exists(), path_rule_row(self)
+        )
 
+
+# lup: ignore[model-free-function] — the same erasure family as url_scope_row
 def path_rule_row(rule: PathRule) -> PathRuleRow:
     """Erase one validated path rule into the kernel's primitive row."""
     return PathRuleRow(
@@ -249,11 +260,6 @@ def human_owned_path_rule(path: str) -> PathRule:
             " instead of editing"
         ),
     )
-
-
-def path_rule_matches(path: Path, rule: PathRule) -> bool:
-    """Compare a path with one rule through the canonical kernel matcher."""
-    return kernel_path_rule_matches(path.as_posix(), path.exists(), path_rule_row(rule))
 
 
 def antipattern_row(rule: AntiPattern) -> AntiPatternRow:

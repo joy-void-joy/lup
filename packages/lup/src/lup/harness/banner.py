@@ -15,6 +15,8 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Discriminator, Field
 
+# lup: ignore[constant-declaration] — the command a reader types, whose words are
+# the CLI's own rather than a preference this module holds
 REGENERATE_COMMAND = "uv run lup-devtools harness generate all"
 """The devtools command that rebuilds every native harness tree."""
 
@@ -107,6 +109,8 @@ class CommentRouter:
         return selected.syntax
 
 
+# lup: ignore[library-default] — one route per comment syntax the formats
+# themselves define, so the table follows the languages rather than a taste
 ARTIFACT_COMMENT_ROUTER = CommentRouter(
     [
         CommentRoute(
@@ -189,7 +193,7 @@ class GeneratedBanner(BaseModel):
     command: str = Field(min_length=1)
     """The command a reader runs to rebuild this artifact, exactly as typed."""
 
-    notes: list[str] = Field(default_factory=list)
+    notes: list[str] = []
     """Anything else a reader of this one target needs, such as where the
     personal half of a generated configuration lives."""
 

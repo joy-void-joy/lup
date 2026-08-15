@@ -20,7 +20,9 @@ logger = logging.getLogger(__name__)
 
 FROZEN = ConfigDict(frozen=True, extra="ignore", populate_by_name=True)
 
-RATE_LIMITS_METHOD = "account/rateLimits/read"
+RATE_LIMITS_METHOD = "account/rateLimits/read"  # lup: ignore[constant-declaration]
+# lup: ignore[constant-declaration] — both are app-server method names, and the
+# docstring below is about how little freedom there is in spelling this one
 TOKEN_USAGE_METHOD = "account/usage/read"
 """What the runtime calls the daily-token read, which is not what it returns.
 
@@ -30,6 +32,7 @@ should be ``account/tokenUsage/read``. It is not, and the runtime answers a
 method it does not know with an error rather than a hint.
 """
 
+# lup: ignore[constant-declaration] — JSON-RPC's own code, fixed by the protocol
 METHOD_NOT_FOUND = -32601
 """JSON-RPC's own code for a method this runtime does not have."""
 

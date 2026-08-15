@@ -25,6 +25,8 @@ from lup.runtime.selection import Runtime, SessionAutonomy, SessionRequest
 
 type CodexSandbox = Literal["read-only", "workspace-write", "danger-full-access"]
 
+# lup: ignore[constant-declaration] — each value is Codex's own sandbox name for
+# the autonomy beside it, over a vocabulary this library closes
 CODEX_AUTONOMY: dict[SessionAutonomy, CodexSandbox] = {
     "ask": "read-only",
     "plan": "read-only",

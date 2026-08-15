@@ -41,8 +41,8 @@ class NotesConfig(BaseModel):
     session: Path = Field(description="This session's working directory")
     output: Path = Field(description="Where this session saves its outputs")
     trace_log: Path = Field(description="Trace log path (agent cannot access)")
-    rw: list[Path] = Field(default_factory=list, description="Read-write directories")
-    ro: list[Path] = Field(default_factory=list, description="Read-only directories")
+    rw: list[Path] = Field(default=[], description="Read-write directories")
+    ro: list[Path] = Field(default=[], description="Read-only directories")
 
     @property
     def all_dirs(self) -> list[Path]:

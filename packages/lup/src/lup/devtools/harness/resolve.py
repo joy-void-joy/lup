@@ -164,6 +164,29 @@ class ResolverIntake(BaseModel):
     carried: list[CarriedNote]
     generated: list[GeneratedNote]
 
+    def describe(self) -> list[str]:
+        """Render this scan the way somebody deciding whether to start a run reads it.
+
+        Every note is named at its own site rather than only counted, because
+        the question this answers — whether the run about to be started is the
+        one worth having — turns on which notes it would plan from and which it
+        would leave alone, not on how many there are of each.
+
+        Each is named and not quoted: what the notes say is one `dev comments`
+        away, and reprinting fifty of them buries the partition this exists to
+        show under the listing that already exists.
+        """
+        return [
+            f"{len(self.actionable)} to plan, {len(self.carried)} carried, "
+            f"{len(self.generated)} left to a generator",
+            *(
+                f"planning from {note.file}:{note.start_line}-{note.end_line}"
+                for note in self.actionable
+            ),
+            *(note.describe() for note in self.carried),
+            *(note.describe() for note in self.generated),
+        ]
+
 
 def resolver_intake(
     comments: list[FoundComment], owned: GeneratedArtifacts
@@ -221,30 +244,6 @@ def scanned_intake(root: Path) -> ResolverIntake:
     return resolver_intake(scan_tracked(find_feedback), generated_artifacts(root))
 
 
-def describe_intake(intake: ResolverIntake) -> list[str]:
-    """Render one scan the way somebody deciding whether to start a run reads it.
-
-    Every note is named at its own site rather than only counted, because the
-    question this answers — whether the run about to be started is the one
-    worth having — turns on which notes it would plan from and which it would
-    leave alone, not on how many there are of each.
-
-    Each is named and not quoted: what the notes say is one `dev comments`
-    away, and reprinting fifty of them buries the partition this exists to
-    show under the listing that already exists.
-    """
-    return [
-        f"{len(intake.actionable)} to plan, {len(intake.carried)} carried, "
-        f"{len(intake.generated)} left to a generator",
-        *(
-            f"planning from {note.file}:{note.start_line}-{note.end_line}"
-            for note in intake.actionable
-        ),
-        *(note.describe() for note in intake.carried),
-        *(note.describe() for note in intake.generated),
-    ]
-
-
 def preview_intake() -> None:
     """Print what a run started now would plan from, without starting one.
 
@@ -256,7 +255,7 @@ def preview_intake() -> None:
     Notes only. A run also takes the project's open issues unless it is
     started with `--no-issues`, and `dev issues` prints exactly those.
     """
-    for line in describe_intake(scanned_intake(project_root())):
+    for line in scanned_intake(project_root()).describe():
         typer.echo(line)
 
 
@@ -491,6 +490,8 @@ def run_resolver_tool_server() -> None:
 
 
 SUPERVISED_WAIT_SECONDS = 3600.0
+"""The shipped floor ``SupervisorSpawn`` takes as its field default below,
+which is where a caller replaces it."""
 
 
 class SupervisorSpawn(BaseModel):
@@ -501,6 +502,10 @@ class SupervisorSpawn(BaseModel):
     enabled: bool = False
     port: int = SUPERVISOR_PORT
     linger: bool = False
+
+    wait_floor: float = SUPERVISED_WAIT_SECONDS
+    """The shortest wait a supervised run takes, whatever it was asked for: a
+    page nobody is watching yet is the case the wait exists for."""
 
     def arguments(self) -> list[str]:
         """These settings again, for a relaunch that must open the same page."""
@@ -513,7 +518,12 @@ class SupervisorSpawn(BaseModel):
             *(["--supervise-linger"] if self.linger else []),
         ]
 
+    def waiting(self, asked: float) -> float:
+        """How long this run waits for an answer, given what was asked."""
+        return max(asked, self.wait_floor) if self.enabled else asked
 
+
+# lup: ignore[model-free-function] — driver: it spawns the supervisor process
 @asynccontextmanager
 async def spawned_supervisor(
     spawn: SupervisorSpawn, run_id: str, adapter: str
@@ -852,6 +862,8 @@ def resolver_source_snapshot(
     return SourceSnapshot(branch=branch, commit=commit)
 
 
+# lup: ignore[constant-declaration] — the run's own branch naming, which a
+# resumed run must spell exactly as the run that created the branch
 REVIEW_BRANCH_SUFFIX = "/review"
 
 
@@ -1040,6 +1052,8 @@ class DetachedRun(BaseModel):
         ]
 
 
+# lup: ignore[model-free-function] — driver: it forks a child process and names
+# where its output lands, which no invocation record does to itself
 def detach_resolve(detached: DetachedRun) -> None:
     """Start a run that outlives this command, and say where to reach it.
 
@@ -1120,6 +1134,9 @@ def forwardable_arguments(argv: list[str]) -> list[str]:
     return [argument for argument in argv[1:] if argument != "--detach"]
 
 
+# lup: ignore[model-free-function] — driver: it scans the tree to resolve what
+# the flags name, so the reach into the repository is the operation and the
+# flags are only its subject
 def admission_request(flags: AdmissionFlags) -> AdmissionRequest | None:
     """Build the evidence one invocation asked to admit, if it asked at all."""
     if not flags.named_anything():
@@ -1299,6 +1316,7 @@ def admitted_issues(numbers: list[int]) -> list[IssueEvidence]:
     return [open_issues[number] for number in numbers]
 
 
+# lup: ignore[model-free-function] — driver: it leases worktrees and runs sessions
 def run_resolve(
     composition: NativeHarnessComposition,
     run_id: str | None,
@@ -1365,7 +1383,6 @@ def run_resolve(
             create_codex_session_factory,
         )
         from lup.adapters.claude.config_home import (
-            configuration_fault,
             selected_config_home,
             untrusted_degradation,
             workspace_config_environment,
@@ -1490,7 +1507,7 @@ def run_resolve(
         # turned one environmental fault into an exception group of concern
         # failures and burned every lease the run had taken.
         fault = (
-            configuration_fault(selected_config_home(session_environment))
+            selected_config_home(session_environment).configuration_fault()
             if adapter == "claude"
             else None
         )

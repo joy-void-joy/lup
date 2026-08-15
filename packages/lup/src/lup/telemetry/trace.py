@@ -165,11 +165,11 @@ class TraceLogger(BaseModel):
 
     trace_path: Path = Field(description="Path to save the trace file")
     title: str = Field(description="Title for the trace")
-    entries: list[TraceEntry] = Field(default_factory=list)
-    events: list[TraceEvent] = Field(default_factory=list)
+    entries: list[TraceEntry] = []
+    events: list[TraceEvent] = []
     # Open tool-use-id -> tool-name map, filled as blocks stream in.
     tool_names: dict[str, str] = Field(  # lup: ignore[dict-str-payload]
-        default_factory=dict, exclude=True
+        default={}, exclude=True
     )
 
     def model_post_init(self, _context: object) -> None:

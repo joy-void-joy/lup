@@ -214,6 +214,9 @@ class NativeSemantics(BaseModel):
         return self.agent_escalates and sandbox.escapable
 
 
+# A composition root over policy and semantics together; on either one it would
+# be that half constructing hooks out of the other.
+# lup: ignore[model-free-function] — composition root
 def create_policy_hooks(
     policy: DecisionPolicy[SemanticTool],
     semantics: NativeSemantics,

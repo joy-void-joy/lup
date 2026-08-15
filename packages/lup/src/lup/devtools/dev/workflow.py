@@ -18,11 +18,18 @@ from pydantic import BaseModel, ConfigDict
 from lup.devtools.dev.commit_guard import DRIFT_COMMAND
 from lup.harness.banner import GeneratedBanner
 from lup.harness.materialization import write_generated_file
+from lup.harness.banner import REGENERATE_COMMAND
 from lup.harness.models import Artifact
 from lup.workspace.paths import project_root
 
+# lup: ignore[constant-declaration] — the directory GitHub Actions itself reads
 WORKFLOW_PATH = Path(".github/workflows/quality.yml")
-WORKFLOW_COMMAND = "uv run lup-devtools harness generate all"
+WORKFLOW_COMMAND = REGENERATE_COMMAND
+"""What the gate runs to rebuild every tree, taken from the command the banners
+already tell a reader to type so the two cannot name different things."""
+
+# lup: ignore[constant-declaration] — the command a reader types, whose words
+# are the CLI's own rather than a preference this module holds
 CHECK_COMMAND = "uv run lup-devtools dev check"
 
 
@@ -47,48 +54,47 @@ class WorkflowSpec(BaseModel):
     sync_flags: list[str] = ["--all-extras"]
     """What `uv sync` is given before the gate runs."""
 
-
-def workflow_body(spec: WorkflowSpec) -> str:
-    """Render the workflow YAML from one project's declared choices."""
-    return f"""name: Quality
+    def body(self) -> str:
+        """Render the workflow YAML from these declared choices."""
+        return f"""name: Quality
 
 on:
   pull_request:
   push:
-    branches: [{", ".join(spec.branches)}]
+    branches: [{", ".join(self.branches)}]
 
 jobs:
   check:
-    runs-on: {spec.runner}
+    runs-on: {self.runner}
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
-      - run: uv sync {" ".join(spec.sync_flags)}
+      - run: uv sync {" ".join(self.sync_flags)}
       - name: Generated artifact drift
         run: {DRIFT_COMMAND}
       - name: Quality gate
         run: {CHECK_COMMAND}
 """
 
+    def artifact(self) -> Artifact:
+        """This workflow as one artifact, gated like any other generated file."""
+        return Artifact.generated(
+            path=WORKFLOW_PATH,
+            body=self.body(),
+            semantic_id="ci.quality",
+            banner=GeneratedBanner(source=__name__, command=WORKFLOW_COMMAND),
+        )
 
-def workflow_artifact(spec: WorkflowSpec) -> Artifact:
-    """The workflow as one artifact, gated like any other generated file."""
-    return Artifact.generated(
-        path=WORKFLOW_PATH,
-        body=workflow_body(spec),
-        semantic_id="ci.quality",
-        banner=GeneratedBanner(source=__name__, command=WORKFLOW_COMMAND),
-    )
 
-
+# lup: ignore[model-free-function] — driver writing the artifact into a tree
 def write_workflow(
     spec: WorkflowSpec, root: Path | None = None, *, check: bool = False
 ) -> Path:
     """Write or verify the generated continuous-integration workflow."""
     return write_generated_file(
-        workflow_artifact(spec),
+        spec.artifact(),
         root or project_root(),
         WORKFLOW_COMMAND,
         check=check,

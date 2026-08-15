@@ -176,6 +176,7 @@ def is_trusted_script(word: str, roots: list[str]) -> bool:
     )
 
 
+# lup: ignore[constant-declaration] — refusal wording, declared with its verdict
 GENERATED_PLUGIN_REFUSAL = (
     "a native plugin tree is compiled from typed source, and the running"
     " runtime already loaded it — edit the policy source, run"
@@ -519,7 +520,7 @@ def opaque_argument(word: str) -> bool:
 HELP_UNSAFE = set("/=$*?~<>|&;`\\'\" \t\n")
 
 
-def is_help_probe(arguments: list[str]) -> bool:
+def is_help_probe(arguments: list[str], unsafe: set[str] = HELP_UNSAFE) -> bool:
     """Recognize an invocation that only prints usage.
 
     ``--help`` is inert wherever it sits among plain subcommand words, so
@@ -529,7 +530,7 @@ def is_help_probe(arguments: list[str]) -> bool:
     """
     if not arguments:
         return False
-    if any(character in HELP_UNSAFE for word in arguments for character in word):
+    if any(character in unsafe for word in arguments for character in word):
         return False
     if arguments == ["-h"]:
         return True

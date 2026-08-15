@@ -28,7 +28,11 @@ from lup_template.devtools.harness.content.shell_vocabulary import SHELL_RULES
 
 from examples.common import Summary
 
+# lup: ignore[constant-declaration] — the one origin this example allows, which
+# is the example's subject rather than a value to pass in
 DOCS_ORIGIN = AnyHttpUrl("https://docs.example.com")
+# lup: ignore[constant-declaration] — the one command this example demonstrates a
+# denial on, which is the example's subject rather than a value to pass in
 DENIED_COMMAND = "curl https://docs.example.com/private/token"
 
 SANDBOX = ClaudeSandboxConfig(allow_unsandboxed_commands=True)

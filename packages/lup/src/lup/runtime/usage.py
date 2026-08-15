@@ -80,7 +80,7 @@ class CostAccumulator(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     total: Spend = Field(default_factory=Spend)
-    stages: dict[str, Spend] = Field(default_factory=dict)
+    stages: dict[str, Spend] = {}
     usage_cost: UsageCost | None = Field(
         default=None,
         description=(
