@@ -19,8 +19,11 @@ from lup.harness.process import (
 )
 from lup.resolver.dag import ConcernGraph, ConcernGraphError
 from lup.resolver.join_tools import (
+    JoinDesk,
+    JoinPlan,
     JoinReport,
     JoinStatusInput,
+    JoinTip,
     LandParentInput,
     StartParentInput,
     create_join_tools,
@@ -5670,6 +5673,72 @@ def test_a_tree_that_renders_nothing_authors_everything_it_changed(
     assert orchestrator.authored_between(lease, "base", "parent") == [
         Path("docs/rules.md")
     ]
+
+
+@pytest.mark.asyncio
+async def test_a_parent_an_earlier_run_landed_is_recorded_without_a_second_account(
+    tmp_path: Path,
+) -> None:
+    """A resume re-enters a join the previous run got part way through.
+
+    Its progress file is the run's, so a fresh one starts empty and the
+    merger is offered every parent again — including the ones already in the
+    tree. Those were accounted for when they landed, and asking again would
+    have this merger adjudicate somebody else's decisions against a tree
+    that has since moved past them.
+    """
+    launcher = LocalProcessLauncher()
+    workspace = failure_leg_workspace(tmp_path, launcher)
+
+    def git(*arguments: str, cwd: Path | None = None) -> str:
+        status = launcher.launch(
+            LaunchRequest(arguments=["git", *arguments], cwd=cwd or workspace)
+        )
+        assert status.code == 0, status.stderr
+        return status.stdout.strip()
+
+    git("checkout", "-b", "one", "source")
+    (workspace / "one.txt").write_text("one\n", encoding="utf-8")
+    git("add", "one.txt")
+    git("commit", "-m", "add one")
+    first = git("rev-parse", "HEAD")
+    git("checkout", "source")
+
+    tree = tmp_path / "integration"
+    git("worktree", "add", "--detach", str(tree), "source")
+    # The previous run merged this parent and committed it; this run has no
+    # record of having done so.
+    git("merge", "--no-ff", "-m", "resolve: join", first, cwd=tree)
+
+    run_dir = tmp_path / "state" / "resumed-join"
+    run_dir.mkdir(parents=True)
+    desk = JoinDesk(run_dir)
+    desk.write_plan(
+        JoinPlan(
+            concern_id="integration",
+            worktree=tree,
+            base=git("rev-parse", "source"),
+            title="resolve: join",
+            purpose="integration",
+            tips=[JoinTip(commit=first, concern_id="a")],
+        )
+    )
+    tools = {
+        tool.name: tool
+        for tool in create_join_tools(run_dir, tree, "integration", launcher=launcher)
+    }
+
+    prepared = await tools["start_parent"](StartParentInput(commit=first))
+    assert prepared.state == "already-in-tree"
+
+    landed = await tools["land_parent"](
+        LandParentInput(commit=first, summary="already in")
+    )
+
+    assert landed.landed is True
+    assert landed.problems == []
+    assert landed.unaccounted == []
+    assert desk.progress().joined == [first]
 
 
 @pytest.mark.asyncio

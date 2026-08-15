@@ -490,6 +490,27 @@ def create_join_tools(
         lease = lease_of(plan)
         progress = desk.progress()
         before = worktrees.head(lease)
+        if tip.commit not in progress.joined and worktrees.already_joined(
+            lease, tip.commit
+        ):
+            # In the tree without this run having put it there — a resume
+            # re-entering a join a previous one got part way through. Its
+            # account was settled when it landed, and asking for one again
+            # would have the merger re-adjudicate somebody else's decisions
+            # against a tree that has since moved past them.
+            desk.record(JoinLanding(commit=tip.commit, head=before), len(plan.tips))
+            return LandParentOutput(
+                commit=tip.commit,
+                landed=True,
+                head=before,
+                joined=len(progress.joined) + 1,
+                planned=len(plan.tips),
+                drain_requested=mailbox.draining() is not None,
+                guidance=(
+                    "Already in the tree from an earlier run, and accounted "
+                    "for when it landed. Recorded; start the next parent."
+                ),
+            )
         try:
             head = worktrees.commit_join(lease, plan.title)
         except RuntimeError as unresolved:
