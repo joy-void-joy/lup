@@ -10,6 +10,13 @@ The server executable and workspace root are supplied, so this names no
 particular checker. A failure is reported to the agent as a tool error rather
 than swallowed: an agent told "no references" by a server that never started
 would conclude the symbol is unused.
+
+Which workspace answers is taken from the file asked about rather than from
+the directory the server started in. The two differ whenever work happens in
+a second checkout of one repository, which is the normal case here — and a
+server rooted on the wrong one does not fail, it resolves the same module
+names against different source and answers confidently about a file nobody
+asked about.
 """
 
 import asyncio
@@ -31,6 +38,14 @@ from lup.types import JsonValue
 
 REQUEST_TIMEOUT_SECONDS = 120.0
 """Budget for one question. A server that stops answering fails the tool."""
+
+WORKSPACE_MARKERS = ("pyproject.toml", ".git")
+"""What makes a directory the workspace a file belongs to, nearest first.
+
+Both are markers a checkout carries at its own root, so the search stops at
+the checkout holding the file rather than walking on to whatever encloses it.
+A project that roots on something else passes its own.
+"""
 
 
 class SymbolSite(BaseModel):
@@ -88,7 +103,13 @@ class RenamePlan(BaseModel):
 class PositionInput(BaseModel):
     """A symbol named by where it sits."""
 
-    path: str = Field(description="Repository-relative path to the file.")
+    path: str = Field(
+        description=(
+            "Path to the file. A relative one resolves against the checkout "
+            "this server was started in; pass an absolute path when you are "
+            "working in a different one, such as a worktree."
+        )
+    )
     line: int = Field(description="One-based line number the symbol is on.")
     column: int = Field(
         default=0, description="Zero-based byte column of the symbol on that line."
@@ -104,7 +125,13 @@ class RenameInput(PositionInput):
 class DocumentInput(BaseModel):
     """A whole file to enumerate."""
 
-    path: str = Field(description="Repository-relative path to the file.")
+    path: str = Field(
+        description=(
+            "Path to the file. A relative one resolves against the checkout "
+            "this server was started in; pass an absolute path when you are "
+            "working in a different one, such as a worktree."
+        )
+    )
 
 
 def path_of(uri: str) -> str:
@@ -128,13 +155,18 @@ def sites_of(result: JsonValue) -> list[SymbolSite]:
 
 
 def create_codeintel_tools(
-    server: Path, root: Path, request_timeout: float = REQUEST_TIMEOUT_SECONDS
+    server: Path,
+    root: Path,
+    request_timeout: float = REQUEST_TIMEOUT_SECONDS,
+    markers: tuple[str, ...] = WORKSPACE_MARKERS,
 ) -> list[LupMcpTool]:
     """Build the code-intelligence tools driving *server* over *root*.
 
     Args:
         server: The language-server executable, run with ``--stdio``.
-        root: Workspace root the server resolves imports against.
+        root: Checkout a relative path resolves against, and the workspace
+            for a file that sits in no discoverable one.
+        markers: What makes a directory a workspace root, nearest first.
 
     Returns:
         Tools answering definition, reference, hover, symbol, and rename
@@ -153,14 +185,33 @@ def create_codeintel_tools(
     def located(path: str) -> Path:
         resolved = (root / path).resolve()
         if not resolved.is_file():
-            raise ToolError(f"no such file: {path}")
+            raise ToolError(f"no such file under {root}: {path}")
         return resolved
+
+    def workspace_for(file: Path) -> Path:
+        """The checkout that should answer about *file*, not the one launched in.
+
+        A server is started once, against the directory the session opened,
+        and keeps that root for its lifetime. Ask it about a file in another
+        checkout of the same repository — a worktree, which is where this
+        project asks that every change be made — and it would resolve the
+        imports against the launch directory: same module names, different
+        source, and an answer that is well-formed and about the wrong tree.
+        The file is the only thing a question carries that knows where it
+        lives, so it is what picks the workspace.
+        """
+        for directory in file.parents:
+            if any((directory / marker).exists() for marker in markers):
+                return directory
+        return root
 
     async def at_position(method: str, params: PositionInput) -> JsonValue:
         resolved = located(params.path)
 
         async def run() -> JsonValue:
-            async with lsp_session(server, root, name=server.name) as session:
+            async with lsp_session(
+                server, workspace_for(resolved), name=server.name
+            ) as session:
                 return await session.request(
                     method,
                     await session.position_in(resolved, params.line, params.column),
@@ -187,7 +238,9 @@ def create_codeintel_tools(
         resolved = located(params.path)
 
         async def run() -> JsonValue:
-            async with lsp_session(server, root, name=server.name) as session:
+            async with lsp_session(
+                server, workspace_for(resolved), name=server.name
+            ) as session:
                 request = await session.position_in(
                     resolved, params.line, params.column
                 )
@@ -216,7 +269,9 @@ def create_codeintel_tools(
         resolved = located(params.path)
 
         async def run() -> JsonValue:
-            async with lsp_session(server, root, name=server.name) as session:
+            async with lsp_session(
+                server, workspace_for(resolved), name=server.name
+            ) as session:
                 await session.open(resolved)
                 return await session.request(
                     "textDocument/documentSymbol",
@@ -245,7 +300,9 @@ def create_codeintel_tools(
         resolved = located(params.path)
 
         async def run() -> JsonValue:
-            async with lsp_session(server, root, name=server.name) as session:
+            async with lsp_session(
+                server, workspace_for(resolved), name=server.name
+            ) as session:
                 request = await session.position_in(
                     resolved, params.line, params.column
                 )

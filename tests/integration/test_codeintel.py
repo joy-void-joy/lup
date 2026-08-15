@@ -8,6 +8,7 @@ specific, rather than asserting the tools exist.
 """
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -121,6 +122,35 @@ async def test_a_rename_is_planned_and_never_written() -> None:
 
     assert result["files"], "a symbol with uses planned no edits"
     assert target.read_text(encoding="utf-8") == before, "the plan wrote to disk"
+
+
+@pytest.mark.asyncio
+async def test_a_file_in_another_checkout_resolves_against_its_own(
+    tmp_path: Path,
+) -> None:
+    """The server is started once; the work happens somewhere else.
+
+    A worktree is a second checkout of the same repository, which is where
+    this project asks that every change be made, and a server rooted on the
+    launch directory resolves the same module names against different
+    source. The failure is silent — a well-formed answer about the wrong
+    tree — so this pins the import, which only resolves if the workspace
+    followed the file.
+    """
+    elsewhere = tmp_path / "other-checkout"
+    elsewhere.mkdir()
+    (elsewhere / "pyproject.toml").write_text("[project]\nname = 'other'\n")
+    (elsewhere / "helpers.py").write_text("def only_here() -> int:\n    return 1\n")
+    caller = elsewhere / "caller.py"
+    caller.write_text("from helpers import only_here\n\nonly_here()\n")
+
+    result = await call(
+        "find_definition",
+        PositionInput(path=str(caller), line=3, column=0),
+    )
+
+    assert result["sites"], "the import resolved against the wrong checkout"
+    assert result["sites"][0]["path"].endswith("helpers.py")
 
 
 @pytest.mark.asyncio
