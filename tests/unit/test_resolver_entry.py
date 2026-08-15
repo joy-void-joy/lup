@@ -746,9 +746,7 @@ async def test_a_statement_seeded_run_reaches_a_planned_inventory() -> None:
     planner: InventoryPlanner = plan
     concerns = (await request.inventory(planner)).concerns
 
-    assert [concern.evidence for concern in concerns] == [
-        "the relay must investigate"
-    ]
+    assert [concern.evidence for concern in concerns] == ["the relay must investigate"]
     assert [(note.file, note.line) for note in concerns[0].notes] == [
         (Path("parked.py"), 2)
     ]
