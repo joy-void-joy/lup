@@ -1,3 +1,7 @@
+# lup: ignore[constant-declaration]
+# Every constant here is what Claude Code itself calls one of these things, so
+# each docstring below states the value's own provenance and a caller passing
+# a different one would be reading a home no runtime writes.
 """Claude Code's configuration document, and a private one per workspace.
 
 Where that document sits is Claude's own rule rather than a shape any
@@ -17,7 +21,7 @@ repository, and to nothing else it happens to open a session in.
 import json
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
 from lup.adapters.claude.login import CLAUDE_CONFIG_DIR, CLAUDE_LOGIN
 from lup.channels.models import write_atomic
@@ -62,13 +66,26 @@ def default_config_home() -> Path:
     return Path.home() / CLAUDE_HOME_DIR
 
 
-class ClaudeConfigHome(BaseModel):
+class ClaudeConfigHome(BaseModel, frozen=True):
     """One selected configuration home, and the document it reads."""
-
-    model_config = ConfigDict(frozen=True)
 
     directory: Path
     document: Path
+
+    def configuration_fault(self) -> str | None:
+        """Why no session can be opened under this home yet, if anything.
+
+        Every private home a run derives is seeded from this one document, so a
+        run that cannot read it cannot open a session anywhere — a fact about
+        the environment rather than about any one piece of work. Answered once
+        and up front, it is a single message before anything is leased, instead
+        of the same fault rediscovered by every session that races to start.
+        """
+        try:
+            load_document(self.document)
+        except ClaudeConfigUnreadable as error:
+            return f"{error}. {restoration_advice(self.directory)}"
+        return None
 
 
 def selected_config_home(environment: EnvVars) -> ClaudeConfigHome:
@@ -154,22 +171,6 @@ def restorable_backups(directory: Path) -> list[Path]:
         key=lambda path: path.stat().st_mtime,
         reverse=True,
     )
-
-
-def configuration_fault(home: ClaudeConfigHome) -> str | None:
-    """Why no session can be opened under this home yet, if anything.
-
-    Every private home a run derives is seeded from this one document, so a
-    run that cannot read it cannot open a session anywhere — a fact about
-    the environment rather than about any one piece of work. Answered once
-    and up front, it is a single message before anything is leased, instead
-    of the same fault rediscovered by every session that races to start.
-    """
-    try:
-        load_document(home.document)
-    except ClaudeConfigUnreadable as error:
-        return f"{error}. {restoration_advice(home.directory)}"
-    return None
 
 
 def restoration_advice(directory: Path) -> str:

@@ -2,9 +2,10 @@
 
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field
 import yaml
 
+from lup.devtools.dev.commit_guard import DRIFT_COMMAND
 from lup.devtools.dev.workflow import (
     CHECK_COMMAND,
     WORKFLOW_PATH,
@@ -22,19 +23,15 @@ from lup.devtools.harness.evidence import (
 STALE_LEDGER = [EvidenceEntry(capability="codex-cli", version="0.144.4")]
 
 
-class WorkflowStep(BaseModel):
+class WorkflowStep(BaseModel, frozen=True):
     """Workflow step fields relevant to native evidence execution."""
-
-    model_config = ConfigDict(frozen=True)
 
     name: str | None = None
     run: str | None = None
 
 
-class WorkflowJob(BaseModel):
+class WorkflowJob(BaseModel, frozen=True):
     """Workflow job fields that enforce evidence ordering."""
-
-    model_config = ConfigDict(frozen=True)
 
     needs: list[str] = Field(default_factory=list)
     condition: str | None = Field(default=None, alias="if")
@@ -42,10 +39,8 @@ class WorkflowJob(BaseModel):
     steps: list[WorkflowStep]
 
 
-class NativeWorkflow(BaseModel):
+class NativeWorkflow(BaseModel, frozen=True):
     """Validated native-workflow job graph."""
-
-    model_config = ConfigDict(frozen=True)
 
     jobs: dict[str, WorkflowJob]
 
@@ -119,16 +114,19 @@ def test_native_workflow_probes_even_when_strict_evidence_fails() -> None:
 
 
 def test_pull_request_workflow_runs_the_same_gate_a_checkout_runs() -> None:
-    """One command, so what CI enforces cannot drift from what `dev check` is.
+    """The gate is one command, so what CI enforces cannot drift from it.
 
     Every row this used to spell out is a row of that command, harness drift
-    included; naming them again here is what let the two lists disagree.
+    included; naming them again here is what let the two lists disagree. The
+    drift step ahead of it is not a second list: it is the constant the commit
+    hook installs, so a contributor who never armed the hook meets the same
+    refusal here.
     """
     document = yaml.safe_load(WORKFLOW_PATH.read_text(encoding="utf-8"))
     workflow = NativeWorkflow.model_validate(document)
     commands = [step.run for step in workflow.jobs["check"].steps if step.run]
 
-    assert commands == ["uv sync --all-extras", CHECK_COMMAND]
+    assert commands == ["uv sync --all-extras", DRIFT_COMMAND, CHECK_COMMAND]
 
 
 def test_the_workflow_on_disk_is_the_one_the_declaration_renders() -> None:

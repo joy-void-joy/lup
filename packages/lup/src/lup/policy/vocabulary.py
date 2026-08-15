@@ -39,19 +39,19 @@ whether opening a pull request is authoring or publishing.
 
 from collections.abc import Sequence
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
+from lup.policy.kernel.decision import SandboxPlacement
 from lup.policy.shell_rules import (
+    RunnerTargetRule,
     ShellCommandRule,
     ShellOperationRule,
     ShellSubcommandRule,
 )
 
 
-class JudgedCommand(BaseModel):
+class JudgedCommand(BaseModel, frozen=True):
     """One command that stops for a human, and the reason it gives them."""
-
-    model_config = ConfigDict(frozen=True)
 
     name: str
     reason: str
@@ -65,7 +65,6 @@ class JudgedCommand(BaseModel):
 def read_only_rules(
     commands: Sequence[str] = (
         "ls",
-        "tree",
         "cat",
         "echo",
         "printf",
@@ -80,6 +79,8 @@ def read_only_rules(
         "fold",
         "cut",
         "tr",
+        "expr",
+        "numfmt",
         "comm",
         "join",
         "paste",
@@ -88,7 +89,6 @@ def read_only_rules(
         "grep",
         "egrep",
         "fgrep",
-        "rg",
         "diff",
         "cmp",
         "jq",
@@ -149,7 +149,7 @@ def read_only_rules(
     are deliberately absent — each decides what some later command sees or
     does, which is the thing this list promises a reader it does not touch.
     """
-    return [ShellCommandRule(name=name) for name in commands]
+    return [ShellCommandRule(name=name, default_effect="allow") for name in commands]
 
 
 def judged_ask_rules(
@@ -298,6 +298,7 @@ def guarded_tool_rules() -> list[ShellCommandRule]:
             # nothing to run. Everything landing inside it still passes the
             # write and edit gates on its own path.
             name="mkdir",
+            default_effect="allow",
         ),
         ShellCommandRule(
             # -l/-L print fingerprints and public keys — the read-only
@@ -315,11 +316,38 @@ def guarded_tool_rules() -> list[ShellCommandRule]:
         ),
         ShellCommandRule(
             name="sort",
+            default_effect="allow",
             ask_flags=["-o", "--output", "--compress-program"],
             reason="a sort flag that writes a file or runs a program requires approval",
         ),
         ShellCommandRule(
+            # Listing a directory is a read, and `-o` lands that listing in a
+            # file — the same flag on the same kind of tool as `sort -o`.
+            name="tree",
+            default_effect="allow",
+            ask_flags=["-o"],
+            reason="a tree flag that writes a file requires approval",
+        ),
+        ShellCommandRule(
+            # A search that runs a program. `--pre` and `--hostname-bin` name
+            # one ripgrep invokes for every file it touches, which is
+            # arbitrary execution wearing a search's clothes, and `-z` hands
+            # the input to whichever decompressor the extension implies.
+            name="rg",
+            default_effect="allow",
+            ask_flags=["--pre", "--hostname-bin", "--search-zip", "-z"],
+            reason="a ripgrep flag that runs another program requires approval",
+        ),
+        ShellCommandRule(
+            # Encoding is a filter; `-o` is the one form that lands a file.
+            name="base64",
+            default_effect="allow",
+            ask_flags=["-o", "--output"],
+            reason="a base64 flag that writes a file requires approval",
+        ),
+        ShellCommandRule(
             name="yq",
+            default_effect="allow",
             ask_flags=["-i", "--inplace", "--in-place", "-s", "--split-exp"],
             reason=(
                 "a yq flag that edits files in place or splits into files"
@@ -332,6 +360,7 @@ def guarded_tool_rules() -> list[ShellCommandRule]:
             # cluster-match benign words like -noout, and no bare "-o" option
             # exists.
             name="xmllint",
+            default_effect="allow",
             ask_flags=["--output", "-output", "--shell", "-shell"],
             reason=(
                 "an xmllint flag that writes files or opens a shell requires approval"
@@ -342,12 +371,14 @@ def guarded_tool_rules() -> list[ShellCommandRule]:
             # screen; only the file-writing and deleting actions remain
             # flag-guarded.
             name="find",
-            ask_flags=["-delete", "-fprint", "-fprintf", "-fls"],
+            default_effect="allow",
+            ask_flags=["-delete", "-fprint", "-fprint0", "-fprintf", "-fls"],
             reason="a mutating find action requires approval",
         ),
         ShellCommandRule(
             # `ss -K` closes established sockets; every other form reports.
             name="ss",
+            default_effect="allow",
             ask_flags=["-K", "--kill"],
             reason="killing sockets requires approval",
         ),
@@ -362,11 +393,72 @@ def guarded_tool_rules() -> list[ShellCommandRule]:
             ask_flags=["-l", "-e", "-c"],
             reason="netcat moves data unless -z pins it to a port scan",
         ),
-        ShellCommandRule(name="cd", reason="directory navigation"),
+        ShellCommandRule(
+            name="cd", default_effect="allow", reason="directory navigation"
+        ),
     ]
 
 
-GIT_READ_ONLY_SUBCOMMANDS = (  # lup: ignore[library-default] — git's own query subcommands; each reads the object store and writes nothing, which is a fact about git rather than a choice made for an adopter
+def runner_target_rules(
+    ambient: Sequence[str] = ("pyright", "pytest", "ruff"),
+    session_opening: Sequence[str] = ("lup-devtools",),
+) -> list[RunnerTargetRule]:
+    """The ``uv run`` targets a project blesses, grouped by what each needs.
+
+    A checker reads the tree and writes inside it, so it runs wherever the
+    session runs and takes ``ambient``.
+
+    A toolchain that opens agent sessions cannot. The runtime keeps
+    per-session state under its own configuration directory — for Claude Code,
+    ``~/.claude/session-env/<session id>``, following ``CLAUDE_CONFIG_DIR`` —
+    and a session opened from inside a sandbox that does not grant that path
+    dies on its first shell call with a bare ``EROFS``, which reads to an agent
+    like a broken repository rather than like a boundary. It then retries,
+    works around it, or reports success from a session that never ran a
+    command; one planning run finished that way and looked normal.
+
+    Measured rather than assumed, because the deny looks like the runtime
+    protecting its own configuration directory: under one ``~/.claude`` parent,
+    ``debug`` — a path the sandbox grants — accepts a directory, while
+    ``session-env`` and a per-session configuration directory beside it, which
+    it does not grant, both refuse one with ``EROFS``. So the deny is the
+    ordinary write allowlist and a grant would lift it. It is still not the
+    remedy: the runtime chooses that path per session, so the grant is a family
+    rather than a path; deriving a private configuration home does not move it,
+    because every entry such a home does not own links back to the shared one;
+    and session state is only the first thing such a
+    toolchain writes outside the tree — a worktree, a plugin cache, and the
+    git configuration behind them follow it.
+
+    Which is why the escape is declared here, once, on the toolchain itself,
+    rather than left to each caller to remember. Where a runtime places no
+    single call outside its sandbox, a confined session is stopped with that
+    reason instead — see :func:`~lup.policy.kernel.shell.decide_shell`.
+    """
+    return [
+        *[RunnerTargetRule(name=name) for name in ambient],
+        *[RunnerTargetRule(name=name, sandbox="outside") for name in session_opening],
+    ]
+
+
+# One criterion decides this table, applied across git's surface rather than to
+# whichever word was last found missing: a subcommand belongs here when it moves
+# no ref, mutates no index entry, and writes nothing into the working tree.
+#
+# That is a question about what a verb *reaches*, not about whether it happens
+# to write bytes, which is why the object-construction verbs pass it. An object
+# nothing points at is unreachable the moment it exists and git collects it, so
+# there is no ref to restore and nothing to undo — `merge-tree --write-tree`,
+# the way to ask whether two branches still merge, is as unremarkable as
+# `merge-base`, and refusing it refuses the question rather than the write.
+#
+# What fails the criterion is absent on purpose and meets git's own deny:
+# `read-tree` and `update-index` write the index, `update-ref` and `pack-refs`
+# move refs, and `format-patch`, `unpack-file`, and `difftool --dir-diff` each
+# land files in the working tree.
+# lup: ignore[library-default] — git's own query and object-construction verbs, taken by the criterion above; which of them reaches a ref is a fact about git rather than a choice made for an adopter
+GIT_READ_ONLY_SUBCOMMANDS = (
+    # Reporting on the object store, the refs, the index, and the config.
     "status",
     "rev-parse",
     "ls-files",
@@ -376,7 +468,6 @@ GIT_READ_ONLY_SUBCOMMANDS = (  # lup: ignore[library-default] — git's own quer
     "blame",
     "annotate",
     "describe",
-    "shortlog",
     "rev-list",
     "name-rev",
     "merge-base",
@@ -398,41 +489,41 @@ GIT_READ_ONLY_SUBCOMMANDS = (  # lup: ignore[library-default] — git's own quer
     # read-only or reversible". Even with `--write-tree` it only adds objects
     # to the store: no ref, no index, no working tree. Sweep the rest of git's
     # query verbs the same way rather than adding this one word.
-    # Object-store queries. These reach the store and stop there: no ref
-    # moves, no index entry changes, no file in the working tree is touched.
-    # `merge-tree --write-tree` and `hash-object -w` add loose objects, which
-    # nothing references and gc collects — the same standing as the pack a
-    # fetch already writes unasked.
-    "merge-tree",
-    "hash-object",
-    "patch-id",
-    "verify-pack",
-    "show-index",
-    "pack-redundant",
-    "get-tar-commit-id",
-    "check-ref-format",
-    "stripspace",
     "show-ref",
-    "symbolic-ref",
     "for-each-ref",
     "count-objects",
     "cherry",
-    "range-diff",
-    "diff-tree",
-    "diff-index",
-    "diff-files",
     "check-ignore",
     "check-attr",
     "check-mailmap",
+    "check-ref-format",
+    "column",
+    "fmt-merge-msg",
     "show-branch",
+    "show-index",
     "verify-commit",
     "verify-tag",
+    "verify-pack",
+    "pack-redundant",
+    "fsck",
+    "patch-id",
+    "request-pull",
+    "stripspace",
+    "get-tar-commit-id",
     "var",
     "version",
     "help",
+    # Constructing an object, which no ref yet points at.
+    "merge-tree",
+    "hash-object",
+    "commit-tree",
+    "mktree",
+    "mktag",
+    "write-tree",
 )
 
-GIT_REVERSIBLE_SUBCOMMANDS = (  # lup: ignore[library-default] — git subcommands the reflog or a second invocation undoes; fixed by what git records rather than by taste
+# lup: ignore[library-default] — git subcommands the reflog or a second invocation undoes; fixed by what git records rather than by taste
+GIT_REVERSIBLE_SUBCOMMANDS = (
     "add",
     "commit",
     "mv",
@@ -447,6 +538,7 @@ GIT_REVERSIBLE_SUBCOMMANDS = (  # lup: ignore[library-default] — git subcomman
 def git_rule(
     guard_force_push: bool = True,
     redirect_checkout: bool = False,
+    sandbox: SandboxPlacement = "outside",
 ) -> ShellCommandRule:
     """Compile the git surface: reads and reversible work allow, losses ask.
 
@@ -467,9 +559,18 @@ def git_rule(
     ref-sourced ``checkout <ref> -- <path>`` form is recognized by the kernel
     ahead of this row either way, because committed content stays
     recoverable.
+
+    ``sandbox`` is where git runs, stated once here and inherited by every
+    subcommand. It is the other axis rather than another effect: a fetch
+    confined to a sandbox with no route to the remote fails however freely it
+    was allowed, and a worktree or config write confined away from the
+    repository's own locks fails the same way, so the placement follows the
+    tool rather than a list of its verbs. A project whose sandbox does reach
+    its remotes answers ``escalable`` instead, which keeps the ordinary fetch
+    confined and leaves the way out to the agent that finds it needs one.
     """
     leaf = [
-        ShellSubcommandRule(name=name)
+        ShellSubcommandRule(name=name, effect="allow")
         for name in (*GIT_READ_ONLY_SUBCOMMANDS, *GIT_REVERSIBLE_SUBCOMMANDS)
     ]
     push_flags = ["--delete", "--mirror", "--prune"]
@@ -477,33 +578,70 @@ def git_rule(
         *[
             ShellSubcommandRule(
                 name=name,
+                effect="allow",
                 ask_flags=["--output"],
                 reason="writing command output to a file requires approval",
             )
-            for name in ("log", "diff", "show", "whatchanged")
+            # `--output` names a path on the command line and lands a file
+            # there, which is the clause that disqualified `format-patch` from
+            # the query family above. The plumbing spellings are not a quieter
+            # kind of read: `diff-tree --output=` lands a file exactly where
+            # `log --output=` does.
+            #
+            # The guard has to follow forwarding rather than only the verbs
+            # that document the flag, because several reach it by handing their
+            # arguments to `log` or `diff` — `stash list`, `stash show` and
+            # `bisect view` carry it for that reason, on their own rows below.
+            # Where a verb forwards is a fact about git worth checking against
+            # its source; guarding one that turns out to reject the flag costs
+            # nothing, since git refuses it either way.
+            #
+            # `--ext-diff` and `--textconv` are deliberately absent, by the
+            # same reasoning that leaves `--paginate` alone: neither names a
+            # program. They enable a driver already configured, and reaching
+            # that configuration means `-c` or `git config`, which ask. That is
+            # what separates them from `rg --pre`, which takes its program as
+            # the next word.
+            for name in (
+                "log",
+                "diff",
+                "show",
+                "whatchanged",
+                "diff-tree",
+                "diff-index",
+                "diff-files",
+                "diff-pairs",
+                "range-diff",
+                "shortlog",
+            )
         ],
         ShellSubcommandRule(
             name="grep",
+            effect="allow",
             ask_flags=["-O", "--open-files-in-pager"],
             reason="opening matches in an arbitrary program requires approval",
         ),
         ShellSubcommandRule(
             name="rebase",
+            effect="allow",
             ask_flags=["-x", "--exec"],
             reason="replaying commits through a shell command requires approval",
         ),
         ShellSubcommandRule(
             name="fetch",
+            effect="allow",
             ask_flags=["--upload-pack"],
             reason="overriding the transport program requires approval",
         ),
         ShellSubcommandRule(
             name="pull",
+            effect="allow",
             ask_flags=["--upload-pack"],
             reason="overriding the transport program requires approval",
         ),
         ShellSubcommandRule(
             name="push",
+            effect="allow",
             ask_flags=(
                 [*push_flags, "-f", "--force", "--force-with-lease"]
                 if guard_force_push
@@ -522,6 +660,7 @@ def git_rule(
         ),
         ShellSubcommandRule(
             name="apply",
+            effect="allow",
             ask_flags=["--unsafe-paths", "--build-fake-ancestor"],
             reason="a patch that writes outside the working area requires approval",
         ),
@@ -566,6 +705,7 @@ def git_rule(
         ),
         ShellSubcommandRule(
             name="reflog",
+            effect="allow",
             operations=[
                 ShellOperationRule(
                     name="expire",
@@ -581,6 +721,7 @@ def git_rule(
         ),
         ShellSubcommandRule(
             name="branch",
+            effect="allow",
             ask_flags=["-d", "-D", "--delete", "-m", "-M", "--move"],
             reason="deleting or moving a branch requires approval",
         ),
@@ -589,7 +730,14 @@ def git_rule(
             effect="ask",
             operations=[
                 ShellOperationRule(name="log", effect="allow"),
-                ShellOperationRule(name="view", effect="allow"),
+                ShellOperationRule(
+                    # Falls back to `git log` where no display is available,
+                    # and hands it the arguments it was given.
+                    name="view",
+                    effect="allow",
+                    ask_flags=["--output"],
+                    reason="writing command output to a file requires approval",
+                ),
             ],
             reason="a bisect step moves HEAD across commits",
         ),
@@ -604,16 +752,27 @@ def git_rule(
         ),
         ShellSubcommandRule(
             name="tag",
+            effect="allow",
             ask_flags=["-d", "--delete"],
             reason="deleting a tag requires approval",
         ),
         ShellSubcommandRule(
+            # The one query verb whose write form is spelled by arity rather
+            # than by a flag: a second operand points the ref somewhere else.
+            # The kernel recognizes the reading form ahead of this row.
+            name="symbolic-ref",
+            effect="ask",
+            reason="pointing a symbolic ref somewhere else moves HEAD",
+        ),
+        ShellSubcommandRule(
             name="reset",
+            effect="allow",
             ask_flags=["--hard", "--merge", "--keep"],
             reason="a working-tree-destroying reset requires approval",
         ),
         ShellSubcommandRule(
             name="switch",
+            effect="allow",
             ask_flags=["-f", "--force", "--discard-changes"],
             reason="a force switch can discard working-tree changes",
         ),
@@ -640,9 +799,22 @@ def git_rule(
         ),
         ShellSubcommandRule(
             name="stash",
+            effect="allow",
             operations=[
-                ShellOperationRule(name="list", effect="allow"),
-                ShellOperationRule(name="show", effect="allow"),
+                ShellOperationRule(
+                    # Forwards its arguments to `git log`, `--output` included.
+                    name="list",
+                    effect="allow",
+                    ask_flags=["--output"],
+                    reason="writing command output to a file requires approval",
+                ),
+                ShellOperationRule(
+                    # Accepts any format git diff knows, `--output` included.
+                    name="show",
+                    effect="allow",
+                    ask_flags=["--output"],
+                    reason="writing command output to a file requires approval",
+                ),
                 ShellOperationRule(name="push", effect="allow"),
                 ShellOperationRule(name="save", effect="allow"),
                 ShellOperationRule(name="pop", effect="allow"),
@@ -661,6 +833,7 @@ def git_rule(
         ),
         ShellSubcommandRule(
             name="remote",
+            effect="allow",
             operations=[
                 ShellOperationRule(
                     name="remove",
@@ -685,11 +858,41 @@ def git_rule(
             ],
         ),
     ]
+    # A global that points git somewhere else is judged here rather than per
+    # subcommand, because the subcommand word is found only after these are
+    # read. A redirect left to `value_flags` alone would only advance the
+    # parser past its argument, and every verb behind it would be answered by a
+    # row reasoning about this worktree: `git -C /elsewhere commit` reads as
+    # reversible because the reflog that undoes it is *here*. The redirect is
+    # exactly what makes that premise someone else's.
+    #
+    # Only the three that name a directory are also in `value_flags`, which
+    # selects the wording of the question rather than the parse — the ask is
+    # reached before any value is skipped. Those three have a way through worth
+    # naming, because `cd there && git status` is two allowed segments.
+    # `--namespace` has none: it redirects refs rather than a path, and the
+    # environment spelling of it is a guarded assignment of its own.
+    #
+    # `--paginate` is deliberately not among them, though it is on the list this
+    # sweep was measured against. It moves no ref, no index entry, and no file:
+    # it forces the pager these subcommands already run by default, and the
+    # program that pager names is reachable only through `-c` or `git config`,
+    # which ask. Gating it would spend a question on the flag rather than on
+    # what the flag could reach.
+    directory_flags = ["-C", "--git-dir", "--work-tree"]
     return ShellCommandRule(
         name="git",
         default_effect="deny",
-        ask_flags=["-c", "--config-env", "--exec-path"],
-        value_flags=["-C", "--git-dir", "--work-tree", "--namespace"],
+        ask_flags=[
+            "-c",
+            "--config-env",
+            "--exec-path",
+            "--super-prefix",
+            "--namespace",
+            *directory_flags,
+        ],
+        value_flags=directory_flags,
+        sandbox=sandbox,
         subcommands=[*leaf, *guarded],
         reason="this git subcommand is not classified as read-only or reversible",
     )
@@ -705,11 +908,29 @@ def gh_rule(allow_authoring: bool = True) -> ShellCommandRule:
     join the verbs that reach other people. Commenting, reviewing, merging
     and closing ask either way: those reach reviewers, or change what the
     repository is.
+
+    Both halves of that grant are claims about *this* repository — the work is
+    the author's own, and the branch is already pushed — and ``--repo`` is what
+    makes them someone else's, so the authoring verbs carry it as a guard the
+    way git's redirecting globals do. Spelled as a flag, the redirect is judged
+    per verb, so reading another repository keeps its grant: a read is a read
+    wherever it points.
+
+    The flag is only half of it. ``GH_REPO`` and ``GH_HOST`` reach the same
+    retarget through the environment, and that spelling is caught by the
+    dangerous-assignment prefixes in :mod:`lup.policy.kernel.words` rather than
+    here — a guard that reads the assignment before any verb is known, so
+    unlike the flag it stops a redirected read as well. The asymmetry is the
+    price of catching the variable gh has not learned yet.
     """
     authoring = ["create", "edit", "ready"]
+    elsewhere = ["-R", "--repo"]
 
     def group(
-        name: str, allowed: list[str], asked: list[str] | None = None
+        name: str,
+        allowed: list[str],
+        asked: list[str] | None = None,
+        authored: list[str] | None = None,
     ) -> ShellSubcommandRule:
         return ShellSubcommandRule(
             name=name,
@@ -718,6 +939,16 @@ def gh_rule(allow_authoring: bool = True) -> ShellCommandRule:
                 *[
                     ShellOperationRule(name=operation, effect="allow")
                     for operation in allowed
+                ],
+                *[
+                    ShellOperationRule(
+                        name=operation,
+                        effect="allow",
+                        ask_flags=elsewhere,
+                        reason=f"gh {name} {operation} against another"
+                        " repository requires approval",
+                    )
+                    for operation in authored or []
                 ],
                 *[
                     ShellOperationRule(
@@ -738,15 +969,7 @@ def gh_rule(allow_authoring: bool = True) -> ShellCommandRule:
         subcommands=[
             group(
                 "pr",
-                [
-                    "list",
-                    "view",
-                    "diff",
-                    "status",
-                    "checks",
-                    "checkout",
-                    *(authoring if allow_authoring else []),
-                ],
+                ["list", "view", "diff", "status", "checks", "checkout"],
                 [
                     "comment",
                     "review",
@@ -754,6 +977,7 @@ def gh_rule(allow_authoring: bool = True) -> ShellCommandRule:
                     "close",
                     *([] if allow_authoring else authoring),
                 ],
+                authoring if allow_authoring else [],
             ),
             group(
                 "issue",
@@ -777,8 +1001,8 @@ def gh_rule(allow_authoring: bool = True) -> ShellCommandRule:
             group("variable", ["list", "get"], ["set", "delete"]),
             group("ruleset", ["list", "view", "check"]),
             group("config", ["get", "list"], ["set"]),
-            ShellSubcommandRule(name="status"),
-            ShellSubcommandRule(name="browse"),
+            ShellSubcommandRule(name="status", effect="allow"),
+            ShellSubcommandRule(name="browse", effect="allow"),
             ShellSubcommandRule(
                 # The default method is GET, so the unguarded form is a read.
                 # Every way of making it something else — naming a method,
@@ -786,6 +1010,7 @@ def gh_rule(allow_authoring: bool = True) -> ShellCommandRule:
                 # which leaves the mutation ask exactly where it belongs
                 # instead of on every query that shares the subcommand.
                 name="api",
+                effect="allow",
                 ask_flags=[
                     "-X",
                     "--method",
@@ -822,7 +1047,7 @@ def docker_rule() -> ShellCommandRule:
         )
 
     queries = [
-        ShellSubcommandRule(name=name)
+        ShellSubcommandRule(name=name, effect="allow")
         for name in (
             "info",
             "version",

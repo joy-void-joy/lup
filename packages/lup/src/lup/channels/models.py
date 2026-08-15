@@ -11,9 +11,7 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict, Field
-
-FROZEN = ConfigDict(frozen=True)
+from pydantic import BaseModel
 
 
 class ChannelConflictError(RuntimeError):
@@ -43,7 +41,7 @@ class Door(StrEnum):
     AGENT = "agent"
 
 
-class DoorPolicy(BaseModel):
+class DoorPolicy(BaseModel, frozen=True):
     """Which doors a channel refuses, named as refusals rather than a roster.
 
     Stating it negatively is what makes the guarantee legible: a resume slot
@@ -52,22 +50,18 @@ class DoorPolicy(BaseModel):
     same thing and reads as an accident of enumeration.
     """
 
-    model_config = FROZEN
-
-    excluded: list[Door] = Field(default_factory=list)
+    excluded: list[Door] = []
 
     def accepts(self, door: Door) -> bool:
         return door not in self.excluded
 
 
-class Offset[T](BaseModel):
+class Offset[T](BaseModel, frozen=True):
     """One stream record and the offset that consumes exactly it.
 
     Committing per record is what keeps a crash between two of them from
     dropping the one that had not been applied yet.
     """
-
-    model_config = FROZEN
 
     item: T
     commit_offset: int

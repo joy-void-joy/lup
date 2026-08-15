@@ -19,24 +19,29 @@ from pathlib import Path
 # distribution. Naming it as a search path is what lets the imports below
 # resolve, for the interpreter and for a type checker alike.
 sys.path.insert(0, str(Path(__file__).parents[1] / "runtime"))
-from kernel.decision import KernelDecision
+from kernel.decision import KernelDecision, escalation_offer, sandbox_escaped
 from policy_data import AGENT_IDENTITY_ENV, AUTONOMOUS_AGENT_IDENTITIES
-import subprocess  # lup: ignore[subprocess] — `sh` is third-party and this half is compiled into a bare script that has no virtual environment to resolve it from
-from kernel.edit import decide_edit
+
+# lup: ignore[subprocess] — `sh` is third-party and this half is compiled into a bare script that has no virtual environment to resolve it from
+import subprocess
+from kernel.edit import decide_edit, relocated_edit_text, relocated_suppressions
 from kernel.fetch import decide_fetch
 from kernel.lex import shell_path_verb_targets, shell_write_targets
 from kernel.shell import decide_shell
+from kernel.tools import decide_tool
 from policy_data import (
+    ALLOWANCE_GRANTS_ENV,
     ALLOWED_FETCH_SCOPES,
     ANTI_PATTERN_ROWS,
-    CONCERN_ALLOWANCES_ENV,
     DENIED_FETCH_SCOPES,
     KNOWN_ALLOWANCES,
     MAXIMUM_ADDED_LINES,
     PATH_ROLES,
     PATH_RULES,
     RECOVERABLE_TARGET_LIMIT,
+    REFUSED_TOOLS,
     RUNNER_TARGETS,
+    SANDBOX_EXCLUDED_COMMANDS,
     SHELL_RULES,
 )
 
@@ -161,23 +166,56 @@ def declared_identity(identity_env: str) -> str:
     return environ[identity_env] if identity_env in environ else ""
 
 
-def granted_allowances(allowances_env: str, known: list[str]) -> list[str]:
-    """Edit gates a human approved for the concern this session is working.
+def document_allowances(document_text: str, known: list[str]) -> list[str]:
+    """Edit gates one document grants, as it reads at this instant.
 
-    Only names in the compiled vocabulary count. The environment is a
-    transport, not an authority: a name no launcher can legitimately declare
-    — a typo, or a gate this policy never grants that way — is dropped
-    rather than honoured, so hand-setting the variable buys nothing.
+    Read here rather than carried in, because a grant is answered while the
+    session it answers is already running: a list resolved when the process
+    started can neither gain the gate a human just approved nor lose one they
+    took back. The document is named from outside and its contents are read
+    afresh, so the current state governs in both directions.
+
+    Only names in the compiled vocabulary count. The document is a transport,
+    not an authority: a name no launcher can legitimately publish — a typo, or
+    a gate this policy never grants this way — is dropped rather than
+    honoured, so hand-writing one buys nothing.
+
+    Nothing to read is no grant, and so is anything unreadable: a missing
+    document, a directory, a half-written replacement, a payload that is not a
+    list of names. Every one of them leaves the gate exactly where it was, so
+    the failure is a refusal a human can answer rather than a grant nobody
+    made.
     """
-    environ = os.environ  # lup: ignore[os-environ]
-    if allowances_env not in environ:
+    if not document_text:
         return []
-    declared = json.loads(environ[allowances_env] or "[]")
+    try:
+        declared = json.loads(Path(document_text).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    if not isinstance(declared, list):
+        return []
     return [str(name) for name in declared if str(name) in known]
 
 
+def granted_allowances(grants_env: str, known: list[str]) -> list[str]:
+    """Edit gates a human approved for the lease this session is working.
+
+    The environment names the document rather than carrying the grants, so
+    what a hook process inherits at launch is a place to look and never an
+    answer that has since moved on.
+    """
+    environ = os.environ  # lup: ignore[os-environ]
+    return document_allowances(
+        environ[grants_env] if grants_env in environ else "", known
+    )
+
+
 def bash_decision(
-    command: str, managed_root: Path | None, sandboxed: bool, interactive: bool
+    command: str,
+    managed_root: Path | None,
+    sandboxed: bool,
+    interactive: bool,
+    escapable: bool,
 ) -> KernelDecision:
     """Judge one shell command against the declared vocabulary.
 
@@ -192,6 +230,11 @@ def bash_decision(
     replacing it would cost. Resolving them for only one of the two writing
     forms is what left ``rm f`` granted while ``echo x > f`` asked about the
     same clean, tracked file.
+
+    ``escapable`` is the one thing here a runtime answers rather than the host:
+    whether it can put a single call outside its own sandbox. It arrives as an
+    argument for the same reason the rest does — a fact one dispatcher stopped
+    passing is a rule that silently stopped applying.
     """
     acted_on = shell_path_verb_targets(command)
     return decide_shell(
@@ -200,6 +243,7 @@ def bash_decision(
         ALLOWED_FETCH_SCOPES,
         DENIED_FETCH_SCOPES,
         sandboxed=sandboxed,
+        excluded_commands=SANDBOX_EXCLUDED_COMMANDS,
         trusted_script_roots=managed_script_roots(managed_root),
         path_roles=PATH_ROLES,
         path_rules=PATH_RULES,
@@ -213,12 +257,42 @@ def bash_decision(
         recoverable_target_limit=RECOVERABLE_TARGET_LIMIT,
         runner_targets=RUNNER_TARGETS,
         interactive=interactive,
+        escapable=escapable,
     )
 
 
 def fetch_decision(url: str) -> KernelDecision:
     """Judge one outbound fetch against the declared scopes."""
     return decide_fetch(url, ALLOWED_FETCH_SCOPES, DENIED_FETCH_SCOPES)
+
+
+def refused_tool_decision(name: str, values: list[str]) -> KernelDecision | None:
+    """Judge one native call against the calls this project refuses outright.
+
+    ``None`` leaves the routing runtime's own answer for a tool no refusal
+    mentions, because the table says what a project decided against and never
+    what it approved — an unmentioned tool is still unclassified.
+    """
+    return decide_tool(name, values, REFUSED_TOOLS)
+
+
+def placed_document(path_text: str, after: str) -> str:
+    """One file's text with every suppression at its canonical placement.
+
+    Only Python has a placement to settle here: the policy is written in terms
+    of a comment the formatter cannot wrap, and the tokenizer that says where
+    a comment really opens is Python's.
+    """
+    if Path(path_text).suffix.lower() not in (".py", ".pyi"):
+        return after
+    return relocated_suppressions(after)
+
+
+def placed_edit_text(path_text: str, after: str, start: int, end: int) -> str | None:
+    """The replacement for an edit's own span, or ``None`` to place nothing."""
+    if Path(path_text).suffix.lower() not in (".py", ".pyi"):
+        return None
+    return relocated_edit_text(after, start, end)
 
 
 def edit_decision(
@@ -233,6 +307,11 @@ def edit_decision(
     The path is relativized against the worktree holding it rather than the
     directory the runtime started in, because every repo-relative rule matches
     on that answer and a session may be launched anywhere.
+
+    The gates this lease holds are read here, per call, rather than resolved
+    when the session started: a grant is answered by a human while the session
+    that asked for it is still running, and one resolved at launch could not
+    have carried the answer.
     """
     suffix = Path(path_text).suffix.lower()
     return decide_edit(
@@ -247,7 +326,7 @@ def edit_decision(
         path_roles=PATH_ROLES,
         maximum_added_lines=MAXIMUM_ADDED_LINES,
         autonomous=autonomous,
-        allowances=granted_allowances(CONCERN_ALLOWANCES_ENV, KNOWN_ALLOWANCES),
+        allowances=granted_allowances(ALLOWANCE_GRANTS_ENV, KNOWN_ALLOWANCES),
         python_source=suffix in (".py", ".pyi"),
     )
 
@@ -286,6 +365,56 @@ def edit_documents(path, old_text, new_text, replace_all):
     return current, updated
 
 
+def spent_escape(tool_input):
+    """Whether the call as written already asked to run outside the sandbox.
+
+    Claude Code's own spelling of the escape, read here rather than compared
+    against in two places: what it means is the kernel's `sandbox_escaped`,
+    which both this boundary and the in-process seam ask.
+    """
+    return (
+        "dangerouslyDisableSandbox" in tool_input
+        and tool_input["dangerouslyDisableSandbox"] is True
+    )
+
+
+def placed_input(payload):
+    """The tool arguments that land the same edit with its directives placed.
+
+    The correcting route rather than the refusing one: where a directive was
+    written somewhere the placement policy does not keep it, the call goes out
+    rewritten instead of coming back as a complaint, so nobody weighs a reason
+    against a column count while writing one. This is what `ruff --add-noqa`
+    does for its own directives, moved to the gate that already reads the
+    edit.
+
+    ``None`` says place nothing. An edit can only rewrite the text it supplies,
+    so a move reaching outside that text declines rather than guesses — and a
+    `replace_all` edit has no single span to read a move back out of.
+    """
+    name = payload["tool_name"]
+    tool_input = payload["tool_input"]
+    if name not in ("Edit", "Write"):
+        return None
+    path = tool_input["file_path"]
+    if Path(path).suffix.lower() not in (".py", ".pyi"):
+        return None
+    if name == "Write":
+        content = tool_input["content"]
+        revised = placed_document(path, content)
+        return None if revised == content else {**tool_input, "content": revised}
+    if "replace_all" in tool_input and tool_input["replace_all"] is True:
+        return None
+    before, after = edit_documents(
+        path, tool_input["old_string"], tool_input["new_string"], False
+    )
+    start = before.find(tool_input["old_string"])
+    revised = placed_edit_text(
+        path, after, start, start + len(tool_input["new_string"])
+    )
+    return None if revised is None else {**tool_input, "new_string": revised}
+
+
 def dispatch(payload):
     name = payload["tool_name"]
     tool_input = payload["tool_input"]
@@ -295,15 +424,15 @@ def dispatch(payload):
         or declared_identity(AGENT_IDENTITY_ENV) in AUTONOMOUS_AGENT_IDENTITIES
     )
     if name == "Bash":
-        unsandboxed = (
-            "dangerouslyDisableSandbox" in tool_input
-            and tool_input["dangerouslyDisableSandbox"] is True
-        )
+        unsandboxed = spent_escape(tool_input)
         return bash_decision(
             tool_input["command"],
             managed_root(),
             sandbox_active() and not unsandboxed,
-            True,
+            interactive=True,
+            # A call's sandbox is an argument of the call here, so a verdict
+            # that has to leave the sandbox is carried out rather than refused.
+            escapable=True,
         )
     if name == "WebFetch":
         return fetch_decision(tool_input["url"])
@@ -325,24 +454,97 @@ def dispatch(payload):
             Path(path).exists(),
             autonomous,
         )
+    # Asked of whatever reached here rather than of a listed few: which tools
+    # are worth refusing is the declaration's answer, and naming any of them
+    # here would be this file holding a second, narrower copy of it. The
+    # branches above keep their calls, which have semantics to be judged by.
+    refused = refused_tool_decision(
+        name, [value for value in tool_input.values() if isinstance(value, str)]
+    )
+    if refused is not None:
+        return refused
     return KernelDecision("ask", "tool is not classified")
 
 
-def rendered(decision):
-    if decision.effect == "defer":
+def rendered(decision, payload, placed):
+    """Answer one call on the permission channel, and place it on the other.
+
+    Claude Code takes a call's sandbox as an argument of the call rather than
+    as part of the verdict, so a placed decision goes out as the permission
+    decision plus a rewrite of the arguments — which is what makes an
+    unprompted placement reachable at all. Three things in the runtime make
+    that rewrite carry the flag rather than swallow it, each read out of the
+    shipped Claude Code binary at version 2.1.228 — the baseline to re-check
+    against, rather than a conclusion to remember: the PreToolUse hook
+    schema types `updatedInput` as an open record of arbitrary keys;
+    `dangerouslyDisableSandbox` is a declared field of the shell tool's own
+    input schema, so it is not an unknown key for the schema validation a
+    returned `updatedInput` has to pass; and the one per-tool key filter
+    applied to it before execution is keyed by a table naming a different
+    tool, so for the shell tool the object arrives whole and the sandbox is
+    chosen from it. What remains outside this file's reach is the session
+    itself: a host that forbids unsandboxed commands ignores the flag, and
+    the call runs confined with the verdict unchanged.
+
+    The rewrite replaces the arguments rather than merging into them, so the
+    whole input is carried through. A deferral is placed nowhere, which is
+    also why nothing here reads a payload a deferral may not have parsed.
+
+    ``placed`` carries the other rewrite this channel can hand back: the same
+    edit with its suppression directives at their canonical placement. It
+    rides along with the verdict rather than replacing it — placing a
+    directive settles where it is written and says nothing about whether the
+    edit may happen, so an ask still asks, over the placed text, which is what
+    the approver should be reading. A denied call runs nothing, so there is
+    nothing to place. The two rewrites never contend for the one
+    ``updatedInput`` field: a directive is placed only in an ``Edit`` or
+    ``Write``, and the sandbox argument belongs only to ``Bash``.
+
+    Both sandbox questions are answered yes here, from that one field: the
+    rewrite is how a verdict places a call, and the same field on the call the
+    agent writes is how the agent places its own — which is what an
+    ``escalable`` verdict offers it. Both halves of that offer are decided in
+    the kernel rather than spelled here: `escalation_offer` says whether it is
+    extended, and `sandbox_escaped` whether a call that spent it still leaves.
+    The in-process seam asks the same two, because one field two boundaries
+    fill from two conditions is a field they can fill differently — which is
+    how the rewrite once revoked an offer the permission channel had granted.
+    """
+    settled = decision.placed(escapable=True, agent_escalates=True)
+    if settled.effect == "defer":
         return {}
+    answer = {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": settled.effect,
+        "permissionDecisionReason": settled.reason,
+    }
+    offer = escalation_offer(settled.sandbox, settled.reason)
+    if offer:
+        answer["additionalContext"] = offer
+    if placed is not None and settled.effect != "deny":
+        return {"hookSpecificOutput": {**answer, "updatedInput": placed}}
+    if settled.sandbox == "ambient" or payload["tool_name"] != "Bash":
+        return {"hookSpecificOutput": answer}
     return {
         "hookSpecificOutput": {
-            "hookEventName": "PreToolUse",
-            "permissionDecision": decision.effect,
-            "permissionDecisionReason": decision.reason,
+            **answer,
+            "updatedInput": {
+                **payload["tool_input"],
+                "dangerouslyDisableSandbox": sandbox_escaped(
+                    settled.sandbox, spent_escape(payload["tool_input"])
+                ),
+            },
         }
     }
 
 
 def main():
+    payload = {}
+    placed = None
     try:
-        decision = dispatch(json.load(sys.stdin))
+        payload = json.load(sys.stdin)
+        decision = dispatch(payload)
+        placed = placed_input(payload)
     # Every way this can fail means one thing — the call went unjudged — and
     # one answer is right for all of them. Naming the exceptions instead is
     # what let a plain unreadable file escape, and the traceback exit reaches
@@ -353,7 +555,7 @@ def main():
         decision = KernelDecision(
             "ask", f"Malformed hook input requires approval: {error}"
         )
-    json.dump(rendered(decision), sys.stdout)
+    json.dump(rendered(decision, payload, placed), sys.stdout)
 
 
 if __name__ == "__main__":

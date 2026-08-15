@@ -21,12 +21,11 @@ from lup.devtools.dev.branches import unlanded_siblings
 from lup.devtools.dev.comments import FoundComment, scan_tracked
 from lup.devtools.harness.drift import (
     RepositoryWriter,
-    clean_repository_artifacts,
-    drift_reports,
-    report_drift,
+    inspect_drift,
+    report_stale,
 )
 from lup.devtools.harness.generate import NativeHarnessComposition
-from lup.devtools.utils import git, uv
+from lup.devtools.utils import decode_stderr, git, uv
 
 # The suite waits on git subprocesses and hook scripts far more than it
 # computes, so it parallelizes well — but each worker pays a full interpreter
@@ -86,9 +85,22 @@ def inline_notes_lines(found: list[FoundComment]) -> list[str]:
 
 
 def changed_paths(since: str) -> list[str]:
-    """Every tracked path this tree changed since a ref, as posix strings."""
-    named = sh.Command("git")("diff", "--name-only", since, _ok_code=list(range(256)))
-    return [line for line in str(named).splitlines() if line]
+    """Every tracked path this tree changed since a ref, as posix strings.
+
+    A ref git cannot resolve refuses the run rather than answering nothing.
+    The two readings are indistinguishable once the exit status is dropped —
+    an empty answer is exactly what a tree that changed nothing gives — and
+    the scope this builds decides which files the blocking gates read. A
+    mistyped ref would scope them to none of them and report ok.
+    """
+    try:
+        named = git.lines("diff", "--name-only", since, _ok_code=[0])
+    except sh.ErrorReturnCode as error:
+        raise typer.BadParameter(
+            f"--since {since!r} does not name a commit in this tree: "
+            f"{decode_stderr(error)}"
+        ) from error
+    return [line for line in named if line]
 
 
 def owned_comments(
@@ -138,6 +150,7 @@ def run_checks(
     repository_writers: list[RepositoryWriter],
     guidance: PromptDocument,
     scope: list[str] | None = None,
+    test_workers: int = TEST_WORKERS,
 ) -> None:
     """Run ruff format, ruff check, pyright, and pytest in sequence.
 
@@ -205,7 +218,7 @@ def run_checks(
                     "run",
                     "pytest",
                     "-n",
-                    str(TEST_WORKERS),
+                    str(test_workers),
                     _cwd=str(test_root.directory),
                 )
                 typer.echo(f"{test_root.name}: ok")
@@ -270,22 +283,16 @@ def run_checks(
         typer.echo("application placement: ok")
     results.append(CheckOutcome(name="application placement", passed=True))
 
-    # lup: This guard is written and correct, and still let two artifact-stale
-    # commits land, because nothing forces it to run before history is written.
-    # The kernel sources are copied verbatim into both plugin trees, so editing
-    # only a comment in canon drifts them — which is exactly how it happened.
-    # Put it on the path a commit must cross, pre-commit or CI, so skipping
-    # `dev check` cannot skip it.
-    stale = [report for report in drift_reports(compositions) if not report.clean]
-    repository_is_current = clean_repository_artifacts(repository_writers)
-    if stale or not repository_is_current:
-        typer.echo(f"harness drift: FAIL ({len(stale)} tree(s))")
-        for report in stale:
-            report_drift(report, paths=True)
-        results.append(CheckOutcome(name="harness drift", passed=False))
-    else:
+    # The same reading the commit hook and the pipeline refuse on, asked here
+    # rather than recomposed, so a tree cannot be stale at one gate and current
+    # at another.
+    drift = inspect_drift(compositions, repository_writers)
+    if drift.clean:
         typer.echo("harness drift: ok")
-        results.append(CheckOutcome(name="harness drift", passed=True))
+    else:
+        typer.echo(f"harness drift: FAIL ({len(drift.stale_trees)} tree(s))")
+        report_stale(drift)
+    results.append(CheckOutcome(name="harness drift", passed=drift.clean))
 
     used = max(
         document_byte_size(claude_prompt_renderer().render(guidance)),

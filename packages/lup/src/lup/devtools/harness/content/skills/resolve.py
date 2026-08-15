@@ -6,10 +6,26 @@ SKILL = models.Skill(
     id="skill.resolve",
     name="resolve",
     description="Resolve inline feedback through isolated work",
+    arguments=[
+        models.Argument(
+            name="concerns",
+            description="What to resolve, in the human's own words",
+            required=False,
+        ),
+    ],
+    argument_hint="[what needs resolving, in your own words]",
     prompt=models.PromptDocument(
         parts=[
+            models.TextPart(text="""**What this run is about:** """),
+            models.ArgumentsRef(),
             models.TextPart(
-                text="""Deferred notes — `# lup: defer: <text>` — are parked work, not open feedback, and the resolver entry excludes them from its inventory, so an editor can never be assigned one. That bare spelling is the default: nothing evaluates a wake condition mechanically, so `defer[<gate>]: <text>` is reserved for a real, externally-checkable gate ("until the v2 API ships") and never restates that this code might change again. Triage them before launching the resolver: read each note against the current state of the repository — its gate where it stated one, its own text where it did not — and when the work reads as due, propose waking it to the user. Waking is an explicit edit that removes the `defer` head so the note re-enters open feedback on the next run; anything still parked carries forward untouched, never re-litigated.
+                text="""
+
+Nothing there means the run plans from what the tree already carries. Anything there is evidence in its own right: pass each concern through as `--admit "<their words>"` on the entry command below, which seeds a fresh run with those statements beside the tree's own notes. Never invent a `# lup:` note site to hold a statement and never paraphrase one — the words are what the planner reads, and what the concern stays traceable to afterwards.
+
+Read the intake preview before starting one: it is the answer to "is this worth running, or worth cleaning out first", and reconstructing it by hand from the scan and the ownership manifests is a dozen calls that still ends in a guess.
+
+Deferred notes — `# lup: defer: <text>` — are parked work, not open feedback, and the resolver entry excludes them from its inventory, so an editor can never be assigned one. That bare spelling is the default: nothing evaluates a wake condition mechanically, so `defer[<gate>]: <text>` is reserved for a real, externally-checkable gate ("until the v2 API ships") and never restates that this code might change again. Triage them before launching the resolver: read each note against the current state of the repository — its gate where it stated one, its own text where it did not — and when the work reads as due, propose waking it to the user. Waking is an explicit edit that removes the `defer` head so the note re-enters open feedback on the next run; anything still parked carries forward untouched, never re-litigated.
 
 """
             ),

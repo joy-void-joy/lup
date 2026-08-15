@@ -129,6 +129,8 @@ def show_module(obj: object, path: str, private: bool) -> None:
             typer.echo(f"  {r}")
 
 
+# lup: ignore[library-default] — the members pydantic itself puts on a model, so
+# the set follows that library rather than any taste of this one's
 PYDANTIC_INTERNALS = frozenset(  # lup: ignore[frozenset-shape] — membership
     {
         "model_config",
@@ -315,11 +317,11 @@ def show_callable_info(obj: object, name: str) -> None:
 REPR_PREVIEW_CHARS = 2000
 
 
-def show_value_info(obj: object) -> None:
+def show_value_info(obj: object, preview_chars: int = REPR_PREVIEW_CHARS) -> None:
     typer.echo(f"Type: {type(obj).__qualname__}")
     r = repr(obj)
-    if len(r) > REPR_PREVIEW_CHARS:
-        r = r[:REPR_PREVIEW_CHARS] + f"… ({len(r)} chars total)"
+    if len(r) > preview_chars:
+        r = r[:preview_chars] + f"… ({len(r)} chars total)"
     typer.echo(f"Value: {r}")
 
     doc = get_docstring(obj)

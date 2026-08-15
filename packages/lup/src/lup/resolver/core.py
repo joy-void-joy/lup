@@ -6,7 +6,7 @@ import logging
 from collections.abc import AsyncGenerator, Callable
 from contextlib import asynccontextmanager
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
 from lup.harness.contracts import SkillInvocationRenderer
 from lup.harness.models import ResolveSpec
@@ -23,6 +23,7 @@ from lup.resolver.contracts import (
 from lup.resolver.actors import ActorSessions
 from lup.resolver.dag import ConcernGraph
 from lup.resolver.execution import ConcernExecutor
+from lup.resolver.grants import GrantLedger
 from lup.resolver.joins import Joiner
 from lup.resolver.journal import (
     Journal,
@@ -85,23 +86,21 @@ from lup.runtime.models import TurnInput, turn_request
 
 logger = logging.getLogger(__name__)
 
-APPROVE = "approve"
-DEFER = "defer"
+# The two words an approval answer may carry: a closed vocabulary this module
+# offers the human and then reads back, so both ends spell it the same.
+APPROVE = "approve"  # lup: ignore[constant-declaration] — answer vocabulary
+DEFER = "defer"  # lup: ignore[constant-declaration] — answer vocabulary
 
 
-class ApprovalDecisions(BaseModel):
+class ApprovalDecisions(BaseModel, frozen=True):
     """Persisted direct choices and their dependency-safe eligible subset."""
-
-    model_config = ConfigDict(frozen=True)
 
     directly_approved: list[str]
     eligible: list[str]
 
 
-class EvidenceCitation(BaseModel):
+class EvidenceCitation(BaseModel, frozen=True):
     """One concern's evidence, named in the fields the concern carries."""
-
-    model_config = ConfigDict(frozen=True)
 
     notes: list[ReviewNote]
     evidence: str
@@ -243,6 +242,9 @@ def approval_question(concern: Concern) -> MaterialQuestion:
     )
 
 
+# lup: ignore[constant-declaration] — a reserved question id a human answers by
+# name on the command line, so the word is part of the interface rather than a
+# setting behind it
 ASSEMBLY_QUESTION_ID = "integration-assembly"
 """The one gate on assembling the review branch, asked once per run."""
 
@@ -373,11 +375,13 @@ class ResolverCore:
         self.actors = ActorSessions(self.repository.root, self.journal, self.mailbox)
         self.run_state = ResolveRun(self.repository, self.journal, observer)
         self.rebaser = BaseRefresher(self.run_state, self.worktrees, self.journal)
+        self.grants = GrantLedger(self.repository.root)
         self.questions = QuestionBroker(
             config,
             self.run_state,
             self.mailbox,
             self.journal,
+            self.grants,
             answer_wait_seconds,
             poll_interval_seconds,
         )
@@ -389,6 +393,7 @@ class ResolverCore:
             worker_factory,
             reviewer_factory,
             invocation_renderer,
+            self.grants,
         )
         self.verifier = Verifier(config.verification_commands, process_launcher)
         self.joiner = Joiner(
@@ -458,6 +463,7 @@ class ResolverCore:
         request: ResolveRequest,
         origin: ConcernOrigin = ConcernOrigin.INVENTORY,
         taken: list[str] | None = None,
+        attempts: int = INVENTORY_PLAN_ATTEMPTS,
     ) -> ResolveInventory:
         """Organize raw review evidence into concerns in a read-only turn.
 
@@ -512,7 +518,7 @@ class ResolverCore:
         # re-derive from scratch what it should be revising.
         attempt = prompt
         complaint: str | None = None
-        for _ in range(INVENTORY_PLAN_ATTEMPTS):
+        for _ in range(attempts):
             result = await planner.turn(
                 turn_request(TurnInput(text=attempt), ConcernInventory)
             )
@@ -533,7 +539,7 @@ class ResolverCore:
         else:
             raise ResolverInvariantError(
                 "inventory planner left review evidence unaccounted for across "
-                f"{INVENTORY_PLAN_ATTEMPTS} attempts — {complaint}"
+                f"{attempts} attempts — {complaint}"
             )
         concerns = [
             Concern(

@@ -16,7 +16,6 @@ from pydantic import (
     AfterValidator,
     AnyHttpUrl,
     BaseModel,
-    ConfigDict,
     Discriminator,
     Field,
     StringConstraints,
@@ -24,15 +23,15 @@ from pydantic import (
 )
 
 from lup.harness.banner import ArtifactBanner, GeneratedBanner
+from lup.markdown import TableCell, escaped
 from lup.policy.kernel.rows import PathRoleName
 from lup.policy.models import PolicyId, UrlPathPrefix
-from lup.policy.shell_rules import ShellCommandRule
+from lup.policy.refused_tools import RefusedTool
+from lup.policy.shell_rules import RunnerTargetRule, ShellCommandRule
 from lup.types import JsonValue, ToolGrant, ToolName
 
 if TYPE_CHECKING:
     from lup.harness.contracts import NativeSpellings, PromptRenderer
-
-FROZEN = ConfigDict(frozen=True)
 
 type NativeName = Annotated[
     str, StringConstraints(pattern=r"^[a-z0-9]([a-z0-9_-]*[a-z0-9])?$")
@@ -45,6 +44,8 @@ type QualifiedAgentName = Annotated[
 ]
 """A delegation target, ``<plugin>:<agent>``, as a runtime addresses one."""
 
+# lup: ignore[constant-declaration] — the characters the runtimes actually write,
+# each of which proves its own sigil is one of these
 INVOCATION_SIGILS = "/$"
 """Every character a runtime writes in front of a skill invocation.
 
@@ -82,7 +83,7 @@ invariant is answered where an author writes the words rather than by a scan
 over the harness they eventually compose into."""
 
 
-class SemanticPart(BaseModel):
+class SemanticPart(BaseModel, frozen=True):
     """One element of a prompt document, answering every question about itself.
 
     Whatever the rest of the harness needs to know about a part is declared
@@ -95,8 +96,6 @@ class SemanticPart(BaseModel):
     Pydantic's metaclass is an ``ABCMeta``, so ``spell`` binds like any
     abstract method: a subtype that does not answer it cannot be constructed.
     """
-
-    model_config = FROZEN
 
     @abstractmethod
     def spell(self, renderer: "PromptRenderer") -> str:
@@ -132,7 +131,7 @@ class SemanticPart(BaseModel):
         return False
 
 
-class TextPart(SemanticPart):
+class TextPart(SemanticPart, frozen=True):
     type: Literal["text"] = "text"
     text: PortableText
 
@@ -144,7 +143,7 @@ class TextPart(SemanticPart):
         return self.text
 
 
-class SpellingExample(SemanticPart):
+class SpellingExample(SemanticPart, frozen=True):
     """Prose whose subject is a runtime's own spelling, quoted verbatim.
 
     Ordinary prose refuses a rendered invocation because a reader on the other
@@ -166,18 +165,59 @@ class SpellingExample(SemanticPart):
         return self.text
 
 
-class InvocationArgument(BaseModel):
-    model_config = FROZEN
+class MarkdownTable(SemanticPart, frozen=True):
+    """A table derived from declarations, laid out and escaped as it renders.
 
+    Rows arrive as the values they stand for rather than as finished Markdown,
+    so the escaping that keeps a pipe or a newline from breaking the row it
+    lands in happens here — a caller composes a table into a document the way
+    it composes any other part, and has no way to splice one in wrong. Every
+    runtime reads the same Markdown, so this spells itself.
+
+    Headers and cells hold data rather than authored prose — a rule's matching
+    shape, a path a document already renders to — so they are not held to the
+    portable-prose invariant a :class:`TextPart` answers for. What the table
+    renders still reaches ``text_payload``, so a native spelling that arrived
+    through a cell is caught where the assembled document is checked.
+    """
+
+    type: Literal["markdown_table"] = "markdown_table"
+    headers: list[str]
+    rows: list[list[TableCell]]
+
+    @model_validator(mode="after")
+    def rows_match_the_header(self) -> "MarkdownTable":
+        ragged = [len(row) for row in self.rows if len(row) != len(self.headers)]
+        if ragged:
+            raise ValueError(
+                f"table rows hold {ragged} cells under {len(self.headers)} headers"
+            )
+        return self
+
+    def spell(self, renderer: "PromptRenderer") -> str:
+        return self.text_payload
+
+    @property
+    def text_payload(self) -> str:
+        """The table as Markdown, one line per row, newline-terminated."""
+        lines = [
+            [escaped(header) for header in self.headers],
+            ["---"] * len(self.headers),
+            *[[cell.render() for cell in row] for row in self.rows],
+        ]
+        return "".join(f"| {' | '.join(line)} |\n" for line in lines)
+
+
+class InvocationArgument(BaseModel, frozen=True):
     name: NativeName
     value: JsonValue
 
 
-class SkillInvocation(SemanticPart):
+class SkillInvocation(SemanticPart, frozen=True):
     type: Literal["skill_invocation"] = "skill_invocation"
     plugin: NativeName
     skill: NativeName
-    arguments: list[InvocationArgument] = Field(default_factory=list)
+    arguments: list[InvocationArgument] = []
 
     def spell(self, renderer: "PromptRenderer") -> str:
         return renderer.own.render(self)
@@ -223,7 +263,7 @@ type PathMember = Annotated[
 """One leaf inside a location: a name, a ``<placeholder>``, or ``*``."""
 
 
-class LocatedPart(SemanticPart):
+class LocatedPart(SemanticPart, frozen=True):
     """One path a prompt names, spelled by whichever adapter renders it.
 
     Scope is the same question for every location — whether the reader's own
@@ -241,7 +281,7 @@ class LocatedPart(SemanticPart):
         return renderer.location(self)
 
 
-class NativePath(LocatedPart):
+class NativePath(LocatedPart, frozen=True):
     """One harness-tree location, spelled by whichever adapter renders it."""
 
     type: Literal["native_path"] = "native_path"
@@ -251,7 +291,7 @@ class NativePath(LocatedPart):
         return runtime.tree(self.location)
 
 
-class PluginPath(LocatedPart):
+class PluginPath(LocatedPart, frozen=True):
     """One plugin-owned location, spelled by whichever adapter renders it.
 
     ``member`` selects a leaf whose whole path differs per runtime — a skill is
@@ -272,7 +312,7 @@ class PluginPath(LocatedPart):
         return self.plugin
 
 
-class SkillPattern(SemanticPart):
+class SkillPattern(SemanticPart, frozen=True):
     """An invocation shape standing in for a skill the reader will name.
 
     ``SkillInvocation`` resolves against the declaration registry, so it cannot
@@ -292,7 +332,7 @@ class SkillPattern(SemanticPart):
         return self.plugin
 
 
-class RuntimeDocs(SemanticPart):
+class RuntimeDocs(SemanticPart, frozen=True):
     """The reader's own runtime documentation, wherever that runtime is."""
 
     type: Literal["runtime_docs"] = "runtime_docs"
@@ -301,7 +341,7 @@ class RuntimeDocs(SemanticPart):
         return renderer.own.runtime_docs()
 
 
-class AskUser(SemanticPart):
+class AskUser(SemanticPart, frozen=True):
     type: Literal["ask_user"] = "ask_user"
     question: PortableText
 
@@ -309,7 +349,7 @@ class AskUser(SemanticPart):
         return renderer.own.ask_user(self.question)
 
 
-class Delegate(SemanticPart):
+class Delegate(SemanticPart, frozen=True):
     type: Literal["delegate"] = "delegate"
     subagent_type: QualifiedAgentName
     prompt: PortableText
@@ -322,7 +362,7 @@ class Delegate(SemanticPart):
         return self.subagent_type
 
 
-class RequestApproval(SemanticPart):
+class RequestApproval(SemanticPart, frozen=True):
     type: Literal["request_approval"] = "request_approval"
     action: PortableText
     reason: PortableText
@@ -331,7 +371,7 @@ class RequestApproval(SemanticPart):
         return renderer.own.request_approval(self.action, self.reason)
 
 
-class RelocateSession(SemanticPart):
+class RelocateSession(SemanticPart, frozen=True):
     """Continue work inside an already-created worktree.
 
     Runtimes differ on whether a running session can move: one relocates in
@@ -347,14 +387,14 @@ class RelocateSession(SemanticPart):
         return renderer.own.relocate_session(self.path)
 
 
-class ResolverEntry(SemanticPart):
+class ResolverEntry(SemanticPart, frozen=True):
     type: Literal["resolver_entry"] = "resolver_entry"
 
     def spell(self, renderer: "PromptRenderer") -> str:
         return renderer.own.resolver_entry()
 
 
-class ArgumentsRef(SemanticPart):
+class ArgumentsRef(SemanticPart, frozen=True):
     type: Literal["arguments_ref"] = "arguments_ref"
 
     def spell(self, renderer: "PromptRenderer") -> str:
@@ -368,6 +408,7 @@ class ArgumentsRef(SemanticPart):
 type PromptPart = Annotated[
     TextPart
     | SpellingExample
+    | MarkdownTable
     | SkillInvocation
     | NativePath
     | PluginPath
@@ -383,9 +424,7 @@ type PromptPart = Annotated[
 ]
 
 
-class PromptDocument(BaseModel):
-    model_config = FROZEN
-
+class PromptDocument(BaseModel, frozen=True):
     parts: list[PromptPart]
     source: str | None = None
     """The module declaring this document, for the banner of an artifact
@@ -398,8 +437,21 @@ class PromptDocument(BaseModel):
             raise ValueError("a document rendered to its own artifact needs a source")
         return self.source
 
+    def prose(self) -> list[str]:
+        """Every literal prose payload this document carries, in reading order."""
+        return [text for part in self.parts if (text := part.text_payload) is not None]
 
-class Document(BaseModel):
+    def text_size(self) -> int:
+        """Lower bound on what this document costs a session, in UTF-8 bytes.
+
+        Every part renders to something, so the rendered document is never
+        smaller. This is the share a neutral module can measure without
+        reaching for an adapter to spell the rest.
+        """
+        return sum(document_byte_size(text) for text in self.prose())
+
+
+class Document(BaseModel, frozen=True):
     """One generated repository document and where it renders.
 
     Separate from the roster that lists them: which documents a project
@@ -407,8 +459,6 @@ class Document(BaseModel):
     path, an identity, and a declaring module is what makes the roster
     renderable by machinery no project writes.
     """
-
-    model_config = FROZEN
 
     path: Path
     semantic_id: str
@@ -447,37 +497,18 @@ def document_byte_size(text: str) -> int:
     return len(text.encode("utf-8"))
 
 
-def document_prose(document: PromptDocument) -> list[str]:
-    """Every literal prose payload a document carries, in reading order."""
-    return [text for part in document.parts if (text := part.text_payload) is not None]
-
-
-def document_text_size(document: PromptDocument) -> int:
-    """Lower bound on what a document costs a session, in UTF-8 bytes.
-
-    Every part renders to something, so the rendered document is never smaller.
-    This is the share a neutral module can measure without reaching for an
-    adapter to spell the rest.
-    """
-    return sum(document_byte_size(text) for text in document_prose(document))
-
-
-class Argument(BaseModel):
-    model_config = FROZEN
-
+class Argument(BaseModel, frozen=True):
     name: NativeName
     description: PortableText = Field(min_length=1, max_length=1024)
     required: bool = False
 
 
-class Skill(BaseModel):
-    model_config = FROZEN
-
+class Skill(BaseModel, frozen=True):
     id: str
     name: NativeName
     description: PortableText = Field(min_length=1, max_length=1024)
-    arguments: list[Argument] = Field(default_factory=list)
-    tools: list[ToolGrant] = Field(default_factory=list)
+    arguments: list[Argument] = []
+    tools: list[ToolGrant] = []
     argument_hint: PortableText | None = None
     prompt: PromptDocument
 
@@ -518,19 +549,17 @@ need and each adapter spells whichever tier it can honor — or omits the choice
 where it has no proven vocabulary to spell it in."""
 
 
-class Agent(BaseModel):
-    model_config = FROZEN
-
+class Agent(BaseModel, frozen=True):
     id: str
     name: NativeName
     description: PortableText = Field(min_length=1, max_length=1024)
     prompt: PromptDocument
-    tools: list[ToolName] = Field(default_factory=list)
+    tools: list[ToolName] = []
     model: ModelTier | None = None
     color: AgentColor | None = None
 
 
-class McpWord(BaseModel):
+class McpWord(BaseModel, frozen=True):
     """One word of the command line that starts an MCP server.
 
     A server the harness offers has to be reachable from wherever the runtime
@@ -540,14 +569,12 @@ class McpWord(BaseModel):
     keeps every other native spelling there.
     """
 
-    model_config = FROZEN
-
     @abstractmethod
     def spell_in(self, runtime: "NativeSpellings") -> str:
         """Spell this word in one runtime's own vocabulary."""
 
 
-class LiteralWord(McpWord):
+class LiteralWord(McpWord, frozen=True):
     """One word every runtime spells identically."""
 
     type: Literal["literal"] = "literal"
@@ -557,7 +584,7 @@ class LiteralWord(McpWord):
         return self.text
 
 
-class ProjectRootWord(McpWord):
+class ProjectRootWord(McpWord, frozen=True):
     """The repository root, as the runtime spawning the server can name it."""
 
     type: Literal["project_root"] = "project_root"
@@ -569,7 +596,7 @@ class ProjectRootWord(McpWord):
 type McpCommandWord = Annotated[LiteralWord | ProjectRootWord, Discriminator("type")]
 
 
-class McpServer(BaseModel):
+class McpServer(BaseModel, frozen=True):
     """One tool server a native tree offers the agent that reads it.
 
     The application owns which tools exist and how they are grouped; this
@@ -578,23 +605,19 @@ class McpServer(BaseModel):
     without either learning the other's assembly.
     """
 
-    model_config = FROZEN
-
     id: str
     name: NativeName
     description: PortableText = Field(min_length=1, max_length=1024)
     command: str = Field(min_length=1)
-    arguments: list[McpCommandWord] = Field(default_factory=list)
+    arguments: list[McpCommandWord] = []
 
     def command_line(self, runtime: "NativeSpellings") -> list[str]:
         """Spell every argument for the runtime that will spawn this server."""
         return [argument.spell_in(runtime) for argument in self.arguments]
 
 
-class HookUrlScope(BaseModel):
+class HookUrlScope(BaseModel, frozen=True):
     """Portable generated-hook URL scope configured by the application."""
-
-    model_config = FROZEN
 
     origin: AnyHttpUrl
     path_prefix: UrlPathPrefix = "/"
@@ -622,7 +645,7 @@ class HookUrlScope(BaseModel):
     )
 
 
-class HookPathRole(BaseModel):
+class HookPathRole(BaseModel, frozen=True):
     """One repository root and the purpose the tree beneath it serves.
 
     Production is the default and needs no declaration: it is what the
@@ -632,20 +655,20 @@ class HookPathRole(BaseModel):
     verbs that ask before destroying something have nothing to protect there.
     """
 
-    model_config = FROZEN
-
     root: Path
     role: PathRoleName
 
 
-class HookSandbox(BaseModel):
+class HookSandbox(BaseModel, frozen=True):
     """OS sandbox declaration compiled into native settings and launchers.
 
     Fetch-scope hostnames join extra_domains as the network allowlist,
     human-owned files become OS-level write denials, and writable_paths become
     the grants that let a sandboxed toolchain reach its caches, so one
     declaration feeds both the semantic policy and the kernel-enforced
-    boundary.
+    boundary. excluded_commands travels the same pair in the other direction:
+    it widens the settings and narrows what the policy will hand to the OS,
+    because work the boundary never confined cannot be deferred to it.
 
     That makes allowed_fetch the home for any origin an agent should be able
     to read: declaring it there grants both the fetch and the egress. Reserve
@@ -655,9 +678,7 @@ class HookSandbox(BaseModel):
     disagree, with the OS admitting a host the fetch policy still asks about.
     """
 
-    model_config = FROZEN
-
-    # lup: This cannot declare `excludedCommands`, which is the only per-command
+    # lup: solved: This cannot declare `excludedCommands`, which is the only per-command
     # lever the sandbox has — it takes a command out of isolation entirely
     # rather than lifting one rule. Two things here need it and neither can say
     # so: docker, which the harness documents as incompatible with the sandbox
@@ -665,10 +686,23 @@ class HookSandbox(BaseModel):
     # socket for a documented reason rather than a wiring bug; and ssh/git/gh,
     # whose egress the HTTP proxy cannot carry. It is an array key merged across
     # scopes, so project settings can declare it.
-    extra_domains: list[str] = Field(default_factory=list)
-    credential_paths: list[str] = Field(default_factory=list)
+    extra_domains: list[str] = []
+    credential_paths: list[str] = []
+    excluded_commands: list[str] = Field(
+        default=[],
+        description=(
+            "Commands the OS boundary does not confine at all. This is the "
+            "only per-command lever a sandbox offers: it takes the command "
+            "out of isolation rather than lifting one rule, so it is what a "
+            "requirement no path or domain can express has to be stated as — "
+            "a daemon socket the isolation blocks outright, or egress over a "
+            "protocol an HTTP proxy cannot carry. Each entry is a command "
+            "prefix written with a trailing ``*``, matching that word run "
+            "alone or followed by arguments."
+        ),
+    )
     writable_paths: list[str] = Field(
-        default_factory=list,
+        default=[],
         description=(
             "Paths outside the workspace a sandboxed toolchain must write. "
             "A tool that cannot reach its cache fails only when the cache is "
@@ -679,16 +713,14 @@ class HookSandbox(BaseModel):
     )
 
 
-class HookSet(BaseModel):
-    model_config = FROZEN
-
+class HookSet(BaseModel, frozen=True):
     id: str
     policy_ids: list[PolicyId]
-    allowed_fetch: list[HookUrlScope] = Field(default_factory=list)
-    denied_fetch: list[HookUrlScope] = Field(default_factory=list)
-    protected_edit_roots: list[Path] = Field(default_factory=list)
+    allowed_fetch: list[HookUrlScope] = []
+    denied_fetch: list[HookUrlScope] = []
+    protected_edit_roots: list[Path] = []
     path_roles: list[HookPathRole] = Field(
-        default_factory=list,
+        default=[],
         description=(
             "What each repository root is for. The lattice judges an action by "
             "what it does; a role supplies what the thing acted upon is for, "
@@ -696,24 +728,34 @@ class HookSet(BaseModel):
         ),
     )
     human_owned_files: list[Path] = Field(
-        default_factory=list,
+        default=[],
         description=(
             "Files whose content the human author owns; every edit is surfaced "
             "as Ask so agents propose changes instead of applying them"
         ),
     )
     shell_rules: list[ShellCommandRule] = Field(
-        default_factory=list,
+        default=[],
         description=(
             "The whole shell vocabulary this project judges safe, asked, or "
             "denied; declare a downstream toolchain here, not in the kernel"
         ),
     )
-    runner_targets: list[str] = Field(
-        default_factory=list,
+    refused_tools: list[RefusedTool] = Field(
+        default=[],
         description=(
-            "Which bare targets `uv run <target>` may reach without a question. "
-            "A project's own toolchain, so the library holds no opinion: an "
+            "Native calls this project has decided against outright, each "
+            "carrying the surface to reach for instead. Whether a tool is "
+            "against the point of a project is that project's judgement, so "
+            "an empty list — the library's own answer — refuses nothing"
+        ),
+    )
+    runner_targets: list[RunnerTargetRule] = Field(
+        default=[],
+        description=(
+            "Which bare targets `uv run <target>` may reach without a question, "
+            "and where each has to run. A project's own toolchain, so the "
+            "library holds no opinion: an "
             "empty list judges every runner invocation by the ordinary shell "
             "vocabulary instead"
         ),
@@ -730,10 +772,17 @@ class HookSet(BaseModel):
     )
     sandbox: HookSandbox | None = None
 
+    def excluded_commands(self) -> list[str]:
+        """Commands no OS boundary confines, declared sandbox or not.
 
-class ResolveSpec(BaseModel):
-    model_config = FROZEN
+        Undeclared reads the same as declared-with-nothing-excluded here,
+        which is what lets every compiled dispatcher take the answer without
+        first asking whether a sandbox exists to have an opinion.
+        """
+        return list(self.sandbox.excluded_commands) if self.sandbox else []
 
+
+class ResolveSpec(BaseModel, frozen=True):
     id: str
     worker_identity: NativeName
     """The identity a worker session declares, and the one the edit policy
@@ -745,9 +794,7 @@ class ResolveSpec(BaseModel):
     merge_skill: SkillInvocation
 
 
-class Plugin(BaseModel):
-    model_config = FROZEN
-
+class Plugin(BaseModel, frozen=True):
     id: str
     name: NativeName
     # Namespaces the plugin inside the selected CODEX_HOME and remains required
@@ -757,7 +804,7 @@ class Plugin(BaseModel):
     description: PortableText = Field(min_length=1, max_length=1024)
     skills: list[Skill]
     agents: list[Agent]
-    mcp_servers: list[McpServer] = Field(default_factory=list)
+    mcp_servers: list[McpServer] = []
     hooks: HookSet | None = None
 
     @model_validator(mode="after")
@@ -774,14 +821,10 @@ class Plugin(BaseModel):
         return self
 
 
-class Harness(BaseModel):
-    model_config = FROZEN
-
+class Harness(BaseModel, frozen=True):
     schema_version: int = 1
     generator_version: str
-    source_evidence: dict[str, str] = Field(  # lup: ignore[dict-str-payload]
-        default_factory=dict
-    )
+    source_evidence: dict[str, str] = {}  # lup: ignore[dict-str-payload]
     plugins: list[Plugin]
     guidance: PromptDocument
     resolver: ResolveSpec
@@ -910,7 +953,7 @@ class Harness(BaseModel):
         if unknown_agents:
             raise ValueError(f"delegations name unknown agents: {unknown_agents}")
 
-        used = document_text_size(self.guidance)
+        used = self.guidance.text_size()
         if used > GUIDANCE_BYTE_BUDGET:
             raise ValueError(
                 f"always-loaded guidance is {used} bytes, over the "
@@ -950,9 +993,7 @@ type NormalizedText = Annotated[str, AfterValidator(lf_normalized)]
 """LF-only text, normalized to terminate in a newline."""
 
 
-class Artifact(BaseModel):
-    model_config = FROZEN
-
+class Artifact(BaseModel, frozen=True):
     path: ArtifactPath
     content: NormalizedText
     semantic_id: str = Field(min_length=1)
@@ -991,9 +1032,7 @@ class Artifact(BaseModel):
         return self
 
 
-class ArtifactTree(BaseModel):
-    model_config = FROZEN
-
+class ArtifactTree(BaseModel, frozen=True):
     artifacts: list[Artifact]
 
     @model_validator(mode="after")
@@ -1004,7 +1043,7 @@ class ArtifactTree(BaseModel):
         return self
 
 
-class CapabilityReport(BaseModel):
+class CapabilityReport(BaseModel, frozen=True, arbitrary_types_allowed=True):
     """A runtime probe's verdict, without the payload that proves it.
 
     Split from the evidence because the commands that report readiness read
@@ -1014,14 +1053,12 @@ class CapabilityReport(BaseModel):
     genuinely needs the proof asks for :class:`CapabilityEvidence` instead.
     """
 
-    model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
-
     capability: str
     supported: bool
     version: str
 
 
-class CapabilityEvidence[C](CapabilityReport):
+class CapabilityEvidence[C](CapabilityReport, frozen=True):
     """One probe's verdict together with the adapter-shaped proof of it."""
 
     evidence: C

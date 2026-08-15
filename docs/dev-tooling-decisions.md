@@ -182,24 +182,33 @@ Consequences: The two rule sets do not duplicate diagnostics. Both generated
 hook runtimes and the repository auditor share one semantic checker, and the
 suppression audit reports bare, stale, and spurious ignores.
 
-## ADR-013: Scope commit-time regeneration to harness inputs
+## ADR-013: Put the drift check on the path a commit must cross
 
-Context: The local pre-commit hook regenerates both native trees, while CI
-already runs formatting, lint, type, unit, anti-pattern, boundary, and
-read-only drift checks on every pull request and push. An always-run hook
-regenerates on commits that cannot change generated output and turns any
-generator fault into a commit-time failure for unrelated work.
+Context: The generated-artifact drift check was correct and still let two
+stale commits land, because nothing made it run before history was written.
+The `.pre-commit-config.yaml` meant to be the commit-time layer declared a
+hook for a framework the project never depended on, so no clone had it
+installed. The sources compiled into both plugin trees are copied there
+verbatim, so rewording a comment in one of them drifted both without
+changing anything either does — and a path pattern deciding when to check is
+one more belief that can be wrong about which commits matter.
 
-Decision: Trigger the hook through an explicit `files:` pattern covering the
-generation inputs — the harness devtools and the `lup` library they compile —
-and the owned native trees reconciliation reads. The per-push CI drift check
-remains the authoritative gate.
+Decision: A git `pre-commit` hook, written by `dev commit-guard install` and
+armed by `dev worktree create`, whose body is `harness check all`. The
+pipeline runs that same command as its own step, spelled from the same
+constant, and `dev check` reads the same `DriftVerdict` that command reads.
+The `pre-commit` framework config is dropped: it named a framework nothing
+depended on, it wanted the same hook path, and it regenerated where a gate
+should read.
 
-Consequences: Ordinary commits run no generation. A commit touching harness
-sources or owned artifacts still regenerates before it lands, and anything
-the pattern misses is caught by `harness check all` in CI. The pattern
-matches the whole `lup` package rather than an enumerated import closure so
-a new generation dependency cannot silently escape it.
+Consequences: Skipping `dev check` no longer skips the drift check. The three
+refusing paths cannot disagree, because there is one computation and one
+failure message naming the command that settles it. The check is whole-tree
+and unscoped, which the sub-second cost affords. Two cases stay the
+pipeline's, which is why the local layer does not replace it: the hook reads
+the worktree rather than the index, so a commit staging canonical source
+while leaving its regenerated artifacts unstaged passes it, and `--no-verify`
+skips it outright. Both reach CI, where the same command refuses them.
 
 ## ADR-014: Judge devtools placement by what an adopter keeps receiving
 

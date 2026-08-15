@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 from lup.adapters.claude.native import (
     ClaudeEventDecoder,
     ClaudeHookPayload,
+    claude_sandbox_input,
     parse_claude_before_tool,
 )
 from lup.hooks import (
@@ -20,6 +21,7 @@ from lup.hooks import (
 )
 from lup.adapters.claude.harness import CLAUDE_DISPATCHER
 from lup.policy.enforcement import NativeSemantics
+from lup.policy.kernel.decision import SandboxPlacement
 from lup.policy.models import SemanticTool
 from lup.types import JsonObject, ToolName
 from lup.workspace.paths import extract_glob_dir
@@ -58,12 +60,32 @@ def claude_hook_semantic_tool(event: LupHookInput) -> SemanticTool:
 CLAUDE_SEMANTICS = NativeSemantics(
     decode=claude_hook_semantic_tool,
     routed_tools=CLAUDE_DISPATCHER.routed_tools,
+    escapable=True,
+    agent_escalates=True,
 )
 """What an in-process Claude session hands a semantic policy.
 
 The routed set is the dispatcher's own, so the tools the plugin registers
 the hook for and the tools this path enforces over cannot drift apart.
+Claude Code answers yes to both sandbox questions from one field of one
+schema: a verdict places a call by writing ``dangerouslyDisableSandbox``
+through the rewrite channel :func:`claude_placed_input` spells, and an agent
+takes its own call out by setting that same field on the call it makes.
 """
+
+
+def claude_placed_input(
+    tool_name: ToolName, tool_input: JsonObject, sandbox: SandboxPlacement
+) -> JsonObject | None:
+    """One in-process call's rewrite, for the one tool that takes the argument.
+
+    Every other call is placed by the session it runs in, so a placement on
+    one has nowhere to go and is dropped rather than written into arguments
+    the tool would not read.
+    """
+    if tool_name != "Bash":
+        return None
+    return claude_sandbox_input(tool_input, sandbox)
 
 
 def build_claude_hook_handler(
@@ -102,7 +124,11 @@ def build_claude_hook_handler(
                 stop_hook_active=stop_hook_active,
             )
         )
-        return lup_hook_output_to_claude(output, event=event)
+        return lup_hook_output_to_claude(
+            output,
+            event=event,
+            placed_input=claude_placed_input(tool_name, tool_input, output.sandbox),
+        )
 
     return claude_hook
 
@@ -131,6 +157,7 @@ def lup_hook_output_to_claude(
     output: LupHookOutput,
     *,
     event: LupHookEvent = "PreToolUse",
+    placed_input: JsonObject | None = None,
 ) -> claude_types.SyncHookJSONOutput:
     """Render a portable hook result into the matching Claude hook shape.
 
@@ -142,6 +169,16 @@ def lup_hook_output_to_claude(
     A rewrite rides the undecided path: it carries corrected arguments while
     leaving the verdict to the ambient permission flow, so fixing a call
     never doubles as granting it.
+
+    ``placed_input`` is the separate case: a verdict that also says where the
+    call runs, which Claude Code takes as an argument, so the decision and the
+    rewrite go out together.
+
+    A verdict carrying something for the agent rather than for whoever the
+    permission channel reaches goes out on the context channel beside it, and
+    on both the effects a placement survives — an approval question puts its
+    reason to a human, which is no more the agent than a grant's record is.
+    :func:`~lup.policy.kernel.decision.escalation_offer` decides what that is.
     """
     from claude_agent_sdk import types as claude_types
 
@@ -151,6 +188,25 @@ def lup_hook_output_to_claude(
                 hookSpecificOutput=claude_types.PreToolUseHookSpecificOutput(
                     hookEventName="PreToolUse",
                     updatedInput=output.updated_input,
+                )
+            )
+        case "PreToolUse", "allow" if (
+            placed_input is not None and output.additional_context
+        ):
+            return claude_types.SyncHookJSONOutput(
+                hookSpecificOutput=claude_types.PreToolUseHookSpecificOutput(
+                    hookEventName="PreToolUse",
+                    permissionDecision="allow",
+                    updatedInput=placed_input,
+                    additionalContext=output.additional_context,
+                )
+            )
+        case "PreToolUse", "allow" if placed_input is not None:
+            return claude_types.SyncHookJSONOutput(
+                hookSpecificOutput=claude_types.PreToolUseHookSpecificOutput(
+                    hookEventName="PreToolUse",
+                    permissionDecision="allow",
+                    updatedInput=placed_input,
                 )
             )
         case "PreToolUse", "allow" if output.additional_context:
@@ -166,6 +222,36 @@ def lup_hook_output_to_claude(
                 hookSpecificOutput=claude_types.PreToolUseHookSpecificOutput(
                     hookEventName="PreToolUse",
                     permissionDecision="allow",
+                )
+            )
+        case "PreToolUse", "ask" if (
+            placed_input is not None and output.additional_context
+        ):
+            return claude_types.SyncHookJSONOutput(
+                hookSpecificOutput=claude_types.PreToolUseHookSpecificOutput(
+                    hookEventName="PreToolUse",
+                    permissionDecision="ask",
+                    permissionDecisionReason=output.reason,
+                    updatedInput=placed_input,
+                    additionalContext=output.additional_context,
+                )
+            )
+        case "PreToolUse", "ask" if placed_input is not None:
+            return claude_types.SyncHookJSONOutput(
+                hookSpecificOutput=claude_types.PreToolUseHookSpecificOutput(
+                    hookEventName="PreToolUse",
+                    permissionDecision="ask",
+                    permissionDecisionReason=output.reason,
+                    updatedInput=placed_input,
+                )
+            )
+        case "PreToolUse", "ask" if output.additional_context:
+            return claude_types.SyncHookJSONOutput(
+                hookSpecificOutput=claude_types.PreToolUseHookSpecificOutput(
+                    hookEventName="PreToolUse",
+                    permissionDecision="ask",
+                    permissionDecisionReason=output.reason,
+                    additionalContext=output.additional_context,
                 )
             )
         case "PreToolUse", "ask":

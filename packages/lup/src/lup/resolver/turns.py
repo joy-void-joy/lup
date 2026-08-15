@@ -19,32 +19,32 @@ turns can keep it.
 from collections.abc import Callable
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
 from lup.harness.contracts import SkillInvocationRenderer
 from lup.harness.models import ResolveSpec
 from lup.policy.identity import ConcernAllowance
 from lup.resolver.actors import ActorSession, ActorSessions
-from lup.resolver.mailbox import QuestionMailbox
+from lup.resolver.grants import GrantLedger, concern_grants, lease_grants
 from lup.resolver.join_desk import (
     JoinPlan,
     JoinProgressRecord,
     JoinTip,
 )
 from lup.resolver.join_tools import JoinReport
+from lup.resolver.mailbox import ParkRequest, QuestionMailbox
 from lup.resolver.models import (
     ActorRef,
     CarriedParent,
     Concern,
     DropCandidate,
     MergeReport,
+    QuestionAnswer,
     ReviewReport,
     WorkAssignment,
     WorkerContext,
     WorkerReport,
     WritableRootLease,
-    ALLOWANCE_GRANTED,
-    allowance_question_id,
 )
 from lup.resolver.run import ResolveRun, ResolverInvariantError
 from lup.resolver.tools import WAIT_CONTRACT
@@ -80,6 +80,8 @@ ASK_PREAMBLE = (
     "guessing or ending your turn to report it. " + WAIT_CONTRACT
 )
 
+# lup: ignore[constant-declaration] — one instruction every worker prompt states
+# identically, declared beside the turn that renders it
 DECLARATION_PREAMBLE = (
     "Before you submit, put the file account you are about to report through "
     "check_declaration and act on what it says. It runs the same reading that "
@@ -90,6 +92,8 @@ DECLARATION_PREAMBLE = (
 )
 
 
+# lup: ignore[constant-declaration] — instruction prose a worker is handed, and
+# what it instructs is this codebase's own criterion protocol
 ANSWERED_ARE_NOT_CRITERIA = (
     "Those rulings are context for judging the work, not criteria in their own "
     "right. Report criteria_met using exactly the declared criterion ids — echo "
@@ -190,14 +194,29 @@ def format_candidates(owed: list[DropCandidate]) -> str:
     )
 
 
-class LedgerEntry(BaseModel):
+class LedgerEntry(BaseModel, frozen=True):
     """One join, as the merger accounted for it."""
-
-    model_config = ConfigDict(frozen=True)
 
     parent: str
     summary: str
     merge: MergeReport
+
+
+def criteria_recital(concern: Concern) -> str:
+    """The ids and descriptions an acceptance is checked against.
+
+    `criteria_met` is compared to these ids exactly, so they are what a
+    reviewer must be able to name — not a summary of them, and not the whole
+    concern, which is what a later round deliberately leaves out.
+    """
+    return (
+        "Acceptance criteria, by the ids `criteria_met` is checked against:\n"
+        + "".join(
+            f"- {criterion.id}: {criterion.description}\n"
+            for criterion in concern.criteria
+        )
+        + "\n"
+    )
 
 
 class TurnRunner:
@@ -212,11 +231,13 @@ class TurnRunner:
         worker_factory: WorkerFactoryRecipe,
         reviewer_factory: ReviewerFactoryRecipe,
         invocation_renderer: SkillInvocationRenderer,
+        grants: GrantLedger,
     ) -> None:
         self.spec = spec
         self.run = run
         self.actors = actors
         self.mailbox = mailbox
+        self.grants = grants
         self.worker_factory = corrective(worker_factory)
         self.reviewer_factory = corrective(reviewer_factory)
         self.invocation_renderer = invocation_renderer
@@ -225,7 +246,20 @@ class TurnRunner:
     def worker_session(
         self, actor: ActorRef, root: Path, allowances: list[ConcernAllowance]
     ) -> ActorSession:
-        """One writing actor's session, authorized for the gates it was granted."""
+        """One writing actor's session, authorized for the gates it was granted.
+
+        The gates are published to this lease's document and the session is
+        handed the reader for it, not the list: an answer that arrives after
+        the session starts reaches it through the document, and the same
+        document is what the lease's deployed dispatcher reads.
+
+        Whatever a caller passes, what this lease has itself been granted is
+        folded in here rather than left to each caller to remember. A turn
+        republishes before it runs and the session holding the reader is the
+        one opened for the first turn, so a set that omitted a gate that
+        reader had already seen would take it away — and be reported as the
+        withdrawal it is indistinguishable from.
+        """
         return self.actors.session(
             actor,
             self.worker_factory(
@@ -233,10 +267,29 @@ class TurnRunner:
                     root=root,
                     concern_id=actor.id,
                     actor=actor,
-                    allowances=allowances,
+                    grants=self.grants.lease(
+                        actor.id,
+                        lease_grants(actor.id, allowances, self.recorded_answers()),
+                        self.park_lease,
+                    ),
                 )
             ),
         )
+
+    def recorded_answers(self) -> list[QuestionAnswer]:
+        """Every answer this run has settled, from the record that settles them.
+
+        The mailbox rather than the persisted state, because the state is a
+        fold of the mailbox taken a moment afterwards and the publisher that
+        delivers a mid-lease grant works from the mailbox. A lease opened in
+        the gap would otherwise publish a set missing a gate a human had
+        already granted — and its reader would call that a withdrawal.
+        """
+        return [record.answer for record in self.mailbox.answers()]
+
+    def park_lease(self, reason: str) -> None:
+        """Stop the run because a human took back what a lease was granted."""
+        self.mailbox.park(ParkRequest(run_id=self.run.require().run_id, reason=reason))
 
     def reviewer_session(self, actor: ActorRef, worktree: Path) -> ActorSession:
         """One reading actor's session, opened over the tree it judges."""
@@ -335,13 +388,21 @@ class TurnRunner:
             f"{span}{answered}"
         )
         if round_number > 1:
-            # This reviewer wrote the criticism the worker was revising, so
-            # it knows what it asked for. Re-reading its own concern cold on
-            # every round was one of the costs of a one-shot session.
+            # This reviewer wrote the criticism the worker was revising, so it
+            # knows what it asked for, and re-reading its whole concern cold on
+            # every round was one of the costs of a one-shot session. The
+            # criteria are the exception, carried every round: the acceptance
+            # guard checks `criteria_met` against these exact ids, and a
+            # reviewer whose session did not survive a resumed run has nowhere
+            # to read them — one reconstructed the ids from the concern's
+            # answered questions, and the guard refused an acceptance it had
+            # already argued for. A round that cannot name what it is judged
+            # against fails identically however often it is retried.
             prompt = (
                 "The worker revised in response to your review. Review the "
                 "updated work against the same acceptance criteria, and say "
                 "explicitly whether each point you raised was addressed.\n\n"
+                f"{criteria_recital(concern)}"
                 f"Worker report:\n{worker.model_dump_json(indent=2)}\n\n"
                 f"{span}{answered}"
             )
@@ -694,25 +755,12 @@ class TurnRunner:
         """Every gate this concern may pass: planned grants plus mid-run ones.
 
         A `request_allowance` question a human answered "grant" extends the
-        concern's authority from that answer on: the next session launched
-        for the concern — a revision round, a merge, a remediation — carries
-        it in its environment and its in-process judge. Without this reader,
-        the tool's question had no machinery behind either answer.
+        concern's authority from that answer on — reaching the session that
+        asked, which is still running, through the document that session's
+        judges read. This is what the run believes; the document is what
+        governs, and the two are the same until a human says otherwise.
         """
-        granted = list(concern.allowances)
-        state = self.run.state
-        if state is None or state.answers is None:
-            return granted
-        answered = {
-            answer.question_id: answer.value for answer in state.answers.answers
-        }
-        for allowance in ConcernAllowance:
-            if allowance in granted:
-                continue
-            key = allowance_question_id(concern.id, allowance)
-            if key in answered and answered[key] == ALLOWANCE_GRANTED:
-                granted.append(allowance)
-        return granted
+        return concern_grants(concern, self.recorded_answers())
 
     def merge_allowances(self) -> list[ConcernAllowance]:
         """Every gate the joined concerns were approved to pass.

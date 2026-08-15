@@ -11,7 +11,7 @@
 from pathlib import Path
 from typing import Literal
 
-from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, ValidationError
+from pydantic import AnyHttpUrl, BaseModel, Field, ValidationError
 
 from lup.policy.models import (
     BeforeTool,
@@ -24,63 +24,54 @@ from lup.policy.models import (
     ToolIdentity,
     UnknownTool,
 )
+from lup.policy.kernel.decision import (
+    SandboxPlacement,
+    escalation_offer,
+    sandbox_escaped,
+)
 from lup.policy.native import NativeDecisionRenderer, NativeEventDecoder
 from lup.types import JsonObject
 
 
-class ClaudeEditOperation(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class ClaudeEditOperation(BaseModel, frozen=True):
     type: Literal["edit"] = "edit"
     path: Path
     before: str
     after: str
 
 
-class ClaudeWriteOperation(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class ClaudeWriteOperation(BaseModel, frozen=True):
     type: Literal["write"] = "write"
     path: Path
     content: str
 
 
-class ClaudeEditBatchOperation(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class ClaudeEditBatchOperation(BaseModel, frozen=True):
     type: Literal["edit_batch"] = "edit_batch"
     changes: list[EditChange] = Field(min_length=1)
 
 
-class ClaudeShellOperation(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class ClaudeShellOperation(BaseModel, frozen=True):
     type: Literal["shell"] = "shell"
     command: str
     cwd: Path | None = None
     unsandboxed: bool = False
 
 
-class ClaudeFetchOperation(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class ClaudeFetchOperation(BaseModel, frozen=True):
     type: Literal["fetch"] = "fetch"
     url: str
 
 
-class ClaudeSearchOperation(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class ClaudeSearchOperation(BaseModel, frozen=True):
     type: Literal["search"] = "search"
     query: str
 
 
-class ClaudeUnknownOperation(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class ClaudeUnknownOperation(BaseModel, frozen=True):
     type: Literal["unknown"] = "unknown"
     name: str
-    input: JsonObject = Field(default_factory=dict)
+    input: JsonObject = {}
 
 
 type ClaudeOperation = (
@@ -94,21 +85,18 @@ type ClaudeOperation = (
 )
 
 
-class ClaudeBeforeToolEvent(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class ClaudeBeforeToolEvent(BaseModel, frozen=True):
     operation: ClaudeOperation
 
 
-class ClaudeHookPayload(BaseModel):
+class ClaudeHookPayload(BaseModel, frozen=True):
     """Validated external hook input before operation-specific parsing."""
 
-    model_config = ConfigDict(frozen=True)
-
     tool_name: str
-    tool_input: JsonObject = Field(default_factory=dict)
+    tool_input: JsonObject = {}
 
 
+# lup: ignore[model-free-function] — boundary decoder off Claude's wire payload
 def parse_claude_before_tool(payload: ClaudeHookPayload) -> ClaudeBeforeToolEvent:
     """Decode Claude names and payload fields at the adapter boundary."""
     match payload.tool_name, payload.tool_input:
@@ -182,10 +170,34 @@ class ClaudeEventDecoder(NativeEventDecoder[ClaudeBeforeToolEvent]):
         return BeforeTool(tool=tool, identity=identity)
 
 
-class ClaudeDecisionOutput(BaseModel):
-    """Claude PreToolUse hook-specific decision payload."""
+def claude_sandbox_input(
+    tool_input: JsonObject | None, sandbox: SandboxPlacement
+) -> JsonObject | None:
+    """The call's own arguments, rewritten to run where the verdict placed it.
 
-    model_config = ConfigDict(frozen=True, populate_by_name=True)
+    Claude Code's one spelling of the sandbox axis, and the only place it is
+    written. The rewrite replaces the arguments outright rather than merging
+    into them, which is why the whole input is carried through; an unplaced
+    verdict rewrites nothing at all.
+
+    Which placements leave is :func:`~lup.policy.kernel.decision.sandbox_escaped`
+    and not this function, because the compiled dispatcher renders the same
+    rewrite and cannot import this one. What stays here is the field name,
+    which is Claude Code's own and reaches no other runtime.
+    """
+    if tool_input is None or sandbox == "ambient":
+        return None
+    match tool_input:
+        case {"dangerouslyDisableSandbox": True}:
+            spent = True
+        case _:
+            spent = False
+    escaped = sandbox_escaped(sandbox, spent)
+    return {**tool_input, "dangerouslyDisableSandbox": escaped}
+
+
+class ClaudeDecisionOutput(BaseModel, frozen=True, populate_by_name=True):
+    """Claude PreToolUse hook-specific decision payload."""
 
     hook_event_name: Literal["PreToolUse"] = Field(
         default="PreToolUse", alias="hookEventName"
@@ -194,15 +206,39 @@ class ClaudeDecisionOutput(BaseModel):
         default=None, alias="permissionDecision"
     )
     reason: str = Field(default="", alias="permissionDecisionReason")
+    updated_input: JsonObject | None = Field(default=None, alias="updatedInput")
+    additional_context: str = Field(default="", alias="additionalContext")
+    """What the agent reads, as against what the human asked is shown.
+
+    The two are separate channels and a grant only travels on this one: a
+    permission reason on an allow reaches the user, so a verdict with
+    something for the agent to act on has to say it here as well."""
 
 
 class ClaudeDecisionRenderer(NativeDecisionRenderer[ClaudeDecisionOutput]):
-    """Render semantic effects; defer omits the decision so the client mode applies."""
+    """Render semantic effects; defer omits the decision so the client mode applies.
 
-    def render(self, decision: Decision) -> ClaudeDecisionOutput:
-        if decision.effect == "defer":
-            return ClaudeDecisionOutput(permissionDecisionReason=decision.reason)
+    Claude Code takes a call's sandbox as an argument of the call, so a placed
+    verdict goes out as the permission decision plus a rewrite of the
+    arguments. That rewrite is what makes an unprompted placement reachable at
+    all, and the rewrite channel carries it: the hook schema types it as an
+    open record, the flag is a declared field of the shell tool's own input
+    schema rather than an unknown key the validation would reject, and the one
+    per-tool key filter applied before execution names a different tool
+    entirely — so the object arrives whole and the sandbox is chosen from it.
+    Read out of the shipped binary at version 2.1.228; the compiled dispatcher
+    in ``assets/policy_dispatcher.py`` carries the finding in full.
+    """
+
+    def render(
+        self, decision: Decision, tool_input: JsonObject | None = None
+    ) -> ClaudeDecisionOutput:
+        settled = decision.placed(escapable=True, agent_escalates=True)
+        if settled.effect == "defer":
+            return ClaudeDecisionOutput(permissionDecisionReason=settled.reason)
         return ClaudeDecisionOutput(
-            permissionDecision=decision.effect,
-            permissionDecisionReason=decision.reason,
+            permissionDecision=settled.effect,
+            permissionDecisionReason=settled.reason,
+            updatedInput=claude_sandbox_input(tool_input, settled.sandbox),
+            additionalContext=escalation_offer(settled.sandbox, settled.reason),
         )

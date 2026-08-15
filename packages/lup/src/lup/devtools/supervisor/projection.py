@@ -14,7 +14,7 @@ import time
 from enum import StrEnum
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field
 
 from lup.resolver.models import ActorRef
 from lup.resolver.mailbox import (
@@ -29,7 +29,6 @@ from lup.resolver.models import (
     ResolvePhase,
     ResolveState,
     VerificationRecord,
-    run_tally,
 )
 
 LIVENESS_WINDOW_SECONDS = 90.0
@@ -39,6 +38,8 @@ A judgement, not a fact about the resolver: it trades how quickly a killed
 run stops claiming to be live against how long a slow phase may go quiet
 without being called parked. Callers that know their own runs' rhythm pass
 their own."""
+# lup: ignore[constant-declaration] — the projection's own file name, which the
+# writer and every reader must spell alike to meet at all
 STATE_FILE = "state.json"
 
 
@@ -53,10 +54,8 @@ class RunStatus(StrEnum):
     FAILED = "failed"
 
 
-class ConcernView(BaseModel):
+class ConcernView(BaseModel, frozen=True):
     """One concern joined across progress, eligibility, and its outcome."""
-
-    model_config = ConfigDict(frozen=True)
 
     id: str
     title: str
@@ -72,7 +71,7 @@ class ConcernView(BaseModel):
     failure: str | None
 
 
-class PendingQuestionView(BaseModel):
+class PendingQuestionView(BaseModel, frozen=True):
     """One question this run has asked, with whatever answer state it holds.
 
     ``offer`` is a value some door proposed that no promoter has taken yet.
@@ -80,15 +79,13 @@ class PendingQuestionView(BaseModel):
     the pending value and can replace it before it counts.
     """
 
-    model_config = ConfigDict(frozen=True)
-
     question: MaterialQuestion
     asked_by: str
     answered: str | None = None
     offer: str | None = None
 
 
-class ReviewView(BaseModel):
+class ReviewView(BaseModel, frozen=True):
     """The branch this run built and what mechanically holds about it.
 
     No verdict. Whether twelve merged concerns are jointly right is a
@@ -97,21 +94,17 @@ class ReviewView(BaseModel):
     the run, not persisted here by a reviewer nothing consumed.
     """
 
-    model_config = ConfigDict(frozen=True)
-
     review_branch: str
     verification: list[VerificationRecord]
 
 
-class SupervisorState(BaseModel):
+class SupervisorState(BaseModel, frozen=True):
     """Everything one page render needs, in one response.
 
     ``phases`` and ``statuses`` are served from the library enums rather
     than restated in the page, so adding a phase upstream cannot leave the
     zero-build frontend silently out of date.
     """
-
-    model_config = ConfigDict(frozen=True)
 
     run_id: str
     live: bool
@@ -128,10 +121,8 @@ class SupervisorState(BaseModel):
     last_activity: float = 0.0
 
 
-class RunSummary(BaseModel):
+class RunSummary(BaseModel, frozen=True):
     """One row of the persisted-run index."""
-
-    model_config = ConfigDict(frozen=True)
 
     run_id: str
     phase: ResolvePhase | None
@@ -148,18 +139,14 @@ class RunSummary(BaseModel):
     operator scanning their runs actually wants."""
 
 
-class RunIndex(BaseModel):
+class RunIndex(BaseModel, frozen=True):
     """Every run found under the resolver state root."""
-
-    model_config = ConfigDict(frozen=True)
 
     runs: list[RunSummary]
 
 
-class ActorIndex(BaseModel):
+class ActorIndex(BaseModel, frozen=True):
     """Every actor a run's record names, which is every trace it can open."""
-
-    model_config = ConfigDict(frozen=True)
 
     actors: list[ActorRef]
 
@@ -434,6 +421,6 @@ def supervisor_state(
         review=review,
         failures=state.failures,
         rerun_recipe=answer_recipe(adapter, state.run_id, unanswered_questions(views)),
-        progress_line=run_tally(state).concerns_line(),
+        progress_line=state.tally().concerns_line(),
         last_activity=activity,
     )

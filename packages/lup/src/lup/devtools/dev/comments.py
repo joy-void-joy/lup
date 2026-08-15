@@ -45,6 +45,13 @@ class FoundComment(MarkerComment):
     file: str
     context: str
 
+    def location_line(self) -> str:
+        """This note's span and read window, the listing's per-note header."""
+        return (
+            f"{self.file}:{self.start_line}-{self.end_line}  "
+            f"(read {self.read_start}-{self.read_end})"
+        )
+
 
 def scan_tracked(
     find: Callable[[str, str], list[MarkerComment]],
@@ -200,14 +207,6 @@ def commit_prompts() -> None:
     typer.echo(f"Committed {len(found)} prompt(s) across {len(files)} file(s).")
 
 
-def location_line(comment: FoundComment) -> str:
-    """One note's span and read window, the listing's per-note header."""
-    return (
-        f"{comment.file}:{comment.start_line}-{comment.end_line}  "
-        f"(read {comment.read_start}-{comment.read_end})"
-    )
-
-
 def render(found: list[FoundComment], *, as_json: bool, empty: str) -> None:
     """Print one scan's results as a listing or JSON (same shape either way).
 
@@ -226,17 +225,17 @@ def render(found: list[FoundComment], *, as_json: bool, empty: str) -> None:
     for comment in found:
         if comment.kind != "note":
             continue
-        typer.echo(location_line(comment))
+        typer.echo(comment.location_line())
         typer.echo(f"    {comment.text}")
     if deferred:
         typer.echo("\nDeferred — parked until explicitly woken:")
         for comment in deferred:
-            typer.echo(location_line(comment))
+            typer.echo(comment.location_line())
             typer.echo(f"    {comment.marker_text()}")
     if solved:
         typer.echo("\nClaimed resolved — awaiting review of each claim:")
         for comment in solved:
-            typer.echo(location_line(comment))
+            typer.echo(comment.location_line())
             typer.echo(f"    solved: {comment.text}")
     files = {comment.file for comment in found}
     summary = f"\n{len(found)} comment(s) in {len(files)} file(s)"

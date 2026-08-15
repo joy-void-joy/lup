@@ -31,6 +31,8 @@ from pydantic import ConfigDict, TypeAdapter, with_config
 from lup.harness.models import Plugin
 from lup.workspace.paths import find_project_root
 
+# lup: ignore[constant-declaration] — the marketplace entry a native host reads,
+# spelled the relative way that host requires
 SELF_PATH = "./.claude/plugins"
 
 

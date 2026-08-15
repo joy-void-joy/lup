@@ -14,7 +14,7 @@ import json
 import shlex
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel
 
 from lup.harness.contracts import CurrentTreeReader, Reconciler
 from lup.harness.generation import artifact_map
@@ -22,9 +22,7 @@ from lup.harness.models import Artifact, ArtifactTree
 from lup.harness.ownership import OwnershipCategory, OwnershipManifest
 
 
-class CurrentArtifact(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class CurrentArtifact(BaseModel, frozen=True):
     path: Path
     content: str
     category: OwnershipCategory
@@ -32,69 +30,58 @@ class CurrentArtifact(BaseModel):
     executable: bool = False
 
 
-class CurrentTree(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class CurrentTree(BaseModel, frozen=True):
     root: Path
     artifacts: list[CurrentArtifact]
 
+    def digest(self) -> str:
+        """Hash classified paths and content hashes without exposing contents."""
+        rows = [
+            {
+                "path": artifact.path.as_posix(),
+                "sha256": artifact.sha256,
+                "category": artifact.category,
+            }
+            for artifact in sorted(
+                self.artifacts, key=lambda item: item.path.as_posix()
+            )
+        ]
+        encoded = json.dumps(rows, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
-class ProposedWrite(BaseModel):
-    model_config = ConfigDict(frozen=True)
 
+class ProposedWrite(BaseModel, frozen=True):
     artifact: Artifact
     previous_sha256: str | None = None
     previous_executable: bool | None = None
 
 
-class ProposedDelete(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class ProposedDelete(BaseModel, frozen=True):
     path: Path
     prior_ownership_sha256: str
 
 
-class ReconciliationConflict(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class ReconciliationConflict(BaseModel, frozen=True):
     path: Path
     category: OwnershipCategory
     message: str
     sensitive: bool = False
 
 
-class ReconciliationProposal(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class ReconciliationProposal(BaseModel, frozen=True):
     id: str
     root: Path
-    writes: list[ProposedWrite] = Field(default_factory=list)
-    deletes: list[ProposedDelete] = Field(default_factory=list)
-    conflicts: list[ReconciliationConflict] = Field(default_factory=list)
+    writes: list[ProposedWrite] = []
+    deletes: list[ProposedDelete] = []
+    conflicts: list[ReconciliationConflict] = []
     base_digest: str
 
 
-class SourcePreimageRow(BaseModel):
+class SourcePreimageRow(BaseModel, frozen=True):
     """One named source path and its optional preimage hash."""
-
-    model_config = ConfigDict(frozen=True)
 
     path: str
     sha256: str | None
-
-
-def current_tree_digest(tree: CurrentTree) -> str:
-    """Hash classified paths and content hashes without exposing contents."""
-    rows = [
-        {
-            "path": artifact.path.as_posix(),
-            "sha256": artifact.sha256,
-            "category": artifact.category,
-        }
-        for artifact in sorted(tree.artifacts, key=lambda item: item.path.as_posix())
-    ]
-    encoded = json.dumps(rows, sort_keys=True, separators=(",", ":"))
-    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
 def source_patch_preimages(content: str) -> list[Path]:
@@ -359,7 +346,7 @@ class DeterministicReconciler(Reconciler):
             if artifact.category == "generated"
             and artifact.path.as_posix() not in wanted
         ]
-        base_digest = current_tree_digest(current)
+        base_digest = current.digest()
         proposal_rows = {
             "base": base_digest,
             "writes": [write.artifact.path.as_posix() for write in writes],

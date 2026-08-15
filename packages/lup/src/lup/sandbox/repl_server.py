@@ -46,7 +46,10 @@ def raise_timeout(signum: int, frame: FrameType | None) -> None:
     raise CellTimeout()
 
 
-def echo_repr(value: object) -> str:  # lup: ignore[bare-object] — any cell value
+def echo_repr(
+    value: object,  # lup: ignore[bare-object] — any cell value
+    max_output: int = MAX_OUTPUT,
+) -> str:
     """``repr`` a cell's value, surviving a hostile ``__repr__``.
 
     The value comes from arbitrary agent code, so its ``__repr__`` may
@@ -55,7 +58,7 @@ def echo_repr(value: object) -> str:  # lup: ignore[bare-object] — any cell va
     is named in place of the repr rather than propagated.
     """
     try:
-        return repr(value)[:MAX_OUTPUT]
+        return repr(value)[:max_output]
     except Exception as e:
         return f"<unrepresentable {type(value).__name__}: {type(e).__name__}>"
 

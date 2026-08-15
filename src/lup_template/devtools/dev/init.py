@@ -46,6 +46,8 @@ PACKAGE_STRING_ANCHOR_RE = re.compile(
     re.VERBOSE,
 )
 
+# lup: ignore[constant-declaration] — each entry is a name lup itself publishes,
+# so what marks a line as framework is lup's vocabulary rather than a preference
 FRAMEWORK_MARKERS = {
     "lup_tool",
     "LupMcpTool",

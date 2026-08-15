@@ -1,3 +1,8 @@
+# lup: ignore[constant-declaration]
+# Every constant here is this repository's own composition — which runtimes it
+# builds for, and what it calls its own harness session. A composition root is
+# where a judgement is finally made rather than passed on, so there is no
+# caller above it to take these from.
 """Root of the project-owned harness declaration graph.
 
 The declaration leaves — skills, agents, prompt documents, settings, and
@@ -33,11 +38,70 @@ from lup.devtools.dev.workflow import WorkflowSpec
 from lup.devtools.project import DevProject
 from lup.harness.contracts import NativeSpellings
 from lup.policy.kernel.rows import PathRoleRow
+from lup.policy.refused_tools import RefusedTool
 from lup.workspace.paths import project_root, read_project_name
 from lup_template.agent.toolsets import tool_group_names
 from lup_template.devtools.harness.content.catalog import AGENTS, SKILLS
 from lup_template.devtools.harness.content.guidance import DOCUMENT as GUIDANCE
-from lup_template.devtools.harness.content.shell_vocabulary import SHELL_RULES
+from lup_template.devtools.harness.content.shell_vocabulary import (
+    RUNNER_TARGETS,
+    SHELL_RULES,
+)
+
+EXCLUDED_COMMANDS = [
+    # `py eval` is the rung the guidance points at for computing anything, and
+    # it computes by talking to the Docker daemon over a Unix socket the
+    # isolation blocks outright — the one incompatibility the runtime's own
+    # documentation names. Excluding the rung leaves the expression evaluated
+    # where it always was, in a container; granting the socket instead would
+    # hand every sandboxed command the host through it.
+    "uv run lup-devtools py eval *",
+    # Egress the sandbox proxy cannot carry: it allowlists hostnames over
+    # HTTP, and the transport underneath a git remote is SSH on port 22. No
+    # narrower lever reaches this — a credential path takes a mode and not a
+    # command, and narrowing the path would still leave ssh unable to read the
+    # key it authenticates with.
+    "ssh *",
+    "git *",
+    # `gh` reaches hosts the allowlist already admits, but it drives `git` for
+    # anything touching a remote, and a child of a confined command is
+    # confined too — so excluding git without it moves the same failure one
+    # call deeper.
+    "gh *",
+]
+"""Commands this project runs with no OS boundary beneath them.
+
+Each is a requirement the boundary cannot express any other way, and the
+count is the point: an exclusion is not a widened rule but a removed one, so
+the list stays as short as the toolchain's actual incompatibilities."""
+
+ARTIFACT_REFUSAL = (
+    "publishing a page leaves the repository, and this project already owns"
+    " surfaces that do not — run `uv run lup-devtools report` for everything"
+    " left to implement, or the report skill to write it whole to tmp/report.md"
+)
+"""Why an artifact is the wrong reflex here, and what answers the same need.
+
+The redirect is the point rather than the refusal, exactly as the
+generated-tree refusal names the source to edit instead of only saying no. A
+report that leaves the repository is one nothing in this project can read
+back; the report surface is where the same question is answered in a place
+every later session, scan, and gate can reach.
+"""
+
+REFUSED_TOOLS = [
+    RefusedTool(tool="Artifact", reason=ARTIFACT_REFUSAL),
+    RefusedTool(tool="Skill", specifier="artifact-design", reason=ARTIFACT_REFUSAL),
+]
+"""The calls this project has decided against, each naming what to reach for.
+
+Both are Claude Code's spellings, and it is there the reflex they stop exists.
+Every runtime consults the table all the same, because which names are worth
+refusing is this declaration's answer rather than an adapter's — so a name
+Codex does offer would be refused there by writing one line here. Neither is
+walled off — a deliberate use escalates with the marker the shell lattice
+already uses, and gets an approval question carrying its own stated reason.
+"""
 
 HARNESS_SESSION = "harness"
 """The session a natively launched tool server opens for itself.
@@ -118,16 +182,18 @@ def application_roots() -> ApplicationRoots:
     package = Path(__file__).resolve().parents[2].relative_to(project_root()).as_posix()
     harness = f"{package}/devtools/harness/"
     plugins = [plugin.name for plugin in portable_harness().plugins]
+    generated = generated_tree_paths(NATIVE_RUNTIMES, plugins)
     return ApplicationRoots(
+        generated=generated,
         composition=[
-            *generated_tree_paths(NATIVE_RUNTIMES, plugins),
+            *generated,
             "tests/",
             "packages/lup/tests/",
             "examples/",
             f"{package}/agent/core.py",
             # Which backend's sub-apps this project takes is a composition
-            # decision like any other: `usage` reads Claude Code's own
-            # credentials, and a project on another backend leaves it out.
+            # decision like any other: `usage` reads each backend's own
+            # account, and a project runs on the backends it names here.
             f"{package}/devtools/subapps.py",
             harness,
             f"{package}/devtools/setup.py",
@@ -179,19 +245,6 @@ def portable_harness(version: str = "0.2.0", root: Path | None = None) -> Harnes
         mcp_servers=agent_tool_servers(),
         hooks=HookSet(
             id="hooks.lup-policy",
-            # lup: Deny `Artifact` and `Skill(artifact-design)` unless escalated,
-            # carrying redirecting guidance the way GENERATED_PLUGIN_REFUSAL does
-            # for a generated tree. Publishing a page is the wrong reflex here:
-            # it leaves the repository, and this project already owns surfaces
-            # that do not. The deny needs somewhere to point, though — measured
-            # while writing this, no general report surface exists. The command
-            # tree is agent, dashboard, dev, feedback, harness, hooks, py, setup,
-            # sync, trace, usage, version; `dashboard` hosts setup integration
-            # status only, and `harness resolve supervise` answers one resolver
-            # run. So add that general surface with the deny, reconciled with the
-            # `/lup:report` skill, which writes `tmp/` markdown rather than
-            # rendering — two report mechanisms that never met would be worse
-            # than the reflex being blocked.
             policy_ids=["fetch", "shell", "edit", "unknown-tool"],
             allowed_fetch=[
                 HookUrlScope(origin=AnyHttpUrl("https://docs.claude.com")),
@@ -263,34 +316,26 @@ def portable_harness(version: str = "0.2.0", root: Path | None = None) -> Harnes
                 HookPathRole(root=Path("node_modules"), role="scratch"),
             ],
             human_owned_files=[Path("README.md")],
+            refused_tools=REFUSED_TOOLS,
             shell_rules=SHELL_RULES,
             # This project's toolchain: what `uv run <target>` may reach here
             # without a question, which is nothing any other project inherits.
-            runner_targets=["pyright", "pytest", "ruff", "lup-devtools"],
+            # The group places `lup-devtools` outside the sandbox, because
+            # every command of it that opens an agent session is unusable
+            # confined.
+            runner_targets=RUNNER_TARGETS,
             sandbox=HookSandbox(
                 extra_domains=["api.anthropic.com"],
-                # lup: This `~/.ssh` entry compiles to a read *deny* in the
-                # generated settings, which is what breaks SSH git: ssh cannot
-                # read its own config, so a host alias never resolves and no key
-                # or agent socket is reachable. Every `git push`, `git fetch` and
-                # `gh` call then needs the sandbox disabled, and the error names
-                # nothing about it. Per-command scoping is not available here:
-                # `credentials.files` takes a path and a mode only, and `mask`
-                # is doubly unavailable — a directory falls back to deny, and
-                # mask is ignored from a repository's settings, which is the
-                # only scope this generates. Narrowing the path does not fix it
-                # either, since ssh must read the key it authenticates with,
-                # and egress is blocked independently: the sandbox proxy
-                # allowlists by hostname over HTTP, and port 22 is not HTTP.
-                # So the real choices are `excludedCommands` for ssh/git/gh,
-                # HTTPS remotes through the proxy, or keeping the escalation
-                # and having the tooling recognize the signature and say so.
+                # A read deny inside the boundary, which is where it belongs:
+                # the commands that legitimately need these keys are the ones
+                # excluded below, and they never enter it.
                 credential_paths=["~/.ssh", "~/.aws/credentials"],
                 # Every command in this project reaches its toolchain through
                 # `uv`, which locks its cache whenever it resolves dependencies
                 # — which a changed pyproject.toml forces, and an integration
                 # merge is what changes pyproject.toml.
                 writable_paths=["~/.cache/uv"],
+                excluded_commands=EXCLUDED_COMMANDS,
             ),
         ),
     )

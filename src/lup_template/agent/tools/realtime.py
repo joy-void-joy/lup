@@ -89,9 +89,7 @@ class IdeasInput(BaseModel):
     action: str = Field(description="One of: add, list, remove, set.")
     content: str = Field(default="", description="Idea text (for add).")
     index: int = Field(default=0, description="Index to remove (for remove).")
-    ideas: list[str] = Field(
-        default_factory=list, description="Full replacement list (for set)."
-    )
+    ideas: list[str] = Field(default=[], description="Full replacement list (for set).")
 
 
 # =====================================================================
@@ -109,7 +107,7 @@ class IdeasOutput(BaseModel):
     """Output for the ideas tool."""
 
     message: str
-    ideas: list[str] = Field(default_factory=list)
+    ideas: list[str] = []
 
 
 class ObserverNotesOutput(BaseModel):
@@ -348,6 +346,8 @@ def create_realtime_tools(
 # 5. Include notes[-1] in the main agent's context tool
 # 6. Call observer.stop() on session teardown
 
+# lup: ignore[constant-declaration] — the observer's own standing prose, which
+# is what this scaffold exists to state
 OBSERVER_SYSTEM_PROMPT = """\
 You are a background observer for a conversation agent. Each turn you \
 receive new transcript messages and write a note the agent reads for \

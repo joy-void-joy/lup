@@ -11,10 +11,11 @@ stay decision-identical; the shared fixture suite asserts exactly that.
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field
+from pydantic import AnyHttpUrl, BaseModel, Field
 
 from lup.codescan.antipatterns import AntiPattern, patterns_for_suffix
 from lup.policy.contracts import DecisionPolicy
+from lup.policy.grants import LeaseGrants
 from lup.policy.kernel.decision import KernelDecision
 from lup.policy.kernel.edit import (
     decide_edit,
@@ -39,7 +40,12 @@ from lup.policy.kernel.rows import (
 )
 from lup.policy.kernel.shell import decide_shell, decide_shell_segment, shell_context
 from lup.policy.kernel.words import command_words as kernel_command_words
-from lup.policy.shell_rules import ShellCommandRule, erase_shell_rules
+from lup.policy.shell_rules import (
+    RunnerTargetRule,
+    ShellCommandRule,
+    erase_runner_targets,
+    erase_shell_rules,
+)
 from lup.policy.models import (
     Decision,
     EditBatch,
@@ -52,13 +58,13 @@ from lup.policy.models import (
 
 def pydantic_decision(decision: KernelDecision) -> Decision:
     """Restore the validated public decision at the kernel boundary."""
-    return Decision(effect=decision.effect, reason=decision.reason)
+    return Decision(
+        effect=decision.effect, reason=decision.reason, sandbox=decision.sandbox
+    )
 
 
-class UrlScope(BaseModel):
+class UrlScope(BaseModel, frozen=True):
     """One normalized scheme/host/port and path-prefix rule."""
-
-    model_config = ConfigDict(frozen=True)
 
     origin: AnyHttpUrl
     path_prefix: UrlPathPrefix = "/"
@@ -67,6 +73,10 @@ class UrlScope(BaseModel):
     any_port: bool = False
 
 
+# The three erasures to the kernel's primitive rows read alike on purpose, and
+# `antipattern_row` erases a model another module declares, so it could not be
+# a method even if these two were.
+# lup: ignore[model-free-function] — one of that erasure family
 def url_scope_row(scope: UrlScope) -> UrlScopeRow:
     """Erase a validated URL scope into the kernel's primitive row."""
     parsed = urlsplit(str(scope.origin))
@@ -100,10 +110,8 @@ class FetchPolicy(DecisionPolicy[FetchUrl]):
         )
 
 
-class ShellSegment(BaseModel):
+class ShellSegment(BaseModel, frozen=True):
     """One parsed command segment with its ordered shell words."""
-
-    model_config = ConfigDict(frozen=True)
 
     words: list[str] = Field(min_length=1)
 
@@ -136,21 +144,25 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
         allowed_urls: list[UrlScope] | None = None,
         denied_urls: list[UrlScope] | None = None,
         sandbox_active: bool = False,
+        sandbox_excluded_commands: list[str] | None = None,
+        escapable: bool = False,
         trusted_script_roots: list[str] | None = None,
         interactive: bool = True,
         path_roles: list[PathRoleRow] | None = None,
         path_rules: list["PathRule"] | None = None,
         recoverable_target_limit: int = 5,
-        runner_targets: list[str] | None = None,
+        runner_targets: list[RunnerTargetRule] | None = None,
     ) -> None:
         self.path_rules = [path_rule_row(rule) for rule in path_rules or []]
         self.path_roles = path_roles or []
         self.recoverable_target_limit = recoverable_target_limit
-        self.runner_targets = runner_targets or []
+        self.runner_targets = erase_runner_targets(runner_targets or [])
+        self.escapable = escapable
         self.rules = erase_shell_rules(rules)
         self.allowed_scopes = [url_scope_row(scope) for scope in allowed_urls or []]
         self.denied_scopes = [url_scope_row(scope) for scope in denied_urls or []]
         self.sandbox_active = sandbox_active
+        self.sandbox_excluded_commands = sandbox_excluded_commands or []
         self.trusted_script_roots = trusted_script_roots or []
         self.interactive = interactive
 
@@ -164,6 +176,7 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
                 self.allowed_scopes,
                 self.denied_scopes,
                 sandboxed=self.sandbox_active and not event.unsandboxed,
+                excluded_commands=self.sandbox_excluded_commands,
                 trusted_script_roots=self.trusted_script_roots,
                 path_roles=self.path_roles,
                 path_rules=self.path_rules,
@@ -179,6 +192,7 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
                 directory_targets=directory_write_targets(acted_on, root),
                 recoverable_target_limit=self.recoverable_target_limit,
                 runner_targets=self.runner_targets,
+                escapable=self.escapable,
             )
         )
 
@@ -198,7 +212,7 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
         )
 
 
-class PathRule(BaseModel):
+class PathRule(BaseModel, frozen=True):
     """One semantic protected-path match supplied by a composition root.
 
     ``kind`` spans the whole primitive vocabulary rather than a subset of it.
@@ -207,14 +221,19 @@ class PathRule(BaseModel):
     the one thing single-sourcing the policy exists to prevent.
     """
 
-    model_config = ConfigDict(frozen=True)
-
     kind: PathRuleKind
     value: str
     reason: str
     allow_autonomous: bool = False
 
+    def matches(self, path: Path) -> bool:
+        """Compare a path with this rule through the canonical kernel matcher."""
+        return kernel_path_rule_matches(
+            path.as_posix(), path.exists(), path_rule_row(self)
+        )
 
+
+# lup: ignore[model-free-function] — the same erasure family as url_scope_row
 def path_rule_row(rule: PathRule) -> PathRuleRow:
     """Erase one validated path rule into the kernel's primitive row."""
     return PathRuleRow(
@@ -237,11 +256,6 @@ def human_owned_path_rule(path: str) -> PathRule:
     )
 
 
-def path_rule_matches(path: Path, rule: PathRule) -> bool:
-    """Compare a path with one rule through the canonical kernel matcher."""
-    return kernel_path_rule_matches(path.as_posix(), path.exists(), path_rule_row(rule))
-
-
 def antipattern_row(rule: AntiPattern) -> AntiPatternRow:
     """Erase one declared rule into the primitive row the kernel matches on.
 
@@ -254,6 +268,7 @@ def antipattern_row(rule: AntiPattern) -> AntiPatternRow:
         pattern=rule.pattern.pattern,
         message=rule.message,
         context=rule.context,
+        refiner="" if rule.refiner is None else rule.refiner.exempt.__name__,
         strength=rule.strength,
     )
 
@@ -267,7 +282,14 @@ def antipattern_rows(change: EditChange) -> list[AntiPatternRow]:
 
 
 class EditPolicy(DecisionPolicy[EditBatch]):
-    """Apply the shared marker, anti-pattern, path, deletion, and size gates."""
+    """Apply the shared marker, anti-pattern, path, deletion, and size gates.
+
+    ``grants`` is asked what the lease holds per change rather than read into
+    a list when the policy is built, which is what lets a gate granted while
+    this session runs release the very next edit — and what makes one taken
+    back stop releasing it. The generated dispatchers read the same document,
+    so a lease has one answer wherever it is asked.
+    """
 
     def __init__(
         self,
@@ -275,10 +297,10 @@ class EditPolicy(DecisionPolicy[EditBatch]):
         maximum_added_lines: int = 3,
         autonomous: bool = False,
         path_roles: list[PathRoleRow] | None = None,
-        allowances: list[str] | None = None,
+        grants: LeaseGrants | None = None,
     ) -> None:
         self.path_roles = path_roles or []
-        self.allowances = allowances or []
+        self.grants = LeaseGrants() if grants is None else grants
         self.protected = list(protected)
         self.maximum_added_lines = maximum_added_lines
         self.autonomous = autonomous
@@ -309,7 +331,7 @@ class EditPolicy(DecisionPolicy[EditBatch]):
                 path_roles=self.path_roles,
                 maximum_added_lines=self.maximum_added_lines,
                 autonomous=self.autonomous,
-                allowances=self.allowances,
+                allowances=self.grants.granted(),
                 python_source=suffix in (".py", ".pyi"),
             )
         )

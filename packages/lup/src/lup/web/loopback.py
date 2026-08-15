@@ -30,13 +30,15 @@ from urllib.parse import urlsplit
 
 from fastapi import FastAPI, Request, Response
 
-LOOPBACK_HOSTS = [  # lup: ignore[library-default] — the loopback interface's own spellings, fixed by the OS and the name it always resolves to; omitting one is a hole rather than a preference
+# lup: ignore[library-default] — the loopback interface's own spellings, fixed by the OS and the name it always resolves to; omitting one is a hole rather than a preference
+LOOPBACK_HOSTS = [
     "127.0.0.1",
     "localhost",
     "::1",
 ]
 """Every spelling of this machine, as a browser or a bind address writes it."""
 
+# lup: ignore[constant-declaration] — HTTP's own status code for the condition
 MISDIRECTED_REQUEST = 421
 """The status for a request whose authority this server does not answer for."""
 

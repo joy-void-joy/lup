@@ -21,7 +21,7 @@ Examples:
 from datetime import datetime
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field
 
 from lup.workspace.paths import (
     TIMESTAMP_FMT,
@@ -33,16 +33,14 @@ from lup.workspace.paths import (
 )
 
 
-class NotesConfig(BaseModel):
+class NotesConfig(BaseModel, arbitrary_types_allowed=True):
     """Notes folder configuration with explicit RW/RO separation."""
-
-    model_config = ConfigDict(arbitrary_types_allowed=True)
 
     session: Path = Field(description="This session's working directory")
     output: Path = Field(description="Where this session saves its outputs")
     trace_log: Path = Field(description="Trace log path (agent cannot access)")
-    rw: list[Path] = Field(default_factory=list, description="Read-write directories")
-    ro: list[Path] = Field(default_factory=list, description="Read-only directories")
+    rw: list[Path] = Field(default=[], description="Read-write directories")
+    ro: list[Path] = Field(default=[], description="Read-only directories")
 
     @property
     def all_dirs(self) -> list[Path]:

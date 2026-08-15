@@ -20,7 +20,7 @@ import ast
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel
 
 from lup.codescan.common import (
     PythonContext,
@@ -29,16 +29,18 @@ from lup.codescan.common import (
     file_level_ignore,
     ignore_rule_ids,
 )
-from lup.policy.kernel.edit import IGNORE_RE
+from lup.policy.kernel.edit import (
+    IGNORE_RE,
+    suppression_placement,
+    suppression_reaches,
+)
 
 type FindingKind = Literal["missing", "untyped", "spurious"]
 """How a violation and the suppressions around it ended up related."""
 
 
-class ClassSymbol(BaseModel):
+class ClassSymbol(BaseModel, frozen=True):
     """Resolved class shape retained by the project-wide symbol index."""
-
-    model_config = ConfigDict(frozen=True)
 
     qualified_name: str
     module: str
@@ -46,32 +48,30 @@ class ClassSymbol(BaseModel):
     path: Path
     line: int
     bases: list[str]
-    abstract_methods: list[str] = Field(default_factory=list)
-    abstract_properties: list[str] = Field(default_factory=list)
-    concrete_callables: list[str] = Field(default_factory=list)
-    member_lines: dict[str, int] = Field(default_factory=dict)
+    abstract_methods: list[str] = []
+    abstract_properties: list[str] = []
+    concrete_callables: list[str] = []
+    member_lines: dict[str, int] = {}
 
 
-class RuleViolation(BaseModel):
+class RuleViolation(BaseModel, frozen=True):
     """One mechanical shape violation before suppression auditing.
 
-    ``suppression_lines`` names the extra lines a directive may legitimately
-    sit on besides ``line`` — a class's header when the violation is reported
-    against one of its members, for instance.
+    Where its suppression may sit is not a field, and deliberately so: a rule
+    that could name its own accepted lines is a rule whose markers read
+    differently from every other rule's, which is how one marker shape ends up
+    valid here and spurious there. ``line`` is where the violation is, and
+    :func:`~lup.policy.kernel.edit.suppression_reaches` decides the rest for
+    every rule alike.
     """
-
-    model_config = ConfigDict(frozen=True)
 
     path: Path
     line: int
     message: str
-    suppression_lines: list[int] = Field(default_factory=list)
 
 
-class RuleFinding(BaseModel):
+class RuleFinding(BaseModel, frozen=True):
     """One missing, untyped, or spurious suppression verdict for a rule."""
-
-    model_config = ConfigDict(frozen=True)
 
     kind: FindingKind
     path: Path
@@ -80,10 +80,8 @@ class RuleFinding(BaseModel):
     rule_id: str
 
 
-class Directive(BaseModel):
+class Directive(BaseModel, frozen=True):
     """One actual comment suppression that may cover a rule's violations."""
-
-    model_config = ConfigDict(frozen=True)
 
     path: Path
     line: int
@@ -102,6 +100,23 @@ def dotted_name(node: ast.expr) -> str | None:
         case ast.Subscript(value=value):
             return dotted_name(value)
     return None
+
+
+def named_types(node: ast.expr) -> list[str]:
+    """Every type name one expression names, without evaluating it.
+
+    Handles the tuple and ``|`` spellings of "any of these types", so a
+    narrowing call that checks several and an annotation that unions several
+    both report each one. A subscript reports the container it names rather
+    than its members: `list[TextPart]` is a list.
+    """
+    match node:
+        case ast.Tuple(elts=elements):
+            return [name for element in elements for name in named_types(element)]
+        case ast.BinOp(left=left, op=ast.BitOr(), right=right):
+            return [*named_types(left), *named_types(right)]
+    name = dotted_name(node)
+    return [] if name is None else [name]
 
 
 def imported_names(tree: ast.Module, module: str) -> dict[str, str]:
@@ -155,6 +170,17 @@ def has_decorator(
     return False
 
 
+def declaration_line(node: ast.FunctionDef | ast.AsyncFunctionDef) -> int:
+    """Where a member's declaration starts, decorators included.
+
+    A decorated ``def`` opens at its first decorator, and that is the line a
+    violation about the whole declaration belongs on. Reporting the ``def``
+    would leave the accepted placement above it wedged between a decorator and
+    the function it decorates — a legal comment nobody would write.
+    """
+    return min([node.lineno, *(item.lineno for item in node.decorator_list)])
+
+
 def build_symbol_index(sources: list[PythonSource]) -> dict[str, ClassSymbol]:
     """Build import-resolved class symbols for all parseable supplied modules."""
     symbols: dict[str, ClassSymbol] = {}
@@ -174,7 +200,7 @@ def build_symbol_index(sources: list[PythonSource]) -> dict[str, ClassSymbol]:
             for member in node.body:
                 if not isinstance(member, ast.FunctionDef | ast.AsyncFunctionDef):
                     continue
-                member_lines[member.name] = member.lineno
+                member_lines[member.name] = declaration_line(member)
                 abstract = has_decorator(
                     member, "abstractmethod", source.module, aliases
                 )
@@ -276,6 +302,12 @@ def audit_suppressions(
 ) -> list[RuleFinding]:
     """Pair a rule's violations with the suppressions written against it.
 
+    A directive covers a violation from the violation's own line or from the
+    line standing directly above it, and from nowhere else — the one policy
+    :func:`~lup.policy.kernel.edit.suppression_reaches` holds for every rule,
+    the line scanners, and the edit hook alike. A refused violation names both
+    lines, so a marker written where nothing reads it says where to go.
+
     Each violation is covered, or reported "missing"; a bare `# lup: ignore`
     that covers one is reported "untyped" once, so the migration to typed
     directives stays visible; a directive naming `rule_id` that guards nothing
@@ -289,23 +321,19 @@ def audit_suppressions(
     directives = [
         directive for source in sources for directive in directives_for(source)
     ]
+    lines_of = {source.path: source.text.splitlines() for source in sources}
     used: set[int] = set()
     untyped_reported: set[int] = set()
     findings: list[RuleFinding] = []
     refusal = " (no suppression: write the replacement)" if strength == "strong" else ""
-    # lup: Where a directive may sit is decided per rule, and that inconsistency
-    # is the bug. This match accepts a directive on the violation's own line or
-    # any line the rule listed in `suppression_lines` — and rules disagree:
-    # dispatch and narrowing declare whole spans, capabilities declares one extra
-    # line, and a rule that declares nothing is inline-only. So the same marker
-    # shape is valid against one rule and spurious against another, which is
-    # exactly the reported "my marker on its own line went spurious while the real
-    # line stayed missing". The human settled it: make the accepted placement
-    # uniform across every rule and have the refusal name the line it expected,
-    # rather than adopting one global policy. Note a strict same-line rule is not
-    # the status quo — 62 markers in the tree use the line-above form today,
-    # including the scanner's own — so that choice would invalidate all of them.
     for violation in violations:
+        # A refusal that does not say where the marker belongs is the reported
+        # failure itself: a directive goes spurious on one line while the
+        # violation stays missing on another, and neither message connects them.
+        expected = (
+            f" — suppress on {suppression_placement(violation.line)}"
+            f": `# lup: ignore[{rule_id}] — <why>`"
+        )
         covering = [
             (index, directive)
             for index, directive in enumerate(directives)
@@ -313,7 +341,9 @@ def audit_suppressions(
             and directive.path == violation.path
             and (
                 directive.file_level
-                or directive.line in {violation.line, *violation.suppression_lines}
+                or suppression_reaches(
+                    lines_of[violation.path], directive.line, violation.line
+                )
             )
             and (directive.rule_ids is None or rule_id in directive.rule_ids)
         ]
@@ -323,7 +353,7 @@ def audit_suppressions(
                     kind="missing",
                     path=violation.path,
                     line=violation.line,
-                    message=f"{violation.message}{refusal}",
+                    message=f"{violation.message}{refusal or expected}",
                     rule_id=rule_id,
                 )
             )

@@ -26,7 +26,7 @@ import logging
 from contextlib import AsyncExitStack
 from pathlib import Path
 
-from pydantic import BaseModel, Field, TypeAdapter
+from pydantic import BaseModel, TypeAdapter
 
 from lup.channels.models import publish_atomic
 from lup.hooks import (
@@ -42,7 +42,7 @@ from lup.resolver.journal import (
     record_turn,
 )
 from lup.resolver.mailbox import ActorDelivery, ActorMessage, QuestionMailbox
-from lup.resolver.models import FROZEN, ActorRef
+from lup.resolver.models import ActorRef
 from lup.runtime.errors import ProviderTurnError
 from lup.runtime.factory import SessionFactory
 from lup.runtime.models import (
@@ -55,6 +55,8 @@ from lup.runtime.models import (
 
 logger = logging.getLogger(__name__)
 
+# lup: ignore[constant-declaration] — the run directory's own layout, which a
+# resumed run must spell exactly as the run that wrote it
 SESSION_DIR = "sessions"
 
 
@@ -62,7 +64,7 @@ class ActorSchemaChangedError(RuntimeError):
     """A resumed actor expects a different submission schema than it left with."""
 
 
-class ActorRecord(BaseModel):
+class ActorRecord(BaseModel, frozen=True):
     """What one actor needs to be reattached after a park.
 
     The digest is recorded here rather than pushed into the runtime because
@@ -72,13 +74,9 @@ class ActorRecord(BaseModel):
     schema now that we expected before the park.
     """
 
-    model_config = FROZEN
-
     actor: ActorRef
     session: SessionId | None = None
-    schema_digests: dict[str, str] = Field(  # lup: ignore[dict-str-payload]
-        default_factory=dict
-    )
+    schema_digests: dict[str, str] = {}  # lup: ignore[dict-str-payload]
     """The digest this actor last used for each submission type it was asked for.
 
     Keyed by type rather than one per actor, because one actor is legitimately

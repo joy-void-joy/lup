@@ -1,3 +1,7 @@
+# lup: ignore[constant-declaration]
+# The constants here name the mailbox's own on-disk layout, which a writer and
+# a reader in different processes must agree on to find each other's files at
+# all — an identity of this format rather than a choice a caller can make.
 """The persisted question mailbox every answer door writes through.
 
 A question is a :class:`~lup.channels.slot.Slot`: declared once by whoever
@@ -19,7 +23,7 @@ import asyncio
 from datetime import datetime
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict, TypeAdapter
+from pydantic import BaseModel, TypeAdapter
 
 from lup.channels.models import (
     ChannelConflictError,
@@ -33,7 +37,6 @@ from lup.channels.slot import Slot, SlotSet
 from lup.channels.stream import Stream
 from lup.channels.wait import POLL_SECONDS, wait_until
 from lup.resolver.models import (
-    FROZEN,
     ActorRef,
     MaterialQuestion,
     QuestionAnswer,
@@ -54,10 +57,8 @@ MailboxCorruptionError = ChannelCorruptionError
 AnswerDoor = Door
 
 
-class PendingQuestion(BaseModel):
+class PendingQuestion(BaseModel, frozen=True):
     """One question a run is waiting on, written once by whoever asked."""
-
-    model_config = FROZEN
 
     run_id: str
     question: MaterialQuestion
@@ -65,10 +66,8 @@ class PendingQuestion(BaseModel):
     asked_at: datetime
 
 
-class AnswerOffer(BaseModel):
+class AnswerOffer(BaseModel, frozen=True):
     """One door's proposed answer, correctable until it is promoted."""
-
-    model_config = FROZEN
 
     run_id: str
     question_id: str
@@ -77,10 +76,8 @@ class AnswerOffer(BaseModel):
     offered_at: datetime
 
 
-class RecordedAnswer(BaseModel):
+class RecordedAnswer(BaseModel, frozen=True):
     """The promoted answer to one question. Written once, never revised."""
-
-    model_config = FROZEN
 
     run_id: str
     answer: QuestionAnswer
@@ -88,16 +85,14 @@ class RecordedAnswer(BaseModel):
     answered_at: datetime
 
 
-class ParkRequest(BaseModel):
+class ParkRequest(BaseModel, frozen=True):
     """A door asking every open wait in this run to give up now."""
-
-    model_config = FROZEN
 
     run_id: str
     reason: str
 
 
-class ActorMessage(BaseModel):
+class ActorMessage(BaseModel, frozen=True):
     """One thing a door told an actor. This never settles anything.
 
     A message is not a question, and the type is where that is enforced: a
@@ -113,8 +108,6 @@ class ActorMessage(BaseModel):
     interrupted.
     """
 
-    model_config = FROZEN
-
     run_id: str
     to_actor: str
     text: str
@@ -124,15 +117,13 @@ class ActorMessage(BaseModel):
     redirect: bool = False
 
 
-class ActorDelivery(BaseModel):
+class ActorDelivery(BaseModel, frozen=True):
     """What one actor has waiting, and the position that consumes exactly it.
 
     The position is carried rather than taken again at the moment of
     delivery, because a message posted between reading and handing over
     would otherwise be committed past without ever being read.
     """
-
-    model_config = FROZEN
 
     messages: list[ActorMessage]
     through: int
@@ -141,10 +132,8 @@ class ActorDelivery(BaseModel):
         return [message for message in self.messages if message.redirect]
 
 
-class MailboxWait(BaseModel):
+class MailboxWait(BaseModel, frozen=True):
     """How one wait ended. ``reason`` is empty only on a complete answer."""
-
-    model_config = ConfigDict(frozen=True)
 
     answered: list[RecordedAnswer]
     unanswered: list[str]
@@ -154,7 +143,7 @@ class MailboxWait(BaseModel):
 type MailboxRecord = PendingQuestion | AnswerOffer | RecordedAnswer | ParkRequest
 
 
-class MailboxSlotRecord(BaseModel):
+class MailboxSlotRecord(BaseModel, frozen=True):
     """One question slot's payload at whichever of its three states it holds.
 
     A slot stores one model, and a question's declaration, its correctable
@@ -162,8 +151,6 @@ class MailboxSlotRecord(BaseModel):
     three optionally keeps the slot generic over a single type without
     collapsing what the three of them mean.
     """
-
-    model_config = FROZEN
 
     pending: PendingQuestion | None = None
     offer: AnswerOffer | None = None

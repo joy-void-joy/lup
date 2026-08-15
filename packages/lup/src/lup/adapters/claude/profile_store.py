@@ -9,7 +9,7 @@ them share every byte of the format and stay separately constructible.
 
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel
 
 from lup.channels.models import publish_atomic
 from lup.adapters.claude.config import (
@@ -21,10 +21,8 @@ from lup.runtime.profiles import ProfileNames, ProfileRegistrar
 REGISTRY_PATH = Path.home() / ".lup" / "profiles.json"
 
 
-class Account(BaseModel):
+class Account(BaseModel, frozen=True):
     """One registered Claude configuration home."""
-
-    model_config = ConfigDict(frozen=True)
 
     config_dir: str
 
@@ -32,7 +30,7 @@ class Account(BaseModel):
 class Registry(BaseModel):
     """Personal on-disk named account registry."""
 
-    profiles: dict[str, Account] = Field(default_factory=dict)
+    profiles: dict[str, Account] = {}
     active: str | None = None
 
 

@@ -23,11 +23,11 @@ guard it turns up as spurious on the next line of the report.
 """
 
 from collections import Counter, defaultdict
-from collections.abc import Sequence, Set as AbstractSet
+from collections.abc import Iterator, Sequence, Set as AbstractSet
 from pathlib import Path
 
 import typer
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
 from lup.codescan.antipatterns import (
     AntiPattern,
@@ -35,18 +35,28 @@ from lup.codescan.antipatterns import (
     audit_text,
     patterns_for_suffix,
 )
-from lup.codescan.boundaries import audit_path_boundaries
+from lup.codescan.behaviour import audit_model_free_functions
+from lup.codescan.boundaries import audit_constant_declarations, audit_path_boundaries
 from lup.codescan.capabilities import audit_capabilities
 from lup.codescan.common import (
     PACKAGE_ROOTS,
+    PythonContext,
     PythonSource,
     Refutation,
+    file_level_ignore,
     module_name,
 )
 from lup.codescan.dispatch import audit_own_model_dispatch
 from lup.codescan.grammar import refute
 from lup.codescan.narrowing import audit_isinstance_chains
 from lup.codescan.registry import RULE_REFERENCE
+from lup.policy.kernel.edit import (
+    IGNORE_RE,
+    SUPPRESSION_COLUMN_LIMIT,
+    inline_suppression,
+    relocated_suppressions,
+    standalone_suppression,
+)
 from lup.policy.kernel.roles import path_role
 from lup.devtools.dev.pyright_oracle import default_oracle
 from lup.devtools.project import DevProject
@@ -74,16 +84,14 @@ class FoundAntiPattern(AntiPatternFinding):
     file: str
 
 
-class FoundRefutation(Refutation):
+class FoundRefutation(Refutation, frozen=True):
     """A :class:`~lup.codescan.common.Refutation` tagged with its file."""
 
     file: str
 
 
-class ScannedFile(BaseModel):
+class ScannedFile(BaseModel, arbitrary_types_allowed=True):
     """One tracked file the sweep reads once and audits against its table."""
-
-    model_config = ConfigDict(arbitrary_types_allowed=True)
 
     rel: str
     path: Path
@@ -98,16 +106,51 @@ class AntiPatternScan(BaseModel):
     refuted: list[FoundRefutation]
 
 
+def scanned_files(
+    project: DevProject, paths: Sequence[str] | None = None
+) -> list[ScannedFile]:
+    """Every tracked production file the audits read, with its table and text.
+
+    ``paths`` narrows the walk to files under the given repository-relative
+    prefixes; ``None`` is the whole repository, and an empty scope is a scope
+    rather than an absent one, so a tree that changed nothing is read for
+    nothing. The declared path roles decide the rest: a rule the edit hook
+    never enforces in a test or scratch tree is not read there either.
+    """
+    roles = project.path_roles
+
+    def found() -> Iterator[ScannedFile]:
+        for rel in git.lines("ls-files", "--cached", "--others", "--exclude-standard"):
+            path = Path(rel)
+            patterns = patterns_for_suffix(path.suffix.lower())
+            if patterns is None or path_role(rel, roles) != "production":
+                continue
+            if paths is not None and not any(
+                rel == p or rel.startswith(f"{p}/") for p in paths
+            ):
+                continue
+            try:
+                text = path.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                continue
+            yield ScannedFile(rel=rel, path=path, patterns=patterns, text=text)
+
+    return list(found())
+
+
 def scan_antipatterns(
-    project: DevProject, paths: Sequence[str] = ()
+    project: DevProject, paths: Sequence[str] | None = None
 ) -> AntiPatternScan:
     """Every missing/spurious marker across tracked production `.py`/TS files.
 
     ``paths`` narrows the sweep to the files under the given repository-relative
     prefixes, for the fix-one-file loop where a whole-repository resolve is the
-    dominant cost. It only decides which files are read: each one still audits
-    against the same tables, and the oracle still resolves them against the
-    whole project, so a scoped verdict matches the sweep's verdict for that file.
+    dominant cost, and for a caller answerable only for what it changed. It
+    only decides which files are read: each one still audits against the same
+    tables, and the oracle still resolves them against the whole project, so a
+    scoped verdict matches the sweep's verdict for that file. ``None`` is the
+    whole repository; naming no path scopes the sweep to nothing, which is
+    what a tree that changed nothing is answerable for.
 
     The audit reads the same declared path roles the edit hook does, so a rule
     the hook never enforces in a test or scratch tree is not reported there
@@ -121,30 +164,16 @@ def scan_antipatterns(
     it every run; where the checker is absent the grammar refutes nothing and
     every broad regex verdict stands.
     """
-    roles = project.path_roles
-    scanned: list[ScannedFile] = []
-    sources: list[PythonSource] = []
-    for rel in git.lines("ls-files", "--cached", "--others", "--exclude-standard"):
-        path = Path(rel)
-        patterns = patterns_for_suffix(path.suffix.lower())
-        if patterns is None or path_role(rel, roles) != "production":
-            continue
-        if paths and not any(rel == p or rel.startswith(f"{p}/") for p in paths):
-            continue
-        try:
-            text = path.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError):
-            continue
-        scanned.append(ScannedFile(rel=rel, path=path, patterns=patterns, text=text))
-        if path.suffix.lower() in {".py", ".pyi"}:
-            sources.append(
-                PythonSource(
-                    path=path,
-                    module=module_name(path, scanned_roots(project)),
-                    text=text,
-                )
-            )
-
+    scanned = scanned_files(project, paths)
+    sources = [
+        PythonSource(
+            path=item.path,
+            module=module_name(item.path, scanned_roots(project)),
+            text=item.text,
+        )
+        for item in scanned
+        if item.path.suffix.lower() in {".py", ".pyi"}
+    ]
     refuted = refute(sources, default_oracle())
     results = [
         FoundAntiPattern(file=item.rel, **finding.model_dump())
@@ -166,8 +195,10 @@ def scan_antipatterns(
         )
         for finding in [
             *audit_capabilities(sources),
+            *audit_model_free_functions(sources),
             *audit_own_model_dispatch(sources),
             *audit_isinstance_chains(sources),
+            *audit_constant_declarations(sources, project.roots),
         ]
     )
     boundary_findings = [
@@ -210,10 +241,138 @@ def scan_antipatterns(
     )
 
 
+class DirectiveSite(BaseModel, frozen=True):
+    """One `# lup: ignore`, where it sits and how wide each placement makes it.
+
+    ``inline_width`` is what the canonical placement would cost: the width of
+    the line as written when the directive is already on it, and the width of
+    the merged line when the directive stands above one. A site with nothing
+    beneath it to merge into reports its own width, because there is no
+    inline form of it to measure.
+    """
+
+    file: str
+    line: int
+    standalone: bool
+    width: int
+    inline_width: int
+    text: str
+
+
+def directive_sites(rel: str, text: str) -> list[DirectiveSite]:
+    """Every real directive in one file, measured against both placements.
+
+    The file-level opt-out is skipped: it governs the whole file rather than
+    a line, so neither placement is about it.
+    """
+    context = PythonContext.parse(text)
+    file_ignore = file_level_ignore(text)
+    lines = text.splitlines()
+
+    def found() -> Iterator[DirectiveSite]:
+        for number, line in enumerate(lines, start=1):
+            match = IGNORE_RE.search(line)
+            if match is None or not context.comment_at(number, match.start()):
+                continue
+            if file_ignore is not None and number == file_ignore.line:
+                continue
+            standalone = standalone_suppression(line) is not None
+            below = lines[number] if standalone and number < len(lines) else ""
+            merged = inline_suppression(below, line) if below.strip() else line
+            yield DirectiveSite(
+                file=rel,
+                line=number,
+                standalone=standalone,
+                width=len(line),
+                inline_width=len(merged) if standalone else len(line),
+                text=line.strip(),
+            )
+
+    return list(found())
+
+
+def place_directives(
+    project: DevProject, limit: int = SUPPRESSION_COLUMN_LIMIT
+) -> list[str]:
+    """Put every directive at its canonical placement, reporting each file moved.
+
+    Nothing the audit decides turns on this: both placements are accepted, so
+    the move only settles which one a file uses. It exists so no author weighs
+    a reason against a column count — the reason gets written, and whichever
+    placement holds it whole is the one it lands in.
+    """
+
+    def moved() -> Iterator[str]:
+        for item in scanned_files(project):
+            if item.path.suffix.lower() not in {".py", ".pyi"}:
+                continue
+            revised = relocated_suppressions(item.text, limit)
+            if revised == item.text:
+                continue
+            item.path.write_text(revised, encoding="utf-8")
+            yield item.rel
+
+    return list(moved())
+
+
+def report_directives(
+    project: DevProject, as_json: bool, limit: int = SUPPRESSION_COLUMN_LIMIT
+) -> None:
+    """Measure every directive in the tree against the canonical placement.
+
+    What the report answers is whether the canonical inline placement can
+    actually hold a directive and its reason: how many sites fit the column
+    budget inline, and how many only fit standing above. A tree whose
+    overflow concentrates in the longest reasons is a tree whose fallback is
+    carrying the justifications that say the most.
+    """
+    sites = [
+        site
+        for item in scanned_files(project)
+        for site in directive_sites(item.rel, item.text)
+    ]
+    inline = [site for site in sites if not site.standalone]
+    above = [site for site in sites if site.standalone]
+    overflow = [site for site in sites if site.inline_width > limit]
+    if as_json:
+        output_json(
+            {
+                "limit": limit,
+                "total": len(sites),
+                "inline": len(inline),
+                "inline_overflowing": sum(1 for s in inline if s.inline_width > limit),
+                "above": len(above),
+                "above_fitting_inline": sum(
+                    1 for s in above if s.inline_width <= limit
+                ),
+                "sites": [site.model_dump() for site in sites],
+            }
+        )
+        return
+    typer.echo(f"{len(sites)} directive(s), budget {limit} columns")
+    typer.echo(
+        f"  inline: {len(inline)} — "
+        f"{sum(1 for s in inline if s.inline_width <= limit)} fit, "
+        f"{sum(1 for s in inline if s.inline_width > limit)} already over"
+    )
+    typer.echo(
+        f"  above:  {len(above)} — "
+        f"{sum(1 for s in above if s.inline_width <= limit)} would fit inline, "
+        f"{sum(1 for s in above if s.inline_width > limit)} only fit above"
+    )
+    for site in sorted(overflow, key=lambda site: site.inline_width, reverse=True):
+        typer.echo(f"{site.file}:{site.line} [{site.inline_width}] {site.text}")
+
+
 ADVISORY_KINDS = {"untyped"}
 
 
-def summarize(project: DevProject, as_json: bool, paths: Sequence[str] = ()) -> None:
+def summarize(
+    project: DevProject,
+    as_json: bool,
+    paths: Sequence[str] | None = None,
+    advisory: AbstractSet[str] = ADVISORY_KINDS,
+) -> None:
     """Tally anti-pattern findings by rule and kind — the sweep triage view.
 
     A per-rule count (most-frequent first, with how many files each spans) and
@@ -233,7 +392,7 @@ def summarize(project: DevProject, as_json: bool, paths: Sequence[str] = ()) -> 
         if finding.file not in files_by_rule[rule]:
             files_by_rule[rule].append(finding.file)
 
-    blocking = sum(1 for finding in found if finding.kind not in ADVISORY_KINDS)
+    blocking = sum(1 for finding in found if finding.kind not in advisory)
     file_count = len(dict.fromkeys(finding.file for finding in found))
 
     if as_json:
@@ -267,7 +426,12 @@ def summarize(project: DevProject, as_json: bool, paths: Sequence[str] = ()) -> 
     typer.echo(f"Rule reference: {RULE_REFERENCE} (`uv run lup-devtools dev rules`)")
 
 
-def report(project: DevProject, as_json: bool, paths: Sequence[str] = ()) -> None:
+def report(
+    project: DevProject,
+    as_json: bool,
+    paths: Sequence[str] | None = None,
+    advisory: AbstractSet[str] = ADVISORY_KINDS,
+) -> None:
     """List anti-pattern findings; exit non-zero when a blocking one remains.
 
     "untyped" findings are advisory (a bare `# lup: ignore` to migrate to a
@@ -277,7 +441,7 @@ def report(project: DevProject, as_json: bool, paths: Sequence[str] = ()) -> Non
     """
     scan = scan_antipatterns(project, paths)
     found = scan.findings
-    blocking = [finding for finding in found if finding.kind not in ADVISORY_KINDS]
+    blocking = [finding for finding in found if finding.kind not in advisory]
     if as_json:
         output_json(
             {
@@ -300,8 +464,8 @@ def report(project: DevProject, as_json: bool, paths: Sequence[str] = ()) -> Non
         typer.echo(f"{finding.file}:{finding.line} [{finding.kind}] {finding.message}")
         typer.echo(f"    {finding.text}")
     files = {finding.file for finding in found}
-    advisory = len(found) - len(blocking)
-    tail = f" (+{advisory} untyped, advisory)" if advisory else ""
+    reported = len(found) - len(blocking)
+    tail = f" (+{reported} untyped, advisory)" if reported else ""
     typer.echo(f"\n{len(blocking)} blocking finding(s){tail} in {len(files)} file(s)")
     typer.echo(f"Rule reference: {RULE_REFERENCE} (`uv run lup-devtools dev rules`)")
     if blocking:

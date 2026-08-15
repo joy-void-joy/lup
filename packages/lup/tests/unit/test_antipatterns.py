@@ -15,13 +15,16 @@ from lup.codescan.antipatterns import (
     TS_ANTI_PATTERNS,
     AntiPattern,
     audit_text,
+    python_anti_patterns,
 )
+from lup.harness.contracts import Spelled, Unsupported
 from lup.policy.bundle import bundled_antipattern_rows
 from lup.policy.kernel.edit import (
     antipattern_decision,
+    default_factory_exempt_lines,
     dict_get_exempt_lines,
     empty_collection_exempt_lines,
-    refiner_for,
+    refiner_named,
 )
 from lup.policy.kernel.rows import AntiPatternRow
 from lup.policy.rules import antipattern_row
@@ -29,6 +32,10 @@ from lup.policy.rules import antipattern_row
 
 def lib_rows(patterns: list[AntiPattern]) -> list[AntiPatternRow]:
     return [antipattern_row(ap) for ap in patterns]
+
+
+def rule_named(patterns: list[AntiPattern], rule_id: str) -> AntiPattern:
+    return next(rule for rule in patterns if rule.id == rule_id)
 
 
 def test_python_table_matches_generated_bundle() -> None:
@@ -147,12 +154,52 @@ def test_relocating_an_approved_marker_is_not_a_new_suppression() -> None:
     assert decision is None or decision.effect != "ask"
 
 
-def test_a_rule_this_file_did_not_suppress_before_still_asks() -> None:
-    """The whole point of the gate: a genuinely new suppression is a judgement."""
+def test_a_violation_no_directive_covers_outranks_the_suppression_beside_it() -> None:
+    """A new directive buys no approval for the violation it does not silence.
+
+    The added line declares `dict-get` and trips `any-type`, so the directive
+    covers nothing and the violation stands unsuppressed. Approving the edit
+    for the suppression it declared would carry that violation through on a
+    reason naming only the directive.
+
+    That a genuinely new suppression is itself a judgement is unchanged, and
+    the two tests beside this one pin it — each declares a directive that does
+    cover the line it sits on, and each still asks.
+    """
     before = "first: Any = 1  # lup: ignore[any-type]\n"
     after = (
         "first: Any = 1  # lup: ignore[any-type]\n"
         "second: Any = 2  # lup: ignore[dict-get]\n"
+    )
+
+    decision = antipattern_decision(
+        before, after, suppression_rows(), python_source=True
+    )
+
+    assert decision is not None
+    assert decision.effect == "deny"
+
+
+def test_a_directive_heading_a_two_line_reason_guards_what_follows_it() -> None:
+    """The placement a reason too long for the column budget has to take.
+
+    The gate reads coverage in both directions and they disagreed: the
+    forward check walks the whole comment block, while the check that decides
+    whether a directive guards anything offered it a fixed pair of lines and
+    so could not see a violation two below. The edit was admitted here and
+    refused by `dev check` — a marker reported spurious while the violation it
+    covers was reported missing.
+
+    Asks rather than allows, because the suppression is newly declared and
+    that is a judgement. What matters is that it is not denied as guarding
+    nothing.
+    """
+    before = "first = 1\n"
+    after = (
+        "first = 1\n"
+        "# lup: ignore[any-type] — the reason this exception is the right\n"
+        "# call, which does not fit beside the line it justifies\n"
+        "value: Any = 1\n"
     )
 
     decision = antipattern_decision(
@@ -290,6 +337,40 @@ def test_audit_keeps_foreign_ids_out_of_file_level_verdicts() -> None:
 def test_audit_skips_plain_comment_lines() -> None:
     findings = audit_text("# a comment mentioning Any in prose\n", PYTHON_ANTI_PATTERNS)
     assert findings == []
+
+
+@pytest.mark.parametrize(
+    "declaration",
+    [
+        "    model_config = ConfigDict(frozen=True)",
+        '    model_config = SettingsConfigDict(extra="ignore")',
+        "    model_config = FROZEN",
+        '    model_config = {"arbitrary_types_allowed": True}',
+        "    model_config: ClassVar[ConfigDict] = ConfigDict(frozen=True)",
+    ],
+)
+def test_model_config_rule_fires_on_every_declaration_shape(declaration: str) -> None:
+    """Each shape a repository census turned up is a declaration the rule sees.
+
+    The shapes differ only in what sits right of the `=`, so a rule anchored on
+    the assignment catches a constructor, a shared alias, a bare dict and an
+    annotated form alike — including one nobody enumerated in advance.
+    """
+    findings = audit_text(f"{declaration}\n", PYTHON_ANTI_PATTERNS)
+    assert [f.rule_id for f in findings] == ["model-config"]
+
+
+def test_model_config_rule_names_the_class_keyword_replacement() -> None:
+    """The message says what to write instead, not only what is wrong."""
+    message = rule_named(PYTHON_ANTI_PATTERNS, "model-config").message
+    assert "class keywords" in message
+    assert "BaseModel, frozen=True" in message
+
+
+def test_model_config_rule_ignores_the_identifier_in_prose() -> None:
+    """A `model_config` named in a comment or a string is not a declaration."""
+    prose = '# model_config = ConfigDict(frozen=True) in a comment\nx = "model_config = 1"\n'
+    assert audit_text(prose, PYTHON_ANTI_PATTERNS) == []
 
 
 def test_comment_context_covers_exactly_the_directive_rules() -> None:
@@ -471,16 +552,16 @@ def test_refiner_survives_a_fragment_it_cannot_parse() -> None:
 
 
 def test_declared_refiners_are_the_kernel_refiners() -> None:
-    """A rule's refiner is the same object the hook applies under its id.
+    """A rule's refiner is the same object the hook applies from its row.
 
-    The rule holds the function and the kernel holds an id map, because a row
+    The rule holds the function and its row carries the name, because a row
     projected into the hermetic runtime cannot carry a callable. Nothing but
     this keeps them the same: a rule refined on one side only is how a marker
     becomes one the audit demands gone and the hook refuses to remove.
     """
     for rule in PYTHON_ANTI_PATTERNS:
         expected = None if rule.refiner is None else rule.refiner.exempt
-        assert refiner_for(rule.id) is expected, rule.id
+        assert refiner_named(antipattern_row(rule)["refiner"]) is expected, rule.id
 
 
 def test_refiner_exempts_deliberate_defaults() -> None:
@@ -911,3 +992,142 @@ def test_audit_file_level_typed_ignore_disables_only_that_rule() -> None:
     findings = audit_text(source, PYTHON_ANTI_PATTERNS)
     assert [f.kind for f in findings] == ["missing"]
     assert findings[0].rule_id == "any-type"
+
+
+DEFAULT_FACTORY_FIELD = (
+    "from pydantic import BaseModel, Field\n"
+    "\n"
+    "\n"
+    "class Record(BaseModel):\n"
+    "    items: list[int] = Field(default_factory=list)\n"
+)
+
+LITERAL_DEFAULT_FIELD = (
+    "from pydantic import BaseModel\n"
+    "\n"
+    "\n"
+    "class Record(BaseModel):\n"
+    "    items: list[int] = []\n"
+)
+
+WORKING_FACTORY_FIELD = (
+    "from pydantic import BaseModel, Field\n"
+    "\n"
+    "\n"
+    "class Record(BaseModel):\n"
+    "    stamp: Moment = Field(default_factory=Moment)\n"
+)
+
+
+def test_default_factory_flags_the_empty_collection_form() -> None:
+    findings = audit_text(DEFAULT_FACTORY_FIELD, PYTHON_ANTI_PATTERNS)
+    assert [(f.kind, f.line, f.rule_id) for f in findings] == [
+        ("missing", 5, "default-factory")
+    ]
+
+
+def test_default_factory_clears_a_factory_that_does_work() -> None:
+    """The near miss: a factory no annotated literal could have said."""
+    assert audit_text(WORKING_FACTORY_FIELD, PYTHON_ANTI_PATTERNS) == []
+    assert default_factory_exempt_lines(WORKING_FACTORY_FIELD) == {5}
+    assert default_factory_exempt_lines(DEFAULT_FACTORY_FIELD) == set()
+
+
+def test_default_factory_and_empty_collection_never_share_a_line() -> None:
+    """The two divide pydantic's ground; neither doubles up on the other's.
+
+    The rule prescribes the literal default, and that literal sits on an
+    annotated class declaration — precisely what the other rule's refiner
+    clears. Were it otherwise, the replacement one gate demands would be the
+    line the other refuses.
+    """
+    for source in (DEFAULT_FACTORY_FIELD, LITERAL_DEFAULT_FIELD):
+        rules = {
+            finding.rule_id for finding in audit_text(source, PYTHON_ANTI_PATTERNS)
+        }
+        assert rules <= {"default-factory"}, source
+
+
+def test_the_prescribed_literal_default_is_an_edit_the_hook_admits() -> None:
+    """Writing the replacement must pass the gate that judged the original.
+
+    A rule whose remedy the edit hook denies is unfollowable: the audit asks
+    for a change the point of writing refuses, and no revision converges.
+    """
+    decision = antipattern_decision(
+        DEFAULT_FACTORY_FIELD,
+        LITERAL_DEFAULT_FIELD,
+        bundled_antipattern_rows()[".py"],
+        python_source=True,
+    )
+
+    assert decision is None or decision.effect == "allow", decision
+
+
+def test_the_set_shapes_name_the_structure_they_collapse() -> None:
+    """Both messages have to say what is lost, not that the type is too much.
+
+    A reader told a `set` is overkill reaches for a `list`, which loses the
+    same field the set did. The reason is the `dict[...]` the members were
+    keying, so the message that carries it is the one that gets the rewrite
+    right.
+    """
+    messages = {
+        rule.id: rule.message
+        for rule in PYTHON_ANTI_PATTERNS
+        if rule.id in ("set-shape", "frozenset-shape")
+    }
+
+    assert set(messages) == {"set-shape", "frozenset-shape"}  # lup: ignore[set-shape]
+    for rule_id, message in messages.items():
+        assert "dict[" in message, rule_id
+        assert "overkill" not in message, rule_id
+
+
+def test_pdf_extraction_flags_every_text_extractor() -> None:
+    for line in (
+        "import fitz\n",
+        "import pymupdf\n",
+        "from pypdf import PdfReader\n",
+        "import PyPDF2\n",
+        "import pdfplumber\n",
+        "from pdfminer.high_level import extract_text\n",
+    ):
+        rule_ids = {f.rule_id for f in audit_text(line, PYTHON_ANTI_PATTERNS)}
+        assert "pdf-extraction" in rule_ids, line
+
+
+def test_pdf_extraction_leaves_the_neighbouring_pdf_names_alone() -> None:
+    """The near miss: naming a PDF is not extracting text from one.
+
+    The rule is about the libraries that pull text out of a document, so a
+    module of our own with `pdf` in its name and a path that ends in one are
+    both untouched — flagging those would teach that PDFs are the problem
+    rather than the silent empty extraction.
+    """
+    clean = "import pdf_report\nfrom lup.pdfs import stamp\nname = 'fitz.pdf'\n"
+
+    assert audit_text(clean, PYTHON_ANTI_PATTERNS) == []
+
+
+def test_pdf_extraction_names_no_tool_until_a_runtime_spells_one() -> None:
+    """The rule ships into every plugin tree, so the reader is asked for.
+
+    Naming one runtime's tool in the portable message would tell the other to
+    use something it does not have; a runtime that declines contributes no
+    sentence, and the failure mode still reads on its own.
+    """
+    neutral = rule_named(PYTHON_ANTI_PATTERNS, "pdf-extraction")
+    spelled = rule_named(
+        python_anti_patterns(Spelled(words="Hand the path to the Read tool.")),
+        "pdf-extraction",
+    )
+    declined = rule_named(
+        python_anti_patterns(Unsupported(reason="no tool takes a document")),
+        "pdf-extraction",
+    )
+
+    assert "Read" not in neutral.message
+    assert neutral.message == declined.message
+    assert spelled.message.endswith("Hand the path to the Read tool.")
+    assert spelled.message.startswith(declined.message)

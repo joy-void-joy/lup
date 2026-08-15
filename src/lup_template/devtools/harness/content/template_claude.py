@@ -111,7 +111,8 @@ The `pyright-lsp` plugin provides code intelligence. **Use these actively** -- t
         models.TextPart(
             text=r"""`lup-devtools harness claude` regenerates, verifies, and runs Claude Code with
 the local Lup plugin and the active profile's account (`CLAUDE_CONFIG_DIR`).
-`lup-devtools usage claude` reports usage for the chosen profile. Profiles are managed
+`lup-devtools usage claude` reports usage for the chosen profile, and
+`lup-devtools usage codex` reports the other backend's. Profiles are managed
 with `lup-devtools setup profile`.
 
 Each repo names its plugin **marketplace** after the project — the plugin entry stays `lup`, so `"""

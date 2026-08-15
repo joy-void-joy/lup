@@ -1,18 +1,21 @@
 """Canonical declaration for the init skill."""
 
 import lup.harness.models as models
+import lup_template.devtools.harness.content.provenance as provenance
 
-# lup: Is init on par with install? Especially about using the github target
-# with a branch until we are published on PyPI — install carries "the source
-# branch is part of what you install", the question about porting from a feature
-# branch, and the `dev library git --branch <source-branch>` recipe, and none of
-# that has an equivalent here.
+SPELLING = provenance.Provenance(
+    library_git="git",
+    project_devtools="uv run lup-devtools",
+    library_checkout="<lup-checkout>",
+)
+"""One checkout, unqualified: this skill turns the library's clone into the project."""
+
 SKILL = models.Skill(
     id="skill.init",
     name="init",
     description="Initialize the self-improvement loop for a specific domain",
     tools=[
-        "Bash(uv run lup-devtools:*, uv sync:*, uv run pyright:*, uv run ruff:*, uv run pytest:*)",
+        "Bash(git:*, uv run lup-devtools:*, uv sync:*, uv run pyright:*, uv run ruff:*, uv run pytest:*)",
         "Read",
         "Grep",
         "Glob",
@@ -32,6 +35,23 @@ This command sets up the project identity, renames the source package, and custo
 ## Your Task
 
 Interview the user about their domain, rename the source package, and generate the appropriate scaffolding.
+
+### The branch you start from is the library you get
+
+This checkout is a clone of lup, so the branch it stands on *is* the library
+version the project begins at: `packages/lup/` is that branch's code, and the
+acquisition mode settled in Phase 2 pins that same ref. A feature branch
+carries work the stable branch has not reviewed, and nothing downstream
+announces that. Resolve both before Phase 0, while `origin` still points at lup
+rather than at the project's own repository:
+
+"""
+            ),
+            *provenance.branch_probes(SPELLING),
+            models.TextPart(
+                text=r"""This checkout is the one supplying the library, and `packages/lup/` is whatever
+branch is checked out — so if the answer was the stable branch, `git switch` to
+it now, before Phase 0 reads anything.
 
 ## Phase 0: Check for DESIGN.md
 
@@ -138,40 +158,74 @@ This handles directory rename (`src/lup_template/` -> `src/<project>/`), import 
 
 ### After renaming:
 
-1. **Merge the guidance file from its template** -- Perform a section-level merge into each tree's guidance file ("""
+#### 1. Declare how the project obtains lup
+
+The template ships the library vendored under `packages/lup/`, which makes the
+project a fork of it. The rename is what allows leaving that mode: `dev library`
+refuses to un-vendor while `src/lup_template/` is present, because an
+uninitialized template and the lup repository are the same bytes and nothing
+else separates them.
+
+"""
+            ),
+            *provenance.acquisition(SPELLING),
+            models.TextPart(
+                text=r"""The command prints the `uv sync` and the regeneration it wants next. Run both
+before anything reads the project's types.
+
+#### 2. Merge the guidance template into the guidance declaration
+
+The merge lands in `src/<project>/devtools/harness/content/guidance.py`, never in a tree's guidance file ("""
             ),
             models.NativePath(location="guidance_file", scope="every_tree"),
-            models.TextPart(text=r""") from its matching template flavor ("""),
+            models.TextPart(
+                text=r"""): those are generation's outputs, and an edit made directly to one is undone the next time the harness runs. Take the sections from that tree's template flavor ("""
+            ),
             models.PluginPath(
                 plugin="lup", location="guidance_template", scope="every_tree"
             ),
             models.TextPart(
                 text=r"""), covering every tree the project commits:
-   1. Read the template and replace `<project>` placeholders with the actual project name
-   2. Read the existing guidance file
-   3. Use the `<!-- section: ... -->` markers in the template to identify independent merge units
-   4. Compare sections: for each marked section, check if the existing guidance file already has that section (by heading match)
-   5. Add missing sections from the template into the existing guidance file
-   6. Leave existing sections untouched -- don't overwrite content the project already has
 
-2. **Initialize upstream sync**:
-   ```bash
-   uv run lup-devtools sync mark-synced lup
-   ```
-   This baselines the sync state so `"""
+1. Read the template and replace `<project>` placeholders with the actual project name
+2. Read the existing declaration
+3. Use the `<!-- section: ... -->` markers in the template to identify independent merge units
+4. Compare sections: for each marked section, check whether the declaration already composes it (by heading match)
+5. Add missing sections to the declaration
+6. Leave existing sections untouched -- don't overwrite content the project already has
+7. Regenerate with `uv run lup-devtools harness generate all`, which is what carries the merged sections into every tree
+
+Which runtimes the project carries is not a choice made here: every tree
+arrives with the clone, and generation writes each one it finds. Dropping a
+runtime is a later removal somebody decides on its own terms.
+
+#### 3. Initialize upstream sync
+
+"""
             ),
-            models.SkillInvocation(plugin="lup", skill="update"),
+            *provenance.sync_baseline(SPELLING),
             models.TextPart(
-                text=r"""` only shows commits after this point.
+                text=r"""That checkout is one you provide: clone the library beside the project, then
+`git switch --detach <commit>` it to the recorded commit. Not this project's
+own checkout — it stands at that commit too, and naming it makes the review
+read the project's own history as upstream work. The linked mode's checkout can
+serve when it already stands there, but it is someone's working checkout and is
+not yours to move.
 
-3. **Verify**:
-   ```bash
-   uv sync
-   uv run pyright
-   uv run ruff check .
-   uv run pytest
-   <project> --help
-   ```
+A recorded path is read in place and never fetched, so whichever checkout you
+name is the one to update before a review. The branch may also have advanced
+since this project was cloned, and a checkpoint taken from its tip marks the
+commits in between as already reviewed when the project does not carry them.
+
+#### 4. Verify
+
+```bash
+uv sync
+uv run pyright
+uv run ruff check .
+uv run pytest
+<project> --help
+```
 
 ## Phase 3: Generate Scaffolding
 

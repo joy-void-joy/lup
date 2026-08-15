@@ -21,9 +21,10 @@ auditor.
 
 Detection is deliberately liberal — `#` or `//`, any case, optional spaces — so
 the same note reads naturally in Python, shell, TypeScript, JSON, or Markdown.
-A colon is required so prose like a `## Notes` heading does not match. A marker
-is a feedback note unless its keyword is `ignore`, which stays the anti-pattern
-escape hatch.
+A colon is required so prose like a `## Notes` heading does not match, and the
+marker has to sit where its comment opens, so a note may spell out the syntax
+it is about without splitting itself in two. A marker is a feedback note unless
+its keyword is `ignore`, which stays the anti-pattern escape hatch.
 
 How a file is scanned depends on its language, because where a note can live
 does. Python source is parsed so a marker counts only where prose belongs — in a
@@ -46,20 +47,6 @@ from lup.policy.kernel.edit import IGNORE_RE
 
 MARKER_RE = re.compile(r"(#|//)\s*lup\s*:", re.IGNORECASE)
 
-# lup: A note is truncated when one of its own continuation lines quotes the
-# marker spelling — writing about a suppression directive, or about this scanner
-# at all, ends the note there and starts a phantom one. MARKER_RE matches
-# anywhere in the line, so backticks and prose context buy nothing. The scanner
-# already skips notes quoted in Markdown code spans; a continuation line needs
-# the same treatment, or a marker must be required at the comment's start.
-
-# lup: Claude will often write the `# lup: ignore` on the line *above* the one it
-# is trying to ignore. Two things there. Why is the Edit asking rather than
-# denying outright? And should we accept the above-line form, or keep the strict
-# same-line policy pyright has? From another agent, the failure demonstrated
-# live: "my marker on its own line went spurious while the real line stayed
-# missing. It has to be inline, which means it fights the column limit.
-# Shortening the name buys the room."
 
 # `# lup: defer: <text>` parks work; a `defer[<gate>]: <text>` head parks it
 # behind a gate somebody other than this note can check ("until the v2 API
@@ -73,7 +60,12 @@ MARKER_RE = re.compile(r"(#|//)\s*lup\s*:", re.IGNORECASE)
 # never closes with `]:` is malformed and the note stays an ordinary (red,
 # visible) review note. The head is matched against a note's text (the part
 # after the marker), so the `ignore` keyword — which never reaches note
-# classification — is untouched.
+# classification — is untouched, and a condition may run past the line it
+# starts on: continuation lines join with a space before this sees them, the
+# same way a note's own message runs on. A gate that had to fit one line
+# would be written shorter than it needed to be, which is how a real
+# externally-checkable condition decays into restating that this code might
+# change again.
 DEFER_HEAD_RE = re.compile(
     r"^defer\s*(?:\[(?P<condition>.+?)\])?\s*:\s*", re.IGNORECASE
 )
@@ -90,6 +82,9 @@ SOLVED_HEAD_RE = re.compile(r"^solved\s*:\s*", re.IGNORECASE)
 TEMPLATE_MARKER_RE = re.compile(r"(?:(#|//)\s*)?TEMPLATE\s*:")
 FENCE_RE = re.compile(r"^\s*(```|~~~)")
 COMMENT_PREFIX_RE = re.compile(r"^\s*(#|//)")
+# The whole run a line opens its comment with, so a marker written `## lup:`
+# or `/// lup:` is read as sitting on that opener rather than inside its prose.
+COMMENT_OPENER_RE = re.compile(r"^\s*(#+|//+)")
 
 # lup: ignore[library-default] — Python's own source suffixes
 PYTHON_SUFFIXES = {".py", ".pyi"}
@@ -166,6 +161,42 @@ class MarkerComment(BaseModel):
             case _:
                 return self
 
+    def classify_deferral(self) -> Self:
+        """Split a `defer:` or `solved:` head off this review note, if present.
+
+        A matching note comes back with the head's kind, the gate a bracketed
+        deferral stated parsed out, and ``text`` reduced to the message after
+        the head. Any other note — including prose that merely starts with the
+        word "defer", a bracket left empty, or a bracket that never closes with
+        `]:` — is returned unchanged as an ordinary ``note``, so a malformed
+        head degrades to visible open feedback instead of a silently mangled
+        condition or a claim nobody made. A bracket opened is a bracket that
+        has to say something; writing none at all is the ordinary way to park
+        work.
+        """
+        solved = SOLVED_HEAD_RE.match(self.text)
+        if solved is not None:
+            return self.model_copy(
+                update={"kind": "solved", "text": self.text[solved.end() :]}
+            )
+        head = DEFER_HEAD_RE.match(self.text)
+        if head is None:
+            return self
+        match head.group("condition"):
+            case None:
+                condition = None
+            case stated if stated.strip():
+                condition = stated.strip()
+            case _:
+                return self
+        return self.model_copy(
+            update={
+                "kind": "defer",
+                "condition": condition,
+                "text": self.text[head.end() :],
+            }
+        )
+
     def deferral_label(self) -> str:
         """How a parked note is labelled in a listing, gate included if stated."""
         return f"deferred[{self.condition}]" if self.condition else "deferred"
@@ -199,8 +230,10 @@ class MarkerScan:
 
     A note is a marker line plus the contiguous same-style comment lines below
     it, merged into one item; the run ends at a decoration line (no letters or
-    digits, e.g. the edge of a `# ====` banner), a foreign comment style, a new
-    marker, or prose outside a comment. Lines whose marker also matches
+    digits, e.g. the edge of a `# ====` banner), a foreign comment style, a
+    marker opening its own comment, or prose outside a comment. A marker
+    quoted inside a comment's prose ends no run, so a note is free to write
+    out the spelling it is about. Lines whose marker also matches
     `ignore`, fenced code, and backtick spans are skipped. In Python mode a
     marker counts only inside a comment or docstring, so marker text in an
     ordinary string literal is left alone.
@@ -227,6 +260,33 @@ class MarkerScan:
     def in_note_context(self, line_no: int, col: int) -> bool:
         return self.context is None or self.context.is_note_context(line_no, col)
 
+    def on_comment_opener(self, line: str, match: re.Match[str]) -> bool:
+        """Whether the marker sits on the run of `#` or `/` that opens the line.
+
+        Exact wherever a line opens with a comment at all, which is every
+        continuation line and most notes. A marker trailing anything else is
+        taken at its word: nothing here can tell a comment's `//` from the one
+        in `https://`, and reading a real note as a mention loses it silently.
+        """
+        opener = COMMENT_OPENER_RE.match(line)
+        return opener is None or match.start() < opener.end()
+
+    def at_comment_start(self, line_no: int, line: str, match: re.Match[str]) -> bool:
+        """Whether the marker at `match` is where its own comment begins.
+
+        A marker written into a comment's prose — a note quoting the `ignore`
+        hatch, or writing about this scanner at all — mentions the spelling
+        rather than using it, and opens nothing. Python's tokenizer says
+        exactly where a comment opens, and says yes everywhere in a file it
+        could not parse, keeping :class:`PythonContext`'s promise that a note
+        is never missed. Without one, the marker's own position against the
+        line's comment opener is the whole reading.
+        """
+        context = self.context
+        if context is not None and context.comment_at(line_no, match.start()):
+            return True
+        return self.on_comment_opener(line, match)
+
     def opens_note(self, line_no: int, line: str, match: re.Match[str]) -> bool:
         """Whether a marker at `match` starts a real note under the active mode."""
         if self.in_fence:
@@ -236,6 +296,8 @@ class MarkerScan:
         if self.mode == ScanMode.JS and match.group(1) == "#":
             return False
         if inside_inline_code(line, match.start()):
+            return False
+        if not self.at_comment_start(line_no, line, match):
             return False
         return self.in_note_context(line_no, match.start())
 
@@ -248,7 +310,8 @@ class MarkerScan:
                 return None
             if not self.in_note_context(line_no, prefix.start(1)):
                 return None
-            if self.marker.search(line) is not None:
+            marker = self.marker.search(line)
+            if marker is not None and self.on_comment_opener(line, marker):
                 return None
             content = line[prefix.end() :].strip()
             if content and not any(ch.isalnum() for ch in content):
@@ -257,7 +320,9 @@ class MarkerScan:
 
         return content_of
 
-    def notes(self) -> list[MarkerComment]:
+    def notes(
+        self, before: int = CONTEXT_BEFORE, after: int = CONTEXT_AFTER
+    ) -> list[MarkerComment]:
         found: list[MarkerComment] = []
         for numbered in self.cursor:
             line_no = numbered.number
@@ -284,8 +349,8 @@ class MarkerScan:
                 MarkerComment(
                     start_line=line_no,
                     end_line=end_line,
-                    read_start=max(1, line_no - CONTEXT_BEFORE),
-                    read_end=min(self.total, end_line + CONTEXT_AFTER),
+                    read_start=max(1, line_no - before),
+                    read_end=min(self.total, end_line + after),
                     text=" ".join(part for part in parts if part),
                 )
             )
@@ -303,42 +368,6 @@ def find_markers(
     return MarkerScan(text, mode, marker=marker, ignore=ignore).notes()
 
 
-def classify_deferral(note: MarkerComment) -> MarkerComment:
-    """Split a `defer:` or `solved:` head off one review note, if present.
-
-    A matching note comes back with the head's kind, the gate a bracketed
-    deferral stated parsed out, and ``text`` reduced to the message after the
-    head. Any other note — including prose that merely starts with the word
-    "defer", a bracket left empty, or a bracket that never closes with `]:` —
-    is returned unchanged as an ordinary ``note``, so a malformed head
-    degrades to visible open feedback instead of a silently mangled condition
-    or a claim nobody made. A bracket opened is a bracket that has to say
-    something; writing none at all is the ordinary way to park work.
-    """
-    solved = SOLVED_HEAD_RE.match(note.text)
-    if solved is not None:
-        return note.model_copy(
-            update={"kind": "solved", "text": note.text[solved.end() :]}
-        )
-    head = DEFER_HEAD_RE.match(note.text)
-    if head is None:
-        return note
-    match head.group("condition"):
-        case None:
-            condition = None
-        case stated if stated.strip():
-            condition = stated.strip()
-        case _:
-            return note
-    return note.model_copy(
-        update={
-            "kind": "defer",
-            "condition": condition,
-            "text": note.text[head.end() :],
-        }
-    )
-
-
 def find_feedback(text: str, mode: str = ScanMode.TEXT) -> list[MarkerComment]:
     """Extract `# lup:` review notes from a file's text.
 
@@ -347,11 +376,11 @@ def find_feedback(text: str, mode: str = ScanMode.TEXT) -> list[MarkerComment]:
     covers the standalone file-level `# lup: ignore` too: it disables
     anti-pattern checks (see `lup.codescan.antipatterns`), never note gathering,
     so feedback in an opted-out file still surfaces. Each surviving note is
-    then classified through :func:`classify_deferral`, so parked work is
-    parked in the data rather than only in the prose.
+    then classified through :meth:`MarkerComment.classify_deferral`, so parked
+    work is parked in the data rather than only in the prose.
     """
     notes = find_markers(text, mode, marker=MARKER_RE, ignore=IGNORE_RE)
-    return [classify_deferral(note) for note in notes]
+    return [note.classify_deferral() for note in notes]
 
 
 class NoteTarget(BaseModel):
@@ -367,6 +396,23 @@ class NoteTarget(BaseModel):
     line: int
     text: str | None = None
 
+    def resolve(self, candidates: list[MarkerComment]) -> MarkerComment | None:
+        """Find the note this target names, tolerating drift when it carries text.
+
+        A text-bearing target picks the nearest candidate whose body matches
+        exactly, so an unchanged line scores zero and wins outright while a note
+        pushed up or down by an earlier edit is still found.
+        """
+        if self.text is None:
+            return next(
+                (note for note in candidates if note.start_line == self.line), None
+            )
+        return min(
+            [note for note in candidates if note.marker_text() == self.text],
+            key=lambda note: abs(note.start_line - self.line),
+            default=None,
+        )
+
 
 class NoteRemoval(BaseModel):
     """Rewritten text, the notes actually removed, and the targets not found."""
@@ -376,6 +422,7 @@ class NoteRemoval(BaseModel):
     missing: list[NoteTarget]
 
 
+# lup: ignore[model-free-function] — the line buffer is the subject, the note a span
 def without_note(lines: list[str], note: MarkerComment) -> None:
     """Drop a standalone note whole; leave an inline note's code behind."""
     head = lines[note.start_line - 1]
@@ -385,26 +432,6 @@ def without_note(lines: list[str], note: MarkerComment) -> None:
         lines[note.start_line - 1] = head_code.rstrip()
     else:
         del lines[note.start_line - 1 : note.end_line]
-
-
-def resolve_note(
-    candidates: list[MarkerComment], target: NoteTarget
-) -> MarkerComment | None:
-    """Find the note a target names, tolerating drift when it carries text.
-
-    A text-bearing target picks the nearest candidate whose body matches
-    exactly, so an unchanged line scores zero and wins outright while a note
-    pushed up or down by an earlier edit is still found.
-    """
-    if target.text is None:
-        return next(
-            (note for note in candidates if note.start_line == target.line), None
-        )
-    return min(
-        [note for note in candidates if note.marker_text() == target.text],
-        key=lambda note: abs(note.start_line - target.line),
-        default=None,
-    )
 
 
 def remove_notes(
@@ -423,9 +450,7 @@ def remove_notes(
     claimed: list[MarkerComment] = []
     missing: list[NoteTarget] = []
     for target in targets:
-        note = resolve_note(
-            [note for note in candidates if note not in claimed], target
-        )
+        note = target.resolve([note for note in candidates if note not in claimed])
         if note is None or (note.kind == "defer" and not wake):
             missing.append(target)
             continue
@@ -473,9 +498,7 @@ def solved_claims_only(
     missing: list[NoteTarget] = []
     refused: list[MarkerComment] = []
     for target in targets:
-        note = resolve_note(
-            [note for note in candidates if note not in claimed], target
-        )
+        note = target.resolve([note for note in candidates if note not in claimed])
         if note is None:
             missing.append(target)
             continue

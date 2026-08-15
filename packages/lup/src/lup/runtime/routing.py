@@ -2,7 +2,7 @@
 
 from collections.abc import Callable
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
 from lup.runtime.config import ModelMatcher
 from lup.runtime.factory import SessionFactory
@@ -35,10 +35,8 @@ class PrefixModelMatcher(ModelMatcher):
 type FactoryRecipe = Callable[[], SessionFactory]
 
 
-class ModelRoute(BaseModel):
+class ModelRoute(BaseModel, frozen=True, arbitrary_types_allowed=True):
     """One immutable matcher and configured factory recipe."""
-
-    model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
 
     name: str
     matcher: ModelMatcher

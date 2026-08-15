@@ -15,6 +15,34 @@ from lup.harness.contracts import NativeSpellings, PromptRenderer
 from lup.harness.models import LocatedPart, NativePath, PromptDocument
 
 
+def sentences(*parts: str) -> str:
+    """Join what each part says, leaving no gap where one says nothing.
+
+    A vocabulary that declines an idea contributes an empty string, and the
+    sentence around it should read as though the idea was never raised rather
+    than carry the space where its words would have gone.
+    """
+    return " ".join(part for part in parts if part)
+
+
+# lup: ignore[constant-declaration] — one reason every tree renders identically,
+# declared with the prompt it belongs to rather than chosen per caller
+SPAWNED_SESSION_LOSES_SHELL = (
+    "Every session the run opens is a child of this call, and a session "
+    "spawned inside a sandbox cannot create the per-session state its own "
+    "shell needs — so each of its shell calls dies on a read-only filesystem, "
+    "leaving planners and workers unable to run a single command while still "
+    "appearing to work."
+)
+"""Why entering the resolver wants to run outside the sandbox.
+
+The need is the same wherever the resolver is entered from, and only the
+escape differs — one runtime spells a per-call flag, another has nothing to
+spell — so both entries state the need from here and let their own vocabulary
+answer it.
+"""
+
+
 def guidance_banner(
     prompts: PromptRenderer, guidance: PromptDocument
 ) -> GeneratedBanner:

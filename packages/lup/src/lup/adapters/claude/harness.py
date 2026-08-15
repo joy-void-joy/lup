@@ -5,6 +5,7 @@ import shlex
 from collections.abc import Sequence
 from pathlib import Path
 from lup.adapters.claude.login import CLAUDE_LOGIN
+from lup.codescan.antipatterns import DOCUMENT_IN_HAND, antipattern_set_for
 from lup.harness.banner import PROMPT_TEXT, VERBATIM_COPY
 from lup.harness.contracts import (
     ArtifactRenderer,
@@ -12,9 +13,15 @@ from lup.harness.contracts import (
     Instruction,
     NativeSpellings,
     PromptRenderer,
+    Spelled,
+    Spelling,
 )
 from lup.harness.generation import argument_text
-from lup.harness.prompts import guidance_banner
+from lup.harness.prompts import (
+    SPAWNED_SESSION_LOSES_SHELL,
+    guidance_banner,
+    sentences,
+)
 from lup.harness.models import (
     Agent,
     Artifact,
@@ -41,8 +48,11 @@ from lup.policy.dispatcher import (
     dispatcher_banner,
 )
 from lup.policy.kernel.rows import PathRoleRow
+from lup.policy.refused_tools import routed_for
 
 
+# lup: ignore[constant-declaration] — each value is Claude Code's own alias for
+# the tier beside it, over a tier vocabulary this library closes
 CLAUDE_MODEL_ALIASES: dict[ModelTier, str] = {
     "inherit": "inherit",
     "strongest": "opus",
@@ -104,35 +114,52 @@ class ClaudeSpellings(NativeSpellings):
             'with `ExitWorktree(action="keep")`'
         )
 
+    def escape_sandbox(self, reason: str) -> Spelling:
+        return Spelled(
+            words=Instruction(
+                f"Launch it with `dangerouslyDisableSandbox: true`. {reason}"
+            )
+        )
+
+    def read_document(self, path: str) -> Spelling:
+        return Spelled(
+            words=Instruction(
+                f"Hand {path} to the `Read` tool, which takes the document itself"
+            )
+        )
+
     def resolver_entry(self) -> Instruction:
         return Instruction(
-            "Run `uv run lup-devtools harness resolve --adapter claude`. "
-            "Where this project has a run that never finished, it refuses "
-            "rather than starting a second one beside it, and lists them: "
-            "relay that choice — resume with `--run-id <id>`, keeping every "
-            "answer already collected, or start fresh with `--new`, which "
-            "re-derives the inventory and discards them. Never take it "
-            "yourself. Assembling the review branch is gated on the "
-            "reserved `integration-assembly` question, so approving it is "
-            "`--answer integration-assembly=approve` like any other answer. "
-            "It waits zero seconds by "
-            "default and parks on material questions, printing each one "
-            "beside the `# lup:` notes it was raised from, the concern's "
-            "spec, and its acceptance criteria; rerun with the repeatable "
-            "`--answer <question-id>=<value>` flag to answer them. "
-            "`--admit <text>` admits work discovered mid-run in the human's "
-            "own words and `--admit-note <file>:<line>` admits a note you "
-            "wrote in the tree, both repeatable. "
-            "Never pass `--wait` or `--supervise`; both hold a run open "
-            "for a human instead of parking — `--wait` at the mailbox, "
-            "`--supervise` at the page it opens. "
-            "Launch it with `dangerouslyDisableSandbox: true`. Every session "
-            "the run opens is a child of this call, and a session spawned "
-            "inside the sandbox cannot create its own "
-            "`~/.claude/session-env/<id>` — so each of its shell calls dies on "
-            "`EROFS: read-only file system, mkdir`, leaving planners and "
-            "workers unable to run a single command while still appearing to "
-            "work."
+            sentences(
+                "Run `uv run lup-devtools harness resolve --adapter claude`. "
+                "`uv run lup-devtools harness resolve intake` first prints what a "
+                "run started now would plan from — every actionable note at its "
+                "file and line, the deferred ones it would carry, and the ones it "
+                "would leave to their generator — creating no run and leasing no "
+                "worktree, so the inventory can be read before committing to it. "
+                "Where this project has a run that never finished, it refuses "
+                "rather than starting a second one beside it, and lists them: "
+                "relay that choice — resume with `--run-id <id>`, keeping every "
+                "answer already collected, or start fresh with `--new`, which "
+                "re-derives the inventory and discards them. Never take it "
+                "yourself. Assembling the review branch is gated on the "
+                "reserved `integration-assembly` question, so approving it is "
+                "`--answer integration-assembly=approve` like any other answer. "
+                "It waits zero seconds by "
+                "default and parks on material questions, printing each one "
+                "beside the `# lup:` notes it was raised from, the concern's "
+                "spec, and its acceptance criteria; rerun with the repeatable "
+                "`--answer <question-id>=<value>` flag to answer them. "
+                "`--admit <text>` carries work in the human's own words: it seeds "
+                "a run that does not exist yet, beside whatever notes the tree "
+                "holds, and joins one already moving. `--admit-note <file>:<line>` "
+                "names a note written in the tree and `--admit-issue <number>` an "
+                "open issue; all three are repeatable. "
+                "Never pass `--wait` or `--supervise`; both hold a run open "
+                "for a human instead of parking — `--wait` at the mailbox, "
+                "`--supervise` at the page it opens.",
+                self.escape_sandbox(SPAWNED_SESSION_LOSES_SHELL).in_prose(),
+            )
         )
 
     def arguments_ref(self) -> Atom:
@@ -188,6 +215,8 @@ class ClaudeSpellings(NativeSpellings):
                 return Atom(f"{root}/TEMPLATE_CLAUDE.md")
 
 
+# lup: ignore[constant-declaration] — which built-ins Claude Code ships is the
+# runtime's fact to state, not a preference a caller holds
 CLAUDE_ABSENT_TOOLS = ("Glob", "Grep")
 """Built-ins the portable vocabulary names that Claude Code does not ship.
 
@@ -397,14 +426,19 @@ to the hook without a branch that decides it.
 class ClaudeHookRenderer(ArtifactRenderer[HookSet]):
     """Render Claude hooks, canonical kernel, and application policy rows."""
 
-    def __init__(self, plugin_name: str, worker_identity: str) -> None:
+    def __init__(
+        self, plugin_name: str, worker_identity: str, spellings: NativeSpellings
+    ) -> None:
         self.plugin_name = plugin_name
         self.worker_identity = worker_identity
+        self.spellings = spellings
 
     def render(self, source: HookSet) -> ArtifactTree:
         registration = [
             {
-                "matcher": "|".join(CLAUDE_DISPATCHER.routed_tools),
+                "matcher": "|".join(
+                    routed_for(CLAUDE_DISPATCHER.routed_tools, source.refused_tools)
+                ),
                 "hooks": [
                     {
                         "type": "command",
@@ -489,8 +523,13 @@ class ClaudeHookRenderer(ArtifactRenderer[HookSet]):
                             for role in source.path_roles
                         ],
                         shell_rules=list(source.shell_rules),
+                        refused_tools=list(source.refused_tools),
                         recoverable_target_limit=source.recoverable_target_limit,
                         runner_targets=list(source.runner_targets),
+                        sandbox_excluded_commands=source.excluded_commands(),
+                        rules=antipattern_set_for(
+                            self.spellings.read_document(DOCUMENT_IN_HAND)
+                        ),
                     ),
                     semantic_id=source.id,
                 ),

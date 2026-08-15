@@ -4,9 +4,15 @@
 host half into the plugin's `hooks/scripts/policy.py`, so this is not itself
 a script. It holds only what Codex spells for itself: the environment naming
 the home it installs trusted packages beneath, relativization against the
-worktree rather than the launch directory, the three tools it routes, the
-patch envelope it decodes into per-file edits, and the fail-closed exit it
-takes where the command-hook boundary offers no way to ask.
+worktree rather than the launch directory, the tools it routes, the patch
+envelope it decodes into per-file edits, and the fail-closed exit it takes
+where the command-hook boundary offers no way to ask.
+
+A call none of those three decode is put to the refusal table before it earns
+the unclassified ask, so this file never names a tool it has no semantics for.
+Which names a runtime offers is that runtime's own fact; which of them a
+project has decided against is the application's — so the tools a refusal adds
+to the routed set come from the declaration rather than from a list here.
 
 The imports below resolve against the generated runtime the compiled script
 sits beside, which is why this file is type-checked against that tree rather
@@ -25,7 +31,12 @@ from pathlib import Path
 # resolve, for the interpreter and for a type checker alike.
 sys.path.insert(0, str(Path(__file__).parents[1] / "runtime"))
 from codex_patch import patched_files
-from decisions import bash_decision, edit_decision, fetch_decision
+from decisions import (
+    bash_decision,
+    edit_decision,
+    fetch_decision,
+    refused_tool_decision,
+)
 from host import declared_identity, read_document, sandbox_active
 from kernel.decision import KernelDecision
 from policy_data import AGENT_IDENTITY_ENV, AUTONOMOUS_AGENT_IDENTITIES
@@ -54,7 +65,11 @@ def dispatch(payload, permission_request=False):
             tool_input["command"],
             managed_root(),
             False if permission_request else sandbox_active(),
-            permission_request,
+            interactive=permission_request,
+            # This hook answers without rewriting the call, so a verdict that
+            # has to leave the sandbox is stopped with that reason instead:
+            # the one route out a rule can compile was decided before this ran.
+            escapable=False,
         )
     if name == "web_fetch":
         return fetch_decision(tool_input["url"])
@@ -74,6 +89,16 @@ def dispatch(payload, permission_request=False):
                 for change in patched_files(tool_input["command"], read_document)
             ]
         )
+    # Asked of whatever reached here rather than of a listed few, exactly as
+    # the Claude half asks it: which tools are worth refusing is the
+    # declaration's answer, and a runtime that shipped the table without
+    # consulting it would read as a refusal in force while the call went
+    # through. The branches above keep their calls, which have semantics.
+    refused = refused_tool_decision(
+        name, [value for value in tool_input.values() if isinstance(value, str)]
+    )
+    if refused is not None:
+        return refused
     return KernelDecision("ask", f"unknown tool {name!r} is not covered by policy")
 
 
@@ -85,7 +110,14 @@ def main():
             if "hook_event_name" in payload
             else False
         )
-        decision = dispatch(payload, permission_request)
+        # A verdict from here places nothing: this hook answers, and the call
+        # runs with the arguments the model wrote, so a placement is degraded
+        # to its plain effect rather than carrying an intent no channel here
+        # performs. The agent's own escape is the other question and Codex
+        # does have one, so a permission to escalate survives as reason text.
+        decision = dispatch(payload, permission_request).placed(
+            escapable=False, agent_escalates=True
+        )
     # Every way this can fail means one thing — the call went unjudged — and
     # one answer is right for all of them. Naming the exceptions instead is
     # what let a plain unreadable file escape, and a traceback exit is not the

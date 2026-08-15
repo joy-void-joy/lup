@@ -28,9 +28,11 @@ from lup.channels.models import (
     publish_atomic,
 )
 
-DECLARATION_FILE = "declared.json"
-OFFER_FILE = "offered.json"
-SETTLED_FILE = "settled.json"
+# The three file names of a slot's on-disk protocol, which a writing process
+# and a reading one in another interpreter must spell alike to meet at all.
+DECLARATION_FILE = "declared.json"  # lup: ignore[constant-declaration] — protocol name
+OFFER_FILE = "offered.json"  # lup: ignore[constant-declaration] — protocol name
+SETTLED_FILE = "settled.json"  # lup: ignore[constant-declaration] — protocol name
 
 
 class Slot[T: BaseModel]:

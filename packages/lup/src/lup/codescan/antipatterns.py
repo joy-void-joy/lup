@@ -35,9 +35,16 @@ surviving directives for. Regex alone remains where a rule is text-shaped. The
 `lup.codescan.registry` index and the generated `docs/rules.md` reference list
 this family beside the boundary, spelling, and architecture rules.
 
+Most messages read the same to everyone, so most of the table is a literal. A
+rule that has to name a native tool asks the runtime for the words instead:
+`pdf-extraction` reaches `NativeSpellings.read_document`, and
+:func:`antipattern_set_for` compiles the table once per plugin so a runtime
+with no such tool ships the rule without one named.
+
 Each entry pairs a stable id and a compiled regex with the message the hook and
-auditor show. This module imports only the standard library and `pydantic`
-(directly and through `lup.codescan.common`) so the auditor can load it cheaply;
+auditor show. Beyond `pydantic` and the harness seam that spells those words,
+this module imports only the standard library (directly and through
+`lup.codescan.common`) so the auditor can load it cheaply;
 `# lup:` marker detection stays in `lup.codescan.markers`, and the shared scan
 core — ignore matching, comment-column tokenization, the masked line
 projections, the line cursor — in `lup.codescan.common`, which this set's
@@ -47,9 +54,11 @@ consumers and the auditor import directly.
 import re
 from collections.abc import Callable
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field
 
+from lup.codescan.behaviour import RULE_ID as MODEL_FREE_FUNCTION_RULE_ID
 from lup.codescan.boundaries import (
+    CONSTANT_DECLARATION_RULE_ID,
     LIBRARY_DEFAULT_RULE_ID,
     NATIVE_SPELLING_RULE_ID,
     RULE_ID as SEAM_BOUNDARY_RULE_ID,
@@ -65,15 +74,19 @@ from lup.codescan.common import (
     file_level_ignore,
     ignore_rule_ids,
 )
+from lup.harness.contracts import Spelling, Unsupported
 from lup.policy.kernel.edit import (
     IGNORE_RE,
+    default_factory_exempt_lines,
     dict_get_exempt_lines,
     empty_collection_exempt_lines,
+    suppression_placement,
+    suppression_reaches,
     tuple_shape_exempt_lines,
 )
 
 
-class Refiner(BaseModel):
+class Refiner(BaseModel, arbitrary_types_allowed=True):
     """An AST context that narrows one rule, and what a cleared match really is.
 
     ``exempt`` returns the lines the context clears, and ``evidence`` says why
@@ -83,13 +96,11 @@ class Refiner(BaseModel):
     the rule is declared.
     """
 
-    model_config = {"arbitrary_types_allowed": True}
-
     exempt: Callable[[str], set[int]]
     evidence: str
 
 
-class AntiPattern(BaseModel):
+class AntiPattern(BaseModel, arbitrary_types_allowed=True):
     """One forbidden code shape: a stable id, the regex that detects it, and why.
 
     ``id`` is a stable kebab-case name a typed `# lup: ignore[id]` directive
@@ -108,15 +119,13 @@ class AntiPattern(BaseModel):
     ``refiner`` is present when the regex is wider than the defect the rule
     names and an AST context settles the difference. It carries the function
     itself, so reading the rule tells you what narrows it rather than only
-    that something does. The kernel reaches the same functions through
-    :data:`lup.policy.kernel.edit.REFINERS`, because a row projected into the
-    hermetic runtime is primitive and cannot carry a callable;
-    ``test_declared_refiners_are_the_kernel_refiners`` pins the two to the
-    same objects, since a rule refined on one side only is exactly the split
-    that makes a marker unremovable.
+    that something does. The row carries its name, which
+    :func:`lup.policy.kernel.edit.refiner_named` resolves back to the function,
+    because a row projected into the hermetic runtime is primitive and cannot
+    carry a callable; ``test_declared_refiners_are_the_kernel_refiners`` pins
+    the two to the same objects, since a rule refined on one side only is
+    exactly the split that makes a marker unremovable.
     """
-
-    model_config = {"arbitrary_types_allowed": True}
 
     id: str
     pattern: re.Pattern[str]
@@ -134,7 +143,7 @@ class AntiPattern(BaseModel):
     """
 
 
-PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
+PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
     AntiPattern(
         id="any-type",
         pattern=re.compile(r"\bAny\b"),
@@ -230,10 +239,6 @@ PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         message="Bare `object` says nothing about the value — use a concrete type, "
         "TypedDict, or BaseModel, and narrow at untyped boundaries",
     ),
-    # lup: Add a rule against `def` under a BaseModel. The model will often reach
-    # for `def parse_model(a: BaseModel)` and friends instead of ABC plus
-    # ABC-wrapper styles, which makes the result more sprawling and harder to
-    # compose or to see everything there is in one place.
     AntiPattern(
         id="bare-basemodel",
         pattern=re.compile(r"(?:(?<!\[)\b\w+\s*:|->)\s*BaseModel\b(?!\s*[\]|])"),
@@ -259,15 +264,13 @@ PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         # or constructed constant. A fixed name set constant wants a dict or a
         # purpose-built structure; an immutable-default-argument use is the one
         # legitimate site — `# lup: ignore[frozenset-shape]` marks it.
-        # lup: This is the wrong justification. The reason not to use `frozenset`
-        # and `set` is not that they are overkill — it is that they collapse
-        # structure over `dict[...]` (and `frozendict` when 3.15 lands). Say
-        # that, here and in set-shape below.
         id="frozenset-shape",
         pattern=re.compile(r"\bfrozenset\b"),
-        message="A declared `frozenset[...]` shape or constant is usually overkill — use "
-        "a dict or a purpose-built structure. For a genuinely immutable default argument "
-        "add `# lup: ignore[frozenset-shape]`",
+        message="A declared `frozenset[...]` shape or constant collapses structure a "
+        "`dict[...]` keeps — each member is a bare name, and whatever it keyed has nowhere "
+        "left to live. Use a dict, frozen once 3.15 ships `frozendict`, or a purpose-built "
+        "structure. For a genuinely immutable default argument add "
+        "`# lup: ignore[frozenset-shape]`",
     ),
     AntiPattern(
         # A declared or constructed set — `set(...)`/`set[...]` (no space
@@ -278,22 +281,38 @@ PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         # its "set" is not a standalone word.
         id="set-shape",
         pattern=re.compile(r"(?<!\.)\bset[\[(]|(?::|->)\s*set\b"),
-        message="A declared `set` is usually better as a dict, when the members "
-        "key something, or as a `list[BaseModel]`, when each member carries more "
-        "than its own name — a bare set of strings is often a record that lost "
-        "its other fields. Reach for membership on a local set comprehension "
+        message="A declared `set` collapses structure a `dict[...]` keeps — a bare set "
+        "of strings is a record that lost its other fields, so whatever each member "
+        "keyed has nowhere left to live. Use a dict when the members key something, or "
+        "a `list[BaseModel]` when each carries more than its own name. Reach for "
+        "membership on a local set comprehension "
         "instead of declaring the set as the interface. For a genuinely "
         "set-shaped value add `# lup: ignore[set-shape]`",
     ),
-    # lup: Add a rule against `Field(default_factory=...)`, as in `mylist =
-    # Field(default_factory=list[B])` where `mylist: list[B] = []` says the same
-    # thing with the type declared. Reconcile it with empty-collection below,
-    # whose refiner already has to decide which `= []` is a deliberate default.
+    AntiPattern(
+        # The refiner clears every factory that does work a literal cannot say,
+        # so what reaches a verdict is the empty collection the annotation
+        # already names. A pydantic field is an annotated class declaration,
+        # which empty-collection's refiner exempts, so no line trips both:
+        # this rule owns the factory spelling and that one owns the seed.
+        id="default-factory",
+        pattern=re.compile(r"\bdefault_factory\s*="),
+        refiner=Refiner(
+            exempt=default_factory_exempt_lines,
+            evidence="a factory doing work no annotated literal expresses",
+        ),
+        message="`Field(default_factory=list)` states in a factory what the annotation "
+        "already declares — write the default as a literal, `items: list[B] = []`, which "
+        "pydantic copies per instance. A factory that does real work (reads another "
+        "declaration, stamps a value, builds a model) is cleared by both gates on its "
+        "own, and a marker there is reported spurious",
+    ),
     AntiPattern(
         # The refiner exempts deliberate defaults — __init__ state, call
         # kwargs, annotated module and class declarations — so what reaches a
-        # verdict is the build-then-append seed. The lookbehind keeps
-        # `==`/`!=`/`<=`/`>=` comparisons out.
+        # verdict is the build-then-append seed. The annotated class
+        # declaration among those is a pydantic field, whose factory spelling
+        # default-factory owns. The lookbehind keeps `==`/`!=`/`<=`/`>=` out.
         id="empty-collection",
         pattern=re.compile(r"(?<![=!<>])=\s*(?:\{\}|\[\]|set\(\))"),
         refiner=Refiner(
@@ -312,20 +331,6 @@ PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         message="`cast(...)` is a code smell — narrow with isinstance or a type guard, "
         "or fix the annotation so the cast is unnecessary",
     ),
-    # lup: Add a rule against PDF text-extraction libraries — PyMuPDF/`fitz`,
-    # pypdf/PyPDF2, pdfplumber, pdfminer and the rest. Hand the path to the
-    # runtime's own document-reading tool instead, which takes the PDF directly
-    # and carries fewer failure modes: an extractor silently returns nothing on
-    # a scanned or image-only page, and the empty string then reads as an empty
-    # document rather than as a failed extraction.
-    #
-    # The message must not name that tool literally. Claude spells it `Read`;
-    # Codex has no equivalent among `shell`/`apply_patch`/`web_fetch`, so this
-    # rule ships into both plugin trees and would tell one of them to use a tool
-    # it does not have. The spelling belongs on `NativeSpellings` beside
-    # `ask_user` and `runtime_docs` — and if Codex genuinely cannot read a PDF,
-    # that is the explicit unsupported declaration the adapter-parity concern
-    # asks for, carrying the reason rather than being silently absent.
     AntiPattern(
         id="import-re",
         pattern=re.compile(r"\bimport\s+re\b|\bfrom\s+re\s+import\b"),
@@ -415,6 +420,19 @@ PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         message="Use Pydantic BaseModel (or TypedDict) instead of NamedTuple/namedtuple",
     ),
     AntiPattern(
+        # Anchored at statement level so a `model_config` mention in a call's
+        # keyword or a payload key is not a declaration. Prose cannot reach it
+        # at all: a "code" rule reads token-masked source, so the identifier
+        # inside a docstring or comment is already blank by the time it matches.
+        id="model-config",
+        pattern=re.compile(r"^\s*model_config\s*[:=]"),
+        message="Declare pydantic configuration as class keywords — "
+        "class A(BaseModel, frozen=True, extra='forbid') — instead of assigning "
+        "model_config, so the configuration reads in the header beside the class "
+        "it configures. Every key carries over under its own name; a shared "
+        "ConfigDict alias inlines into each header rather than being imported",
+    ),
+    AntiPattern(
         id="subprocess",
         pattern=re.compile(r"\bimport\s+subprocess\b|\bfrom\s+subprocess\s+import\b"),
         message="Use the `sh` library instead of subprocess",
@@ -493,6 +511,75 @@ PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         "(unused `_` function parameters are exempt)",
     ),
 ]
+"""Python rules whose message reads the same whatever runtime is shown it."""
+
+
+# lup: ignore[constant-declaration] — the bare noun a rule's own sentence uses,
+# declared with the rule rather than chosen per caller
+DOCUMENT_IN_HAND = "the file"
+"""How the document rule names the file for a runtime to place in its sentence.
+
+A rule speaks about no particular path, so what a runtime interpolates here is
+the bare noun; whatever it says about handing a document over whole is the
+runtime's own sentence to make.
+"""
+
+NO_RUNTIME_READER = Unsupported(
+    reason="this table was compiled for no runtime, so none of them is speaking here"
+)
+"""The reader the neutral table carries: the repository audit and the rule
+reference are read by people rather than by a runtime, and inventing a tool
+name for them would be the platform leak the seam exists to prevent."""
+
+
+def pdf_extraction_rule(document_reader: Spelling) -> AntiPattern:
+    """The rule against PDF text extractors, completed by one runtime's reader.
+
+    The extractor's failure is silent: a scanned or image-only page yields an
+    empty string, which reads downstream as an empty document rather than as
+    an extraction that did not happen. Handing the file whole to the runtime's
+    own reader has no such mode.
+
+    Which tool that is belongs to the runtime, and this rule ships into every
+    plugin tree — so the sentence is asked for rather than written here, and a
+    runtime with nothing that takes a document contributes none, leaving the
+    failure mode stated and no tool named.
+    """
+    return AntiPattern(
+        id="pdf-extraction",
+        pattern=re.compile(
+            r"\b(?:import|from)\s+"
+            r"(?:fitz|pymupdf|pypdf|PyPDF2|PyPDF4|pdfplumber|pdfminer|pypdfium2)\b"
+        ),
+        message=" ".join(
+            words
+            for words in (
+                "A PDF text extractor comes back empty from a scanned or image-only "
+                "page, and an empty string reads as an empty document rather than as "
+                "an extraction that failed — read the document whole instead of "
+                "pulling text out of it.",
+                document_reader.in_prose(),
+            )
+            if words
+        ),
+    )
+
+
+def python_anti_patterns(
+    document_reader: Spelling,
+    portable: list[AntiPattern] = PORTABLE_PYTHON_ANTI_PATTERNS,
+) -> list[AntiPattern]:
+    """The Python table one runtime is shown, in its own words where it has them.
+
+    The portable rows are this library's reading of the conventions rather than
+    anything Python settles, so a project holding itself to a different set
+    passes its own — the same reason :class:`AntiPatternSet` takes its tables
+    instead of naming them.
+    """
+    return [*portable, pdf_extraction_rule(document_reader)]
+
+
+PYTHON_ANTI_PATTERNS: list[AntiPattern] = python_anti_patterns(NO_RUNTIME_READER)
 """Anti-patterns checked against added lines of `.py` files (mirrors the hook)."""
 
 
@@ -585,10 +672,14 @@ PY_SUFFIXES = (".py", ".pyi")
 # lup: ignore[library-default] — the suffixes those ecosystems compile
 TS_SUFFIXES = (".ts", ".tsx", ".js", ".jsx", ".vue", ".svelte")
 
+# lup: ignore[library-default] — the ids other codescan scanners own, so the set
+# follows those rules' own identities rather than any taste of this module's
 FOREIGN_RULE_IDS: frozenset[str] = frozenset(  # lup: ignore[frozenset-shape]
     {
         ABC_CAPABILITY_RULE_ID,
+        CONSTANT_DECLARATION_RULE_ID,
         LIBRARY_DEFAULT_RULE_ID,
+        MODEL_FREE_FUNCTION_RULE_ID,
         NATIVE_SPELLING_RULE_ID,
         OWN_MODEL_DISPATCH_RULE_ID,
         SEAM_BOUNDARY_RULE_ID,
@@ -628,7 +719,7 @@ def refined_refutations(text: str, patterns: list[AntiPattern]) -> list[Refutati
     ]
 
 
-class AntiPatternSet(BaseModel):
+class AntiPatternSet(BaseModel, frozen=True, arbitrary_types_allowed=True):
     """Which anti-patterns a project checks, by the language they read.
 
     The rules a project holds itself to are its own conventions written down,
@@ -637,8 +728,6 @@ class AntiPatternSet(BaseModel):
     audit, and the generated rule reference together, so a project that
     replaces it replaces all three at once.
     """
-
-    model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
 
     python: list[AntiPattern] = Field(default_factory=lambda: PYTHON_ANTI_PATTERNS)
     typescript: list[AntiPattern] = Field(default_factory=lambda: TS_ANTI_PATTERNS)
@@ -657,6 +746,18 @@ class AntiPatternSet(BaseModel):
         return None
 
 
+def antipattern_set_for(document_reader: Spelling) -> AntiPatternSet:
+    """The tables one native plugin ships, its own reader spelled into them.
+
+    Generation reaches this once per runtime, so the rows compiled into a
+    plugin say what that runtime can actually do — and a runtime that declines
+    ships the rule with its reason stated and no tool it does not have named.
+    """
+    return AntiPatternSet(python=python_anti_patterns(document_reader))
+
+
+# `AntiPatternSet.for_suffix` is the operation; this binds the default table to it.
+# lup: ignore[model-free-function] — the suffix is the subject, the set its table
 def patterns_for_suffix(
     suffix: str, rules: AntiPatternSet | None = None
 ) -> list[AntiPattern] | None:
@@ -747,6 +848,14 @@ def audit_text(
     tokenizer), so a docstring or string literal that merely *mentions*
     `# lup: ignore` — and a note whose prose quotes it — guards nothing. Text
     that does not tokenize as Python falls back to a plain substring check.
+
+    Where it may be written is one policy for every rule, line-shaped and
+    AST-shaped alike: the line it guards, or standing alone directly above —
+    the placement a reason too long for the column budget needs, since a
+    comment is the one thing the formatter cannot wrap. A directive is graded
+    against the lines it reaches rather than the line it sits on, so the
+    overflow placement is read where it applies instead of being reported as
+    guarding nothing.
     """
     file_ignore = file_level_ignore(text)
     file_disabled: set[str] = set()
@@ -769,36 +878,89 @@ def audit_text(
         for refutation in refined_refutations(text, patterns) + (refutations or [])
     }
 
-    def inline_directive(line_no: int, line: str) -> re.Match[str] | None:
-        match = IGNORE_RE.search(line)
-        if match is None:
-            return None
-        if not context.comment_at(line_no, match.start()):
-            return None
-        return match
-
     file_ignore_line = file_ignore.line if file_ignore is not None else 0
     original_lines = text.splitlines()
     projections = LineProjections.parse(text)
 
+    def written_directive(line_no: int) -> re.Match[str] | None:
+        """The directive actually written on one line, if a comment opens it.
+
+        The whole-file opt-out is not one of these. It stands alone like the
+        overflow placement does, so reading it as one would quietly make it
+        the guard for whatever line happens to follow the header.
+        """
+        if line_no < 1 or line_no > len(original_lines) or line_no == file_ignore_line:
+            return None
+        match = IGNORE_RE.search(original_lines[line_no - 1])
+        if match is None or not context.comment_at(line_no, match.start()):
+            return None
+        return match
+
+    def guarding_directive(line_no: int) -> re.Match[str] | None:
+        """The directive covering `line_no`, wherever the one policy puts it.
+
+        The same placement every project-wide rule accepts, so a marker that
+        reads correctly against an AST rule reads correctly here. A directive
+        found above is the overflow placement: the line it guards had no room
+        left for the reason that justifies it, and a reason worth reading
+        often needs more than one line of its own.
+
+        Every line up to the head of the comment block, because that is what
+        `suppression_reaches` accepts and this only asks it where to look. A
+        fixed pair of candidates was exactly complete while the policy was
+        capped at the line directly above, and stopped being the moment it
+        widened.
+        """
+        return next(
+            (
+                match
+                for candidate in range(line_no, 0, -1)
+                if (match := written_directive(candidate)) is not None
+                and suppression_reaches(original_lines, candidate, line_no)
+            ),
+            None,
+        )
+
+    def guarded_lines(line_no: int) -> list[int]:
+        """Every audited line the directive written on `line_no` reaches.
+
+        The mirror of :func:`guarding_directive`, and what keeps the reported
+        failure from recurring: a directive is judged against the lines it
+        actually covers, so one standing above its violation is read there
+        rather than reported as guarding nothing where it sits.
+
+        Asked of every audited line rather than the next one, so the two
+        directions agree. Where they disagreed, one marker was reported
+        spurious here and its violation reported missing there — the failure
+        this pair exists to prevent, produced by the pair itself.
+        """
+        return [
+            candidate
+            for candidate in sorted(hits_by_line)
+            if candidate >= line_no
+            and suppression_reaches(original_lines, line_no, candidate)
+        ]
+
+    hits_by_line = {
+        number: [
+            ap
+            for ap in line_hits(projections, number, patterns)
+            if (ap.id, number) not in refuted
+        ]
+        for number in range(1, len(original_lines) + 1)
+        # The file-level directive line is not itself audited, and docstring
+        # prose is not code — no comment can open inside a string to guard it.
+        if number != file_ignore_line and number not in context.docstring_lines
+    }
+
+    def preview_of(line_no: int) -> str:
+        return original_lines[line_no - 1].strip()[:80]
+
     file_live: set[str] = set()
     findings: list[AntiPatternFinding] = []
-    for index, line in enumerate(original_lines, start=1):
-        if index == file_ignore_line:
-            continue  # the file-level directive line is not itself audited
-        if index in context.docstring_lines:
-            continue  # docstring prose is not code, and no comment can guard it
-        preview = line.strip()[:80]
-        hits = [
-            ap
-            for ap in line_hits(projections, index, patterns)
-            if (ap.id, index) not in refuted
-        ]
-        hit_ids = {ap.id for ap in hits}
-        directive = inline_directive(index, line)
-        inline_ids = ignore_rule_ids(directive) if directive is not None else None
-
-        silenced_by_bare = False
+    for index, hits in hits_by_line.items():
+        directive = guarding_directive(index)
+        covered_ids = ignore_rule_ids(directive) if directive is not None else None
         for ap in hits:
             if ap.strength == "strong":
                 # No directive reaches this one. A soft rule's suppression is a
@@ -809,7 +971,7 @@ def audit_text(
                     AntiPatternFinding(
                         kind="missing",
                         line=index,
-                        text=preview,
+                        text=preview_of(index),
                         message=f"{ap.message} (no suppression: write the replacement)",
                         rule_id=ap.id,
                     )
@@ -818,57 +980,74 @@ def audit_text(
             if ap.id in file_disabled:
                 # Live only when the file-level directive is the sole silencer;
                 # an inline-covered hit does not keep the file-wide id alive.
-                if directive is None or not (inline_ids is None or ap.id in inline_ids):
+                if directive is None or not (
+                    covered_ids is None or ap.id in covered_ids
+                ):
                     file_live.add(ap.id)
                 continue
-            if directive is not None and (inline_ids is None or ap.id in inline_ids):
-                silenced_by_bare = silenced_by_bare or inline_ids is None
+            if directive is not None and (covered_ids is None or ap.id in covered_ids):
                 continue
             findings.append(
                 AntiPatternFinding(
                     kind="missing",
                     line=index,
-                    text=preview,
-                    message=ap.message,
+                    text=preview_of(index),
+                    message=f"{ap.message} — suppress on {suppression_placement(index)}",
                     rule_id=ap.id,
                 )
             )
 
+    # Every directive is graded where it is written, against the lines it
+    # reaches rather than the one it sits on. Those differ for exactly the
+    # overflow placement, and conflating them is what reported a marker
+    # standing above its violation as guarding nothing.
+    for index in range(1, len(original_lines) + 1):
+        directive = written_directive(index)
         if directive is None:
             continue
-        if inline_ids is None:
-            if silenced_by_bare:
-                covered = sorted(i for i in hit_ids if i not in file_disabled)
-                findings.append(
-                    AntiPatternFinding(
-                        kind="untyped",
-                        line=index,
-                        text=preview,
-                        message="`# lup: ignore` is untyped — name the rule(s) it silences: "
-                        f"`# lup: ignore[{', '.join(covered)}]`",
-                        rule_id=covered[0] if covered else "",
-                    )
+        named = ignore_rule_ids(directive)
+        guarded = [
+            ap for line_no in guarded_lines(index) for ap in hits_by_line[line_no]
+        ]
+        reached = {ap.id for ap in guarded}
+        silenced = {
+            ap.id
+            for ap in guarded
+            if ap.strength != "strong" and ap.id not in file_disabled
+        }
+        if named is not None:
+            findings.extend(
+                AntiPatternFinding(
+                    kind="spurious",
+                    line=index,
+                    text=preview_of(index),
+                    message=f"`# lup: ignore[{rid}]` guards a line that does not trip `{rid}` — remove it",
+                    rule_id=rid,
                 )
-            else:
-                findings.append(
-                    AntiPatternFinding(
-                        kind="spurious",
-                        line=index,
-                        text=preview,
-                        message="`# lup: ignore` guards a line that matches no anti-pattern — remove it",
-                    )
+                for rid in sorted(named - reached - FOREIGN_RULE_IDS)
+            )
+            continue
+        covered = sorted(rid for rid in reached if rid not in file_disabled)
+        if silenced:
+            findings.append(
+                AntiPatternFinding(
+                    kind="untyped",
+                    line=index,
+                    text=preview_of(index),
+                    message="`# lup: ignore` is untyped — name the rule(s) it silences: "
+                    f"`# lup: ignore[{', '.join(covered)}]`",
+                    rule_id=covered[0] if covered else "",
                 )
+            )
         else:
-            for rid in sorted(inline_ids - hit_ids - FOREIGN_RULE_IDS):
-                findings.append(
-                    AntiPatternFinding(
-                        kind="spurious",
-                        line=index,
-                        text=preview,
-                        message=f"`# lup: ignore[{rid}]` guards a line that does not trip `{rid}` — remove it",
-                        rule_id=rid,
-                    )
+            findings.append(
+                AntiPatternFinding(
+                    kind="spurious",
+                    line=index,
+                    text=preview_of(index),
+                    message="`# lup: ignore` guards a line that matches no anti-pattern — remove it",
                 )
+            )
 
     if file_ignore is not None:
         directive_text = text.splitlines()[file_ignore.line - 1].strip()[:80]

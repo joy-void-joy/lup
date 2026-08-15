@@ -65,6 +65,7 @@ from typing import Literal, TypedDict
 
 from pydantic import BaseModel, Field
 
+from lup.policy.kernel.decision import SandboxPlacement, escalation_offer
 from lup.workspace.paths import path_is_under
 from lup.types import JsonObject, ToolName
 
@@ -101,7 +102,7 @@ class LupHookInput(BaseModel):
 
     event: LupHookEvent
     tool_name: str = ""
-    tool_input: JsonObject = Field(default_factory=dict)
+    tool_input: JsonObject = {}
     tool_path: str = ""
     tool_result: str = ""
     stop_hook_active: bool = False
@@ -112,19 +113,13 @@ class LupHookOutput(BaseModel):
 
     decision: LupHookDecision | None = None
     reason: str = ""
+    sandbox: SandboxPlacement = "ambient"
+    """Where the call runs, which is a separate answer from whether it may.
+
+    Neutral here on purpose: an adapter whose runtime can place one call
+    spells the placement in its own words, and one whose runtime cannot
+    renders the decision alone rather than a placement nothing honours."""
     system_message: str | None = None
-    # lup: We want a sandbox decision on top of the permission one —
-    # `Decision(effect="allow", sandbox="escalate")` for git push — so the agent
-    # stops asking for sandbox escalation every time. `tmp/sandbox-escalation-
-    # briefing.md` reports the obvious rendering is impossible: for Bash this
-    # field is a per-tool whitelist applying only `command`, dropping unknown
-    # keys after validation, so `dangerouslyDisableSandbox` would render and do
-    # nothing. That is a prior session's finding, not reproduced: the hooks
-    # reference documents no whitelist either way, our tests only prove we emit
-    # the field, and the runtime is not readable from here. Settle it by
-    # injecting the key for one command and running `git ls-remote origin HEAD`,
-    # which fails sandboxed and succeeds outside — it needs a restart, since the
-    # runtime has already loaded the plugin.
     updated_input: JsonObject | None = Field(
         default=None,
         description=(
@@ -151,7 +146,7 @@ type LupHookFn = Callable[[LupHookInput], Awaitable[LupHookOutput]]
 """Async function that receives a normalized hook event and returns a decision."""
 
 
-class LupHookMatcher(BaseModel):
+class LupHookMatcher(BaseModel, arbitrary_types_allowed=True):
     """A hook handler with an optional tool-name matcher.
 
     The ``tag`` field lets adapters dispatch deterministically instead
@@ -162,8 +157,6 @@ class LupHookMatcher(BaseModel):
     hook: LupHookFn
     tag: str | None = None
 
-    model_config = {"arbitrary_types_allowed": True}
-
 
 class LupHooksConfig(BaseModel):
     """Backend-neutral hook registration — a typed structure, not a bare dict.
@@ -173,9 +166,9 @@ class LupHooksConfig(BaseModel):
     each event's matchers into their native form.
     """
 
-    pre_tool_use: list[LupHookMatcher] = Field(default_factory=list)
-    post_tool_use: list[LupHookMatcher] = Field(default_factory=list)
-    stop: list[LupHookMatcher] = Field(default_factory=list)
+    pre_tool_use: list[LupHookMatcher] = []
+    post_tool_use: list[LupHookMatcher] = []
+    stop: list[LupHookMatcher] = []
 
     def for_event(self, event: LupHookEvent) -> list[LupHookMatcher]:
         """Return the matchers registered for *event*."""
@@ -197,14 +190,37 @@ class LupHooksConfig(BaseModel):
         return {event: matchers for event, matchers in events.items() if matchers}
 
 
-def allow_hook() -> LupHookOutput:
-    """Create a generic allow decision."""
-    return LupHookOutput(decision="allow")
+def allow_hook(
+    sandbox: SandboxPlacement = "ambient", reason: str = ""
+) -> LupHookOutput:
+    """Create a generic allow decision, optionally placed and optionally said.
+
+    An ``escalable`` grant says its reason twice, on both channels a grant
+    has, because the two reach different readers and only one of them can act
+    on it — :func:`~lup.policy.kernel.decision.escalation_offer` is where that
+    is decided, for every boundary that delivers it.
+    """
+    return LupHookOutput(
+        decision="allow",
+        sandbox=sandbox,
+        reason=reason,
+        additional_context=escalation_offer(sandbox, reason),
+    )
 
 
-def ask_hook(reason: str) -> LupHookOutput:
-    """Create a decision that defers to whoever is entitled to make it."""
-    return LupHookOutput(decision="ask", reason=reason)
+def ask_hook(reason: str, sandbox: SandboxPlacement = "ambient") -> LupHookOutput:
+    """Create a decision that defers to whoever is entitled to make it.
+
+    An ``escalable`` approval question says its reason twice for the same
+    reason a grant does: the human answering it is not the agent holding the
+    offer.
+    """
+    return LupHookOutput(
+        decision="ask",
+        reason=reason,
+        sandbox=sandbox,
+        additional_context=escalation_offer(sandbox, reason),
+    )
 
 
 def deny_hook(reason: str) -> LupHookOutput:
@@ -217,6 +233,7 @@ def block_hook(reason: str) -> LupHookOutput:
     return LupHookOutput(decision="block", reason=reason)
 
 
+# lup: ignore[model-free-function] — a merge of two configs, neither the subject
 def merge_hooks(base: LupHooksConfig, additional: LupHooksConfig) -> LupHooksConfig:
     """Merge two hook configurations. Base hooks run first."""
     return LupHooksConfig(

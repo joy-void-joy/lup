@@ -16,7 +16,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel
 
 from lup.hooks import LupHooksConfig
 from lup.mcp import McpServerEntry
@@ -34,10 +34,8 @@ should not have to know which.
 """
 
 
-class SessionRequest(BaseModel):
+class SessionRequest(BaseModel, frozen=True, arbitrary_types_allowed=True):
     """What an application asks of a session, before a runtime renders it."""
-
-    model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
 
     model: str | None = None
     instructions: str = ""
@@ -46,11 +44,11 @@ class SessionRequest(BaseModel):
     cwd: Path | None = None
     autonomy: SessionAutonomy | None = None
     tools: list[str] | None = None
-    allowed_tools: list[str] = Field(default_factory=list)
-    tool_servers: dict[str, McpServerEntry] = Field(default_factory=dict)
+    allowed_tools: list[str] = []
+    tool_servers: dict[str, McpServerEntry] = {}
     max_turns: int | None = None
     max_thinking_tokens: int | None = None
-    environment: EnvVars = Field(default_factory=dict)
+    environment: EnvVars = {}
     hooks: LupHooksConfig | None = None
 
 
@@ -58,15 +56,13 @@ type SessionOpener = Callable[[SessionRequest], SessionFactory]
 """Render one request into the configured session factory of one runtime."""
 
 
-class Runtime(BaseModel):
+class Runtime(BaseModel, frozen=True, arbitrary_types_allowed=True):
     """One runtime an application selects, end to end.
 
     A transparent carrier: it decides nothing and composes no seam, so an
     application stores one the way it stores any other declaration, and the
     single assignment naming it is the only place a provider is chosen.
     """
-
-    model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
 
     name: str
     login: ProviderLogin

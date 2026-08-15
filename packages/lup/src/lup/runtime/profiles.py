@@ -18,7 +18,7 @@ words rather than in words this module would have to choose.
 from abc import ABC, abstractmethod
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
 from lup.runtime.login import ProviderLogin
 
@@ -65,10 +65,8 @@ class ProfileRegistrar(ABC):
         """Forget name, if this origin knows it."""
 
 
-class Profile(BaseModel):
+class Profile(BaseModel, frozen=True):
     """One profile, resolved far enough for a caller to act on it."""
-
-    model_config = ConfigDict(frozen=True)
 
     name: str
     config_dir: Path

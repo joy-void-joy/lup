@@ -1,3 +1,7 @@
+# lup: ignore[constant-declaration]
+# Every constant here is a Codex app-server method or reply word, so the wire
+# decides the value and a caller passing another would answer a request the
+# server never sends.
 """Translate backend-neutral Lup hooks to Codex app-server approval replies.
 
 The Claude twin of this module wraps SDK hook handlers. Codex has no such
@@ -27,7 +31,7 @@ approval requests are not alike:
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field
 
 from lup.adapters.codex.native import (
     CodexBeforeToolEvent,
@@ -60,7 +64,7 @@ turn, and nothing here is a human.
 """
 
 
-class CodexCommandApproval(BaseModel):
+class CodexCommandApproval(BaseModel, frozen=True, extra="ignore"):
     """The fields of a command-execution approval this seam reads.
 
     Codex sends more than these — item and turn identifiers, the decisions it
@@ -68,8 +72,6 @@ class CodexCommandApproval(BaseModel):
     modelled, because a policy judges the act and not the bookkeeping around
     it, and an unmodelled field cannot break validation when Codex adds one.
     """
-
-    model_config = ConfigDict(frozen=True, extra="ignore")
 
     command: str = ""
     cwd: Path | None = None
@@ -106,24 +108,30 @@ def codex_approval_semantic_tool(event: LupHookInput) -> SemanticTool:
 CODEX_SEMANTICS = NativeSemantics(
     decode=codex_approval_semantic_tool,
     routed_tools=list(APPROVAL_METHODS),
+    agent_escalates=True,
 )
 """What an in-process Codex session hands a semantic policy.
 
 The routed set is the approval methods themselves, because that is the whole
 vocabulary this boundary speaks: unlike the Claude hook, which sees a tool
 roster, the app-server asks about acts.
+
+That is also why the two sandbox facts split here. An approval reply accepts
+or declines and rewrites nothing, so no verdict of this seam's places a call
+and ``escapable`` stays false. The agent's own escape is a different matter
+and it has one: Codex puts ``sandbox_permissions`` on the shell tool the
+model calls — see :meth:`~lup.adapters.codex.harness.CodexSpellings.escape_sandbox`
+for the source it was read from.
 """
 
 
-class CodexApprovalResponder(BaseModel):
+class CodexApprovalResponder(BaseModel, frozen=True, arbitrary_types_allowed=True):
     """Answer app-server approval requests from portable hook registrations.
 
     One of these exists per conversation, because the transport installs one
     handler for the whole session and a session's hooks are fixed when it
     opens.
     """
-
-    model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
 
     hooks: LupHooksConfig = Field(description="What this session declared")
 

@@ -25,6 +25,8 @@ from lup.runtime.selection import Runtime, SessionAutonomy, SessionRequest
 
 type CodexSandbox = Literal["read-only", "workspace-write", "danger-full-access"]
 
+# lup: ignore[constant-declaration] — each value is Codex's own sandbox name for
+# the autonomy beside it, over a vocabulary this library closes
 CODEX_AUTONOMY: dict[SessionAutonomy, CodexSandbox] = {
     "ask": "read-only",
     "plan": "read-only",
@@ -51,8 +53,12 @@ def codex_mcp_server(name: str, server: McpServerEntry) -> CodexMcpServerConfig:
             )
 
 
-def codex_session(request: SessionRequest) -> SessionFactory:
-    """Render a portable request into a configured Codex session factory.
+def codex_config(request: SessionRequest) -> CodexSessionConfig:
+    """Render a portable request into Codex's own session configuration.
+
+    Rendering is separate from building so an application can stack a
+    :class:`~lup.runtime.config.ConfigTransform` — a compatible endpoint, a
+    profile — onto what a request asked for, before any session exists.
 
     ``cwd`` is required rather than defaulted: Codex sandboxes a session
     against its working directory, so inferring one would decide what the
@@ -74,23 +80,26 @@ def codex_session(request: SessionRequest) -> SessionFactory:
         )
     if request.cwd is None:
         raise ValueError("Codex sandboxes a session against a cwd; none was given")
-    return create_codex_session_factory(
-        CodexSessionConfig(
-            model=request.model,
-            developer_instructions=request.instructions,
-            cwd=request.cwd,
-            sandbox=(
-                None if request.autonomy is None else CODEX_AUTONOMY[request.autonomy]
-            ),
-            approval_policy="never",
-            environment=request.environment,
-            mcp_servers={
-                name: codex_mcp_server(name, server)
-                for name, server in request.tool_servers.items()
-            },
-            writable_roots=[request.cwd],
-        )
+    return CodexSessionConfig(
+        model=request.model,
+        developer_instructions=request.instructions,
+        cwd=request.cwd,
+        sandbox=(
+            None if request.autonomy is None else CODEX_AUTONOMY[request.autonomy]
+        ),
+        approval_policy="never",
+        environment=request.environment,
+        mcp_servers={
+            name: codex_mcp_server(name, server)
+            for name, server in request.tool_servers.items()
+        },
+        writable_roots=[request.cwd],
     )
+
+
+def codex_session(request: SessionRequest) -> SessionFactory:
+    """Render a portable request into a configured Codex session factory."""
+    return create_codex_session_factory(codex_config(request))
 
 
 CODEX_RUNTIME = Runtime(

@@ -14,25 +14,23 @@ somebody is asking.
 
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel
 
 from lup.channels.models import utc_now
 from lup.resolver.models import CarriedParent, VerificationCommand
 
-JOIN_DIR = "join"
+JOIN_DIR = Path("join")
 """Where under a run directory the join plan and its progress are kept."""
 
 
-class JoinTip(BaseModel):
+class JoinTip(BaseModel, frozen=True):
     """One parent on the table, and what the merger needs to judge it."""
-
-    model_config = ConfigDict(frozen=True)
 
     commit: str
     concern_id: str
     summary: str = ""
     """What the concern behind this parent set out to do."""
-    files: list[Path] = Field(default_factory=list)
+    files: list[Path] = []
     """Every path this parent wrote, measured from where it forked.
 
     The whole point of handing the set over at once: overlap between two
@@ -41,7 +39,7 @@ class JoinTip(BaseModel):
     """
 
 
-class JoinPlan(BaseModel):
+class JoinPlan(BaseModel, frozen=True):
     """Every parent one join has to land, written where a resume can read it.
 
     Persisted rather than passed, because the merger's session and the run
@@ -50,24 +48,20 @@ class JoinPlan(BaseModel):
     the table and which of them are already in.
     """
 
-    model_config = ConfigDict(frozen=True)
-
     concern_id: str
     worktree: Path
     base: str
     title: str
     purpose: str
-    tips: list[JoinTip] = Field(default_factory=list)
-    carried: list[CarriedParent] = Field(default_factory=list)
+    tips: list[JoinTip] = []
+    carried: list[CarriedParent] = []
     """Parents already inside another, which land when their container does."""
-    regeneration: list[str] = Field(default_factory=list)
-    verification: list[VerificationCommand] = Field(default_factory=list)
+    regeneration: list[str] = []
+    verification: list[VerificationCommand] = []
 
 
-class JoinLanding(BaseModel):
+class JoinLanding(BaseModel, frozen=True):
     """One parent as it actually landed, recorded by the verb that landed it."""
-
-    model_config = ConfigDict(frozen=True)
 
     commit: str
     head: str
@@ -83,16 +77,14 @@ class JoinLanding(BaseModel):
     twelve seconds, and a rate averaged over those describes no work the
     run ever did.
     """
-    broke: list[str] = Field(default_factory=list)
+    broke: list[str] = []
     at: str = ""
 
 
-class JoinProgressRecord(BaseModel):
+class JoinProgressRecord(BaseModel, frozen=True):
     """How far the merger has got, durable across its own session dying."""
 
-    model_config = ConfigDict(frozen=True)
-
-    landings: list[JoinLanding] = Field(default_factory=list)
+    landings: list[JoinLanding] = []
     planned: int = 0
 
     @property
@@ -109,8 +101,8 @@ class JoinProgressRecord(BaseModel):
 class JoinDesk:
     """The run directory's view of one join, as files both transports read."""
 
-    def __init__(self, run_dir: Path) -> None:
-        self.root = run_dir / JOIN_DIR
+    def __init__(self, run_dir: Path, subdirectory: Path = JOIN_DIR) -> None:
+        self.root = run_dir / subdirectory
 
     def plan_path(self) -> Path:
         return self.root / "plan.json"

@@ -13,23 +13,18 @@ instead, and those are checked against what it actually spells.
 
 from typing import get_args
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
 from lup.harness.contracts import NativeSpellings
-from lup.harness.models import (
-    Harness,
-    PluginLocation,
-    TreeLocation,
-    document_prose,
-)
+from lup.harness.models import Harness, PluginLocation, TreeLocation
 
+# lup: ignore[constant-declaration] — the rule's own identity, what a typed
+# directive and every deny message name it by
 RULE_ID = "portable-content"
 
 
-class ProseBreach(BaseModel):
+class ProseBreach(BaseModel, frozen=True):
     """One native spelling found in prose that every tree renders."""
-
-    model_config = ConfigDict(frozen=True)
 
     declaration_id: str
     spelling: str
@@ -78,7 +73,7 @@ def prose_breaches(
     prose = [
         (declaration_id, text)
         for declaration_id, document in documents
-        for text in document_prose(document)
+        for text in document.prose()
     ]
     prose.extend(
         (declaration.id, declaration.description)

@@ -26,8 +26,8 @@ from contextlib import asynccontextmanager
 from datetime import timedelta
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict, Field
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import BaseModel, Field
+from pydantic_settings import BaseSettings
 
 from lup.adapters.codex.app_server import (
     CodexAppServer,
@@ -165,7 +165,7 @@ class FailingLauncher(ProcessLauncher):
         return ExitStatus(code=self.code, stderr=f"failed: {request.arguments}")
 
 
-class ChildEnvironment(BaseSettings):
+class ChildEnvironment(BaseSettings, extra="ignore"):
     """The two halves of the environment, as only the child can report them.
 
     `CodexAppServer.start` overlays the caller's declared variables onto the
@@ -174,22 +174,18 @@ class ChildEnvironment(BaseSettings):
     declares it.
     """
 
-    model_config = SettingsConfigDict(extra="ignore")
-
     lup_fake_declared: str = ""
     path: str = ""
 
 
-class ChildExit(BaseModel):
+class ChildExit(BaseModel, frozen=True):
     """How a scripted child ends its own process, instead of answering."""
-
-    model_config = ConfigDict(frozen=True)
 
     status: int = 1
     stderr: str = ""
 
 
-class ScriptedReply(BaseModel):
+class ScriptedReply(BaseModel, frozen=True):
     """What the app-server double does when one client method arrives.
 
     A reply that is neither silent nor an exit answers the request — with
@@ -198,8 +194,6 @@ class ScriptedReply(BaseModel):
     from the client side without one being owed.
     """
 
-    model_config = ConfigDict(frozen=True)
-
     result: JsonValue = None
     error: RpcError | None = None
     notifications: list[RpcNotification] = Field(default_factory=list)
@@ -207,7 +201,7 @@ class ScriptedReply(BaseModel):
     silent: bool = False
 
 
-class AppServerTranscript(BaseModel):
+class AppServerTranscript(BaseModel, frozen=True):
     """One scripted app-server session, keyed by the method each reply answers.
 
     A child ordinarily ends when its stdin does, which is a clean exit and so
@@ -216,17 +210,13 @@ class AppServerTranscript(BaseModel):
     still there to terminate.
     """
 
-    model_config = ConfigDict(frozen=True)
-
     replies: dict[str, ScriptedReply] = Field(default_factory=dict)
     otherwise: ScriptedReply = ScriptedReply()
     lingers: bool = False
 
 
-class AppServerRecord(BaseModel):
+class AppServerRecord(BaseModel, frozen=True):
     """What one child saw: how it was launched, and what reached it."""
-
-    model_config = ConfigDict(frozen=True)
 
     pid: int
     arguments: list[str]
@@ -295,7 +285,7 @@ def alive(pid: int) -> bool:
     return True
 
 
-class FakeAppServer(BaseModel):
+class FakeAppServer(BaseModel, frozen=True):
     """A `CodexAppServer` bound to a scripted child instead of an installed CLI.
 
     The child is this interpreter running this module, so it needs no execute
@@ -305,8 +295,6 @@ class FakeAppServer(BaseModel):
     a suite that wants the turn lifecycle offline scripts `thread/start` and
     `turn/start` the same way this one scripts `initialize`.
     """
-
-    model_config = ConfigDict(frozen=True)
 
     root: Path
 

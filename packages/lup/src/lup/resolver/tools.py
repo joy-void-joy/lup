@@ -11,6 +11,7 @@ the relayed context. Only where that context comes from differs.
 """
 
 import asyncio
+from collections.abc import Collection
 from pathlib import Path
 from typing import Literal
 
@@ -40,12 +41,16 @@ from lup.resolver.models import (
 )
 from lup.types import EnvVars
 
-RESOLVER_RUN_DIR_ENV = "LUP_RESOLVER_RUN_DIR"
-RESOLVER_CONCERN_ENV = "LUP_RESOLVER_CONCERN"
-RESOLVER_LEASE_ROOT_ENV = "LUP_RESOLVER_LEASE_ROOT"
-RESOLVER_ACTOR_ENV = "LUP_RESOLVER_ACTOR"
+# Four env var names the orchestrator sets and a worker's tool process reads,
+# so each is a handshake between two processes rather than a value either picks.
+RESOLVER_RUN_DIR_ENV = "LUP_RESOLVER_RUN_DIR"  # lup: ignore[constant-declaration]
+RESOLVER_CONCERN_ENV = "LUP_RESOLVER_CONCERN"  # lup: ignore[constant-declaration]
+RESOLVER_LEASE_ROOT_ENV = "LUP_RESOLVER_LEASE_ROOT"  # lup: ignore[constant-declaration]
+RESOLVER_ACTOR_ENV = "LUP_RESOLVER_ACTOR"  # lup: ignore[constant-declaration]
 TOOL_WAIT_SECONDS = 300.0
 
+# lup: ignore[constant-declaration] — one sentence every waiting tool's schema
+# states identically, declared beside the tools rather than chosen per caller
 WAIT_CONTRACT = (
     "This call blocks until a human answers. Blocking is expected and correct: "
     "you are not stuck, you are waiting. Do not poll, do not call this again in "
@@ -111,7 +116,7 @@ class AskedQuestion(BaseModel):
         description="The decision, stated so a human can answer it cold"
     )
     choices: list[str] = Field(
-        default_factory=list,
+        default=[],
         description="The allowed answers. Leave empty for free text.",
     )
     recommendation: str | None = Field(
@@ -135,7 +140,7 @@ class QueueQuestionsOutput(BaseModel):
 
 class AwaitAnswersInput(BaseModel):
     question_ids: list[str] = Field(
-        default_factory=list,
+        default=[],
         description="Ids from queue_questions. Empty waits for every one you queued.",
     )
 
@@ -155,11 +160,11 @@ class AwaitAnswersOutput(BaseModel):
 
 class CheckDeclarationInput(BaseModel):
     files_changed: list[Path] = Field(
-        default_factory=list,
+        default=[],
         description="Every path you believe you changed, as you would report it",
     )
     swept_beyond_scope: list[Path] = Field(
-        default_factory=list,
+        default=[],
         description="Paths you would report as swept beyond your concern's scope",
     )
 
@@ -183,7 +188,9 @@ IRREVERSIBLE_VERBS = dict.fromkeys(
 )
 
 
-def agent_may_approve(command: str, root: Path) -> bool:
+def agent_may_approve(
+    command: str, root: Path, irreversible: Collection[str] = IRREVERSIBLE_VERBS
+) -> bool:
     """Whether an orchestrating agent may answer this ask, or only a human.
 
     Recoverability decides, not the verb. Removing a file the object store
@@ -201,7 +208,7 @@ def agent_may_approve(command: str, root: Path) -> bool:
     words = command.split()
     if not words:
         return False
-    if any(word in IRREVERSIBLE_VERBS for word in words[:2]):
+    if any(word in irreversible for word in words[:2]):
         return False
     if words[0] != "rm":
         return True
@@ -399,7 +406,10 @@ def create_question_tools(
         "allowance is granted when a concern is planned, and a need nobody "
         "could have foreseen — a rule that only meets its exception once two "
         "branches are joined — has no other route. This asks a human and "
-        "waits, like any other question.",
+        "waits, like any other question. A grant takes effect in this "
+        "session, from the moment it is answered: retry the call that was "
+        "refused and carry on from where you stopped. Nothing restarts, and "
+        "nothing you have already done needs doing again.",
         name="request_allowance",
     )
     async def request_allowance(params: RequestAllowanceInput) -> AwaitAnswersOutput:

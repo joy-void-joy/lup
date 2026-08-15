@@ -15,10 +15,11 @@ from uuid import uuid4
 
 from mcp.server import Server
 from mcp.types import CallToolResult, TextContent, Tool
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field
 
 from lup.mcp import LupMcpServerConfig, McpServerEntry
 from lup.hooks import LupHooksConfig
+from lup.policy.enforcement import SandboxPosture
 from lup.runtime.composition import AcceptedTurn, CompletedTurn, ComposedSession
 from lup.runtime.contracts import (
     EventStream,
@@ -74,14 +75,44 @@ type ClaudeSettingSource = Literal["user", "project", "local"]
 """One filesystem settings source the CLI may load for a session."""
 
 
-class ClaudeSandboxConfig(BaseModel):
+class ClaudeSandboxConfig(BaseModel, frozen=True):
     """Claude SDK sandbox settings consumed by this factory."""
-
-    model_config = ConfigDict(frozen=True)
 
     enabled: bool = True
     auto_allow_bash_if_sandboxed: bool = True
     allow_unsandboxed_commands: bool = False
+    excluded_commands: list[str] = Field(
+        default=[],
+        description=(
+            "Command prefixes this session runs outside the boundary. A "
+            "spawned session inherits none of the launching shell's settings "
+            "files, so a requirement stated there reaches it only by being "
+            "passed here too"
+        ),
+    )
+
+    def posture(self) -> SandboxPosture:
+        """These settings as the policy judging this session reads them.
+
+        The same two values reach the CLI and the policy from this one
+        object, so a session cannot be permitted more or less than whatever
+        judges it believes. Read off a runtime constant instead, the two
+        drifted the only way they can: the policy granted an escape the
+        settings forbade, and the runtime dropped it without a word.
+
+        The two halves are not equally firm, and only one of them settles
+        its own question. ``allow_unsandboxed_commands`` decides the escape
+        outright — off, the per-call argument is ignored. ``enabled`` only
+        asks for a sandbox: where one cannot start, the CLI warns and runs
+        the session unconfined, and this reports a boundary that is not
+        there. The CLI settles that with a fail-if-unavailable setting, which
+        this configuration cannot reach because the SDK's sandbox settings do
+        not carry it; until they do, the placement is settled here and the
+        confinement is asserted.
+        """
+        return SandboxPosture(
+            active=self.enabled, escapable=self.allow_unsandboxed_commands
+        )
 
 
 type ClaudePermissionMode = Literal[
@@ -90,17 +121,15 @@ type ClaudePermissionMode = Literal[
 """Claude Code's own words for how much a session may do without asking."""
 
 
-class ClaudeSessionConfig(BaseModel):
+class ClaudeSessionConfig(BaseModel, frozen=True, arbitrary_types_allowed=True):
     """Immutable Claude-only provider configuration."""
-
-    model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
 
     model: str | None = None
     system_prompt: str = ""
     coding_harness_preset: bool = True
     tools: list[str] | None = None
-    allowed_tools: list[str] = Field(default_factory=list)
-    tool_servers: dict[str, McpServerEntry] = Field(default_factory=dict)
+    allowed_tools: list[str] = []
+    tool_servers: dict[str, McpServerEntry] = {}
     permission_mode: ClaudePermissionMode | None = "bypassPermissions"
     max_turns: int | None = None
     delta_streaming: bool = True
@@ -109,8 +138,8 @@ class ClaudeSessionConfig(BaseModel):
     max_thinking_tokens: int | None = SESSION_THINKING_TOKENS
     effort: Literal["low", "medium", "high", "xhigh", "max"] | None = None
     cwd: Path | None = None
-    add_dirs: list[Path] = Field(default_factory=list)
-    plugin_dirs: list[Path] = Field(default_factory=list)
+    add_dirs: list[Path] = []
+    plugin_dirs: list[Path] = []
     """Plugin directories this session loads, the way `--plugin-dir` does.
 
     A session given none of these resolves plugins through the project
@@ -119,11 +148,11 @@ class ClaudeSessionConfig(BaseModel):
     worktree can be judged by a plugin generated from another's commit.
     Naming the directory is what makes a session load the tree it is in.
     """
-    environment: EnvVars = Field(default_factory=dict)
+    environment: EnvVars = {}
     sandbox: ClaudeSandboxConfig | None = None
     hooks: LupHooksConfig | None = None
     submission_gate_resolver: SubmissionGateResolver | None = None
-    subagents: list[SubagentSpec] = Field(default_factory=list)
+    subagents: list[SubagentSpec] = []
     max_buffer_size: int | None = None
     stderr_tail_lines: int = Field(
         default=50,
@@ -134,9 +163,7 @@ class ClaudeSessionConfig(BaseModel):
         ),
     )
     setting_sources: list[ClaudeSettingSource] | None = None
-    extra_args: dict[str, str | None] = Field(  # lup: ignore[dict-str-payload]
-        default_factory=dict
-    )
+    extra_args: dict[str, str | None] = {}  # lup: ignore[dict-str-payload]
 
 
 type SubmissionBindingSource = Callable[[], TurnSubmission | None]
@@ -741,6 +768,7 @@ class ClaudeSessionOpener:
                 await state.disconnect()
 
 
+# lup: ignore[model-free-function] — composition root over the session config
 def create_claude_session_factory(
     config: ClaudeSessionConfig,
 ) -> SessionFactory:
@@ -751,6 +779,7 @@ def create_claude_session_factory(
 # The fully qualified name of the turn-bound submission tool as Claude Code
 # sees it. Compositions that install their own tool-allowlist hooks must
 # include it, or the hook denies the very tool the turn requires.
+# lup: ignore[constant-declaration] — the qualified name Claude Code composes
 SUBMISSION_TOOL = "mcp__lup-output__submit_output"
 
 
@@ -808,6 +837,7 @@ def build_submission_server(
     )
 
 
+# lup: ignore[model-free-function] — renders the declaration into the SDK's shape
 def build_claude_options(
     config: ClaudeSessionConfig,
     *,
@@ -849,6 +879,7 @@ def build_claude_options(
             enabled=config.sandbox.enabled,
             autoAllowBashIfSandboxed=config.sandbox.auto_allow_bash_if_sandboxed,
             allowUnsandboxedCommands=config.sandbox.allow_unsandboxed_commands,
+            excludedCommands=list(config.sandbox.excluded_commands),
         )
         if config.sandbox is not None
         else None

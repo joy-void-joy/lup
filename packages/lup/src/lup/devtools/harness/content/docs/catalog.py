@@ -55,13 +55,18 @@ def library_documents(
     skills: list[models.Skill],
     agents: list[models.Agent],
     plugin: models.NativeName,
+    claude_decodes: list[str],
+    codex_decodes: list[str],
     root: str = LIBRARY_DOCS_ROOT,
 ) -> list[models.Document]:
     """Every page lup publishes, in the order the index teaches them.
 
     The two that audit the plugin's own roster take it, so their counts and
     their bullet lists describe the harness a project actually composed
-    rather than the half of it this library happens to ship.
+    rather than the half of it this library happens to ship. The parity audit
+    additionally takes what each runtime's hook decodes, which only a root
+    composing the concrete runtimes may name — reading it here would put a
+    native implementation behind every page this module publishes.
     """
     return [
         published("library", "library.md", library.DOCUMENT, root),
@@ -75,7 +80,9 @@ def library_documents(
         published(
             "platform_differentiation",
             "platform-differentiation.md",
-            platform_differentiation.document(skills, agents),
+            platform_differentiation.document(
+                skills, agents, claude_decodes, codex_decodes
+            ),
             root,
         ),
         published(

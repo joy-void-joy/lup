@@ -10,7 +10,7 @@
             "type": "command"
           }
         ],
-        "matcher": "Bash|web_fetch|apply_patch"
+        "matcher": "Bash|web_fetch|apply_patch|Artifact|Skill"
       }
     ],
     "PreToolUse": [
@@ -23,7 +23,7 @@
             "type": "command"
           }
         ],
-        "matcher": "Bash|web_fetch|apply_patch"
+        "matcher": "Bash|web_fetch|apply_patch|Artifact|Skill"
       }
     ]
   }

@@ -1,6 +1,9 @@
-# lup: ignore[native-spelling]
+# lup: ignore[native-spelling, constant-declaration]
 # This portable scaffold names the hook event it teaches adopters about; every
 # skill mention is a typed invocation part rendered natively per platform.
+# Every constant here is one block of that scaffold's prose: a project wanting
+# different words composes different blocks, which is an override the
+# mechanical half of the constant rule cannot see.
 """Portable downstream-template sections shared by every guidance flavor."""
 
 import lup.harness.models as models
@@ -560,7 +563,7 @@ src/
     │   ├── dev/                # Worktrees, branches, PRs, and pre-flight checks
     │   ├── feedback/           # Feedback state, metrics, and session commits
     │   ├── trace/              # Trace display, search, and analysis
-    │   ├── usage/              # Claude Code usage display (api/render/app)
+    │   ├── usage/              # Usage display, filled by each backend's reader
     │   ├── setup.py            # Shared integration registry + terminal wizard
     │   ├── dashboard/          # Local setup API and packaged zero-build web UI
     │   ├── supervisor/         # Live and read-only web supervision of resolver runs
@@ -774,6 +777,10 @@ stated reason. Under a launcher-verified OS sandbox (`LUP_SANDBOX_ACTIVE`),
 unjudged work defers to that boundary instead of denying and a
 `dangerouslyDisableSandbox` escape re-enters the deny lattice; the sandbox
 block in `.claude/settings.json` derives from the same `HookSet` declaration.
+Where a command runs is a second axis a rule declares beside its effect and
+cascades to the levels beneath it, so every `git` verb already runs outside
+the sandbox unasked, and a runtime that cannot place a call renders the
+plain effect.
 Segments join deny > ask > defer > allow — unjudged rides into a judged
 prompt, a judged deny wins the batch. Malformed input fails conservatively,
 a `$(...)` substitution classifies recursively (the inner command joins the

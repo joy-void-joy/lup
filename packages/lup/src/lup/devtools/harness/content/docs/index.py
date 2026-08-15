@@ -11,30 +11,44 @@ stays with the group that lists it. The preamble and epilogue are a project's
 own words about its own repository, and pass through untouched.
 """
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
 import lup.harness.models as models
-from lup.markdown import MarkdownTable, cell, link
+from lup.markdown import LinkCell, PlainCell
 
 
-class IndexEntry(BaseModel):
+class IndexEntry(BaseModel, frozen=True):
     """One row of the index: a page, and the question it answers."""
-
-    model_config = ConfigDict(frozen=True)
 
     link: str
     answers: str
 
 
-class IndexGroup(BaseModel):
+class IndexGroup(BaseModel, frozen=True):
     """One heading of the index, and the pages listed beneath it."""
-
-    model_config = ConfigDict(frozen=True)
 
     title: str
     entries: list[IndexEntry]
     blurb: str = ""
     """Prose between the heading and the table, for a group that needs it."""
+
+    def parts(self) -> list[models.PromptPart]:
+        """This heading, its blurb, and its rows as a table part."""
+        blurb = f"{self.blurb}\n\n" if self.blurb else ""
+        return [
+            models.TextPart(text=f"## {self.title}\n\n{blurb}"),
+            models.MarkdownTable(
+                headers=["Page", "Answers"],
+                rows=[
+                    [
+                        LinkCell(text=item.link, target=item.link),
+                        PlainCell(text=item.answers),
+                    ]
+                    for item in self.entries
+                ],
+            ),
+            models.TextPart(text="\n"),
+        ]
 
 
 def entry(document: models.Document, answers: str) -> IndexEntry:
@@ -44,18 +58,6 @@ def entry(document: models.Document, answers: str) -> IndexEntry:
     outliving a rename: a page that moved moves its own row.
     """
     return IndexEntry(link=document.path.name, answers=answers)
-
-
-def group_text(group: IndexGroup) -> str:
-    """One heading, its blurb, and its rows as a Markdown table."""
-    table = MarkdownTable(
-        headers=["Page", "Answers"],
-        rows=[
-            [link(item.link, item.link), cell(item.answers)] for item in group.entries
-        ],
-    )
-    blurb = f"{group.blurb}\n\n" if group.blurb else ""
-    return f"## {group.title}\n\n{blurb}{table.render()}\n"
 
 
 def document_index(
@@ -68,7 +70,7 @@ def document_index(
         source=__name__,
         parts=[
             *preamble,
-            models.TextPart(text="".join(group_text(group) for group in groups)),
+            *[part for group in groups for part in group.parts()],
             *epilogue,
         ],
     )

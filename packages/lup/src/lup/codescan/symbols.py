@@ -14,13 +14,11 @@ it, and the tree it went missing from no longer holds it.
 
 import ast
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
 
-class DefinedSymbol(BaseModel):
+class DefinedSymbol(BaseModel, frozen=True):
     """One name a source defines, and the line that defines it."""
-
-    model_config = ConfigDict(frozen=True)
 
     name: str
     """Qualified by the scopes that hold it, as ``Outer.inner``."""

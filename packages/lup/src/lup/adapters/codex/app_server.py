@@ -7,56 +7,44 @@ from pathlib import Path
 from queue import Queue
 
 import sh
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel
 
 from lup.types import EnvVars, JsonObject, JsonValue
 
 
-class RpcError(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class RpcError(BaseModel, frozen=True):
     code: int
     message: str
     data: JsonValue = None
 
 
-class RpcMessage(BaseModel):
+class RpcMessage(BaseModel, frozen=True):
     """Validated envelope for responses, notifications, and server requests."""
-
-    model_config = ConfigDict(frozen=True)
 
     id: int | str | None = None
     method: str | None = None
-    params: JsonObject = Field(default_factory=dict)
+    params: JsonObject = {}
     result: JsonValue = None
     error: RpcError | None = None
 
 
-class RpcRequest(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class RpcRequest(BaseModel, frozen=True):
     method: str
     id: int
     params: JsonObject
 
 
-class RpcNotification(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class RpcNotification(BaseModel, frozen=True):
     method: str
-    params: JsonObject = Field(default_factory=dict)
+    params: JsonObject = {}
 
 
-class RpcSuccess(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class RpcSuccess(BaseModel, frozen=True):
     id: int | str
     result: JsonValue
 
 
-class RpcFailure(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class RpcFailure(BaseModel, frozen=True):
     id: int | str
     error: RpcError
 
@@ -113,7 +101,8 @@ class CodexAppServer:
             self.stderr.append(line)
 
         environment = dict(
-            os.environ  # lup: ignore[os-environ] — native process boundary inherits ambient variables
+            # lup: ignore[os-environ] — native process boundary inherits ambient variables
+            os.environ
         )
         environment.update(self.environment)
         command = sh.Command(str(self.executable))

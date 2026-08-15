@@ -209,11 +209,151 @@ def test_decoration_line_ends_a_feedback_note_too() -> None:
     assert texts(source, ScanMode.PYTHON) == ["note inside a banner"]
 
 
+def test_note_quoting_the_marker_spelling_mid_body_stays_one_note() -> None:
+    # A spelling written into a continuation line's prose is a mention, not a
+    # marker: the run absorbs it and the note keeps its full text and its
+    # true end line, with no phantom note left behind.
+    source = (
+        "# lup: the escape hatch and a note look alike, because the hatch is\n"
+        "# written # lup: ignore[rule-id] on the offending line, and a note\n"
+        "# that says so has to stay one note.\n"
+        "x = 1\n"
+    )
+    (note,) = find_feedback(source, ScanMode.PYTHON)
+    assert note.text == (
+        "the escape hatch and a note look alike, because the hatch is written "
+        "# lup: ignore[rule-id] on the offending line, and a note that says so "
+        "has to stay one note."
+    )
+    assert (note.start_line, note.end_line) == (1, 3)
+
+
+def test_line_scanned_note_quoting_the_spelling_emits_no_phantom() -> None:
+    # Text has no lexer to say where a comment opens, so the position of the
+    # match on the line is the whole reading — a quoted spelling mid-prose
+    # must not split the note into a truncated one and an invented one.
+    source = (
+        "# lup: a plain-text note, where no lexer vouches for\n"
+        "# anything, so a body that writes # lup: out in the open\n"
+        "# still must not split into two.\n"
+    )
+    (note,) = find_feedback(source, ScanMode.TEXT)
+    assert note.text == (
+        "a plain-text note, where no lexer vouches for anything, so a body "
+        "that writes # lup: out in the open still must not split into two."
+    )
+    assert note.end_line == 3
+
+
+def test_url_before_a_trailing_note_does_not_swallow_it() -> None:
+    # A marker trailing code is taken at its word, because nothing outside
+    # Python can tell a comment's `//` from the one in `https://`. Reading a
+    # real note as a mention is how feedback disappears unnoticed.
+    shell = "curl https://example.com  # lup: pin this endpoint\n"
+    assert texts(shell, ScanMode.TEXT) == ["pin this endpoint"]
+    js = 'const at = "https://example.com";  // lup: pin this endpoint\n'
+    assert texts(js, ScanMode.JS) == ["pin this endpoint"]
+
+
+def test_doubled_introducer_opens_a_note_and_ends_the_one_above() -> None:
+    # `##` and `///` open one comment between them, so a marker written on the
+    # run is on the opener, not quoted inside prose.
+    assert texts("## lup: the doubled form is a note\n", ScanMode.MARKDOWN) == [
+        "the doubled form is a note"
+    ]
+    # And it ends the note above rather than joining it, which is what keeps
+    # removing that note from taking the suppression with it.
+    source = "# lup: a note in a line-scanned file\n## lup: ignore[dict-get]\n"
+    (note,) = find_feedback(source, ScanMode.TEXT)
+    assert note.text == "a note in a line-scanned file"
+    assert note.end_line == 1
+    # Python is stricter, because a note there is placed by the tokenizer's
+    # own comment column rather than by the run: a doubled marker in a `.py`
+    # comment is code, as it has always been.
+    assert find_feedback("## lup: not a note here\n", ScanMode.PYTHON) == []
+
+
+def test_hash_in_docstring_prose_does_not_swallow_a_later_marker() -> None:
+    # A docstring line opens no comment, so the marker in it is where its
+    # prose begins no matter what characters came first.
+    source = '"""Ids.\n\nUse #1 through #4. # lup: document the ids.\n"""\n'
+    assert texts(source, ScanMode.PYTHON) == ["document the ids."]
+
+
+def test_slash_note_absorbs_a_continuation_quoting_the_hash_spelling() -> None:
+    # A run ends at a marker sitting on the line's own introducer, which the
+    # mapper knows exactly — so a `//` note may quote the `#` spelling.
+    source = (
+        "// lup: the Python half of the tree writes\n"
+        "// its suppressions as # lup: ignore[rule-id], which this note\n"
+        "// has to be able to say.\n"
+    )
+    (note,) = find_feedback(source, ScanMode.JS)
+    assert note.text == (
+        "the Python half of the tree writes its suppressions as "
+        "# lup: ignore[rule-id], which this note has to be able to say."
+    )
+    assert note.end_line == 3
+
+
+def test_two_adjacent_notes_stay_separate() -> None:
+    # The second marker opens its own comment, so it ends the first note's
+    # run rather than joining it.
+    source = (
+        "# lup: the first note, which runs\n"
+        "# onto a second line\n"
+        "# lup: the second note, opening its own comment\n"
+        "x = 1\n"
+    )
+    notes = find_feedback(source, ScanMode.PYTHON)
+    assert [note.text for note in notes] == [
+        "the first note, which runs onto a second line",
+        "the second note, opening its own comment",
+    ]
+    assert [(note.start_line, note.end_line) for note in notes] == [(1, 2), (3, 3)]
+
+
+def test_ignore_directive_below_a_note_ends_it_rather_than_joining_it() -> None:
+    # A suppression opens its own comment too, so the note stops above it —
+    # absorbing it would make removing the note take the directive along.
+    source = (
+        "# lup: the receiver is a vendor payload\n"
+        "# lup: ignore[dict-get]\n"
+        'value = payload.get("id")\n'
+    )
+    (note,) = find_feedback(source, ScanMode.PYTHON)
+    assert note.text == "the receiver is a vendor payload"
+    assert note.end_line == 1
+
+
 def test_defer_note_parses_kind_condition_and_text() -> None:
     source = "# lup: defer[until v2 ships]: rework the cache layer\n"
     (note,) = find_feedback(source, ScanMode.PYTHON)
     assert note.kind == "defer"
     assert note.condition == "until v2 ships"
+    assert note.text == "rework the cache layer"
+
+
+def test_a_wake_condition_may_run_past_the_line_it_starts_on() -> None:
+    """A gate worth stating is often longer than one line leaves room for.
+
+    The head is parsed from a note's assembled text and continuation lines
+    join it with a space, so a condition spanning them is one condition — the
+    same reason a note's own message may run on. A gate that has to fit on one
+    line is a gate written shorter than it needed to be, which is how a real
+    externally-checkable condition decays into restating that this code might
+    change again.
+    """
+    source = (
+        "# lup: defer[until the v2 API ships and every caller of the old\n"
+        "# endpoint has migrated off it]: rework the cache layer\n"
+    )
+    (note,) = find_feedback(source, ScanMode.PYTHON)
+    assert note.kind == "defer"
+    assert note.condition == (
+        "until the v2 API ships and every caller of the old endpoint has "
+        "migrated off it"
+    )
     assert note.text == "rework the cache layer"
 
 

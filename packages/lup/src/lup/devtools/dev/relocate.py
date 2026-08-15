@@ -31,7 +31,7 @@ import tokenize
 from collections.abc import Collection, Iterator
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
 SOURCE_SUFFIXES = (".py", ".pyi")
 """Which files a sweep reads, for a caller that does not say.
@@ -68,7 +68,7 @@ def name_parts(dotted: str) -> list[str] | None:
         return None
 
 
-class Relocation(BaseModel):
+class Relocation(BaseModel, frozen=True):
     """One module path that moved, and where it moved to, as name tokens.
 
     Held as parts rather than as dotted text because that is what the rewrite
@@ -77,25 +77,39 @@ class Relocation(BaseModel):
     where somebody typed one.
     """
 
-    model_config = ConfigDict(frozen=True)
-
     old: list[str]
     new: list[str]
 
 
-class ModuleRun(BaseModel):
+class ModuleRun(BaseModel, frozen=True):
     """The token span naming one module path, as indexes into the token list."""
-
-    model_config = ConfigDict(frozen=True)
 
     start: int
     end: int
 
+    def renamed(
+        self, tokens: list[tokenize.TokenInfo], moves: list[Relocation]
+    ) -> list[str] | None:
+        """The replacement name tokens for this run, if it moved.
 
-class ModuleEdit(BaseModel):
+        A move matches the module it names and every module beneath it, so
+        relocating a package carries its submodules without each being
+        declared. The result may be longer or shorter than what it replaces —
+        a move into or out of a subpackage changes the path's depth.
+        """
+        named = [
+            token.string
+            for token in tokens[self.start : self.end + 1]
+            if token.string != "."
+        ]
+        for move in moves:
+            if named[: len(move.old)] == move.old:
+                return [*move.new, *named[len(move.old) :]]
+        return None
+
+
+class ModuleEdit(BaseModel, frozen=True):
     """One module path to respell, as a span on one line of the source."""
-
-    model_config = ConfigDict(frozen=True)
 
     row: int
     start: int
@@ -103,10 +117,8 @@ class ModuleEdit(BaseModel):
     text: str
 
 
-class RelocationEdit(BaseModel):
+class RelocationEdit(BaseModel, frozen=True):
     """One file the rewrite changed, and how many imports it repointed."""
-
-    model_config = ConfigDict(frozen=True)
 
     path: Path
     imports: int
@@ -160,25 +172,6 @@ def module_runs(tokens: list[tokenize.TokenInfo]) -> list[ModuleRun]:
     return list(found())
 
 
-def renamed_run(
-    tokens: list[tokenize.TokenInfo], run: ModuleRun, moves: list[Relocation]
-) -> list[str] | None:
-    """The replacement name tokens for one module run, if it moved.
-
-    A move matches the module it names and every module beneath it, so
-    relocating a package carries its submodules without each being declared.
-    The result may be longer or shorter than what it replaces — a move into or
-    out of a subpackage changes the path's depth.
-    """
-    named = [
-        token.string for token in tokens[run.start : run.end + 1] if token.string != "."
-    ]
-    for move in moves:
-        if named[: len(move.old)] == move.old:
-            return [*move.new, *named[len(move.old) :]]
-    return None
-
-
 def module_edits(
     tokens: list[tokenize.TokenInfo], moves: list[Relocation]
 ) -> list[ModuleEdit]:
@@ -191,7 +184,7 @@ def module_edits(
 
     def found() -> Iterator[ModuleEdit]:
         for run in module_runs(tokens):
-            renamed = renamed_run(tokens, run, moves)
+            renamed = run.renamed(tokens, moves)
             start, end = tokens[run.start].start, tokens[run.end].end
             if renamed is None or start[0] != end[0]:
                 continue

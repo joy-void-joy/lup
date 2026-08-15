@@ -8,7 +8,7 @@ from datetime import timedelta
 from pathlib import Path
 
 import pytest
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
 from lup.adapters.codex.app_server import CodexAppServer, RpcNotification
 from lup.adapters.codex.runtime import (
@@ -57,15 +57,11 @@ from lup.runtime.output import InMemorySubmittedOutputStore
 from lup.runtime.query import query
 
 
-class OutputA(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class OutputA(BaseModel, frozen=True):
     value: int
 
 
-class OutputB(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class OutputB(BaseModel, frozen=True):
     label: str
 
 
@@ -446,7 +442,7 @@ async def test_a_command_approval_is_judged_on_the_command_it_carries() -> None:
     policy = SemanticToolPolicy(
         shell=ShellPolicy(
             [
-                ShellCommandRule(name="ls"),
+                ShellCommandRule(name="ls", default_effect="allow"),
                 ShellCommandRule(name="curl", default_effect="deny", reason="egress"),
             ]
         )
