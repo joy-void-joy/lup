@@ -620,7 +620,6 @@ class Joiner:
                             concern_id=concern.id,
                             commit=examined,
                             question_id="" if question is None else question.id,
-                            at=utc_now().isoformat(),
                         )
                     )
                 return question
