@@ -2,7 +2,7 @@
 
 import asyncio
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
 from lup.adapters.claude.runtime import (
     ClaudeSessionConfig,
@@ -15,10 +15,8 @@ from lup.runtime.models import TurnRequest, TurnResult, turn_request
 from examples.common import Summary
 
 
-class DraftState(BaseModel):
+class DraftState(BaseModel, frozen=True):
     """Latest application state to summarize."""
-
-    model_config = ConfigDict(frozen=True)
 
     text: str
 

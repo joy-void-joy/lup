@@ -43,7 +43,7 @@ from typing import Literal, TypedDict
 import tomlkit
 import tomlkit.items
 import typer
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 from importlib.metadata import version as installed_version
 from packaging.requirements import Requirement
 
@@ -111,15 +111,13 @@ type GitRefKind = Literal["branch", "tag", "rev"]
 """Which kind of ref a git source pins, spelled as uv spells it."""
 
 
-class GitSource(BaseModel):
+class GitSource(BaseModel, frozen=True):
     """A repository and the single ref of it a project resolves ``lup`` at.
 
     The ref is one field pair rather than three optional ones, so a source
     naming both a branch and a tag cannot be constructed — uv accepts only
     one, and a model that can hold two only moves the error later.
     """
-
-    model_config = ConfigDict(frozen=True)
 
     url: str = REPOSITORY_URL
     ref_kind: GitRefKind = "branch"
@@ -138,10 +136,8 @@ class GitSource(BaseModel):
         return entry
 
 
-class RefFlag(BaseModel):
+class RefFlag(BaseModel, frozen=True):
     """One ref-kind flag, and the ref a command line gave it — or nothing."""
-
-    model_config = ConfigDict(frozen=True)
 
     kind: GitRefKind
     ref: str | None = None

@@ -9,7 +9,7 @@ from pathlib import Path
 from time import perf_counter
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, Field, model_validator
 
 from lup.adapters.codex.app_server import CodexAppServer, RpcMessage, RpcNotification
 from lup.adapters.codex.hooks import (
@@ -50,10 +50,8 @@ from lup.runtime.transcript import fold_transcript
 from lup.types import EnvVars, JsonObject, JsonValue, Usage
 
 
-class CodexSessionConfig(BaseModel):
+class CodexSessionConfig(BaseModel, frozen=True, arbitrary_types_allowed=True):
     """Immutable Codex-only app-server configuration."""
-
-    model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
 
     model: str | None = None
     developer_instructions: str = ""
@@ -93,45 +91,33 @@ class CodexSessionConfig(BaseModel):
         return self
 
 
-class CodexMcpServerConfig(BaseModel):
+class CodexMcpServerConfig(BaseModel, frozen=True):
     """One project tool group served to Codex over an explicit subprocess."""
-
-    model_config = ConfigDict(frozen=True)
 
     command: str
     args: list[str] = []
     env: EnvVars = {}
 
 
-class CodexThreadRef(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class CodexThreadRef(BaseModel, frozen=True):
     id: str
 
 
-class CodexTurnRef(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class CodexTurnRef(BaseModel, frozen=True):
     id: str
     status: str = "inProgress"
     duration_ms: int | None = Field(default=None, alias="durationMs")
 
 
-class CodexThreadResponse(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class CodexThreadResponse(BaseModel, frozen=True):
     thread: CodexThreadRef
 
 
-class CodexTurnResponse(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class CodexTurnResponse(BaseModel, frozen=True):
     turn: CodexTurnRef
 
 
-class DynamicToolCall(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class DynamicToolCall(BaseModel, frozen=True):
     thread_id: str = Field(alias="threadId")
     turn_id: str = Field(alias="turnId")
     call_id: str = Field(alias="callId")
@@ -139,7 +125,7 @@ class DynamicToolCall(BaseModel):
     arguments: JsonValue
 
 
-class McpElicitationRequest(BaseModel):
+class McpElicitationRequest(BaseModel, frozen=True):
     """One approval elicitation for an MCP server tool call.
 
     Codex treats session-scoped MCP servers as untrusted and elicits an
@@ -147,15 +133,11 @@ class McpElicitationRequest(BaseModel):
     ``_meta.codex_approval_kind = "mcp_tool_call"``) before every call.
     """
 
-    model_config = ConfigDict(frozen=True)
-
     thread_id: str = Field(alias="threadId")
     server_name: str = Field(alias="serverName")
 
 
-class TokenUsageBreakdown(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class TokenUsageBreakdown(BaseModel, frozen=True):
     input_tokens: int = Field(alias="inputTokens")
     output_tokens: int = Field(alias="outputTokens")
     cached_input_tokens: int = Field(alias="cachedInputTokens")

@@ -146,7 +146,7 @@ type LupHookFn = Callable[[LupHookInput], Awaitable[LupHookOutput]]
 """Async function that receives a normalized hook event and returns a decision."""
 
 
-class LupHookMatcher(BaseModel):
+class LupHookMatcher(BaseModel, arbitrary_types_allowed=True):
     """A hook handler with an optional tool-name matcher.
 
     The ``tag`` field lets adapters dispatch deterministically instead
@@ -156,8 +156,6 @@ class LupHookMatcher(BaseModel):
     matcher: str | None = None
     hook: LupHookFn
     tag: str | None = None
-
-    model_config = {"arbitrary_types_allowed": True}
 
 
 class LupHooksConfig(BaseModel):

@@ -2,7 +2,7 @@
 
 from datetime import timedelta
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field
 
 from lup.runtime.wrappers import UsageRecord, UsageSink
 from lup.types import Usage, UsageCost
@@ -64,7 +64,7 @@ class Spend(BaseModel):
         self.output_tokens += other.output_tokens
 
 
-class CostAccumulator(BaseModel):
+class CostAccumulator(BaseModel, arbitrary_types_allowed=True):
     """Cumulative spend across turns, and the per-stage breakdown beneath it.
 
     A session reports usage one turn at a time through ``UsageConfig``, which
@@ -76,8 +76,6 @@ class CostAccumulator(BaseModel):
     and restoring one is ``model_validate()``; :meth:`merge` adds a restored
     snapshot to a live accumulator so a run survives a restart.
     """
-
-    model_config = ConfigDict(arbitrary_types_allowed=True)
 
     total: Spend = Field(default_factory=Spend)
     stages: dict[str, Spend] = {}

@@ -13,7 +13,7 @@ refused here by the identical command rather than by a second rule about it.
 
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
 from lup.devtools.dev.commit_guard import DRIFT_COMMAND
 from lup.harness.banner import GeneratedBanner
@@ -33,7 +33,7 @@ already tell a reader to type so the two cannot name different things."""
 CHECK_COMMAND = "uv run lup-devtools dev check"
 
 
-class WorkflowSpec(BaseModel):
+class WorkflowSpec(BaseModel, frozen=True):
     """The choices a project makes about running its own gate.
 
     Every field is a judgement rather than a fact, which is why each is a
@@ -42,8 +42,6 @@ class WorkflowSpec(BaseModel):
     argument for generating this file is that CI owes the project one gate,
     and a second list to keep in step is the thing being avoided.
     """
-
-    model_config = ConfigDict(frozen=True)
 
     branches: list[str] = ["main"]
     """Which pushed branches run the gate, beyond every pull request."""

@@ -30,10 +30,8 @@ somewhere else passes its own.
 """
 
 
-class ReportTopic(BaseModel):
+class ReportTopic(BaseModel, frozen=True):
     """One question a report answers, and what a reader does about it."""
-
-    model_config = FROZEN
 
     title: str
     guidance: str
@@ -68,15 +66,13 @@ REPORT_TOPICS = (NOTES, DEFERRALS, CLAIMS, DRIFT, UNLANDED, LEASES)
 """Every topic this report accounts for, in the order it reads them."""
 
 
-class ReportItem(BaseModel):
+class ReportItem(BaseModel, frozen=True):
     """One outstanding thing: where it is, what it says, and any gate on it.
 
     One shape for every topic rather than one per surface, because a report
     is read rather than dispatched on, and each surface keeps its own command
     for the detail this leaves out.
     """
-
-    model_config = FROZEN
 
     where: str
     what: str
@@ -88,10 +84,8 @@ class ReportItem(BaseModel):
         return f"`{self.where}`{gate} — {self.what}"
 
 
-class ReportPart(BaseModel):
+class ReportPart(BaseModel, frozen=True):
     """One topic together with what the surfaces found for it."""
-
-    model_config = FROZEN
 
     topic: ReportTopic
     items: list[ReportItem]
@@ -110,10 +104,8 @@ class ReportPart(BaseModel):
         return heading + "\n" + "".join(f"- {item.line()}\n" for item in self.items)
 
 
-class Report(BaseModel):
+class Report(BaseModel, frozen=True):
     """Everything there still is to implement, as the surfaces can see it."""
-
-    model_config = FROZEN
 
     parts: list[ReportPart]
 

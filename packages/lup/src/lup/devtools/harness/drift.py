@@ -16,7 +16,7 @@ from typing import Protocol
 from pathlib import Path
 
 import typer
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
 from lup.harness.banner import REGENERATE_COMMAND
 from lup.devtools.harness.generate import (
@@ -84,10 +84,8 @@ def repository_staleness(write: RepositoryWriter) -> list[str]:
     return []
 
 
-class DriftVerdict(BaseModel):
+class DriftVerdict(BaseModel, frozen=True):
     """One reading of whether every generated artifact is what its source renders."""
-
-    model_config = ConfigDict(frozen=True)
 
     reports: list[DriftReport]
     """Ownership-aware drift for each native tree inspected."""

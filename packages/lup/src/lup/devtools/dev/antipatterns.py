@@ -27,7 +27,7 @@ from collections.abc import Iterator, Sequence, Set as AbstractSet
 from pathlib import Path
 
 import typer
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
 from lup.codescan.antipatterns import (
     AntiPattern,
@@ -84,16 +84,14 @@ class FoundAntiPattern(AntiPatternFinding):
     file: str
 
 
-class FoundRefutation(Refutation):
+class FoundRefutation(Refutation, frozen=True):
     """A :class:`~lup.codescan.common.Refutation` tagged with its file."""
 
     file: str
 
 
-class ScannedFile(BaseModel):
+class ScannedFile(BaseModel, arbitrary_types_allowed=True):
     """One tracked file the sweep reads once and audits against its table."""
-
-    model_config = ConfigDict(arbitrary_types_allowed=True)
 
     rel: str
     path: Path
@@ -243,7 +241,7 @@ def scan_antipatterns(
     )
 
 
-class DirectiveSite(BaseModel):
+class DirectiveSite(BaseModel, frozen=True):
     """One `# lup: ignore`, where it sits and how wide each placement makes it.
 
     ``inline_width`` is what the canonical placement would cost: the width of
@@ -252,8 +250,6 @@ class DirectiveSite(BaseModel):
     beneath it to merge into reports its own width, because there is no
     inline form of it to measure.
     """
-
-    model_config = ConfigDict(frozen=True)
 
     file: str
     line: int

@@ -7,23 +7,19 @@ from pathlib import Path
 from queue import Queue
 
 import sh
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
 from lup.types import EnvVars, JsonObject, JsonValue
 
 
-class RpcError(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class RpcError(BaseModel, frozen=True):
     code: int
     message: str
     data: JsonValue = None
 
 
-class RpcMessage(BaseModel):
+class RpcMessage(BaseModel, frozen=True):
     """Validated envelope for responses, notifications, and server requests."""
-
-    model_config = ConfigDict(frozen=True)
 
     id: int | str | None = None
     method: str | None = None
@@ -32,31 +28,23 @@ class RpcMessage(BaseModel):
     error: RpcError | None = None
 
 
-class RpcRequest(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class RpcRequest(BaseModel, frozen=True):
     method: str
     id: int
     params: JsonObject
 
 
-class RpcNotification(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class RpcNotification(BaseModel, frozen=True):
     method: str
     params: JsonObject = {}
 
 
-class RpcSuccess(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class RpcSuccess(BaseModel, frozen=True):
     id: int | str
     result: JsonValue
 
 
-class RpcFailure(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class RpcFailure(BaseModel, frozen=True):
     id: int | str
     error: RpcError
 

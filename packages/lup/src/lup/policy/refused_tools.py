@@ -7,12 +7,12 @@ composition root states its own — the same inversion the shell vocabulary
 takes. :mod:`lup.policy.kernel.tools` decides against the erased rows.
 """
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field
 
 from lup.policy.kernel.rows import RefusedToolRow
 
 
-class RefusedTool(BaseModel):
+class RefusedTool(BaseModel, frozen=True):
     """One native call a project refuses, and where its agent goes instead.
 
     ``specifier`` narrows the refusal to a single subject of a tool — the
@@ -26,8 +26,6 @@ class RefusedTool(BaseModel):
     question when the call's own input carries the escalation marker, so a
     reflex is stopped without a deliberate use being walled off.
     """
-
-    model_config = ConfigDict(frozen=True)
 
     tool: str
     specifier: str = ""

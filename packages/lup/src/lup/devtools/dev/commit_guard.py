@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Literal
 
 import sh
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
 from lup.harness.banner import REGENERATE_COMMAND
 from lup.devtools.utils import git
@@ -39,7 +39,7 @@ GUARD_MARKER = "lup-commit-guard"
 """How an installed hook says it is this command's to rewrite."""
 
 
-class CommitGuard(BaseModel):
+class CommitGuard(BaseModel, frozen=True):
     """What one repository installs as its commit-time refusal of stale output.
 
     Both fields are judgements rather than facts — another project may guard a
@@ -47,8 +47,6 @@ class CommitGuard(BaseModel):
     a caller replaces rather than a constant it would have to fork this module
     to change.
     """
-
-    model_config = ConfigDict(frozen=True)
 
     command: str = DRIFT_COMMAND
     """What the hook runs, and refuses the commit on a nonzero exit from."""
@@ -71,10 +69,8 @@ type GuardStatus = Literal["current", "stale", "absent", "foreign"]
 """What sits at the hook path, judged against what this guard would write."""
 
 
-class GuardState(BaseModel):
+class GuardState(BaseModel, frozen=True):
     """Where a repository's commit guard lives and what is actually there."""
-
-    model_config = ConfigDict(frozen=True)
 
     path: Path
     status: GuardStatus

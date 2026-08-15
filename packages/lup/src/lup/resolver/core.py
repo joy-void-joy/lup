@@ -6,7 +6,7 @@ import logging
 from collections.abc import AsyncGenerator, Callable
 from contextlib import asynccontextmanager
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
 from lup.harness.contracts import SkillInvocationRenderer
 from lup.harness.models import ResolveSpec
@@ -91,19 +91,15 @@ APPROVE = "approve"  # lup: ignore[constant-declaration] — answer vocabulary
 DEFER = "defer"  # lup: ignore[constant-declaration] — answer vocabulary
 
 
-class ApprovalDecisions(BaseModel):
+class ApprovalDecisions(BaseModel, frozen=True):
     """Persisted direct choices and their dependency-safe eligible subset."""
-
-    model_config = ConfigDict(frozen=True)
 
     directly_approved: list[str]
     eligible: list[str]
 
 
-class EvidenceCitation(BaseModel):
+class EvidenceCitation(BaseModel, frozen=True):
     """One concern's evidence, named in the fields the concern carries."""
-
-    model_config = ConfigDict(frozen=True)
 
     notes: list[ReviewNote]
     evidence: str

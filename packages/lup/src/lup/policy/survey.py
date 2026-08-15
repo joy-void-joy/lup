@@ -11,7 +11,7 @@ A downstream project wants exactly this whenever it edits its own composition,
 which is why the walk is library mechanism rather than one repository's test.
 """
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
 from lup.policy.kernel.decision import DecisionEffect, SandboxPlacement
 from lup.policy.kernel.rows import RuleLevel, ShellRuleRow
@@ -29,10 +29,8 @@ the listed ones are, and it is the one form no walk over the rows would reach.
 """
 
 
-class ClassifiedForm(BaseModel):
+class ClassifiedForm(BaseModel, frozen=True):
     """One command line the table declares, and the verdict it produces."""
-
-    model_config = ConfigDict(frozen=True)
 
     command: str
     effect: DecisionEffect
@@ -40,10 +38,8 @@ class ClassifiedForm(BaseModel):
     reason: str
 
 
-class SurveyedRule(BaseModel):
+class SurveyedRule(BaseModel, frozen=True):
     """One erased row: what it decided, and which level decided each half."""
-
-    model_config = ConfigDict(frozen=True)
 
     path: str
     level: RuleLevel

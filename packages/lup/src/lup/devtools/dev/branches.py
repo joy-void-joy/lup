@@ -11,7 +11,7 @@ from typing import Literal, NoReturn, Required, TypedDict
 
 import sh
 import typer
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field
 
 from lup.harness.environment import non_interactive_environment
 from lup.harness.process import LaunchRequest, ProcessLauncher
@@ -568,10 +568,8 @@ def detect_base_branch(branch: str | None = None) -> BaseCandidate:
     return best
 
 
-class BaseFreshness(BaseModel):
+class BaseFreshness(BaseModel, frozen=True):
     """How far a checkout sits behind the remote branch its base answers to."""
-
-    model_config = ConfigDict(frozen=True)
 
     tracked: str = ""
     """The remote branch measured against; empty when there is none to measure."""

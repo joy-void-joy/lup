@@ -42,7 +42,7 @@ from lup.resolver.journal import (
     record_turn,
 )
 from lup.resolver.mailbox import ActorDelivery, ActorMessage, QuestionMailbox
-from lup.resolver.models import FROZEN, ActorRef
+from lup.resolver.models import ActorRef
 from lup.runtime.errors import ProviderTurnError
 from lup.runtime.factory import SessionFactory
 from lup.runtime.models import (
@@ -64,7 +64,7 @@ class ActorSchemaChangedError(RuntimeError):
     """A resumed actor expects a different submission schema than it left with."""
 
 
-class ActorRecord(BaseModel):
+class ActorRecord(BaseModel, frozen=True):
     """What one actor needs to be reattached after a park.
 
     The digest is recorded here rather than pushed into the runtime because
@@ -73,8 +73,6 @@ class ActorRecord(BaseModel):
     it restored, so the answerable question is whether *we* expect the same
     schema now that we expected before the park.
     """
-
-    model_config = FROZEN
 
     actor: ActorRef
     session: SessionId | None = None

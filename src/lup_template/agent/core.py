@@ -7,7 +7,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
-from pydantic import AnyHttpUrl, BaseModel, ConfigDict, SecretStr
+from pydantic import AnyHttpUrl, BaseModel, SecretStr
 
 from lup.adapters.claude.config import (
     ClaudeCompatibilityTransform,
@@ -89,10 +89,8 @@ class PersistentSessionResult(BaseModel):
     turns: int
 
 
-class SessionBuild(BaseModel):
+class SessionBuild(BaseModel, frozen=True, arbitrary_types_allowed=True):
     """Configured provider-neutral factory and its application workspace."""
-
-    model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
 
     factory: SessionFactory
     notes: NotesConfig

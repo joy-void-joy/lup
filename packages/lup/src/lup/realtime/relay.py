@@ -271,14 +271,12 @@ class EventOffset(BaseModel):
     commit_offset: int
 
 
-class RelayState(BaseModel):
+class RelayState(BaseModel, extra="allow"):
     """Parent-maintained snapshot served to the agent's context tool.
 
     ``unread_events`` drives the sleep guard; everything else is domain
     context — extra fields pass through to the agent verbatim.
     """
-
-    model_config = {"extra": "allow"}
 
     unread_events: int = 0
 

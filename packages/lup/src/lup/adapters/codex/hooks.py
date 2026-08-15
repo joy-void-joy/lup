@@ -31,7 +31,7 @@ approval requests are not alike:
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field
 
 from lup.adapters.codex.native import (
     CodexBeforeToolEvent,
@@ -64,7 +64,7 @@ turn, and nothing here is a human.
 """
 
 
-class CodexCommandApproval(BaseModel):
+class CodexCommandApproval(BaseModel, frozen=True, extra="ignore"):
     """The fields of a command-execution approval this seam reads.
 
     Codex sends more than these — item and turn identifiers, the decisions it
@@ -72,8 +72,6 @@ class CodexCommandApproval(BaseModel):
     modelled, because a policy judges the act and not the bookkeeping around
     it, and an unmodelled field cannot break validation when Codex adds one.
     """
-
-    model_config = ConfigDict(frozen=True, extra="ignore")
 
     command: str = ""
     cwd: Path | None = None
@@ -127,15 +125,13 @@ for the source it was read from.
 """
 
 
-class CodexApprovalResponder(BaseModel):
+class CodexApprovalResponder(BaseModel, frozen=True, arbitrary_types_allowed=True):
     """Answer app-server approval requests from portable hook registrations.
 
     One of these exists per conversation, because the transport installs one
     handler for the whole session and a session's hooks are fixed when it
     opens.
     """
-
-    model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
 
     hooks: LupHooksConfig = Field(description="What this session declared")
 

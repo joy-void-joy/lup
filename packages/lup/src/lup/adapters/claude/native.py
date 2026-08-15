@@ -11,7 +11,7 @@
 from pathlib import Path
 from typing import Literal
 
-from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, ValidationError
+from pydantic import AnyHttpUrl, BaseModel, Field, ValidationError
 
 from lup.policy.models import (
     BeforeTool,
@@ -33,56 +33,42 @@ from lup.policy.native import NativeDecisionRenderer, NativeEventDecoder
 from lup.types import JsonObject
 
 
-class ClaudeEditOperation(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class ClaudeEditOperation(BaseModel, frozen=True):
     type: Literal["edit"] = "edit"
     path: Path
     before: str
     after: str
 
 
-class ClaudeWriteOperation(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class ClaudeWriteOperation(BaseModel, frozen=True):
     type: Literal["write"] = "write"
     path: Path
     content: str
 
 
-class ClaudeEditBatchOperation(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class ClaudeEditBatchOperation(BaseModel, frozen=True):
     type: Literal["edit_batch"] = "edit_batch"
     changes: list[EditChange] = Field(min_length=1)
 
 
-class ClaudeShellOperation(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class ClaudeShellOperation(BaseModel, frozen=True):
     type: Literal["shell"] = "shell"
     command: str
     cwd: Path | None = None
     unsandboxed: bool = False
 
 
-class ClaudeFetchOperation(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class ClaudeFetchOperation(BaseModel, frozen=True):
     type: Literal["fetch"] = "fetch"
     url: str
 
 
-class ClaudeSearchOperation(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class ClaudeSearchOperation(BaseModel, frozen=True):
     type: Literal["search"] = "search"
     query: str
 
 
-class ClaudeUnknownOperation(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class ClaudeUnknownOperation(BaseModel, frozen=True):
     type: Literal["unknown"] = "unknown"
     name: str
     input: JsonObject = {}
@@ -99,16 +85,12 @@ type ClaudeOperation = (
 )
 
 
-class ClaudeBeforeToolEvent(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class ClaudeBeforeToolEvent(BaseModel, frozen=True):
     operation: ClaudeOperation
 
 
-class ClaudeHookPayload(BaseModel):
+class ClaudeHookPayload(BaseModel, frozen=True):
     """Validated external hook input before operation-specific parsing."""
-
-    model_config = ConfigDict(frozen=True)
 
     tool_name: str
     tool_input: JsonObject = {}
@@ -214,10 +196,8 @@ def claude_sandbox_input(
     return {**tool_input, "dangerouslyDisableSandbox": escaped}
 
 
-class ClaudeDecisionOutput(BaseModel):
+class ClaudeDecisionOutput(BaseModel, frozen=True, populate_by_name=True):
     """Claude PreToolUse hook-specific decision payload."""
-
-    model_config = ConfigDict(frozen=True, populate_by_name=True)
 
     hook_event_name: Literal["PreToolUse"] = Field(
         default="PreToolUse", alias="hookEventName"

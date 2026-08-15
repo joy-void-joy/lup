@@ -12,7 +12,7 @@ import json
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
 from lup.adapters.harness import (
     claude_prompt_renderer,
@@ -60,7 +60,7 @@ from lup.harness.contracts import (
 from lup.harness.validation import validated_tree
 
 
-class ProjectContent(BaseModel):
+class ProjectContent(BaseModel, frozen=True):
     """What a project publishes on top of the tree its harness compiles.
 
     The harness says what the plugin *is*; this says what else the repository
@@ -69,8 +69,6 @@ class ProjectContent(BaseModel):
     settings. All of it is one project's, which is why generation takes it
     rather than importing a catalog it would have to name.
     """
-
-    model_config = ConfigDict(frozen=True)
 
     harness: Harness
 
@@ -89,10 +87,8 @@ class ProjectContent(BaseModel):
     """Native settings for the runtime that reads a settings file."""
 
 
-class GenerationRecipe(BaseModel):
+class GenerationRecipe(BaseModel, frozen=True, arbitrary_types_allowed=True):
     """Injected data and capabilities needed by neutral generation orchestration."""
-
-    model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
 
     label: str
     root: Path
@@ -109,15 +105,13 @@ type RuntimeReadiness = Callable[[], Sequence[CapabilityReport]]
 """How a composition asks its runtime whether it is actually installed."""
 
 
-class NativeHarnessComposition(BaseModel):
+class NativeHarnessComposition(BaseModel, frozen=True, arbitrary_types_allowed=True):
     """Concrete capabilities supplied to one CLI composition root.
 
     The one shape every harness command works in: a generation recipe, a
     readiness probe set, and a renderer for skill invocations. Which classes
     fill those is the composition root's business, never the command's.
     """
-
-    model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
 
     recipe: GenerationRecipe
     readiness: RuntimeReadiness
@@ -133,19 +127,15 @@ class HarnessGenerationConflict(RuntimeError):
         self.conflicts = conflicts
 
 
-class GenerationReport(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class GenerationReport(BaseModel, frozen=True):
     target: str
     changed: list[Path]
     removed: list[Path]
     source_digest: str
 
 
-class DriftReport(BaseModel):
+class DriftReport(BaseModel, frozen=True):
     """Read-only desired-tree comparison for pre-commit and CI."""
-
-    model_config = ConfigDict(frozen=True)
 
     target: str
     ownership_present: bool

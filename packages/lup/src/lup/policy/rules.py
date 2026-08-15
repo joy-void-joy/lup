@@ -11,7 +11,7 @@ stay decision-identical; the shared fixture suite asserts exactly that.
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field
+from pydantic import AnyHttpUrl, BaseModel, Field
 
 from lup.codescan.antipatterns import AntiPattern, patterns_for_suffix
 from lup.policy.contracts import DecisionPolicy
@@ -63,10 +63,8 @@ def pydantic_decision(decision: KernelDecision) -> Decision:
     )
 
 
-class UrlScope(BaseModel):
+class UrlScope(BaseModel, frozen=True):
     """One normalized scheme/host/port and path-prefix rule."""
-
-    model_config = ConfigDict(frozen=True)
 
     origin: AnyHttpUrl
     path_prefix: UrlPathPrefix = "/"
@@ -112,10 +110,8 @@ class FetchPolicy(DecisionPolicy[FetchUrl]):
         )
 
 
-class ShellSegment(BaseModel):
+class ShellSegment(BaseModel, frozen=True):
     """One parsed command segment with its ordered shell words."""
-
-    model_config = ConfigDict(frozen=True)
 
     words: list[str] = Field(min_length=1)
 
@@ -216,7 +212,7 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
         )
 
 
-class PathRule(BaseModel):
+class PathRule(BaseModel, frozen=True):
     """One semantic protected-path match supplied by a composition root.
 
     ``kind`` spans the whole primitive vocabulary rather than a subset of it.
@@ -224,8 +220,6 @@ class PathRule(BaseModel):
     express is a rule whose reach depends on who launched the run, which is
     the one thing single-sourcing the policy exists to prevent.
     """
-
-    model_config = ConfigDict(frozen=True)
 
     kind: PathRuleKind
     value: str

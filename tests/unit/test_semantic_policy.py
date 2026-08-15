@@ -16,7 +16,7 @@ from typing import Literal, get_args
 
 import pytest
 import sh
-from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field
+from pydantic import AnyHttpUrl, BaseModel, Field
 
 from lup.adapters.claude.native import (
     ClaudeBeforeToolEvent,
@@ -86,10 +86,8 @@ from lup_template.devtools.harness.catalog import declared_hook_set, portable_ha
 from lup_template.devtools.harness.content.shell_vocabulary import SHELL_RULES
 
 
-class DecisionCase(BaseModel):
+class DecisionCase(BaseModel, frozen=True):
     """One primitive input and its expected policy effect."""
-
-    model_config = ConfigDict(frozen=True)
 
     input: str
     effect: Literal["allow", "ask", "deny", "defer"]
@@ -106,20 +104,16 @@ class DecisionCase(BaseModel):
     """Repository-relative files that already exist when the case is judged."""
 
 
-class HostShape(BaseModel):
+class HostShape(BaseModel, frozen=True):
     """The host facts a case is judged under, as one hashable identity."""
-
-    model_config = ConfigDict(frozen=True)
 
     sandboxed: bool
     escapable: bool
     interactive: bool
 
 
-class EditDecisionCase(BaseModel):
+class EditDecisionCase(BaseModel, frozen=True):
     """One edit fixture shared by canonical and assembled policy forms."""
-
-    model_config = ConfigDict(frozen=True)
 
     path: str
     before: str | None

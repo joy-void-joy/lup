@@ -24,15 +24,13 @@ block rather than folded into it: an addition cannot drift from what it adds
 to, while a restatement can.
 """
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
 import lup.harness.models as models
 
 
-class Provenance(BaseModel):
+class Provenance(BaseModel, frozen=True):
     """How one skill spells the checkouts a provenance answer is about."""
-
-    model_config = ConfigDict(frozen=True)
 
     library_git: str
     """Git run against the checkout the library comes from."""

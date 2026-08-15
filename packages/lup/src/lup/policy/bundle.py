@@ -14,7 +14,7 @@ import json
 import urllib.parse
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
 from lup.codescan.antipatterns import AntiPatternSet
 from lup.harness.banner import REGENERATE_COMMAND, GeneratedBanner
@@ -40,10 +40,8 @@ from lup.policy.shell_rules import (
 from lup.policy.rules import antipattern_row, human_owned_path_rule, path_rule_row
 
 
-class KernelModule(BaseModel):
+class KernelModule(BaseModel, frozen=True):
     """One hermetic kernel source file copied into a generated runtime."""
-
-    model_config = ConfigDict(frozen=True)
 
     name: str
     source: str

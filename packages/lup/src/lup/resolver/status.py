@@ -21,23 +21,19 @@ from pydantic import BaseModel
 
 from lup.channels.models import utc_now
 from lup.resolver.journal import journal_tail
-from lup.resolver.models import FROZEN, ConcernStatus, ResolvePhase
+from lup.resolver.models import ConcernStatus, ResolvePhase
 from lup.resolver.state import ResolverStateRepository
 
 
-class StatusCount(BaseModel):
+class StatusCount(BaseModel, frozen=True):
     """How many concerns stand at one status."""
-
-    model_config = FROZEN
 
     status: ConcernStatus
     concerns: int
 
 
-class LastRecorded(BaseModel):
+class LastRecorded(BaseModel, frozen=True):
     """The run's most recent journal entry, as a reader needs to see it."""
-
-    model_config = FROZEN
 
     event: str
     actor: str
@@ -48,10 +44,8 @@ class LastRecorded(BaseModel):
         return (now if now is not None else utc_now()) - self.at
 
 
-class RunStatus(BaseModel):
+class RunStatus(BaseModel, frozen=True):
     """Where a run stands, and whether anything is driving it."""
-
-    model_config = FROZEN
 
     run_id: str
     exists: bool

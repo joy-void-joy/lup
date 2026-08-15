@@ -11,7 +11,7 @@ from typing import Annotated, Literal
 
 import typer
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field
 
 from lup.devtools.setup import Integration, read_env_local, write_env_local
 from lup.types import EnvVars
@@ -26,20 +26,16 @@ application overrides — never a value an adopter has to fork to change.
 """
 
 
-class DashboardField(BaseModel):
+class DashboardField(BaseModel, frozen=True):
     """One declarative setup field safe to expose in the browser."""
-
-    model_config = ConfigDict(frozen=True)
 
     key: str
     prompt: str
     secret: bool
 
 
-class DashboardIntegration(BaseModel):
+class DashboardIntegration(BaseModel, frozen=True):
     """Browser-facing projection of one setup integration."""
-
-    model_config = ConfigDict(frozen=True)
 
     name: str
     command: str
@@ -50,10 +46,8 @@ class DashboardIntegration(BaseModel):
     fields: list[DashboardField]
 
 
-class DashboardState(BaseModel):
+class DashboardState(BaseModel, frozen=True):
     """Complete setup progress shown by the dashboard."""
-
-    model_config = ConfigDict(frozen=True)
 
     configured: int
     total: int

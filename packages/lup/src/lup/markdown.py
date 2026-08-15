@@ -17,7 +17,7 @@ import html
 from abc import abstractmethod
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Discriminator
+from pydantic import BaseModel, Discriminator
 
 
 def contained(value: str) -> str:
@@ -35,7 +35,7 @@ def escaped(value: str) -> str:
     return contained(html.escape(value))
 
 
-class MarkdownCell(BaseModel):
+class MarkdownCell(BaseModel, frozen=True):
     """One cell of a generated table, holding the value it displays.
 
     Every kind answers :meth:`render`, and every answer runs the value it
@@ -43,11 +43,11 @@ class MarkdownCell(BaseModel):
     and cannot be the one that forgot to escape.
     """
 
-    # lup: Add an anti-pattern on `model_config =` and instruct the agent to use
+    # lup: solved: Add an anti-pattern on `model_config =` and instruct the agent to use
     # the modern `class A(BaseModel, frozen=True, ...)` notation instead, then
     # convert the ones we already have — this line is one of them.
     #
-    # lup: The human settled the scope: convert every site, library and
+    # lup: solved: The human settled the scope: convert every site, library and
     # application alike, knowing the cost. Measured at the time: 305 in source
     # (301 library, 4 application) plus 35 in tests, of which ~201 are literal
     # `ConfigDict(...)` and ~97 are alias-bound `model_config = FROZEN`, where
@@ -57,7 +57,6 @@ class MarkdownCell(BaseModel):
     # shared declarations. That DRY reversal was chosen deliberately, against the
     # recommendation to exempt them — so do not treat an alias-bound site as
     # exempt, and delete the aliases rather than leaving them unreferenced.
-    model_config = ConfigDict(frozen=True)
 
     text: str
 
@@ -66,7 +65,7 @@ class MarkdownCell(BaseModel):
         """This cell's Markdown, with the value it holds escaped."""
 
 
-class PlainCell(MarkdownCell):
+class PlainCell(MarkdownCell, frozen=True):
     """A value shown as it reads."""
 
     type: Literal["plain"] = "plain"
@@ -75,7 +74,7 @@ class PlainCell(MarkdownCell):
         return escaped(self.text)
 
 
-class CodeCell(MarkdownCell):
+class CodeCell(MarkdownCell, frozen=True):
     """A value marked as code by the fence Markdown spells with backticks."""
 
     type: Literal["code"] = "code"
@@ -84,7 +83,7 @@ class CodeCell(MarkdownCell):
         return f"`{escaped(self.text)}`"
 
 
-class HtmlCodeCell(MarkdownCell):
+class HtmlCodeCell(MarkdownCell, frozen=True):
     """A value marked as code by the HTML element rather than the fence.
 
     For a value that may itself hold a backtick — a rule's matching shape, a
@@ -97,7 +96,7 @@ class HtmlCodeCell(MarkdownCell):
         return f"<code>{escaped(self.text)}</code>"
 
 
-class LinkCell(MarkdownCell):
+class LinkCell(MarkdownCell, frozen=True):
     """A cell naming a page rather than describing one.
 
     The destination is held to the row's structure but not otherwise escaped:

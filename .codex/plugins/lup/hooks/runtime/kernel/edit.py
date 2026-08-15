@@ -767,10 +767,19 @@ def refiner_named(name: str) -> Callable[[str], set[int]] | None:
 def refined_exempt_lines(
     source: str, rows: list[AntiPatternRow]
 ) -> dict[str, set[int]]:
-    """Where each refined rule is cleared in this source, computed once."""
+    """Where each refined rule is cleared in this source, computed once.
+
+    A row without the field reads as declaring no refiner, which is what an
+    empty name already means here. The table is generated, so a rule can
+    arrive from a branch older than the field — and this gate is compiled
+    into the dispatcher that decides every edit, whose own recovery is
+    regenerating the table. Raising on the malformed table would take down
+    the one path that repairs it, and the rule then simply runs unrefined,
+    which reports more than it should rather than less.
+    """
     found: dict[str, set[int]] = {}
     for row in rows:
-        refiner = refiner_named(row["refiner"])
+        refiner = refiner_named(row["refiner"] if "refiner" in row else "")
         if refiner is not None:
             found[row["id"]] = refiner(source)
     return found

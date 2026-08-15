@@ -9,7 +9,7 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import httpx
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field
 
 from lup.adapters.claude.login import CLAUDE_LOGIN
 
@@ -35,10 +35,8 @@ ANTHROPIC_BETA = "oauth-2025-04-20"
 # ── API response types ─────────────────────────────────────
 
 
-class UsageBucket(BaseModel):
+class UsageBucket(BaseModel, frozen=True, extra="ignore"):
     """One rate-limit window: how much is spent, and when it clears."""
-
-    model_config = ConfigDict(frozen=True, extra="ignore")
 
     utilization: float = 0
     resets_at: str = ""
@@ -56,10 +54,8 @@ class UsageBucket(BaseModel):
             return None
 
 
-class ExtraUsage(BaseModel):
+class ExtraUsage(BaseModel, frozen=True, extra="ignore"):
     """Metered spend past the plan, in cents."""
-
-    model_config = ConfigDict(frozen=True, extra="ignore")
 
     is_enabled: bool = False
     monthly_limit: float = 0
@@ -67,15 +63,13 @@ class ExtraUsage(BaseModel):
     utilization: float = 0
 
 
-class UsageResponse(BaseModel):
+class UsageResponse(BaseModel, frozen=True, extra="ignore"):
     """What the unversioned OAuth endpoint reports about this account.
 
     Every window is optional and unknown keys are ignored: the endpoint is
     unversioned, plans differ in which windows they meter, and a payload that
     grew a field is not a reason to stop reporting the ones it kept.
     """
-
-    model_config = ConfigDict(frozen=True, extra="ignore")
 
     five_hour: UsageBucket | None = None
     seven_day: UsageBucket | None = None
@@ -89,24 +83,21 @@ class UsageResponse(BaseModel):
 # ── stats cache models ─────────────────────────────────────
 
 
-class DailyActivity(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
+class DailyActivity(BaseModel, populate_by_name=True):
     date: str
     message_count: int = Field(alias="messageCount", default=0)
     session_count: int = Field(alias="sessionCount", default=0)
     tool_call_count: int = Field(alias="toolCallCount", default=0)
 
 
-class DailyModelTokens(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
+class DailyModelTokens(BaseModel, populate_by_name=True):
     date: str
     tokens_by_model: dict[str, int] = Field(  # lup: ignore[dict-str-payload] — tally
         alias="tokensByModel", default={}
     )
 
 
-class ModelUsageEntry(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
+class ModelUsageEntry(BaseModel, populate_by_name=True):
     input_tokens: int = Field(alias="inputTokens", default=0)
     output_tokens: int = Field(alias="outputTokens", default=0)
     cache_read_input_tokens: int = Field(alias="cacheReadInputTokens", default=0)
@@ -119,16 +110,14 @@ class ModelUsageEntry(BaseModel):
     max_output_tokens: int = Field(alias="maxOutputTokens", default=0)
 
 
-class LongestSession(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
+class LongestSession(BaseModel, populate_by_name=True):
     session_id: str = Field(alias="sessionId")
     duration: int
     message_count: int = Field(alias="messageCount")
     timestamp: str
 
 
-class StatsCache(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
+class StatsCache(BaseModel, populate_by_name=True):
     version: int = 0
     last_computed_date: str = Field(alias="lastComputedDate", default="")
     daily_activity: list[DailyActivity] = Field(alias="dailyActivity", default=[])

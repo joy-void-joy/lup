@@ -47,7 +47,7 @@ same reason.
 
 from typing import Literal, TypedDict
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
 from lup.policy.kernel.decision import DecisionEffect, SandboxPlacement
 from lup.policy.kernel.rows import RunnerTargetRow, RuleLevel, ShellRuleRow
@@ -72,14 +72,12 @@ repeat it.
 """
 
 
-class DeclaredAxes(BaseModel):
+class DeclaredAxes(BaseModel, frozen=True):
     """What one level of a table states, leaving the rest to the level above.
 
     ``None`` is inheritance, and it is the only thing absence means anywhere in
     the table — never a reset to the most permissive value.
     """
-
-    model_config = ConfigDict(frozen=True)
 
     effect: CommandEffect | None = None
     sandbox: SandboxPlacement | None = None
@@ -94,10 +92,8 @@ class RowAxes(TypedDict):
     sandbox_source: RuleLevel
 
 
-class ResolvedAxes(BaseModel):
+class ResolvedAxes(BaseModel, frozen=True):
     """Both axes as one level resolved them, and where each value came from."""
-
-    model_config = ConfigDict(frozen=True)
 
     effect: CommandEffect
     effect_source: RuleLevel
@@ -137,7 +133,7 @@ ROOT_AXES = ResolvedAxes(
 """What the outermost level of every table inherits from."""
 
 
-class RunnerTargetRule(BaseModel):
+class RunnerTargetRule(BaseModel, frozen=True):
     """One ``uv run <target>`` a project blesses, and where it has to run.
 
     ``uv`` is parsed rather than matched against the command table, so this is
@@ -154,16 +150,12 @@ class RunnerTargetRule(BaseModel):
     leave, which is what stops a second way of saying it from growing.
     """
 
-    model_config = ConfigDict(frozen=True)
-
     name: str
     sandbox: SandboxPlacement = "ambient"
 
 
-class ShellOperationRule(BaseModel):
+class ShellOperationRule(BaseModel, frozen=True):
     """One operation word under a subcommand — e.g. ``worktree remove``."""
-
-    model_config = ConfigDict(frozen=True)
 
     name: str
     effect: CommandEffect = ROOT_EFFECT
@@ -180,15 +172,13 @@ class ShellOperationRule(BaseModel):
         )
 
 
-class ShellSubcommandRule(BaseModel):
+class ShellSubcommandRule(BaseModel, frozen=True):
     """One subcommand under a command — e.g. ``git worktree``, ``gh pr``.
 
     ``read_verbs`` name action-selecting flags that pin a one-action-at-a-time
     subcommand to its query form (``git config --get``); their presence among
     literal, unguarded words de-escalates a non-allow effect to allow.
     """
-
-    model_config = ConfigDict(frozen=True)
 
     name: str
     effect: CommandEffect = ROOT_EFFECT
@@ -207,7 +197,7 @@ class ShellSubcommandRule(BaseModel):
         )
 
 
-class ShellCommandRule(BaseModel):
+class ShellCommandRule(BaseModel, frozen=True):
     """One executable — a read-only tool, or a subcommand-gated command.
 
     On a subcommand-gated command, ``value_flags`` name the global options that
@@ -230,8 +220,6 @@ class ShellCommandRule(BaseModel):
     it out — one field says every one of these, so a rule that permits the
     outside never has a second way to say it.
     """
-
-    model_config = ConfigDict(frozen=True)
 
     name: str
     default_effect: CommandEffect

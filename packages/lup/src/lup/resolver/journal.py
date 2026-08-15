@@ -25,7 +25,6 @@ from pydantic import BaseModel, TypeAdapter
 from lup.channels.models import utc_now
 from lup.channels.stream import Stream
 from lup.resolver.models import (
-    FROZEN,
     ActorRef,
     ConcernProgress,
     MaterialQuestion,
@@ -39,45 +38,37 @@ from lup.runtime.models import TurnEvent
 JOURNAL_FILE = "journal.jsonl"
 
 
-class PhaseChangedEvent(BaseModel):
+class PhaseChangedEvent(BaseModel, frozen=True):
     """The run moved to a new phase."""
-
-    model_config = FROZEN
 
     type: Literal["phase_changed"] = "phase_changed"
     phase: ResolvePhase
 
 
-class ConcernProgressedEvent(BaseModel):
+class ConcernProgressedEvent(BaseModel, frozen=True):
     """One concern reached a new status."""
-
-    model_config = FROZEN
 
     type: Literal["concern_progressed"] = "concern_progressed"
     progress: ConcernProgress
 
 
-class QuestionAskedEvent(BaseModel):
+class QuestionAskedEvent(BaseModel, frozen=True):
     """An actor put a material question to the humans."""
-
-    model_config = FROZEN
 
     type: Literal["question_asked"] = "question_asked"
     question: MaterialQuestion
     asked_by: str
 
 
-class AnswerSettledEvent(BaseModel):
+class AnswerSettledEvent(BaseModel, frozen=True):
     """A question took its answer, from whichever door supplied it."""
-
-    model_config = FROZEN
 
     type: Literal["answer_settled"] = "answer_settled"
     answer: QuestionAnswer
     door: str
 
 
-class MessagePostedEvent(BaseModel):
+class MessagePostedEvent(BaseModel, frozen=True):
     """A door volunteered something to an actor, or an actor replied.
 
     An intervention belongs in the record beside what it interrupted. A
@@ -86,8 +77,6 @@ class MessagePostedEvent(BaseModel):
     between a trace and an audit filed somewhere else.
     """
 
-    model_config = FROZEN
-
     type: Literal["message_posted"] = "message_posted"
     text: str
     door: str
@@ -95,7 +84,7 @@ class MessagePostedEvent(BaseModel):
     redirect: bool = False
 
 
-class MessageOutstandingEvent(BaseModel):
+class MessageOutstandingEvent(BaseModel, frozen=True):
     """A message still queued for an actor whose session is being closed.
 
     Recorded because the sender was told the message was sent, and the
@@ -105,18 +94,14 @@ class MessageOutstandingEvent(BaseModel):
     failure of an operation somebody performed to stop something.
     """
 
-    model_config = FROZEN
-
     type: Literal["message_outstanding"] = "message_outstanding"
     text: str
     door: str
     redirect: bool = False
 
 
-class JoinCompletedEvent(BaseModel):
+class JoinCompletedEvent(BaseModel, frozen=True):
     """One parent was joined, and whether git had to be adjudicated for it."""
-
-    model_config = FROZEN
 
     type: Literal["join_completed"] = "join_completed"
     parent: str
@@ -125,10 +110,8 @@ class JoinCompletedEvent(BaseModel):
     broke: list[str] = []
 
 
-class JoinAuditEvent(BaseModel):
+class JoinAuditEvent(BaseModel, frozen=True):
     """The finished tree was re-checked against every parent that built it."""
-
-    model_config = FROZEN
 
     type: Literal["join_audit"] = "join_audit"
     parents: list[str]
@@ -136,7 +119,7 @@ class JoinAuditEvent(BaseModel):
     commit: str
 
 
-class ReviewResidualEvent(BaseModel):
+class ReviewResidualEvent(BaseModel, frozen=True):
     """Observations an accepting review recorded beside its verdict.
 
     A residual on a rejected review re-enters the worker's feedback; on an
@@ -145,15 +128,13 @@ class ReviewResidualEvent(BaseModel):
     the supervisor, and whoever files the follow-up work.
     """
 
-    model_config = FROZEN
-
     type: Literal["review_residual"] = "review_residual"
     concern_id: str
     round: int
     residual: list[str]
 
 
-class CriteriaCarriedEvent(BaseModel):
+class CriteriaCarriedEvent(BaseModel, frozen=True):
     """A human took an acceptance over criteria the reviewer left unmet.
 
     The bar is theirs, so waiving part of it is theirs too, and the waiver
@@ -162,15 +143,13 @@ class CriteriaCarriedEvent(BaseModel):
     and only this says which parts and on whose word.
     """
 
-    model_config = FROZEN
-
     type: Literal["criteria_carried"] = "criteria_carried"
     concern_id: str
     round: int
     criteria: list[str]
 
 
-class ForeignCriteriaEvent(BaseModel):
+class ForeignCriteriaEvent(BaseModel, frozen=True):
     """An accepted review credited ids the concern never declared.
 
     Recorded rather than acted on. Every declared criterion was accounted
@@ -181,15 +160,13 @@ class ForeignCriteriaEvent(BaseModel):
     visible to whoever reads the run.
     """
 
-    model_config = FROZEN
-
     type: Literal["foreign_criteria"] = "foreign_criteria"
     concern_id: str
     round: int
     labels: list[str]
 
 
-class VerificationFailedEvent(BaseModel):
+class VerificationFailedEvent(BaseModel, frozen=True):
     """What one gate saw at the moment it decided a concern's round.
 
     A run's record held no verification event of any kind: the check ran,
@@ -199,8 +176,6 @@ class VerificationFailedEvent(BaseModel):
     lease worktree the check ran in is usually still held by the run.
     """
 
-    model_config = FROZEN
-
     type: Literal["verification_failed"] = "verification_failed"
     concern_id: str
     round: int
@@ -209,7 +184,7 @@ class VerificationFailedEvent(BaseModel):
     output: str
 
 
-class RecheckRepeatedEvent(BaseModel):
+class RecheckRepeatedEvent(BaseModel, frozen=True):
     """A re-check reproduced a standing finding already put to the humans.
 
     The same lost-criteria set for the same concern asks once; a later join
@@ -217,15 +192,13 @@ class RecheckRepeatedEvent(BaseModel):
     question per join.
     """
 
-    model_config = FROZEN
-
     type: Literal["recheck_repeated"] = "recheck_repeated"
     concern_id: str
     occasion: str
     criteria: list[str]
 
 
-class BaseRefreshedEvent(BaseModel):
+class BaseRefreshedEvent(BaseModel, frozen=True):
     """A lease made from here starts from the branch as it stands now.
 
     A run pinned to the commit it was created at cannot see a fix made to
@@ -236,8 +209,6 @@ class BaseRefreshedEvent(BaseModel):
     it are still where they were.
     """
 
-    model_config = FROZEN
-
     type: Literal["base_refreshed"] = "base_refreshed"
     branch: str
     was: str
@@ -246,7 +217,7 @@ class BaseRefreshedEvent(BaseModel):
     reason: str = ""
 
 
-class LeaseRefreshedEvent(BaseModel):
+class LeaseRefreshedEvent(BaseModel, frozen=True):
     """What bringing the refreshed base into one lease did, or what stopped it.
 
     The base event above says where the run now starts; it says nothing
@@ -257,8 +228,6 @@ class LeaseRefreshedEvent(BaseModel):
     replaced code, which is the failure the refresh exists to prevent.
     """
 
-    model_config = FROZEN
-
     type: Literal["lease_refreshed"] = "lease_refreshed"
     concern_id: str
     commit: str
@@ -268,7 +237,7 @@ class LeaseRefreshedEvent(BaseModel):
     reason: str = ""
 
 
-class LeaseDriftEvent(BaseModel):
+class LeaseDriftEvent(BaseModel, frozen=True):
     """An abandoned concern's tree does not hold the commit last recorded.
 
     Recorded at restore rather than raised. The concern failed, so nothing
@@ -276,18 +245,14 @@ class LeaseDriftEvent(BaseModel):
     and a reader salvaging it wants both commits named.
     """
 
-    model_config = FROZEN
-
     type: Literal["lease_drift"] = "lease_drift"
     concern_id: str
     expected: str
     found: str
 
 
-class RunFailedEvent(BaseModel):
+class RunFailedEvent(BaseModel, frozen=True):
     """The run reached a terminal failure."""
-
-    model_config = FROZEN
 
     type: Literal["run_failed"] = "run_failed"
     reason: str
@@ -321,10 +286,8 @@ logs cannot answer that.
 """
 
 
-class JournalEntry(BaseModel):
+class JournalEntry(BaseModel, frozen=True):
     """One event, stamped and attributed."""
-
-    model_config = FROZEN
 
     seq: int
     at: datetime
@@ -335,10 +298,8 @@ class JournalEntry(BaseModel):
 ENTRY_ADAPTER: TypeAdapter[JournalEntry] = TypeAdapter(JournalEntry)
 
 
-class JournalTail(BaseModel):
+class JournalTail(BaseModel, frozen=True):
     """What one follower read, and where it should resume."""
-
-    model_config = FROZEN
 
     entries: list[JournalEntry]
     offset: int

@@ -5,7 +5,7 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 import pytest
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
 from lup.runtime.background import BackgroundAgent, BackgroundConfig
 from lup.runtime.composition import AcceptedTurn, CompletedTurn, ComposedSession
@@ -23,9 +23,7 @@ from lup.runtime.models import (
 from tests.unit.test_capability_runtime import RecordingBinder
 
 
-class BackgroundState(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class BackgroundState(BaseModel, frozen=True):
     value: int
 
 

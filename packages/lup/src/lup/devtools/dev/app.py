@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Annotated
 
 import typer
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
 import lup.devtools.dev.antipatterns as antipatterns_mod
 import lup.devtools.dev.boundaries as boundaries_mod
@@ -22,6 +22,7 @@ import lup.devtools.dev.comments as comments
 import lup.devtools.dev.commit_guard as commit_guard
 import lup.devtools.dev.conflicts as conflicts
 import lup.devtools.dev.issues as issues_mod
+import lup.devtools.dev.model_config as model_config_mod
 import lup.devtools.dev.plugin as plugin_mod
 import lup.devtools.dev.policy_explain as policy_explain
 import lup.devtools.dev.pr as pr
@@ -40,15 +41,13 @@ from lup.policy.vocabulary import default_vocabulary
 from lup.workspace.paths import project_root
 
 
-class DevDeclarations(BaseModel):
+class DevDeclarations(BaseModel, frozen=True):
     """Everything the dev tree reads about the repository it is running in.
 
     Read when a command runs rather than when the CLI is composed: each of
     these resolves against the working directory, and a CLI is imported long
     before anyone knows which repository it will be pointed at.
     """
-
-    model_config = ConfigDict(frozen=True)
 
     project: DevProject
     hooks: HookSet
@@ -80,6 +79,11 @@ def create_dev_app(
         guard_app,
         name="commit-guard",
         help="The pre-commit hook refusing stale generated artifacts",
+    )
+    app.add_typer(
+        model_config_mod.create_model_config_app(),
+        name="model-config",
+        help="Pydantic configuration census and equivalence",
     )
 
     # -- worktree commands --

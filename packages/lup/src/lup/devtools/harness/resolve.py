@@ -14,7 +14,7 @@ from pathlib import Path
 
 import sh
 import typer
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
 from lup.codescan.markers import find_feedback
 from lup.harness.enforcement import semantic_policy_for
@@ -96,15 +96,13 @@ from lup.devtools.supervisor.projection import answer_recipe as rerun_recipe
 from lup.devtools.supervisor.projection import PendingQuestionView, question_views
 
 
-class ConfiguredModel(BaseModel):
+class ConfiguredModel(BaseModel, frozen=True):
     """The model an application is configured to run, and where it routes.
 
     A resolver session runs through one native adapter, and a model reaches
     only the backend its vendor prefix names. Naming both here lets the
     driver say which one it declined rather than silently taking a default.
     """
-
-    model_config = ConfigDict(frozen=True)
 
     name: str
     adapter: str
@@ -114,10 +112,8 @@ class ConfiguredModel(BaseModel):
         return self.name if self.adapter == adapter else None
 
 
-class LocatedNote(BaseModel):
+class LocatedNote(BaseModel, frozen=True):
     """Where one scanned note sits, spelled the way a reader opens it."""
-
-    model_config = ConfigDict(frozen=True)
 
     file: str
     start_line: int
@@ -127,7 +123,7 @@ class LocatedNote(BaseModel):
         return f"{self.file}:{self.start_line}-{self.end_line}"
 
 
-class CarriedNote(LocatedNote):
+class CarriedNote(LocatedNote, frozen=True):
     """One parked note the resolver leaves alone, with the gate it stated."""
 
     label: str
@@ -136,7 +132,7 @@ class CarriedNote(LocatedNote):
         return f"carrying {self.label} {self.location()}"
 
 
-class GeneratedNote(LocatedNote):
+class GeneratedNote(LocatedNote, frozen=True):
     """One note a generated artifact holds, named by the id that owns it."""
 
     semantic_id: str
@@ -332,10 +328,8 @@ def parse_answer_flags(
     return {pair[0]: pair[1] for pair in pairs}
 
 
-class NoteTargetRef(BaseModel):
+class NoteTargetRef(BaseModel, frozen=True):
     """One `file:line` target naming a note already written in the tree."""
-
-    model_config = ConfigDict(frozen=True)
 
     file: Path
     line: int
@@ -494,10 +488,8 @@ SUPERVISED_WAIT_SECONDS = 3600.0
 which is where a caller replaces it."""
 
 
-class SupervisorSpawn(BaseModel):
+class SupervisorSpawn(BaseModel, frozen=True):
     """Whether a run opens a page beside itself, and on which port."""
-
-    model_config = ConfigDict(frozen=True)
 
     enabled: bool = False
     port: int = SUPERVISOR_PORT
@@ -967,7 +959,7 @@ def describe_refresh(report: RefreshReport) -> list[str]:
     return lines
 
 
-class AdmissionFlags(BaseModel):
+class AdmissionFlags(BaseModel, frozen=True):
     """The evidence one invocation named, in the flags that carried it.
 
     Kept as flags rather than resolved evidence because a detached run is
@@ -975,8 +967,6 @@ class AdmissionFlags(BaseModel):
     sayable again, and whatever a relaunch cannot say is dropped without a
     word.
     """
-
-    model_config = ConfigDict(frozen=True)
 
     statements: list[str]
     notes: list[str]
@@ -994,7 +984,7 @@ class AdmissionFlags(BaseModel):
         ]
 
 
-class DetachedRun(BaseModel):
+class DetachedRun(BaseModel, frozen=True):
     """One invocation, spelled as the relaunch that has to carry it on.
 
     A detached launch re-issues its own command in a child, so every option
@@ -1011,8 +1001,6 @@ class DetachedRun(BaseModel):
     claim refuses an admission instead of seeding from it, leaving the child
     to reject its own command line where nobody is listening.
     """
-
-    model_config = ConfigDict(frozen=True)
 
     adapter: str
     run_id: str | None

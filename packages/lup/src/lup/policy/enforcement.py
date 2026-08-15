@@ -15,7 +15,7 @@ already carries.
 
 from collections.abc import Callable
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field
 
 from lup.hooks import (
     LupHookInput,
@@ -104,7 +104,7 @@ composition root supplies this — ``lup.adapters.claude.hooks`` has the
 decoder for Claude sessions."""
 
 
-class SandboxPosture(BaseModel):
+class SandboxPosture(BaseModel, frozen=True):
     """What one session's own sandbox configuration means to the policy.
 
     Read from the configuration a session is opened with, never from the
@@ -120,8 +120,6 @@ class SandboxPosture(BaseModel):
     nothing about its sandbox is judged as confining nothing and escaping
     nowhere.
     """
-
-    model_config = ConfigDict(frozen=True)
 
     active: bool = False
     """Whether an OS sandbox is asked to confine what this session runs.
@@ -145,7 +143,7 @@ class SandboxPosture(BaseModel):
     """Whether this session may place one call outside that sandbox."""
 
 
-class NativeSemantics(BaseModel):
+class NativeSemantics(BaseModel, frozen=True):
     """One runtime's call decoder together with the tools it has rules for.
 
     The two are one fact, and a caller asked for them separately can supply
@@ -157,8 +155,6 @@ class NativeSemantics(BaseModel):
     that disables enforcement while looking like configuration — is refused
     at construction.
     """
-
-    model_config = ConfigDict(frozen=True)
 
     decode: SemanticDecoder
     routed_tools: list[str] = Field(min_length=1)

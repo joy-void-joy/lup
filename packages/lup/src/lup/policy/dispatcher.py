@@ -40,7 +40,7 @@ from importlib import resources
 from pathlib import PurePath
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
 from lup.harness.banner import REGENERATE_COMMAND, GeneratedBanner
 from lup.policy.kernel.edit import file_level_line, suppression_reaches
@@ -124,15 +124,13 @@ writing the reason to stderr and exiting non-zero.
 """
 
 
-class DispatcherDeclaration(BaseModel):
+class DispatcherDeclaration(BaseModel, frozen=True):
     """Everything one native runtime spells differently from every other.
 
     Each field is required, so answering the whole set is what constructing a
     runtime means. Adding a field is how a new axis of divergence is opened,
     and both runtimes have to close it before the tree compiles again.
     """
-
-    model_config = ConfigDict(frozen=True)
 
     runtime_name: str
     package: str
@@ -143,19 +141,15 @@ class DispatcherDeclaration(BaseModel):
     runtime_modules: list[str]
 
 
-class DispatcherImport(BaseModel):
+class DispatcherImport(BaseModel, frozen=True):
     """One module a dispatcher half imports, with the names it takes."""
-
-    model_config = ConfigDict(frozen=True)
 
     module: str
     names: list[str]
 
 
-class SourceHalf(BaseModel):
+class SourceHalf(BaseModel, frozen=True, arbitrary_types_allowed=True):
     """One type-checked module the compiler reads rather than authors."""
-
-    model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
 
     module: str
     text: str

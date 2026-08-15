@@ -12,15 +12,13 @@ so an application stores one the way it stores the runtime's name.
 
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
 from lup.types import EnvVars
 
 
-class ProviderLogin(BaseModel):
+class ProviderLogin(BaseModel, frozen=True):
     """One runtime's stored-login location, in that runtime's own words."""
-
-    model_config = ConfigDict(frozen=True)
 
     config_home_env: str
     """Environment variable pointing this runtime's CLI at a config home."""

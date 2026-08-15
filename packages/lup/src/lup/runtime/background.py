@@ -12,7 +12,7 @@ import asyncio
 import logging
 from collections.abc import Awaitable, Callable
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field
 
 from lup.runtime.factory import SessionFactory
 from lup.runtime.errors import TurnError
@@ -21,10 +21,8 @@ from lup.runtime.models import TurnRequest, TurnResult
 logger = logging.getLogger(__name__)
 
 
-class BackgroundConfig(BaseModel):
+class BackgroundConfig(BaseModel, frozen=True):
     """Scheduling behavior independent from provider construction."""
-
-    model_config = ConfigDict(frozen=True)
 
     debounce_seconds: float = Field(default=0.1, ge=0)
 

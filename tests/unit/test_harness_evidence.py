@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field
 import yaml
 
 from lup.devtools.dev.commit_guard import DRIFT_COMMAND
@@ -23,19 +23,15 @@ from lup.devtools.harness.evidence import (
 STALE_LEDGER = [EvidenceEntry(capability="codex-cli", version="0.144.4")]
 
 
-class WorkflowStep(BaseModel):
+class WorkflowStep(BaseModel, frozen=True):
     """Workflow step fields relevant to native evidence execution."""
-
-    model_config = ConfigDict(frozen=True)
 
     name: str | None = None
     run: str | None = None
 
 
-class WorkflowJob(BaseModel):
+class WorkflowJob(BaseModel, frozen=True):
     """Workflow job fields that enforce evidence ordering."""
-
-    model_config = ConfigDict(frozen=True)
 
     needs: list[str] = Field(default_factory=list)
     condition: str | None = Field(default=None, alias="if")
@@ -43,10 +39,8 @@ class WorkflowJob(BaseModel):
     steps: list[WorkflowStep]
 
 
-class NativeWorkflow(BaseModel):
+class NativeWorkflow(BaseModel, frozen=True):
     """Validated native-workflow job graph."""
-
-    model_config = ConfigDict(frozen=True)
 
     jobs: dict[str, WorkflowJob]
 

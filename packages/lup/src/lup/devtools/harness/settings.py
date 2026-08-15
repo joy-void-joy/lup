@@ -13,16 +13,14 @@ session is denied something the policy allows.
 
 from urllib.parse import urlsplit
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field
 
 from lup.harness.models import HookSet, HookUrlScope, Plugin
 from lup.types import JsonObject, JsonValue
 
 
-class Settings(BaseModel):
+class Settings(BaseModel, frozen=True):
     """The half of a settings artifact that is a project's own judgement."""
-
-    model_config = ConfigDict(frozen=True)
 
     base: JsonObject = Field(
         default={},

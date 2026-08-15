@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 from datetime import timedelta
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field
 
 from lup.channels.models import publish_atomic
 from lup.runtime.composition import is_output_model
@@ -44,35 +44,27 @@ from lup.runtime.models import (
 from lup.types import Usage, UsageCost
 
 
-class TimeoutConfig(BaseModel):
+class TimeoutConfig(BaseModel, frozen=True):
     """Deadline covering native acceptance through terminal completion."""
-
-    model_config = ConfigDict(frozen=True)
 
     seconds: float = Field(gt=0)
 
 
-class BudgetConfig(BaseModel):
+class BudgetConfig(BaseModel, frozen=True, arbitrary_types_allowed=True):
     """Whole-logical-turn cost limit and independent usage estimator."""
-
-    model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
 
     maximum_usd: float = Field(ge=0)
     usage_cost: UsageCost
 
 
-class RecoveryConfig(BaseModel):
+class RecoveryConfig(BaseModel, frozen=True):
     """Bounded provider-failure retries inside one logical turn."""
-
-    model_config = ConfigDict(frozen=True)
 
     retries: int = Field(default=1, ge=0)
 
 
-class CorrectionConfig(BaseModel):
+class CorrectionConfig(BaseModel, frozen=True):
     """Bounded missing-output correction cycles inside one logical turn."""
-
-    model_config = ConfigDict(frozen=True)
 
     cycles: int = Field(default=2, ge=0)
     instruction: str = (
@@ -81,38 +73,30 @@ class CorrectionConfig(BaseModel):
     )
 
 
-class PersistenceConfig(BaseModel):
+class PersistenceConfig(BaseModel, frozen=True):
     """Directory receiving one successful immutable result document per turn."""
-
-    model_config = ConfigDict(frozen=True)
 
     directory: Path
 
 
-class TraceRecord(BaseModel):
+class TraceRecord(BaseModel, frozen=True):
     """Terminal evidence emitted once for a complete logical turn."""
-
-    model_config = ConfigDict(frozen=True)
 
     succeeded: bool
     identifiers: TurnIdentifiers | None = None
     failure: TurnFailure | None = None
 
 
-class UsageRecord(BaseModel):
+class UsageRecord(BaseModel, frozen=True):
     """Portable usage observed after a successful logical turn."""
-
-    model_config = ConfigDict(frozen=True)
 
     identifiers: TurnIdentifiers
     usage: Usage
     duration: timedelta
 
 
-class DisplayRecord(BaseModel):
+class DisplayRecord(BaseModel, frozen=True):
     """Completed replay data, deliberately distinct from live events."""
-
-    model_config = ConfigDict(frozen=True)
 
     identifiers: TurnIdentifiers
     messages: list[TurnMessage]
@@ -124,26 +108,20 @@ type UsageSink = Callable[[UsageRecord], Awaitable[None]]
 type DisplaySink = Callable[[DisplayRecord], Awaitable[None]]
 
 
-class TracingConfig(BaseModel):
+class TracingConfig(BaseModel, frozen=True, arbitrary_types_allowed=True):
     """Terminal logical-turn trace callback."""
-
-    model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
 
     sink: TraceSink
 
 
-class UsageConfig(BaseModel):
+class UsageConfig(BaseModel, frozen=True, arbitrary_types_allowed=True):
     """Successful logical-turn usage callback."""
-
-    model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
 
     sink: UsageSink
 
 
-class DisplayConfig(BaseModel):
+class DisplayConfig(BaseModel, frozen=True, arbitrary_types_allowed=True):
     """Successful completed-replay callback."""
-
-    model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
 
     sink: DisplaySink
 

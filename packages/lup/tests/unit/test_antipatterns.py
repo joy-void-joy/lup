@@ -309,6 +309,40 @@ def test_audit_skips_plain_comment_lines() -> None:
     assert findings == []
 
 
+@pytest.mark.parametrize(
+    "declaration",
+    [
+        "    model_config = ConfigDict(frozen=True)",
+        '    model_config = SettingsConfigDict(extra="ignore")',
+        "    model_config = FROZEN",
+        '    model_config = {"arbitrary_types_allowed": True}',
+        "    model_config: ClassVar[ConfigDict] = ConfigDict(frozen=True)",
+    ],
+)
+def test_model_config_rule_fires_on_every_declaration_shape(declaration: str) -> None:
+    """Each shape a repository census turned up is a declaration the rule sees.
+
+    The shapes differ only in what sits right of the `=`, so a rule anchored on
+    the assignment catches a constructor, a shared alias, a bare dict and an
+    annotated form alike — including one nobody enumerated in advance.
+    """
+    findings = audit_text(f"{declaration}\n", PYTHON_ANTI_PATTERNS)
+    assert [f.rule_id for f in findings] == ["model-config"]
+
+
+def test_model_config_rule_names_the_class_keyword_replacement() -> None:
+    """The message says what to write instead, not only what is wrong."""
+    message = rule_named(PYTHON_ANTI_PATTERNS, "model-config").message
+    assert "class keywords" in message
+    assert "BaseModel, frozen=True" in message
+
+
+def test_model_config_rule_ignores_the_identifier_in_prose() -> None:
+    """A `model_config` named in a comment or a string is not a declaration."""
+    prose = '# model_config = ConfigDict(frozen=True) in a comment\nx = "model_config = 1"\n'
+    assert audit_text(prose, PYTHON_ANTI_PATTERNS) == []
+
+
 def test_comment_context_covers_exactly_the_directive_rules() -> None:
     """Only comment-directive rules scan comments; every other rule sees code."""
     python_comment = {ap.id for ap in PYTHON_ANTI_PATTERNS if ap.context == "comment"}

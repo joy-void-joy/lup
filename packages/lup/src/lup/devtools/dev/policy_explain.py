@@ -17,7 +17,7 @@ import json
 from pathlib import Path
 
 import typer
-from pydantic import AnyHttpUrl, BaseModel, ConfigDict
+from pydantic import AnyHttpUrl, BaseModel
 
 from lup.devtools.utils import output_json
 from lup.harness.enforcement import semantic_policy_for
@@ -39,10 +39,8 @@ EFFECT_STYLES: StringMap = {
 """How each verdict reads at a glance, for a caller that does not say."""
 
 
-class PolicyVerdict(BaseModel):
+class PolicyVerdict(BaseModel, frozen=True):
     """One classified input and what the declared policy decided about it."""
-
-    model_config = ConfigDict(frozen=True)
 
     input: str
     kind: str

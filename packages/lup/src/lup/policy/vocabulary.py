@@ -39,7 +39,7 @@ whether opening a pull request is authoring or publishing.
 
 from collections.abc import Sequence
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
 from lup.policy.kernel.decision import SandboxPlacement
 from lup.policy.shell_rules import (
@@ -50,10 +50,8 @@ from lup.policy.shell_rules import (
 )
 
 
-class JudgedCommand(BaseModel):
+class JudgedCommand(BaseModel, frozen=True):
     """One command that stops for a human, and the reason it gives them."""
-
-    model_config = ConfigDict(frozen=True)
 
     name: str
     reason: str

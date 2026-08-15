@@ -11,7 +11,7 @@
 from pathlib import Path
 from typing import Literal
 
-from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, ValidationError
+from pydantic import AnyHttpUrl, BaseModel, Field, ValidationError
 
 from lup.policy.models import (
     BeforeTool,
@@ -28,46 +28,34 @@ from lup.policy.native import NativeDecisionRenderer, NativeEventDecoder
 from lup.types import JsonObject
 
 
-class CodexFileChange(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class CodexFileChange(BaseModel, frozen=True):
     path: Path
     before: str | None = None
     after: str | None = None
 
 
-class CodexFileChangeOperation(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class CodexFileChangeOperation(BaseModel, frozen=True):
     type: Literal["file_change"] = "file_change"
     changes: list[CodexFileChange] = Field(min_length=1)
 
 
-class CodexShellOperation(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class CodexShellOperation(BaseModel, frozen=True):
     type: Literal["shell"] = "shell"
     command: str
     cwd: Path | None = None
 
 
-class CodexFetchOperation(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class CodexFetchOperation(BaseModel, frozen=True):
     type: Literal["fetch"] = "fetch"
     url: str
 
 
-class CodexSearchOperation(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class CodexSearchOperation(BaseModel, frozen=True):
     type: Literal["search"] = "search"
     query: str
 
 
-class CodexUnknownOperation(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class CodexUnknownOperation(BaseModel, frozen=True):
     type: Literal["unknown"] = "unknown"
     name: str
     input: JsonObject = {}
@@ -82,16 +70,12 @@ type CodexOperation = (
 )
 
 
-class CodexBeforeToolEvent(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class CodexBeforeToolEvent(BaseModel, frozen=True):
     operation: CodexOperation
 
 
-class CodexHookPayload(BaseModel):
+class CodexHookPayload(BaseModel, frozen=True):
     """Validated external hook input before operation-specific parsing."""
-
-    model_config = ConfigDict(frozen=True)
 
     tool_name: str
     tool_input: JsonObject = {}
@@ -158,10 +142,8 @@ class CodexEventDecoder(NativeEventDecoder[CodexBeforeToolEvent]):
         return BeforeTool(tool=tool, identity=identity)
 
 
-class CodexDecisionOutput(BaseModel):
+class CodexDecisionOutput(BaseModel, frozen=True):
     """Exit behavior for one hermetic Codex command hook."""
-
-    model_config = ConfigDict(frozen=True)
 
     exit_code: int
     stdout: str = ""
