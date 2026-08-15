@@ -91,7 +91,10 @@ def dispatch(payload):
             tool_input["command"],
             managed_root(),
             sandbox_active() and not unsandboxed,
-            True,
+            interactive=True,
+            # A call's sandbox is an argument of the call here, so a verdict
+            # that has to leave the sandbox is carried out rather than refused.
+            escapable=True,
         )
     if name == "WebFetch":
         return fetch_decision(tool_input["url"])

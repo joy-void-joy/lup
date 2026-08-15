@@ -38,7 +38,10 @@ from lup.workspace.paths import project_root, read_project_name
 from lup_template.agent.toolsets import tool_group_names
 from lup_template.devtools.harness.content.catalog import AGENTS, SKILLS
 from lup_template.devtools.harness.content.guidance import DOCUMENT as GUIDANCE
-from lup_template.devtools.harness.content.shell_vocabulary import SHELL_RULES
+from lup_template.devtools.harness.content.shell_vocabulary import (
+    RUNNER_TARGETS,
+    SHELL_RULES,
+)
 
 EXCLUDED_COMMANDS = [
     # `py eval` is the rung the guidance points at for computing anything, and
@@ -310,7 +313,10 @@ def portable_harness(version: str = "0.2.0", root: Path | None = None) -> Harnes
             shell_rules=SHELL_RULES,
             # This project's toolchain: what `uv run <target>` may reach here
             # without a question, which is nothing any other project inherits.
-            runner_targets=["pyright", "pytest", "ruff", "lup-devtools"],
+            # The group places `lup-devtools` outside the sandbox, because
+            # every command of it that opens an agent session is unusable
+            # confined.
+            runner_targets=RUNNER_TARGETS,
             sandbox=HookSandbox(
                 extra_domains=["api.anthropic.com"],
                 # A read deny inside the boundary, which is where it belongs:

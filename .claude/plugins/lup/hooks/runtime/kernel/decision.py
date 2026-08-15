@@ -27,6 +27,21 @@ renders the plain effect instead — see :meth:`KernelDecision.placed`.
 SANDBOX_ESCAPE_NOTICE = " — this will run outside the sandbox"
 """What an approval question adds when the call it approves also escapes."""
 
+SANDBOX_TRAPPED_REASON = (
+    "this has to run outside the sandbox, and this runtime puts no single call"
+    " outside its own — run from inside one it would reach the shell and die on"
+    " a bare read-only-filesystem error, which reads like a broken repository"
+    " rather than like a boundary; re-run it from a session that is not"
+    " sandboxed"
+)
+"""Why a call that has to escape is refused where nothing can carry it out.
+
+An intent no runtime will honour is worse than a refusal: the call runs,
+fails on whatever it happened to write first, and the agent cannot tell that
+from a repository in a bad state, so it retries, works around it, or reports
+success from a session that never ran a command.
+"""
+
 
 KERNEL_IMPORT_ALLOWLIST = (  # lup: ignore[library-default] — the stdlib the kernel actually imports; the hermetic guarantee it exists to hold
     "ast",

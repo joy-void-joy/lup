@@ -19,6 +19,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from lup.mcp import LupMcpServerConfig, McpServerEntry
 from lup.hooks import LupHooksConfig
+from lup.policy.enforcement import SandboxPosture
 from lup.runtime.composition import AcceptedTurn, CompletedTurn, ComposedSession
 from lup.runtime.contracts import (
     EventStream,
@@ -91,6 +92,29 @@ class ClaudeSandboxConfig(BaseModel):
             "passed here too"
         ),
     )
+
+    def posture(self) -> SandboxPosture:
+        """These settings as the policy judging this session reads them.
+
+        The same two values reach the CLI and the policy from this one
+        object, so a session cannot be permitted more or less than whatever
+        judges it believes. Read off a runtime constant instead, the two
+        drifted the only way they can: the policy granted an escape the
+        settings forbade, and the runtime dropped it without a word.
+
+        The two halves are not equally firm, and only one of them settles
+        its own question. ``allow_unsandboxed_commands`` decides the escape
+        outright — off, the per-call argument is ignored. ``enabled`` only
+        asks for a sandbox: where one cannot start, the CLI warns and runs
+        the session unconfined, and this reports a boundary that is not
+        there. The CLI settles that with a fail-if-unavailable setting, which
+        this configuration cannot reach because the SDK's sandbox settings do
+        not carry it; until they do, the placement is settled here and the
+        confinement is asserted.
+        """
+        return SandboxPosture(
+            active=self.enabled, escapable=self.allow_unsandboxed_commands
+        )
 
 
 type ClaudePermissionMode = Literal[

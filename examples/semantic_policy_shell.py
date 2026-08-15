@@ -16,6 +16,7 @@ from pydantic import AnyHttpUrl
 
 from lup.adapters.claude.hooks import CLAUDE_SEMANTICS
 from lup.adapters.claude.runtime import (
+    ClaudeSandboxConfig,
     ClaudeSessionConfig,
     create_claude_session_factory,
 )
@@ -29,6 +30,14 @@ from examples.common import Summary
 
 DOCS_ORIGIN = AnyHttpUrl("https://docs.example.com")
 DENIED_COMMAND = "curl https://docs.example.com/private/token"
+
+SANDBOX = ClaudeSandboxConfig(allow_unsandboxed_commands=True)
+"""The escape this session permits, said once to the policy and the runtime.
+
+A rule may place a call outside the sandbox, but only a session that opened
+the channel can carry it there. One object answers both so the two cannot
+disagree — unstated, a placement is rendered and silently dropped.
+"""
 
 
 def policy_hooks() -> LupHooksConfig:
@@ -46,6 +55,7 @@ def policy_hooks() -> LupHooksConfig:
     return create_policy_hooks(
         SemanticToolPolicy(shell=policy),
         CLAUDE_SEMANTICS,
+        sandbox=SANDBOX.posture(),
     )
 
 
@@ -55,6 +65,7 @@ def session_config() -> ClaudeSessionConfig:
         model="claude-opus-5",
         system_prompt="Run what you are asked to run and report what happened.",
         hooks=policy_hooks(),
+        sandbox=SANDBOX,
     )
 
 

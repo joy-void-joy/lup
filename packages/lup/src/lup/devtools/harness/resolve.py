@@ -17,6 +17,14 @@ import typer
 from pydantic import BaseModel, ConfigDict
 
 from lup.codescan.markers import find_feedback
+from lup.harness.enforcement import semantic_policy_for
+from lup.harness.models import HookSet
+from lup.hooks import LupHooksConfig
+from lup.policy.enforcement import (
+    NativeSemantics,
+    SandboxPosture,
+    create_policy_hooks,
+)
 from lup.mcp import create_mcp_server, serve_stdio, server_tool_names
 from lup.policy.grants import LeaseGrants, allowance_grants_environment
 from lup.policy.identity import agent_identity_environment
@@ -939,6 +947,71 @@ def admission_request(
     )
 
 
+def worker_policy_hooks(
+    declared_hooks: HookSet,
+    grants: LeaseGrants,
+    semantics: NativeSemantics,
+    sandbox: SandboxPosture,
+) -> LupHooksConfig:
+    """Judge a worker's calls by the policy every plugin enforces.
+
+    The directory ACL beside this bounds the worker's filesystem reach and
+    says nothing about what it may fetch or run — so egress and shell passed
+    unjudged, with the OS sandbox as the only floor. This supplies exactly
+    those verdicts, scoped to the tools it has rules for: a headless worker
+    has no human to answer an `ask`, so judging a tool this vocabulary cannot
+    classify would deny it, and would outrank the ACL's own grant.
+
+    The worker is autonomous because its edits are reviewed by an actor of
+    this run, which is the same fact the generated tree derives its
+    autonomous list from.
+
+    ``grants`` is asked what the lease holds at each judgment, over the same
+    document the session environment names — so this judge and the lease's
+    deployed dispatcher release exactly the same gates, including one granted
+    after both were built.
+
+    ``semantics`` is how one runtime's calls become the vocabulary this
+    policy judges. It is a parameter rather than a constant because both
+    runtimes have that decode now, and hardcoding one was what left the
+    other's workers judged by nothing.
+
+    ``sandbox`` is the session's own confinement, read from the declaration
+    the factory opens it with rather than from the runtime. Taking the
+    runtime's word granted an escape the session forbade — rendered onto the
+    wire, dropped without a word, and the call left confined to fail on
+    whatever it wrote first. Asking the session instead is what lets a
+    worker's toolchain be placed outside and actually get there.
+
+    Only the placement is taken from it. What the posture says about
+    confinement stays out of the verdict, because the kernel spends that fact
+    on a substitution this host cannot afford: its arm takes ``defer`` and
+    ``ask`` together, so where there is no human to answer, every guarded
+    verdict becomes a run rather than a refusal — ``find -delete`` and ``git
+    push --delete`` among them, and a ``# lup: escalate:`` marker, which
+    resolves to an ask, turned into the way to avoid the human it exists to
+    summon. A worker keeps the fail-closed floor until it can answer a
+    question through the channel it already holds.
+
+    It composes here, outside the factory that calls it, because the defect
+    this shape exists to prevent was never in a verdict: the kernel answered
+    correctly every time and the session handed it host facts it did not
+    have. A composition only a running resolver can build is one no test
+    reaches, and this one shipped its own widening once already.
+    """
+    return create_policy_hooks(
+        semantic_policy_for(
+            declared_hooks,
+            autonomous=True,
+            interactive=False,
+            escapable=semantics.escapes_from(sandbox),
+            grants=grants,
+        ),
+        semantics.also_refusing(declared_hooks.refused_tools),
+        sandbox=sandbox,
+    )
+
+
 def answer_issues(concerns: list[Concern], manifest: ResolveManifest) -> list[int]:
     """Say on each answered issue where the work that answers it now sits.
 
@@ -1053,14 +1126,11 @@ def run_resolve(
         )
         from lup.adapters.claude.hooks import CLAUDE_SEMANTICS
         from lup.adapters.codex.hooks import CODEX_SEMANTICS
-        from lup.harness.enforcement import semantic_policy_for
         from lup.hooks import (
-            LupHooksConfig,
             create_git_inspection_hook,
             create_permission_hooks,
             merge_hooks,
         )
-        from lup.policy.enforcement import NativeSemantics, create_policy_hooks
 
         from lup.adapters.codex.harness_runtime import (
             CodexPluginInstaller,
@@ -1195,18 +1265,6 @@ def run_resolve(
                 for path in (declared.writable_paths if declared is not None else [])
             ]
 
-        def worker_sandbox() -> ClaudeSandboxConfig:
-            """The boundary a worker session runs behind.
-
-            A spawned session inherits none of the settings files a launched
-            one reads, so the exclusions the declaration states have to be
-            handed over here as well. Without them a worker is confined by a
-            boundary its own toolchain does not fit through, and every
-            failure it meets names something other than the boundary.
-            """
-            excluded = plugin.hooks.excluded_commands() if plugin.hooks else []
-            return ClaudeSandboxConfig(excluded_commands=excluded)
-
         # lup: Every session opened here loses Bash entirely. A session launched
         # from inside sandboxed Bash cannot create its own
         # `~/.claude/session-env/<id>`, so each shell call dies on `EROFS:
@@ -1221,6 +1279,31 @@ def run_resolve(
         # that path made writable — the deny looks like the runtime's own
         # protection of its config directory, so test that a grant can override
         # it rather than assuming.
+
+        # A worker is confined to its lease, and the toolchain it verifies
+        # with is declared to run outside that confinement — so the escape has
+        # to be permitted where the session is opened, or the placement is
+        # rendered and dropped, which is the failure the placement exists to
+        # prevent. Claude's channel is a per-call argument, so one object says
+        # this to the session and to the policy at once and the two cannot
+        # come apart.
+        #
+        # A spawned session also inherits none of the settings files a launched
+        # one reads, so the exclusions the declaration states are handed over
+        # here as well: without them a worker is confined by a boundary its own
+        # toolchain does not fit through, and every failure it meets names
+        # something other than the boundary.
+        claude_worker_sandbox = ClaudeSandboxConfig(
+            allow_unsandboxed_commands=True,
+            excluded_commands=plugin.hooks.excluded_commands() if plugin.hooks else [],
+        )
+        # Codex has no such channel: its sandbox is a mode on the whole
+        # session, declared with that session below, and a call placed outside
+        # runs confined there whatever anyone says. So this carries the one
+        # fact the policy can act on — that nothing escapes — and says nothing
+        # about a confinement it could only restate.
+        codex_worker_sandbox = SandboxPosture()
+
         def worker_factory(context: WorkerContext) -> SessionFactory:
             """Open one worker session that can ask its own questions.
 
@@ -1267,7 +1350,7 @@ def run_resolve(
                         cwd=cwd,
                         add_dirs=[cwd, *toolchain_writable_paths()],
                         plugin_dirs=[lease_plugin_dir(cwd, plugin.name)],
-                        sandbox=worker_sandbox(),
+                        sandbox=claude_worker_sandbox,
                         environment=isolated_claude_environment(
                             concern_environment, cwd
                         ),
@@ -1281,7 +1364,10 @@ def run_resolve(
                                 merge_hooks(
                                     create_permission_hooks([cwd], []),
                                     worker_policy_hooks(
-                                        context.grants, CLAUDE_SEMANTICS
+                                        harness.declared_hooks,
+                                        context.grants,
+                                        CLAUDE_SEMANTICS,
+                                        claude_worker_sandbox.posture(),
                                     ),
                                 ),
                                 create_git_inspection_hook(),
@@ -1304,7 +1390,12 @@ def run_resolve(
                     # because its generated plugin hook is not reached either.
                     approval_policy="onRequest",
                     hooks=merge_hooks(
-                        worker_policy_hooks(context.grants, CODEX_SEMANTICS),
+                        worker_policy_hooks(
+                            harness.declared_hooks,
+                            context.grants,
+                            CODEX_SEMANTICS,
+                            codex_worker_sandbox,
+                        ),
                         create_inbox_hooks(inbox),
                     ),
                     environment=concern_environment,
@@ -1322,43 +1413,6 @@ def run_resolve(
                     },
                     writable_roots=[cwd],
                 )
-            )
-
-        def worker_policy_hooks(
-            grants: LeaseGrants, semantics: NativeSemantics
-        ) -> LupHooksConfig:
-            """Judge a worker's calls by the policy every plugin enforces.
-
-            The directory ACL beside this bounds the worker's filesystem
-            reach and says nothing about what it may fetch or run — so
-            egress and shell passed unjudged, with the OS sandbox as the
-            only floor. This supplies exactly those verdicts, scoped to the
-            tools it has rules for: a headless worker has no human to answer
-            an `ask`, so judging a tool this vocabulary cannot classify
-            would deny it, and would outrank the ACL's own grant.
-
-            The worker is autonomous because its edits are reviewed by an
-            actor of this run, which is the same fact the generated tree
-            derives its autonomous list from.
-
-            ``grants`` is asked what the lease holds at each judgment, over
-            the same document the session environment names — so this judge
-            and the lease's deployed dispatcher release exactly the same
-            gates, including one granted after both were built.
-
-            ``semantics`` is how one runtime's calls become the vocabulary
-            this policy judges. It is a parameter rather than a constant
-            because both runtimes have that decode now, and hardcoding one
-            was what left the other's workers judged by nothing.
-            """
-            return create_policy_hooks(
-                semantic_policy_for(
-                    harness.declared_hooks,
-                    autonomous=True,
-                    interactive=False,
-                    grants=grants,
-                ),
-                semantics.also_refusing(harness.declared_hooks.refused_tools),
             )
 
         def reviewer_factory(cwd: Path) -> SessionFactory:

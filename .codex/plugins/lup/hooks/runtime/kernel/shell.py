@@ -10,11 +10,18 @@ from .decision import (
     ESCALATE_HINT,
     KernelDecision,
     RESHAPE_HINT,
+    SANDBOX_TRAPPED_REASON,
     SUBSTITUTION_SENTINEL,
     SandboxPlacement,
     unjudged,
 )
-from .rows import PathRoleRow, PathRuleRow, ShellRuleRow, UrlScopeRow
+from .rows import (
+    PathRoleRow,
+    PathRuleRow,
+    RunnerTargetRow,
+    ShellRuleRow,
+    UrlScopeRow,
+)
 from .words import (
     INTERPRETERS,
     asks_before_removing_a_directory,
@@ -38,6 +45,8 @@ from .commands import (
     decide_uv,
     git_checkout_pathspec,
     git_restore_source,
+    git_restore_unchanged,
+    git_symbolic_ref_read,
 )
 
 ESCALATE_RE = re.compile(
@@ -65,7 +74,7 @@ class ShellContext(TypedDict):
     recoverable_targets: list[str]
     directory_targets: list[str]
     recoverable_target_limit: int
-    runner_targets: list[str]
+    runner_targets: list[RunnerTargetRow]
 
 
 def shell_context(
@@ -79,7 +88,7 @@ def shell_context(
     recoverable_targets: list[str] | None = None,
     directory_targets: list[str] | None = None,
     recoverable_target_limit: int = 5,
-    runner_targets: list[str] | None = None,
+    runner_targets: list[RunnerTargetRow] | None = None,
 ) -> ShellContext:
     """Bundle one classification's declarations, normalizing absent lists.
 
@@ -144,14 +153,6 @@ def decide_find_words(words: list[str], context: ShellContext) -> KernelDecision
     return decide_command_rows(remaining, context["rows"])
 
 
-# lup: The shell auto-allow asks for permission far too often, and in general it
-# feels very incomplete. Take example from Codex' own allowlist —
-# https://github.com/openai/codex. Measured with `lup-devtools hooks classify`
-# after landing review-fixes, these still stop and should not: `git restore
-# <path>` asks, `rm tracked.py` asks, and `git merge-tree --write-tree` denies
-# as unclassified though it writes no ref, index, or working tree. Also
-# EnterWorktree and ExitWorktree. Already fixed there, for the record:
-# `rm -rf build/` and `make --dry-run` both allow now.
 def decide_shell_segment(segment: list[str], context: ShellContext) -> KernelDecision:
     """Classify one parsed shell segment against the vocabulary and handlers."""
     while segment and segment[0] == "!":
@@ -194,11 +195,16 @@ def decide_shell_segment(segment: list[str], context: ShellContext) -> KernelDec
             "ask", "the git ext transport can execute commands — requires approval"
         )
     if executable == "git":
-        pathspec = git_checkout_pathspec(words)
-        if pathspec is None:
-            pathspec = git_restore_source(words)
-        if pathspec is not None:
-            return pathspec
+        recognized = (
+            git_checkout_pathspec(words)
+            or git_restore_source(words)
+            or git_restore_unchanged(
+                words, context["recoverable_targets"], context["path_rules"]
+            )
+            or git_symbolic_ref_read(words)
+        )
+        if recognized is not None:
+            return recognized
     refused = refuses_generated_plugin_write(words)
     if refused is not None:
         return refused
@@ -309,7 +315,9 @@ def literal_loop_word(word: str) -> bool:
     )
 
 
-def uv_post_target_words_safe(words: list[str], runner_targets: list[str]) -> bool:
+def uv_post_target_words_safe(
+    words: list[str], runner_targets: list[RunnerTargetRow]
+) -> bool:
     """True when every unknown word sits strictly after a blessed uv run target.
 
     uv stops parsing its own options at the first positional word, so a word
@@ -325,7 +333,7 @@ def uv_post_target_words_safe(words: list[str], runner_targets: list[str]) -> bo
             return False
         if word.startswith("-"):
             continue
-        return "/" not in word and word in runner_targets
+        return "/" not in word and any(row["name"] == word for row in runner_targets)
     return False
 
 
@@ -760,7 +768,7 @@ def classify_shell(
     recoverable_targets: list[str] | None = None,
     directory_targets: list[str] | None = None,
     recoverable_target_limit: int = 5,
-    runner_targets: list[str] | None = None,
+    runner_targets: list[RunnerTargetRow] | None = None,
 ) -> KernelDecision:
     """Conservatively classify every segment in one shell command."""
     segments = parse_shell_words(
@@ -844,7 +852,8 @@ def decide_shell(
     recoverable_targets: list[str] | None = None,
     directory_targets: list[str] | None = None,
     recoverable_target_limit: int = 5,
-    runner_targets: list[str] | None = None,
+    runner_targets: list[RunnerTargetRow] | None = None,
+    escapable: bool = False,
 ) -> KernelDecision:
     """Classify one command, honoring an escalation marker and hinting denies.
 
@@ -864,11 +873,21 @@ def decide_shell(
     boundary as unjudged work; unsandboxed, it fails closed. Such a host is
     never told to escalate, because that flow cannot complete there. A judged
     deny is never rescued by the sandbox in either mode.
+
+    ``escapable`` is the third fact of that family: whether this host can put
+    one call outside its own sandbox. A command declared ``outside`` is not
+    advice — confined, it fails on whatever it writes first — so a host that
+    cannot place it stops it here with that reason rather than letting it reach
+    the shell. The pair is what makes the declaration safe to give a toolchain:
+    where the escape is carried out it is unprompted, and where nothing can
+    carry it out the refusal names the sandbox instead of a bare write error.
     """
     hint = ESCALATE_HINT if interactive else RESHAPE_HINT
     confined = sandboxed and not sandbox_excluded(command, excluded_commands or [])
 
     def resolve(decision: KernelDecision) -> KernelDecision:
+        if sandboxed and not escapable and decision.sandbox == "outside":
+            return KernelDecision("deny", SANDBOX_TRAPPED_REASON)
         match decision.effect:
             case "allow":
                 return decision

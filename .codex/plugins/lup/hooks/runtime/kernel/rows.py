@@ -101,6 +101,18 @@ class RefusedToolRow(TypedDict):
     reason: str
 
 
+class RunnerTargetRow(TypedDict):
+    """One erased ``uv run <target>`` a project blesses, and where it runs.
+
+    ``sandbox`` is the same axis :class:`ShellRuleRow` carries, on the one
+    surface a command row cannot reach: ``uv`` is parsed rather than matched,
+    so a target's placement has nowhere else to be declared.
+    """
+
+    name: str
+    sandbox: SandboxPlacement
+
+
 class ShellRuleRow(TypedDict):
     """One erased shell-command rule the kernel matches by executable name.
 

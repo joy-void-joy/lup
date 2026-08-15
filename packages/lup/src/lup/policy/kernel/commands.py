@@ -7,11 +7,13 @@ import re
 from typing import TypedDict
 
 from .decision import KernelDecision, unjudged
-from .rows import ShellRuleRow, UrlScopeRow
+from .rows import PathRuleRow, RunnerTargetRow, ShellRuleRow, UrlScopeRow
 from .words import (
     INTERPRETERS,
     flag_matches,
+    git_restore_operands,
     opaque_argument,
+    protected_write_target,
     uv_run_words,
 )
 from .fetch import decide_fetch
@@ -99,6 +101,10 @@ def split_subcommand(
     raises carries that row's placement: the call still has to run where the
     command declared it runs, and a question that dropped the placement would
     approve one thing and perform another.
+
+    A guarded global that also takes a value is one that moves the command to
+    another tree, so the question names the way through: running the same verb
+    from inside that tree is judged on its own and needs no redirect.
     """
     ask_flags = default["ask_flags"] if default else []
     value_flags = default["value_flags"] if default else []
@@ -109,9 +115,14 @@ def split_subcommand(
         if not word.startswith("-"):
             return Subcommand(word=word, remainder=arguments[position + 1 :])
         if flag_matches(word, ask_flags):
+            redirect = (
+                " — or cd into that tree and run it there"
+                if flag_matches(word, value_flags)
+                else ""
+            )
             return KernelDecision(
                 "ask",
-                f"{executable} global flag {word} requires approval",
+                f"{executable} global flag {word} requires approval{redirect}",
                 placement,
             )
         position += 2 if word in value_flags else 1
@@ -619,8 +630,14 @@ def decide_gh_api_words(words: list[str]) -> KernelDecision:
     return KernelDecision("allow", "read-only gh api call")
 
 
-def decide_uv(words: list[str], runner_targets: list[str]) -> KernelDecision:
-    """Classify a uv invocation, gating dependency and inline-code forms."""
+def decide_uv(
+    words: list[str], runner_targets: list[RunnerTargetRow]
+) -> KernelDecision:
+    """Classify a uv invocation, gating dependency and inline-code forms.
+
+    A blessed target carries its own placement, so a toolchain that has to run
+    outside the sandbox says so once here rather than at each call site.
+    """
     subcommand = words[1]
     if subcommand in ("add", "sync"):
         return KernelDecision(
@@ -645,8 +662,11 @@ def decide_uv(words: list[str], runner_targets: list[str]) -> KernelDecision:
             return KernelDecision(
                 "ask", "uv run --with fetches and executes external code"
             )
-        if bare_target and run_command in runner_targets:
-            return KernelDecision("allow")
+        blessed = next(
+            (row for row in runner_targets if row["name"] == run_command), None
+        )
+        if bare_target and blessed is not None:
+            return KernelDecision("allow", "", blessed["sandbox"])
         if bare_target and len(run_words) == 2 and run_words[1] == "--help":
             return KernelDecision("allow", "command help is read-only")
     return unjudged(f"uv {words[1]} is not classified")
@@ -680,34 +700,60 @@ def git_restore_source(words: list[str]) -> KernelDecision | None:
     reflog. The index-sourced form and opaque words fall through to the
     restore row's ask.
     """
-    if len(words) < 4 or words[1] != "restore":
-        return None
-    source: str | None = None
-    paths: list[str] = []
-    position = 2
-    while position < len(words):
-        word = words[position]
-        if word == "--source" and position + 1 < len(words):
-            source = words[position + 1]
-            position += 2
-            continue
-        if word.startswith("--source="):
-            source = word[len("--source=") :]
-            position += 1
-            continue
-        if word in ("--staged", "--worktree", "-S", "-W", "--"):
-            position += 1
-            continue
-        if word.startswith("-"):
-            return None
-        paths.append(word)
-        position += 1
-    if source is None or not paths:
-        return None
-    if source.startswith("-") or opaque_argument(source):
-        return None
-    if any(opaque_argument(word) for word in paths):
+    parsed = git_restore_operands(words)
+    if parsed is None or parsed["source"] is None:
         return None
     return KernelDecision(
         "allow", "restore from a named ref recovers committed file state"
     )
+
+
+def git_restore_unchanged(
+    words: list[str], recoverable_targets: list[str], path_rules: list[PathRuleRow]
+) -> KernelDecision | None:
+    """Recognize an index-sourced ``git restore`` whose paths hold no pending work.
+
+    The row asks because restoring discards what the working tree has that the
+    index does not. Where the host reports a path as tracked and carrying no
+    uncommitted change, it has nothing the index does not, and the restore
+    writes back the bytes already on disk — so the row's question has no
+    answer worth putting to anyone. A path with pending work keeps it, which
+    is the only case the question was ever about.
+
+    Nothing bounds this the way the delete grant is bounded. That cap counts
+    how much committed work one command destroys before a sweep is worth a
+    question; this destroys none of it, however many paths are named. What
+    does bound it is ownership, which the delete grant defers to for the same
+    reason: what a path costs to rebuild is the wrong question about a file
+    protected by whose it is, and the two gates read one table so they cannot
+    come to differ about one.
+    """
+    parsed = git_restore_operands(words)
+    if parsed is None or parsed["source"] is not None:
+        return None
+    if not all(path in recoverable_targets for path in parsed["paths"]):
+        return None
+    protected = protected_write_target(parsed["paths"], path_rules, True)
+    if protected is not None:
+        return protected
+    return KernelDecision("allow", "every restored path already matches the index")
+
+
+def git_symbolic_ref_read(words: list[str]) -> KernelDecision | None:
+    """Recognize ``git symbolic-ref [--short] <name>`` — the form that reports.
+
+    Alone among the query verbs, symbolic-ref spells its write as a second
+    operand rather than as a flag, so no flag list separates reading HEAD from
+    pointing it elsewhere. One operand and nothing but the reporting flags is
+    the read; a second operand, ``--delete``, or a word that expands at run
+    time falls through to the row's ask.
+    """
+    if len(words) < 3 or words[1] != "symbolic-ref":
+        return None
+    operands = [word for word in words[2:] if not word.startswith("-")]
+    flags = [word for word in words[2:] if word.startswith("-")]
+    if len(operands) != 1 or any(opaque_argument(word) for word in words[2:]):
+        return None
+    if any(flag not in ("--short", "-q", "--quiet") for flag in flags):
+        return None
+    return KernelDecision("allow", "reading a symbolic ref reports where it points")

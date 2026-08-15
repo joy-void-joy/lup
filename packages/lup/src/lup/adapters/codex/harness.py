@@ -54,7 +54,11 @@ from lup.policy.kernel.words import (
     INTERPRETERS,
     PASS_THROUGH_WORDS,
 )
-from lup.policy.shell_rules import ShellCommandRule, erase_shell_rules
+from lup.policy.shell_rules import (
+    RunnerTargetRule,
+    ShellCommandRule,
+    erase_shell_rules,
+)
 
 
 class CodexSpellings(NativeSpellings):
@@ -425,7 +429,7 @@ CODEX_DYNAMIC_COMMANDS = (
 
 
 def codex_allow_prefixes(
-    rules: list[ShellCommandRule], runner_targets: list[str]
+    rules: list[ShellCommandRule], runner_targets: list[RunnerTargetRule]
 ) -> list[list[str]]:
     """Compile semantic allows that stay allowed for every suffix.
 
@@ -440,6 +444,13 @@ def codex_allow_prefixes(
     nesting: a level that inherited its effect is native-allowed on exactly the
     terms of one that spelled it out, which is the same reading the dispatcher
     and the canonical policy take.
+
+    That bypass is also the whole of this runtime's escape, which is why a
+    runner target's placement does not narrow what is emitted here: a target
+    declared ``outside`` reaches the outside through its prefix rule or not at
+    all. The forms this cannot widen — a target behind a global flag, or one
+    joined into a compound command — reach the hook, where a confined session
+    is stopped with the reason rather than left to fail on the first write.
     """
 
     def add(prefix: list[str]) -> None:
@@ -464,7 +475,7 @@ def codex_allow_prefixes(
         elif f"{row['command']} {row['subcommand']}" not in operational:
             add([row["command"], row["subcommand"]])
     for target in runner_targets:
-        add(["uv", "run", target])
+        add(["uv", "run", target.name])
     return sorted(prefixes)
 
 

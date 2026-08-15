@@ -45,20 +45,33 @@ ALLOWED_UNDER_A_RESTRICTIVE_PARENT = (
     "git rev-list",
     "git name-rev",
     "git merge-base",
-    # Object-store queries. They reach the store and stop there — no ref
-    # moves, no index entry changes, no working-tree file is touched — so the
-    # vocabulary sweeps them read-only beside the rest of git's query verbs.
-    "git merge-tree",
-    "git hash-object",
+    # Reporting on the store, the refs, the index and the config, and the
+    # object-construction verbs beside them: each reaches the store and stops
+    # there — no ref moves, no index entry changes, no working-tree file is
+    # touched — which is the one criterion the vocabulary sweeps git by.
+    "git column",
+    "git fmt-merge-msg",
+    "git fsck",
     "git patch-id",
+    "git request-pull",
     "git verify-pack",
-    "git show-index",
     "git pack-redundant",
+    "git show-index",
     "git get-tar-commit-id",
     "git check-ref-format",
     "git stripspace",
+    "git merge-tree",
+    "git hash-object",
+    "git commit-tree",
+    "git mktree",
+    "git mktag",
+    "git write-tree",
+    # Emitting a diff, where only `--output` lands a file and is guarded.
+    "git diff-pairs",
     "git show-ref",
-    "git symbolic-ref",
+    # `symbolic-ref` is deliberately absent: its write form is spelled by a
+    # second operand rather than by a flag, so the bare verb asks and only the
+    # reading form — which the kernel recognizes ahead of that row — allows.
     "git for-each-ref",
     "git count-objects",
     "git cherry",

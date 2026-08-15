@@ -100,6 +100,47 @@ composition root supplies this — ``lup.adapters.claude.hooks`` has the
 decoder for Claude sessions."""
 
 
+class SandboxPosture(BaseModel):
+    """What one session's own sandbox configuration means to the policy.
+
+    Read from the configuration a session is opened with, never from the
+    runtime it opens on. Those answer different questions: a runtime says
+    whether a per-call escape channel exists at all, and only the session
+    says whether it is open here. A policy handed the runtime's answer
+    judges a host it does not have — a worker configured to forbid
+    unsandboxed commands was still told it could escape, so every placement
+    was rendered onto the wire and dropped, leaving the call confined with
+    the verdict unchanged and nothing anywhere saying so.
+
+    Both fields default to the shape that claims least: a session that says
+    nothing about its sandbox is judged as confining nothing and escaping
+    nowhere.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    active: bool = False
+    """Whether an OS sandbox is asked to confine what this session runs.
+
+    Asserted by configuration rather than observed, and the two come apart:
+    a runtime whose sandbox cannot start on the host — a missing dependency,
+    an unsupported platform — warns and runs the session anyway, so a request
+    read back as an answer describes a boundary that may not be there. A
+    runtime offering a fail-if-unavailable setting closes that at the source,
+    and a session opened with one earns this rather than claiming it.
+
+    Which is why it describes the session without deciding anything about it.
+    A caller that spends this on the kernel's confined-host behaviour is
+    buying a substitution as well: there, an unanswerable question rides the
+    OS boundary instead of failing closed, so a host with no way to reach a
+    human converts every guarded verdict into a run. Worth taking where the
+    boundary is established and the questions can be asked; not something to
+    infer from a session having set a flag."""
+
+    escapable: bool = False
+    """Whether this session may place one call outside that sandbox."""
+
+
 class NativeSemantics(BaseModel):
     """One runtime's call decoder together with the tools it has rules for.
 
@@ -134,14 +175,28 @@ class NativeSemantics(BaseModel):
         the generated tree beside it.
         """
         return NativeSemantics(
-            decode=self.decode, routed_tools=routed_for(self.routed_tools, refused)
+            decode=self.decode,
+            routed_tools=routed_for(self.routed_tools, refused),
+            escapable=self.escapable,
         )
+
+    def escapes_from(self, sandbox: SandboxPosture) -> bool:
+        """Whether one call of this session can actually reach outside it.
+
+        Both halves have to hold and each answers its own question: the
+        runtime supplies the channel, the session opens it. Composed here so
+        that no caller has to remember a placement needs both — the one that
+        remembered only the runtime is what put an escape on the wire for a
+        session that would drop it.
+        """
+        return self.escapable and sandbox.escapable
 
 
 def create_policy_hooks(
     policy: DecisionPolicy[SemanticTool],
     semantics: NativeSemantics,
     *,
+    sandbox: SandboxPosture = SandboxPosture(),
     tag: str = "semantic_policy",
 ) -> LupHooksConfig:
     """Create a PreToolUse hook that enforces *policy* on the tools it judges.
@@ -172,6 +227,10 @@ def create_policy_hooks(
             :class:`SemanticToolPolicy` over the fetch, shell, and edit rules.
         semantics: The adapter's decoder and the native tool names this
             policy has rules for, as the adapter exports them.
+        sandbox: What the configuration this session is opened with confines
+            and permits. Left unstated, no placement reaches the wire, which
+            is the right answer for a session that declared no sandbox and
+            the safe one for a session that declared one and forgot to say.
         tag: Matcher tag for adapter dispatch.
 
     Returns:
@@ -185,7 +244,7 @@ def create_policy_hooks(
             return LupHookOutput()
         return policy_hook_output(
             policy.decide(semantics.decode(event).as_documents()),
-            semantics.escapable,
+            semantics.escapes_from(sandbox),
         )
 
     return LupHooksConfig(

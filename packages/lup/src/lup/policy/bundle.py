@@ -26,11 +26,17 @@ from lup.policy.kernel.rows import (
     PathRoleRow,
     PathRuleRow,
     RefusedToolRow,
+    RunnerTargetRow,
     ShellRuleRow,
     UrlScopeRow,
 )
 from lup.policy.refused_tools import RefusedTool, erase_refused_tools
-from lup.policy.shell_rules import ShellCommandRule, erase_shell_rules
+from lup.policy.shell_rules import (
+    RunnerTargetRule,
+    ShellCommandRule,
+    erase_runner_targets,
+    erase_shell_rules,
+)
 from lup.policy.rules import antipattern_row, human_owned_path_rule, path_rule_row
 
 
@@ -228,6 +234,19 @@ def refused_tool_rows_literal(rows: list[RefusedToolRow]) -> str:
     )
 
 
+def runner_target_rows_literal(rows: list[RunnerTargetRow]) -> str:
+    """Render the blessed runner targets as primitive runtime rows."""
+    return dict_rows_literal(
+        [
+            [
+                f'"name": {json.dumps(row["name"])}',
+                f'"sandbox": {json.dumps(row["sandbox"])}',
+            ]
+            for row in rows
+        ]
+    )
+
+
 def string_rows_literal(rows: list[str]) -> str:
     """Render a sequence of generated string identities."""
     if not rows:
@@ -282,7 +301,7 @@ def render_policy_data(
     shell_rules: list[ShellCommandRule],
     refused_tools: list[RefusedTool],
     recoverable_target_limit: int,
-    runner_targets: list[str],
+    runner_targets: list[RunnerTargetRule],
     sandbox_excluded_commands: list[str],
 ) -> str:
     """Render one plugin's canonical policy rows without executable logic."""
@@ -310,7 +329,8 @@ def render_policy_data(
             "KNOWN_ALLOWANCES: list[str] = " + string_rows_literal(known_allowances()),
             "MAXIMUM_ADDED_LINES = 3",
             "RECOVERABLE_TARGET_LIMIT = " + json.dumps(recoverable_target_limit),
-            "RUNNER_TARGETS: list[str] = " + string_rows_literal(runner_targets),
+            "RUNNER_TARGETS: list[RunnerTargetRow] = "
+            + runner_target_rows_literal(erase_runner_targets(runner_targets)),
             "SANDBOX_EXCLUDED_COMMANDS: list[str] = "
             + string_rows_literal(sandbox_excluded_commands),
         ]
@@ -322,6 +342,7 @@ def render_policy_data(
         "    PathRoleRow,\n"
         "    PathRuleRow,\n"
         "    RefusedToolRow,\n"
+        "    RunnerTargetRow,\n"
         "    ShellRuleRow,\n"
         "    UrlScopeRow,\n"
         ")"
