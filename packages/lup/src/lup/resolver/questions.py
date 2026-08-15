@@ -83,6 +83,22 @@ class QuestionBroker:
             and item.question.id not in answered
         ]
 
+    def raised(self, question_ids: list[str]) -> list[MaterialQuestion]:
+        """The questions behind these ids, as the mailbox holds them.
+
+        A re-check reused from a previous pass knows only that it raised a
+        question, because the mailbox owns what it says. Reading it back is
+        what lets the reuse still be waited on: a question whose answer is
+        already recorded resolves at once, and one still open holds the run
+        exactly as it would have on the pass that asked it.
+        """
+        wanted = {identifier: True for identifier in question_ids}
+        return [
+            item.question
+            for item in self.mailbox.questions()
+            if item.question.id in wanted
+        ]
+
     def queue_questions(self, questions: list[MaterialQuestion], asked_by: str) -> None:
         """Publish questions so any door can answer them."""
         for question in questions:

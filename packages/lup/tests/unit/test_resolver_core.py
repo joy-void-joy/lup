@@ -5836,6 +5836,28 @@ async def test_the_final_recheck_reads_the_tree_from_a_checkout_of_its_own(
     # Nothing left behind: the pool discards what it made.
     assert not [path for path in read_from if path.exists()]
 
+    # Resumed against the same tree, the re-check spends nothing: every other
+    # phase skips work it has already done, and this was the one that did not.
+    # One measured run spent 47 reviewer turns on 21 concerns because each
+    # interruption re-examined all of them — and re-running a reviewer can
+    # return a different verdict for an unchanged tree, which then wedges the
+    # run on a question already asked another way.
+    read_from.clear()
+
+    again = await core.joiner.recheck_criteria(state, integration)
+
+    assert again == [], "the recorded re-checks still hold"
+    assert read_from == [], "no reviewer turn is spent twice on one tree"
+
+    # A tree reassembled from different parents is a different question.
+    git("commit", "--allow-empty", "-m", "reassembled")
+    reassembled = integration.model_copy(update={"commit": git("rev-parse", "HEAD")})
+    read_from.clear()
+
+    await core.joiner.recheck_criteria(state, reassembled)
+
+    assert len(read_from) == 3, "a different commit is examined afresh"
+
 
 @pytest.mark.asyncio
 async def test_a_capped_wave_holds_the_cap_and_resumes_what_it_never_started(
