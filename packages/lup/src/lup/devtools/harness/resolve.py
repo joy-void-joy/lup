@@ -1438,6 +1438,19 @@ def run_resolve(
                     ),
                 ],
                 recheck_standing_per_join=recheck_standing_per_join,
+                # Both plugin trees are rendered from the catalogs a lease
+                # edits, so nearly every join disagrees about them. Rendering
+                # again is a second and settles it exactly; a merger choosing
+                # between two stale renderings is minutes and a judgement it
+                # has no basis for.
+                regeneration_command=[
+                    "uv",
+                    "run",
+                    "lup-devtools",
+                    "harness",
+                    "generate",
+                    "all",
+                ],
             ),
             harness.resolver,
             worker_factory,

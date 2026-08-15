@@ -787,6 +787,8 @@
             return `<div class="entry note"><div class="entry-head"><span class="muted">${escapeHtml(stamp)}</span> <span class="pill strong">${escapeHtml(event.door)} ${event.redirect ? "redirect" : "message"} unread by ${escapeHtml(who)}</span></div><div class="say">${escapeHtml(event.text)}</div></div>`;
           case "join_planned":
             return `<div class="entry note">${head}<div>merging ${event.tips.length} parent(s)${event.carried.length ? `; ${event.carried.length} already inside one: ${escapeHtml(event.carried.map((item) => `${item.commit.slice(0, 12)} in ${item.inside.slice(0, 12)}`).join(", "))}` : ""}</div></div>`;
+          case "join_rendered":
+            return `<div class="entry note">${head}<div>generated artifacts settled <span class="mono">${escapeHtml(event.parent.slice(0, 12))}</span> — no merger turn</div></div>`;
           case "join_completed":
             return `<div class="entry note">${head}<div>joined <span class="mono">${escapeHtml(event.parent.slice(0, 12))}</span>${event.conflicted ? " (conflicted)" : ""}${event.broke.length ? ` — broke: ${escapeHtml(event.broke.join(", "))}` : ""}</div></div>`;
           case "join_audit":

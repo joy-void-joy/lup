@@ -141,6 +141,21 @@ class JoinPlannedEvent(BaseModel):
     carried: list["CarriedParent"] = Field(default_factory=list)
 
 
+class JoinRenderedEvent(BaseModel):
+    """A join disagreed only in artifacts, and the generator settled it.
+
+    Worth recording because it is the difference between a join that cost a
+    merger turn and one that cost a second: every lease touching a catalog
+    re-renders both plugin trees, so a conflict there says nothing about the
+    work and everything about when each branch last generated.
+    """
+
+    model_config = FROZEN
+
+    type: Literal["join_rendered"] = "join_rendered"
+    parent: str
+
+
 class JoinAuditEvent(BaseModel):
     """The finished tree was re-checked against every parent that built it."""
 
@@ -317,6 +332,7 @@ type RunEvent = (
     | MessagePostedEvent
     | MessageOutstandingEvent
     | JoinPlannedEvent
+    | JoinRenderedEvent
     | JoinCompletedEvent
     | JoinAuditEvent
     | ReviewResidualEvent
