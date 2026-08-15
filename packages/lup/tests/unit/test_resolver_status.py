@@ -8,7 +8,8 @@ from pydantic import TypeAdapter
 
 from lup.channels.models import local_stamp, utc_now
 from lup.channels.stream import Stream
-from lup.resolver.models import ConcernStatus, ResolvePhase
+from lup.resolver.join_desk import JoinDesk, JoinLanding
+from lup.resolver.models import ConcernStatus, JoinProgress, ResolvePhase
 from lup.resolver.state import ResolverStateRepository
 from lup.resolver.status import (
     LastRecorded,
@@ -16,6 +17,7 @@ from lup.resolver.status import (
     RunStatus,
     StatusCount,
     elapsed_per_item,
+    phase_progress,
     run_status,
 )
 from lup.devtools.supervisor.doors import report_status, status_header
@@ -73,6 +75,67 @@ def test_a_finished_bar_estimates_nothing_further() -> None:
 
     assert done.remaining() is None
     assert "ETA" not in done.render()
+
+
+def absorbed(joined: list[str], planned: int) -> JoinProgress:
+    """What the orchestrator has written back, as of its last turn."""
+    return JoinProgress(joined=joined, commit="b" * 40, planned=planned)
+
+
+def test_the_bar_moves_while_the_join_turn_is_still_running(tmp_path: Path) -> None:
+    """The merger drives a whole join inside one turn, so nothing else does.
+
+    The orchestrator's copy is written when the turn returns. Watched alone
+    it sits still for the length of the phase, which is the same shape a
+    wedged run has — and the guidance sends a reader to this surface
+    precisely so they do not have to judge by silence.
+    """
+    desk = JoinDesk(tmp_path)
+    for index in range(10):
+        desk.record(JoinLanding(commit=f"{index:040d}", head="c" * 40), planned=13)
+
+    progress = phase_progress(absorbed(["0" * 40], planned=13), tmp_path)
+
+    assert progress is not None
+    assert progress.done == 10
+    assert progress.total == 13
+
+
+def test_the_bar_never_goes_backwards_when_a_turn_starts(tmp_path: Path) -> None:
+    """A resumed run's checkpoint is empty until its merger lands something.
+
+    Reading it alone would report a run mid-integration as having joined
+    nothing, which is worse than the staleness it fixes.
+    """
+    earlier = [f"{index:040d}" for index in range(8)]
+
+    progress = phase_progress(absorbed(earlier, planned=13), tmp_path)
+
+    assert progress is not None
+    assert progress.done == 8
+
+
+def test_a_parent_recorded_without_a_merge_does_not_set_the_rate(
+    tmp_path: Path,
+) -> None:
+    """Sweeping what an earlier run landed times no work this one did.
+
+    A resume records those in seconds — four inside twelve on the run this
+    was measured on — and a rate averaged over them promises an ETA the
+    joins remaining will not come close to.
+    """
+    desk = JoinDesk(tmp_path)
+    for index in range(4):
+        desk.record(
+            JoinLanding(commit=f"{index:040d}", head="c" * 40, merged=False),
+            planned=13,
+        )
+
+    progress = phase_progress(absorbed([], planned=13), tmp_path)
+
+    assert progress is not None
+    assert progress.done == 4
+    assert progress.per_item is None
 
 
 def test_an_unheld_run_reads_as_not_running(tmp_path: Path) -> None:
