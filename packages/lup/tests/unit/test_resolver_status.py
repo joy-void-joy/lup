@@ -3,11 +3,13 @@
 from datetime import datetime, timedelta
 from pathlib import Path
 
+import pytest
 from pydantic import TypeAdapter
 
 from lup.channels.models import local_stamp, utc_now
 from lup.channels.stream import Stream
-from lup.resolver.models import ConcernStatus, ResolvePhase
+from lup.resolver.join_desk import JoinDesk, JoinLanding
+from lup.resolver.models import ConcernStatus, JoinProgress, ResolvePhase
 from lup.resolver.state import ResolverStateRepository
 from lup.resolver.status import (
     LastRecorded,
@@ -15,9 +17,10 @@ from lup.resolver.status import (
     RunStatus,
     StatusCount,
     elapsed_per_item,
+    phase_progress,
     run_status,
 )
-from lup.devtools.supervisor.doors import attention_line
+from lup.devtools.supervisor.doors import report_status, status_header
 
 
 def test_a_bar_reports_the_rate_of_the_stretches_actually_worked() -> None:
@@ -72,6 +75,67 @@ def test_a_finished_bar_estimates_nothing_further() -> None:
 
     assert done.remaining() is None
     assert "ETA" not in done.render()
+
+
+def absorbed(joined: list[str], planned: int) -> JoinProgress:
+    """What the orchestrator has written back, as of its last turn."""
+    return JoinProgress(joined=joined, commit="b" * 40, planned=planned)
+
+
+def test_the_bar_moves_while_the_join_turn_is_still_running(tmp_path: Path) -> None:
+    """The merger drives a whole join inside one turn, so nothing else does.
+
+    The orchestrator's copy is written when the turn returns. Watched alone
+    it sits still for the length of the phase, which is the same shape a
+    wedged run has — and the guidance sends a reader to this surface
+    precisely so they do not have to judge by silence.
+    """
+    desk = JoinDesk(tmp_path)
+    for index in range(10):
+        desk.record(JoinLanding(commit=f"{index:040d}", head="c" * 40), planned=13)
+
+    progress = phase_progress(absorbed(["0" * 40], planned=13), tmp_path)
+
+    assert progress is not None
+    assert progress.done == 10
+    assert progress.total == 13
+
+
+def test_the_bar_never_goes_backwards_when_a_turn_starts(tmp_path: Path) -> None:
+    """A resumed run's checkpoint is empty until its merger lands something.
+
+    Reading it alone would report a run mid-integration as having joined
+    nothing, which is worse than the staleness it fixes.
+    """
+    earlier = [f"{index:040d}" for index in range(8)]
+
+    progress = phase_progress(absorbed(earlier, planned=13), tmp_path)
+
+    assert progress is not None
+    assert progress.done == 8
+
+
+def test_a_parent_recorded_without_a_merge_does_not_set_the_rate(
+    tmp_path: Path,
+) -> None:
+    """Sweeping what an earlier run landed times no work this one did.
+
+    A resume records those in seconds — four inside twelve on the run this
+    was measured on — and a rate averaged over them promises an ETA the
+    joins remaining will not come close to.
+    """
+    desk = JoinDesk(tmp_path)
+    for index in range(4):
+        desk.record(
+            JoinLanding(commit=f"{index:040d}", head="c" * 40, merged=False),
+            planned=13,
+        )
+
+    progress = phase_progress(absorbed([], planned=13), tmp_path)
+
+    assert progress is not None
+    assert progress.done == 4
+    assert progress.per_item is None
 
 
 def test_an_unheld_run_reads_as_not_running(tmp_path: Path) -> None:
@@ -251,7 +315,7 @@ def test_a_reading_is_dated_in_the_reader_s_own_zone() -> None:
     assert stamp.endswith(now.strftime("%Z"))
 
 
-def test_the_attention_line_carries_progress_losses_and_who_is_held_up() -> None:
+def test_the_header_carries_progress_losses_and_who_is_held_up() -> None:
     """Three facts and no fourth: how far, what was lost, who is waiting.
 
     A per-status breakdown is progress rather than attention — nobody acts
@@ -269,16 +333,56 @@ def test_the_attention_line_carries_progress_losses_and_who_is_held_up() -> None
         run_id="r", exists=True, held=True, phase=ResolvePhase.WORKERS, counts=counts
     )
 
-    assert attention_line(working).endswith(
+    assert status_header(working).endswith(
         "workers · 38/39 settled · 1 failed · running"
     )
-    assert attention_line(working.model_copy(update={"unanswered": 2})).endswith(
-        "38/39 settled · 1 failed · 2 questions waiting"
+    assert status_header(working.model_copy(update={"unanswered": 2})).endswith(
+        "38/39 settled · 1 failed · 2 questions waiting · running"
     )
-    assert attention_line(working.model_copy(update={"held": False})).endswith(
-        "stopped"
+    assert status_header(working.model_copy(update={"held": False})).endswith("stopped")
+    assert "retired" not in status_header(working)
+
+
+def test_the_header_is_the_report_it_heads(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """One composition, so the compact form cannot drift from the full one.
+
+    Two renderers over the same projection is what let a flag go on saying
+    what it carried after the line it described had moved on.
+    """
+    working = RunStatus(
+        run_id="r",
+        exists=True,
+        held=True,
+        phase=ResolvePhase.INTEGRATION,
+        counts=[StatusCount(status=ConcernStatus.VERIFIED, concerns=4)],
+        progress=PhaseProgress(label="joins", done=5, total=13),
     )
-    assert "retired" not in attention_line(working)
+
+    report_status(working)
+
+    printed = capsys.readouterr().out.splitlines()
+    assert printed[0] == status_header(working)
+    assert not any(line.startswith(status_header(working)) for line in printed[1:])
+
+
+def test_the_header_says_how_much_longer_the_phase_it_is_in_should_take() -> None:
+    """The figure a reader plans around, on the line they are handed."""
+    joining = RunStatus(
+        run_id="r",
+        exists=True,
+        held=True,
+        phase=ResolvePhase.INTEGRATION,
+        counts=[StatusCount(status=ConcernStatus.INTEGRATING, concerns=13)],
+        progress=PhaseProgress(
+            label="joins", done=5, total=13, per_item=timedelta(minutes=2)
+        ),
+    )
+
+    assert "joins " in status_header(joining)
+    assert "5/13" in status_header(joining)
+    assert "ETA 16m00s" in status_header(joining)
 
 
 def test_a_run_that_lost_nothing_says_nothing_about_losses() -> None:
@@ -291,7 +395,7 @@ def test_a_run_that_lost_nothing_says_nothing_about_losses() -> None:
         counts=[StatusCount(status=ConcernStatus.VERIFIED, concerns=4)],
     )
 
-    assert attention_line(clean).endswith("workers · 4/4 settled · running")
+    assert status_header(clean).endswith("workers · 4/4 settled · running")
 
 
 def test_the_fraction_can_reach_its_own_total() -> None:
@@ -313,7 +417,7 @@ def test_the_fraction_can_reach_its_own_total() -> None:
         ],
     )
 
-    assert "4/4 settled" in attention_line(ended)
+    assert "4/4 settled" in status_header(ended)
 
 
 def test_a_caller_wanting_another_shape_passes_one() -> None:

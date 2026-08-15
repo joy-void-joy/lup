@@ -156,6 +156,16 @@ class JoinRenderedEvent(BaseModel):
     parent: str
 
 
+class RecheckReusedEvent(BaseModel):
+    """A resume took these concerns' re-checks from the pass that ran them."""
+
+    model_config = FROZEN
+
+    type: Literal["recheck_reused"] = "recheck_reused"
+    concerns: list[str]
+    commit: str
+
+
 class JoinAuditEvent(BaseModel):
     """The finished tree was re-checked against every parent that built it."""
 
@@ -335,6 +345,7 @@ type RunEvent = (
     | JoinRenderedEvent
     | JoinCompletedEvent
     | JoinAuditEvent
+    | RecheckReusedEvent
     | ReviewResidualEvent
     | CriteriaCarriedEvent
     | ForeignCriteriaEvent

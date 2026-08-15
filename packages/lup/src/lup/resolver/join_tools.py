@@ -29,9 +29,9 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from lup.channels.models import utc_now
 from lup.harness.process import LocalProcessLauncher, ProcessLauncher
 from lup.mcp import LupMcpTool, ToolError, lup_tool
+from lup.resolver.join_desk import JoinDesk, JoinLanding, JoinPlan, JoinTip
 from lup.resolver.mailbox import QuestionMailbox
 from lup.resolver.models import (
     CarriedParent,
@@ -39,14 +39,10 @@ from lup.resolver.models import (
     DropCandidate,
     HunkDisposition,
     MergeReport,
-    VerificationCommand,
     WritableRootLease,
 )
 from lup.resolver.orchestrator import WorktreeOrchestrator
 from lup.resolver.verification import Verifier
-
-JOIN_DIR = "join"
-"""Where under a run directory the join plan and its progress are kept."""
 
 
 def names_parent(declared: str, parent: str) -> bool:
@@ -122,47 +118,6 @@ def merge_problems(
     ]
 
 
-class JoinTip(BaseModel):
-    """One parent on the table, and what the merger needs to judge it."""
-
-    model_config = ConfigDict(frozen=True)
-
-    commit: str
-    concern_id: str
-    summary: str = ""
-    """What the concern behind this parent set out to do."""
-    files: list[Path] = Field(default_factory=list)
-    """Every path this parent wrote, measured from where it forked.
-
-    The whole point of handing the set over at once: overlap between two
-    tips is visible here before either is merged, where the loop only ever
-    revealed it by conflicting on the second.
-    """
-
-
-class JoinPlan(BaseModel):
-    """Every parent one join has to land, written where a resume can read it.
-
-    Persisted rather than passed, because the merger's session and the run
-    process are separately mortal: a resumed run opens a session that
-    remembers nothing, and the plan is what tells it which parents were on
-    the table and which of them are already in.
-    """
-
-    model_config = ConfigDict(frozen=True)
-
-    concern_id: str
-    worktree: Path
-    base: str
-    title: str
-    purpose: str
-    tips: list[JoinTip] = Field(default_factory=list)
-    carried: list[CarriedParent] = Field(default_factory=list)
-    """Parents already inside another, which land when their container does."""
-    regeneration: list[str] = Field(default_factory=list)
-    verification: list[VerificationCommand] = Field(default_factory=list)
-
-
 class PreparedJoin(BaseModel):
     """What preparing one parent found, kept until its landing records it."""
 
@@ -170,93 +125,6 @@ class PreparedJoin(BaseModel):
 
     conflicted: bool = False
     rendered: bool = False
-
-
-class JoinLanding(BaseModel):
-    """One parent as it actually landed, recorded by the verb that landed it."""
-
-    model_config = ConfigDict(frozen=True)
-
-    commit: str
-    head: str
-    conflicted: bool = False
-    rendered: bool = False
-    """Whether regenerating the artifacts settled this join on its own."""
-    broke: list[str] = Field(default_factory=list)
-    at: str = ""
-
-
-class JoinProgressRecord(BaseModel):
-    """How far the merger has got, durable across its own session dying."""
-
-    model_config = ConfigDict(frozen=True)
-
-    landings: list[JoinLanding] = Field(default_factory=list)
-    planned: int = 0
-
-    @property
-    def joined(self) -> list[str]:
-        """The parents in the tree, in the order the merger put them there."""
-        return [landing.commit for landing in self.landings]
-
-    @property
-    def commit(self) -> str:
-        """The tree the last landing produced, which a resume restores to."""
-        return self.landings[-1].head if self.landings else ""
-
-
-class JoinDesk:
-    """The run directory's view of one join, as files both transports read."""
-
-    def __init__(self, run_dir: Path) -> None:
-        self.root = run_dir / JOIN_DIR
-
-    def plan_path(self) -> Path:
-        return self.root / "plan.json"
-
-    def progress_path(self) -> Path:
-        return self.root / "progress.json"
-
-    def write_plan(self, plan: JoinPlan) -> None:
-        self.root.mkdir(parents=True, exist_ok=True)
-        self.plan_path().write_text(plan.model_dump_json(indent=2), encoding="utf-8")
-
-    def plan(self) -> JoinPlan | None:
-        path = self.plan_path()
-        if not path.is_file():
-            return None
-        return JoinPlan.model_validate_json(path.read_text(encoding="utf-8"))
-
-    def progress(self) -> JoinProgressRecord:
-        path = self.progress_path()
-        if not path.is_file():
-            return JoinProgressRecord()
-        return JoinProgressRecord.model_validate_json(path.read_text(encoding="utf-8"))
-
-    def record(self, landing: JoinLanding, planned: int) -> None:
-        """Say where the sequence got to, after the tree it names exists.
-
-        Written by whoever landed the parent rather than by the orchestrator
-        afterwards, so the checkpoint survives the run process dying between
-        two parents — which is the interruption this is for.
-        """
-        self.root.mkdir(parents=True, exist_ok=True)
-        before = self.progress().landings
-        record = JoinProgressRecord(
-            landings=[
-                *before,
-                landing.model_copy(update={"at": utc_now().isoformat()}),
-            ],
-            planned=planned,
-        )
-        self.progress_path().write_text(
-            record.model_dump_json(indent=2), encoding="utf-8"
-        )
-
-    def clear(self) -> None:
-        """Drop a finished join's plan and progress, so the next starts clean."""
-        for path in (self.plan_path(), self.progress_path()):
-            path.unlink(missing_ok=True)
 
 
 class StartParentInput(BaseModel):
@@ -498,7 +366,10 @@ def create_join_tools(
             # account was settled when it landed, and asking for one again
             # would have the merger re-adjudicate somebody else's decisions
             # against a tree that has since moved past them.
-            desk.record(JoinLanding(commit=tip.commit, head=before), len(plan.tips))
+            desk.record(
+                JoinLanding(commit=tip.commit, head=before, merged=False),
+                len(plan.tips),
+            )
             return LandParentOutput(
                 commit=tip.commit,
                 landed=True,

@@ -26,12 +26,12 @@ from lup.harness.models import ResolveSpec
 from lup.policy.identity import ConcernAllowance
 from lup.resolver.actors import ActorSession, ActorSessions
 from lup.resolver.mailbox import QuestionMailbox
-from lup.resolver.join_tools import (
+from lup.resolver.join_desk import (
     JoinPlan,
     JoinProgressRecord,
-    JoinReport,
     JoinTip,
 )
+from lup.resolver.join_tools import JoinReport
 from lup.resolver.models import (
     ActorRef,
     CarriedParent,

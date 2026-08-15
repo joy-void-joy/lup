@@ -354,9 +354,10 @@ def show_status(
     line: bool = typer.Option(
         False,
         "--line",
-        help="One line carrying only what needs you — the time, the phase, "
-        "and a question waiting, a stop, or a failure. Nothing when there "
-        "is nothing to act on but that it is running",
+        help="Print this report's first line and stop. It carries what "
+        "needs you — the time, the phase, how far along, how much longer, "
+        "and a question waiting, a stop or a failure. What the full report "
+        "adds below it is the per-status breakdown and the last event",
     ),
 ) -> None:
     """Say whether a run is alive, where it stands, and what it last did.
@@ -373,13 +374,15 @@ def show_status(
     status = run_status(repository, run_id)
     if not status.exists:
         raise typer.BadParameter(f"no resolver run {run_id!r} under {root}")
-    if line:
-        typer.echo(attention_line(status))
+    if line and not watch:
+        typer.echo(status_header(status))
         return
-    report_status(status)
     if not watch:
+        report_status(status)
         return
-    watch_status(repository, run_id, heartbeat, poll, startup, status)
+    typer.echo(status_header(status))
+    report_waiting(run_id)
+    watch_status(repository, run_id, heartbeat, poll, startup, status, line)
 
 
 SETTLED_STATUSES: tuple[ConcernStatus, ...] = (
@@ -401,21 +404,25 @@ counted as finished would inflate the fraction silently.
 """
 
 
-def attention_line(
+def status_header(
     status: RunStatus, settled: tuple[ConcernStatus, ...] = SETTLED_STATUSES
 ) -> str:
-    """The one line worth interrupting somebody with, and nothing more.
+    """The report's first line, and on its own what ``--line`` prints.
+
+    One composition rather than two, so the compact form cannot drift from
+    the full one: what a full report adds below this line is only what this
+    line leaves out — the per-status breakdown, and the last journal event.
 
     A breakdown of every status is progress rather than attention: nobody
     acts on "9 retired", and a reader scanning for what needs them has to
-    find it among nine figures that do not.
+    find it among nine figures that do not. What is here instead is how far
+    along the run is, how much longer the phase it is in should take, what
+    it has lost on the way, and whether it is holding anybody up.
 
-    Standing facts are left out for the same reason, which is the sharper
-    half. A concern that failed days ago is not something to attend to now,
-    and carrying its count displaced the one field that does change — so
-    the line read as though a failure were happening while the run worked
-    quietly through it. What is left is how far along the run is, what it
-    has lost on the way, and whether it is holding anybody up.
+    A loss is named only where there is one, so its presence means it, and
+    it joins the liveness rather than standing in for it: a run works
+    quietly through a concern that failed days ago, and a line carrying the
+    failure alone reads as though it were happening now.
 
     The fraction counts every concern that reached a terminal state rather
     than only the ones that produced work, so it can actually arrive at its
@@ -428,41 +435,64 @@ def attention_line(
     total = sum(counts.values())
     failed = counts[ConcernStatus.FAILED] if ConcernStatus.FAILED in counts else 0
     waiting = status.unanswered
-    held = "running" if status.held else "stopped"
+    iterator = status.progress
     return " · ".join(
         [
             local_stamp(),
             str(status.phase),
             f"{done}/{total} settled",
+            *([f"{iterator.label} {iterator.render()}"] if iterator else []),
             *([f"{failed} failed"] if failed else []),
-            f"{waiting} question{'' if waiting == 1 else 's'} waiting"
-            if waiting
-            else held,
+            *(
+                [f"{waiting} question{'' if waiting == 1 else 's'} waiting"]
+                if waiting
+                else []
+            ),
+            status.verdict(),
         ]
     )
 
 
 def report_status(status: RunStatus) -> None:
-    """Print one reading of a run, verdict first and stamped with the hour.
+    """Print one reading of a run: the header, then what it leaves out.
 
     Stamped because whoever reads this reads it inside a report written
     later still, and "how long since I was last told anything" is the
     question they are actually asking. The run's own relative ages answer a
     different one: how long a worker has been quiet.
     """
-    typer.echo(f"{local_stamp()} — {status.verdict()}")
-    typer.echo(f"  phase: {status.phase}")
-    if status.progress is not None:
-        typer.echo(f"  {status.progress.label}: {status.progress.render()}")
+    typer.echo(status_header(status))
     for count in status.counts:
         typer.echo(f"  {count.concerns:>3} {count.status}")
-    if status.unanswered:
-        typer.echo(f"  {status.unanswered} question(s) waiting on you")
     if status.last is not None:
         typer.echo(
             f"  last: {status.last.event} by {status.last.actor} "
             f"at {status.last.at:%Y-%m-%d %H:%M:%S}Z"
         )
+
+
+def report_waiting(run_id: str) -> None:
+    """Print any question now waiting, whole, beside the change that raised it.
+
+    A watch reports what moved; a question that moved is one somebody has to
+    read, and naming it without carrying it makes every wake-up start with a
+    round trip to fetch what happened. The reader is an agent that must
+    measure a question's claims against the tree before relaying it, so what
+    it needs is the question's own words — the notes it was raised from, the
+    concern's specification, its acceptance criteria — not a count.
+
+    Carrying it also survives a channel that drops: a notification lost after
+    this one still leaves the question in hand, where a count that went
+    missing leaves no trace that anything was ever asked.
+    """
+    waiting = [
+        view
+        for view in pending_views(open_mailbox(run_id))
+        if view.answered is None and view.offer is None
+    ]
+    for view in waiting:
+        for line in describe(view):
+            typer.echo(line)
 
 
 def watch_status(
@@ -472,6 +502,7 @@ def watch_status(
     poll: float,
     startup: float,
     first: RunStatus,
+    terse: bool = False,
 ) -> None:
     """Report a run until it parks or finishes, so nobody hand-rolls the loop.
 
@@ -497,16 +528,21 @@ def watch_status(
         if status.watched() != frame:
             frame = status.watched()
             quiet = 0.0
-            report_status(status)
+            if terse:
+                typer.echo(status_header(status))
+            else:
+                report_status(status)
+            report_waiting(run_id)
         elif quiet >= heartbeat:
             quiet = 0.0
-            typer.echo(f"{local_stamp()} — {status.verdict()}")
+            typer.echo(status_header(status))
     # Nothing is reported here. Every way this loop ends moves a field the
     # frame is taken over — the lock is released, or the phase becomes
     # terminal — so the reading that ended it was already printed as a
     # change, and a run settled before the first poll was printed by the
     # caller.
     typer.echo(f"{local_stamp()} — watch ended: {run_id} is waiting on you.")
+    report_waiting(run_id)
 
 
 def retire_concern(

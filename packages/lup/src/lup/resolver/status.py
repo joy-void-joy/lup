@@ -21,8 +21,14 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 
 from lup.channels.models import utc_now
+from lup.resolver.join_desk import JoinDesk
 from lup.resolver.journal import journal_tail
-from lup.resolver.models import FROZEN, ConcernStatus, ResolvePhase, ResolveState
+from lup.resolver.models import (
+    FROZEN,
+    ConcernStatus,
+    JoinProgress,
+    ResolvePhase,
+)
 from lup.resolver.state import ResolverStateRepository
 
 
@@ -141,23 +147,23 @@ class RunStatus(BaseModel):
     """The current phase's iterator, where the phase has one worth drawing."""
 
     def verdict(self) -> str:
-        """One line a reader can act on without interpreting the rest.
+        """Whether anything is driving this run, in the words to say it in.
 
         The held lock is the fact; quiet time is context on top of it, never
         the verdict on its own. Judging by silence produced a confident
         wrong "it crashed" about a run that was mid-turn, because a long
         model turn looks exactly like a stall from outside.
+
+        Short enough to sit at the end of a line that already carries the
+        phase, so the phase is not named twice.
         """
         if not self.exists:
             return "no such run under this project's .lup/resolve"
         if not self.held:
-            return f"not running — parked or finished in phase {self.phase}"
+            return "stopped"
         if self.last is None:
-            return "running — a process holds the lock, nothing recorded yet"
-        return (
-            "running — a process holds the lock, last recorded "
-            f"{int(self.last.quiet_for().total_seconds())}s ago"
-        )
+            return "running"
+        return f"running, last {int(self.last.quiet_for().total_seconds())}s ago"
 
     def watched(self) -> str:
         """The part of this projection a watch reports a change in.
@@ -268,22 +274,44 @@ def unfinished_runs(state_root: Path) -> list[RunSummary]:
     )
 
 
-def phase_progress(state: ResolveState) -> PhaseProgress | None:
+def phase_progress(
+    progress: JoinProgress | None, run_dir: Path
+) -> PhaseProgress | None:
     """The iterator the current phase is working through, where it has one.
 
     Only the join sequence so far. A phase earns a bar by knowing both how
     many items it faces and when each one landed; the worker phase knows the
     first and not the second, and drawing a bar that cannot say a rate would
     promise an estimate the run has no way to make.
+
+    Read from both records the sequence writes, because neither is complete
+    on its own. The merger drives a whole join inside one turn, so the
+    orchestrator's copy does not move until the turn returns and a reader
+    watching it sees nothing for the length of the phase; the checkpoint
+    ``land_parent`` writes is current between two parents but starts empty
+    for a run whose earlier joins a previous sequence recorded. Their union
+    is what has landed, so the count can never go backwards.
     """
-    progress = state.join_progress
-    if progress is None or not progress.planned:
+    checkpoint = JoinDesk(run_dir).progress()
+    planned = max(progress.planned if progress else 0, checkpoint.planned)
+    if not planned:
         return None
     return PhaseProgress(
         label="joins",
-        done=len(progress.joined),
-        total=progress.planned,
-        per_item=elapsed_per_item(progress.completions),
+        done=len({*(progress.joined if progress else []), *checkpoint.joined}),
+        total=planned,
+        per_item=elapsed_per_item(
+            sorted(
+                [
+                    *(progress.completions if progress else []),
+                    *(
+                        datetime.fromisoformat(landing.at)
+                        for landing in checkpoint.landings
+                        if landing.merged and landing.at
+                    ),
+                ]
+            )
+        ),
     )
 
 
@@ -315,7 +343,7 @@ def run_status(repository: ResolverStateRepository, run_id: str) -> RunStatus:
             for question in (state.questions.questions if state.questions else [])
             if question.id not in answered
         ),
-        progress=phase_progress(state),
+        progress=phase_progress(state.join_progress, repository.root),
         last=None
         if entry is None
         else LastRecorded(

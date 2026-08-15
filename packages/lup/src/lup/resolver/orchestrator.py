@@ -1,5 +1,6 @@
 """Concrete lease, worktree, commit, and dependency-base orchestration."""
 
+import shutil
 from itertools import takewhile
 from pathlib import Path
 
@@ -166,6 +167,34 @@ class WorktreeOrchestrator:
         if self.preparer is not None:
             self.preparer.prepare(lease.root)
 
+    def discard_unregistered(self, root: Path) -> None:
+        """Clear a leftover checkout directory git no longer counts as one.
+
+        A run killed mid-read leaves its reading worktree on disk. Git's own
+        bookkeeping is pruned, but removal keeps untracked files, and a
+        session traces into the tree it runs in — so an ignored telemetry
+        file survives, the directory survives with it, and `worktree add`
+        refuses the path from then on. Every later resume died there, on a
+        directory that is by construction disposable: a detached read-only
+        checkout of a commit that still exists.
+
+        Only when git disowns it. A path git still lists is somebody's
+        worktree, and removing one out from under a reader is a different
+        act entirely.
+        """
+        if not root.exists():
+            return
+        listed = self.launcher.launch(
+            LaunchRequest(arguments=["git", "worktree", "list"], cwd=self.workspace)
+        )
+        if listed.code == 0 and any(
+            line.split()[0] == str(root)
+            for line in listed.stdout.splitlines()
+            if line.split()
+        ):
+            return
+        shutil.rmtree(root)
+
     def read_only_checkout(self, root: Path, commit: str) -> None:
         """A detached worktree at one commit, for actors that only read it.
 
@@ -177,6 +206,7 @@ class WorktreeOrchestrator:
         would have concurrent readers regenerating into each other, and into
         the integration tree the audit depends on being clean.
         """
+        self.discard_unregistered(root)
         self.require(
             LaunchRequest(
                 arguments=["git", "worktree", "add", "--detach", str(root), commit],

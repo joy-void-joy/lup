@@ -36,14 +36,16 @@ from lup.resolver.journal import (
     JoinRenderedEvent,
     Journal,
     RecheckRepeatedEvent,
+    RecheckReusedEvent,
 )
-from lup.resolver.join_tools import (
+from lup.resolver.recheck_desk import RecheckDesk, RecheckRecord
+from lup.resolver.join_desk import (
     JoinDesk,
     JoinPlan,
     JoinProgressRecord,
     JoinTip,
-    merge_problems,
 )
+from lup.resolver.join_tools import merge_problems
 from lup.resolver.models import (
     ActorRef,
     CarriedParent,
@@ -580,17 +582,50 @@ class Joiner:
         examining = [concern for concern in state.concerns if concern.id in integrated]
         if not examining:
             return []
-        async with self.reading_pool(integration, len(examining)) as trees:
+        # An integration with no commit has nothing to have examined, so a
+        # record could name no tree and reuse would be against whatever the
+        # reader happened to check out.
+        examined = integration.commit or ""
+        desk = RecheckDesk(self.questions.mailbox.root)
+        settled = {
+            concern.id: record
+            for concern in examining
+            if examined
+            for record in [desk.recorded(concern.id, examined)]
+            if record is not None
+        }
+        asking = [concern for concern in examining if concern.id not in settled]
+        if settled:
+            self.journal.record(
+                RecheckReusedEvent(concerns=sorted(settled), commit=examined)
+            )
+        carried = self.questions.raised(
+            [record.question_id for record in settled.values() if record.question_id]
+        )
+        if not asking:
+            return carried
+        async with self.reading_pool(integration, len(asking)) as trees:
 
             async def examine(concern: Concern) -> MaterialQuestion | None:
                 tree = await trees.get()
                 try:
-                    return await self.recheck_one(concern, tree, integration)
+                    question = await self.recheck_one(concern, tree, integration)
                 finally:
                     trees.put_nowait(tree)
+                # After the turn, so a re-check interrupted part way through
+                # is re-run rather than recorded as having decided nothing.
+                if examined:
+                    desk.record(
+                        RecheckRecord(
+                            concern_id=concern.id,
+                            commit=examined,
+                            question_id="" if question is None else question.id,
+                        )
+                    )
+                return question
 
-            asked = await asyncio.gather(*[examine(concern) for concern in examining])
-        return [question for question in asked if question is not None]
+            asked = await asyncio.gather(*[examine(concern) for concern in asking])
+        return [*carried, *[question for question in asked if question is not None]]
 
     @asynccontextmanager
     async def reading_pool(
