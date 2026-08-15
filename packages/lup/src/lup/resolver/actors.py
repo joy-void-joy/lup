@@ -26,7 +26,7 @@ import logging
 from contextlib import AsyncExitStack
 from pathlib import Path
 
-from pydantic import BaseModel, TypeAdapter
+from pydantic import BaseModel, Field, TypeAdapter
 
 from lup.channels.models import publish_atomic
 from lup.hooks import (
@@ -76,7 +76,18 @@ class ActorRecord(BaseModel):
 
     actor: ActorRef
     session: SessionId | None = None
-    schema_digest: str | None = None
+    schema_digests: dict[str, str] = Field(  # lup: ignore[dict-str-payload]
+        default_factory=dict
+    )
+    """The digest this actor last used for each submission type it was asked for.
+
+    Keyed by type rather than one per actor, because one actor is legitimately
+    asked for more than one: the merger drives a whole join and reports a
+    `JoinReport`, then adjudicates the finished tree and reports a
+    `MergeReport`. A single digest read that second ask as the first schema
+    having changed, and refused a conversation whose history is exactly what
+    the second ask needs.
+    """
 
 
 RECORD_ADAPTER: TypeAdapter[ActorRecord] = TypeAdapter(ActorRecord)
@@ -362,16 +373,27 @@ class ActorSession:
         )
 
     def check_schema[T: BaseModel | None](self, request: TurnRequest[T]) -> None:
-        """Refuse a resumed actor whose submission schema no longer matches."""
+        """Refuse a resumed actor whose submission schema no longer matches.
+
+        Per submission type, because being asked for a second one is ordinary
+        rather than suspect: the same merger reports a join and then, once the
+        tree is whole, adjudicates it. What is worth refusing is a type this
+        actor has answered before whose shape has since moved, which is the
+        park-across-a-code-change this guard was built for.
+        """
         digest = schema_digest(request.output_type)
-        if self.record.schema_digest is None:
-            self.record = self.record.model_copy(update={"schema_digest": digest})
+        if request.output_type is None or digest is None:
             return
-        if digest != self.record.schema_digest:
+        named = request.output_type.__name__
+        seen = self.record.schema_digests
+        if named in seen and seen[named] != digest:
             raise ActorSchemaChangedError(
-                f"{self.actor.label()} resumed expecting a different submission "
-                "schema than the one it was bound to"
+                f"{self.actor.label()} resumed expecting a different {named} "
+                "than the one it was bound to"
             )
+        self.record = self.record.model_copy(
+            update={"schema_digests": {**seen, named: digest}}
+        )
 
     async def close(self) -> None:
         await self.stack.aclose()
