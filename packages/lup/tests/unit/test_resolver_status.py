@@ -9,7 +9,19 @@ from pydantic import TypeAdapter
 from lup.channels.models import local_stamp, utc_now
 from lup.channels.stream import Stream
 from lup.resolver.join_desk import JoinDesk, JoinLanding
-from lup.resolver.models import ConcernStatus, JoinProgress, ResolvePhase
+from lup.harness.models import ResolveSpec, SkillInvocation
+from lup.resolver.models import (
+    AcceptanceCriterion,
+    Concern,
+    ConcernProgress,
+    ConcernStatus,
+    IntegrationRecord,
+    JoinProgress,
+    ResolvePhase,
+    ResolveState,
+    SourceSnapshot,
+)
+from lup.resolver.recheck_desk import RecheckDesk, RecheckRecord
 from lup.resolver.state import ResolverStateRepository
 from lup.resolver.status import (
     LastRecorded,
@@ -17,7 +29,9 @@ from lup.resolver.status import (
     RunStatus,
     StatusCount,
     elapsed_per_item,
+    join_bar,
     phase_progress,
+    recheck_bar,
     run_status,
 )
 from lup.devtools.supervisor.doors import report_status, status_header
@@ -94,7 +108,7 @@ def test_the_bar_moves_while_the_join_turn_is_still_running(tmp_path: Path) -> N
     for index in range(10):
         desk.record(JoinLanding(commit=f"{index:040d}", head="c" * 40), planned=13)
 
-    progress = phase_progress(absorbed(["0" * 40], planned=13), tmp_path)
+    progress = join_bar(absorbed(["0" * 40], planned=13), tmp_path)
 
     assert progress is not None
     assert progress.done == 10
@@ -109,7 +123,7 @@ def test_the_bar_never_goes_backwards_when_a_turn_starts(tmp_path: Path) -> None
     """
     earlier = [f"{index:040d}" for index in range(8)]
 
-    progress = phase_progress(absorbed(earlier, planned=13), tmp_path)
+    progress = join_bar(absorbed(earlier, planned=13), tmp_path)
 
     assert progress is not None
     assert progress.done == 8
@@ -131,11 +145,94 @@ def test_a_parent_recorded_without_a_merge_does_not_set_the_rate(
             planned=13,
         )
 
-    progress = phase_progress(absorbed([], planned=13), tmp_path)
+    progress = join_bar(absorbed([], planned=13), tmp_path)
 
     assert progress is not None
     assert progress.done == 4
     assert progress.per_item is None
+
+
+def verifying(concerns: list[str], examined: str | None) -> ResolveState:
+    """A run in the phase that re-checks every concern it integrated."""
+    return ResolveState(
+        config_digest="config-sha",
+        run_id="run-1",
+        phase=ResolvePhase.VERIFICATION,
+        source=SourceSnapshot(branch="dev", commit="source-sha"),
+        spec=ResolveSpec(
+            id="resolve",
+            worker_identity="resolver-worker",
+            worker_skill=SkillInvocation(plugin="lup", skill="worker"),
+            review_skill=SkillInvocation(plugin="lup", skill="review"),
+            merge_skill=SkillInvocation(plugin="lup", skill="merge"),
+        ),
+        concerns=[
+            Concern(
+                id=name,
+                title=name,
+                spec=f"Resolve {name}",
+                criteria=[AcceptanceCriterion(id=f"{name}-done", description="done")],
+            )
+            for name in concerns
+        ],
+        progress=[
+            ConcernProgress(concern_id=name, status=ConcernStatus.INTEGRATING)
+            for name in concerns
+        ],
+        integration=IntegrationRecord(
+            branch="review",
+            worktree=Path("integration"),
+            concerns=concerns,
+            commit=examined,
+        ),
+    )
+
+
+def test_the_bar_moves_while_every_concern_is_still_integrating(
+    tmp_path: Path,
+) -> None:
+    """The re-check phase changes no status until the last concern lands.
+
+    A reader watching the tally sees one figure for the length of the phase
+    and then a jump, which is the shape a wedged run has — and the guidance
+    sends them to this surface precisely so they need not judge by silence.
+    The reviewers write a record each as they finish, so the phase knows both
+    figures a bar is owed.
+    """
+    facing = [f"concern-{index}" for index in range(21)]
+    desk = RecheckDesk(tmp_path)
+    for name in facing[:4]:
+        desk.record(RecheckRecord(concern_id=name, commit="b" * 40))
+
+    progress = phase_progress(verifying(facing, "b" * 40), tmp_path)
+
+    assert progress is not None
+    assert (progress.label, progress.done, progress.total) == ("re-checks", 4, 21)
+
+
+def test_a_recheck_of_another_tree_is_not_progress_through_this_one(
+    tmp_path: Path,
+) -> None:
+    """Repairing the merged tree is what a stop-on-defects run asks for.
+
+    Every record the tree before the repair earned names that commit, and
+    counting them would report a phase as most of the way through the moment
+    it started over.
+    """
+    facing = [f"concern-{index}" for index in range(21)]
+    desk = RecheckDesk(tmp_path)
+    for name in facing[:4]:
+        desk.record(RecheckRecord(concern_id=name, commit="a" * 40))
+
+    progress = phase_progress(verifying(facing, "b" * 40), tmp_path)
+
+    assert progress is not None
+    assert progress.done == 0
+
+
+def test_a_verification_with_nothing_examined_earns_no_bar(tmp_path: Path) -> None:
+    """An integration with no commit has nothing a record could be keyed to."""
+    assert recheck_bar(verifying(["a"], None), tmp_path) is None
 
 
 def test_an_unheld_run_reads_as_not_running(tmp_path: Path) -> None:

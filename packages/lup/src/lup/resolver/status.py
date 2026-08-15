@@ -28,7 +28,9 @@ from lup.resolver.models import (
     ConcernStatus,
     JoinProgress,
     ResolvePhase,
+    ResolveState,
 )
+from lup.resolver.recheck_desk import RecheckDesk
 from lup.resolver.state import ResolverStateRepository
 
 
@@ -179,9 +181,10 @@ class RunStatus(BaseModel):
                 str(self.held),
                 str(self.phase),
                 str(self.unanswered),
-                # A join is one of the four facts a reader waits on, and the
-                # statuses above do not move for it: every concern is already
-                # `integrating` and stays there until the last one lands.
+                # The phase's own progress is one of the four facts a reader
+                # waits on, and the statuses above move for neither phase that
+                # has it: every concern is already `integrating` and stays
+                # there through the last join and every re-check after it.
                 str(self.progress.done if self.progress else 0),
                 *(f"{count.status}={count.concerns}" for count in self.counts),
             ]
@@ -274,15 +277,24 @@ def unfinished_runs(state_root: Path) -> list[RunSummary]:
     )
 
 
-def phase_progress(
-    progress: JoinProgress | None, run_dir: Path
-) -> PhaseProgress | None:
+def phase_progress(state: ResolveState, run_dir: Path) -> PhaseProgress | None:
     """The iterator the current phase is working through, where it has one.
 
-    Only the join sequence so far. A phase earns a bar by knowing both how
-    many items it faces and when each one landed; the worker phase knows the
-    first and not the second, and drawing a bar that cannot say a rate would
-    promise an estimate the run has no way to make.
+    A phase earns a bar by knowing both how many items it faces and when each
+    one landed; the worker phase knows the first and not the second, and
+    drawing a bar that cannot say a rate would promise an estimate the run has
+    no way to make. Two phases know both, and for the same reason: each drives
+    one item at a time and writes a checkpoint as that item finishes.
+    """
+    match state.phase:
+        case ResolvePhase.VERIFICATION:
+            return recheck_bar(state, run_dir)
+        case _:
+            return join_bar(state.join_progress, run_dir)
+
+
+def join_bar(progress: JoinProgress | None, run_dir: Path) -> PhaseProgress | None:
+    """How far the join sequence has got.
 
     Read from both records the sequence writes, because neither is complete
     on its own. The merger drives a whole join inside one turn, so the
@@ -315,6 +327,43 @@ def phase_progress(
     )
 
 
+def recheck_bar(state: ResolveState, run_dir: Path) -> PhaseProgress | None:
+    """How far the final re-check has got through the concerns it examines.
+
+    The statuses cannot answer this. Every concern the re-check faces is
+    already ``integrating`` and stays there until the phase ends, so a reader
+    watching the tally sees one figure for the length of the phase and then a
+    jump — which is the shape a wedged run has, and exactly the judgement the
+    liveness verdict exists to spare them.
+
+    Counted against the commit examined, because that is what makes a record
+    reusable: a tree reassembled from different parents is a different
+    question, and the records of the tree before it are not progress through
+    this one.
+    """
+    examined = state.integration.commit if state.integration else None
+    facing = {
+        item.concern_id
+        for item in state.progress
+        if item.status == ConcernStatus.INTEGRATING
+    }
+    if not examined or not facing:
+        return None
+    records = [
+        record
+        for record in RecheckDesk(run_dir).examined(examined)
+        if record.concern_id in facing
+    ]
+    return PhaseProgress(
+        label="re-checks",
+        done=len(records),
+        total=len(facing),
+        per_item=elapsed_per_item(
+            sorted(datetime.fromisoformat(record.at) for record in records if record.at)
+        ),
+    )
+
+
 def run_status(repository: ResolverStateRepository, run_id: str) -> RunStatus:
     """Everything the run directory can say about where this run stands."""
     held = repository.held()
@@ -343,7 +392,7 @@ def run_status(repository: ResolverStateRepository, run_id: str) -> RunStatus:
             for question in (state.questions.questions if state.questions else [])
             if question.id not in answered
         ),
-        progress=phase_progress(state.join_progress, repository.root),
+        progress=phase_progress(state, repository.root),
         last=None
         if entry is None
         else LastRecorded(

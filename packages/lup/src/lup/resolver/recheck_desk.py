@@ -36,6 +36,13 @@ class RecheckRecord(BaseModel):
     copy is a second thing to keep true — so a resume reads the record to
     learn a question exists and the mailbox to learn what it says.
     """
+    at: str = ""
+    """When the re-check finished, so the phase watching this can say a rate.
+
+    Defaulted rather than required, because a run already part way through
+    this phase wrote its earlier records before the field existed, and those
+    are exactly the records a resume must still be able to reuse.
+    """
 
 
 class RecheckDesk:
@@ -66,6 +73,23 @@ class RecheckDesk:
             return None
         record = RecheckRecord.model_validate_json(path.read_text(encoding="utf-8"))
         return record if record.commit == commit else None
+
+    def examined(self, commit: str) -> list[RecheckRecord]:
+        """Every re-check already made of that commit, in no order.
+
+        The phase's own checkpoint, read the way the join sequence's is: the
+        reviewers run concurrently and each writes as it finishes, so this
+        moves throughout the phase while every concern's status stays
+        ``integrating`` until the last one lands.
+        """
+        return [
+            record
+            for path in sorted(self.root.glob("*.json"))
+            for record in [
+                RecheckRecord.model_validate_json(path.read_text(encoding="utf-8"))
+            ]
+            if record.commit == commit
+        ]
 
     def clear(self) -> None:
         """Drop every record, so a fresh assembly re-checks from nothing."""
