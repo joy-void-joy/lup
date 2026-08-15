@@ -9,12 +9,13 @@ Examples::
     $ uv run lup-devtools dev pr sync-base --json
     $ uv run lup-devtools dev pr push --force --json
     $ uv run lup-devtools dev pr create --base dev --title "feat: search" --body "..."
-    $ uv run lup-devtools dev pr update 42 --body "..."
+    $ uv run lup-devtools dev pr create --base dev --title "feat: search" --body-file body.md
+    $ uv run lup-devtools dev pr update 42 --body-file body.md
 """
 
 import json
 import logging
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 from typing import Literal
 from urllib.parse import urlparse
 
@@ -509,6 +510,30 @@ def parse_pr_url(stdout: str) -> str:
         if urlparse(candidate).scheme in ("http", "https"):
             return candidate
     return ""
+
+
+def resolve_body(body: str | None, body_file: Path | None) -> str:
+    """The body text, from whichever of the two ways of giving it was used.
+
+    A PR body is prose long enough to want headings, code spans and lists,
+    and whoever composes one has usually just written it to a file. Reading
+    that file here keeps the text out of an argument list, where quoting is
+    the caller's problem: a body spliced through a shell needs every
+    apostrophe in its prose escaped by hand, and one missed truncates the
+    document into a parse error that names an offset rather than the body.
+    """
+    match (body, body_file):
+        case (None, None):
+            raise typer.BadParameter("pass --body or --body-file")
+        case (str(), Path()):
+            raise typer.BadParameter("pass --body or --body-file, not both")
+        case (None, Path() as path):
+            try:
+                return path.read_text(encoding="utf-8")
+            except OSError as e:
+                raise typer.BadParameter(f"cannot read {path}: {e}")
+        case (str() as text, None):
+            return text
 
 
 def create(

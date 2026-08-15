@@ -676,21 +676,33 @@ def create_dev_app(
     def pr_create_cmd(
         base: Annotated[str, typer.Option("--base", help="Target branch for PR")],
         title: Annotated[str, typer.Option("--title", help="PR title")],
-        body: Annotated[str, typer.Option("--body", help="PR body (markdown)")],
+        body: Annotated[
+            str | None, typer.Option("--body", help="PR body (markdown)")
+        ] = None,
+        body_file: Annotated[
+            Path | None,
+            typer.Option("--body-file", help="Read the PR body from this file"),
+        ] = None,
         as_json: Annotated[
             bool,
             typer.Option("--json", help="Output as JSON"),
         ] = False,
     ) -> None:
         """Create a new PR."""
-        pr.create(base, title, body, as_json)
+        pr.create(base, title, pr.resolve_body(body, body_file), as_json)
 
     @pr_app.command("update")
     def pr_update_cmd(
         pr_number: Annotated[int, typer.Argument(help="PR number to update")],
-        body: Annotated[str, typer.Option("--body", help="New PR body (markdown)")],
+        body: Annotated[
+            str | None, typer.Option("--body", help="New PR body (markdown)")
+        ] = None,
+        body_file: Annotated[
+            Path | None,
+            typer.Option("--body-file", help="Read the new PR body from this file"),
+        ] = None,
     ) -> None:
         """Update a PR body."""
-        pr.update(pr_number, body)
+        pr.update(pr_number, pr.resolve_body(body, body_file))
 
     return app
