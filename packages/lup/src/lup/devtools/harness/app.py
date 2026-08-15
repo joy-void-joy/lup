@@ -11,7 +11,6 @@ A launch command exists exactly when its adapter is among those targets: a
 project generating one native tree is not offered a launcher for the other.
 """
 
-import sys
 from pathlib import Path
 from typing import Annotated
 
@@ -150,6 +149,7 @@ def create_harness_app(
     resolve_app.command("park")(park_run)
     resolve_app.command("drain")(drain_run)
     resolve_app.command("refresh")(resolve.refresh_run)
+    resolve_app.command("intake")(resolve.preview_intake)
     app.add_typer(resolve_app, name="resolve")
 
     @resolve_app.callback(invoke_without_command=True)
@@ -196,9 +196,11 @@ def create_harness_app(
             list[str] | None,
             typer.Option(
                 "--admit",
-                help="Admit work discovered mid-run into this run, described in "
-                "the human's own words (repeatable). Only the new evidence is "
-                "planned; recorded answers and completed work are kept.",
+                help="Work described in the human's own words (repeatable). It "
+                "seeds a run that does not exist yet, alongside whatever notes "
+                "the tree holds, and joins one that does — where only the new "
+                "evidence is planned and recorded answers and completed work "
+                "are kept.",
             ),
         ] = None,
         admit_note: Annotated[
@@ -289,12 +291,40 @@ def create_harness_app(
         """Drive the shared persisted resolver through one explicit native adapter."""
         if context.invoked_subcommand is not None:
             return
+        admitted = resolve.AdmissionFlags(
+            statements=admit or [], notes=admit_note or [], issues=admit_issue or []
+        )
         if detach:
             if adapter is None:
                 raise typer.BadParameter(
                     "--adapter is required to drive a resolver run"
                 )
-            resolve.detach_resolve(run_id, resolve.forwardable_arguments(sys.argv))
+            # Ending a run reads recorded state and frees worktrees: it takes
+            # no turn, so there is nothing for a child to outlive this command
+            # with, and a relaunch carrying no `--abort` would start the run it
+            # was asked to end.
+            if abort is not None:
+                raise typer.BadParameter(
+                    "a run cannot be started detached and ended in one command"
+                )
+            resolve.detach_resolve(
+                resolve.DetachedRun(
+                    adapter=adapter,
+                    run_id=run_id,
+                    answers=answer or [],
+                    admitted=admitted,
+                    issues=issues,
+                    wait=wait,
+                    host_retries=host_retries,
+                    host_backoff=host_backoff,
+                    supervisor=resolve.SupervisorSpawn(
+                        enabled=supervise,
+                        port=supervise_port,
+                        linger=supervise_linger,
+                    ),
+                    adopt_config=adopt_config,
+                )
+            )
             return
         # Ending a run reads its recorded state and frees its worktrees; no turn
         # is taken and no skill invocation is rendered, so the one thing an
@@ -313,7 +343,7 @@ def create_harness_app(
             resolve.SupervisorSpawn(
                 enabled=supervise, port=supervise_port, linger=supervise_linger
             ),
-            resolve.admission_request(admit or [], admit_note or [], admit_issue or []),
+            resolve.admission_request(admitted),
             model,
             adopt_config,
             issues,
