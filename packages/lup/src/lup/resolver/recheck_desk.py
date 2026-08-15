@@ -17,6 +17,8 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict
 
+from lup.channels.models import utc_now
+
 RECHECK_DIR = "rechecks"
 """Where under a run directory the finished re-checks are recorded."""
 
@@ -39,9 +41,11 @@ class RecheckRecord(BaseModel):
     at: str = ""
     """When the re-check finished, so the phase watching this can say a rate.
 
-    Defaulted rather than required, because a run already part way through
-    this phase wrote its earlier records before the field existed, and those
-    are exactly the records a resume must still be able to reuse.
+    Left empty by whoever builds one and filled in by :meth:`RecheckDesk.record`,
+    which is the moment it becomes true. Defaulted rather than required for the
+    same reason it survives a read: a run already part way through this phase
+    wrote its earlier records before the field existed, and those are exactly
+    the records a resume must still be able to reuse.
     """
 
 
@@ -60,10 +64,20 @@ class RecheckDesk:
         A file per concern rather than one document, because the readers run
         concurrently: a shared file would need every one of them to serialize
         against the others for a record none of them reads.
+
+        Stamped here rather than by the caller. Writing is the moment the fact
+        becomes true, so the one place that writes is the one place that can
+        state it and the only place that cannot forget to. A stamp already set
+        is kept, so re-recording a read-back record does not restate it as now.
         """
         self.root.mkdir(parents=True, exist_ok=True)
+        stamped = (
+            record
+            if record.at
+            else record.model_copy(update={"at": utc_now().isoformat()})
+        )
         self.path(record.concern_id).write_text(
-            record.model_dump_json(indent=2), encoding="utf-8"
+            stamped.model_dump_json(indent=2), encoding="utf-8"
         )
 
     def recorded(self, concern_id: str, commit: str) -> RecheckRecord | None:

@@ -235,6 +235,61 @@ def test_a_verification_with_nothing_examined_earns_no_bar(tmp_path: Path) -> No
     assert recheck_bar(verifying(["a"], None), tmp_path) is None
 
 
+def test_the_desk_stamps_a_record_so_a_caller_cannot_forget_to(
+    tmp_path: Path,
+) -> None:
+    """Writing is the moment the fact becomes true, so writing states it.
+
+    A rate is what turns a count into an estimate, and it needs when each item
+    landed. Left to the caller, one that omits it costs the whole phase its
+    ETA and nothing reports the omission — the count still moves, so the bar
+    looks like it works.
+    """
+    desk = RecheckDesk(tmp_path)
+
+    desk.record(RecheckRecord(concern_id="a", commit="b" * 40))
+
+    recorded = desk.recorded("a", "b" * 40)
+    assert recorded is not None
+    assert datetime.fromisoformat(recorded.at) <= utc_now()
+
+
+def test_re_recording_keeps_the_stamp_the_first_write_gave_it(
+    tmp_path: Path,
+) -> None:
+    """A record read back and written again is not a re-check made now."""
+    desk = RecheckDesk(tmp_path)
+    desk.record(RecheckRecord(concern_id="a", commit="b" * 40))
+    first = desk.recorded("a", "b" * 40)
+    assert first is not None
+
+    desk.record(first)
+
+    again = desk.recorded("a", "b" * 40)
+    assert again is not None
+    assert again.at == first.at
+
+
+def test_a_bar_says_its_rate_once_the_records_carry_when(tmp_path: Path) -> None:
+    """Two stamps on one stretch are what an ETA is derived from."""
+    desk = RecheckDesk(tmp_path)
+    start = utc_now()
+    for index, name in enumerate(["a", "b", "c"]):
+        desk.record(
+            RecheckRecord(
+                concern_id=name,
+                commit="b" * 40,
+                at=(start + timedelta(minutes=index)).isoformat(),
+            )
+        )
+
+    progress = recheck_bar(verifying(["a", "b", "c", "d"], "b" * 40), tmp_path)
+
+    assert progress is not None
+    assert progress.per_item == timedelta(minutes=1)
+    assert progress.remaining() == timedelta(minutes=1)
+
+
 def test_an_unheld_run_reads_as_not_running(tmp_path: Path) -> None:
     repository = ResolverStateRepository(tmp_path, "quiet")
     repository.root.mkdir(parents=True)
