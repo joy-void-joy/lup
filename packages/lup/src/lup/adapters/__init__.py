@@ -23,7 +23,7 @@ Matched, and answering the same questions
 
 ``harness.py`` — both spell one :class:`~lup.harness.contracts.NativeSpellings`,
 which is closed by construction: a method added there cannot be left
-unanswered by either. Two methods are answered by declining (see below).
+unanswered by either. One method is answered by declining (see below).
 Codex additionally compiles native prefix rules and a project config file,
 because it reads shell allows and tool servers from files Claude has no
 equivalent of; Claude renders a separate MCP artifact for the same reason in
@@ -107,11 +107,9 @@ sweep leaves open.
 Declined rather than absent
 ---------------------------
 
-Two portable ideas have no Codex spelling, and each says so through an
-:class:`~lup.harness.contracts.Unsupported` carrying the reason: escaping the
-sandbox for one call, whose Codex overrides exist only as session-level flags
-on its binary, and handing a document whole to a tool, which nothing in its
-roster does. Both are declared answers rather than missing methods, so prose
-that asks for either gets nothing rather than an approximation, and an audit
-gets the reason.
+One portable idea has no Codex spelling, and says so through an
+:class:`~lup.harness.contracts.Unsupported` carrying the reason: handing a
+document whole to a tool, which nothing in its roster does. It is a declared
+answer rather than a missing method, so prose that asks for it gets nothing
+rather than an approximation, and an audit gets the reason.
 """
