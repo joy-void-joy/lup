@@ -2,7 +2,7 @@
 
 import asyncio
 from collections import Counter
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from contextlib import AbstractAsyncContextManager
 from datetime import UTC, datetime
 from pathlib import Path
@@ -15,8 +15,19 @@ from lup.harness.ownership import GeneratedArtifacts, OwnedArtifact
 from lup.harness.process import (
     LaunchRequest,
     LocalProcessLauncher,
+    ProcessLauncher,
 )
 from lup.resolver.dag import ConcernGraph, ConcernGraphError
+from lup.resolver.join_tools import (
+    JoinDesk,
+    JoinPlan,
+    JoinReport,
+    JoinStatusInput,
+    JoinTip,
+    LandParentInput,
+    StartParentInput,
+    create_join_tools,
+)
 from tests.unit.doubles import (
     FailingLauncher,
     ScriptedLauncher,
@@ -86,6 +97,7 @@ from lup.resolver.models import (
     SourceSnapshot,
     VerificationAcceptance,
     VerificationCommand,
+    HunkDisposition,
     WorkerContext,
     WorkerReport,
     WritableRootLease,
@@ -522,12 +534,134 @@ class UnusedInvocationRenderer(SkillInvocationRenderer):
 
 
 type ResolverResponse = Callable[[Path, str], JsonObject]
+type JoinDriver = Callable[[], Awaitable[None]]
+
+
+def merger_that_keeps_everything(
+    run_dir: Path, lease_root: Path, concern_id: str, launcher: ProcessLauncher
+) -> JoinDriver:
+    """A merger that lands every parent and accounts for whatever it is asked.
+
+    Written as a driver rather than a canned report because the merger now
+    owns its own sequence: a double that only answers with a report would
+    land nothing, and the checkpoint the run reads is written by the verbs,
+    not by the answer. Dispositioning every candidate as kept is the
+    simplest complete account — the point under test is that the gate is
+    reached and satisfied, not what a real merger would decide.
+    """
+    tools = {
+        tool.name: tool
+        for tool in create_join_tools(
+            run_dir, lease_root, concern_id, launcher=launcher
+        )
+    }
+
+    async def drive() -> None:
+        status = await tools["join_status"](JoinStatusInput())
+        if status.drain_requested:
+            return
+        for tip in status.remaining:
+            await tools["start_parent"](StartParentInput(commit=tip.commit))
+            landing = await tools["land_parent"](
+                LandParentInput(commit=tip.commit, summary=f"joined {tip.commit[:12]}")
+            )
+            if not landing.landed:
+                landing = await tools["land_parent"](
+                    LandParentInput(
+                        commit=tip.commit,
+                        summary=f"joined {tip.commit[:12]}",
+                        dispositions=[
+                            HunkDisposition(
+                                path=candidate.path,
+                                parent=candidate.parent,
+                                fate="kept",
+                                rationale="carried through the join",
+                            )
+                            for candidate in landing.unaccounted
+                        ],
+                    )
+                )
+            if landing.drain_requested:
+                return
+
+    return drive
+
+
+def recording_worker_recipe(
+    state_root: Path,
+    launcher: ProcessLauncher,
+    response: ResolverResponse,
+    log: list[str],
+) -> Callable[[WorkerContext], SessionFactory]:
+    """``worker_recipe``, for the tests that also read back every prompt."""
+
+    def run_dir() -> Path:
+        runs = sorted(path for path in state_root.iterdir() if path.is_dir())
+        if len(runs) != 1:
+            raise AssertionError(f"expected one run under {state_root}, found {runs}")
+        return runs[0]
+
+    def recipe(context: WorkerContext) -> SessionFactory:
+        return session_factory(
+            PromptRecordingSession(
+                context.root,
+                response,
+                log,
+                merger_that_keeps_everything(
+                    run_dir(), context.root, context.concern_id, launcher
+                )
+                if context.actor.kind == "merger"
+                else None,
+            )
+        )
+
+    return recipe
+
+
+def merger_draining_after_one_parent(
+    run_dir: Path, launcher: ProcessLauncher, response: ResolverResponse
+) -> Callable[[WorkerContext], SessionFactory]:
+    """A merger that lands one parent, then finds the run asked to stop.
+
+    The drain arrives mid-sequence rather than before the join, because
+    that is the boundary worth pinning: one already waiting stops the join
+    before a session is opened, which exercises a different path.
+    """
+
+    def recipe(context: WorkerContext) -> SessionFactory:
+        if context.actor.kind != "merger":
+            return resolver_test_factory(context.root, response)
+        tools = {
+            tool.name: tool
+            for tool in create_join_tools(
+                run_dir, context.root, context.concern_id, launcher=launcher
+            )
+        }
+
+        async def drive() -> None:
+            status = await tools["join_status"](JoinStatusInput())
+            first = status.remaining[0]
+            await tools["start_parent"](StartParentInput(commit=first.commit))
+            QuestionMailbox(run_dir).drain(
+                ParkRequest(run_id=run_dir.name, reason="operator stopped it")
+            )
+            landed = await tools["land_parent"](
+                LandParentInput(commit=first.commit, summary="joined the first")
+            )
+            assert landed.drain_requested, "the landing verb reports a waiting drain"
+
+        return resolver_test_factory(context.root, response, drive)
+
+    return recipe
 
 
 class ResolverTestSession(Session):
-    def __init__(self, root: Path, response: ResolverResponse) -> None:
+    def __init__(
+        self, root: Path, response: ResolverResponse, joining: JoinDriver | None = None
+    ) -> None:
         self.root = root
         self.response = response
+        self.joining = joining
         self.sequence = 0
 
     async def start[T: BaseModel | None](
@@ -537,9 +671,15 @@ class ResolverTestSession(Session):
         if not is_output_model(output_type):
             raise AssertionError("resolver turns must request typed output")
         self.sequence += 1
-        output = output_type.model_validate(
-            self.response(self.root, output_type.__name__)
-        )
+        if output_type is JoinReport and self.joining is not None:
+            await self.joining()
+            output = output_type.model_validate(
+                {"plan": "in the order given", "summary": "joined every parent"}
+            )
+        else:
+            output = output_type.model_validate(
+                self.response(self.root, output_type.__name__)
+            )
         result = turn_result(
             output,
             identifiers(f"resolver-{self.root.name}", f"turn-{self.sequence}"),
@@ -547,8 +687,46 @@ class ResolverTestSession(Session):
         return TurnHandle[T](turn=StaticTurn(result))
 
 
-def resolver_test_factory(root: Path, response: ResolverResponse) -> SessionFactory:
-    return session_factory(ResolverTestSession(root, response))
+def resolver_test_factory(
+    root: Path, response: ResolverResponse, joining: JoinDriver | None = None
+) -> SessionFactory:
+    return session_factory(ResolverTestSession(root, response, joining))
+
+
+def worker_recipe(
+    state_root: Path,
+    launcher: ProcessLauncher,
+    response: ResolverResponse,
+) -> Callable[[WorkerContext], SessionFactory]:
+    """The worker factory a test core gets, with a merger that drives its join.
+
+    One recipe opens both a concern's worker and the merger that joins into
+    it, and only the second is handed the verbs that land a parent — the
+    same split the real factory makes, for the same reason.
+
+    The run directory is found rather than named, because a test builds its
+    core with the run id inline and there is exactly one run under a test's
+    state root. Resolved at session time, when the directory exists.
+    """
+
+    def run_dir() -> Path:
+        runs = sorted(path for path in state_root.iterdir() if path.is_dir())
+        if len(runs) != 1:
+            raise AssertionError(f"expected one run under {state_root}, found {runs}")
+        return runs[0]
+
+    def recipe(context: WorkerContext) -> SessionFactory:
+        return resolver_test_factory(
+            context.root,
+            response,
+            merger_that_keeps_everything(
+                run_dir(), context.root, context.concern_id, launcher
+            )
+            if context.actor.kind == "merger"
+            else None,
+        )
+
+    return recipe
 
 
 class LiteralInvocationRenderer(SkillInvocationRenderer):
@@ -694,7 +872,7 @@ async def test_one_note_raising_two_issues_reaches_both_concerns(
             ],
         ),
         resolve_spec(),
-        lambda context: resolver_test_factory(context.root, reviewer_response),
+        worker_recipe(tmp_path / "state", recording_launcher(), reviewer_response),
         lambda root: resolver_test_factory(root, reviewer_response),
         LiteralInvocationRenderer(),
         recording_launcher(),
@@ -754,7 +932,7 @@ async def test_inventory_planner_clusters_every_contextual_note_once(
             ],
         ),
         resolve_spec(),
-        lambda context: resolver_test_factory(context.root, reviewer_response),
+        worker_recipe(tmp_path / "state", recording_launcher(), reviewer_response),
         lambda root: resolver_test_factory(root, reviewer_response),
         LiteralInvocationRenderer(),
         recording_launcher(),
@@ -1595,7 +1773,7 @@ async def test_complete_resolver_lifecycle_uses_real_isolated_git_worktrees(
             ],
         ),
         resolve_spec(),
-        lambda context: resolver_test_factory(context.root, worker_response),
+        worker_recipe(tmp_path / "state", launcher, worker_response),
         lambda root: resolver_test_factory(root, reviewer_response),
         LiteralInvocationRenderer(),
         launcher,
@@ -1758,7 +1936,7 @@ async def test_resume_after_a_kill_past_workers_completes_without_backward_phase
                 ],
             ),
             resolve_spec(),
-            lambda context: resolver_test_factory(context.root, worker_response),
+            worker_recipe(tmp_path / "state", launcher, worker_response),
             lambda root: resolver_test_factory(root, reviewer_response),
             LiteralInvocationRenderer(),
             launcher,
@@ -1916,7 +2094,7 @@ def failure_leg_core(
             recheck_standing_per_join=recheck_standing_per_join,
         ),
         resolve_spec(),
-        lambda context: resolver_test_factory(context.root, worker_response),
+        worker_recipe(tmp_path / "state", launcher, worker_response),
         lambda root: resolver_test_factory(root, reviewer_response),
         LiteralInvocationRenderer(),
         launcher,
@@ -2507,7 +2685,7 @@ async def test_aborting_a_parked_run_frees_its_leases_and_refuses_resumption(
                 ],
             ),
             resolve_spec(),
-            lambda context: resolver_test_factory(context.root, worker_response),
+            worker_recipe(tmp_path / "state", launcher, worker_response),
             lambda root: resolver_test_factory(root, lambda *_: {}),
             LiteralInvocationRenderer(),
             launcher,
@@ -2590,7 +2768,7 @@ async def test_midrun_question_parks_the_concern_and_resumes_after_answers(
                 ],
             ),
             resolve_spec(),
-            lambda context: resolver_test_factory(context.root, worker_response),
+            worker_recipe(tmp_path / "state", launcher, worker_response),
             lambda root: resolver_test_factory(root, reviewer_response),
             LiteralInvocationRenderer(),
             launcher,
@@ -3092,10 +3270,16 @@ async def test_a_drain_stops_integration_between_two_parents(tmp_path: Path) -> 
     git("checkout", "source")
 
     def unused_actor(_root: Path, _output_name: str) -> JsonObject:
-        raise AssertionError("a clean join spends no actor turn")
+        raise AssertionError("a drained join spends no turn past the merger's")
 
     core = failure_leg_core(
         tmp_path, workspace, launcher, "drained-join", unused_actor, unused_actor
+    )
+    # Asked for while the merger is mid-sequence, which is the boundary under
+    # test. A drain already waiting when integration begins stops the join
+    # before a session is opened at all, so it never reaches this boundary.
+    core.turns.worker_factory = merger_draining_after_one_parent(
+        tmp_path / "state" / "drained-join", launcher, unused_actor
     )
     concerns = [concern("a"), concern("b")]
     state = ResolveState(
@@ -3119,8 +3303,6 @@ async def test_a_drain_stops_integration_between_two_parents(tmp_path: Path) -> 
         ],
     )
     core.persist(state)
-    core.mailbox.drain(ParkRequest(run_id="drained-join", reason="operator stopped it"))
-
     with pytest.raises(ResolverDrained) as drained:
         await core.integrate(state, state.outcomes)
 
@@ -3184,7 +3366,7 @@ async def test_a_finished_run_releases_itself_without_a_human_gate(
                 ],
             ),
             resolve_spec(),
-            lambda context: resolver_test_factory(context.root, worker_response),
+            worker_recipe(tmp_path / "state", launcher, worker_response),
             lambda root: resolver_test_factory(root, reviewer_response),
             LiteralInvocationRenderer(),
             launcher,
@@ -3218,7 +3400,7 @@ async def test_an_offer_outside_a_closed_gate_never_decides(
             verification_commands=[VerificationCommand(name="v", arguments=["git"])],
         ),
         resolve_spec(),
-        lambda context: resolver_test_factory(context.root, lambda *_: {}),
+        worker_recipe(tmp_path / "state", launcher, lambda *_: {}),
         lambda root: resolver_test_factory(root, lambda *_: {}),
         LiteralInvocationRenderer(),
         launcher,
@@ -3263,7 +3445,7 @@ async def test_a_design_question_records_an_answer_in_the_humans_own_words(
             verification_commands=[VerificationCommand(name="v", arguments=["git"])],
         ),
         resolve_spec(),
-        lambda context: resolver_test_factory(context.root, lambda *_: {}),
+        worker_recipe(tmp_path / "state", launcher, lambda *_: {}),
         lambda root: resolver_test_factory(root, lambda *_: {}),
         LiteralInvocationRenderer(),
         launcher,
@@ -3311,7 +3493,7 @@ def test_an_allowance_answered_in_prose_is_refused_rather_than_read_as_no(
             verification_commands=[VerificationCommand(name="v", arguments=["git"])],
         ),
         resolve_spec(),
-        lambda context: resolver_test_factory(context.root, lambda *_: {}),
+        worker_recipe(tmp_path / "state", launcher, lambda *_: {}),
         lambda root: resolver_test_factory(root, lambda *_: {}),
         LiteralInvocationRenderer(),
         launcher,
@@ -3382,7 +3564,7 @@ def admitting_core(
             ],
         ),
         resolve_spec(),
-        lambda context: resolver_test_factory(context.root, worker_response),
+        worker_recipe(tmp_path / "state", launcher, worker_response),
         lambda root: resolver_test_factory(root, reviewer_response),
         LiteralInvocationRenderer(),
         launcher,
@@ -3912,7 +4094,7 @@ async def test_observer_receives_every_persisted_transition_in_order(
             ],
         ),
         resolve_spec(),
-        lambda context: resolver_test_factory(context.root, worker_response),
+        worker_recipe(tmp_path / "state", launcher, worker_response),
         lambda root: resolver_test_factory(root, reviewer_response),
         LiteralInvocationRenderer(),
         launcher,
@@ -4149,9 +4331,11 @@ async def test_a_granted_allowance_reaches_the_sessions_launched_next(
             "files_changed": ["a.txt"],
         }
 
+    granting = worker_recipe(tmp_path / "state", launcher, worker_response)
+
     def recording_worker_factory(context: WorkerContext) -> SessionFactory:
         carried.append(list(context.allowances))
-        return resolver_test_factory(context.root, worker_response)
+        return granting(context)
 
     core = ResolverCore(
         ResolverConfig(
@@ -4202,8 +4386,14 @@ async def test_a_granted_allowance_reaches_the_sessions_launched_next(
 class PromptRecordingSession(ResolverTestSession):
     """A scripted session that also records every prompt it was handed."""
 
-    def __init__(self, root: Path, response: ResolverResponse, log: list[str]) -> None:
-        super().__init__(root, response)
+    def __init__(
+        self,
+        root: Path,
+        response: ResolverResponse,
+        log: list[str],
+        joining: JoinDriver | None = None,
+    ) -> None:
+        super().__init__(root, response, joining)
         self.log = log
 
     async def start[T: BaseModel | None](
@@ -4233,7 +4423,7 @@ def recheck_core(
             ],
         ),
         resolve_spec(),
-        lambda context: resolver_test_factory(context.root, reviewer_response),
+        worker_recipe(tmp_path / "state", recording_launcher(), reviewer_response),
         lambda root: session_factory(
             PromptRecordingSession(root, reviewer_response, log)
         ),
@@ -4427,8 +4617,8 @@ async def test_completeness_guard_appends_and_names_the_gap(tmp_path: Path) -> N
             ],
         ),
         resolve_spec(),
-        lambda context: session_factory(
-            PromptRecordingSession(context.root, worker_response, worker_prompts)
+        recording_worker_recipe(
+            tmp_path / "state", launcher, worker_response, worker_prompts
         ),
         lambda root: resolver_test_factory(root, reviewer_response),
         LiteralInvocationRenderer(),
@@ -4504,8 +4694,8 @@ async def test_a_carried_residual_takes_the_acceptance_the_reviewer_wrote(
             ],
         ),
         resolve_spec(),
-        lambda context: session_factory(
-            PromptRecordingSession(context.root, worker_response, worker_prompts)
+        recording_worker_recipe(
+            tmp_path / "state", launcher, worker_response, worker_prompts
         ),
         lambda root: resolver_test_factory(root, reviewer_response),
         LiteralInvocationRenderer(),
@@ -4625,8 +4815,8 @@ async def test_a_revision_carries_its_assignment_and_names_its_round(
             ],
         ),
         resolve_spec(),
-        lambda context: session_factory(
-            PromptRecordingSession(context.root, worker_response, worker_prompts)
+        recording_worker_recipe(
+            tmp_path / "state", launcher, worker_response, worker_prompts
         ),
         lambda root: resolver_test_factory(root, reviewer_response),
         LiteralInvocationRenderer(),
@@ -4701,8 +4891,8 @@ async def test_an_answered_question_credited_as_met_is_corrected_not_charged(
             ],
         ),
         resolve_spec(),
-        lambda context: session_factory(
-            PromptRecordingSession(context.root, worker_response, worker_prompts)
+        recording_worker_recipe(
+            tmp_path / "state", launcher, worker_response, worker_prompts
         ),
         lambda root: resolver_test_factory(root, reviewer_response),
         LiteralInvocationRenderer(),
@@ -4777,7 +4967,7 @@ async def test_a_round_that_commits_nothing_neither_charges_nor_reviews_an_empty
             ],
         ),
         resolve_spec(),
-        lambda context: resolver_test_factory(context.root, worker_response),
+        worker_recipe(tmp_path / "state", launcher, worker_response),
         lambda root: session_factory(
             PromptRecordingSession(root, reviewer_response, reviewer_prompts)
         ),
@@ -4845,7 +5035,7 @@ async def test_review_prompt_names_the_range_and_the_rulings(tmp_path: Path) -> 
             ],
         ),
         resolve_spec(),
-        lambda context: resolver_test_factory(context.root, worker_response),
+        worker_recipe(tmp_path / "state", launcher, worker_response),
         lambda root: session_factory(
             PromptRecordingSession(root, reviewer_response, reviewer_prompts)
         ),
@@ -4898,7 +5088,7 @@ async def test_plan_prompt_states_the_marker_stripping_rule(tmp_path: Path) -> N
             ],
         ),
         resolve_spec(),
-        lambda context: resolver_test_factory(context.root, planner_response),
+        worker_recipe(tmp_path / "state", recording_launcher(), planner_response),
         lambda root: session_factory(
             PromptRecordingSession(root, planner_response, log)
         ),
@@ -5483,3 +5673,294 @@ def test_a_tree_that_renders_nothing_authors_everything_it_changed(
     assert orchestrator.authored_between(lease, "base", "parent") == [
         Path("docs/rules.md")
     ]
+
+
+@pytest.mark.asyncio
+async def test_a_parent_an_earlier_run_landed_is_recorded_without_a_second_account(
+    tmp_path: Path,
+) -> None:
+    """A resume re-enters a join the previous run got part way through.
+
+    Its progress file is the run's, so a fresh one starts empty and the
+    merger is offered every parent again — including the ones already in the
+    tree. Those were accounted for when they landed, and asking again would
+    have this merger adjudicate somebody else's decisions against a tree
+    that has since moved past them.
+    """
+    launcher = LocalProcessLauncher()
+    workspace = failure_leg_workspace(tmp_path, launcher)
+
+    def git(*arguments: str, cwd: Path | None = None) -> str:
+        status = launcher.launch(
+            LaunchRequest(arguments=["git", *arguments], cwd=cwd or workspace)
+        )
+        assert status.code == 0, status.stderr
+        return status.stdout.strip()
+
+    git("checkout", "-b", "one", "source")
+    (workspace / "one.txt").write_text("one\n", encoding="utf-8")
+    git("add", "one.txt")
+    git("commit", "-m", "add one")
+    first = git("rev-parse", "HEAD")
+    git("checkout", "source")
+
+    tree = tmp_path / "integration"
+    git("worktree", "add", "--detach", str(tree), "source")
+    # The previous run merged this parent and committed it; this run has no
+    # record of having done so.
+    git("merge", "--no-ff", "-m", "resolve: join", first, cwd=tree)
+
+    run_dir = tmp_path / "state" / "resumed-join"
+    run_dir.mkdir(parents=True)
+    desk = JoinDesk(run_dir)
+    desk.write_plan(
+        JoinPlan(
+            concern_id="integration",
+            worktree=tree,
+            base=git("rev-parse", "source"),
+            title="resolve: join",
+            purpose="integration",
+            tips=[JoinTip(commit=first, concern_id="a")],
+        )
+    )
+    tools = {
+        tool.name: tool
+        for tool in create_join_tools(run_dir, tree, "integration", launcher=launcher)
+    }
+
+    prepared = await tools["start_parent"](StartParentInput(commit=first))
+    assert prepared.state == "already-in-tree"
+
+    landed = await tools["land_parent"](
+        LandParentInput(commit=first, summary="already in")
+    )
+
+    assert landed.landed is True
+    assert landed.problems == []
+    assert landed.unaccounted == []
+    assert desk.progress().joined == [first]
+
+
+@pytest.mark.asyncio
+async def test_the_final_recheck_reads_the_tree_from_a_checkout_of_its_own(
+    tmp_path: Path,
+) -> None:
+    """The last phase is a reviewer turn per concern, with no order between them.
+
+    Serially, one measured run's 21 integrated concerns at 16.3 minutes a
+    turn is most of a working day spent on a phase where nothing waits for
+    anything. They run together instead — but not in one directory: a
+    reviewer is denied Write and Edit, and still runs the project's gate,
+    which writes caches and re-renders artifacts. Concurrent readers sharing
+    the integration worktree would regenerate into each other, and into the
+    tree the audit and the review branch are read from.
+    """
+    launcher = LocalProcessLauncher()
+    workspace = failure_leg_workspace(tmp_path, launcher)
+
+    def git(*arguments: str) -> str:
+        status = launcher.launch(
+            LaunchRequest(arguments=["git", *arguments], cwd=workspace)
+        )
+        assert status.code == 0, status.stderr
+        return status.stdout.strip()
+
+    read_from: list[Path] = []
+
+    def reviewer_response(root: Path, _output_name: str) -> JsonObject:
+        read_from.append(root)
+        return {
+            "concern_id": "a",
+            "accepted": True,
+            "generalized": True,
+            "reason": "criteria hold",
+            "criteria_met": ["held"],
+        }
+
+    run_id = "recheck-pool"
+    core = ResolverCore(
+        ResolverConfig(
+            state_root=tmp_path / "state",
+            workspace=workspace,
+            worktree_root=tmp_path / "resolver-worktrees",
+            run_id=run_id,
+            integration_branch=f"resolve/{run_id}/review",
+            max_parallel_workers=3,
+            verification_commands=[
+                VerificationCommand(name="verify", arguments=["git", "diff", "--check"])
+            ],
+        ),
+        resolve_spec(),
+        worker_recipe(tmp_path / "state", launcher, reviewer_response),
+        lambda root: resolver_test_factory(root, reviewer_response),
+        LiteralInvocationRenderer(),
+        launcher,
+    )
+    # One criterion id across the three, so a single scripted reviewer answers
+    # for whichever concern reaches it — the pool decides that, not the test.
+    concerns = [
+        Concern(
+            id=identifier,
+            title=identifier.title(),
+            spec=f"Resolve {identifier}",
+            criteria=[AcceptanceCriterion(id="held", description="done")],
+            integration_approved=True,
+        )
+        for identifier in ("a", "b", "c")
+    ]
+    state = ResolveState(
+        config_digest="config-sha",
+        run_id=run_id,
+        phase=ResolvePhase.INTEGRATION,
+        source=snapshot(workspace, launcher),
+        spec=resolve_spec(),
+        concerns=concerns,
+        progress=[
+            ConcernProgress(concern_id=item.id, status=ConcernStatus.VERIFIED)
+            for item in concerns
+        ],
+    )
+    core.persist(state)
+    integration = IntegrationRecord(
+        branch=f"resolve/{run_id}/review",
+        worktree=tmp_path / "resolver-worktrees" / "integration",
+        concerns=[item.id for item in concerns],
+        commit=git("rev-parse", "HEAD"),
+    )
+
+    asked = await core.joiner.recheck_criteria(state, integration)
+
+    assert asked == [], "every concern's criteria still hold"
+    assert len(read_from) == 3, "one reviewer turn per integrated concern"
+    # A checkout each, and never the integration worktree itself.
+    assert len(set(read_from)) == 3
+    assert integration.worktree not in read_from
+    # Nothing left behind: the pool discards what it made.
+    assert not [path for path in read_from if path.exists()]
+
+
+@pytest.mark.asyncio
+async def test_a_capped_wave_holds_the_cap_and_resumes_what_it_never_started(
+    tmp_path: Path,
+) -> None:
+    """The cap is what a cut wave costs, so what it queues has to survive one.
+
+    Uncapped, a batch opened a session per runnable concern — eleven within
+    the same second in a measured run — which spends the host's allowance at
+    the width of the batch and races the credential file every session
+    shares. Capping is the instrument, and it introduces a state that did
+    not exist before: a concern leased but never started, because the cap
+    was full when the run died.
+
+    Such a concern has recorded nothing, so the next batch selects it again
+    exactly as the lease phase left it. That is the property here — the run
+    dies mid-wave with two concerns never begun, and the resume finishes all
+    three rather than shipping one.
+    """
+    launcher = LocalProcessLauncher()
+    workspace = failure_leg_workspace(tmp_path, launcher)
+
+    def git(*arguments: str) -> str:
+        status = launcher.launch(
+            LaunchRequest(arguments=["git", *arguments], cwd=workspace)
+        )
+        assert status.code == 0, status.stderr
+        return status.stdout.strip()
+
+    run_id = "capped-wave"
+    live: list[str] = []
+    widest = 0
+    started: list[str] = []
+    stopping = True
+
+    def worker_response(root: Path, output_name: str) -> JsonObject:
+        nonlocal widest, stopping
+        identifier = root.name
+        if output_name != WorkerReport.__name__:
+            raise AssertionError(output_name)
+        started.append(identifier)
+        live.append(identifier)
+        widest = max(widest, len(live))
+        live.remove(identifier)
+        if stopping:
+            # Stopped while the wave is one concern deep. The other two are
+            # leased and queued behind the cap, having run nothing at all.
+            stopping = False
+            QuestionMailbox(tmp_path / "state" / run_id).drain(
+                ParkRequest(run_id=run_id, reason="stopped mid-wave")
+            )
+        (root / f"{identifier}.txt").write_text("done\n", encoding="utf-8")
+        return {
+            "concern_id": identifier,
+            "changed": True,
+            "summary": f"implemented {identifier}",
+            "files_changed": [f"{identifier}.txt"],
+        }
+
+    def reviewer_response(root: Path, output_name: str) -> JsonObject:
+        if output_name != ReviewReport.__name__:
+            raise AssertionError(output_name)
+        return {
+            "concern_id": root.name,
+            "accepted": True,
+            "generalized": True,
+            "reason": "criteria met",
+            "criteria_met": [f"{root.name}-done"],
+        }
+
+    def build() -> ResolverCore:
+        return ResolverCore(
+            ResolverConfig(
+                state_root=tmp_path / "state",
+                workspace=workspace,
+                worktree_root=tmp_path / "resolver-worktrees",
+                run_id=run_id,
+                integration_branch=f"resolve/{run_id}/review",
+                max_parallel_workers=1,
+                verification_commands=[
+                    VerificationCommand(
+                        name="combined-diff",
+                        arguments=["git", "diff", "--check", "HEAD"],
+                    )
+                ],
+            ),
+            resolve_spec(),
+            worker_recipe(tmp_path / "state", launcher, worker_response),
+            lambda root: resolver_test_factory(root, reviewer_response),
+            LiteralInvocationRenderer(),
+            launcher,
+        )
+
+    inventory = ResolveInventory(
+        source=SourceSnapshot(
+            branch=git("branch", "--show-current"), commit=git("rev-parse", "HEAD")
+        ),
+        concerns=[concern("a"), concern("b"), concern("c")],
+    )
+
+    core = build()
+    seed_approvals(core, inventory.concerns)
+    with pytest.raises(ResolverDrained):
+        await core.run(inventory)
+
+    # One ran; the other two were still behind the cap and recorded nothing.
+    assert started == ["a"]
+    assert widest == 1, "never more than the cap in flight"
+
+    resumed = build()
+    seed_approvals(resumed, inventory.concerns)
+    # Parks at the final re-check: it asks each concern's reviewer about the
+    # integrated tree, and one shared double cannot answer as three different
+    # concerns. Beside the point here, which is what the worker phase did.
+    with pytest.raises(ResolverAwaitingAnswers):
+        await resumed.resume()
+
+    outcomes = resumed.repository.load().outcomes
+    assert {outcome.concern_id for outcome in outcomes if outcome.verified} == {
+        "a",
+        "b",
+        "c",
+    }
+    # Both concerns the stopped wave never began were started by the resume.
+    assert {"b", "c"} <= set(started)
+    assert widest == 1

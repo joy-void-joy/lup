@@ -1145,6 +1145,23 @@ class ResolverConfig(BaseModel):
     both to one allowance let a concern oscillate between under-declaring
     and over-declaring until it failed with its criteria never evaluated.
     """
+    max_parallel_workers: int = Field(default=4, ge=1)
+    """How many concerns may hold a session at once.
+
+    Uncapped, a batch opens one session per runnable concern — a measured
+    run reached eleven within the same second. Three things follow from
+    that, and none of them is throughput. The host's allowance is spent at
+    the width of the batch rather than the depth of the work, which was 18
+    of one run's 35 refusals. Every session shares one credential file, so a
+    refresh rotates the token under the others and denies them all at once,
+    which was the other 12. And an interruption costs whatever is in flight,
+    so a wide batch loses more of it.
+
+    Four rather than one because the concerns are genuinely independent and
+    waiting them out serially is real time; four rather than eleven because
+    none of the three costs above is paid per concern, they are paid per
+    concurrent session. Our judgement about one host, so a caller sets it.
+    """
     recheck_standing_per_join: bool = False
     """Whether each join re-checks the concerns already in the tree.
 

@@ -43,6 +43,7 @@ from lup.types import EnvVars
 RESOLVER_RUN_DIR_ENV = "LUP_RESOLVER_RUN_DIR"
 RESOLVER_CONCERN_ENV = "LUP_RESOLVER_CONCERN"
 RESOLVER_LEASE_ROOT_ENV = "LUP_RESOLVER_LEASE_ROOT"
+RESOLVER_ACTOR_ENV = "LUP_RESOLVER_ACTOR"
 TOOL_WAIT_SECONDS = 300.0
 
 WAIT_CONTRACT = (
@@ -59,12 +60,20 @@ class ResolverToolContext(BaseModel):
     run_dir: Path
     concern_id: str
     lease_root: Path
+    actor_kind: str = ""
+    """Which actor this subprocess serves, where the tools differ by it.
+
+    A merger carries the verbs that sequence a join and a worker must not:
+    commit authority over the tree everything lands in is the whole of what
+    separates them, and one lease can open both.
+    """
 
     def to_env(self) -> EnvVars:
         return {
             RESOLVER_RUN_DIR_ENV: str(self.run_dir),
             RESOLVER_CONCERN_ENV: self.concern_id,
             RESOLVER_LEASE_ROOT_ENV: str(self.lease_root),
+            RESOLVER_ACTOR_ENV: self.actor_kind,
         }
 
 
@@ -76,6 +85,7 @@ class ResolverToolEnv(BaseSettings):
     lease_root: Path | None = Field(
         default=None, validation_alias=RESOLVER_LEASE_ROOT_ENV
     )
+    actor_kind: str = Field(default="", validation_alias=RESOLVER_ACTOR_ENV)
 
 
 def read_resolver_tool_context() -> ResolverToolContext | None:
@@ -84,7 +94,10 @@ def read_resolver_tool_context() -> ResolverToolContext | None:
     if env.run_dir is None or env.concern_id is None or env.lease_root is None:
         return None
     return ResolverToolContext(
-        run_dir=env.run_dir, concern_id=env.concern_id, lease_root=env.lease_root
+        run_dir=env.run_dir,
+        concern_id=env.concern_id,
+        lease_root=env.lease_root,
+        actor_kind=env.actor_kind,
     )
 
 

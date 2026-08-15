@@ -13,7 +13,7 @@ import pytest
 
 from lup.harness.models import ResolveSpec, SkillInvocation
 from lup.harness.process import ExitStatus, LaunchRequest, ProcessLauncher
-from lup.resolver.joins import merge_problems
+from lup.resolver.join_tools import merge_problems
 from lup.resolver.models import (
     AcceptanceCriterion,
     Concern,

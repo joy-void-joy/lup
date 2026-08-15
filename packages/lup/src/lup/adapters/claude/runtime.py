@@ -258,6 +258,40 @@ def needs_a_person(
     return any(signature in message.casefold() for signature in signatures)
 
 
+ROTATION_AMBIGUOUS_SIGNATURES: tuple[str, ...] = (
+    "oauth access token has been revoked",
+    "failed to authenticate",
+    "authentication_error",
+    "not logged in",
+    "please run /login",
+    "api error: 401",
+)
+"""Which of those faults a sibling's token refresh produces identically.
+
+Concurrent sessions share one credential file, because the alternative is
+worse: a private copy each would mean the first refresh rotates the token and
+strands every other copy for good. Sharing costs a race instead. A refresh
+rotates, so the moment one session renews, every sibling still holding the
+previous token is denied — in the words the provider also uses for a
+credential nobody is going to renew.
+
+The two are indistinguishable in the message and opposite in what they need,
+so the run asks the only question that separates them: a session opened
+afresh reads the rotated file and succeeds, where a dead credential fails
+again. One probe is the whole difference, and it costs a delay to be wrong.
+
+An empty balance and a rejected key are absent deliberately. Neither is
+reachable by rotation, so probing one only postpones handing it back.
+"""
+
+
+def may_be_a_rotation(
+    message: str, signatures: tuple[str, ...] = ROTATION_AMBIGUOUS_SIGNATURES
+) -> bool:
+    """Whether a fresh session could find this fault already cleared."""
+    return any(signature in message.casefold() for signature in signatures)
+
+
 def turn_error(interrupt: "ClaudeInterrupt") -> type[TurnError]:
     """Classify a failed turn the way Codex's terminal status does."""
     return TurnInterruptedError if interrupt.requested else ProviderTurnError

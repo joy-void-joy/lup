@@ -75,6 +75,7 @@ from lup.resolver.tools import (
     create_question_tools,
     read_resolver_tool_context,
 )
+from lup.resolver.join_tools import create_join_tools
 from lup.runtime.factory import SessionFactory
 from lup.types import EnvVars
 from lup.workspace.paths import project_root
@@ -386,12 +387,21 @@ def run_resolver_tool_server() -> None:
     serve_stdio(
         create_mcp_server(
             "resolver",
-            tools=create_question_tools(
-                QuestionMailbox(context.run_dir),
-                context.concern_id,
-                run_id=context.run_dir.name,
-                lease_root=context.lease_root,
-            ),
+            tools=[
+                *create_question_tools(
+                    QuestionMailbox(context.run_dir),
+                    context.concern_id,
+                    run_id=context.run_dir.name,
+                    lease_root=context.lease_root,
+                ),
+                *(
+                    create_join_tools(
+                        context.run_dir, context.lease_root, context.concern_id
+                    )
+                    if context.actor_kind == "merger"
+                    else []
+                ),
+            ],
         )
     )
 
@@ -535,6 +545,14 @@ HOST_BACKOFF_SECONDS: float = 60.0
 
 HOST_RETRY_CEILING_SECONDS: float = 1800.0
 """The longest gap between probes, once doubling has grown past it."""
+
+AUTH_PROBE_SECONDS: float = 30.0
+"""How long to let a rotated credential settle before opening one fresh session.
+
+Long enough that the session which rotated the token has written the file,
+short enough that being wrong about a genuinely dead credential delays the
+hand-back by less than a minute.
+"""
 
 
 def host_retry_delay(
@@ -1030,6 +1048,8 @@ def run_resolve(
     take_issues: bool = True,
     host_retries: int = HOST_RETRIES,
     host_backoff: float = HOST_BACKOFF_SECONDS,
+    auth_probe_delay: float = AUTH_PROBE_SECONDS,
+    max_parallel_workers: int = 4,
     recheck_standing_per_join: bool = False,
     start_new: bool = False,
 ) -> None:
@@ -1069,6 +1089,7 @@ def run_resolve(
             ClaudeSessionConfig,
             create_claude_session_factory,
             environmental_fault,
+            may_be_a_rotation,
             needs_a_person,
         )
         from lup.adapters.codex.runtime import (
@@ -1259,6 +1280,7 @@ def run_resolve(
                 run_dir=state_root / resolved_run_id,
                 concern_id=context.concern_id,
                 lease_root=cwd,
+                actor_kind=context.actor.kind,
             )
             # Grants are per-concern: a lease carries only what the human
             # approved with the concern it was leased for.
@@ -1267,17 +1289,31 @@ def run_resolve(
                 **worker_environment,
                 **concern_allowances_environment(granted),
             }
-            if adapter == "claude":
-                server = create_mcp_server(
-                    "resolver",
-                    tools=create_question_tools(
-                        QuestionMailbox(tool_context.run_dir),
+            # A merger sequences its own join, so it carries the verbs that
+            # do it. They are added by actor kind rather than granted to
+            # every session, because commit authority over the integration
+            # tree is exactly what a worker must not have.
+            actor_tools = [
+                *create_question_tools(
+                    QuestionMailbox(tool_context.run_dir),
+                    context.concern_id,
+                    run_id=resolved_run_id,
+                    lease_root=tool_context.lease_root,
+                    wake=core.wake,
+                ),
+                *(
+                    create_join_tools(
+                        tool_context.run_dir,
+                        tool_context.lease_root,
                         context.concern_id,
-                        run_id=resolved_run_id,
-                        lease_root=tool_context.lease_root,
-                        wake=core.wake,
-                    ),
-                )
+                        launcher=launcher,
+                    )
+                    if context.actor.kind == "merger"
+                    else []
+                ),
+            ]
+            if adapter == "claude":
+                server = create_mcp_server("resolver", tools=actor_tools)
                 return create_claude_session_factory(
                     ClaudeSessionConfig(
                         model=session_model,
@@ -1437,6 +1473,7 @@ def run_resolve(
                         base_option="--since",
                     ),
                 ],
+                max_parallel_workers=max_parallel_workers,
                 recheck_standing_per_join=recheck_standing_per_join,
                 # Both plugin trees are rendered from the catalogs a lease
                 # edits, so nearly every join disagrees about them. Rendering
@@ -1571,20 +1608,38 @@ def run_resolve(
             several days, each time waiting on a person rather than on the
             allowance. The waiting is the part a person adds nothing to.
 
-            A fault only a person can clear still parks immediately: a revoked
-            credential does not heal, so probing one is just a slower way to
-            hand it back.
+            A fault only a person can clear still parks, but one a sibling's
+            token refresh could have faked is probed once first: concurrent
+            sessions share a credential file, so a rotation denies everyone
+            still holding the previous token in the same words a dead
+            credential uses. A session opened afresh reads the rotated file
+            and tells the two apart, where handing it straight back stops a
+            run nobody has to do anything about.
             """
+            probed: str | None = None
             for attempt in range(host_retries + 1):
                 try:
                     await drive()
                     return
                 except ResolverEnvironmentFault as fault:
-                    delay = (
-                        None
-                        if needs_a_person(fault.cause)
-                        else host_retry_delay(attempt, host_retries, host_backoff)
-                    )
+                    if needs_a_person(fault.cause):
+                        if probed == fault.cause or not may_be_a_rotation(fault.cause):
+                            report_environment_fault(fault, adapter, resolved_run_id)
+                            raise typer.Exit(code=75) from fault
+                        # Only against the same words twice running. An
+                        # ordinary refusal in between means the run got
+                        # somewhere, so the next rotation is its own fault
+                        # rather than the one already ruled on.
+                        probed = fault.cause
+                        typer.echo(
+                            f"[resolve] the host refused ({fault.cause}); a sibling "
+                            f"may have rotated the credential — one probe in "
+                            f"{auth_probe_delay:.0f}s"
+                        )
+                        await asyncio.sleep(auth_probe_delay)
+                        continue
+                    probed = None
+                    delay = host_retry_delay(attempt, host_retries, host_backoff)
                     if delay is None:
                         report_environment_fault(fault, adapter, resolved_run_id)
                         raise typer.Exit(code=75) from fault

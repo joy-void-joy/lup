@@ -26,8 +26,15 @@ from lup.harness.models import ResolveSpec
 from lup.policy.identity import ConcernAllowance
 from lup.resolver.actors import ActorSession, ActorSessions
 from lup.resolver.mailbox import QuestionMailbox
+from lup.resolver.join_tools import (
+    JoinPlan,
+    JoinProgressRecord,
+    JoinReport,
+    JoinTip,
+)
 from lup.resolver.models import (
     ActorRef,
+    CarriedParent,
     Concern,
     DropCandidate,
     MergeReport,
@@ -100,6 +107,50 @@ instruction for the same reason.
 
 def format_paths(paths: list[Path]) -> str:
     return "\n".join(f"- {path.as_posix()}" for path in paths) or "- (none)"
+
+
+def format_tips(tips: list[JoinTip], sample: int = 12) -> str:
+    """Every parent still to land, with the files that decide their order.
+
+    The paths are the point. A merger reading only shas learns which work
+    contests which by conflicting on it; reading the files, it can put two
+    parents that rewrite one module next to each other before merging
+    either. Capped per parent because the obligation is to notice the
+    overlap, not to read every path.
+    """
+    return "Parents to join:\n" + (
+        "\n\n".join(
+            f"- {tip.commit[:12]} — {tip.concern_id}"
+            + (f": {tip.summary}" if tip.summary else "")
+            + (
+                "\n  files: "
+                + ", ".join(path.as_posix() for path in tip.files[:sample])
+                + (
+                    f" (+{len(tip.files) - sample} more)"
+                    if len(tip.files) > sample
+                    else ""
+                )
+                if tip.files
+                else ""
+            )
+            for tip in tips
+        )
+        or "- (none)"
+    )
+
+
+def format_carried(carried: list[CarriedParent]) -> str:
+    """Parents already inside another, named so nothing reads as dropped.
+
+    They are not on the table and must not be merged separately — they are
+    in the tree the moment their container lands — but a merger that sees a
+    concern's work missing from its plan and cannot tell why will ask.
+    """
+    if not carried:
+        return ""
+    return "\n\nRiding inside another parent, so already accounted for:\n" + "\n".join(
+        f"- {item.commit[:12]} is contained in {item.inside[:12]}" for item in carried
+    )
 
 
 def format_candidates(owed: list[DropCandidate]) -> str:
@@ -301,6 +352,74 @@ class TurnRunner:
         if result.output.concern_id != concern.id:
             raise ResolverInvariantError("reviewer returned a foreign concern id")
         return await self.declared_labels_only(reviewer, concern, result.output)
+
+    async def join_turn(
+        self,
+        lease: WritableRootLease,
+        plan: JoinPlan,
+        progress: JoinProgressRecord,
+        purpose: str,
+    ) -> JoinReport:
+        """Put the whole set of parents to the merger, and let it sequence them.
+
+        The plan goes over in full — every tip, the concern behind it, and
+        the paths it wrote — because the alternative is a merger that
+        discovers the shape of the work parent by parent. One measured run
+        had three branches rewriting a single module and met the third at
+        parent nine, with the first two already resolved in ways it would
+        not have chosen knowing about it.
+
+        What the orchestrator used to interleave is in the tools instead, so
+        nothing is traded for the foreknowledge: ``land_parent`` refuses a
+        short account while the merger is still on that parent, verifies the
+        tree it just made, writes the checkpoint, and says on the way out
+        whether a drain is waiting.
+        """
+        landed = {commit for commit in progress.joined}
+        remaining = [tip for tip in plan.tips if tip.commit not in landed]
+        prompt = (
+            "Join every parent below into the assigned worktree. You own the "
+            "sequence: read the whole set first, decide the order that puts "
+            "related work together, and say what you plan before you start. "
+            "Parents that touch the same files are the ones worth thinking "
+            "about — their paths are listed so you can see that before you "
+            "merge rather than at the conflict.\n\n"
+            "For each parent: call start_parent, resolve any conflict it "
+            "reports and stage it with `git add`, then call land_parent with "
+            "the account of what you did. Do not commit and do not change "
+            "branches — land_parent owns commit authority, and it is what "
+            "checks the account, verifies the tree and records the "
+            "checkpoint.\n\n"
+            "Two things you must account for in land_parent. Every candidate "
+            "it names is content one parent contributed that the tree no "
+            "longer holds — disposition each as kept, rewritten, superseded "
+            "or dropped, with a reason. A rewrite is a legitimate answer; "
+            "silence is not, and where a candidate names definitions no "
+            "longer present, read those first: a function one parent defined "
+            "and this tree does not is the shape a regression takes, and "
+            "'rewritten' is only true if you can name where the behaviour "
+            "landed. And any file you edit outside the conflict set must be "
+            "declared with a reason — fixing a caller whose file merged "
+            "clean is correct and expected, and is exactly what has to be "
+            "visible.\n\n"
+            "land_parent verifies the tree the moment you land a parent and "
+            "brings a failure straight back to you naming what broke, so you "
+            "are not the last line of defence. What costs the run is "
+            "iterating the project's whole gate to green by hand. Rendered "
+            "artifacts are settled by the generator before you see a "
+            "conflict, so a difference in one is never yours to resolve.\n\n"
+            "Stop and end your turn when land_parent reports "
+            "drain_requested, or when every parent has landed.\n\n"
+            + f"{self.invocation_renderer.render(self.spec.merge_skill)}\n\n"
+            + f"Purpose: {purpose}\nWorktree: {lease.root}\n"
+            + f"Already landed: {len(landed)} of {len(plan.tips)}\n\n"
+            + format_tips(remaining)
+            + format_carried(plan.carried)
+        )
+        result = await self.merger_session(lease).turn(
+            turn_request(TurnInput(text=prompt), JoinReport)
+        )
+        return result.output
 
     async def merge_turn(
         self,

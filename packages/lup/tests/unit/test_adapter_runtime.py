@@ -24,7 +24,9 @@ from lup.adapters.claude.runtime import (
     build_submission_server,
     claude_usage,
     convert_claude_block,
+    ROTATION_AMBIGUOUS_SIGNATURES,
     environmental_fault,
+    may_be_a_rotation,
     needs_a_person,
 )
 from lup.adapters.codex.app_server import CodexAppServer, RpcMessage, RpcNotification
@@ -1771,3 +1773,23 @@ def test_an_allowance_is_waited_out_where_a_credential_is_handed_back() -> None:
     assert needs_a_person("API Error: 401 OAuth access token has been revoked.")
     assert needs_a_person("Not logged in · Please run /login")
     assert needs_a_person("Your credit balance is too low")
+
+
+def test_a_rotated_credential_is_probed_where_a_spent_balance_is_handed_back() -> None:
+    """One run's 12 auth faults fired in three instants of 4, 2 and 6 at once.
+
+    Eleven sessions sharing one credential file, one of them refreshing: the
+    siblings still holding the previous token are denied in the provider's
+    words for a credential nobody will renew. That run recorded a failed
+    phase and was working again 19 seconds later on the same file, which is
+    not something a person can do and not something a dead credential allows.
+    """
+    assert may_be_a_rotation("API Error: 401 OAuth access token has been revoked.")
+    assert may_be_a_rotation("Not logged in · Please run /login")
+
+    # Neither is reachable by a refresh, so probing only delays the hand-back.
+    assert not may_be_a_rotation("Your credit balance is too low")
+    assert not may_be_a_rotation("Invalid API key")
+
+    # Every one of them is a fault a person is asked about, probe or no probe.
+    assert all(needs_a_person(message) for message in ROTATION_AMBIGUOUS_SIGNATURES)

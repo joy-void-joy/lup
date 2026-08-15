@@ -261,8 +261,9 @@ def create_harness_app(
                 help="How many times to come back to a host that refused — an "
                 "exhausted allowance, a rate limit, an unreachable upstream — "
                 "before parking the run for a human. Zero parks on the first "
-                "refusal. A fault only a person can clear, such as a revoked "
-                "credential, parks however this is set.",
+                "refusal. A fault only a person can clear, such as an empty "
+                "balance, parks however this is set — after the single probe "
+                "that rules out a sibling having rotated the credential.",
             ),
         ] = resolve.HOST_RETRIES,
         host_backoff: Annotated[
@@ -273,6 +274,28 @@ def create_harness_app(
                 "doubles, up to half an hour between probes.",
             ),
         ] = resolve.HOST_BACKOFF_SECONDS,
+        auth_probe_delay: Annotated[
+            float,
+            typer.Option(
+                "--auth-probe-delay",
+                help="Seconds to let a credential settle before the one fresh "
+                "session that tells a rotated token from a dead one. Sessions "
+                "share a credential file, so a sibling's refresh denies every "
+                "other session in the words a dead credential uses; the probe "
+                "is what separates them.",
+            ),
+        ] = resolve.AUTH_PROBE_SECONDS,
+        max_parallel_workers: Annotated[
+            int,
+            typer.Option(
+                "--max-parallel-workers",
+                help="How many concerns may hold a session at once. Uncapped, a "
+                "batch opens one per runnable concern — a measured run reached "
+                "eleven in the same second, which spends the host's allowance "
+                "at the width of the batch, races the credential file every "
+                "session shares, and loses all of it to one interruption.",
+            ),
+        ] = 4,
         start_new: Annotated[
             bool,
             typer.Option(
@@ -340,6 +363,8 @@ def create_harness_app(
             issues,
             host_retries,
             host_backoff,
+            auth_probe_delay,
+            max_parallel_workers,
             recheck_standing_per_join,
             start_new,
         )
