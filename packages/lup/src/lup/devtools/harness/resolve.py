@@ -536,6 +536,14 @@ HOST_BACKOFF_SECONDS: float = 60.0
 HOST_RETRY_CEILING_SECONDS: float = 1800.0
 """The longest gap between probes, once doubling has grown past it."""
 
+AUTH_PROBE_SECONDS: float = 30.0
+"""How long to let a rotated credential settle before opening one fresh session.
+
+Long enough that the session which rotated the token has written the file,
+short enough that being wrong about a genuinely dead credential delays the
+hand-back by less than a minute.
+"""
+
 
 def host_retry_delay(
     attempt: int,
@@ -1030,6 +1038,7 @@ def run_resolve(
     take_issues: bool = True,
     host_retries: int = HOST_RETRIES,
     host_backoff: float = HOST_BACKOFF_SECONDS,
+    auth_probe_delay: float = AUTH_PROBE_SECONDS,
     recheck_standing_per_join: bool = False,
     start_new: bool = False,
 ) -> None:
@@ -1069,6 +1078,7 @@ def run_resolve(
             ClaudeSessionConfig,
             create_claude_session_factory,
             environmental_fault,
+            may_be_a_rotation,
             needs_a_person,
         )
         from lup.adapters.codex.runtime import (
@@ -1571,20 +1581,38 @@ def run_resolve(
             several days, each time waiting on a person rather than on the
             allowance. The waiting is the part a person adds nothing to.
 
-            A fault only a person can clear still parks immediately: a revoked
-            credential does not heal, so probing one is just a slower way to
-            hand it back.
+            A fault only a person can clear still parks, but one a sibling's
+            token refresh could have faked is probed once first: concurrent
+            sessions share a credential file, so a rotation denies everyone
+            still holding the previous token in the same words a dead
+            credential uses. A session opened afresh reads the rotated file
+            and tells the two apart, where handing it straight back stops a
+            run nobody has to do anything about.
             """
+            probed: str | None = None
             for attempt in range(host_retries + 1):
                 try:
                     await drive()
                     return
                 except ResolverEnvironmentFault as fault:
-                    delay = (
-                        None
-                        if needs_a_person(fault.cause)
-                        else host_retry_delay(attempt, host_retries, host_backoff)
-                    )
+                    if needs_a_person(fault.cause):
+                        if probed == fault.cause or not may_be_a_rotation(fault.cause):
+                            report_environment_fault(fault, adapter, resolved_run_id)
+                            raise typer.Exit(code=75) from fault
+                        # Only against the same words twice running. An
+                        # ordinary refusal in between means the run got
+                        # somewhere, so the next rotation is its own fault
+                        # rather than the one already ruled on.
+                        probed = fault.cause
+                        typer.echo(
+                            f"[resolve] the host refused ({fault.cause}); a sibling "
+                            f"may have rotated the credential — one probe in "
+                            f"{auth_probe_delay:.0f}s"
+                        )
+                        await asyncio.sleep(auth_probe_delay)
+                        continue
+                    probed = None
+                    delay = host_retry_delay(attempt, host_retries, host_backoff)
                     if delay is None:
                         report_environment_fault(fault, adapter, resolved_run_id)
                         raise typer.Exit(code=75) from fault
