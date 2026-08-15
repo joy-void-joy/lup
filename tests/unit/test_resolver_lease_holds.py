@@ -93,9 +93,59 @@ def test_a_run_that_died_still_holds_its_branches(
     assert BRANCH in held(tmp_path, run_state(phase))
 
 
-def test_completion_releases_the_lease(tmp_path: Path) -> None:
-    """The one phase that carried every lease through the join machinery."""
-    assert held(tmp_path, run_state(ResolvePhase.COMPLETE)) == {}
+def test_a_completed_run_still_reports_the_branch_it_left_behind(
+    tmp_path: Path,
+) -> None:
+    """Completion releases the lease; it does not dispose of the branch.
+
+    A run reaches this phase by finishing its own work, not by getting its
+    batch onto the integration branch, and cleanup deactivates every lease
+    whether or not it managed to delete the branch. So the branch that
+    survives reads as loose work — commits the integration branch lacks and
+    no pull request driving them — which is textbook LAND, and both verbs a
+    sweep offers for that destroy or duplicate a batch that may already have
+    landed under some other branch's pull request.
+    """
+    assert BRANCH in held(tmp_path, run_state(ResolvePhase.COMPLETE, active=False))
+
+
+def test_a_completed_run_s_leftover_is_offered_a_reading_not_a_resume(
+    tmp_path: Path,
+) -> None:
+    """Nothing restarts a run that finished, so the reason must not offer to."""
+    reason = held(tmp_path, run_state(ResolvePhase.COMPLETE, active=False))[BRANCH]
+
+    assert "resume" not in reason
+    assert "--abort" not in reason
+    assert f"resolve status --run-id {RUN_ID}" in reason
+
+
+def test_a_completed_run_s_leftover_surveys_as_keep_rather_than_land(
+    tmp_path: Path,
+) -> None:
+    """One decision about the run, not one per branch it happened to leave."""
+    reasons = held(tmp_path, run_state(ResolvePhase.COMPLETE, active=False))
+    verdict = disposition_for(
+        BRANCH,
+        integration="dev",
+        current="dev-checkout",
+        contained_in=[],
+        pr=None,
+        unique_commits=108,
+        held=reasons[BRANCH],
+    )
+
+    assert verdict.status == "KEEP"
+
+
+def test_a_completed_run_is_reported_as_not_alive(tmp_path: Path) -> None:
+    """Nothing is coming back for these, so a sweep asks about the run first."""
+    ResolverStateRepository(tmp_path, RUN_ID).save(
+        run_state(ResolvePhase.COMPLETE, active=False)
+    )
+    assert [hold.alive for hold in runs_holding(live_lease_branches(tmp_path))] == [
+        False
+    ]
 
 
 def test_a_working_run_holds_its_branches(tmp_path: Path) -> None:
