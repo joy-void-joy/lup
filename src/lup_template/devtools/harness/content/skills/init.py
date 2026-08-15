@@ -195,6 +195,10 @@ The merge lands in `src/<project>/devtools/harness/content/guidance.py`, never i
 6. Leave existing sections untouched -- don't overwrite content the project already has
 7. Regenerate with `uv run lup-devtools harness generate all`, which is what carries the merged sections into every tree
 
+Which runtimes the project carries is not a choice made here: every tree
+arrives with the clone, and generation writes each one it finds. Dropping a
+runtime is a later removal somebody decides on its own terms.
+
 #### 3. Initialize upstream sync
 
 """

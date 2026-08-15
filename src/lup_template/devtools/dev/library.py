@@ -40,10 +40,11 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Literal, TypedDict
 
+import httpx
 import tomlkit
 import tomlkit.items
 import typer
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 from importlib.metadata import version as installed_version
 from packaging.requirements import Requirement
 
@@ -529,3 +530,98 @@ def library_status() -> None:
                 typer.echo(f"{source.ref_kind}: {source.ref}")
         case LibraryMode.PUBLISHED:
             typer.echo(f"version: {installed_version(DISTRIBUTION)}")
+
+
+RELEASE_INDEX_URL = f"https://pypi.org/pypi/{DISTRIBUTION}/json"
+"""Where a release is looked up. Overridable: a project resolving lup through
+a private index asks that index the same question in the same shape."""
+
+RELEASE_PROBE_SECONDS = 10.0
+"""How long the look-up waits. An unreachable index is an answer this command
+knows how to give, and giving it beats blocking whoever is waiting on it."""
+
+
+class ReleaseIndexInfo(BaseModel):
+    """The one field of the index's document this reads."""
+
+    version: str
+
+
+class ReleaseIndexDocument(BaseModel):
+    """A package index's answer about one distribution."""
+
+    info: ReleaseIndexInfo
+
+
+class ReleaseProbe(BaseModel, frozen=True):
+    """What the package index holds for lup: a version, nothing, or no answer.
+
+    The third outcome stays itself instead of collapsing into the second. An
+    index that could not be reached has not said a release is absent, and
+    reading it that way pins a project to a repository ref on the strength of
+    a dropped connection.
+
+    What this does not decide is the acquisition mode. Only one half of that
+    is a fact — whether a release exists at all — and the other half is what
+    the project is to the library: one that works on lup, dogfooding a branch
+    and sending changes back, wants that branch whether or not a release was
+    cut from it.
+    """
+
+    version: str = ""
+    unreachable: str = ""
+
+    def describe(self) -> list[str]:
+        """What the index answered, and the command that takes it at its word."""
+        if self.unreachable:
+            return [
+                f"index unreachable: {self.unreachable}",
+                "A probe that did not land settles nothing. Retry, or declare "
+                "the mode this project already knows it wants.",
+            ]
+        if not self.version:
+            return [
+                "no release published yet",
+                f"dev library {LibraryMode.GIT} --branch <branch>",
+            ]
+        return [
+            f"released: {self.version}",
+            f"dev library use {LibraryMode.PUBLISHED} --version {self.version}",
+            f"`{LibraryMode.GIT}` stays a live choice: a project that works on "
+            "lup as well as with it runs the branch it is improving rather "
+            "than the last release cut from it.",
+        ]
+
+
+def probe_release(
+    url: str = RELEASE_INDEX_URL, timeout: float = RELEASE_PROBE_SECONDS
+) -> ReleaseProbe:
+    """Ask the package index whether a release of lup exists.
+
+    A missing project is the index answering rather than failing: before the
+    first release that is the true state of the world, and it is the answer
+    that sends a new project to the repository rather than to nothing.
+    """
+    try:
+        response = (
+            httpx.get(  # lup: ignore[dict-get] — httpx's GET verb, not a dict read
+                url, timeout=timeout, follow_redirects=True
+            )
+        )
+    except httpx.HTTPError as error:
+        return ReleaseProbe(unreachable=f"{type(error).__name__}: {error}")
+    if response.status_code == httpx.codes.NOT_FOUND:
+        return ReleaseProbe()
+    if response.status_code != httpx.codes.OK:
+        return ReleaseProbe(unreachable=f"{url} answered {response.status_code}")
+    try:
+        document = ReleaseIndexDocument.model_validate_json(response.content)
+    except ValidationError:
+        return ReleaseProbe(unreachable=f"{url} answered a document it could not read")
+    return ReleaseProbe(version=document.info.version)
+
+
+def library_release() -> None:
+    """CLI entry for ``lup-devtools dev library release`` (see module docstring)."""
+    for line in probe_release().describe():
+        typer.echo(line)

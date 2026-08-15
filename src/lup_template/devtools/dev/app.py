@@ -102,6 +102,12 @@ def library_status_cmd() -> None:
     library.library_status()
 
 
+@library_app.command("release")
+def library_release_cmd() -> None:
+    """Ask the package index whether a release exists, and which mode that settles."""
+    library.library_release()
+
+
 @library_app.command("use")
 def library_use_cmd(
     mode: Annotated[

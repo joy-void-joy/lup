@@ -138,24 +138,35 @@ uninitialized template and the lup repository are the same bytes and nothing
 else separates them.
 
 A project depends on `lup` as a package rather than keeping a copy of the
-library's source. Which acquisition mode to declare is a fact you look up, not
-a preference — check whether a release exists before deciding:
+library's source. Half the answer is a fact to look up rather than a
+preference — whether a release exists at all, and which:
 
 ```
-curl -sI https://pypi.org/pypi/lup/json
+uv run lup-devtools dev library release
 ```
 
-| Status line | Mode | Command |
+It reports the released version, or that none is published yet, and prints the
+command that declares what it found — so the release number is read from the
+index rather than guessed at.
+
+The other half is a judgement about what this project is to lup, and the
+look-up does not make it. Ask the user which of these describes them:
+
+| Mode | The project it is for | Command |
 | --- | --- | --- |
-| `200` — a release exists | published | `uv run lup-devtools dev library use published --version <release>` |
-| `404` — nothing published yet | **git** | `uv run lup-devtools dev library git --branch <branch>` |
-| The library is being developed alongside this project | linked | `uv run lup-devtools dev library link <checkout>` |
+| published | A consumer of the library: it takes releases and upgrades on its own schedule | `uv run lup-devtools dev library use published --version <release>` |
+| **git** | Either nothing is published yet, or the project works *on* lup as well as with it — running a branch to dogfood it and sending changes back | `uv run lup-devtools dev library git --branch <branch>` |
+| linked | The library is being developed alongside this project, in a checkout on the same disk | `uv run lup-devtools dev library link <checkout>` |
 
-Prefer the index the moment it can answer, and the repository until it can:
-both hand the project a real package, so its `packages/lup/` stays absent and
-nothing has to be merged later. Vendoring is not on this list — a vendored copy
-is a fork with all the reconciliation that implies, and is only right for a
-project that genuinely intends to modify library source.
+With nothing published, git is the only mode that resolves, so the look-up
+settles it. Once a release exists, published is the quieter default and git
+stays a live choice: a project that reads the library's own diffs, or that
+expects to send work back, is better served by the branch it is improving than
+by the last release cut from it. All three hand the project a real package, so
+its `packages/lup/` stays absent and nothing has to be merged later. Vendoring
+is not on this list — a vendored copy is a fork with all the reconciliation
+that implies, and is only right for a project that genuinely intends to modify
+library source.
 
 The git mode resolves `subdirectory = "packages/lup"`, because the distribution sits inside the repository rather than at its root, and pins whichever ref you name. **The ref resolves against the remote, not against any checkout on disk**: uv fetches the branch as the remote has it, so work the remote has not seen is not in what you pinned. Before declaring a git source, read what the remote's branch actually resolves to — `git ls-remote origin <branch>` names that tip — and if it is not the recorded commit, say so rather than pinning a dependency whose contents you have not accounted for.
 
@@ -177,6 +188,10 @@ The merge lands in `src/<project>/devtools/harness/content/guidance.py`, never i
 5. Add missing sections to the declaration
 6. Leave existing sections untouched -- don't overwrite content the project already has
 7. Regenerate with `uv run lup-devtools harness generate all`, which is what carries the merged sections into every tree
+
+Which runtimes the project carries is not a choice made here: every tree
+arrives with the clone, and generation writes each one it finds. Dropping a
+runtime is a later removal somebody decides on its own terms.
 
 #### 3. Initialize upstream sync
 
