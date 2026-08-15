@@ -214,6 +214,44 @@ class TestPrCreate:
         stdout = "Warning: 1 uncommitted change\nhttps://github.com/org/repo/pull/7\n"
         assert parse_pr_url(stdout) == "https://github.com/org/repo/pull/7"
 
+    def test_body_file_read_verbatim(self, tmp_path: Path) -> None:
+        from lup.devtools.dev.pr import resolve_body
+
+        # The quoting a shell argument would have made the caller escape.
+        written = "## It's here\n\nA `--body` with 'quotes' and \"doubles\".\n"
+        source = tmp_path / "body.md"
+        source.write_text(written, encoding="utf-8")
+
+        assert resolve_body(None, source) == written
+
+    def test_body_and_body_file_together_refused(self, tmp_path: Path) -> None:
+        import typer
+
+        from lup.devtools.dev.pr import resolve_body
+
+        source = tmp_path / "body.md"
+        source.write_text("from the file", encoding="utf-8")
+
+        with pytest.raises(typer.BadParameter):
+            resolve_body("inline", source)
+
+    def test_neither_body_refused(self) -> None:
+        import typer
+
+        from lup.devtools.dev.pr import resolve_body
+
+        with pytest.raises(typer.BadParameter):
+            resolve_body(None, None)
+
+    def test_unreadable_body_file_names_the_path(self, tmp_path: Path) -> None:
+        import typer
+
+        from lup.devtools.dev.pr import resolve_body
+
+        missing = tmp_path / "absent.md"
+        with pytest.raises(typer.BadParameter, match="absent.md"):
+            resolve_body(None, missing)
+
 
 # ── fix 15b: module-info filters to symbols defined in the module ──────────
 
