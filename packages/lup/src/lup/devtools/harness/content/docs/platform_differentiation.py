@@ -4,6 +4,8 @@
 
 import lup.harness.models as models
 
+from lup.markdown import contained
+
 
 def document(
     skills: list[models.Skill],
@@ -20,8 +22,8 @@ def document(
     refusal table widens the rendered matcher past it, by whatever the
     composing project declared.
     """
-    claude_decoded = r"\|".join(claude_decodes)
-    codex_decoded = r"\|".join(codex_decodes)
+    claude_decoded = contained("|".join(claude_decodes))
+    codex_decoded = contained("|".join(codex_decodes))
     return models.PromptDocument(
         source=__name__,
         parts=[

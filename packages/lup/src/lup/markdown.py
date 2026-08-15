@@ -21,17 +21,31 @@ from pydantic import BaseModel, Discriminator
 
 
 def contained(value: str) -> str:
-    """Neutralize every character that would end a cell or a row early.
+    r"""Neutralize every character that would end a cell or a row early.
+
+    The pipe is spelled ``\|`` rather than as an entity because GFM's table
+    extension unescapes it while splitting the row, before anything parses
+    what is inside a cell. So it survives in prose, inside a code span, and
+    inside a raw HTML element alike, where ``&#124;`` survives only the two
+    that decode an entity — inside a code span a reader is shown the entity
+    itself. One spelling that reaches everywhere is what lets this be asked
+    once rather than chosen per destination.
 
     Both line endings count: a lone carriage return ends a line for a Markdown
     reader exactly as a newline does, so leaving it would break the row one
     character short of the case anyone tests for.
     """
-    return value.translate(str.maketrans({"|": "&#124;", "\n": " ", "\r": " "}))
+    return value.translate(str.maketrans({"|": r"\|", "\n": " ", "\r": " "}))
 
 
 def escaped(value: str) -> str:
-    """Generated text made safe to be the content of one cell."""
+    """Generated text made safe to be the content of one cell.
+
+    For a destination that decodes an escape. A Markdown code span does not:
+    ``&lt;`` is shown there as written, while a bare ``<`` needs no help
+    because nothing in a code span is read as markup — so a code span takes
+    :func:`contained` alone and this would corrupt it.
+    """
     return contained(html.escape(value))
 
 
@@ -39,8 +53,9 @@ class MarkdownCell(BaseModel, frozen=True):
     """One cell of a generated table, holding the value it displays.
 
     Every kind answers :meth:`render`, and every answer runs the value it
-    holds through :func:`escaped`, so a new kind of formatting is one class
-    and cannot be the one that forgot to escape.
+    holds through :func:`contained` — directly where the kind's destination
+    reads a value verbatim, through :func:`escaped` where it decodes one — so
+    a new kind of formatting is one class and cannot be the one that forgot.
     """
 
     # lup: solved: Add an anti-pattern on `model_config =` and instruct the agent to use
@@ -80,7 +95,7 @@ class CodeCell(MarkdownCell, frozen=True):
     type: Literal["code"] = "code"
 
     def render(self) -> str:
-        return f"`{escaped(self.text)}`"
+        return f"`{contained(self.text)}`"
 
 
 class HtmlCodeCell(MarkdownCell, frozen=True):

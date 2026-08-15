@@ -35,13 +35,33 @@ def test_a_pipe_or_a_newline_cannot_break_out_of_the_cell_holding_it() -> None:
     lines = table.text_payload.splitlines()
 
     assert lines == [
-        "| Rule &#124; id | Diagnostic |",
+        r"| Rule \| id | Diagnostic |",
         "| --- | --- |",
-        "| `dict &#124; get` | one two |",
-        "| <code>`a &#124; b`</code> | [a &#124; b](a&#124;b.md) |",
+        r"| `dict \| get` | one two |",
+        r"| <code>`a \| b`</code> | [a \| b](a\|b.md) |",
         "| one  two | plain |",
     ]
-    assert all(line.count("|") == 3 for line in lines)
+    # What has to hold is that no pipe left in a line is one a row splits on.
+    assert all(line.replace(r"\|", "").count("|") == 3 for line in lines)
+
+
+def test_a_code_span_carries_markup_as_it_reads_where_a_raw_element_escapes_it() -> (
+    None
+):
+    """Opposite treatments, because one destination decodes an escape and one does not.
+
+    Inside backticks nothing is read as markup and nothing is decoded, so `<`
+    needs no help and `&lt;` written there is shown as the four characters it
+    is. The raw `<code>` element is the other way about: its content is HTML,
+    read by something that does decode.
+    """
+    table = MarkdownTable(
+        headers=["Example"],
+        rows=[[CodeCell(text='<b x="1">')], [HtmlCodeCell(text='<b x="1">')]],
+    )
+
+    assert '| `<b x="1">` |' in table.text_payload
+    assert "| <code>&lt;b x=&quot;1&quot;&gt;</code> |" in table.text_payload
 
 
 def test_markup_in_a_value_is_shown_rather_than_interpreted() -> None:

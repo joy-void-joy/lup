@@ -28,6 +28,8 @@ from pydantic import BaseModel
 
 import lup.harness.models as models
 
+from lup.markdown import contained
+
 
 class Provenance(BaseModel, frozen=True):
     """How one skill spells the checkouts a provenance answer is about."""
@@ -76,6 +78,10 @@ standing there before you go on.
 # with those commands rather than describing them
 def acquisition(spelling: Provenance) -> list[models.PromptPart]:
     """The look-up that settles which mode the project resolves ``lup`` through."""
+    # A row is split on `|` before its cells are parsed, so the one value that
+    # flows into this table is contained where it lands in one. The fence and
+    # the prose below take it as it reads: nothing there ends a row.
+    celled = contained(spelling.project_devtools)
     return [
         models.TextPart(
             text=rf"""A project depends on `lup` as a package rather than keeping a copy of the
@@ -95,9 +101,9 @@ look-up does not make it. Ask the user which of these describes them:
 
 | Mode | The project it is for | Command |
 | --- | --- | --- |
-| published | A consumer of the library: it takes releases and upgrades on its own schedule | `{spelling.project_devtools} dev library use published --version <release>` |
-| **git** | Either nothing is published yet, or the project works *on* lup as well as with it — running a branch to dogfood it and sending changes back | `{spelling.project_devtools} dev library git --branch <branch>` |
-| linked | The library is being developed alongside this project, in a checkout on the same disk | `{spelling.project_devtools} dev library link <checkout>` |
+| published | A consumer of the library: it takes releases and upgrades on its own schedule | `{celled} dev library use published --version <release>` |
+| **git** | Either nothing is published yet, or the project works *on* lup as well as with it — running a branch to dogfood it and sending changes back | `{celled} dev library git --branch <branch>` |
+| linked | The library is being developed alongside this project, in a checkout on the same disk | `{celled} dev library link <checkout>` |
 
 With nothing published, git is the only mode that resolves, so the look-up
 settles it. Once a release exists, published is the quieter default and git
