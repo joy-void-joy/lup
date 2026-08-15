@@ -108,6 +108,16 @@ def above(body: str, statement: str, rule: str, gap: int = 0) -> str:
     )
 
 
+def heading_a_reason(body: str, statement: str, rule: str, lines: int = 1) -> str:
+    """The directive heading its own reason, which runs on for `lines` more."""
+    indent = indent_of(statement)
+    continuation = "".join(
+        f"{indent}# and the reason keeps going, line {number + 2} of it\n"
+        for number in range(lines)
+    )
+    return f"{body}{indent}{DIRECTIVE.format(rule=rule)}\n{continuation}{statement}"
+
+
 PLACEMENTS = [
     pytest.param(SPAN_RULE, SPAN_BODY, SPAN_CALL, id="span-declaring rule"),
     pytest.param(
@@ -136,6 +146,22 @@ def test_directive_standing_directly_above_covers_it(
     rule: str, body: str, statement: str
 ) -> None:
     assert findings_for(above(body, statement, rule), rule) == []
+
+
+@pytest.mark.parametrize(("rule", "body", "statement"), PLACEMENTS)
+def test_a_reason_spanning_more_than_one_line_still_covers_it(
+    rule: str, body: str, statement: str
+) -> None:
+    """The placement a reason too long for the column budget has to take.
+
+    Every rule family, because they disagreed: the ones deciding coverage
+    through `suppression_reaches` alone accepted it, while the two reading
+    from a fixed pair of candidate lines could not see a directive two lines
+    up — so one marker was reported spurious and its violation missing, at
+    once, which is the failure this whole placement policy exists to remove.
+    """
+    for length in (1, 2, 3):
+        assert findings_for(heading_a_reason(body, statement, rule, length), rule) == []
 
 
 @pytest.mark.parametrize(("rule", "body", "statement"), PLACEMENTS)

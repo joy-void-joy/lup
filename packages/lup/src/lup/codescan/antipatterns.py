@@ -897,17 +897,24 @@ def audit_text(
         return match
 
     def guarding_directive(line_no: int) -> re.Match[str] | None:
-        """The directive covering `line_no`, from its own line or the one above.
+        """The directive covering `line_no`, wherever the one policy puts it.
 
         The same placement every project-wide rule accepts, so a marker that
         reads correctly against an AST rule reads correctly here. A directive
         found above is the overflow placement: the line it guards had no room
-        left for the reason that justifies it.
+        left for the reason that justifies it, and a reason worth reading
+        often needs more than one line of its own.
+
+        Every line up to the head of the comment block, because that is what
+        `suppression_reaches` accepts and this only asks it where to look. A
+        fixed pair of candidates was exactly complete while the policy was
+        capped at the line directly above, and stopped being the moment it
+        widened.
         """
         return next(
             (
                 match
-                for candidate in (line_no, line_no - 1)
+                for candidate in range(line_no, 0, -1)
                 if (match := written_directive(candidate)) is not None
                 and suppression_reaches(original_lines, candidate, line_no)
             ),
@@ -921,11 +928,16 @@ def audit_text(
         failure from recurring: a directive is judged against the lines it
         actually covers, so one standing above its violation is read there
         rather than reported as guarding nothing where it sits.
+
+        Asked of every audited line rather than the next one, so the two
+        directions agree. Where they disagreed, one marker was reported
+        spurious here and its violation reported missing there — the failure
+        this pair exists to prevent, produced by the pair itself.
         """
         return [
             candidate
-            for candidate in (line_no, line_no + 1)
-            if candidate in hits_by_line
+            for candidate in sorted(hits_by_line)
+            if candidate >= line_no
             and suppression_reaches(original_lines, line_no, candidate)
         ]
 

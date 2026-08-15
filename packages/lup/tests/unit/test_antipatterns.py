@@ -180,6 +180,36 @@ def test_a_violation_no_directive_covers_outranks_the_suppression_beside_it() ->
     assert decision.effect == "deny"
 
 
+def test_a_directive_heading_a_two_line_reason_guards_what_follows_it() -> None:
+    """The placement a reason too long for the column budget has to take.
+
+    The gate reads coverage in both directions and they disagreed: the
+    forward check walks the whole comment block, while the check that decides
+    whether a directive guards anything offered it a fixed pair of lines and
+    so could not see a violation two below. The edit was admitted here and
+    refused by `dev check` — a marker reported spurious while the violation it
+    covers was reported missing.
+
+    Asks rather than allows, because the suppression is newly declared and
+    that is a judgement. What matters is that it is not denied as guarding
+    nothing.
+    """
+    before = "first = 1\n"
+    after = (
+        "first = 1\n"
+        "# lup: ignore[any-type] — the reason this exception is the right\n"
+        "# call, which does not fit beside the line it justifies\n"
+        "value: Any = 1\n"
+    )
+
+    decision = antipattern_decision(
+        before, after, suppression_rows(), python_source=True
+    )
+
+    assert decision is not None
+    assert decision.effect == "ask"
+
+
 def test_a_typed_marker_widened_to_a_bare_one_still_asks() -> None:
     """Bare covers every rule, so going bare suppresses more than it did."""
     before = "value: Any = 1  # lup: ignore[any-type]\n"

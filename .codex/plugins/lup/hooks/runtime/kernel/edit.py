@@ -1076,8 +1076,8 @@ def spurious_refusal(number: int, dead: list[str], live: list[str]) -> KernelDec
         f"line {number}: this suppression names {named}, which nothing it guards "
         f"trips{instead}. Drop {named} from it: a rule that does not fire is "
         f"silenced by nothing, and the audit reports the directive spurious. One "
-        f"written on line {number} reaches line {number}, and line {number + 1} "
-        "when it stands alone (see docs/rules.md)",
+        f"written on line {number} reaches that line, and where it stands alone "
+        "the line beneath its comment block (see docs/rules.md)",
     )
 
 
@@ -1167,16 +1167,21 @@ def antipattern_decision(
     def guarded_hits(number: int) -> list[AntiPatternHit]:
         """Every rule tripped by the lines one directive is written to guard.
 
-        Read from the directive's side, through the one placement policy: its
-        own line always, and the line below when it stands alone. The rows and
-        the refined exemptions are the ones the gate matched with above, so
-        what counts as a trip here is what counts as a trip everywhere.
+        Read from the directive's side, through the one placement policy, and
+        asked of it rather than guessed: `suppression_reaches` decides, and
+        this only offers it the lines below. Offering a fixed pair was exactly
+        complete while the policy stopped at the next line, and left a
+        directive whose reason spans two lines guarding nothing it could see —
+        so the forward check admitted an edit this one then called spurious.
+
+        The rows and the refined exemptions are the ones the gate matched with
+        above, so what counts as a trip here is what counts as a trip
+        everywhere.
         """
         guarded = {
             candidate: True
-            for candidate in (number, number + 1)
-            if candidate <= len(original_lines)
-            and suppression_reaches(original_lines, number, candidate)
+            for candidate in range(number, len(original_lines) + 1)
+            if suppression_reaches(original_lines, number, candidate)
         }
         return list(
             anti_pattern_hits(
