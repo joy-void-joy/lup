@@ -518,7 +518,7 @@ src/
     │   ├── dev/                # Worktrees, branches, PRs, and pre-flight checks
     │   ├── feedback/           # Feedback state, metrics, and session commits
     │   ├── trace/              # Trace display, search, and analysis
-    │   ├── usage/              # Claude Code usage display (api/render/app)
+    │   ├── usage/              # Usage display, filled by each backend's reader
     │   ├── setup.py            # Shared integration registry + terminal wizard
     │   ├── dashboard/          # Local setup API and packaged zero-build web UI
     │   ├── supervisor/         # Live and read-only web supervision of resolver runs
@@ -741,7 +741,8 @@ Run `uv run lup-devtools --help` for the full command tree.
 
 `lup-devtools harness claude` regenerates, verifies, and runs Claude Code with
 the local Lup plugin and the active profile's account (`CLAUDE_CONFIG_DIR`).
-`lup-devtools usage claude` reports usage for the chosen profile. Profiles are managed
+`lup-devtools usage claude` reports usage for the chosen profile, and
+`lup-devtools usage codex` reports the other backend's. Profiles are managed
 with `lup-devtools setup profile`.
 
 Each repo names its plugin **marketplace** after the project — the plugin entry stays `lup`, so `/lup:*` is identical everywhere. Marketplace names share one global namespace (`~/.claude/plugins/known_marketplaces.json`), so a shared name like `lup`/`local` collides across repos and an install from one shadows the others; `lup-devtools dev plugin name` (run by `/lup:init` and `/lup:install`) wires the per-project name.
@@ -761,6 +762,10 @@ stated reason. Under a launcher-verified OS sandbox (`LUP_SANDBOX_ACTIVE`),
 unjudged work defers to that boundary instead of denying and a
 `dangerouslyDisableSandbox` escape re-enters the deny lattice; the sandbox
 block in `.claude/settings.json` derives from the same `HookSet` declaration.
+Where a command runs is a second axis a rule declares beside its effect and
+cascades to the levels beneath it, so every `git` verb already runs outside
+the sandbox unasked, and a runtime that cannot place a call renders the
+plain effect.
 Segments join deny > ask > defer > allow — unjudged rides into a judged
 prompt, a judged deny wins the batch. Malformed input fails conservatively,
 a `$(...)` substitution classifies recursively (the inner command joins the

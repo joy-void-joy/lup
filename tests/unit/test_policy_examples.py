@@ -104,15 +104,39 @@ async def test_shell_example_refuses_the_command_its_policy_denies() -> None:
 
 async def test_shell_example_allows_a_read_only_command() -> None:
     decision = await attempted_call(
-        semantic_policy_shell.session_config(), "Bash", {"command": "git status"}
+        semantic_policy_shell.session_config(), "Bash", {"command": "ls -la"}
     )
 
     # An allow grants and says nothing further: the portable vocabulary
-    # carries a reason only where one changes what the agent does next.
+    # carries a reason only where one changes what the agent does next, and a
+    # command whose rule states no placement is not rewritten either.
     assert decision == {
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
             "permissionDecision": "allow",
+        }
+    }
+
+
+async def test_shell_example_runs_a_git_read_outside_the_sandbox() -> None:
+    """`git` states its placement once, so every verb beneath it escapes.
+
+    The declaration sits on the command and this is a subcommand under it,
+    which is what makes the round trip worth driving: the erased row already
+    carries the placement, so the renderer reads one field rather than walking
+    a hierarchy it cannot see.
+    """
+    command = "git status"
+
+    decision = await attempted_call(
+        semantic_policy_shell.session_config(), "Bash", {"command": command}
+    )
+
+    assert decision == {
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "allow",
+            "updatedInput": {"command": command, "dangerouslyDisableSandbox": True},
         }
     }
 

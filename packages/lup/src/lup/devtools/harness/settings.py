@@ -13,19 +13,17 @@ session is denied something the policy allows.
 
 from urllib.parse import urlsplit
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field
 
 from lup.harness.models import HookSet, HookUrlScope, Plugin
 from lup.types import JsonObject, JsonValue
 
 
-class Settings(BaseModel):
+class Settings(BaseModel, frozen=True):
     """The half of a settings artifact that is a project's own judgement."""
 
-    model_config = ConfigDict(frozen=True)
-
     base: JsonObject = Field(
-        default_factory=dict,
+        default={},
         description=(
             "Runtime settings that are neither derived from the declaration "
             "nor permissions — the editor integrations and session defaults a "
@@ -33,15 +31,15 @@ class Settings(BaseModel):
         ),
     )
     official_plugins: JsonObject = Field(
-        default_factory=dict,
+        default={},
         description="Vendor-published plugins this project enables by name.",
     )
     allowed: list[JsonValue] = Field(
-        default_factory=list,
+        default=[],
         description="Tool patterns granted outright, before the served-tool grants.",
     )
     denied: list[JsonValue] = Field(
-        default_factory=list,
+        default=[],
         description="Tool patterns refused regardless of what else allows them.",
     )
 
@@ -83,13 +81,16 @@ def allowed_network_domains(hooks: HookSet) -> list[str]:
     return list(dict.fromkeys(merged))
 
 
+# lup: ignore[model-free-function] — renderer over a declaration and a plugin
 def project_settings(declared: Settings, plugin: Plugin | None) -> JsonObject:
     """Render the settings artifact, deriving every block it can.
 
     The sandbox stays permissive where the semantic policy already judges
     (escapes re-enter the deny lattice) and hardens what shell writers could
     otherwise bypass: human-owned files become OS-level write denials and the
-    declared credential paths become sandbox read denials.
+    declared credential paths become sandbox read denials. Both are array
+    keys the runtime merges across settings scopes, so a repository states
+    its own requirement without displacing the user's or the organization's.
     """
     settings: JsonObject = dict(declared.base)
     settings["enabledPlugins"] = dict(declared.official_plugins)
@@ -118,6 +119,7 @@ def project_settings(declared: Settings, plugin: Plugin | None) -> JsonObject:
     domains: list[JsonValue] = list(allowed_network_domains(hooks))
     settings["sandbox"] = {
         "enabled": True,
+        "excludedCommands": list(hooks.sandbox.excluded_commands),
         "network": {"allowedDomains": domains},
         "filesystem": {
             "denyWrite": [path.as_posix() for path in hooks.human_owned_files],

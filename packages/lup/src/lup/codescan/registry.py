@@ -17,9 +17,10 @@ type oracle has resolved what the spelling refers to.
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
 import lup.codescan.antipatterns as antipatterns
+import lup.codescan.behaviour as behaviour
 import lup.codescan.boundaries as boundaries
 import lup.codescan.capabilities as capabilities
 import lup.codescan.dispatch as dispatch
@@ -31,11 +32,13 @@ from lup.codescan.common import RuleStrength
 type RuleFamily = Literal["anti-pattern", "boundary", "spelling", "architecture"]
 
 
+# lup: ignore[constant-declaration] — one generated artifact's identity: the
+# writer and every deny message that cites it must name the same file
 RULE_REFERENCE = "docs/rules.md"
 """Repository-relative path of the generated reference deny messages cite."""
 
 
-class RegisteredRule(BaseModel):
+class RegisteredRule(BaseModel, frozen=True):
     """One rule's discovery card: identity, family, diagnostic, and home.
 
     ``refinement`` is empty for a rule that decides the same way everywhere.
@@ -44,8 +47,6 @@ class RegisteredRule(BaseModel):
     contributor who meets a denial the repository sweep does not report can
     tell which surface is speaking.
     """
-
-    model_config = ConfigDict(frozen=True)
 
     id: str
     family: RuleFamily
@@ -88,6 +89,24 @@ STRUCTURAL_RULES: list[RegisteredRule] = [
             "pydantic.BaseModel."
         ),
         defined_in=dispatch.__name__,
+    ),
+    RegisteredRule(
+        id=behaviour.RULE_ID,
+        family="architecture",
+        scope="Python architecture",
+        example="def render_part(part: TextPart) -> str: ...",
+        message=(
+            "A model we declare carries what can be done with it. A free function "
+            "taking one as a parameter puts that operation where the model cannot "
+            "see it, so the type's behaviour is spread across whichever modules "
+            "call it. Declare it on the model, or on the ABC the model composes. "
+            "Methods are the shape this steers toward and are never reported; nor "
+            "is a constructor (a model named only in the return), a boundary "
+            "converter (a model another module declares), or a function over a "
+            "vendor payload or a builtin, since the rule fires only on project "
+            "classes inheriting pydantic.BaseModel."
+        ),
+        defined_in=behaviour.__name__,
     ),
     RegisteredRule(
         id=narrowing.RULE_ID,
@@ -151,6 +170,28 @@ STRUCTURAL_RULES: list[RegisteredRule] = [
             "canonical table, whose value is fixed outside this repository."
         ),
         defined_in=boundaries.__name__,
+    ),
+    RegisteredRule(
+        id=boundaries.CONSTANT_DECLARATION_RULE_ID,
+        family="architecture",
+        scope="Python constants",
+        example="SNIPPET_LENGTH = 500",
+        message=(
+            "A constant is a judgement a second implementer with the same intent "
+            "could have made differently — a ceiling, a retry count, an allowlist — "
+            "frozen where no caller can replace it. It reaches them as an overridable "
+            "default instead: a parameter default, a pydantic field default, or the "
+            "sentinel a mutable default is written as. Suppress only a canonical "
+            "value — a provider's wire spelling, a language's own vocabulary, an "
+            "identity this repository defines. A constant that exists to carve "
+            "text by hand is steered to the parser rather than to a parameter, "
+            "because parametrizing it would keep the surgery."
+        ),
+        defined_in=boundaries.__name__,
+        refinement=(
+            "The library's own multi-entry tables are library-default's instead, so "
+            "the two partition every declaration and neither reaches the other's."
+        ),
     ),
     RegisteredRule(
         id=boundaries.KERNEL_IMPORT_RULE_ID,

@@ -76,6 +76,7 @@ from lup.resolver.models import (
     ConcernProgress,
     ConcernStatus,
     DependencyBase,
+    DiffValidation,
     IntegrationRecord,
     JoinProgress,
     InventoryNote,
@@ -529,6 +530,7 @@ def recording_launcher() -> ScriptedLauncher:
         {
             "rev-parse HEAD": [out("base-sha\n"), out("created-sha\n")],
             "diff --name-only": out("src/module.py\n"),
+            "diff --cached": out(code=1),
             "branch --show-current": out("resolve/a\n"),
         }
     )
@@ -825,6 +827,53 @@ def plan_of(*concerns: JsonObject) -> JsonObject:
     return {"concerns": [concern for concern in concerns]}
 
 
+SAID = "the relay must investigate before it answers"
+
+
+@pytest.mark.asyncio
+async def test_a_run_is_planned_from_words_with_no_note_written_first(
+    tmp_path: Path,
+) -> None:
+    """How a human arrives: the work in their own words, nothing in the tree.
+
+    A run seedable only from notes made them invent a note site for the
+    planner to read back, which is a file edit standing in for a sentence.
+    """
+    core = planning_core(tmp_path, lambda *_: plan_of(concern_referencing([0])))
+
+    inventory = await core.plan_inventory(
+        ResolveRequest(
+            source=SourceSnapshot(branch="feature", commit="source-sha"),
+            statements=[SAID],
+        )
+    )
+
+    assert [concern.id for concern in inventory.concerns] == ["concern-0"]
+    assert inventory.concerns[0].notes == []
+    assert inventory.concerns[0].evidence == SAID
+
+
+@pytest.mark.asyncio
+async def test_a_statement_and_a_note_reach_one_inventory(tmp_path: Path) -> None:
+    """Positions run end to end, so one turn plans both kinds together."""
+    request = two_note_request().model_copy(update={"statements": [SAID]})
+    core = planning_core(
+        tmp_path,
+        lambda *_: plan_of(
+            concern_referencing([0, 1]),
+            concern_referencing([2]),
+        ),
+    )
+
+    inventory = await core.plan_inventory(request)
+
+    assert [
+        ([note.line for note in concern.notes], concern.evidence)
+        for concern in inventory.concerns
+    ] == [([7, 1], ""), ([], SAID)]
+    assert all(concern.eligible for concern in inventory.concerns)
+
+
 @pytest.mark.asyncio
 async def test_a_note_no_concern_claims_names_itself_and_stops_the_run(
     tmp_path: Path,
@@ -1086,7 +1135,7 @@ def test_preparing_a_different_join_still_opens_the_merge(tmp_path: Path) -> Non
     ] in launcher.arguments
 
 
-def test_already_joined_reports_containment_from_merge_base(tmp_path: Path) -> None:
+def test_containment_is_reported_from_merge_base(tmp_path: Path) -> None:
     lease = joined_lease(tmp_path)
 
     contained = ancestry_launcher(is_ancestor=True)
@@ -1267,9 +1316,85 @@ def test_only_orchestrator_creates_commits_and_reads_their_identity(
         ["git", "diff", "--name-only", "base-sha"],
         ["git", "diff", "--check", "base-sha"],
         ["git", "add", "-A"],
+        ["git", "diff", "--cached", "--quiet", "HEAD"],
         ["git", "commit", "-m", "resolve: A"],
         ["git", "rev-parse", "HEAD"],
     ]
+
+
+def moved_head_launcher(contains_base: bool, clean_tree: bool) -> ScriptedLauncher:
+    """A lease whose HEAD has moved off the base this check was handed."""
+    return ScriptedLauncher(
+        {
+            "rev-parse HEAD": [out("moved-sha\n"), out("committed-sha\n")],
+            "branch --show-current": out("resolve/a\n"),
+            "merge-base --is-ancestor": out(code=0 if contains_base else 1),
+            "diff --name-only": out("src/module.py\n"),
+            "diff --cached": out(code=0 if clean_tree else 1),
+        }
+    )
+
+
+def validate_moved(launcher: ScriptedLauncher, tmp_path: Path) -> DiffValidation:
+    """Validate one worker's report against a lease whose HEAD has moved."""
+    leases = WritableRootLeases(tmp_path / "agents")
+    lease = leases.acquire("a", "resolve/a")
+    return WorktreeOrchestrator(launcher, tmp_path).validate_and_commit(
+        concern("a"),
+        WorkerReport(
+            concern_id="a",
+            changed=True,
+            summary="updated module",
+            files_changed=[Path("src/module.py")],
+        ),
+        lease,
+        "base-sha",
+        leases,
+    )
+
+
+def test_a_lease_that_advanced_past_its_base_is_still_measured_from_it(
+    tmp_path: Path,
+) -> None:
+    """A base the check carried while the branch moved on is not a rewrite.
+
+    The base is still in the lease's history, so everything the diff
+    measures from it is intact — failing here spent a concern on the run's
+    own bookkeeping.
+    """
+    diff = validate_moved(
+        moved_head_launcher(contains_base=True, clean_tree=False), tmp_path
+    )
+
+    assert diff.valid
+    assert diff.commit == "committed-sha"
+
+
+def test_a_lease_that_lost_its_base_names_the_authority_that_changed(
+    tmp_path: Path,
+) -> None:
+    """A stale base and a rewritten history no longer share one verdict."""
+    diff = validate_moved(
+        moved_head_launcher(contains_base=False, clean_tree=True), tmp_path
+    )
+
+    assert not diff.valid
+    assert diff.reason == (
+        "worker changed commit authority: base-sha is no longer in the lease's history"
+    )
+
+
+def test_work_already_committed_in_the_lease_is_accepted_where_it_sits(
+    tmp_path: Path,
+) -> None:
+    """`git commit` refuses an empty commit, and the work is present anyway."""
+    launcher = moved_head_launcher(contains_base=True, clean_tree=True)
+
+    diff = validate_moved(launcher, tmp_path)
+
+    assert diff.valid
+    assert diff.commit == "moved-sha"
+    assert ["git", "commit", "-m", "resolve: A"] not in launcher.arguments
 
 
 @pytest.mark.asyncio
@@ -4420,7 +4545,7 @@ async def test_a_granted_allowance_reaches_the_sessions_launched_next(
     """
     launcher = LocalProcessLauncher()
     workspace = failure_leg_workspace(tmp_path, launcher)
-    carried: list[list[ConcernAllowance]] = []
+    carried: list[list[str]] = []
 
     def worker_response(root: Path, output_name: str) -> JsonObject:
         if output_name == MergeReport.__name__:
@@ -4436,7 +4561,7 @@ async def test_a_granted_allowance_reaches_the_sessions_launched_next(
     granting = worker_recipe(tmp_path / "state", launcher, worker_response)
 
     def recording_worker_factory(context: WorkerContext) -> SessionFactory:
-        carried.append(list(context.allowances))
+        carried.append(context.grants.granted())
         return granting(context)
 
     core = ResolverCore(
@@ -4481,7 +4606,7 @@ async def test_a_granted_allowance_reaches_the_sessions_launched_next(
     assert outcome.verified, outcome.failure
     assert concern("a").allowances == []
     assert carried and all(
-        ConcernAllowance.ANTIPATTERN_SUPPRESSION in launch for launch in carried
+        ConcernAllowance.ANTIPATTERN_SUPPRESSION.value in launch for launch in carried
     )
 
 

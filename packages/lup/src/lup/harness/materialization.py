@@ -9,7 +9,7 @@ defined here because materializers are the only producers.
 import hashlib
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
 from lup.harness.contracts import Materializer
 from lup.harness.models import Artifact
@@ -17,15 +17,53 @@ from lup.harness.reconciliation import ReconciliationProposal
 from lup.harness.validation import validated_tree
 
 
-class MaterializationResult(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class MaterializationResult(BaseModel, frozen=True):
     changed: list[Path]
     removed: list[Path]
 
 
 class MaterializationConflictError(RuntimeError):
     """A proposal is unresolved or stale at materialization time."""
+
+
+class MaterializationRefusedError(RuntimeError):
+    """The environment refused a write the proposal was entitled to make.
+
+    Separate from a conflict because nothing about the proposal is wrong:
+    the artifact is correct, the base is current, and the boundary the
+    session runs behind is what said no.
+    """
+
+
+def discard_staged_write(error: OSError) -> None:
+    """Remove the staged copy a refused rename left behind.
+
+    A rename that fails leaves its source where it was, and the source here
+    is named for a proposal that will never be made again — so no later run
+    collects it, and it surfaces in the next diff as an artifact nobody
+    wrote and nobody can explain.
+    """
+    staged = Path(error.filename) if error.filename else None
+    if staged is not None and staged.suffix == ".tmp":
+        staged.unlink(missing_ok=True)
+
+
+def refused_write(error: OSError) -> MaterializationRefusedError:
+    """Name the boundary behind a refused artifact write.
+
+    A runtime protects its own configuration paths by mounting them rather
+    than by permissioning them, so a sandboxed session replacing one is
+    refused with a busy device or a read-only filesystem — an errno about
+    hardware, standing in for a boundary decision. Saying which boundary is
+    what turns it back into something a reader can act on.
+    """
+    target = error.filename2 or error.filename or "a generated artifact"
+    return MaterializationRefusedError(
+        f"{target}: {error.strerror}. The artifact is correct and its base is "
+        "current, so the environment is what refused the write: an OS sandbox "
+        "denies the paths its own runtime protects, and no grant lifts those. "
+        "Regenerate from a session outside the sandbox."
+    )
 
 
 def file_digest(path: Path) -> str | None:

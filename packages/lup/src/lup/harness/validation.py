@@ -10,24 +10,20 @@ implement.
 from abc import ABC, abstractmethod
 from collections import Counter
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel
 
 from lup.harness.banner import ARTIFACT_COMMENT_ROUTER
 from lup.harness.generation import ArtifactValidationError
 from lup.harness.models import Artifact, ArtifactTree
 
 
-class ValidationIssue(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class ValidationIssue(BaseModel, frozen=True):
     semantic_id: str
     message: str
 
 
-class ValidationResult(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
-    issues: list[ValidationIssue] = Field(default_factory=list)
+class ValidationResult(BaseModel, frozen=True):
+    issues: list[ValidationIssue] = []
 
     @property
     def valid(self) -> bool:

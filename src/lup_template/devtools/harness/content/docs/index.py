@@ -1,3 +1,6 @@
+# lup: ignore[constant-declaration]
+# Both constants here are blocks of this index's own prose, and the index is
+# the document rather than a value some caller passes into one.
 """The documentation index: what this repository is, and where each part is.
 
 The component table and the closing note are this repository's own words. The

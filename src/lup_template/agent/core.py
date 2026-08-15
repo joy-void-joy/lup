@@ -7,7 +7,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
-from pydantic import AnyHttpUrl, BaseModel, ConfigDict, SecretStr
+from pydantic import AnyHttpUrl, BaseModel, SecretStr
 
 from lup.adapters.claude.config import (
     ClaudeCompatibilityTransform,
@@ -89,10 +89,8 @@ class PersistentSessionResult(BaseModel):
     turns: int
 
 
-class SessionBuild(BaseModel):
+class SessionBuild(BaseModel, frozen=True, arbitrary_types_allowed=True):
     """Configured provider-neutral factory and its application workspace."""
-
-    model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
 
     factory: SessionFactory
     notes: NotesConfig
@@ -170,6 +168,8 @@ def provider_factory(
     codex_mcp_servers: dict[str, CodexMcpServerConfig] | None = None,
     writable_roots: list[Path] | None = None,
     subagents: list[SubagentSpec] | None = None,
+    thinking_budget: int | None = None,
+    max_turns: int | None = None,
 ) -> SessionFactory:
     """The one application-owned provider selection boundary.
 
@@ -198,9 +198,11 @@ def provider_factory(
                 if session_defaults
                 else None
             ),
-            max_turns=settings.max_turns,
+            max_turns=max_turns if max_turns is not None else settings.max_turns,
             max_thinking_tokens=(
-                settings.max_thinking_tokens
+                thinking_budget
+                if thinking_budget is not None
+                else settings.max_thinking_tokens
                 if settings.max_thinking_tokens is not None
                 else SESSION_THINKING_TOKENS
                 if session_defaults
@@ -475,7 +477,8 @@ def build_session_factory(
 
         allowed_tools = policy.get_allowed_tools(
             tool_servers,
-            builtin_tools=frozenset(  # lup: ignore[frozenset-shape] — immutable policy input
+            # lup: ignore[frozenset-shape] — immutable policy input
+            builtin_tools=frozenset(
                 {"Read", "Glob", "Grep", "WebSearch", "WebFetch", "Bash"}
             ),
         )
@@ -584,8 +587,15 @@ def build_auxiliary_factory(
     model: str,
     system_prompt: str = "",
     tools: list[str] | None = None,
+    thinking_budget: int | None = None,
+    max_turns: int | None = None,
 ) -> SessionFactory:
-    """Build a one-shot nested/reviewer factory through the same route."""
+    """Build a one-shot nested/reviewer factory through the same route.
+
+    A nested agent's bounds are the caller's: it is one query with a job, so
+    the turn cap and thinking budget belong to whoever declared that job
+    rather than to the session settings a whole run shares.
+    """
     return decorate_factory(
         provider_factory(
             model=model,
@@ -595,6 +605,8 @@ def build_auxiliary_factory(
             allowed_tools=tools,
             coding_harness_preset=False,
             session_defaults=False,
+            thinking_budget=thinking_budget,
+            max_turns=max_turns,
         )
     )
 

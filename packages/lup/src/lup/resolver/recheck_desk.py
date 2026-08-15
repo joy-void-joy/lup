@@ -15,18 +15,16 @@ parents is a different question and every concern is examined again.
 
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
 from lup.channels.models import utc_now
 
-RECHECK_DIR = "rechecks"
+RECHECK_DIR = Path("rechecks")
 """Where under a run directory the finished re-checks are recorded."""
 
 
-class RecheckRecord(BaseModel):
+class RecheckRecord(BaseModel, frozen=True):
     """One concern's re-check, as the reviewer that ran it left it."""
-
-    model_config = ConfigDict(frozen=True)
 
     concern_id: str
     commit: str
@@ -52,8 +50,8 @@ class RecheckRecord(BaseModel):
 class RecheckDesk:
     """The run directory's record of which re-checks have already run."""
 
-    def __init__(self, run_dir: Path) -> None:
-        self.root = run_dir / RECHECK_DIR
+    def __init__(self, run_dir: Path, subdirectory: Path = RECHECK_DIR) -> None:
+        self.root = run_dir / subdirectory
 
     def path(self, concern_id: str) -> Path:
         return self.root / f"{concern_id}.json"

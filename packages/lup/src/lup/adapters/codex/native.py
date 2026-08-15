@@ -8,15 +8,10 @@
 # added.
 """Codex-private native event parsing and capability-aware decisions."""
 
-# lup: Please ensure there is full Codex parity. `lup-devtools usage` is
-# Claude-only right now — `lup.adapters.claude` ships a whole `usage/` package
-# (api, app, render) and this adapter has no equivalent at all. Sweep the two
-# adapter surfaces against each other rather than fixing only this one.
-
 from pathlib import Path
 from typing import Literal
 
-from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, ValidationError
+from pydantic import AnyHttpUrl, BaseModel, Field, ValidationError
 
 from lup.policy.models import (
     BeforeTool,
@@ -33,49 +28,37 @@ from lup.policy.native import NativeDecisionRenderer, NativeEventDecoder
 from lup.types import JsonObject
 
 
-class CodexFileChange(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class CodexFileChange(BaseModel, frozen=True):
     path: Path
     before: str | None = None
     after: str | None = None
 
 
-class CodexFileChangeOperation(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class CodexFileChangeOperation(BaseModel, frozen=True):
     type: Literal["file_change"] = "file_change"
     changes: list[CodexFileChange] = Field(min_length=1)
 
 
-class CodexShellOperation(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class CodexShellOperation(BaseModel, frozen=True):
     type: Literal["shell"] = "shell"
     command: str
     cwd: Path | None = None
 
 
-class CodexFetchOperation(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class CodexFetchOperation(BaseModel, frozen=True):
     type: Literal["fetch"] = "fetch"
     url: str
 
 
-class CodexSearchOperation(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class CodexSearchOperation(BaseModel, frozen=True):
     type: Literal["search"] = "search"
     query: str
 
 
-class CodexUnknownOperation(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class CodexUnknownOperation(BaseModel, frozen=True):
     type: Literal["unknown"] = "unknown"
     name: str
-    input: JsonObject = Field(default_factory=dict)
+    input: JsonObject = {}
 
 
 type CodexOperation = (
@@ -87,21 +70,18 @@ type CodexOperation = (
 )
 
 
-class CodexBeforeToolEvent(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class CodexBeforeToolEvent(BaseModel, frozen=True):
     operation: CodexOperation
 
 
-class CodexHookPayload(BaseModel):
+class CodexHookPayload(BaseModel, frozen=True):
     """Validated external hook input before operation-specific parsing."""
 
-    model_config = ConfigDict(frozen=True)
-
     tool_name: str
-    tool_input: JsonObject = Field(default_factory=dict)
+    tool_input: JsonObject = {}
 
 
+# lup: ignore[model-free-function] — boundary decoder off Codex's wire payload
 def parse_codex_before_tool(payload: CodexHookPayload) -> CodexBeforeToolEvent:
     """Decode stable Codex hook fields; opaque patches remain conservative."""
     match payload.tool_name, payload.tool_input:
@@ -162,10 +142,8 @@ class CodexEventDecoder(NativeEventDecoder[CodexBeforeToolEvent]):
         return BeforeTool(tool=tool, identity=identity)
 
 
-class CodexDecisionOutput(BaseModel):
+class CodexDecisionOutput(BaseModel, frozen=True):
     """Exit behavior for one hermetic Codex command hook."""
-
-    model_config = ConfigDict(frozen=True)
 
     exit_code: int
     stdout: str = ""
@@ -174,7 +152,22 @@ class CodexDecisionOutput(BaseModel):
 
 
 class CodexDecisionRenderer(NativeDecisionRenderer[CodexDecisionOutput]):
-    """Render approval when supported and otherwise fail closed."""
+    """Render approval when supported and otherwise fail closed.
+
+    A placement is degraded away here, because what this boundary returns is
+    an accept or a decline and nothing else: the call it judges runs with the
+    arguments the model wrote, so a verdict of its own has no way to move one
+    outside the sandbox. Saying so is what keeps a placement from reading as
+    honoured — dropped in silence, an escape this boundary cannot perform
+    would look performed to everything upstream of it. The ``outside`` Codex
+    does have is compiled ahead of the session as a prefix rule, in
+    :func:`~lup.adapters.codex.harness.codex_allow_prefixes`, not decided here.
+
+    A permission to escalate survives the degrading, because it was never
+    addressed to this boundary: the agent spends it on its own next call, with
+    the words :meth:`~lup.adapters.codex.harness.CodexSpellings.escape_sandbox`
+    carries.
+    """
 
     def __init__(self, supports_ask: bool) -> None:
         if supports_ask:
@@ -184,18 +177,21 @@ class CodexDecisionRenderer(NativeDecisionRenderer[CodexDecisionOutput]):
             )
         self.supports_ask = supports_ask
 
-    def render(self, decision: Decision) -> CodexDecisionOutput:
-        match decision.effect:
+    def render(
+        self, decision: Decision, tool_input: JsonObject | None = None
+    ) -> CodexDecisionOutput:
+        settled = decision.placed(escapable=False, agent_escalates=True)
+        match settled.effect:
             case "allow" | "defer":
                 return CodexDecisionOutput(exit_code=0)
             case "deny":
-                return CodexDecisionOutput(exit_code=2, stderr=decision.reason)
+                return CodexDecisionOutput(exit_code=2, stderr=settled.reason)
             case "ask":
                 return CodexDecisionOutput(
                     exit_code=2,
                     stderr=(
                         f"Approval is required but unavailable at this boundary: "
-                        f"{decision.reason}"
+                        f"{settled.reason}"
                     ),
                     approximation="ask rendered as fail-closed denial",
                 )

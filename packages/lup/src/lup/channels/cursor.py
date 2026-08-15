@@ -18,13 +18,11 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
-from lup.channels.models import FROZEN, ChannelCorruptionError, publish_atomic
+from lup.channels.models import ChannelCorruptionError, publish_atomic
 
 
-class ReaderPosition(BaseModel):
+class ReaderPosition(BaseModel, frozen=True):
     """One reader's committed offset into one stream."""
-
-    model_config = FROZEN
 
     offset: int
 

@@ -22,22 +22,27 @@ sys.path.insert(0, str(Path(__file__).parents[1] / "runtime"))
 from codex_patch import patched_files
 from kernel.decision import KernelDecision
 from policy_data import AGENT_IDENTITY_ENV, AUTONOMOUS_AGENT_IDENTITIES
-import subprocess  # lup: ignore[subprocess] — `sh` is third-party and this half is compiled into a bare script that has no virtual environment to resolve it from
-from kernel.edit import decide_edit
+
+# lup: ignore[subprocess] — `sh` is third-party and this half is compiled into a bare script that has no virtual environment to resolve it from
+import subprocess
+from kernel.edit import decide_edit, relocated_edit_text, relocated_suppressions
 from kernel.fetch import decide_fetch
 from kernel.lex import shell_path_verb_targets, shell_write_targets
 from kernel.shell import decide_shell
+from kernel.tools import decide_tool
 from policy_data import (
+    ALLOWANCE_GRANTS_ENV,
     ALLOWED_FETCH_SCOPES,
     ANTI_PATTERN_ROWS,
-    CONCERN_ALLOWANCES_ENV,
     DENIED_FETCH_SCOPES,
     KNOWN_ALLOWANCES,
     MAXIMUM_ADDED_LINES,
     PATH_ROLES,
     PATH_RULES,
     RECOVERABLE_TARGET_LIMIT,
+    REFUSED_TOOLS,
     RUNNER_TARGETS,
+    SANDBOX_EXCLUDED_COMMANDS,
     SHELL_RULES,
 )
 
@@ -162,23 +167,56 @@ def declared_identity(identity_env: str) -> str:
     return environ[identity_env] if identity_env in environ else ""
 
 
-def granted_allowances(allowances_env: str, known: list[str]) -> list[str]:
-    """Edit gates a human approved for the concern this session is working.
+def document_allowances(document_text: str, known: list[str]) -> list[str]:
+    """Edit gates one document grants, as it reads at this instant.
 
-    Only names in the compiled vocabulary count. The environment is a
-    transport, not an authority: a name no launcher can legitimately declare
-    — a typo, or a gate this policy never grants that way — is dropped
-    rather than honoured, so hand-setting the variable buys nothing.
+    Read here rather than carried in, because a grant is answered while the
+    session it answers is already running: a list resolved when the process
+    started can neither gain the gate a human just approved nor lose one they
+    took back. The document is named from outside and its contents are read
+    afresh, so the current state governs in both directions.
+
+    Only names in the compiled vocabulary count. The document is a transport,
+    not an authority: a name no launcher can legitimately publish — a typo, or
+    a gate this policy never grants this way — is dropped rather than
+    honoured, so hand-writing one buys nothing.
+
+    Nothing to read is no grant, and so is anything unreadable: a missing
+    document, a directory, a half-written replacement, a payload that is not a
+    list of names. Every one of them leaves the gate exactly where it was, so
+    the failure is a refusal a human can answer rather than a grant nobody
+    made.
     """
-    environ = os.environ  # lup: ignore[os-environ]
-    if allowances_env not in environ:
+    if not document_text:
         return []
-    declared = json.loads(environ[allowances_env] or "[]")
+    try:
+        declared = json.loads(Path(document_text).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    if not isinstance(declared, list):
+        return []
     return [str(name) for name in declared if str(name) in known]
 
 
+def granted_allowances(grants_env: str, known: list[str]) -> list[str]:
+    """Edit gates a human approved for the lease this session is working.
+
+    The environment names the document rather than carrying the grants, so
+    what a hook process inherits at launch is a place to look and never an
+    answer that has since moved on.
+    """
+    environ = os.environ  # lup: ignore[os-environ]
+    return document_allowances(
+        environ[grants_env] if grants_env in environ else "", known
+    )
+
+
 def bash_decision(
-    command: str, managed_root: Path | None, sandboxed: bool, interactive: bool
+    command: str,
+    managed_root: Path | None,
+    sandboxed: bool,
+    interactive: bool,
+    escapable: bool,
 ) -> KernelDecision:
     """Judge one shell command against the declared vocabulary.
 
@@ -193,6 +231,11 @@ def bash_decision(
     replacing it would cost. Resolving them for only one of the two writing
     forms is what left ``rm f`` granted while ``echo x > f`` asked about the
     same clean, tracked file.
+
+    ``escapable`` is the one thing here a runtime answers rather than the host:
+    whether it can put a single call outside its own sandbox. It arrives as an
+    argument for the same reason the rest does — a fact one dispatcher stopped
+    passing is a rule that silently stopped applying.
     """
     acted_on = shell_path_verb_targets(command)
     return decide_shell(
@@ -201,6 +244,7 @@ def bash_decision(
         ALLOWED_FETCH_SCOPES,
         DENIED_FETCH_SCOPES,
         sandboxed=sandboxed,
+        excluded_commands=SANDBOX_EXCLUDED_COMMANDS,
         trusted_script_roots=managed_script_roots(managed_root),
         path_roles=PATH_ROLES,
         path_rules=PATH_RULES,
@@ -214,12 +258,42 @@ def bash_decision(
         recoverable_target_limit=RECOVERABLE_TARGET_LIMIT,
         runner_targets=RUNNER_TARGETS,
         interactive=interactive,
+        escapable=escapable,
     )
 
 
 def fetch_decision(url: str) -> KernelDecision:
     """Judge one outbound fetch against the declared scopes."""
     return decide_fetch(url, ALLOWED_FETCH_SCOPES, DENIED_FETCH_SCOPES)
+
+
+def refused_tool_decision(name: str, values: list[str]) -> KernelDecision | None:
+    """Judge one native call against the calls this project refuses outright.
+
+    ``None`` leaves the routing runtime's own answer for a tool no refusal
+    mentions, because the table says what a project decided against and never
+    what it approved — an unmentioned tool is still unclassified.
+    """
+    return decide_tool(name, values, REFUSED_TOOLS)
+
+
+def placed_document(path_text: str, after: str) -> str:
+    """One file's text with every suppression at its canonical placement.
+
+    Only Python has a placement to settle here: the policy is written in terms
+    of a comment the formatter cannot wrap, and the tokenizer that says where
+    a comment really opens is Python's.
+    """
+    if Path(path_text).suffix.lower() not in (".py", ".pyi"):
+        return after
+    return relocated_suppressions(after)
+
+
+def placed_edit_text(path_text: str, after: str, start: int, end: int) -> str | None:
+    """The replacement for an edit's own span, or ``None`` to place nothing."""
+    if Path(path_text).suffix.lower() not in (".py", ".pyi"):
+        return None
+    return relocated_edit_text(after, start, end)
 
 
 def edit_decision(
@@ -234,6 +308,11 @@ def edit_decision(
     The path is relativized against the worktree holding it rather than the
     directory the runtime started in, because every repo-relative rule matches
     on that answer and a session may be launched anywhere.
+
+    The gates this lease holds are read here, per call, rather than resolved
+    when the session started: a grant is answered by a human while the session
+    that asked for it is still running, and one resolved at launch could not
+    have carried the answer.
     """
     suffix = Path(path_text).suffix.lower()
     return decide_edit(
@@ -248,7 +327,7 @@ def edit_decision(
         path_roles=PATH_ROLES,
         maximum_added_lines=MAXIMUM_ADDED_LINES,
         autonomous=autonomous,
-        allowances=granted_allowances(CONCERN_ALLOWANCES_ENV, KNOWN_ALLOWANCES),
+        allowances=granted_allowances(ALLOWANCE_GRANTS_ENV, KNOWN_ALLOWANCES),
         python_source=suffix in (".py", ".pyi"),
     )
 
@@ -276,7 +355,11 @@ def dispatch(payload, permission_request=False):
             tool_input["command"],
             managed_root(),
             False if permission_request else sandbox_active(),
-            permission_request,
+            interactive=permission_request,
+            # This hook answers without rewriting the call, so a verdict that
+            # has to leave the sandbox is stopped with that reason instead:
+            # the one route out a rule can compile was decided before this ran.
+            escapable=False,
         )
     if name == "web_fetch":
         return fetch_decision(tool_input["url"])
@@ -296,6 +379,16 @@ def dispatch(payload, permission_request=False):
                 for change in patched_files(tool_input["command"], read_document)
             ]
         )
+    # Asked of whatever reached here rather than of a listed few, exactly as
+    # the Claude half asks it: which tools are worth refusing is the
+    # declaration's answer, and a runtime that shipped the table without
+    # consulting it would read as a refusal in force while the call went
+    # through. The branches above keep their calls, which have semantics.
+    refused = refused_tool_decision(
+        name, [value for value in tool_input.values() if isinstance(value, str)]
+    )
+    if refused is not None:
+        return refused
     return KernelDecision("ask", f"unknown tool {name!r} is not covered by policy")
 
 
@@ -307,7 +400,14 @@ def main():
             if "hook_event_name" in payload
             else False
         )
-        decision = dispatch(payload, permission_request)
+        # A verdict from here places nothing: this hook answers, and the call
+        # runs with the arguments the model wrote, so a placement is degraded
+        # to its plain effect rather than carrying an intent no channel here
+        # performs. The agent's own escape is the other question and Codex
+        # does have one, so a permission to escalate survives as reason text.
+        decision = dispatch(payload, permission_request).placed(
+            escapable=False, agent_escalates=True
+        )
     # Every way this can fail means one thing — the call went unjudged — and
     # one answer is right for all of them. Naming the exceptions instead is
     # what let a plain unreadable file escape, and a traceback exit is not the

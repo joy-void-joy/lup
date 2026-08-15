@@ -6,25 +6,21 @@ import os
 from pathlib import Path
 
 import sh
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field
 
 from lup.adapters.codex.login import CODEX_LOGIN
 from lup.harness.contracts import CapabilityProbe
 from lup.harness.models import CapabilityEvidence
 
 
-class CodexCliEvidence(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class CodexCliEvidence(BaseModel, frozen=True):
     executable: Path
-    arguments: list[str] = Field(default_factory=list)
+    arguments: list[str] = []
     installed: bool
     output: str = ""
 
 
-class PluginCacheConfig(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class PluginCacheConfig(BaseModel, frozen=True):
     codex_home: Path = Field(default_factory=lambda: Path.home() / ".codex")
     # Required for explicit shared homes and for a stable installed-cache path.
     marketplace: str
@@ -34,9 +30,7 @@ class PluginCacheConfig(BaseModel):
     version: str | None = None
 
 
-class PluginCacheEvidence(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class PluginCacheEvidence(BaseModel, frozen=True):
     source_root: Path
     installed_root: Path
     source_digest: str
@@ -77,6 +71,7 @@ def plugin_manifest_version(source_root: Path) -> str:
     raise ValueError(f"Codex plugin manifest lacks a version: {manifest}")
 
 
+# lup: ignore[model-free-function] — digests the source tree the config locates
 def plugin_cache_evidence(
     source_root: Path, config: PluginCacheConfig
 ) -> PluginCacheEvidence:

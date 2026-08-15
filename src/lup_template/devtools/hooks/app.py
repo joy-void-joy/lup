@@ -27,16 +27,27 @@ from lup.devtools.utils import output_json
 app = typer.Typer(help="Query the permission policy", no_args_is_help=True)
 
 
-def shell_decision(command: str, autonomous: bool, interactive: bool) -> Decision:
+def shell_decision(
+    command: str, autonomous: bool, interactive: bool, trapped: bool = False
+) -> Decision:
     """Classify one shell command exactly as a live session would.
 
     The host facts a decision needs — which redirect targets already exist,
     which operands Git could restore, which are directories — are resolved by
     the policy itself against ``cwd``, so this answer is the answer a session
     standing here would get rather than one reached without them.
+
+    ``trapped`` asks the other question a placement raises: what a session an
+    OS sandbox confines, on a runtime that puts no single call outside it,
+    is told about a command that has to run outside. Left off, the answer is
+    the declared verdict — the placement itself, which is what a reader wants
+    to see. Turned on, it is the refusal that boundary reaches.
     """
     policy = semantic_policy_for(
-        declared_hook_set(), autonomous=autonomous, interactive=interactive
+        declared_hook_set(),
+        autonomous=autonomous,
+        interactive=interactive,
+        sandbox_active=trapped,
     )
     return policy.decide(ShellCommand(command=command, cwd=project_root()))
 
@@ -51,6 +62,13 @@ def report(subject: str, decision: Decision, as_json: bool) -> None:
         output_json({"subject": subject, **decision.model_dump()})
     else:
         typer.echo(f"{decision.effect:>5}  {subject}")
+        match decision.sandbox:
+            case "ambient":
+                pass
+            case "escalable":
+                typer.echo("       runs inside the sandbox, and may be taken out")
+            case placement:
+                typer.echo(f"       runs {placement} the sandbox")
         if decision.reason:
             typer.echo(f"       {decision.reason}")
     if decision.effect != "allow":
@@ -66,6 +84,13 @@ def classify_command(
     headless: Annotated[
         bool, typer.Option("--headless", help="Judge with no human to answer an ask")
     ] = False,
+    trapped: Annotated[
+        bool,
+        typer.Option(
+            "--trapped",
+            help="Judge as a confined session whose runtime cannot escape",
+        ),
+    ] = False,
     as_json: Annotated[bool, typer.Option("--json", help="Emit JSON")] = False,
 ) -> None:
     """Say what the policy decides about one shell command, and why.
@@ -74,8 +99,9 @@ def classify_command(
 
         $ uv run lup-devtools hooks classify 'gh api /repos/o/r/pulls/1'
         $ uv run lup-devtools hooks classify 'rm build/out' --json
+        $ uv run lup-devtools hooks classify 'uv run lup-devtools dev check' --trapped
     """
-    report(command, shell_decision(command, autonomous, not headless), as_json)
+    report(command, shell_decision(command, autonomous, not headless, trapped), as_json)
 
 
 @app.command("classify-fetch")

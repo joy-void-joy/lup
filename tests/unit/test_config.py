@@ -3,15 +3,12 @@
 from pathlib import Path
 
 import pytest
-from pydantic_settings import SettingsConfigDict
 
 from lup_template.agent.config import Settings, engine_for_model
 
 
-class EnvOnlySettings(Settings):
+class EnvOnlySettings(Settings, env_file=None, extra="ignore"):
     """Settings variant that ignores .env files — process env vars only."""
-
-    model_config = SettingsConfigDict(env_file=None, extra="ignore")
 
 
 def test_extra_dirs_parses_path_style_env(monkeypatch: pytest.MonkeyPatch) -> None:

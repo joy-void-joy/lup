@@ -3,7 +3,7 @@
 from pathlib import Path
 from typing import Literal
 
-from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, SecretStr
+from pydantic import AnyHttpUrl, BaseModel, Field, SecretStr
 
 from lup.adapters.claude.runtime import (
     ClaudeSessionConfig,
@@ -16,20 +16,16 @@ from lup.runtime.config import ConfigTransform, ProfileResolver, ProfileSelector
 PLACEHOLDER_CREDENTIAL = "dummy"
 
 
-class ClaudeProfileSelection(BaseModel):
+class ClaudeProfileSelection(BaseModel, frozen=True):
     """One complete Claude account/configuration home."""
-
-    model_config = ConfigDict(frozen=True)
 
     config_directory: Path
 
 
-class ClaudeProfileRegistry(BaseModel):
+class ClaudeProfileRegistry(BaseModel, frozen=True):
     """Immutable account selection state supplied by an application."""
 
-    model_config = ConfigDict(frozen=True)
-
-    profiles: dict[str, ClaudeProfileSelection] = Field(default_factory=dict)
+    profiles: dict[str, ClaudeProfileSelection] = {}
     active: str | None = None
     default: ClaudeProfileSelection = Field(
         default_factory=lambda: ClaudeProfileSelection(
@@ -67,6 +63,9 @@ class ClaudeProfileResolver(ProfileResolver[ClaudeSessionConfig]):
         return ClaudeConfigDirectoryTransform(profile)
 
 
+# The registry declares which account is selected; naming the resolver and the
+# session factory that act on it would put both inside the declaration.
+# lup: ignore[model-free-function] — composition root over the registry
 def claude_profile_selector(
     registry: ClaudeProfileRegistry,
 ) -> ProfileSelector[ClaudeSessionConfig]:
@@ -76,10 +75,8 @@ def claude_profile_selector(
     )
 
 
-class ClaudeCompatibleEndpoint(BaseModel):
+class ClaudeCompatibleEndpoint(BaseModel, frozen=True):
     """All configuration owned by an Anthropic-compatible endpoint."""
-
-    model_config = ConfigDict(frozen=True)
 
     base_url: AnyHttpUrl
     api_key: SecretStr | None = None

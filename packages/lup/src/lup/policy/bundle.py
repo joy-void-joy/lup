@@ -14,31 +14,34 @@ import json
 import urllib.parse
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
 from lup.codescan.antipatterns import AntiPatternSet
 from lup.harness.banner import REGENERATE_COMMAND, GeneratedBanner
-from lup.policy.identity import (
-    AGENT_IDENTITY_ENV,
-    CONCERN_ALLOWANCES_ENV,
-    ConcernAllowance,
-)
+from lup.policy.grants import ALLOWANCE_GRANTS_ENV, known_allowances
+from lup.policy.identity import AGENT_IDENTITY_ENV
 import lup.policy.kernel as kernel
 from lup.policy.kernel.rows import (
     AntiPatternRow,
     PathRoleRow,
     PathRuleRow,
+    RefusedToolRow,
+    RunnerTargetRow,
     ShellRuleRow,
     UrlScopeRow,
 )
-from lup.policy.shell_rules import ShellCommandRule, erase_shell_rules
+from lup.policy.refused_tools import RefusedTool, erase_refused_tools
+from lup.policy.shell_rules import (
+    RunnerTargetRule,
+    ShellCommandRule,
+    erase_runner_targets,
+    erase_shell_rules,
+)
 from lup.policy.rules import antipattern_row, human_owned_path_rule, path_rule_row
 
 
-class KernelModule(BaseModel):
+class KernelModule(BaseModel, frozen=True):
     """One hermetic kernel source file copied into a generated runtime."""
-
-    model_config = ConfigDict(frozen=True)
 
     name: str
     source: str
@@ -215,6 +218,33 @@ def path_role_rows_literal(rows: list[PathRoleRow]) -> str:
     )
 
 
+def refused_tool_rows_literal(rows: list[RefusedToolRow]) -> str:
+    """Render declared tool refusals as primitive runtime rows."""
+    return dict_rows_literal(
+        [
+            [
+                f'"tool": {json.dumps(row["tool"])}',
+                f'"specifier": {json.dumps(row["specifier"])}',
+                f'"reason": {json.dumps(row["reason"])}',
+            ]
+            for row in rows
+        ]
+    )
+
+
+def runner_target_rows_literal(rows: list[RunnerTargetRow]) -> str:
+    """Render the blessed runner targets as primitive runtime rows."""
+    return dict_rows_literal(
+        [
+            [
+                f'"name": {json.dumps(row["name"])}',
+                f'"sandbox": {json.dumps(row["sandbox"])}',
+            ]
+            for row in rows
+        ]
+    )
+
+
 def string_rows_literal(rows: list[str]) -> str:
     """Render a sequence of generated string identities."""
     if not rows:
@@ -233,6 +263,7 @@ def shell_rule_rows_literal(rows: list[ShellRuleRow]) -> str:
         lines.append(f'        "subcommand": {json.dumps(row["subcommand"])},')
         lines.append(f'        "operation": {json.dumps(row["operation"])},')
         lines.append(f'        "effect": {json.dumps(row["effect"])},')
+        lines.append(f'        "effect_source": {json.dumps(row["effect_source"])},')
         for name, flags in (
             ("ask_flags", row["ask_flags"]),
             ("allow_flags", row["allow_flags"]),
@@ -245,6 +276,8 @@ def shell_rule_rows_literal(rows: list[ShellRuleRow]) -> str:
                 lines.append("        ],")
             else:
                 lines.append(f'        "{name}": [],')
+        lines.append(f'        "sandbox": {json.dumps(row["sandbox"])},')
+        lines.append(f'        "sandbox_source": {json.dumps(row["sandbox_source"])},')
         lines.append(f'        "reason": {json.dumps(row["reason"])},')
         lines.append("    },")
     lines.append("]")
@@ -264,10 +297,18 @@ def render_policy_data(
     autonomous_agent_identities: list[str],
     path_roles: list[PathRoleRow],
     shell_rules: list[ShellCommandRule],
+    refused_tools: list[RefusedTool],
     recoverable_target_limit: int,
-    runner_targets: list[str],
+    runner_targets: list[RunnerTargetRule],
+    sandbox_excluded_commands: list[str],
+    rules: AntiPatternSet | None = None,
 ) -> str:
-    """Render one plugin's canonical policy rows without executable logic."""
+    """Render one plugin's canonical policy rows without executable logic.
+
+    ``rules`` is the table compiled for the runtime this plugin belongs to, so
+    a rule whose message names a native tool ships each tree the words that
+    tree can act on. Omitting it renders the runtime-neutral table.
+    """
     body = "\n\n".join(
         [
             "ALLOWED_FETCH_SCOPES: list[UrlScopeRow] = "
@@ -279,19 +320,23 @@ def render_policy_data(
                 runtime_path_rules(protected_roots, human_owned_files)
             ),
             "ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = "
-            + antipattern_rows_literal(bundled_antipattern_rows()),
+            + antipattern_rows_literal(bundled_antipattern_rows(rules)),
             "PATH_ROLES: list[PathRoleRow] = " + path_role_rows_literal(path_roles),
             "SHELL_RULES: list[ShellRuleRow] = "
             + shell_rule_rows_literal(erase_shell_rules(shell_rules)),
+            "REFUSED_TOOLS: list[RefusedToolRow] = "
+            + refused_tool_rows_literal(erase_refused_tools(refused_tools)),
             "AUTONOMOUS_AGENT_IDENTITIES: list[str] = "
             + string_rows_literal(autonomous_agent_identities),
             "AGENT_IDENTITY_ENV = " + json.dumps(AGENT_IDENTITY_ENV),
-            "CONCERN_ALLOWANCES_ENV = " + json.dumps(CONCERN_ALLOWANCES_ENV),
-            "KNOWN_ALLOWANCES: list[str] = "
-            + string_rows_literal([member.value for member in ConcernAllowance]),
+            "ALLOWANCE_GRANTS_ENV = " + json.dumps(ALLOWANCE_GRANTS_ENV),
+            "KNOWN_ALLOWANCES: list[str] = " + string_rows_literal(known_allowances()),
             "MAXIMUM_ADDED_LINES = 3",
             "RECOVERABLE_TARGET_LIMIT = " + json.dumps(recoverable_target_limit),
-            "RUNNER_TARGETS: list[str] = " + string_rows_literal(runner_targets),
+            "RUNNER_TARGETS: list[RunnerTargetRow] = "
+            + runner_target_rows_literal(erase_runner_targets(runner_targets)),
+            "SANDBOX_EXCLUDED_COMMANDS: list[str] = "
+            + string_rows_literal(sandbox_excluded_commands),
         ]
     )
     return (
@@ -300,6 +345,8 @@ def render_policy_data(
         "    AntiPatternRow,\n"
         "    PathRoleRow,\n"
         "    PathRuleRow,\n"
+        "    RefusedToolRow,\n"
+        "    RunnerTargetRow,\n"
         "    ShellRuleRow,\n"
         "    UrlScopeRow,\n"
         ")"

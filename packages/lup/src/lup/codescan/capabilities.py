@@ -23,6 +23,8 @@ from lup.codescan.project import (
     build_symbol_index,
 )
 
+# lup: ignore[constant-declaration] — the rule's own identity, what a typed
+# directive and every deny message name it by
 RULE_ID = "abc-capability"
 
 
@@ -117,7 +119,6 @@ def architecture_violations(
                     RuleViolation(
                         path=symbol.path,
                         line=symbol.member_lines[member],
-                        suppression_lines=[symbol.line],
                         message=f"capability {symbol.name} declares abstract property {member}",
                     )
                 )
@@ -126,7 +127,6 @@ def architecture_violations(
                     RuleViolation(
                         path=symbol.path,
                         line=symbol.member_lines[member],
-                        suppression_lines=[symbol.line],
                         message=f"capability {symbol.name} has concrete callable {member}",
                     )
                 )

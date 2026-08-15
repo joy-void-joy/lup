@@ -329,23 +329,23 @@ class WorktreeOrchestrator:
                 valid=False,
                 reason="worker changed branch authority",
             )
+        # A HEAD that moved is two different events sharing one symptom. One is
+        # a worker rewriting the lease's history out from under the base it was
+        # given, which invalidates everything measured from it. The other is a
+        # base this check carried while the lease's own branch advanced past it
+        # — a commit the run made, or one the turn made on top of the base —
+        # which changes nothing about what the diff below measures, because it
+        # measures from the base and the base is still in the history. Blaming
+        # the worker for both failed a concern for the run's own bookkeeping.
         current = self.head(lease)
-        # lup: A run cannot follow a base that moved under it. `base_commit` is
-        # captured once when the run starts, the run id defaults to it, and this
-        # check invalidates a concern outright when a lease's HEAD differs — so a
-        # `git pull` mid-run makes every remaining concern fail rather than
-        # rebase. This bit for real: a run planned 13 concerns against a tree ten
-        # commits stale, where a merged upstream fix had already changed intake
-        # and 16 of its 53 notes were generated copies no worker could edit.
-        # Following a moved base means re-basing every lease, re-deriving each
-        # diff against the new base, and re-running intake, which can add or drop
-        # concerns while work is in flight — so decide whether a run should
-        # refuse to start when the base is behind its remote instead.
-        if current != base_commit:
+        if current != base_commit and not self.already_joined(lease, base_commit):
             return DiffValidation(
                 concern_id=concern.id,
                 valid=False,
-                reason="worker changed commit or branch authority",
+                reason=(
+                    f"worker changed commit authority: {base_commit} is no longer "
+                    "in the lease's history"
+                ),
             )
         inspected = inspect_changes(self.launcher, lease.root, base_commit)
         if inspected.failure:
@@ -394,6 +394,18 @@ class WorktreeOrchestrator:
         added = self.launcher.launch(
             LaunchRequest(arguments=["git", "add", "-A"], cwd=lease.root)
         )
+        # The change this diff measured can already be in the lease's history:
+        # the base advanced and the working tree is clean. Nothing is left to
+        # commit, and `git commit` refuses an empty one, so committing anyway
+        # would fail a concern whose work is present and fully accounted for.
+        staged = self.launcher.launch(
+            LaunchRequest(
+                arguments=["git", "diff", "--cached", "--quiet", "HEAD"],
+                cwd=lease.root,
+            )
+        )
+        if added.code == 0 and staged.code == 0:
+            return DiffValidation(concern_id=concern.id, valid=True, commit=current)
         committed = self.launcher.launch(
             LaunchRequest(
                 arguments=["git", "commit", "-m", f"resolve: {concern.title}"],
@@ -439,8 +451,13 @@ class WorktreeOrchestrator:
         lines = found.stdout.splitlines()
         return lines[0] if found.code == 0 and lines else ""
 
-    def contains(self, commit: str, candidate: str) -> bool:
-        """Whether ``candidate`` is already reachable from ``commit``."""
+    def reachable(self, commit: str, candidate: str) -> bool:
+        """Whether ``candidate`` is already reachable from ``commit``.
+
+        Named for the two commits it compares rather than for containment,
+        because :meth:`contains` asks the same question of a lease's own HEAD
+        and one class cannot answer to both under a single name.
+        """
         return (
             self.launcher.launch(
                 LaunchRequest(
@@ -497,9 +514,9 @@ class WorktreeOrchestrator:
         way rather than leaving a half-merged base behind, and no worktree
         is needed for either answer.
         """
-        if base == onto or self.contains(base, onto):
+        if base == onto or self.reachable(base, onto):
             return BaseRefresh(was=base, commit=base)
-        if self.contains(onto, base):
+        if self.reachable(onto, base):
             return BaseRefresh(was=base, commit=onto)
         merged = self.launcher.launch(
             LaunchRequest(
@@ -575,7 +592,7 @@ class WorktreeOrchestrator:
         dropped = [
             name
             for name, side in (("the run's base", source.commit), (source.branch, tip))
-            if side and not self.contains(resolved, side)
+            if side and not self.reachable(resolved, side)
         ]
         if dropped:
             return BaseRefresh(
@@ -616,7 +633,7 @@ class WorktreeOrchestrator:
         touched.
         """
         head = self.head(lease)
-        if self.contains(head, commit):
+        if self.reachable(head, commit):
             return []
         merged = self.launcher.launch(
             LaunchRequest(

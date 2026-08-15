@@ -181,6 +181,7 @@ def test_hook_line_rule_is_unchanged() -> None:
             pattern=r"\.get\s*\(",
             message=rows[0]["message"],
             context="code",
+            refiner="dict_get_exempt_lines",
             strength="soft",
         )
     ]

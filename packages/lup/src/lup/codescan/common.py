@@ -24,10 +24,11 @@ from collections.abc import Callable, Set as AbstractSet
 from pathlib import Path, PurePosixPath
 from typing import Literal, Self
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
 from lup.policy.kernel.edit import (
     FILE_IGNORE_RE,
+    file_level_line,
     docstring_lines as python_docstring_lines,
     mask_python_string_literals,
     python_code_lines,
@@ -85,23 +86,23 @@ class FileIgnore(BaseModel):
 
 
 def file_level_ignore(text: str, max_lines: int = 10) -> FileIgnore | None:
-    """The file-level `# lup: ignore` in the first `max_lines`, or ``None``.
+    """The file-level `# lup: ignore` in the header block, or ``None``.
 
     A standalone bare `# lup: ignore` opts the whole file out of anti-pattern
     checks; the typed `# lup: ignore[rule-id]` form opts out only the named
     rules. Feedback-note scanning never consults this — an opted-out file still
     surfaces its `# lup:` notes (see `lup.codescan.markers.find_feedback`).
     """
-    for i, line in enumerate(text.splitlines()):
-        if i >= max_lines:
-            break
-        match = FILE_IGNORE_RE.match(line)
-        if match is not None:
-            return FileIgnore(line=i + 1, rule_ids=ignore_rule_ids(match))
-    return None
+    number = file_level_line(text, max_lines)
+    if number == 0:
+        return None
+    match = FILE_IGNORE_RE.match(text.splitlines()[number - 1])
+    return FileIgnore(
+        line=number, rule_ids=ignore_rule_ids(match) if match is not None else None
+    )
 
 
-# lup: ignore[library-default] — this library's own import root, fixed by the
+# lup: ignore[constant-declaration] — this library's own import root, fixed by the
 # name it is distributed under rather than by any adopter's taste.
 LIBRARY_PACKAGE_ROOT = "lup"
 
@@ -112,15 +113,13 @@ initialization renames it, so a value written down here would go on naming a
 package that no longer exists and silently resolve nothing."""
 
 
-class PythonSource(BaseModel):
+class PythonSource(BaseModel, frozen=True):
     """One import-resolvable Python module a project-wide scanner reads.
 
     The unit every whole-project scan consumes: the architecture audit builds
     its symbol index from these, and the typed grammar parses them for the
     sites it judges.
     """
-
-    model_config = ConfigDict(frozen=True)
 
     path: Path
     module: str
@@ -165,7 +164,7 @@ def sources_from_paths(
     ]
 
 
-class Refutation(BaseModel):
+class Refutation(BaseModel, frozen=True):
     """One rule hit a refiner proved does not apply, and the proof.
 
     A refiner sharpens a broad line rule after the fact: the regex says the
@@ -178,8 +177,6 @@ class Refutation(BaseModel):
     ``subject`` is the source expression the verdict is about and ``evidence``
     the sentence that justifies it, so a dropped finding is always accountable.
     """
-
-    model_config = ConfigDict(frozen=True)
 
     rule_id: str
     line: int

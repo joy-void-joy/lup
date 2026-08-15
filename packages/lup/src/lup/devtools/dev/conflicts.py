@@ -45,6 +45,8 @@ from lup.devtools.utils import (
 
 logger = logging.getLogger(__name__)
 
+# lup: ignore[constant-declaration] — where uv installs a project's own console
+# script, which is the property the docstring below turns on
 LAUNCHER = ".venv/bin/lup-devtools"
 """How the conflict workflow reaches this toolchain, named by path.
 
@@ -53,6 +55,7 @@ A ``PATH`` lookup would let a sibling worktree's environment answer, and
 in this project's own environment does neither.
 """
 
+# lup: ignore[constant-declaration] — what Python packaging calls the file
 MANIFEST = "pyproject.toml"
 """The file ``uv`` must parse before it will run anything."""
 

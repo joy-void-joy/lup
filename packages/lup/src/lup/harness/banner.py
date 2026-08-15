@@ -13,8 +13,10 @@ from abc import ABC, abstractmethod
 from pathlib import PurePath
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Discriminator, Field
+from pydantic import BaseModel, Discriminator, Field
 
+# lup: ignore[constant-declaration] — the command a reader types, whose words are
+# the CLI's own rather than a preference this module holds
 REGENERATE_COMMAND = "uv run lup-devtools harness generate all"
 """The devtools command that rebuilds every native harness tree."""
 
@@ -75,10 +77,8 @@ class SuffixPathMatcher(PathMatcher):
         return path.suffix in self.suffixes
 
 
-class CommentRoute(BaseModel):
+class CommentRoute(BaseModel, frozen=True, arbitrary_types_allowed=True):
     """One immutable matcher and the comment syntax it selects."""
-
-    model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
 
     name: str
     matcher: PathMatcher
@@ -107,6 +107,8 @@ class CommentRouter:
         return selected.syntax
 
 
+# lup: ignore[library-default] — one route per comment syntax the formats
+# themselves define, so the table follows the languages rather than a taste
 ARTIFACT_COMMENT_ROUTER = CommentRouter(
     [
         CommentRoute(
@@ -131,14 +133,12 @@ ARTIFACT_COMMENT_ROUTER = CommentRouter(
 """Which comment syntax each generated file format is written in."""
 
 
-class BannerPlacement(BaseModel):
+class BannerPlacement(BaseModel, frozen=True):
     """Where a banner sits in one file's text.
 
     An interpreter line has to stay the first line of the file, so it is the
     one thing a banner opens beneath rather than above.
     """
-
-    model_config = ConfigDict(frozen=True)
 
     interpreter: str
     body: str
@@ -156,7 +156,7 @@ type BannerExemptionReason = Literal["prompt_text", "verbatim_copy"]
 """Why an artifact whose format admits comments still carries no banner."""
 
 
-class BannerExemption(BaseModel):
+class BannerExemption(BaseModel, frozen=True):
     """One artifact's declared reason for carrying no generated-from banner.
 
     ``prompt_text`` is verbatim model-facing text after its frontmatter, where
@@ -164,8 +164,6 @@ class BannerExemption(BaseModel):
     byte-identical copy of a canonical source, where a banner would break the
     diff that proves the copy faithful.
     """
-
-    model_config = ConfigDict(frozen=True)
 
     type: Literal["exempt"] = "exempt"
     reason: BannerExemptionReason
@@ -175,10 +173,8 @@ class BannerExemption(BaseModel):
         return True
 
 
-class GeneratedBanner(BaseModel):
+class GeneratedBanner(BaseModel, frozen=True):
     """What produced one artifact, and the exact command that rebuilds it."""
-
-    model_config = ConfigDict(frozen=True)
 
     type: Literal["banner"] = "banner"
     source: str = Field(min_length=1)
@@ -189,7 +185,7 @@ class GeneratedBanner(BaseModel):
     command: str = Field(min_length=1)
     """The command a reader runs to rebuild this artifact, exactly as typed."""
 
-    notes: list[str] = Field(default_factory=list)
+    notes: list[str] = []
     """Anything else a reader of this one target needs, such as where the
     personal half of a generated configuration lives."""
 

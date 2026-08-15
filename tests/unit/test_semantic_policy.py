@@ -12,11 +12,11 @@ import json
 import sys
 from pathlib import Path
 from types import ModuleType
-from typing import Literal
+from typing import Literal, get_args
 
 import pytest
 import sh
-from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field
+from pydantic import AnyHttpUrl, BaseModel, Field
 
 from lup.adapters.claude.native import (
     ClaudeBeforeToolEvent,
@@ -37,7 +37,10 @@ from lup.adapters.codex.native import (
 )
 from lup.harness.enforcement import declared_path_rules, semantic_policy_for
 from lup.harness.models import HookSet
+from lup.types import JsonObject
 from lup.policy.chain import UnknownToolPolicy
+from lup.policy.grants import LeaseGrants, write_allowance_grants
+from lup.policy.identity import ConcernAllowance
 from lup.policy.bundle import (
     bundled_antipattern_rows,
     policy_kernel_modules,
@@ -45,9 +48,18 @@ from lup.policy.bundle import (
     runtime_path_rules,
     runtime_url_scope,
 )
-from lup.policy.kernel.decision import KernelDecision
+from lup.policy.kernel.decision import (
+    DecisionEffect,
+    KernelDecision,
+    SANDBOX_ESCALATION_OFFER,
+    SANDBOX_ESCALATION_UNSUPPORTED,
+    SANDBOX_TRAPPED_REASON,
+    SandboxPlacement,
+    sandbox_escaped,
+)
 from lup.policy.kernel.edit import decide_edit
 from lup.policy.kernel.rows import PathRoleRow
+from lup.policy.refused_tools import RefusedTool, erase_refused_tools
 from lup.policy.kernel.lex import shell_write_targets
 from lup.policy.models import (
     Decision,
@@ -55,6 +67,7 @@ from lup.policy.models import (
     EditChange,
     FetchUrl,
     ShellCommand,
+    ToolIdentity,
     UnknownTool,
 )
 from lup.policy.rules import (
@@ -68,27 +81,39 @@ from lup.policy.rules import (
     path_rule_row,
 )
 
+from lup.policy.vocabulary import runner_target_rules
 from lup_template.devtools.harness.catalog import declared_hook_set, portable_harness
 from lup_template.devtools.harness.content.shell_vocabulary import SHELL_RULES
 
 
-class DecisionCase(BaseModel):
+class DecisionCase(BaseModel, frozen=True):
     """One primitive input and its expected policy effect."""
-
-    model_config = ConfigDict(frozen=True)
 
     input: str
     effect: Literal["allow", "ask", "deny", "defer"]
     sandboxed: bool = False
+    escapable: bool = False
+    """Whether the host judging this case can place one call outside its sandbox.
+
+    Off by default, matching the kernel: a host that says nothing about
+    placement cannot perform one, and a command declared ``outside`` is
+    stopped there rather than run somewhere its declaration forbids."""
+
     interactive: bool = True
     existing: list[str] = Field(default_factory=list)
     """Repository-relative files that already exist when the case is judged."""
 
 
-class EditDecisionCase(BaseModel):
-    """One edit fixture shared by canonical and assembled policy forms."""
+class HostShape(BaseModel, frozen=True):
+    """The host facts a case is judged under, as one hashable identity."""
 
-    model_config = ConfigDict(frozen=True)
+    sandboxed: bool
+    escapable: bool
+    interactive: bool
+
+
+class EditDecisionCase(BaseModel, frozen=True):
+    """One edit fixture shared by canonical and assembled policy forms."""
 
     path: str
     before: str | None
@@ -115,10 +140,30 @@ Shared by the shell and edit fixtures rather than restated for each, because
 a table the two gates could be given differently is the drift these cases
 exist to catch."""
 
+FIXTURE_EXCLUDED_COMMANDS = ["quuxify *"]
+"""One command the fixtures treat as taken out of the OS sandbox.
+
+Unjudged exactly like `frobnicate` beside it, so the pair says the whole
+rule between them: unjudged work defers to a boundary that covers it, and
+denies where the declaration removed the cover."""
+
+FIXTURE_REFUSED_TOOLS = [
+    RefusedTool(tool="Quuxify", reason="quuxifying leaves the repository"),
+    RefusedTool(
+        tool="Skill", specifier="quux-design", reason="designing quux leaves it too"
+    ),
+]
+"""One whole-tool refusal and one narrowed to a single subject.
+
+The pair says the rule between them: a bare row refuses every use of its
+tool, a specifier row refuses one and leaves the tool's other uses to the
+runtime, and neither is a name this repository actually refuses — what is
+being pinned is the shape, not this project's own judgement."""
+
 FIXTURE_RECOVERABLE_LIMIT = 5
-FIXTURE_RUNNER_TARGETS = ["pyright", "pytest", "ruff", "lup-devtools"]
-"""What this project declares `uv run <target>` may reach, which is what the
-shell fixtures below are written against."""
+FIXTURE_RUNNER_TARGETS = runner_target_rules()
+"""What this project declares `uv run <target>` may reach, and where each runs,
+which is what the shell fixtures below are written against."""
 """How many restorable files one command may destroy before it asks."""
 
 SHELL_POLICY_CASES = [
@@ -431,11 +476,55 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="git config --global user.name me", effect="ask"),
     DecisionCase(input="git config --get $KEY", effect="ask"),
     # Global value flags are consumed, never read as the subcommand; globals
-    # that change execution behavior ask.
-    DecisionCase(input="git -C /other status", effect="allow"),
+    # that change execution behavior or move git to another repository ask.
+    # A redirect is judged before the subcommand word is even found, so it
+    # cannot be answered by the row that would otherwise reason about this
+    # worktree — `commit` is reversible here, where the reflog lives.
+    DecisionCase(input="git -C /other status", effect="ask"),
+    DecisionCase(input="git -C /tmp/other commit -am x", effect="ask"),
+    DecisionCase(input="git -C /tmp/o merge --abort", effect="ask"),
+    DecisionCase(input="git --git-dir=/tmp/x --work-tree=/tmp add .", effect="ask"),
+    DecisionCase(input="git --namespace=other push", effect="ask"),
+    DecisionCase(input="git --super-prefix=x/ status", effect="ask"),
+    # Reading another tree keeps its way through, as two allowed segments.
+    DecisionCase(input="cd /other && git status", effect="allow"),
     DecisionCase(input="git -C status restore f", effect="ask"),
     DecisionCase(input="git -c core.pager=touch log", effect="ask"),
     DecisionCase(input="git --exec-path=/tmp/x status", effect="ask"),
+    # The pager is not gated: it moves nothing, these subcommands already run
+    # it by default, and the program it names is reachable only through `-c`
+    # and `git config`, which ask.
+    DecisionCase(input="git --paginate diff", effect="allow"),
+    DecisionCase(input="git --no-pager log", effect="allow"),
+    # A configured diff driver stays allowed on purpose, the way `--paginate`
+    # does: the flag names no program, only enables one already configured,
+    # and that configuration is reachable only through `-c` and `git config`.
+    # git also enables textconv by default for `diff` and `log`, so refusing
+    # the flag would not stop a driver that already runs on the bare form.
+    DecisionCase(input="git diff --ext-diff", effect="allow"),
+    DecisionCase(input="git diff --textconv HEAD", effect="allow"),
+    DecisionCase(input="git cat-file --textconv HEAD:f", effect="allow"),
+    # `--output` is the guard, because it names a path and lands a file there.
+    # It follows forwarding rather than only the verbs that document the flag:
+    # `stash list`, `stash show` and `bisect view` reach it by handing their
+    # arguments to `log` or `diff`. Bare, each still reports and allows.
+    DecisionCase(input="git stash show --output=/tmp/f", effect="ask"),
+    DecisionCase(input="git stash list --output=/tmp/f", effect="ask"),
+    DecisionCase(input="git bisect view --output=/tmp/f", effect="ask"),
+    DecisionCase(input="git shortlog --output=/tmp/f HEAD", effect="ask"),
+    DecisionCase(input="git stash show", effect="allow"),
+    DecisionCase(input="git stash list", effect="allow"),
+    DecisionCase(input="git bisect view", effect="allow"),
+    DecisionCase(input="git shortlog HEAD", effect="allow"),
+    DecisionCase(input="git diff-tree --output=/tmp/f", effect="ask"),
+    DecisionCase(input="git diff-index --output=/tmp/f", effect="ask"),
+    DecisionCase(input="git diff-pairs --output=/tmp/f", effect="ask"),
+    DecisionCase(input="git range-diff --output=/tmp/f a b", effect="ask"),
+    DecisionCase(input="git diff-tree HEAD", effect="allow"),
+    DecisionCase(input="git diff-files", effect="allow"),
+    DecisionCase(input="git diff-index HEAD", effect="allow"),
+    DecisionCase(input="git range-diff a...b", effect="allow"),
+    DecisionCase(input="git diff-pairs", effect="allow"),
     # Exec-bearing and file-writing flags on allowed subcommands ask.
     DecisionCase(input="git rebase --exec 'touch x' HEAD~2", effect="ask"),
     DecisionCase(input="git fetch --upload-pack=/tmp/x origin", effect="ask"),
@@ -454,6 +543,59 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="git restore --source=$REF f", effect="ask"),
     DecisionCase(input="git restore --source=HEAD", effect="ask"),
     DecisionCase(input="git restore -s HEAD f", effect="ask"),
+    # The query family, pinned so a later narrowing reads as a failing test
+    # rather than as friction nobody can source. Each of these moves no ref,
+    # touches no index entry, and writes nothing into the working tree.
+    DecisionCase(input="git merge-tree main dev", effect="allow"),
+    DecisionCase(input="git merge-tree --write-tree main dev", effect="allow"),
+    DecisionCase(input="git hash-object -w README.md", effect="allow"),
+    DecisionCase(input="git commit-tree -m x HEAD^{tree}", effect="allow"),
+    DecisionCase(input="git mktree", effect="allow"),
+    DecisionCase(input="git mktag", effect="allow"),
+    DecisionCase(input="git write-tree", effect="allow"),
+    DecisionCase(input="git patch-id", effect="allow"),
+    DecisionCase(input="git show-index", effect="allow"),
+    DecisionCase(input="git get-tar-commit-id", effect="allow"),
+    DecisionCase(input="git fsck", effect="allow"),
+    DecisionCase(input="git verify-pack -v x.idx", effect="allow"),
+    DecisionCase(input="git check-ref-format --branch topic", effect="allow"),
+    DecisionCase(input="git stripspace", effect="allow"),
+    DecisionCase(input="git column", effect="allow"),
+    DecisionCase(input="git diff-pairs", effect="allow"),
+    DecisionCase(input="git fmt-merge-msg", effect="allow"),
+    DecisionCase(input="git request-pull main https://x.test/r HEAD", effect="allow"),
+    # And the near misses the criterion excludes, each for a different one of
+    # its three clauses. A sweep that admitted any of these would have been a
+    # sweep of the word rather than of what the word reaches.
+    DecisionCase(input="git read-tree HEAD", effect="deny"),
+    DecisionCase(input="git update-index --refresh", effect="deny"),
+    DecisionCase(input="git update-ref refs/heads/x HEAD", effect="deny"),
+    DecisionCase(input="git pack-refs --all", effect="deny"),
+    DecisionCase(input="git format-patch HEAD~1", effect="deny"),
+    DecisionCase(input="git unpack-file abc123", effect="deny"),
+    DecisionCase(input="git difftool -y main", effect="deny"),
+    DecisionCase(input="git gc --prune=now", effect="deny"),
+    # symbolic-ref spells its write as a second operand rather than as a flag,
+    # so the reading form is recognized and every writing form keeps the ask.
+    DecisionCase(input="git symbolic-ref HEAD", effect="allow"),
+    DecisionCase(input="git symbolic-ref --short HEAD", effect="allow"),
+    DecisionCase(input="git symbolic-ref HEAD refs/heads/topic", effect="ask"),
+    DecisionCase(input="git symbolic-ref --delete HEAD", effect="ask"),
+    DecisionCase(input="git symbolic-ref --short $REF", effect="ask"),
+    # A search that runs a program is not a read, however it is spelled.
+    DecisionCase(input="rg -n needle src", effect="allow"),
+    DecisionCase(input="rg --pre ./decrypt needle", effect="ask"),
+    DecisionCase(input="rg --pre=./decrypt needle", effect="ask"),
+    DecisionCase(input="rg --hostname-bin ./who needle", effect="ask"),
+    DecisionCase(input="rg -z needle archive", effect="ask"),
+    DecisionCase(input="find . -name '*.py' -fprint0 out", effect="ask"),
+    # Filters that read and print, and the one flag on each that lands a file.
+    DecisionCase(input="expr 1 + 2", effect="allow"),
+    DecisionCase(input="numfmt --to=iec 1024", effect="allow"),
+    DecisionCase(input="base64 payload.bin", effect="allow"),
+    DecisionCase(input="base64 -o out.txt payload.bin", effect="ask"),
+    DecisionCase(input="tree -L 2 src", effect="allow"),
+    DecisionCase(input="tree -o listing.txt", effect="ask"),
     # Patch application allows in every in-repository form; only the flags that
     # write outside the working area are guarded.
     DecisionCase(input="git apply p.diff", effect="allow"),
@@ -475,6 +617,23 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="gh api -X POST /repos", effect="ask"),
     DecisionCase(input="gh issue create --title x", effect="ask"),
     DecisionCase(input="gh pr checkout 123", effect="allow"),
+    # Authoring allows because the work is the author's own and the branch is
+    # already pushed — both claims about this repository, and `--repo` is what
+    # makes them someone else's. Reading elsewhere keeps its grant.
+    DecisionCase(input="gh pr create --fill", effect="allow"),
+    DecisionCase(input="gh pr create --repo other/victim --fill", effect="ask"),
+    DecisionCase(input="gh pr create -R other/victim --fill", effect="ask"),
+    DecisionCase(input="gh pr edit -R other/victim --title x", effect="ask"),
+    DecisionCase(input="gh pr ready -R other/victim", effect="ask"),
+    DecisionCase(input="gh pr list -R other/repo", effect="allow"),
+    DecisionCase(input="gh pr view -R other/repo 1", effect="allow"),
+    # The flag is not the only spelling of the redirect, so guarding it alone
+    # would leave the same pull request one word away. `GH_` joins `GIT_` as a
+    # prefix rather than a list of names, which fails closed on the next
+    # variable gh learns to read.
+    DecisionCase(input="GH_REPO=other/victim gh pr create --fill", effect="ask"),
+    DecisionCase(input="env GH_REPO=other/victim gh pr create --fill", effect="ask"),
+    DecisionCase(input="GH_HOST=evil.test gh pr create --fill", effect="ask"),
     DecisionCase(input="gh auth status", effect="allow"),
     DecisionCase(input="gh secret list", effect="deny"),
     # Adversarial hardening: no auto-allowed code execution or injection.
@@ -644,11 +803,37 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="sort $UNBOUND f", effect="defer", sandboxed=True),
     DecisionCase(input="foo() { cat x; }", effect="defer", sandboxed=True),
     DecisionCase(input="case $m in a) echo a;;", effect="defer", sandboxed=True),
-    DecisionCase(input="git push --delete origin feat", effect="ask", sandboxed=True),
+    DecisionCase(
+        input="git push --delete origin feat",
+        effect="ask",
+        sandboxed=True,
+        escapable=True,
+    ),
     DecisionCase(input="sed -i 's/a/b/' f", effect="deny", sandboxed=True),
     DecisionCase(input="ssh-add -D", effect="deny", sandboxed=True),
     DecisionCase(input="frobnicate; ssh host", effect="ask", sandboxed=True),
     DecisionCase(input="python -c 'x'", effect="deny", sandboxed=True),
+    # An excluded command runs with no OS boundary beneath it, so unjudged
+    # work in it has nothing to defer to and returns to the deny lattice —
+    # including when it rides in beside a command the boundary would confine.
+    DecisionCase(input="quuxify --weird", effect="deny", sandboxed=True),
+    DecisionCase(input="frobnicate; quuxify now", effect="deny", sandboxed=True),
+    DecisionCase(input="quuxifyer --weird", effect="defer", sandboxed=True),
+    # The toolchain declares its escape, so nothing carries a flag to reach it:
+    # unconfined it simply runs, and where a call can be placed it is placed.
+    DecisionCase(input="uv run lup-devtools dev check", effect="allow"),
+    DecisionCase(
+        input="uv run lup-devtools dev check",
+        effect="allow",
+        sandboxed=True,
+        escapable=True,
+    ),
+    # Confined with nowhere to put the call, the declaration cannot be honoured,
+    # so it is stopped with the reason rather than run where it will die on the
+    # first write. The same holds for anything else declared outside.
+    DecisionCase(input="uv run lup-devtools dev check", effect="deny", sandboxed=True),
+    DecisionCase(input="git push --delete origin feat", effect="deny", sandboxed=True),
+    DecisionCase(input="uv run pytest tests/unit", effect="allow", sandboxed=True),
     # A help probe only prints usage, so it reads an unclassified command
     # without judging it. Bare -h counts alone; carrying a value it is an
     # ordinary argument (mysql -h host) and classifies normally.
@@ -666,6 +851,16 @@ SHELL_POLICY_CASES = [
     DecisionCase(
         input="git push --delete origin feat",
         effect="defer",
+        sandboxed=True,
+        escapable=True,
+        interactive=False,
+    ),
+    # A placement nothing can carry out outranks that boundary either way:
+    # deferring means the OS confines the call, which is the one answer a
+    # command declared outside cannot take.
+    DecisionCase(
+        input="git push --delete origin feat",
+        effect="deny",
         sandboxed=True,
         interactive=False,
     ),
@@ -735,6 +930,28 @@ EDIT_POLICY_CASES = [
         path="src/module.py",
         before="value = 1",
         after="value: dict[str, object] = {}",
+        effect="deny",
+    ),
+    # A directive is judged by what it silences: one covering the violation
+    # beside it is the reasoned exception a human weighs, and one covering
+    # nothing is refused before anybody is asked to weigh it.
+    EditDecisionCase(
+        path="src/module.py",
+        before="value = 1",
+        after="value = 1\nother: Any = 2  # lup: ignore[any-type]",
+        effect="ask",
+    ),
+    EditDecisionCase(
+        path="src/module.py",
+        before="value = 1",
+        after="value = 1\nother = 2  # lup: ignore[any-type]",
+        effect="deny",
+    ),
+    # And a directive covering one line does not carry the line beside it.
+    EditDecisionCase(
+        path="src/module.py",
+        before="value = 1",
+        after="value = 1\nfirst: Any = 2  # lup: ignore[any-type]\nsecond: Any = 3",
         effect="deny",
     ),
     EditDecisionCase(
@@ -915,6 +1132,19 @@ def test_policy_bundle_contains_assembly_but_no_decision_implementation() -> Non
     assert all(not name.startswith("decide_") for name in functions)
 
 
+def test_the_neutral_kernel_never_learns_one_runtime_sandbox_spelling() -> None:
+    """The kernel carries the axis; only an adapter carries a vendor's word for it.
+
+    Codex matches on this same kernel and has no per-call sandbox at all, so a
+    spelling that leaked in here would be one runtime's argument name sitting
+    in the shared verdict every other runtime reads.
+    """
+    kernel = [item.source for item in policy_kernel_modules()]
+
+    assert not [item for item in kernel if "dangerouslyDisableSandbox" in item]
+    assert [item for item in kernel if "SandboxPlacement" in item]
+
+
 def write_kernel_package(runtime: Path) -> Path:
     """Materialize the kernel package a generated runtime directory carries."""
     package = runtime / "kernel"
@@ -999,8 +1229,10 @@ def test_assembled_kernel_runs_without_site_packages(tmp_path: Path) -> None:
             autonomous_agent_identities=["resolver-worker"],
             path_roles=FIXTURE_PATH_ROLES,
             shell_rules=SHELL_RULES,
+            refused_tools=FIXTURE_REFUSED_TOOLS,
             recoverable_target_limit=FIXTURE_RECOVERABLE_LIMIT,
             runner_targets=FIXTURE_RUNNER_TARGETS,
+            sandbox_excluded_commands=FIXTURE_EXCLUDED_COMMANDS,
         ),
         encoding="utf-8",
     )
@@ -1027,7 +1259,7 @@ def test_assembled_kernel_runs_without_site_packages(tmp_path: Path) -> None:
         "from policy_data import (\n"
         "    ALLOWED_FETCH_SCOPES, ANTI_PATTERN_ROWS, DENIED_FETCH_SCOPES,\n"
         "    MAXIMUM_ADDED_LINES, PATH_ROLES, PATH_RULES, RUNNER_TARGETS,\n"
-        "    SHELL_RULES,\n"
+        "    SANDBOX_EXCLUDED_COMMANDS, SHELL_RULES,\n"
         ")\n"
         "fixtures = json.loads(\n"
         "    (Path(__file__).parent / 'fixtures.json').read_text(encoding='utf-8')\n"
@@ -1035,6 +1267,8 @@ def test_assembled_kernel_runs_without_site_packages(tmp_path: Path) -> None:
         "for case in fixtures['shell']:\n"
         "    result = decide_shell(\n"
         "        case['input'], SHELL_RULES, sandboxed=case['sandboxed'],\n"
+        "        excluded_commands=SANDBOX_EXCLUDED_COMMANDS,\n"
+        "        escapable=case['escapable'],\n"
         "        interactive=case['interactive'],\n"
         "        path_roles=PATH_ROLES,\n"
         "        path_rules=PATH_RULES,\n"
@@ -1105,6 +1339,54 @@ def test_unknown_tools_remain_auditable_and_ask() -> None:
     assert UnknownToolPolicy().decide(codex.tool).effect == "ask"
 
 
+def refused_tool_call(name: str, payload: JsonObject) -> UnknownTool:
+    """One unclassified native call, as a decoder hands it to the policy."""
+    return UnknownTool(identity=ToolIdentity(original_name=name), input=payload)
+
+
+REFUSAL_CASES = [
+    ("Quuxify", {"content": "a page"}, "deny"),
+    ("Skill", {"skill": "quux-design"}, "deny"),
+    ("Skill", {"skill": "commit"}, "defer"),
+    ("Novel", {"skill": "quux-design"}, "ask"),
+    ("Quuxify", {"body": "# lup: escalate: the user asked for a page\nbody"}, "ask"),
+    ("Quuxify", {"body": "# lup: escalate:\nbody"}, "deny"),
+]
+"""What a declared refusal answers, across every shape it has to tell apart.
+
+The whole rule reads off the rows: a refused tool denies, a refused subject
+of a tool denies, another subject of that same tool passes to the runtime
+rather than stopping at a human, a tool nobody mentioned stays unclassified,
+a stated escalation becomes the question it asked for, and one stating
+nothing does not.
+"""
+
+
+@pytest.mark.parametrize(("name", "payload", "effect"), REFUSAL_CASES)
+def test_declared_tool_refusals_decide_identically(
+    name: str, payload: JsonObject, effect: str, tmp_path: Path
+) -> None:
+    policy = UnknownToolPolicy(FIXTURE_REFUSED_TOOLS)
+    module = load_bundled_kernel(tmp_path, "tools")
+    bundled = module.decide_tool(
+        name,
+        [value for value in payload.values() if isinstance(value, str)],
+        erase_refused_tools(FIXTURE_REFUSED_TOOLS),
+    )
+
+    assert policy.decide(refused_tool_call(name, payload)).effect == effect
+    assert (bundled.effect if bundled is not None else "ask") == effect
+
+
+def test_a_tool_refusal_names_what_to_reach_for_instead() -> None:
+    policy = UnknownToolPolicy(FIXTURE_REFUSED_TOOLS)
+
+    decision = policy.decide(refused_tool_call("Quuxify", {"content": "a page"}))
+
+    assert "quuxifying leaves the repository" in decision.reason
+    assert "lup: escalate:" in decision.reason
+
+
 def test_malformed_native_fetch_urls_become_conservative_unknown_tools() -> None:
     from lup.adapters.claude.native import ClaudeFetchOperation
     from lup.adapters.codex.native import CodexFetchOperation
@@ -1131,6 +1413,140 @@ def test_native_decision_renderers_preserve_or_fail_closed_on_ask() -> None:
     assert codex.approximation == "ask rendered as fail-closed denial"
     with pytest.raises(ValueError, match="not been evidenced"):
         CodexDecisionRenderer(supports_ask=True)
+
+
+def test_the_decision_effect_stays_closed_at_four_members() -> None:
+    """Escaping the sandbox is the other axis, never a fifth effect.
+
+    A member per placement would need an ask-plus-escape next and then a
+    deny-plus-escape, so the two questions stay two fields.
+    """
+    assert sorted(get_args(DecisionEffect.__value__)) == [
+        "allow",
+        "ask",
+        "defer",
+        "deny",
+    ]
+    assert sorted(get_args(SandboxPlacement.__value__)) == [
+        "ambient",
+        "escalable",
+        "inside",
+        "outside",
+    ]
+    assert Decision(effect="allow", sandbox="outside").effect == "allow"
+
+
+def test_the_settled_sandbox_composition_rows_render_as_decided() -> None:
+    """Every settled pair a rewrite renders, on a runtime that can place a call.
+
+    The placement is an argument of the call on Claude Code, so an allow that
+    escapes is an allow plus a rewrite; an ask that escapes is asking two
+    things at once, so the reason says both. The two escalable pairs answer on
+    a second channel as well, and are pinned where that offer is.
+    """
+    shell: JsonObject = {"command": "git ls-remote origin HEAD"}
+    render = ClaudeDecisionRenderer().render
+
+    asked = render(
+        Decision(effect="ask", reason="needs a human", sandbox="outside"), shell
+    )
+    denied = render(Decision(effect="deny", reason="refused", sandbox="outside"), shell)
+    confined = render(Decision(effect="allow", sandbox="inside"), shell)
+    ambient = render(Decision(effect="allow", sandbox="ambient"), shell)
+    escaped = render(Decision(effect="allow", sandbox="outside"), shell)
+
+    assert asked.permission_decision == "ask"
+    assert asked.reason == "needs a human — this will run outside the sandbox"
+    assert asked.updated_input == {**shell, "dangerouslyDisableSandbox": True}
+    assert (denied.permission_decision, denied.updated_input) == ("deny", None)
+    assert confined.updated_input == {**shell, "dangerouslyDisableSandbox": False}
+    assert (ambient.permission_decision, ambient.updated_input) == ("allow", None)
+    assert escaped.updated_input == {**shell, "dangerouslyDisableSandbox": True}
+
+
+def test_a_deny_short_circuits_whatever_the_sandbox_says() -> None:
+    """Where a call would have run cannot soften a refusal.
+
+    Held at construction rather than checked at each renderer, so no boundary
+    can read a placement off a verdict that reached none.
+    """
+    assert KernelDecision("deny", "refused", "outside").sandbox == "ambient"
+    assert Decision(effect="deny", reason="refused", sandbox="outside").sandbox == (
+        "ambient"
+    )
+    assert KernelDecision("defer", "unjudged", "outside").sandbox == "ambient"
+
+    refused = KernelDecision("deny", "refused", "escalable")
+    placed = refused.placed(escapable=True, agent_escalates=True)
+    assert (refused.sandbox, placed.reason) == ("ambient", "refused")
+
+
+def test_a_runtime_that_cannot_place_a_call_renders_the_plain_effect() -> None:
+    """A Codex verdict rewrites nothing, so an intent it cannot perform is dropped.
+
+    Degrading in silence is the failure this pins: an escape rendered into a
+    channel that ignores it reads as honoured to everything upstream, and the
+    call runs confined with nobody told.
+    """
+    escaped = Decision(effect="allow", reason="fine", sandbox="outside")
+    asked = Decision(effect="ask", reason="needs a human", sandbox="outside")
+
+    codex = CodexDecisionRenderer(supports_ask=False)
+
+    assert codex.render(escaped).exit_code == 0
+    assert "outside the sandbox" not in codex.render(asked).stderr
+    assert escaped.placed(escapable=False, agent_escalates=True) == Decision(
+        effect="allow", reason="fine"
+    )
+
+
+def test_a_permission_to_escalate_turns_on_the_agent_and_not_on_the_channel() -> None:
+    """The offer is addressed to the agent, so it is the agent that decides it.
+
+    Which is why it survives on a runtime whose verdicts place nothing: the
+    middle case here is Codex, where a hook rewrites no call — so no placement
+    reaches the wire — while the agent still has words for taking its own call
+    out, and the reason carries them. Reading that case off the placement
+    channel is what would drop an offer the agent could have spent.
+
+    Where the agent has no way out the call runs confined, and says so as
+    ``inside`` rather than as the session-deferring placement: withdrawing an
+    offer is not the same act as handing the question back to the session,
+    and on an unconfined session the two differ by the whole sandbox. The
+    reason says the offer is not available, because an agent that spends a
+    turn discovering that learns nothing it can act on.
+    """
+    offered = Decision(effect="allow", reason="fine", sandbox="escalable")
+
+    placed = offered.placed(escapable=True, agent_escalates=True)
+    carried = offered.placed(escapable=False, agent_escalates=True)
+    degraded = offered.placed(escapable=True, agent_escalates=False)
+
+    assert (placed.sandbox, placed.reason) == (
+        "escalable",
+        "fine" + SANDBOX_ESCALATION_OFFER,
+    )
+    assert (carried.sandbox, carried.reason) == (
+        "ambient",
+        "fine" + SANDBOX_ESCALATION_OFFER,
+    )
+    assert (degraded.sandbox, degraded.effect) == ("inside", "allow")
+    assert degraded.reason == "fine" + SANDBOX_ESCALATION_UNSUPPORTED
+    assert CodexDecisionRenderer(supports_ask=False).render(offered).exit_code == 0
+
+
+def test_only_an_escalable_placement_reads_what_the_call_already_asked() -> None:
+    """Which placements leave is one answer, so two renderers cannot differ.
+
+    ``outside`` leaves and ``inside`` stays whatever the call said, because
+    those are the verdict's to decide. Only ``escalable`` reads the second
+    argument, which is what makes it a permission the agent spends rather
+    than a placement done to it.
+    """
+    for spent in (True, False):
+        assert sandbox_escaped("outside", spent) is True
+        assert sandbox_escaped("inside", spent) is False
+        assert sandbox_escaped("escalable", spent) is spent
 
 
 def test_fetch_policy_normalizes_origin_and_rejects_lookalikes() -> None:
@@ -1312,6 +1728,43 @@ def test_a_recoverable_grant_never_covers_a_protected_path(tmp_path: Path) -> No
     assert effect("rm notes.md") == "allow"
     assert effect("rm README.md") == "ask"
     assert effect("cp notes.md README.md") == "ask"
+    # Restoring one grants on the same host fact, so it defers to the same
+    # table: a clean README.md is exactly as restorable and exactly as owned.
+    assert effect("git restore notes.md") == "allow"
+    assert effect("git restore README.md") == "ask"
+
+
+def test_restoring_a_file_that_holds_no_pending_work_changes_nothing(
+    tmp_path: Path,
+) -> None:
+    """The restore row asks about discarded work, so it should not ask when there is none.
+
+    Whether `git restore <path>` costs anything is the same question `rm
+    <path>` poses and the same host answer settles it: a tracked path with no
+    uncommitted change has nothing the index does not already hold, so the
+    restore writes back the bytes on disk. Pending work restores the ask,
+    which is the only case the row was ever about.
+    """
+    committed_tree(tmp_path, "notes.md", "other.md")
+    policy = ShellPolicy(SHELL_RULES, runner_targets=FIXTURE_RUNNER_TARGETS)
+
+    def effect(command: str) -> str:
+        return policy.decide(ShellCommand(command=command, cwd=tmp_path)).effect
+
+    assert effect("git restore notes.md") == "allow"
+    assert effect("git restore --staged notes.md") == "allow"
+    assert effect("git restore notes.md other.md") == "allow"
+    # Deleting and restoring the same clean path agree, because one host fact
+    # answers both.
+    assert effect("rm notes.md") == "allow"
+    # Uncommitted work, an untracked path, and a directory each keep the ask:
+    # the first would be discarded, and the host vouches for neither of the
+    # others.
+    (tmp_path / "notes.md").write_text("uncommitted\n", encoding="utf-8")
+    assert effect("git restore notes.md") == "ask"
+    assert effect("git restore notes.md other.md") == "ask"
+    assert effect("git restore untracked.md") == "ask"
+    assert effect("git restore .") == "ask"
 
 
 def test_moving_a_recoverable_file_costs_what_deleting_it_costs(
@@ -1462,26 +1915,30 @@ def test_shell_policy_preserves_golden_compound_and_wrapper_outcomes(
         path_rules=FIXTURE_PATH_RULES,
         runner_targets=FIXTURE_RUNNER_TARGETS,
     )
-    sandboxed_policy = ShellPolicy(
-        SHELL_RULES,
-        sandbox_active=True,
-        path_roles=FIXTURE_PATH_ROLES,
-        path_rules=FIXTURE_PATH_RULES,
-        runner_targets=FIXTURE_RUNNER_TARGETS,
-    )
+    hosts: dict[HostShape, ShellPolicy] = {}
 
-    for index, case in enumerate(SHELL_POLICY_CASES):
-        if case.interactive:
-            active = sandboxed_policy if case.sandboxed else policy
-        else:
-            active = ShellPolicy(
+    def host_policy(case: DecisionCase) -> ShellPolicy:
+        """One policy per host shape a case describes, built once for each."""
+        shape = HostShape(
+            sandboxed=case.sandboxed,
+            escapable=case.escapable,
+            interactive=case.interactive,
+        )
+        if shape not in hosts:
+            hosts[shape] = ShellPolicy(
                 SHELL_RULES,
                 sandbox_active=case.sandboxed,
-                interactive=False,
+                sandbox_excluded_commands=FIXTURE_EXCLUDED_COMMANDS,
+                escapable=case.escapable,
+                interactive=case.interactive,
                 path_roles=FIXTURE_PATH_ROLES,
                 path_rules=FIXTURE_PATH_RULES,
                 runner_targets=FIXTURE_RUNNER_TARGETS,
             )
+        return hosts[shape]
+
+    for index, case in enumerate(SHELL_POLICY_CASES):
+        active = host_policy(case)
         # Each case judges a tree of its own, so a file one case declares
         # present never leaks into the next case's create-versus-overwrite.
         root = tmp_path / f"case{index}"
@@ -1496,11 +1953,13 @@ def test_shell_policy_preserves_golden_compound_and_wrapper_outcomes(
             case.input,
             policy.rules,
             sandboxed=case.sandboxed,
+            excluded_commands=FIXTURE_EXCLUDED_COMMANDS,
+            escapable=case.escapable,
             interactive=case.interactive,
             path_roles=FIXTURE_PATH_ROLES,
             path_rules=policy.path_rules,
             existing_targets=case.existing,
-            runner_targets=FIXTURE_RUNNER_TARGETS,
+            runner_targets=policy.runner_targets,
         ).effect
         assert bundled_effect == case.effect, case.input
 
@@ -1538,6 +1997,35 @@ def test_sandbox_escape_reenters_the_deny_lattice() -> None:
     )
     assert escaped.effect == "deny"
     assert "escalate" in escaped.reason
+
+
+def test_the_toolchain_carries_its_own_escape_and_is_refused_without_one() -> None:
+    """The declaration is the escape, and where nothing can carry it, the stop.
+
+    Confined with nowhere to put the call, the toolchain would reach the shell
+    and die on whatever it wrote first — a bare read-only-filesystem error an
+    agent reads as a broken repository rather than as a boundary, so it
+    retries, works around it, or reports success from a session that never ran
+    a command. Naming the sandbox costs one turn instead.
+    """
+    command = ShellCommand(command="uv run lup-devtools harness resolve")
+
+    placed = ShellPolicy(
+        SHELL_RULES,
+        sandbox_active=True,
+        escapable=True,
+        runner_targets=FIXTURE_RUNNER_TARGETS,
+    ).decide(command)
+    assert placed.effect == "allow"
+    assert placed.sandbox == "outside"
+
+    trapped = ShellPolicy(
+        SHELL_RULES,
+        sandbox_active=True,
+        runner_targets=FIXTURE_RUNNER_TARGETS,
+    ).decide(command)
+    assert trapped.effect == "deny"
+    assert trapped.reason == SANDBOX_TRAPPED_REASON
 
 
 def test_non_interactive_denials_do_not_prescribe_escalation() -> None:
@@ -1642,6 +2130,282 @@ def test_declaring_a_suppression_still_asks() -> None:
     decision = policy.decide(declared)
     assert decision.effect == "ask"
     assert decision.reason.startswith("edit introduces an antipattern suppression")
+
+
+def test_a_suppression_that_silences_nothing_is_refused() -> None:
+    """A marker that suppresses nothing is the cheap way past a gate.
+
+    The gate asks about every added directive alike, so a directive naming a
+    rule the line does not trip costs one approval and buys an exemption
+    nobody weighed. Asking would spend a human turn admitting a marker the
+    audit reports spurious the moment it lands.
+    """
+    policy = EditPolicy(protected=[])
+    dead = EditBatch(
+        changes=[
+            EditChange(
+                path=Path("a.py"),
+                before="x = 1\n",
+                after="x = 1\ny = 2  # lup: ignore[dict-get]\n",
+            )
+        ]
+    )
+    decision = policy.decide(dead)
+
+    assert decision.effect == "deny"
+    assert "dict-get" in decision.reason
+
+
+def test_an_uncovered_violation_denies_whatever_else_the_edit_declares() -> None:
+    """One suppression must not carry the violations beside it through.
+
+    Deciding the declared ask first left the denial below it unreachable for
+    any edit that added a directive at all, so a marker covering line 2 bought
+    approval for an unsuppressed line 3 the prompt never mentioned. The
+    precedence is the strong rule's, applied to the rest of the table.
+
+    The fourth case is what keeps this narrow: an edit whose every added
+    violation is covered is the ordinary suppression path, and it still asks.
+    """
+    policy = EditPolicy(protected=[])
+
+    def decide(after: str) -> Decision:
+        return policy.decide(
+            EditBatch(
+                changes=[EditChange(path=Path("a.py"), before="x = 1\n", after=after)]
+            )
+        )
+
+    alone = decide("x = 1\nsecond: Any = 3\n")
+    genuine = decide(
+        "x = 1\nfirst: Any = 2  # lup: ignore[any-type]\nsecond: Any = 3\n"
+    )
+    bare = decide("x = 1\ny = 2  # lup: ignore\nsecond: Any = 3\n")
+    every_one_covered = decide(
+        "x = 1\nfirst: Any = 2  # lup: ignore[any-type]\n"
+        "second: Any = 3  # lup: ignore[any-type]\n"
+    )
+
+    assert alone.effect == "deny"
+    assert genuine.effect == "deny"
+    assert bare.effect == "deny"
+    # The denial names what the ask was hiding, or it trades a silent approval
+    # for a silent refusal.
+    assert "line 3" in genuine.reason
+    assert "any-type" in genuine.reason
+    assert every_one_covered.effect == "ask"
+
+
+def test_the_gate_refuses_the_marker_the_refiner_already_refutes() -> None:
+    """Both gates reach one verdict, because one refiner answers both.
+
+    A route decorator trips the `dict-get` regex and the AST refutes it, so a
+    marker written there guards nothing. The audit reports that afterwards;
+    the exemption it reads is the kernel's own, so the same verdict is
+    available at the point of writing, which is where it is worth having.
+    """
+    policy = EditPolicy(protected=[])
+    refuted = EditBatch(
+        changes=[
+            EditChange(
+                path=Path("a.py"),
+                before="def read() -> None:\n    pass\n",
+                after=(
+                    '@app.get("/x")  # lup: ignore[dict-get]\n'
+                    "def read() -> None:\n    pass\n"
+                ),
+            )
+        ]
+    )
+    decision = policy.decide(refuted)
+
+    assert decision.effect == "deny"
+    assert "dict-get" in decision.reason
+
+
+def test_a_refusal_names_what_the_line_trips_instead() -> None:
+    """The directive the site wanted is named, so the next attempt is not a guess."""
+    policy = EditPolicy(protected=[])
+    misnamed = EditBatch(
+        changes=[
+            EditChange(
+                path=Path("a.py"),
+                before="x = 1\n",
+                after="x = 1\nvalue: Any = 2  # lup: ignore[dict-get]\n",
+            )
+        ]
+    )
+    decision = policy.decide(misnamed)
+
+    assert decision.effect == "deny"
+    assert "names dict-get" in decision.reason
+    assert "the line trips any-type instead" in decision.reason
+
+
+def test_a_directive_written_above_its_violation_is_not_dead() -> None:
+    """The overflow placement guards the line below, which an edit need not add.
+
+    The reported failure this answers is a marker that went spurious while the
+    violation it was written for stayed live. Judging a directive by its own
+    line alone would refuse exactly the placement a reason too long to sit
+    inline has to take.
+    """
+    policy = EditPolicy(protected=[])
+    hoisted = EditBatch(
+        changes=[
+            EditChange(
+                path=Path("a.py"),
+                before="x = 1\nvalue: Any = 2\n",
+                after=(
+                    "x = 1\n"
+                    "# lup: ignore[any-type] — the SDK hands back Any\n"
+                    "value: Any = 2\n"
+                ),
+            )
+        ]
+    )
+    assert policy.decide(hoisted).effect == "ask"
+
+
+def test_shrinking_a_dead_directive_is_still_the_audit_s_own_fix() -> None:
+    """The gate refusing a marker must not refuse the edit that removes it.
+
+    Dropping one id from a directive is what the audit demands when it reports
+    that id spurious, and the result is smaller whether or not what remains is
+    dead too — refusing it would leave the marker unremovable.
+    """
+    policy = EditPolicy(protected=[])
+    narrowed = EditBatch(
+        changes=[
+            EditChange(
+                path=Path("a.py"),
+                before="x = 1\ny = 2  # lup: ignore[any-type, dict-get]\n",
+                after="x = 1\ny = 2  # lup: ignore[any-type]\n",
+            )
+        ]
+    )
+    assert policy.decide(narrowed).effect == "allow"
+
+
+def test_only_the_dead_half_of_a_directive_is_refused() -> None:
+    """A directive doing part of its job is refused for the part that is dead.
+
+    The remedy names the id rather than the directive, because dropping the
+    whole of one that also covers a live violation would only resurface the
+    denial it was silencing.
+    """
+    policy = EditPolicy(protected=[])
+    mixed = EditBatch(
+        changes=[
+            EditChange(
+                path=Path("a.py"),
+                before="x = 1\n",
+                after="x = 1\nvalue: Any = 2  # lup: ignore[any-type, dict-get]\n",
+            )
+        ]
+    )
+    decision = policy.decide(mixed)
+
+    assert decision.effect == "deny"
+    assert "names dict-get" in decision.reason
+    assert "Drop dict-get from it" in decision.reason
+
+
+def test_a_rule_another_scanner_owns_is_not_refused_over() -> None:
+    """A verdict this gate cannot reach is not one it may refuse over.
+
+    `abc-capability` belongs to a scanner the hermetic runtime does not
+    carry, so whether the line trips it is unknowable here — the same line
+    the audit draws when it decides which markers it may call spurious.
+    """
+    policy = EditPolicy(protected=[])
+    foreign = EditBatch(
+        changes=[
+            EditChange(
+                path=Path("a.py"),
+                before="x = 1\n",
+                after="x = 1\nclass Store(ABC):  # lup: ignore[abc-capability]\n",
+            )
+        ]
+    )
+    assert policy.decide(foreign).effect == "ask"
+
+
+def test_a_fragment_with_no_tree_is_not_refused_over_a_guess() -> None:
+    """A refiner reads an AST, and an exemption from a missing one is a guess.
+
+    `tuple_shape_exempt_lines` clears every line where the source does not
+    parse, so a gate that read clearance as proof would refuse a directive for
+    its own blindness. With no tree there is no hit either, so what is left is
+    the ordinary ask.
+    """
+    policy = EditPolicy(protected=[])
+    fragment = EditBatch(
+        changes=[
+            EditChange(
+                path=Path("a.py"),
+                before="    pass\n",
+                after="    pair: tuple[int, str] = (1, 2)  # lup: ignore[tuple-shape]\n",
+            )
+        ]
+    )
+    assert policy.decide(fragment).effect == "ask"
+
+
+def test_an_allowance_buys_a_live_suppression_and_never_a_dead_one() -> None:
+    """The grant answers the ask, and the refusal is not an ask.
+
+    A human approving a plan that needs suppressions approved reasoned
+    exceptions, not markers that silence nothing — so the allowance reaches
+    the directive that covers a violation and stops at the one that covers
+    none.
+    """
+
+    def granted(after: str) -> KernelDecision:
+        change = EditChange(path=Path("a.py"), before="value: str\n", after=after)
+        return decide_edit(
+            "a.py",
+            change.before,
+            change.after,
+            path_exists=True,
+            path_rules=[],
+            antipattern_rows=antipattern_rows(change),
+            allowances=["antipattern-suppression"],
+            python_source=True,
+        )
+
+    assert granted("value: Any  # lup: ignore[any-type]\n").effect == "allow"
+    assert granted("value: str  # lup: ignore[any-type]\n").effect == "deny"
+
+
+def test_a_creation_names_the_suppressions_it_arrives_carrying() -> None:
+    """A whole write is approved for its shape, and its directives ride along.
+
+    Reviewing a creation is worth doing for the layout and the shape it shows,
+    which is exactly what makes a directive in the middle of a new module the
+    easiest thing in an edit to approve without having seen it.
+    """
+    policy = EditPolicy(protected=[])
+    carrying = EditBatch(
+        changes=[
+            EditChange(
+                path=Path("src/new.py"),
+                after='"""Doc."""\n\nvalue: Any = 1  # lup: ignore[any-type]\n',
+            )
+        ]
+    )
+    plain = EditBatch(
+        changes=[EditChange(path=Path("src/new.py"), after='"""Doc."""\n')]
+    )
+    decision = policy.decide(carrying)
+
+    assert decision.effect == "ask"
+    assert "this new file arrives carrying antipattern suppressions" in decision.reason
+    assert (
+        "line 3 silences any-type: value: Any = 1  # lup: ignore[any-type]"
+        in decision.reason
+    )
+    assert policy.decide(plain).reason == "full-file writes require approval"
 
 
 def test_dropping_one_rule_from_a_suppression_needs_no_approval() -> None:
@@ -1887,7 +2651,12 @@ def test_retiring_a_suppression_the_ast_refutes_is_allowed() -> None:
 
 
 def test_a_suppression_ask_names_every_line_it_is_asking_about() -> None:
-    """A prompt carries the reason and nothing else, so it has to locate the line."""
+    """A prompt carries the reason and nothing else, so it locates and names.
+
+    The quoted line is a preview and a directive is written at the end of the
+    line it guards, so which rule is being silenced is the first thing a cut
+    takes — it is stated rather than left to be read back out.
+    """
     policy = EditPolicy(protected=[])
     batch = EditBatch(
         changes=[
@@ -1905,8 +2674,14 @@ def test_a_suppression_ask_names_every_line_it_is_asking_about() -> None:
     decision = policy.decide(batch)
 
     assert decision.effect == "ask"
-    assert "line 2: first: Any = 1  # lup: ignore[any-type]" in decision.reason
-    assert "line 3: second: Any = 2  # lup: ignore[any-type]" in decision.reason
+    assert (
+        "line 2 silences any-type: first: Any = 1  # lup: ignore[any-type]"
+        in decision.reason
+    )
+    assert (
+        "line 3 silences any-type: second: Any = 2  # lup: ignore[any-type]"
+        in decision.reason
+    )
 
 
 def test_a_denial_names_the_line_that_tripped_it() -> None:
@@ -2114,7 +2889,16 @@ def test_content_prose_examples_do_not_trip_code_or_marker_gates() -> None:
     assert decision.effect == "allow"
 
 
-def test_a_granted_new_devtools_allowance_releases_exactly_that_gate() -> None:
+def granting(root: Path, *allowances: ConcernAllowance) -> LeaseGrants:
+    """A lease holding exactly these gates, through the document that says so."""
+    document = root / "grants.json"
+    write_allowance_grants(document, list(allowances))
+    return LeaseGrants(document)
+
+
+def test_a_granted_new_devtools_allowance_releases_exactly_that_gate(
+    tmp_path: Path,
+) -> None:
     """A concern's grant skips the new-devtools ask and nothing adjacent."""
     rule = PathRule(
         kind="new_devtools",
@@ -2133,7 +2917,9 @@ def test_a_granted_new_devtools_allowance_releases_exactly_that_gate() -> None:
     assert ungranted.effect == "ask"
     assert "new devtools module" in ungranted.reason
     granted = EditPolicy(
-        protected=[rule], autonomous=True, allowances=["new-devtools-module"]
+        protected=[rule],
+        autonomous=True,
+        grants=granting(tmp_path, ConcernAllowance.NEW_DEVTOOLS_MODULE),
     )
     assert granted.decide(creation).effect == "allow"
 
@@ -2165,7 +2951,9 @@ def test_fragment_edits_are_judged_as_the_documents_they_produce(
     assert policy.decide(fragment.as_documents()).effect == "allow"
 
 
-def test_semantic_policy_threads_allowances_into_the_edit_gate() -> None:
+def test_semantic_policy_threads_allowances_into_the_edit_gate(
+    tmp_path: Path,
+) -> None:
     """The composed policy honours the same grants the dispatchers read."""
     creation = EditBatch(
         changes=[
@@ -2179,7 +2967,9 @@ def test_semantic_policy_threads_allowances_into_the_edit_gate() -> None:
     withheld = semantic_policy_for(hooks, autonomous=True)
     assert withheld.decide(creation).effect == "ask"
     released = semantic_policy_for(
-        hooks, autonomous=True, allowances=["new-devtools-module"]
+        hooks,
+        autonomous=True,
+        grants=granting(tmp_path, ConcernAllowance.NEW_DEVTOOLS_MODULE),
     )
     assert released.decide(creation).effect == "allow"
 

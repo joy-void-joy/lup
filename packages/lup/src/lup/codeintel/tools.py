@@ -127,7 +127,9 @@ def sites_of(result: JsonValue) -> list[SymbolSite]:
     ]
 
 
-def create_codeintel_tools(server: Path, root: Path) -> list[LupMcpTool]:
+def create_codeintel_tools(
+    server: Path, root: Path, request_timeout: float = REQUEST_TIMEOUT_SECONDS
+) -> list[LupMcpTool]:
     """Build the code-intelligence tools driving *server* over *root*.
 
     Args:
@@ -142,7 +144,7 @@ def create_codeintel_tools(server: Path, root: Path) -> list[LupMcpTool]:
 
     async def guarded[T](work: Awaitable[T], question: str) -> T:
         try:
-            return await asyncio.wait_for(work, timeout=REQUEST_TIMEOUT_SECONDS)
+            return await asyncio.wait_for(work, timeout=request_timeout)
         except (OSError, EOFError, TimeoutError, ValueError) as error:
             raise ToolError(
                 f"{server.name} could not answer {question}: {error}"

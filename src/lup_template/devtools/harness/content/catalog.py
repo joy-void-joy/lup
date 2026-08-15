@@ -1,3 +1,8 @@
+# lup: ignore[constant-declaration]
+# Every constant here is this repository's own composition — which skills and
+# agents its plugin ships, and what that plugin is called. A composition root
+# is where a judgement is finally made rather than passed on, so there is no
+# caller above it to take these from.
 """This repository's harness content: what it inherits, and what only it has.
 
 The skills automating agent work come from the library. Declared here are the

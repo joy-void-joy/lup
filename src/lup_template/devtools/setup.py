@@ -206,6 +206,8 @@ def timezone_status(env: EnvVars) -> IntegrationStatus:
 # the fields to prompt for. Bespoke flows pass ``setup_func`` instead.
 # =====================================================================
 
+# lup: ignore[constant-declaration] — which integrations this application offers
+# to set up, decided here because nothing sits above it to be asked
 INTEGRATIONS: list[Integration] = [
     Integration(
         name="Slack",

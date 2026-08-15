@@ -1,18 +1,13 @@
-"""Display Claude Code usage from the live API.
+"""Read Claude Code usage: the live OAuth windows, and the local daily cache.
 
-Calls the /api/oauth/usage endpoint for real-time utilization data
-and supplements with stats-cache.json for daily detail.
-
-Anthropic-only by nature: it reads Claude Code OAuth credentials and an
-Anthropic endpoint. There is no Codex/OpenAI equivalent (the Codex
-runtime exposes no usage API) — for per-session cost and token usage on
-any backend, read the session JSON (``trace list`` shows the backend;
-Codex cost needs ``CODEX_USD_PER_MTOK_*`` rates).
+The ``/api/oauth/usage`` endpoint gives real-time utilization for every window
+the plan meters, and ``stats-cache.json`` supplements it with per-day and
+per-model detail. The display, the pacing bars, and the snapshot are shared;
+only what is read here is Anthropic's.
 
 Examples::
 
     $ uv run lup-devtools usage claude
-    $ uv run lup-devtools usage claude --no-watch
     $ uv run lup-devtools usage claude --no-detail
     $ uv run lup-devtools usage claude --json
     $ uv run lup-devtools usage claude --watch --interval 300

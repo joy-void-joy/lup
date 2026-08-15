@@ -40,23 +40,30 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Literal, TypedDict
 
+import httpx
 import tomlkit
 import tomlkit.items
 import typer
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ValidationError
 from importlib.metadata import version as installed_version
 from packaging.requirements import Requirement
 
 from lup.workspace.paths import find_project_root
 from lup.devtools.utils import git
 
-VENDORED_ROOT = "packages/lup"
-VENDORED_SRC = "packages/lup/src"
+# The three below spell where the vendored copy sits, which is a fact about
+# lup's own layout and this repository's, not a choice either end makes.
+VENDORED_ROOT = "packages/lup"  # lup: ignore[constant-declaration] — fixed layout
+VENDORED_SRC = "packages/lup/src"  # lup: ignore[constant-declaration] — fixed layout
+# lup: ignore[constant-declaration] — fixed layout
 VENDORED_SIBLINGS = {"src": VENDORED_SRC, "tests": f"{VENDORED_ROOT}/tests"}
 """Each plain search root and the vendored one that shadows it. A search path
 naming the plain root wants its vendored twin exactly while the package is
 there, and wants it gone the moment the package is not."""
+# lup: ignore[constant-declaration] — the name the library is published under
 DISTRIBUTION = "lup"
+# lup: ignore[constant-declaration] — the glob this repository's own uv workspace
+# is laid out as, which the manifest below already states
 WORKSPACE_MEMBERS = ["packages/*"]
 REPOSITORY_URL = "https://github.com/joy-void-joy/lup"
 """Where the library is published as source. Overridable: a fork, a mirror, or
@@ -77,6 +84,8 @@ class ExecutionEnvironment(TypedDict):
 # Type-checking a vendored adapter's dispatcher asset needs the generated
 # runtime beside it on the search path. Both halves live under the package, so
 # the pair exists exactly when the library is vendored.
+# lup: ignore[constant-declaration] — the adapter packages lup actually ships,
+# so the value follows lup.adapters rather than any taste
 RUNTIMES = ("claude", "codex")
 VENDORED_EXECUTION_ENVIRONMENTS = [
     ExecutionEnvironment(
@@ -103,15 +112,13 @@ type GitRefKind = Literal["branch", "tag", "rev"]
 """Which kind of ref a git source pins, spelled as uv spells it."""
 
 
-class GitSource(BaseModel):
+class GitSource(BaseModel, frozen=True):
     """A repository and the single ref of it a project resolves ``lup`` at.
 
     The ref is one field pair rather than three optional ones, so a source
     naming both a branch and a tag cannot be constructed — uv accepts only
     one, and a model that can hold two only moves the error later.
     """
-
-    model_config = ConfigDict(frozen=True)
 
     url: str = REPOSITORY_URL
     ref_kind: GitRefKind = "branch"
@@ -130,10 +137,8 @@ class GitSource(BaseModel):
         return entry
 
 
-class RefFlag(BaseModel):
+class RefFlag(BaseModel, frozen=True):
     """One ref-kind flag, and the ref a command line gave it — or nothing."""
-
-    model_config = ConfigDict(frozen=True)
 
     kind: GitRefKind
     ref: str | None = None
@@ -247,6 +252,9 @@ def apply_dependency(document: tomlkit.TOMLDocument, version: str | None) -> lis
     raise KeyError(f"no {DISTRIBUTION} requirement in [project].dependencies")
 
 
+# GitSource's own share of this is `git.entry()`; what is left is the edit to
+# `[tool.uv.sources]`, which the document owns and one mode's argument does not.
+# lup: ignore[model-free-function] — the TOML document is the subject
 def apply_source(
     document: tomlkit.TOMLDocument,
     mode: LibraryMode,
@@ -396,6 +404,9 @@ def guard_leaving_local(root: Path, force: bool) -> None:
     )
 
 
+# Rewriting `pyproject.toml` is about the checkout, and `git` is the argument
+# exactly one mode reads — beside `version` and `checkout`, which the others do.
+# lup: ignore[model-free-function] — the checkout is the subject, git one mode's input
 def set_mode(
     root: Path,
     mode: LibraryMode,
@@ -467,6 +478,9 @@ def use_library(
     report(changes, dry_run, f"Already resolving {DISTRIBUTION} as {mode}.")
 
 
+# The body of `dev library git`, beside the other three command entries: its
+# subject is the command line, and GitSource is what the flags parsed into.
+# lup: ignore[model-free-function] — CLI command body over its parsed flags
 def git_library(
     source: GitSource, keep_vendored: bool, force: bool, dry_run: bool
 ) -> None:
@@ -516,3 +530,98 @@ def library_status() -> None:
                 typer.echo(f"{source.ref_kind}: {source.ref}")
         case LibraryMode.PUBLISHED:
             typer.echo(f"version: {installed_version(DISTRIBUTION)}")
+
+
+RELEASE_INDEX_URL = f"https://pypi.org/pypi/{DISTRIBUTION}/json"
+"""Where a release is looked up. Overridable: a project resolving lup through
+a private index asks that index the same question in the same shape."""
+
+RELEASE_PROBE_SECONDS = 10.0
+"""How long the look-up waits. An unreachable index is an answer this command
+knows how to give, and giving it beats blocking whoever is waiting on it."""
+
+
+class ReleaseIndexInfo(BaseModel):
+    """The one field of the index's document this reads."""
+
+    version: str
+
+
+class ReleaseIndexDocument(BaseModel):
+    """A package index's answer about one distribution."""
+
+    info: ReleaseIndexInfo
+
+
+class ReleaseProbe(BaseModel, frozen=True):
+    """What the package index holds for lup: a version, nothing, or no answer.
+
+    The third outcome stays itself instead of collapsing into the second. An
+    index that could not be reached has not said a release is absent, and
+    reading it that way pins a project to a repository ref on the strength of
+    a dropped connection.
+
+    What this does not decide is the acquisition mode. Only one half of that
+    is a fact — whether a release exists at all — and the other half is what
+    the project is to the library: one that works on lup, dogfooding a branch
+    and sending changes back, wants that branch whether or not a release was
+    cut from it.
+    """
+
+    version: str = ""
+    unreachable: str = ""
+
+    def describe(self) -> list[str]:
+        """What the index answered, and the command that takes it at its word."""
+        if self.unreachable:
+            return [
+                f"index unreachable: {self.unreachable}",
+                "A probe that did not land settles nothing. Retry, or declare "
+                "the mode this project already knows it wants.",
+            ]
+        if not self.version:
+            return [
+                "no release published yet",
+                f"dev library {LibraryMode.GIT} --branch <branch>",
+            ]
+        return [
+            f"released: {self.version}",
+            f"dev library use {LibraryMode.PUBLISHED} --version {self.version}",
+            f"`{LibraryMode.GIT}` stays a live choice: a project that works on "
+            "lup as well as with it runs the branch it is improving rather "
+            "than the last release cut from it.",
+        ]
+
+
+def probe_release(
+    url: str = RELEASE_INDEX_URL, timeout: float = RELEASE_PROBE_SECONDS
+) -> ReleaseProbe:
+    """Ask the package index whether a release of lup exists.
+
+    A missing project is the index answering rather than failing: before the
+    first release that is the true state of the world, and it is the answer
+    that sends a new project to the repository rather than to nothing.
+    """
+    try:
+        response = (
+            httpx.get(  # lup: ignore[dict-get] — httpx's GET verb, not a dict read
+                url, timeout=timeout, follow_redirects=True
+            )
+        )
+    except httpx.HTTPError as error:
+        return ReleaseProbe(unreachable=f"{type(error).__name__}: {error}")
+    if response.status_code == httpx.codes.NOT_FOUND:
+        return ReleaseProbe()
+    if response.status_code != httpx.codes.OK:
+        return ReleaseProbe(unreachable=f"{url} answered {response.status_code}")
+    try:
+        document = ReleaseIndexDocument.model_validate_json(response.content)
+    except ValidationError:
+        return ReleaseProbe(unreachable=f"{url} answered a document it could not read")
+    return ReleaseProbe(version=document.info.version)
+
+
+def library_release() -> None:
+    """CLI entry for ``lup-devtools dev library release`` (see module docstring)."""
+    for line in probe_release().describe():
+        typer.echo(line)

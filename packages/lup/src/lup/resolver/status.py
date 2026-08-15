@@ -18,13 +18,12 @@ from collections import Counter
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from lup.channels.models import utc_now
 from lup.resolver.join_desk import JoinDesk
 from lup.resolver.journal import journal_tail
 from lup.resolver.models import (
-    FROZEN,
     ConcernStatus,
     JoinProgress,
     ResolvePhase,
@@ -34,19 +33,15 @@ from lup.resolver.recheck_desk import RecheckDesk
 from lup.resolver.state import ResolverStateRepository
 
 
-class StatusCount(BaseModel):
+class StatusCount(BaseModel, frozen=True):
     """How many concerns stand at one status."""
-
-    model_config = FROZEN
 
     status: ConcernStatus
     concerns: int
 
 
-class LastRecorded(BaseModel):
+class LastRecorded(BaseModel, frozen=True):
     """The run's most recent journal entry, as a reader needs to see it."""
-
-    model_config = FROZEN
 
     event: str
     actor: str
@@ -81,7 +76,7 @@ def elapsed_per_item(
     return sum(intervals, timedelta()) / len(intervals)
 
 
-class PhaseProgress(BaseModel):
+class PhaseProgress(BaseModel, frozen=True):
     """One phase's iterator, as far through it as the run has got.
 
     Per phase rather than one figure for the run, because the phases do not
@@ -90,8 +85,6 @@ class PhaseProgress(BaseModel):
     estimate spanning both would be wrong for whichever phase it was not
     measured on, and wrong most of the time.
     """
-
-    model_config = FROZEN
 
     label: str
     done: int
@@ -131,10 +124,8 @@ def compact_interval(span: timedelta) -> str:
     return f"{seconds // 3600}h{seconds % 3600 // 60:02d}m"
 
 
-class RunStatus(BaseModel):
+class RunStatus(BaseModel, frozen=True):
     """Where a run stands, and whether anything is driving it."""
-
-    model_config = FROZEN
 
     run_id: str
     exists: bool
@@ -142,7 +133,7 @@ class RunStatus(BaseModel):
     """Whether a process holds the run lock — the liveness answer."""
 
     phase: ResolvePhase | None = None
-    counts: list[StatusCount] = Field(default_factory=list)
+    counts: list[StatusCount] = []
     unanswered: int = 0
     last: LastRecorded | None = None
     progress: PhaseProgress | None = None
@@ -224,10 +215,8 @@ class RunStatus(BaseModel):
         return not self.held
 
 
-class RunSummary(BaseModel):
+class RunSummary(BaseModel, frozen=True):
     """One run on disk, as far as choosing between them needs to know."""
-
-    model_config = FROZEN
 
     run_id: str
     phase: ResolvePhase

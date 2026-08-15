@@ -11,6 +11,12 @@ default, so an adopter replaces the vocabulary rather than editing the library
 (``library-default``, the mechanical half of the placement criterion in
 ``docs/library.md``).
 
+The same criterion holds beyond the library, where the choice is frozen for
+this project's own callers rather than for an adopter, so ``constant-declaration``
+judges every other module-level constant by it. The two read one enumeration
+and :meth:`ConstantDeclaration.judging_rule` hands each declaration to exactly
+one of them, so neither can reach a line the other owns.
+
 A deliberate exception uses the typed ``# lup: ignore[<rule-id>]`` on the
 offending line or as a file-level directive, with a reason.
 """
@@ -18,30 +24,40 @@ offending line or as a file-level directive, with a reason.
 import ast
 from collections.abc import Collection, Sequence
 from pathlib import Path
-from typing import Self, get_args
+from typing import get_args
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel
 
 from lup.codescan.common import (
     PythonContext,
+    PythonSource,
     file_level_ignore,
     ignore_rule_ids,
 )
-from lup.policy.kernel.edit import IGNORE_RE
+from lup.codescan.project import RuleFinding, RuleViolation, audit_suppressions
+from lup.policy.kernel.edit import (
+    IGNORE_RE,
+    suppression_placement,
+    suppression_reaches,
+)
 from lup.harness.contracts import NativeSpellings
 from lup.harness.models import PluginLocation, TreeLocation
 from lup.policy.kernel.decision import KERNEL_IMPORT_ALLOWLIST
 
+# lup: ignore[constant-declaration] — a rule id is the rule's own identity: it is
+# what a typed directive, a deny message, and the reference all name it by, so a
+# caller passing a different one would be silencing a rule nobody can spell
 RULE_ID = "seam-boundary"
+# lup: ignore[constant-declaration] — rule identity
 NATIVE_SPELLING_RULE_ID = "native-spelling"
+# lup: ignore[constant-declaration] — rule identity
 KERNEL_IMPORT_RULE_ID = "kernel-imports"
-# lup: Probably also want an anti-pattern against constant declaration itself,
-# wider than this library-only rule. The model tends to write `SNIPPET_LENGTH =
-# 500` ("how much of a result is returned inline before it is saved to disk
-# instead") where the value should have been parametrized, and `UTC_SUFFIX = "Z"`
-# ("what Exa appends to a timestamp, which callers here read without") where the
-# timestamp should have been parsed with datetime rather than removesuffix.
+# lup: ignore[constant-declaration] — rule identity
 LIBRARY_DEFAULT_RULE_ID = "library-default"
+# lup: ignore[constant-declaration] — rule identity
+CONSTANT_DECLARATION_RULE_ID = "constant-declaration"
+# lup: ignore[constant-declaration] — where this library's own sources sit in the
+# repository that publishes it, which is a fact about the distribution
 LIBRARY_ROOT = "packages/lup/src/lup/"
 KERNEL_ROOT = f"{LIBRARY_ROOT}policy/kernel/"
 """Where the decision kernel ships, derived so it cannot drift from the root."""
@@ -65,6 +81,8 @@ NATIVE_SPELLINGS = {
     "turn/start": "Codex app-server method",
     "turn/steer": "Codex app-server method",
     "turn/interrupt": "Codex app-server method",
+    "account/rateLimits/read": "Codex app-server method",
+    "account/usage/read": "Codex app-server method",
 }
 
 
@@ -95,7 +113,7 @@ def generated_tree_paths(
     )
 
 
-class ApplicationRoots(BaseModel):
+class ApplicationRoots(BaseModel, frozen=True):
     """Where one application composes concrete implementations of the seams.
 
     The library guards its own package and can name nothing beyond it: an
@@ -104,14 +122,20 @@ class ApplicationRoots(BaseModel):
     silently sanction nothing.
     """
 
-    model_config = ConfigDict(frozen=True)
-
-    composition: list[str] = Field(default_factory=list)
+    composition: list[str] = []
     """Repository-relative files, or directory prefixes ending in ``/``."""
 
-    portable_prose: list[str] = Field(default_factory=list)
+    portable_prose: list[str] = []
     """Those composition roots whose prose must still name no provider — a
     declaration every tree renders is written in one of them."""
+
+    generated: list[str] = []
+    """Directory prefixes a runtime writes its own tree at.
+
+    Nothing under one is authored, so a rule about a choice has nothing to say
+    there: the artifact renders a judgement made in the declaration it is
+    compiled from, which is both where the rule can report it and the only
+    place a fix survives the next generation."""
 
     def sanctions(self, rel_path: Path) -> bool:
         """Whether this application composes natively at that path."""
@@ -120,6 +144,10 @@ class ApplicationRoots(BaseModel):
             posix.startswith(root) if root.endswith("/") else posix == root
             for root in self.composition
         )
+
+    def renders(self, rel_path: Path) -> bool:
+        """Whether that path is compiled rather than written."""
+        return rel_path.as_posix().startswith(tuple(self.generated))
 
     def sanctions_spelling(self, rel_path: Path) -> bool:
         """Whether that path may also own a provider's own wire words."""
@@ -153,6 +181,9 @@ def composes_natively(rel_path: Path) -> bool:
     return "lup/adapters/" in posix or posix in LIBRARY_COMPOSITION
 
 
+# The library's own roots and the adopter's are two tables, and only one of them
+# is a model; `ApplicationRoots.sanctions` carries that one's half.
+# lup: ignore[model-free-function] — the path is the subject, the roots its table
 def path_is_sanctioned(
     rel_path: Path, application: ApplicationRoots = NO_APPLICATION
 ) -> bool:
@@ -170,6 +201,7 @@ def library_placement_path_is_audited(rel_path: Path) -> bool:
     return posix.startswith(LIBRARY_ROOT) and "lup/adapters/" not in posix
 
 
+# lup: ignore[model-free-function] — the path is the subject, the roots its table
 def native_spelling_path_is_sanctioned(
     rel_path: Path, application: ApplicationRoots = NO_APPLICATION
 ) -> bool:
@@ -199,37 +231,79 @@ class BoundaryAuditFinding(BaseModel):
 class SourceViolation(BaseModel):
     """One unsuppressed source shape before ordinary suppression auditing.
 
-    ``line`` is where the violation is reported; ``directive_from`` and
-    ``directive_to`` bound the lines where its suppression may sit. Both
-    default to ``line`` — an import or a spelling is one line, and the repo
-    convention puts its directive on exactly that line. A rule whose subject
-    is a whole declaration widens the bound instead, so a fifty-line table can
-    be excused by a directive heading it rather than one crammed onto the
-    opening line, where a real reason would not fit.
+    ``line`` is where the violation is reported, and it is the only thing this
+    rule gets to say about its suppression: a declaration heading a fifty-line
+    table is excused from the line above it, exactly as every other rule is,
+    because a reason that does not fit inline goes to the same place whatever
+    is being excused.
     """
 
     line: int
-    directive_from: int = 0
-    directive_to: int = 0
     text: str
     subject: str
     message: str
 
-    @model_validator(mode="after")
-    def default_zone_to_the_reported_line(self) -> Self:
-        self.directive_from = self.directive_from or self.line
-        self.directive_to = max(self.directive_to, self.line)
-        return self
 
+class ConstantDeclaration(BaseModel):
+    """One module-level constant, and the shape its value is written in.
 
-class TableConstant(BaseModel):
-    """One module-level constant bound to a multi-entry collection display."""
+    ``entries`` counts the members of a written-out collection display — a
+    vocabulary, whose judgement is which entries it holds — and is ``None``
+    where the value is a single fact rather than a table.
+    """
 
     name: str
     line: int
     end_line: int
     text: str
-    entries: int
+    entries: int | None = None
+
+    directive_from: int = 0
+    """First line a suppression may sit on to excuse this declaration.
+
+    A directive may head its declaration, from anywhere in the comment block
+    written directly above it — a reason worth reading rarely fits on one
+    line. The block stops at the first line that is not a comment, so the zone
+    never reaches the neighbour above: constants sit in runs, and one reason
+    covering two of them would strand the second's own marker as a directive
+    guarding nothing.
+    """
+
+    def judging_rule(self, library_module: bool) -> str:
+        """Which of the two constant rules judges this declaration.
+
+        Exactly one does, because this is a single total function over the one
+        enumeration both rules read. A vocabulary the library freezes is
+        ``library-default``'s, since it reaches an adopter only by their
+        editing this repository; every other constant is
+        ``constant-declaration``'s. Neither rule can reach a line the other
+        owns, so no declaration is reported twice or excused by the wrong
+        directive.
+        """
+        vocabulary = self.entries is not None and self.entries >= 2
+        return (
+            LIBRARY_DEFAULT_RULE_ID
+            if library_module and vocabulary
+            else CONSTANT_DECLARATION_RULE_ID
+        )
+
+    def judgement(self, carved: bool) -> str:
+        """Why this frozen constant is reported, and what to do about it."""
+        if carved:
+            return (
+                f"{self.name} exists only to carve a value out of text by hand — "
+                "parse the value instead (datetime for a timestamp, urllib.parse "
+                "for a URL, pathlib.Path for a path) and the constant goes with "
+                "the surgery"
+            )
+        return (
+            f"constant {self.name} is a judgement a second implementer with the "
+            "same intent could have made differently, frozen where no caller can "
+            "replace it — take it as an overridable default, or suppress it with "
+            f"# lup: ignore[{CONSTANT_DECLARATION_RULE_ID}] and the reason it is "
+            "canonical: a provider's wire spelling, a language's own vocabulary, "
+            "an identity this repository defines"
+        )
 
 
 class BoundaryDirective(BaseModel):
@@ -379,24 +453,58 @@ def collection_entries(node: ast.expr) -> int | None:
 
     Only a written-out display counts. A comprehension is derived from another
     value rather than declared, and a scalar is a single fact, not a table.
+
+    A constructor wrapping one display is that display: ``dict.fromkeys([...])``
+    and ``frozenset({...})`` write down the same vocabulary a bare display
+    does, and a table that escaped judgement by naming its own container would
+    be the easiest thing in the world to reach for.
     """
     match node:
         case ast.List(elts=elts) | ast.Tuple(elts=elts) | ast.Set(elts=elts):
             return len(elts)
         case ast.Dict(keys=keys):
             return len(keys)
+        case ast.Call(args=[ast.expr() as only]):
+            return collection_entries(only)
     return None
 
 
-def table_constants(text: str) -> list[TableConstant]:
-    """Module-level shouty constants bound to a two-or-more-entry display."""
+def frozen_literal(node: ast.expr) -> bool:
+    """Whether a scalar value is decided here rather than derived from a name.
+
+    A value that names another symbol — a constant, a call, an attribute, an
+    interpolated string — follows from that symbol, so the choice it embodies
+    was made where the symbol was declared and is judged there instead. A
+    collection display never reaches this test: its judgement is which entries
+    it holds, and that is chosen here however each entry is spelled.
+    """
+    match node:
+        case ast.Constant():
+            return True
+        case ast.UnaryOp(operand=operand):
+            return frozen_literal(operand)
+        # A bare constructor over literals writes down a value the same way:
+        # the characters `set("$*?")` holds are as much a choice as a
+        # display's entries, and a name that is only the container is no name.
+        # Only a plain name counts as the constructor — an attribute chain
+        # such as `resources.files(...).read_text(...)` takes literal
+        # arguments while its value comes from somewhere else entirely.
+        case ast.Call(func=ast.Name(), args=args, keywords=keywords) if (
+            args and not keywords
+        ):
+            return all(frozen_literal(argument) for argument in args)
+    return False
+
+
+def constant_declarations(text: str) -> list[ConstantDeclaration]:
+    """Every module-level shouty constant whose value is a choice made here."""
     try:
         tree = ast.parse(text)
     except SyntaxError:
         return []
     lines = text.splitlines()
 
-    def declared(node: ast.stmt) -> TableConstant | None:
+    def declared(node: ast.stmt) -> ConstantDeclaration | None:
         match node:
             case (
                 ast.Assign(targets=[ast.Name(id=name)], value=value)
@@ -405,10 +513,10 @@ def table_constants(text: str) -> list[TableConstant]:
                 entries = collection_entries(value)
             case _:
                 return None
-        if not name.isupper() or entries is None or entries < 2:
+        if not name.isupper() or (entries is None and not frozen_literal(value)):
             return None
         line = lines[node.lineno - 1] if node.lineno <= len(lines) else ""
-        return TableConstant(
+        return ConstantDeclaration(
             name=name,
             line=node.lineno,
             end_line=node.end_lineno or node.lineno,
@@ -416,7 +524,33 @@ def table_constants(text: str) -> list[TableConstant]:
             entries=entries,
         )
 
-    return [found for node in tree.body if (found := declared(node)) is not None]
+    found = [
+        declaration for node in tree.body if (declaration := declared(node)) is not None
+    ]
+    occupied = {
+        line
+        for declaration in found
+        for line in range(declaration.line, declaration.end_line + 1)
+    }
+
+    def heading_from(line: int) -> int:
+        if line - 1 in occupied:
+            return line
+        start = line - 1
+        while (
+            start > 1
+            and lines[start - 1].strip().startswith("#")
+            and lines[start - 2].strip().startswith("#")
+        ):
+            start -= 1
+        return start
+
+    return [
+        declaration.model_copy(
+            update={"directive_from": heading_from(declaration.line)}
+        )
+        for declaration in found
+    ]
 
 
 def default_position_names(
@@ -424,11 +558,11 @@ def default_position_names(
 ) -> set[str]:  # lup: ignore[set-shape] — name identity membership
     """Constant names one module reaches as a caller-replaceable default.
 
-    Three spellings count, and only these: a parameter default in a signature,
-    a pydantic ``Field`` default (or a ``default_factory`` lambda returning the
-    constant), and the two shapes a mutable default is written as — the
-    ``TABLE if argument is None else argument`` sentinel and the
-    ``argument or TABLE`` fallback.
+    Four spellings count, and only these: a parameter default in a signature,
+    a field default in a class body — written plainly or through pydantic's
+    ``Field`` (or a ``default_factory`` lambda returning the constant) — and
+    the two shapes a mutable default is written as, the ``TABLE if argument is
+    None else argument`` sentinel and the ``argument or TABLE`` fallback.
     """
     try:
         tree = ast.parse(text)
@@ -441,10 +575,21 @@ def default_position_names(
                 return [name]
         return []
 
+    def assigned(node: ast.stmt) -> list[ast.expr | None]:
+        match node:
+            case ast.AnnAssign(value=value) | ast.Assign(value=value):
+                return [value]
+        return []
+
     def defaults(node: ast.AST) -> list[ast.expr | None]:
         match node:
             case ast.FunctionDef(args=args) | ast.AsyncFunctionDef(args=args):
                 return [*args.defaults, *args.kw_defaults]
+            # A field a class body assigns is the plain spelling of the same
+            # override a `Field(default=...)` writes out, and the one a model
+            # is usually written with; a subclass replaces either.
+            case ast.ClassDef(body=body):
+                return [value for member in body for value in assigned(member)]
             case ast.Call(keywords=keywords):
                 return [
                     keyword.value
@@ -471,6 +616,51 @@ def default_position_names(
     }
 
 
+# lup: ignore[library-default] — the string methods that carve a value out of
+# text, a set the language fixes rather than this project
+CARVING_CALLS = (
+    "removeprefix",
+    "removesuffix",
+    "partition",
+    "rpartition",
+    "split",
+    "rsplit",
+    "strip",
+    "lstrip",
+    "rstrip",
+    "replace",
+)
+
+
+def carved_names(
+    text: str,
+) -> set[str]:  # lup: ignore[set-shape] — name identity membership
+    """Constant names one module hands to a string-surgery call.
+
+    A constant reached this way exists only because a structured value is
+    carved out of text by hand — the suffix a timestamp ends in, the separator
+    a path is split on. Parametrizing it would freeze the surgery behind a
+    nicer name, so the rule steers these to the parser that already knows the
+    format instead.
+    """
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return set()  # lup: ignore[set-shape] — an unparseable module carves nothing
+
+    def carved(node: ast.AST) -> list[str]:
+        match node:
+            case ast.Call(func=ast.Attribute(attr=attribute), args=args) if (
+                attribute in CARVING_CALLS
+            ):
+                return [
+                    argument.id for argument in args if isinstance(argument, ast.Name)
+                ]
+        return []
+
+    return {name for node in ast.walk(tree) for name in carved(node)}
+
+
 def library_default_violations(
     text: str,
     overridable: Collection[str],
@@ -479,8 +669,6 @@ def library_default_violations(
     return [
         SourceViolation(
             line=constant.line,
-            directive_from=constant.line - 1,
-            directive_to=constant.end_line,
             text=constant.text,
             subject=constant.name,
             message=(
@@ -488,9 +676,72 @@ def library_default_violations(
                 "project choice no caller can replace — take it as a default"
             ),
         )
-        for constant in table_constants(text)
+        for constant in constant_declarations(text)
         if constant.name not in overridable
+        and constant.judging_rule(library_module=True) == LIBRARY_DEFAULT_RULE_ID
     ]
+
+
+# lup: ignore[model-free-function] — the audited path and text are the subject
+def constant_declaration_violations(
+    rel_path: Path,
+    text: str,
+    overridable: Collection[str],
+    carved: Collection[str],
+    application: ApplicationRoots = NO_APPLICATION,
+) -> list[SourceViolation]:
+    """Find frozen constants at one path that no caller can replace."""
+    if application.renders(rel_path):
+        return []
+    library_module = library_placement_path_is_audited(rel_path)
+    return [
+        SourceViolation(
+            line=constant.line,
+            text=constant.text,
+            subject=constant.name,
+            message=constant.judgement(constant.name in carved),
+        )
+        for constant in constant_declarations(text)
+        if constant.name not in overridable
+        and constant.judging_rule(library_module) == CONSTANT_DECLARATION_RULE_ID
+    ]
+
+
+# lup: ignore[model-free-function] — the project's sources are the subject
+def audit_constant_declarations(
+    sources: list[PythonSource], application: ApplicationRoots = NO_APPLICATION
+) -> list[RuleFinding]:
+    """Judge every frozen constant in a project against how it is reached.
+
+    Whether a caller can replace a constant, and whether it exists only to
+    carve text by hand, are properties of the project rather than of the
+    module that writes the value down — so both are pooled across every source
+    before any one declaration is judged, the way the library placement sweep
+    already pools the names its own callers can replace.
+
+    A generated tree is read for what it reaches and never judged or audited:
+    its files are compiled from the declarations above, so a directive in one
+    is a copy of a directive that already answers for itself where it was
+    written, and reporting the copy would ask for a second one nothing can act
+    on.
+    """
+    overridable = {
+        name for source in sources for name in default_position_names(source.text)
+    }
+    carved = {name for source in sources for name in carved_names(source.text)}
+    authored = [source for source in sources if not application.renders(source.path)]
+    violations = [
+        RuleViolation(
+            path=source.path,
+            line=violation.line,
+            message=violation.message,
+        )
+        for source in authored
+        for violation in constant_declaration_violations(
+            source.path, source.text, overridable, carved, application
+        )
+    ]
+    return audit_suppressions(authored, violations, CONSTANT_DECLARATION_RULE_ID)
 
 
 def audit_rule(
@@ -499,6 +750,7 @@ def audit_rule(
     """Apply ordinary inline/file suppression auditing to one boundary rule."""
     context = PythonContext.parse(text)
     file_ignore = file_level_ignore(text)
+    lines = text.splitlines()
     directives: list[BoundaryDirective] = []  # lup: ignore[empty-collection]
     if file_ignore is not None:
         directives.append(
@@ -508,7 +760,7 @@ def audit_rule(
                 file_level=True,
             )
         )
-    for line_number, line in enumerate(text.splitlines(), start=1):
+    for line_number, line in enumerate(lines, start=1):
         if file_ignore is not None and line_number == file_ignore.line:
             continue
         match = IGNORE_RE.search(line)
@@ -530,7 +782,7 @@ def audit_rule(
             for index, directive in enumerate(directives)
             if (
                 directive.file_level
-                or violation.directive_from <= directive.line <= violation.directive_to
+                or suppression_reaches(lines, directive.line, violation.line)
             )
             and (directive.rule_ids is None or rule_id in directive.rule_ids)
         ]
@@ -540,7 +792,10 @@ def audit_rule(
                     kind="missing",
                     line=violation.line,
                     text=violation.text,
-                    message=violation.message,
+                    message=(
+                        f"{violation.message} — suppress on "
+                        f"{suppression_placement(violation.line)}"
+                    ),
                     rule_id=rule_id,
                     module=violation.subject,
                 )
@@ -591,6 +846,7 @@ def audit_boundaries(text: str) -> list[BoundaryAuditFinding]:
     ]
 
 
+# lup: ignore[model-free-function] — the audited path and text are the subject
 def audit_path_boundaries(
     rel_path: Path, text: str, application: ApplicationRoots = NO_APPLICATION
 ) -> list[BoundaryAuditFinding]:

@@ -56,7 +56,7 @@ from collections.abc import Callable, Iterator
 from datetime import datetime
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict, Field, SerializeAsAny, ValidationError
+from pydantic import BaseModel, Field, SerializeAsAny, ValidationError
 
 from lup.types import JsonObject, JsonValue, Usage
 from lup.telemetry.metrics import MetricsSummary
@@ -101,7 +101,7 @@ class SessionResult[OutputT: BaseModel](BaseModel):
     timestamp: str
     output: OutputT
     reasoning: str = Field(default="", description="Raw reasoning text")
-    sources_consulted: list[str] = Field(default_factory=list)
+    sources_consulted: list[str] = []
     duration_seconds: float | None = None
     cost_usd: float | None = None
     token_usage: SerializeAsAny[Usage] | None = None
@@ -109,7 +109,7 @@ class SessionResult[OutputT: BaseModel](BaseModel):
     outcome: str | None = Field(default=None, description="Outcome after resolution")
 
 
-class SessionRecord(BaseModel):
+class SessionRecord(BaseModel, extra="allow"):
     """A session result read back from disk, tolerant of domain variation.
 
     The read-side counterpart of :class:`SessionResult`: every core field
@@ -118,22 +118,43 @@ class SessionRecord(BaseModel):
     fields a domain adds to its result model survive via ``extra="allow"``.
     """
 
-    model_config = ConfigDict(extra="allow")
-
     session_id: str = ""
     task_id: str | None = None
     agent_version: str = ""
     agent_sdk: str | None = None
     sdk_session_id: str | None = None
     timestamp: str = ""
-    output: JsonObject = Field(default_factory=dict)
+    output: JsonObject = {}
     reasoning: str = ""
-    sources_consulted: list[str] = Field(default_factory=list)
+    sources_consulted: list[str] = []
     duration_seconds: float | None = None
     cost_usd: float | None = None
     token_usage: Usage | None = None
     tool_metrics: MetricsSummary | None = None
     outcome: JsonValue = None
+
+    def markdown_summary(self) -> str:
+        """Format this session record as a markdown summary.
+
+        Extracts common fields that most domains will have. Downstream
+        projects can provide a custom formatter for domain-specific display.
+        """
+        stamp = self.timestamp or "unknown"
+        lines: list[str] = [f"### {stamp}"]
+
+        output = self.output
+        if "summary" in output:
+            lines.append(f"**Summary**: {str(output['summary'])[:200]}...")
+        if "confidence" in output:
+            confidence = output["confidence"]
+            if isinstance(confidence, (int, float)):
+                lines.append(f"**Confidence**: {confidence:.1%}")
+
+        if self.outcome:
+            lines.append(f"**Outcome**: {self.outcome}")
+
+        lines.append("")
+        return "\n".join(lines)
 
 
 def save_session(
@@ -278,33 +299,6 @@ def update_session_metadata(
         return False
 
 
-# -- Default formatter for format_history_for_context -------------------------
-
-
-def default_session_formatter(session: SessionRecord) -> str:
-    """Format a session record as a markdown summary.
-
-    Extracts common fields that most domains will have. Downstream
-    projects can provide a custom formatter for domain-specific display.
-    """
-    stamp = session.timestamp or "unknown"
-    lines: list[str] = [f"### {stamp}"]
-
-    output = session.output
-    if "summary" in output:
-        lines.append(f"**Summary**: {str(output['summary'])[:200]}...")
-    if "confidence" in output:
-        confidence = output["confidence"]
-        if isinstance(confidence, (int, float)):
-            lines.append(f"**Confidence**: {confidence:.1%}")
-
-    if session.outcome:
-        lines.append(f"**Outcome**: {session.outcome}")
-
-    lines.append("")
-    return "\n".join(lines)
-
-
 def format_history_for_context(
     sessions: list[SessionRecord],
     *,
@@ -325,7 +319,7 @@ def format_history_for_context(
     if not sessions:
         return ""
 
-    fmt = formatter or default_session_formatter
+    fmt = formatter or SessionRecord.markdown_summary
 
     lines = ["## Past Sessions\n"]
     for session in sessions[-max_sessions:]:

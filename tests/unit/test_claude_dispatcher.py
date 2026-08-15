@@ -6,13 +6,19 @@ run the emitted script on a fresh interpreter with JSON on stdin, the way
 the harness invokes it.
 """
 
+import importlib.util
 import json
 from pathlib import Path
+from types import ModuleType
 
 import pytest
 import sh
 
-from lup.types import JsonObject
+from lup.adapters.claude.hooks import claude_placed_input
+from lup.policy.grants import allowance_grants_environment, write_allowance_grants
+from lup.policy.identity import AGENT_IDENTITY_ENV, ConcernAllowance
+from lup.policy.kernel.decision import SandboxPlacement
+from lup.types import EnvVars, JsonObject
 from tests.unit.repos import initialized_repo
 
 DISPATCHER = Path(".claude/plugins/lup/hooks/scripts/policy.py")
@@ -114,6 +120,48 @@ def test_a_declared_test_root_is_not_judged_against_production_conventions() -> 
     assert isinstance(allowed, dict)
     assert denied["permissionDecision"] == "deny"
     assert allowed["permissionDecision"] == "allow"
+
+
+def test_an_overwide_suppression_is_placed_rather_than_left_to_the_author() -> None:
+    """The gate rewrites the call instead of making the author budget columns.
+
+    An inline directive whose reason outgrows the line is what pushes an agent
+    to shorten an identifier to buy room. The hook moves it onto the line
+    above, so the reason survives whole and nobody had to choose.
+    """
+    reason = "a justification long enough that keeping it inline outgrows the line"
+    decision = decide(
+        edit_payload(
+            "packages/lup/src/lup/devtools/dev/antipatterns.py",
+            "from lup.devtools.utils import git, output_json",
+            f"from typing import Any  # lup: ignore[any-type] — {reason}",
+            False,
+        )
+    )
+
+    specific = decision["hookSpecificOutput"]
+    assert isinstance(specific, dict)
+    placed = specific["updatedInput"]
+    assert isinstance(placed, dict)
+    assert placed["new_string"] == (
+        f"# lup: ignore[any-type] — {reason}\nfrom typing import Any"
+    )
+
+
+def test_a_suppression_that_fits_is_left_exactly_where_it_was_written() -> None:
+    """Placing is a normal form, so what is already canonical is not touched."""
+    decision = decide(
+        edit_payload(
+            "packages/lup/src/lup/devtools/dev/antipatterns.py",
+            "from lup.devtools.utils import git, output_json",
+            "from typing import Any  # lup: ignore[any-type] — at a boundary",
+            False,
+        )
+    )
+
+    specific = decision["hookSpecificOutput"]
+    assert isinstance(specific, dict)
+    assert "updatedInput" not in specific
 
 
 def write_payload(path: str, content: str) -> JsonObject:
@@ -267,3 +315,275 @@ def test_an_unreadable_target_asks_instead_of_letting_the_edit_through() -> None
     specific = decision["hookSpecificOutput"]
     assert isinstance(specific, dict)
     assert specific["permissionDecision"] == "ask"
+
+
+def test_a_call_placed_outside_the_sandbox_is_allowed_and_rewritten() -> None:
+    """The unprompted placement, emitted by the script a session really runs.
+
+    A remote read is unusable confined, so the vocabulary places it outside;
+    the verdict stays an allow and the placement rides the rewrite channel.
+    The rewrite has to carry the whole input rather than the flag alone,
+    because it replaces the arguments instead of merging into them.
+    """
+    decision = decide(bash_payload("git ls-remote origin HEAD"))
+
+    specific = decision["hookSpecificOutput"]
+    assert isinstance(specific, dict)
+    assert specific["permissionDecision"] == "allow"
+    assert specific["updatedInput"] == {
+        "command": "git ls-remote origin HEAD",
+        "dangerouslyDisableSandbox": True,
+    }
+
+
+def test_the_toolchain_reaches_the_outside_with_no_flag_from_its_caller() -> None:
+    """The declaration carries the escape, so no call site has to remember it.
+
+    Every `lup-devtools` command that opens an agent session is unusable
+    confined: the runtime creates per-session state under its configuration
+    directory, and a session spawned inside a sandbox that does not grant that
+    path loses its shell entirely. An instruction asking an agent for the flag
+    reaches one skill on one runtime; the declaration reaches every invocation
+    of the toolchain, whichever entry point started it.
+    """
+    decision = decide(bash_payload("uv run lup-devtools harness resolve"))
+
+    specific = decision["hookSpecificOutput"]
+    assert isinstance(specific, dict)
+    assert specific["permissionDecision"] == "allow"
+    assert specific["updatedInput"] == {
+        "command": "uv run lup-devtools harness resolve",
+        "dangerouslyDisableSandbox": True,
+    }
+
+
+def test_a_checker_target_is_left_where_the_session_already_runs() -> None:
+    """The escape is the toolchain's, not every blessed runner target's.
+
+    A checker reads the tree and writes inside it, so placing it outside would
+    widen the boundary for the commands that have no need of it.
+    """
+    decision = decide(bash_payload("uv run pytest tests/unit"))
+
+    specific = decision["hookSpecificOutput"]
+    assert isinstance(specific, dict)
+    assert specific["permissionDecision"] == "allow"
+    assert "updatedInput" not in specific
+
+
+def test_an_unplaced_call_carries_no_rewrite_at_all() -> None:
+    """Saying nothing about the sandbox must not restate the session's own mode.
+
+    An `updatedInput` on every call would make the dispatcher the author of a
+    placement it never decided, and the rewrite replaces the arguments — so a
+    verdict with nothing to say about where the call runs says nothing.
+    """
+    decision = decide(bash_payload("ls"))
+
+    specific = decision["hookSpecificOutput"]
+    assert isinstance(specific, dict)
+    assert specific["permissionDecision"] == "allow"
+    assert "updatedInput" not in specific
+
+
+NEW_DEVTOOLS_MODULE = write_payload(
+    "src/lup_template/devtools/harness/newborn_probe.py", '"""Newborn."""\n'
+)
+"""Creating a devtools module: the gate a `new-devtools-module` grant opens."""
+
+
+def session_environment(document: Path | None) -> EnvVars:
+    """The whole environment one worker session is launched with, and keeps.
+
+    Nothing is inherited, so an operator with either variable exported cannot
+    decide the outcome of an assertion below. The grants variable names a
+    document; what that document says is not part of the environment, and is
+    free to change while the session runs.
+    """
+    return {
+        AGENT_IDENTITY_ENV: "resolver-worker",
+        **allowance_grants_environment(document),
+    }
+
+
+def effect_under(payload: JsonObject, environment: EnvVars) -> str:
+    """The verdict the deployed dispatcher returns for one launched session."""
+    output = str(
+        sh.Command("python3")(
+            "-I",
+            "-S",
+            str(DISPATCHER),
+            _in=json.dumps(payload),
+            _env=environment,
+        )
+    )
+    specific = json.loads(output)["hookSpecificOutput"]
+    assert isinstance(specific, dict)
+    return str(specific["permissionDecision"])
+
+
+def test_a_grant_made_after_a_session_started_releases_its_very_next_call(
+    tmp_path: Path,
+) -> None:
+    """The environment never changes here; only the human's answer does.
+
+    This is the whole point of reading at judgment. A worker that discovers
+    mid-flight that it needs a gate asks, a human answers while that session
+    is still running, and the answer has to reach the process that asked —
+    which an allowance rendered into the environment at launch could not do.
+    """
+    document = tmp_path / "grants.json"
+    launched = session_environment(document)
+    assert effect_under(NEW_DEVTOOLS_MODULE, launched) == "ask"
+
+    write_allowance_grants(document, [ConcernAllowance.NEW_DEVTOOLS_MODULE])
+
+    assert effect_under(NEW_DEVTOOLS_MODULE, launched) == "allow"
+
+
+def test_a_grant_taken_back_stops_releasing_its_gate_just_as_immediately(
+    tmp_path: Path,
+) -> None:
+    """Symmetric by construction: the document is read, not remembered."""
+    document = tmp_path / "grants.json"
+    launched = session_environment(document)
+    write_allowance_grants(document, [ConcernAllowance.NEW_DEVTOOLS_MODULE])
+    assert effect_under(NEW_DEVTOOLS_MODULE, launched) == "allow"
+
+    write_allowance_grants(document, [])
+
+    assert effect_under(NEW_DEVTOOLS_MODULE, launched) == "ask"
+
+
+def test_a_grant_made_before_the_session_started_is_honoured_too(
+    tmp_path: Path,
+) -> None:
+    """A gate approved with the plan reaches the lease by the same route."""
+    document = tmp_path / "grants.json"
+    write_allowance_grants(document, [ConcernAllowance.NEW_DEVTOOLS_MODULE])
+
+    assert effect_under(NEW_DEVTOOLS_MODULE, session_environment(document)) == "allow"
+
+
+def test_a_session_holding_no_grant_sees_the_unchanged_lattice(
+    tmp_path: Path,
+) -> None:
+    """Naming no document, and naming an empty one, both grant nothing."""
+    empty = tmp_path / "grants.json"
+    write_allowance_grants(empty, [])
+
+    assert effect_under(NEW_DEVTOOLS_MODULE, session_environment(None)) == "ask"
+    assert effect_under(NEW_DEVTOOLS_MODULE, session_environment(empty)) == "ask"
+
+
+def test_one_leases_grant_cannot_release_a_siblings_gate(tmp_path: Path) -> None:
+    """A session reads the document it was pointed at and no other."""
+    write_allowance_grants(
+        tmp_path / "sibling.json", [ConcernAllowance.NEW_DEVTOOLS_MODULE]
+    )
+
+    launched = session_environment(tmp_path / "mine.json")
+
+    assert effect_under(NEW_DEVTOOLS_MODULE, launched) == "ask"
+
+
+def test_a_stale_environment_cannot_grant_what_the_document_does_not(
+    tmp_path: Path,
+) -> None:
+    """The retired variable is inert, so there is one answer and not two.
+
+    An allowance carried as a value in the environment outlives whatever
+    decided it. Left readable it would be a second source for a fact that has
+    one, and the one it disagreed with would be the live one.
+    """
+    document = tmp_path / "grants.json"
+    write_allowance_grants(document, [])
+    launched = {
+        **session_environment(document),
+        "LUP_CONCERN_ALLOWANCES": '["new-devtools-module"]',
+    }
+
+    assert effect_under(NEW_DEVTOOLS_MODULE, launched) == "ask"
+
+
+def bundled_dispatcher() -> ModuleType:
+    """Import the emitted dispatcher so its own `rendered` can be called.
+
+    A placement reaches that function on a decision, and no rule declares
+    `escalable` yet — the placement exists so `toolchain-sandbox-escalation`
+    can declare one. Driving it from a command would therefore pin nothing
+    until the first rule lands, which is exactly when a silent revocation
+    would stop being catchable.
+    """
+    spec = importlib.util.spec_from_file_location(
+        "bundled_claude_policy", DISPATCHER.resolve()
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def dispatcher_rewrite(placement: SandboxPlacement, call: JsonObject) -> JsonObject:
+    """What the emitted dispatcher rewrites one placed Bash call to."""
+    dispatcher = bundled_dispatcher()
+    answer = dispatcher.rendered(
+        dispatcher.KernelDecision("allow", "placed", placement),
+        {"tool_name": "Bash", "tool_input": call},
+        None,
+    )
+    specific = answer["hookSpecificOutput"]
+    assert isinstance(specific, dict)
+    rewritten = specific["updatedInput"]
+    assert isinstance(rewritten, dict)
+    return rewritten
+
+
+def spent_call(spent: bool) -> JsonObject:
+    """One Bash call, with or without the escape its agent already asked for."""
+    call: JsonObject = {"command": "uv run lup-devtools dev check"}
+    if spent:
+        call["dangerouslyDisableSandbox"] = True
+    return call
+
+
+def test_the_dispatcher_lets_the_agent_spend_the_escalation_it_was_offered() -> None:
+    """An offer the same hook revokes on the rewrite is one nobody can take.
+
+    The permission channel grants the escape and the rewrite replaces the
+    call's arguments outright, so a rewrite answering a plain `False` hands
+    back what the reason just offered — and the agent cannot tell, because
+    the grant it read still says it may leave. Unspent, the same placement
+    confines the call: that half is what makes this a permission rather than
+    a placement, and one predicate answers both so neither can drift.
+    """
+    spent = dispatcher_rewrite("escalable", spent_call(True))
+    unspent = dispatcher_rewrite("escalable", spent_call(False))
+
+    assert spent == {**spent_call(True), "dangerouslyDisableSandbox": True}
+    assert unspent == {**spent_call(False), "dangerouslyDisableSandbox": False}
+
+
+@pytest.mark.parametrize("placement", ["inside", "escalable", "outside"])
+@pytest.mark.parametrize("spent", [True, False])
+def test_both_boundaries_place_one_call_the_same_way(
+    placement: SandboxPlacement, spent: bool
+) -> None:
+    """One field two boundaries fill is one they can fill differently.
+
+    The in-process seam and the emitted dispatcher render the same rewrite
+    for two different readers, and only the second is what a native session
+    runs — so a suite exercising the first alone reports a placement working
+    while the shipped path strips it. They are compared against each other
+    rather than each against its own expectation, because what went wrong was
+    never either one alone.
+
+    Both sides are the entry a session reaches: `claude_placed_input` is what
+    the in-process handler calls, so a renderer nothing constructs cannot
+    stand in for it here.
+    """
+    call = spent_call(spent)
+
+    assert dispatcher_rewrite(placement, call) == claude_placed_input(
+        "Bash", call, placement
+    )

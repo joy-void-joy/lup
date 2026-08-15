@@ -31,9 +31,11 @@ DECLARED = Settings(
         # The guidance sends every change through a worktree, so entering and
         # leaving one is the first thing a session does and the last. Asking
         # about the step the workflow mandates is asking whether to follow it.
-        # Neither tool writes: `EnterWorktree` moves this session into a tree
-        # `dev worktree create` already made, and `ExitWorktree` only removes
-        # one when asked to, which is its own question.
+        # `EnterWorktree` moves this session into a tree `dev worktree create`
+        # already made. `ExitWorktree` can remove one, and what holds it back
+        # is the tool's own refusal on uncommitted files and unmerged commits
+        # — which its caller overrides by setting `discard_changes`, so the
+        # grant is trust in that refusal rather than a second gate behind it.
         "EnterWorktree",
         "ExitWorktree",
         "Read(./.claude/settings.json.local*)",

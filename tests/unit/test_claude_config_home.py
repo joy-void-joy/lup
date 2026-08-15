@@ -12,7 +12,6 @@ from lup.adapters.claude.config_home import (
     CLAUDE_CONFIG_FILE,
     CLAUDE_HOME_LAYOUT,
     ClaudeConfigUnreadable,
-    configuration_fault,
     load_document,
     record_trust,
     restorable_backups,
@@ -239,7 +238,7 @@ def test_an_unreadable_document_stops_a_run_before_it_leases(
     home.document.write_text('{"projects": {', encoding="utf-8")
     restorable = backup(tmp_path, "whole", json.dumps({"projects": {"/a": {}}}))
 
-    fault = configuration_fault(home)
+    fault = home.configuration_fault()
     assert fault is not None
     assert "does not parse" in fault
     assert str(restorable) in fault
@@ -249,4 +248,4 @@ def test_a_readable_document_is_no_fault(tmp_path: Path) -> None:
     home = selected_config_home({CLAUDE_CONFIG_DIR: str(tmp_path)})
     save_document(home.document, {})
 
-    assert configuration_fault(home) is None
+    assert home.configuration_fault() is None

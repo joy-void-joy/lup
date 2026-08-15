@@ -2,11 +2,13 @@
 
 import json
 import shlex
+from collections.abc import Collection
 from importlib import resources
 from pathlib import Path
 
 import tomlkit
 from lup.adapters.codex.login import CODEX_LOGIN
+from lup.codescan.antipatterns import DOCUMENT_IN_HAND, antipattern_set_for
 from lup.harness.banner import (
     PROMPT_TEXT,
     REGENERATE_COMMAND,
@@ -19,9 +21,16 @@ from lup.harness.contracts import (
     Instruction,
     NativeSpellings,
     PromptRenderer,
+    Spelled,
+    Spelling,
+    Unsupported,
 )
 from lup.harness.generation import argument_text
-from lup.harness.prompts import guidance_banner
+from lup.harness.prompts import (
+    SPAWNED_SESSION_LOSES_SHELL,
+    guidance_banner,
+    sentences,
+)
 from lup.harness.models import (
     GUIDANCE_BYTE_BUDGET,
     Agent,
@@ -49,11 +58,16 @@ from lup.policy.dispatcher import (
     dispatcher_banner,
 )
 from lup.policy.kernel.rows import PathRoleRow
+from lup.policy.refused_tools import routed_for
 from lup.policy.kernel.words import (
     INTERPRETERS,
     PASS_THROUGH_WORDS,
 )
-from lup.policy.shell_rules import ShellCommandRule
+from lup.policy.shell_rules import (
+    RunnerTargetRule,
+    ShellCommandRule,
+    erase_shell_rules,
+)
 
 
 class CodexSpellings(NativeSpellings):
@@ -63,6 +77,11 @@ class CodexSpellings(NativeSpellings):
     plugin name is deliberately unused there. The model tier is declined
     outright: recorded evidence for Codex custom agents covers TOML parsing
     only, so there is no proven alias to spell a tier in.
+
+    Reading a document whole is declined outright rather than approximated,
+    saying why: nothing in this roster does it, and an approximation would
+    read as an instruction the agent can follow and cost it a turn to find
+    out otherwise.
     """
 
     @property
@@ -107,37 +126,78 @@ class CodexSpellings(NativeSpellings):
             "carried on here would land in the checkout it started from"
         )
 
-    # lup: The Claude entry now tells the agent to launch the run outside the
-    # sandbox, because a session spawned inside it loses every shell call. This
-    # one says nothing, and inventing a flag would be worse than the silence:
-    # the Codex overrides this repository knows are session-level flags on the
-    # binary, not a per-call escape a skill can ask for. "Run this outside the
-    # sandbox" is a portable idea with a per-runtime spelling, so it wants a
-    # `NativeSpellings` method beside `ask_user` — and if Codex has no per-call
-    # escape, the explicit unsupported declaration the adapter-parity concern
-    # asks for, carrying the reason.
+    def escape_sandbox(self, reason: str) -> Spelling:
+        """Spell the per-call escape Codex puts in the model's own hands.
+
+        Read out of the source at tag ``rust-v0.145.0`` — the release
+        ``docs/native-capabilities.md`` pins — rather than out of the prose
+        pages, which describe the session-level flags and leave this one
+        unmentioned. ``codex-rs/core/src/tools/handlers/shell_spec.rs`` puts
+        ``sandbox_permissions`` on the shell tool the model calls, describing
+        it to the model as a per-command sandbox override whose
+        ``require_escalated`` value means unsandboxed execution, beside a
+        ``justification`` field that becomes the approval question a human
+        answers; the value is pushed into that enum unconditionally, so it is
+        offered on every session.
+        ``codex-rs/core/src/tools/sandboxing.rs`` is where it lands, mapping
+        ``requires_escalated_permissions()`` to a first attempt that bypasses
+        the sandbox. Both paths are re-derivable at that tag, which is the
+        point of naming them: the finding is checkable rather than inherited.
+
+        This is the agent's route and not a hook's — a Codex policy verdict
+        still places nothing, which is why
+        :data:`~lup.adapters.codex.hooks.CODEX_SEMANTICS` splits the two.
+        """
+        return Spelled(
+            words=Instruction(
+                "Re-issue it with `sandbox_permissions` set to "
+                "`require_escalated`, and a `justification` saying why, which "
+                f"is the approval question the user answers. {reason}"
+            )
+        )
+
+    def read_document(self, path: str) -> Spelling:
+        return Unsupported(
+            reason=(
+                "Codex's tool roster reads a document only by running a shell "
+                "command over it, and `view_image` — the one tool that takes a "
+                "file whole — accepts images alone, so nothing here can be "
+                "handed a PDF or an office document"
+            )
+        )
+
     def resolver_entry(self) -> Instruction:
         return Instruction(
-            "Run `uv run lup-devtools harness resolve --adapter codex`. "
-            "Where this project has a run that never finished, it refuses "
-            "rather than starting a second one beside it, and lists them: "
-            "relay that choice — resume with `--run-id <id>`, keeping every "
-            "answer already collected, or start fresh with `--new`, which "
-            "re-derives the inventory and discards them. Never take it "
-            "yourself. Assembling the review branch is gated on the "
-            "reserved `integration-assembly` question, so approving it is "
-            "`--answer integration-assembly=approve` like any other answer. "
-            "It waits zero seconds by "
-            "default and parks on material questions, printing each one "
-            "beside the `# lup:` notes it was raised from, the concern's "
-            "spec, and its acceptance criteria; rerun with the repeatable "
-            "`--answer <question-id>=<value>` flag to answer them. "
-            "`--admit <text>` admits work discovered mid-run in the human's "
-            "own words and `--admit-note <file>:<line>` admits a note you "
-            "wrote in the tree, both repeatable. "
-            "Never pass `--wait` or `--supervise`; both hold a run open "
-            "for a human instead of parking — `--wait` at the mailbox, "
-            "`--supervise` at the page it opens."
+            sentences(
+                "Run `uv run lup-devtools harness resolve --adapter codex`. "
+                "`uv run lup-devtools harness resolve intake` first prints what a "
+                "run started now would plan from — every actionable note at its "
+                "file and line, the deferred ones it would carry, and the ones it "
+                "would leave to their generator — creating no run and leasing no "
+                "worktree, so the inventory can be read before committing to it. "
+                "Where this project has a run that never finished, it refuses "
+                "rather than starting a second one beside it, and lists them: "
+                "relay that choice — resume with `--run-id <id>`, keeping every "
+                "answer already collected, or start fresh with `--new`, which "
+                "re-derives the inventory and discards them. Never take it "
+                "yourself. Assembling the review branch is gated on the "
+                "reserved `integration-assembly` question, so approving it is "
+                "`--answer integration-assembly=approve` like any other answer. "
+                "It waits zero seconds by "
+                "default and parks on material questions, printing each one "
+                "beside the `# lup:` notes it was raised from, the concern's "
+                "spec, and its acceptance criteria; rerun with the repeatable "
+                "`--answer <question-id>=<value>` flag to answer them. "
+                "`--admit <text>` carries work in the human's own words: it seeds "
+                "a run that does not exist yet, beside whatever notes the tree "
+                "holds, and joins one already moving. `--admit-note <file>:<line>` "
+                "names a note written in the tree and `--admit-issue <number>` an "
+                "open issue; all three are repeatable. "
+                "Never pass `--wait` or `--supervise`; both hold a run open "
+                "for a human instead of parking — `--wait` at the mailbox, "
+                "`--supervise` at the page it opens.",
+                self.escape_sandbox(SPAWNED_SESSION_LOSES_SHELL).in_prose(),
+            )
         )
 
     def arguments_ref(self) -> Atom:
@@ -428,39 +488,57 @@ CODEX_DYNAMIC_COMMANDS = (
 
 
 def codex_allow_prefixes(
-    rules: list[ShellCommandRule], runner_targets: list[str]
+    rules: list[ShellCommandRule],
+    runner_targets: list[RunnerTargetRule],
+    dynamic: Collection[str] = CODEX_DYNAMIC_COMMANDS,
 ) -> list[list[str]]:
     """Compile semantic allows that stay allowed for every suffix.
 
     Codex prefix rules bypass the sandbox, so flag-guarded rows cannot be
-    widened into a native allow. The runtime hook continues to classify those
-    forms, along with every command whose safety depends on parsed content.
+    widened into a native allow, and neither can one placed ``inside``, whose
+    whole statement is that the call runs confined however the session is
+    running. The runtime hook continues to classify those forms, along with
+    every command whose safety depends on parsed content.
+
+    The erased rows are what this reads rather than the declarations they came
+    from, because the rows are where both axes have been resolved down the
+    nesting: a level that inherited its effect is native-allowed on exactly the
+    terms of one that spelled it out, which is the same reading the dispatcher
+    and the canonical policy take.
+
+    That bypass is the whole of the escape this compiler can declare, which is
+    why a runner target's placement does not narrow what is emitted here: a
+    target declared ``outside`` reaches the outside through its prefix rule or
+    not at all. What a rule cannot reach is the escape the model spends on its
+    own call, which exists but is chosen a call at a time rather than compiled
+    in advance — :meth:`CodexSpellings.escape_sandbox` carries it. The forms
+    this cannot widen — a target behind a global flag, or one joined into a
+    compound command — reach the hook, where a confined session is stopped
+    with the reason rather than left to fail on the first write.
     """
 
     def add(prefix: list[str]) -> None:
         if prefix not in prefixes:
             prefixes.append(prefix)
 
+    rows = erase_shell_rules(rules)
+    gated = dict.fromkeys(row["command"] for row in rows if row["subcommand"])
+    operational = dict.fromkeys(
+        f"{row['command']} {row['subcommand']}" for row in rows if row["operation"]
+    )
     prefixes: list[list[str]] = []
-    for command in rules:
-        if not command.subcommands:
-            if (
-                command.name not in CODEX_DYNAMIC_COMMANDS
-                and command.default_effect == "allow"
-                and not command.ask_flags
-            ):
-                add([command.name])
+    for row in rows:
+        if row["effect"] != "allow" or row["ask_flags"] or row["sandbox"] == "inside":
             continue
-        for subcommand in command.subcommands:
-            if subcommand.operations:
-                for operation in subcommand.operations:
-                    if operation.effect == "allow" and not operation.ask_flags:
-                        add([command.name, subcommand.name, operation.name])
-                continue
-            if subcommand.effect == "allow" and not subcommand.ask_flags:
-                add([command.name, subcommand.name])
+        if not row["subcommand"]:
+            if row["command"] not in gated and row["command"] not in dynamic:
+                add([row["command"]])
+        elif row["operation"]:
+            add([row["command"], row["subcommand"], row["operation"]])
+        elif f"{row['command']} {row['subcommand']}" not in operational:
+            add([row["command"], row["subcommand"]])
     for target in runner_targets:
-        add(["uv", "run", target])
+        add(["uv", "run", target.name])
     return sorted(prefixes)
 
 
@@ -479,9 +557,12 @@ def render_codex_rules(source: HookSet) -> str:
 class CodexHookRenderer(ArtifactRenderer[HookSet]):
     """Render Codex hooks, canonical kernel, and application policy rows."""
 
-    def __init__(self, plugin_name: str, worker_identity: str) -> None:
+    def __init__(
+        self, plugin_name: str, worker_identity: str, spellings: NativeSpellings
+    ) -> None:
         self.plugin_name = plugin_name
         self.worker_identity = worker_identity
+        self.spellings = spellings
 
     def render(self, source: HookSet) -> ArtifactTree:
         policy_hook = {
@@ -492,7 +573,9 @@ class CodexHookRenderer(ArtifactRenderer[HookSet]):
         }
         registration = [
             {
-                "matcher": "|".join(CODEX_DISPATCHER.routed_tools),
+                "matcher": "|".join(
+                    routed_for(CODEX_DISPATCHER.routed_tools, source.refused_tools)
+                ),
                 "hooks": [policy_hook],
             }
         ]
@@ -587,8 +670,13 @@ class CodexHookRenderer(ArtifactRenderer[HookSet]):
                             for role in source.path_roles
                         ],
                         shell_rules=list(source.shell_rules),
+                        refused_tools=list(source.refused_tools),
                         recoverable_target_limit=source.recoverable_target_limit,
                         runner_targets=list(source.runner_targets),
+                        sandbox_excluded_commands=source.excluded_commands(),
+                        rules=antipattern_set_for(
+                            self.spellings.read_document(DOCUMENT_IN_HAND)
+                        ),
                     ),
                     semantic_id=source.id,
                 ),

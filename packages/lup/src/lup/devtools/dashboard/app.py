@@ -11,27 +11,31 @@ from typing import Annotated, Literal
 
 import typer
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field
 
 from lup.devtools.setup import Integration, read_env_local, write_env_local
 from lup.types import EnvVars
 from lup.web.serve import local_page_app, serve_local_page
 
+DASHBOARD_PORT = 8765
+"""Where this page listens when nothing says otherwise.
 
-class DashboardField(BaseModel):
+A port is this library's judgement rather than anyone's convention, so it is
+the default the ``--port`` flag replaces and the factory parameter an
+application overrides — never a value an adopter has to fork to change.
+"""
+
+
+class DashboardField(BaseModel, frozen=True):
     """One declarative setup field safe to expose in the browser."""
-
-    model_config = ConfigDict(frozen=True)
 
     key: str
     prompt: str
     secret: bool
 
 
-class DashboardIntegration(BaseModel):
+class DashboardIntegration(BaseModel, frozen=True):
     """Browser-facing projection of one setup integration."""
-
-    model_config = ConfigDict(frozen=True)
 
     name: str
     command: str
@@ -42,10 +46,8 @@ class DashboardIntegration(BaseModel):
     fields: list[DashboardField]
 
 
-class DashboardState(BaseModel):
+class DashboardState(BaseModel, frozen=True):
     """Complete setup progress shown by the dashboard."""
-
-    model_config = ConfigDict(frozen=True)
 
     configured: int
     total: int
@@ -102,6 +104,7 @@ def find_integration(integrations: list[Integration], command: str) -> Integrati
     return integration
 
 
+# lup: ignore[model-free-function] — subject is the registry, not the payload
 def save_integration(
     integrations: list[Integration], command: str, update: IntegrationUpdate
 ) -> DashboardState:
@@ -143,7 +146,7 @@ def create_dashboard(url: str, integrations: list[Integration]) -> FastAPI:
 
 
 def create_dashboard_app(
-    integrations: list[Integration], default_port: int = 8765
+    integrations: list[Integration], default_port: int = DASHBOARD_PORT
 ) -> typer.Typer:
     """Build the dashboard command over a project's declared integrations."""
     app = typer.Typer(

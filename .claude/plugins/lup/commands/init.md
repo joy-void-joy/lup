@@ -1,6 +1,6 @@
 ---
 description: "Initialize the self-improvement loop for a specific domain"
-allowed-tools: Bash(uv run lup-devtools:*, uv sync:*, uv run pyright:*, uv run ruff:*, uv run pytest:*), Read, Edit, Write, AskUserQuestion
+allowed-tools: Bash(git:*, uv run lup-devtools:*, uv sync:*, uv run pyright:*, uv run ruff:*, uv run pytest:*), Read, Edit, Write, AskUserQuestion
 ---
 
 # Initialize Self-Improvement Loop
@@ -12,6 +12,29 @@ This command sets up the project identity, renames the source package, and custo
 ## Your Task
 
 Interview the user about their domain, rename the source package, and generate the appropriate scaffolding.
+
+### The branch you start from is the library you get
+
+This checkout is a clone of lup, so the branch it stands on *is* the library
+version the project begins at: `packages/lup/` is that branch's code, and the
+acquisition mode settled in Phase 2 pins that same ref. A feature branch
+carries work the stable branch has not reviewed, and nothing downstream
+announces that. Resolve both before Phase 0, while `origin` still points at lup
+rather than at the project's own repository:
+
+- `git rev-parse --abbrev-ref HEAD` — the branch the library would come from
+- `git symbolic-ref --short refs/remotes/origin/HEAD` — what the remote treats as stable
+
+When they differ, Ask the user with the AskUserQuestion tool, offering concrete options plus a free-text choice: whether to proceed from the checkout's current branch, which carries work the stable branch has not reviewed, or from the stable branch instead
+
+Record the branch and the commit the answer settles on. Everything below is
+about that commit — the acquisition mode pins its branch and the upstream
+checkpoint is taken at it — so the checkout supplying the library has to be
+standing there before you go on.
+
+This checkout is the one supplying the library, and `packages/lup/` is whatever
+branch is checked out — so if the answer was the stable branch, `git switch` to
+it now, before Phase 0 reads anything.
 
 ## Phase 0: Check for DESIGN.md
 
@@ -106,28 +129,104 @@ This handles directory rename (`src/lup_template/` -> `src/<project>/`), import 
 
 ### After renaming:
 
-1. **Merge the guidance file from its template** -- Perform a section-level merge into each tree's guidance file (.claude/CLAUDE.md under Claude Code, AGENTS.md under Codex) from its matching template flavor (.claude/plugins/lup/TEMPLATE_CLAUDE.md under Claude Code, .codex/plugins/lup/TEMPLATE_AGENTS.md under Codex), covering every tree the project commits:
-   1. Read the template and replace `<project>` placeholders with the actual project name
-   2. Read the existing guidance file
-   3. Use the `<!-- section: ... -->` markers in the template to identify independent merge units
-   4. Compare sections: for each marked section, check if the existing guidance file already has that section (by heading match)
-   5. Add missing sections from the template into the existing guidance file
-   6. Leave existing sections untouched -- don't overwrite content the project already has
+#### 1. Declare how the project obtains lup
 
-2. **Initialize upstream sync**:
-   ```bash
-   uv run lup-devtools sync mark-synced lup
-   ```
-   This baselines the sync state so `/lup:update` only shows commits after this point.
+The template ships the library vendored under `packages/lup/`, which makes the
+project a fork of it. The rename is what allows leaving that mode: `dev library`
+refuses to un-vendor while `src/lup_template/` is present, because an
+uninitialized template and the lup repository are the same bytes and nothing
+else separates them.
 
-3. **Verify**:
-   ```bash
-   uv sync
-   uv run pyright
-   uv run ruff check .
-   uv run pytest
-   <project> --help
-   ```
+A project depends on `lup` as a package rather than keeping a copy of the
+library's source. Half the answer is a fact to look up rather than a
+preference — whether a release exists at all, and which:
+
+```
+uv run lup-devtools dev library release
+```
+
+It reports the released version, or that none is published yet, and prints the
+command that declares what it found — so the release number is read from the
+index rather than guessed at.
+
+The other half is a judgement about what this project is to lup, and the
+look-up does not make it. Ask the user which of these describes them:
+
+| Mode | The project it is for | Command |
+| --- | --- | --- |
+| published | A consumer of the library: it takes releases and upgrades on its own schedule | `uv run lup-devtools dev library use published --version <release>` |
+| **git** | Either nothing is published yet, or the project works *on* lup as well as with it — running a branch to dogfood it and sending changes back | `uv run lup-devtools dev library git --branch <branch>` |
+| linked | The library is being developed alongside this project, in a checkout on the same disk | `uv run lup-devtools dev library link <checkout>` |
+
+With nothing published, git is the only mode that resolves, so the look-up
+settles it. Once a release exists, published is the quieter default and git
+stays a live choice: a project that reads the library's own diffs, or that
+expects to send work back, is better served by the branch it is improving than
+by the last release cut from it. All three hand the project a real package, so
+its `packages/lup/` stays absent and nothing has to be merged later. Vendoring
+is not on this list — a vendored copy is a fork with all the reconciliation
+that implies, and is only right for a project that genuinely intends to modify
+library source.
+
+The git mode resolves `subdirectory = "packages/lup"`, because the distribution sits inside the repository rather than at its root, and pins whichever ref you name. **The ref resolves against the remote, not against any checkout on disk**: uv fetches the branch as the remote has it, so work the remote has not seen is not in what you pinned. Before declaring a git source, read what the remote's branch actually resolves to — `git ls-remote origin <branch>` names that tip — and if it is not the recorded commit, say so rather than pinning a dependency whose contents you have not accounted for.
+
+The extras come from what the project runs: `claude` and/or `codex` for the
+adapters it drives, `docker` for the code-execution sandbox, `web` for the
+session API. Name them in the requirement (`lup[claude,codex,docker]`).
+
+The command prints the `uv sync` and the regeneration it wants next. Run both
+before anything reads the project's types.
+
+#### 2. Merge the guidance template into the guidance declaration
+
+The merge lands in `src/<project>/devtools/harness/content/guidance.py`, never in a tree's guidance file (.claude/CLAUDE.md under Claude Code, AGENTS.md under Codex): those are generation's outputs, and an edit made directly to one is undone the next time the harness runs. Take the sections from that tree's template flavor (.claude/plugins/lup/TEMPLATE_CLAUDE.md under Claude Code, .codex/plugins/lup/TEMPLATE_AGENTS.md under Codex), covering every tree the project commits:
+
+1. Read the template and replace `<project>` placeholders with the actual project name
+2. Read the existing declaration
+3. Use the `<!-- section: ... -->` markers in the template to identify independent merge units
+4. Compare sections: for each marked section, check whether the declaration already composes it (by heading match)
+5. Add missing sections to the declaration
+6. Leave existing sections untouched -- don't overwrite content the project already has
+7. Regenerate with `uv run lup-devtools harness generate all`, which is what carries the merged sections into every tree
+
+Which runtimes the project carries is not a choice made here: every tree
+arrives with the clone, and generation writes each one it finds. Dropping a
+runtime is a later removal somebody decides on its own terms.
+
+#### 3. Initialize upstream sync
+
+Baseline the upstream checkpoint at *the recorded commit*, not at whatever the
+remote's default branch points to. `--synced` reads the checkpoint from the
+named checkout's HEAD, so that checkout has to be standing at the recorded
+commit when this runs:
+
+```
+uv run lup-devtools sync setup lup <lup-checkout> --branch <branch> --synced
+```
+
+`setup` records that checkout, the branch settled on above, and its HEAD as the checkpoint, so `/lup:update` only shows commits that land afterward. Plain `sync mark-synced lup` is wrong here: the shipped `sync.json` entry carries a URL and no branch, so it clones the remote's default branch and checkpoints *that* HEAD — so every commit the project already carries comes back as unported work once the branch merges.
+
+That checkout is one you provide: clone the library beside the project, then
+`git switch --detach <commit>` it to the recorded commit. Not this project's
+own checkout — it stands at that commit too, and naming it makes the review
+read the project's own history as upstream work. The linked mode's checkout can
+serve when it already stands there, but it is someone's working checkout and is
+not yours to move.
+
+A recorded path is read in place and never fetched, so whichever checkout you
+name is the one to update before a review. The branch may also have advanced
+since this project was cloned, and a checkpoint taken from its tip marks the
+commits in between as already reviewed when the project does not carry them.
+
+#### 4. Verify
+
+```bash
+uv sync
+uv run pyright
+uv run ruff check .
+uv run pytest
+<project> --help
+```
 
 ## Phase 3: Generate Scaffolding
 

@@ -67,6 +67,7 @@ from lup.devtools.harness.content.skills.refactor import SKILL as SKILL_REFACTOR
 from lup.devtools.harness.content.skills.refactor_tools import (
     SKILL as SKILL_REFACTOR_TOOLS,
 )
+from lup.devtools.harness.content.skills.report import SKILL as SKILL_REPORT
 from lup.devtools.harness.content.skills.resolve import SKILL as SKILL_RESOLVE
 from lup.devtools.harness.content.skills.resolve_reviewer import (
     SKILL as SKILL_RESOLVE_REVIEWER,
@@ -78,11 +79,6 @@ from lup.devtools.harness.content.skills.verify_solved import (
 
 # lup: ignore[library-default] — the skills this library authors, so the list is what it ships rather than a choice made for an adopter
 LIBRARY_SKILLS = [
-    # lup: We probably want a `/lup:report` skill here, invoked after a long
-    # session, that writes a report from scratch under `tmp/` for everything
-    # there still is to implement. Invoked after a "please implement
-    # tmp/plan_something.md" it should update that report — rewritten whole, not
-    # appended to, with all that is left to do.
     SKILL_ADD_COMMAND,
     SKILL_BUMP,
     SKILL_CLOSE,
@@ -104,6 +100,7 @@ LIBRARY_SKILLS = [
     SKILL_REBASE,
     SKILL_REFACTOR,
     SKILL_REFACTOR_TOOLS,
+    SKILL_REPORT,
     SKILL_RESOLVE,
     SKILL_RESOLVE_REVIEWER,
     SKILL_REVIEW,

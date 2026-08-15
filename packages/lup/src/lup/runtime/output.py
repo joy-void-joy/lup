@@ -5,7 +5,7 @@ import json
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ValidationError
 
 from lup.channels.models import publish_atomic
 from lup.runtime.contracts import SubmittedOutputStore
@@ -14,10 +14,8 @@ from lup.runtime.models import SubmissionDecision, TurnToolBinding
 from lup.types import JsonObject, JsonValue
 
 
-class SubmissionResponse(BaseModel):
+class SubmissionResponse(BaseModel, frozen=True):
     """Actionable response returned by the portable submission tool."""
-
-    model_config = ConfigDict(frozen=True)
 
     accepted: bool
     message: str
@@ -61,10 +59,8 @@ class FileSubmittedOutputStore(SubmittedOutputStore):
         return output_type.model_validate_json(self.path.read_text(encoding="utf-8"))
 
 
-class AttemptDocument(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
-    attempts: list[ValidationAttempt] = Field(default_factory=list)
+class AttemptDocument(BaseModel, frozen=True):
+    attempts: list[ValidationAttempt] = []
 
 
 def record_attempt(store: SubmittedOutputStore, message: str) -> None:

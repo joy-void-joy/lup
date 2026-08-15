@@ -31,11 +31,15 @@ from lup.codescan.project import (
     descendants_of,
     dotted_name,
     imported_names,
+    named_types,
     resolve_name,
 )
 
+# lup: ignore[constant-declaration] — the rule's own identity, what a typed
+# directive and every deny message name it by
 RULE_ID = "own-model-dispatch"
 
+# lup: ignore[constant-declaration] — the import path pydantic publishes
 MODEL_BASES = {"pydantic.BaseModel"}
 """Roots whose project-defined descendants count as models we declare."""
 
@@ -43,28 +47,16 @@ MODEL_BASES = {"pydantic.BaseModel"}
 NARROWING_CALLS = {"isinstance", "issubclass"}
 """Builtins that branch on a runtime type rather than asking the value."""
 
+# lup: ignore[constant-declaration] — typing's own name for it, not ours
 EXHAUSTIVENESS_CALL = "assert_never"
 """The static net that only exists to catch a union gaining a member."""
 
+# lup: ignore[constant-declaration] — the rule's own sentence, declared with what
+# it detects rather than chosen per caller
 REMEDY = (
     "declare the operation on the union's base and let each variant answer or "
     "decline it"
 )
-
-
-def named_types(node: ast.expr) -> list[str]:
-    """Every type name a narrowing call's second argument names.
-
-    Handles the tuple and ``|`` spellings of "any of these types" so a
-    multi-type check reports each project model it branches on.
-    """
-    match node:
-        case ast.Tuple(elts=elements):
-            return [name for element in elements for name in named_types(element)]
-        case ast.BinOp(left=left, op=ast.BitOr(), right=right):
-            return [*named_types(left), *named_types(right)]
-    name = dotted_name(node)
-    return [] if name is None else [name]
 
 
 def dispatch_violations(
@@ -80,15 +72,8 @@ def dispatch_violations(
         aliases = imported_names(tree, source.module)
 
         def report(node: ast.expr | ast.pattern, message: str) -> None:
-            line = node.lineno
-            end = node.end_lineno or line
             violations.append(
-                RuleViolation(
-                    path=source.path,
-                    line=line,
-                    message=message,
-                    suppression_lines=list(range(line, end + 1)),
-                )
+                RuleViolation(path=source.path, line=node.lineno, message=message)
             )
 
         def matched_model(name: str) -> str | None:

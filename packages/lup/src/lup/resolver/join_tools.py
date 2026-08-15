@@ -27,7 +27,7 @@ question tools do.
 
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field
 
 from lup.harness.process import LocalProcessLauncher, ProcessLauncher
 from lup.mcp import LupMcpTool, ToolError, lup_tool
@@ -118,10 +118,8 @@ def merge_problems(
     ]
 
 
-class PreparedJoin(BaseModel):
+class PreparedJoin(BaseModel, frozen=True):
     """What preparing one parent found, kept until its landing records it."""
-
-    model_config = ConfigDict(frozen=True)
 
     conflicted: bool = False
     rendered: bool = False
@@ -144,7 +142,7 @@ class LandParentInput(BaseModel):
     commit: str = Field(description="The parent you prepared with start_parent.")
     summary: str = Field(description="What this join did, in one or two sentences.")
     dispositions: list[HunkDisposition] = Field(
-        default_factory=list,
+        default=[],
         description=(
             "What became of each piece of content this parent contributed "
             "that the merged tree no longer holds. Every candidate named by "
@@ -152,7 +150,7 @@ class LandParentInput(BaseModel):
         ),
     )
     out_of_conflict_edits: list[DeclaredEdit] = Field(
-        default_factory=list,
+        default=[],
         description=(
             "Every file you edited that was not in the conflict set, with the "
             "reason. Fixing a caller whose file merged clean is correct and "
@@ -165,7 +163,7 @@ class JoinStatusInput(BaseModel):
     """Nothing: where the join stands is not a question with parameters."""
 
 
-class JoinReport(BaseModel):
+class JoinReport(BaseModel, frozen=True, extra="forbid"):
     """The merger's account of one turn spent joining a set of parents.
 
     Narrative rather than authoritative. What actually landed is whatever
@@ -174,8 +172,6 @@ class JoinReport(BaseModel):
     the commit. This is where the merger says what it decided and why, and
     what it wants whoever reads the run to know.
     """
-
-    model_config = ConfigDict(frozen=True, extra="forbid")
 
     plan: str = Field(
         description=(
@@ -198,44 +194,38 @@ class JoinReport(BaseModel):
     )
 
 
-class StartParentOutput(BaseModel):
+class StartParentOutput(BaseModel, frozen=True):
     """What a prepared merge left to decide."""
-
-    model_config = ConfigDict(frozen=True)
 
     commit: str
     state: str
-    conflicted: list[Path] = Field(default_factory=list)
+    conflicted: list[Path] = []
     rendered_settled: bool = False
     guidance: str = ""
 
 
-class LandParentOutput(BaseModel):
+class LandParentOutput(BaseModel, frozen=True):
     """Whether the parent landed, and what is owed if it did not."""
-
-    model_config = ConfigDict(frozen=True)
 
     commit: str
     landed: bool
     head: str = ""
     joined: int = 0
     planned: int = 0
-    problems: list[str] = Field(default_factory=list)
-    unaccounted: list[DropCandidate] = Field(default_factory=list)
-    broke: list[str] = Field(default_factory=list)
+    problems: list[str] = []
+    unaccounted: list[DropCandidate] = []
+    broke: list[str] = []
     drain_requested: bool = False
     guidance: str = ""
 
 
-class JoinStatusOutput(BaseModel):
+class JoinStatusOutput(BaseModel, frozen=True):
     """Where the join stands, for a session that has to re-establish it."""
 
-    model_config = ConfigDict(frozen=True)
-
     head: str
-    joined: list[str] = Field(default_factory=list)
-    remaining: list[JoinTip] = Field(default_factory=list)
-    carried: list[CarriedParent] = Field(default_factory=list)
+    joined: list[str] = []
+    remaining: list[JoinTip] = []
+    carried: list[CarriedParent] = []
     drain_requested: bool = False
 
 

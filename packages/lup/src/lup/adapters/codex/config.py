@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, SecretStr
+from pydantic import AnyHttpUrl, BaseModel, Field, SecretStr
 
 from lup.adapters.codex.login import CODEX_LOGIN
 from lup.adapters.codex.runtime import (
@@ -15,21 +15,17 @@ from lup.types import JsonObject
 OPENAI_COMPAT_API_KEY_ENV = "LUP_OPENAI_COMPAT_API_KEY"
 
 
-class CodexProfileSelection(BaseModel):
+class CodexProfileSelection(BaseModel, frozen=True):
     """A Codex account home and optional independently named config overlay."""
-
-    model_config = ConfigDict(frozen=True)
 
     codex_home: Path | None = None
     named_profile: str | None = None
 
 
-class CodexProfileRegistry(BaseModel):
+class CodexProfileRegistry(BaseModel, frozen=True):
     """Immutable Codex profile selection supplied by an application."""
 
-    model_config = ConfigDict(frozen=True)
-
-    profiles: dict[str, CodexProfileSelection] = Field(default_factory=dict)
+    profiles: dict[str, CodexProfileSelection] = {}
     active: str | None = None
     default: CodexProfileSelection = Field(default_factory=CodexProfileSelection)
 
@@ -69,6 +65,9 @@ class CodexProfileResolver(ProfileResolver[CodexSessionConfig]):
         return CodexProfileTransform(profile)
 
 
+# The registry declares which profile is selected; naming the resolver and the
+# session factory that act on it would put both inside the declaration.
+# lup: ignore[model-free-function] — composition root over the registry
 def codex_profile_selector(
     registry: CodexProfileRegistry,
 ) -> ProfileSelector[CodexSessionConfig]:
@@ -76,10 +75,8 @@ def codex_profile_selector(
     return ProfileSelector(CodexProfileResolver(registry), create_codex_session_factory)
 
 
-class CodexCompatibleEndpoint(BaseModel):
+class CodexCompatibleEndpoint(BaseModel, frozen=True):
     """All configuration owned by one OpenAI-compatible model provider."""
-
-    model_config = ConfigDict(frozen=True)
 
     identifier: str = "lup_openai_compat"
     name: str | None = None

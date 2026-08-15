@@ -12,15 +12,17 @@ from pathlib import Path
 from typing import Annotated
 
 import typer
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
 import lup.devtools.dev.antipatterns as antipatterns_mod
 import lup.devtools.dev.boundaries as boundaries_mod
 import lup.devtools.dev.branches as branches
 import lup.devtools.dev.check as check
 import lup.devtools.dev.comments as comments
+import lup.devtools.dev.commit_guard as commit_guard
 import lup.devtools.dev.conflicts as conflicts
 import lup.devtools.dev.issues as issues_mod
+import lup.devtools.dev.model_config as model_config_mod
 import lup.devtools.dev.plugin as plugin_mod
 import lup.devtools.dev.policy_explain as policy_explain
 import lup.devtools.dev.pr as pr
@@ -34,18 +36,18 @@ from lup.devtools.harness.drift import RepositoryWriter
 from lup.devtools.harness.launch import relocation_hint
 from lup.devtools.project import DevProject
 from lup.harness.models import HookSet, Plugin, PromptDocument
+from lup.policy.kernel.edit import SUPPRESSION_COLUMN_LIMIT
+from lup.policy.vocabulary import default_vocabulary
 from lup.workspace.paths import project_root
 
 
-class DevDeclarations(BaseModel):
+class DevDeclarations(BaseModel, frozen=True):
     """Everything the dev tree reads about the repository it is running in.
 
     Read when a command runs rather than when the CLI is composed: each of
     these resolves against the working directory, and a CLI is imported long
     before anyone knows which repository it will be pointed at.
     """
-
-    model_config = ConfigDict(frozen=True)
 
     project: DevProject
     hooks: HookSet
@@ -66,12 +68,23 @@ def create_dev_app(
     pr_app = typer.Typer(no_args_is_help=True)
     conflict_app = typer.Typer(no_args_is_help=True)
     plugin_app = typer.Typer(no_args_is_help=True)
+    guard_app = typer.Typer(no_args_is_help=True)
     app.add_typer(worktree_app, name="worktree", help="Worktree management")
     app.add_typer(pr_app, name="pr", help="PR lifecycle (status, merge, push, checks)")
     app.add_typer(
         conflict_app, name="conflict", help="Merge/rebase conflict resolution"
     )
     app.add_typer(plugin_app, name="plugin", help="Local plugin marketplace wiring")
+    app.add_typer(
+        guard_app,
+        name="commit-guard",
+        help="The pre-commit hook refusing stale generated artifacts",
+    )
+    app.add_typer(
+        model_config_mod.create_model_config_app(),
+        name="model-config",
+        help="Pydantic configuration census and equivalence",
+    )
 
     # -- worktree commands --
 
@@ -307,6 +320,39 @@ def create_dev_app(
         """Finalize the merge/rebase/cherry-pick after all conflicts are resolved."""
         conflicts.conflict_complete(dry_run)
 
+    # -- commit-guard commands --
+
+    GUARD = commit_guard.CommitGuard()
+
+    @guard_app.command("install")
+    def guard_install_cmd(
+        force: Annotated[
+            bool,
+            typer.Option("--force", help="Replace a pre-commit hook written elsewhere"),
+        ] = False,
+    ) -> None:
+        """Install the pre-commit hook that refuses stale generated artifacts.
+
+        Idempotent, and shared by every worktree of the clone it is run from,
+        so re-running it after a library upgrade refreshes an older body.
+        """
+        try:
+            state = commit_guard.install_guard(GUARD, project_root(), force=force)
+        except commit_guard.GuardConflict as error:
+            typer.echo(str(error), err=True)
+            raise typer.Exit(1) from error
+        typer.echo(state.describe())
+
+    @guard_app.command("status")
+    def guard_status_cmd() -> None:
+        """Report whether this clone refuses a stale artifact at commit time."""
+        typer.echo(commit_guard.read_guard(GUARD, project_root()).describe())
+
+    @guard_app.command("uninstall")
+    def guard_uninstall_cmd() -> None:
+        """Remove the hook, leaving a pre-commit hook written elsewhere alone."""
+        typer.echo(commit_guard.uninstall_guard(GUARD, project_root()).describe())
+
     # -- check command --
 
     @app.command("check")
@@ -379,9 +425,9 @@ def create_dev_app(
         declarations = declared()
         if antipatterns:
             if stats:
-                antipatterns_mod.summarize(declarations.project, as_json, path or ())
+                antipatterns_mod.summarize(declarations.project, as_json, path)
             else:
-                antipatterns_mod.report(declarations.project, as_json, path or ())
+                antipatterns_mod.report(declarations.project, as_json, path)
             return
         if boundaries:
             boundaries_mod.report(declarations.project, as_json)
@@ -494,6 +540,39 @@ def create_dev_app(
         """
         comments.todos(as_json)
 
+    @app.command("directives")
+    def directives_cmd(
+        as_json: Annotated[
+            bool,
+            typer.Option("--json", help="Output as JSON"),
+        ] = False,
+        limit: Annotated[
+            int,
+            typer.Option("--limit", help="Column budget the inline placement gets"),
+        ] = SUPPRESSION_COLUMN_LIMIT,
+        fix: Annotated[
+            bool,
+            typer.Option(
+                "--fix", help="Move each directive to its canonical placement"
+            ),
+        ] = False,
+    ) -> None:
+        """Measure every `# lup: ignore` against the canonical inline placement.
+
+        Placement is uniform — a directive sits on the line it guards, or
+        stands alone directly above it — and the inline form is the canonical
+        one. This reports which sites the column budget lets stay inline and
+        which only fit above, so the fallback is sized against the tree rather
+        than assumed.
+        """
+        if fix:
+            moved = antipatterns_mod.place_directives(declared().project, limit)
+            typer.echo(f"{len(moved)} file(s) replaced")
+            for rel in moved:
+                typer.echo(f"  {rel}")
+            return
+        antipatterns_mod.report_directives(declared().project, as_json, limit)
+
     @app.command("issues")
     def issues_cmd(
         excluded: Annotated[
@@ -591,6 +670,28 @@ def create_dev_app(
         policy_explain.explain(
             subjects, kind, sandbox, autonomous, as_json, declared().hooks
         )
+
+    @app.command("vocabulary")
+    def vocabulary_cmd(
+        offered: Annotated[
+            bool,
+            typer.Option("--offered", help="Survey lup's offered defaults instead"),
+        ] = False,
+        as_json: Annotated[bool, typer.Option("--json", help="Emit JSON")] = False,
+        output: Annotated[
+            Path | None,
+            typer.Option("--output", help="Write the survey here instead of stdout"),
+        ] = None,
+        provenance: Annotated[
+            bool,
+            typer.Option(
+                "--provenance", help="List rules and where each axis came from"
+            ),
+        ] = False,
+    ) -> None:
+        """Show every shell form the declared vocabulary judges, and how."""
+        rules = default_vocabulary() if offered else list(declared().hooks.shell_rules)
+        policy_explain.survey(rules, as_json, output, provenance)
 
     # -- plugin commands --
 

@@ -15,14 +15,20 @@ from pathlib import Path
 
 import sh
 import typer
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
 from lup.codescan.markers import find_feedback
-from lup.mcp import create_mcp_server, serve_stdio, server_tool_names
-from lup.policy.identity import (
-    agent_identity_environment,
-    concern_allowances_environment,
+from lup.harness.enforcement import semantic_policy_for
+from lup.harness.models import HookSet
+from lup.hooks import LupHooksConfig
+from lup.policy.enforcement import (
+    NativeSemantics,
+    SandboxPosture,
+    create_policy_hooks,
 )
+from lup.mcp import create_mcp_server, serve_stdio, server_tool_names
+from lup.policy.grants import LeaseGrants, allowance_grants_environment
+from lup.policy.identity import agent_identity_environment
 from lup.harness.environment import non_interactive_environment
 from lup.harness.ownership import GeneratedArtifacts, generated_artifacts
 from lup.harness.process import LaunchRequest, LocalProcessLauncher, ProcessLauncher
@@ -79,6 +85,7 @@ from lup.resolver.join_tools import create_join_tools
 from lup.runtime.factory import SessionFactory
 from lup.types import EnvVars
 from lup.workspace.paths import project_root
+from lup.devtools.dev.branches import probe_base_freshness, require_fresh_base
 from lup.devtools.dev.comments import FoundComment, scan_tracked
 from lup.devtools.dev.issues import comment_on_issues, fetch_open_issues
 from lup.devtools.dev.remote_auth import check_remote_auth
@@ -87,19 +94,18 @@ from lup.devtools.dev.worktree import (
     sync_dependencies,
 )
 from lup.devtools.harness.generate import NativeHarnessComposition
+from lup.devtools.supervisor.page import SUPERVISOR_PORT
 from lup.devtools.supervisor.projection import answer_recipe as rerun_recipe
 from lup.devtools.supervisor.projection import PendingQuestionView, question_views
 
 
-class ConfiguredModel(BaseModel):
+class ConfiguredModel(BaseModel, frozen=True):
     """The model an application is configured to run, and where it routes.
 
     A resolver session runs through one native adapter, and a model reaches
     only the backend its vendor prefix names. Naming both here lets the
     driver say which one it declined rather than silently taking a default.
     """
-
-    model_config = ConfigDict(frozen=True)
 
     name: str
     adapter: str
@@ -109,6 +115,35 @@ class ConfiguredModel(BaseModel):
         return self.name if self.adapter == adapter else None
 
 
+class LocatedNote(BaseModel, frozen=True):
+    """Where one scanned note sits, spelled the way a reader opens it."""
+
+    file: str
+    start_line: int
+    end_line: int
+
+    def location(self) -> str:
+        return f"{self.file}:{self.start_line}-{self.end_line}"
+
+
+class CarriedNote(LocatedNote, frozen=True):
+    """One parked note the resolver leaves alone, with the gate it stated."""
+
+    label: str
+
+    def describe(self) -> str:
+        return f"carrying {self.label} {self.location()}"
+
+
+class GeneratedNote(LocatedNote, frozen=True):
+    """One note a generated artifact holds, named by the id that owns it."""
+
+    semantic_id: str
+
+    def describe(self) -> str:
+        return f"leaving to its generator: {self.semantic_id} owns {self.location()}"
+
+
 class ResolverIntake(BaseModel):
     """The scan partitioned at the resolver boundary.
 
@@ -116,22 +151,42 @@ class ResolverIntake(BaseModel):
     explicit edit that removes its `defer` head — so an editor can never be
     assigned parked work. ``carried`` reports each parked note, and
     ``generated`` each note a generator answers for rather than this tree.
+
+    Each bucket the resolver only reports on carries the note rather than a
+    line about it, so the run's own report and a preview of what a run would
+    plan render from one declaration instead of agreeing by hand. What it
+    plans from stays the scanned comment, because that is what becomes
+    evidence and it carries the read context a planner needs.
     """
 
     actionable: list[FoundComment]
-    carried: list[str]
-    generated: list[str]
+    carried: list[CarriedNote]
+    generated: list[GeneratedNote]
+
+    def describe(self) -> list[str]:
+        """Render this scan the way somebody deciding whether to start a run reads it.
+
+        Every note is named at its own site rather than only counted, because
+        the question this answers — whether the run about to be started is the
+        one worth having — turns on which notes it would plan from and which it
+        would leave alone, not on how many there are of each.
+
+        Each is named and not quoted: what the notes say is one `dev comments`
+        away, and reprinting fifty of them buries the partition this exists to
+        show under the listing that already exists.
+        """
+        return [
+            f"{len(self.actionable)} to plan, {len(self.carried)} carried, "
+            f"{len(self.generated)} left to a generator",
+            *(
+                f"planning from {note.file}:{note.start_line}-{note.end_line}"
+                for note in self.actionable
+            ),
+            *(note.describe() for note in self.carried),
+            *(note.describe() for note in self.generated),
+        ]
 
 
-# lup: There is no way to see what a run would plan without starting one. Every
-# resolve subcommand — supervise, questions, answer, actors, say, redirect, park
-# — operates on a run that already exists, so discovering an inventory means
-# committing to a run that leases a worktree per concern. Add `harness resolve
-# intake`, printing all three buckets this returns with file, line, and for a
-# generated note the owning `semantic_id`. Reported from downstream: answering
-# "is this good to clean and restart from scratch?" took a dozen calls of
-# reading this function, `scan_tracked`, and cross-referencing ownership by
-# hand — and that reconstruction is what found the bug fixed in #47.
 def resolver_intake(
     comments: list[FoundComment], owned: GeneratedArtifacts
 ) -> ResolverIntake:
@@ -145,26 +200,62 @@ def resolver_intake(
     """
     notes = [comment for comment in comments if comment.kind == "note"]
 
-    def generated() -> Iterator[str]:
+    def generated() -> Iterator[GeneratedNote]:
         """Each note a generated artifact holds, named by the artifact."""
         for comment in notes:
             artifact = owned.owning(comment.file)
             if artifact is not None:
-                yield (
-                    f"{artifact.semantic_id} owns "
-                    f"{comment.file}:{comment.start_line}-{comment.end_line}"
+                yield GeneratedNote(
+                    file=comment.file,
+                    start_line=comment.start_line,
+                    end_line=comment.end_line,
+                    semantic_id=artifact.semantic_id,
                 )
 
     return ResolverIntake(
         actionable=[note for note in notes if owned.owning(note.file) is None],
         generated=list(generated()),
         carried=[
-            f"carrying {comment.deferral_label()} "
-            f"{comment.file}:{comment.start_line}-{comment.end_line}"
+            CarriedNote(
+                file=comment.file,
+                start_line=comment.start_line,
+                end_line=comment.end_line,
+                label=comment.deferral_label(),
+            )
             for comment in comments
             if comment.kind == "defer"
         ],
     )
+
+
+def scanned_intake(root: Path) -> ResolverIntake:
+    """Partition the tree's notes the way a run does, without starting one.
+
+    A preview and a run reach the scan through here, so what a preview shows
+    and what a run plans from cannot come apart: there is one partitioning
+    and both read it.
+
+    The scan is the tracked files of the working directory, which is what
+    ``scan_tracked`` reads; ``root`` names only the tree whose ownership proof
+    decides which of those a generator owns. Both readers pass the project
+    root, so the two halves agree for either of them.
+    """
+    return resolver_intake(scan_tracked(find_feedback), generated_artifacts(root))
+
+
+def preview_intake() -> None:
+    """Print what a run started now would plan from, without starting one.
+
+    Every other resolve subcommand operates on a run that already exists, so
+    reading an inventory meant committing to one — and a run leases a worktree
+    per concern. Reading the tree creates nothing, so the decision to start
+    can come after the evidence rather than before it.
+
+    Notes only. A run also takes the project's open issues unless it is
+    started with `--no-issues`, and `dev issues` prints exactly those.
+    """
+    for line in scanned_intake(project_root()).describe():
+        typer.echo(line)
 
 
 def lease_plugin_dir(root: Path, plugin_name: str) -> Path:
@@ -240,10 +331,8 @@ def parse_answer_flags(
     return {pair[0]: pair[1] for pair in pairs}
 
 
-class NoteTargetRef(BaseModel):
+class NoteTargetRef(BaseModel, frozen=True):
     """One `file:line` target naming a note already written in the tree."""
-
-    model_config = ConfigDict(frozen=True)
 
     file: Path
     line: int
@@ -407,18 +496,38 @@ def run_resolver_tool_server() -> None:
 
 
 SUPERVISED_WAIT_SECONDS = 3600.0
+"""The shipped floor ``SupervisorSpawn`` takes as its field default below,
+which is where a caller replaces it."""
 
 
-class SupervisorSpawn(BaseModel):
+class SupervisorSpawn(BaseModel, frozen=True):
     """Whether a run opens a page beside itself, and on which port."""
 
-    model_config = ConfigDict(frozen=True)
-
     enabled: bool = False
-    port: int = 8766
+    port: int = SUPERVISOR_PORT
     linger: bool = False
 
+    wait_floor: float = SUPERVISED_WAIT_SECONDS
+    """The shortest wait a supervised run takes, whatever it was asked for: a
+    page nobody is watching yet is the case the wait exists for."""
 
+    def arguments(self) -> list[str]:
+        """These settings again, for a relaunch that must open the same page."""
+        if not self.enabled:
+            return []
+        return [
+            "--supervise",
+            "--supervise-port",
+            str(self.port),
+            *(["--supervise-linger"] if self.linger else []),
+        ]
+
+    def waiting(self, asked: float) -> float:
+        """How long this run waits for an answer, given what was asked."""
+        return max(asked, self.wait_floor) if self.enabled else asked
+
+
+# lup: ignore[model-free-function] — driver: it spawns the supervisor process
 @asynccontextmanager
 async def spawned_supervisor(
     spawn: SupervisorSpawn, run_id: str, adapter: str
@@ -719,6 +828,11 @@ def resolver_source_snapshot(
     """Create an unattached source commit containing current review-note files."""
     branch = resolver_git(launcher, root, ["branch", "--show-current"]) or "HEAD"
     head = resolver_git(launcher, root, ["rev-parse", "HEAD"])
+    # A run seeded from statements alone has no note file to preserve, and a
+    # pathless diff would compare the whole tree and snapshot HEAD's own tree
+    # under a second commit.
+    if not note_paths:
+        return SourceSnapshot(branch=branch, commit=head)
     status = launcher.launch(
         LaunchRequest(
             arguments=["git", "diff", "--quiet", "HEAD", "--", *map(str, note_paths)],
@@ -760,6 +874,8 @@ def resolver_source_snapshot(
     return SourceSnapshot(branch=branch, commit=commit)
 
 
+# lup: ignore[constant-declaration] — the run's own branch naming, which a
+# resumed run must spell exactly as the run that created the branch
 REVIEW_BRANCH_SUFFIX = "/review"
 
 
@@ -863,7 +979,105 @@ def describe_refresh(report: RefreshReport) -> list[str]:
     return lines
 
 
-def detach_resolve(run_id: str | None, forwarded: list[str]) -> None:
+class AdmissionFlags(BaseModel, frozen=True):
+    """The evidence one invocation named, in the flags that carried it.
+
+    Kept as flags rather than resolved evidence because a detached run is
+    launched by rebuilding this command line: what a human named has to be
+    sayable again, and whatever a relaunch cannot say is dropped without a
+    word.
+    """
+
+    statements: list[str]
+    notes: list[str]
+    issues: list[int]
+
+    def named_anything(self) -> bool:
+        return bool(self.statements or self.notes or self.issues)
+
+    def arguments(self) -> list[str]:
+        """These flags again, so a relaunch carries everything this one named."""
+        return [
+            *(part for item in self.statements for part in ("--admit", item)),
+            *(part for item in self.notes for part in ("--admit-note", item)),
+            *(part for item in self.issues for part in ("--admit-issue", str(item))),
+        ]
+
+
+class DetachedRun(BaseModel, frozen=True):
+    """One invocation, spelled as the relaunch that has to carry it on.
+
+    A detached launch re-issues its own command in a child, so every option
+    deciding what the run does has to survive the fork. Carrying a subset is
+    what this shape exists to prevent, and each omission fails silently
+    behind a parent that has already reported a run started: a missing
+    `--admit` loses the words the run was asked to plan from, and a missing
+    `--no-issues` detaches a larger run than anyone asked for — every open
+    issue as evidence, a worktree leased per concern.
+
+    ``run_id`` is forwarded only where a human named one. A launch derives
+    the same id from the same commit the child derives it from, so passing it
+    back adds nothing except a claim that the run already exists — and that
+    claim refuses an admission instead of seeding from it, leaving the child
+    to reject its own command line where nobody is listening.
+    """
+
+    adapter: str
+    run_id: str | None
+    answers: list[str]
+    admitted: AdmissionFlags
+    issues: bool
+    wait: float
+    host_retries: int
+    host_backoff: float
+    supervisor: SupervisorSpawn
+    adopt_config: bool
+    auth_probe_delay: float
+    max_parallel_workers: int
+    recheck_standing_per_join: bool
+
+    def arguments(self) -> list[str]:
+        """The command a child is started with, carrying this whole invocation."""
+        return [
+            "uv",
+            "run",
+            "lup-devtools",
+            "harness",
+            "resolve",
+            "--adapter",
+            self.adapter,
+            *(["--run-id", self.run_id] if self.run_id is not None else []),
+            *(part for answer in self.answers for part in ("--answer", answer)),
+            *self.admitted.arguments(),
+            *([] if self.issues else ["--no-issues"]),
+            *(["--wait", str(self.wait)] if self.wait else []),
+            # Always spelled: zero retries parks on the first refusal, so
+            # rendering these only when truthy would drop the one setting a
+            # human is most likely to have named deliberately.
+            "--host-retries",
+            str(self.host_retries),
+            "--host-backoff",
+            str(self.host_backoff),
+            *self.supervisor.arguments(),
+            *(["--adopt-config"] if self.adopt_config else []),
+            # Spelled for the same reason the host settings above are: each
+            # decides how wide the run goes and how long it waits, so falling
+            # back to a default in the child is a run nobody asked for.
+            "--auth-probe-delay",
+            str(self.auth_probe_delay),
+            "--max-parallel-workers",
+            str(self.max_parallel_workers),
+            *(
+                ["--recheck-standing-per-join"]
+                if self.recheck_standing_per_join
+                else []
+            ),
+        ]
+
+
+# lup: ignore[model-free-function] — driver: it forks a child process and names
+# where its output lands, which no invocation record does to itself
+def detach_resolve(detached: DetachedRun) -> None:
     """Start a run that outlives this command, and say where to reach it.
 
     A blocking run holds the launching agent's only turn, so nothing could
@@ -872,32 +1086,34 @@ def detach_resolve(run_id: str | None, forwarded: list[str]) -> None:
     launching returns, the run directory is the whole contract: the page and
     an orchestrating agent are peers on it, exactly as two pages would be.
 
-    The child's arguments are *derived* from the ones this process received
-    rather than re-listed from the flags detaching happens to know about. A
-    re-listing drops whatever it was not taught: it forwarded adapter, run
-    id and answers, so `--adopt-config` silently vanished and a moved run
-    could not be resumed detached at all — and `--no-issues`, `--admit*` and
-    `--wait` went the same way. Derived, a flag added to the callback is
-    forwarded because it was typed, not because someone remembered it here.
+    Statements ride along with everything else the invocation named: seeding
+    a run from what a human said and returning is the shape this flag exists
+    for.
+
+    A detached child speaks to nobody, so this reports success the moment it
+    forks and cannot take that back. Two things keep that honest: what can be
+    judged before forking is judged here, and what cannot goes to a file this
+    names on the way out, so a child that refuses its own command line leaves
+    a record instead of a launcher claiming a run that does not exist.
     """
     root = project_root()
-    resolved = run_id or (
+    resolved = detached.run_id or (
         "resolve-"
         + resolver_git(
             LocalProcessLauncher(), root, ["rev-parse", "--short=12", "HEAD"]
         )
     )
-    arguments = [
-        "uv",
-        "run",
-        "lup-devtools",
-        *forwarded,
-        # Named explicitly even when it was defaulted, so parent and child
-        # agree on which run this is rather than each deriving it from a
-        # HEAD that may move between the two.
-        *(() if run_id else ("--run-id", resolved)),
-    ]
+    # Resolve the evidence here and discard what it returns. The child
+    # resolves it again, but only the child would meet a `--admit-note`
+    # naming nothing actionable or an issue number naming nothing open, and
+    # it meets it after this command has already reported a run started.
+    admission_request(detached.admitted)
     log = detached_log(root, resolved)
+    arguments = detached.arguments()
+    # One stream, not one path opened twice: sh opens `_out` and `_err`
+    # separately, so naming the same file for both leaves two handles
+    # truncating at offset zero and overwriting each other — losing exactly
+    # the refusal this file exists to keep.
     sh.Command(arguments[0])(
         *arguments[1:],
         _cwd=str(root),
@@ -908,7 +1124,7 @@ def detach_resolve(run_id: str | None, forwarded: list[str]) -> None:
         # first step indistinguishable from one working quietly: the refusal
         # went nowhere, and the run directory held no trace of it either.
         _out=str(log),
-        _err=str(log),
+        _err_to_out=True,
     )
     typer.echo(f"Run {resolved} started detached.")
     typer.echo(f"Its output: {log}")
@@ -941,21 +1157,152 @@ def forwardable_arguments(argv: list[str]) -> list[str]:
     return [argument for argument in argv[1:] if argument != "--detach"]
 
 
-def admission_request(
-    statements: list[str], note_targets: list[str], issue_numbers: list[int]
-) -> AdmissionRequest | None:
+# lup: ignore[model-free-function] — driver: it scans the tree to resolve what
+# the flags name, so the reach into the repository is the operation and the
+# flags are only its subject
+def admission_request(flags: AdmissionFlags) -> AdmissionRequest | None:
     """Build the evidence one invocation asked to admit, if it asked at all."""
-    if not statements and not note_targets and not issue_numbers:
+    if not flags.named_anything():
         return None
-    targets = parse_note_targets(note_targets)
-    intake = resolver_intake(
-        scan_tracked(find_feedback), generated_artifacts(project_root())
-    )
-    scanned = intake.actionable if targets else []
+    targets = parse_note_targets(flags.notes)
+    scanned = scanned_intake(project_root()).actionable if targets else []
     return AdmissionRequest(
         notes=admission_notes(targets, scanned),
+        statements=flags.statements,
+        issues=admitted_issues(flags.issues),
+    )
+
+
+def missing_run_refusal(run_id: str | None, resolved_run_id: str) -> str | None:
+    """Why admitting into a run that does not exist is refused, where it is.
+
+    Naming a run is a claim that it exists, so a typo seeds a second run under
+    the misspelling and leases a worktree per concern before anyone reads the
+    line saying so. An id nobody named was never that claim: it defaulted from
+    the commit, and seeding is what somebody arriving with statements asked
+    for. So the refusal survives for exactly one case, and says that statements
+    do not need a run to exist rather than leaving that to be inferred.
+    """
+    if run_id is None:
+        return None
+    return (
+        f"no resolver run {resolved_run_id!r} to admit into. Statements seed a "
+        "run of their own: drop --run-id to start one from them, or name a run "
+        "that exists."
+    )
+
+
+def seed_request(
+    source: SourceSnapshot,
+    comments: list[FoundComment],
+    issues: list[IssueEvidence],
+    admission: AdmissionRequest | None,
+) -> ResolveRequest | None:
+    """The evidence a fresh run plans from: what the tree holds and what was said.
+
+    A statement has nowhere else to come from — somebody arriving with the
+    work in their own words has written nothing down yet — so a run seedable
+    only from notes made them invent note sites before it would start. The
+    same evidence a run is handed mid-flight seeds one at the outset, and the
+    two kinds mix: the tree's notes and the human's statements are both
+    positions in one request, planned by one turn.
+
+    Evidence named explicitly is folded in rather than appended, because a
+    note or an issue reaches a fresh run through the scan as well, and the
+    same work described twice is planned as two concerns.
+
+    Having nothing to plan from is answered here, as ``None``, rather than by
+    whoever calls this: the evidence folded together here is exactly the
+    evidence a request refuses to exist without, so a caller deciding it
+    separately is a second copy of one rule — and the copy that drifts is the
+    one a suite stays green through, because no test can reach it.
+    """
+    named = admission.notes if admission is not None else []
+    statements = admission.statements if admission is not None else []
+    admitted = admission.issues if admission is not None else []
+    scanned = [
+        InventoryNote(
+            file=Path(comment.file),
+            line=comment.start_line,
+            text=comment.marker_text(),
+            context=comment.context,
+        )
+        for comment in comments
+    ]
+    notes = {(note.file, note.line): note for note in [*scanned, *named]}
+    numbered = {issue.number: issue for issue in [*issues, *admitted]}
+    if not notes and not statements and not numbered:
+        return None
+    return ResolveRequest(
+        source=source,
+        notes=list(notes.values()),
         statements=statements,
-        issues=admitted_issues(issue_numbers),
+        issues=list(numbered.values()),
+    )
+
+
+def worker_policy_hooks(
+    declared_hooks: HookSet,
+    grants: LeaseGrants,
+    semantics: NativeSemantics,
+    sandbox: SandboxPosture,
+) -> LupHooksConfig:
+    """Judge a worker's calls by the policy every plugin enforces.
+
+    The directory ACL beside this bounds the worker's filesystem reach and
+    says nothing about what it may fetch or run — so egress and shell passed
+    unjudged, with the OS sandbox as the only floor. This supplies exactly
+    those verdicts, scoped to the tools it has rules for: a headless worker
+    has no human to answer an `ask`, so judging a tool this vocabulary cannot
+    classify would deny it, and would outrank the ACL's own grant.
+
+    The worker is autonomous because its edits are reviewed by an actor of
+    this run, which is the same fact the generated tree derives its
+    autonomous list from.
+
+    ``grants`` is asked what the lease holds at each judgment, over the same
+    document the session environment names — so this judge and the lease's
+    deployed dispatcher release exactly the same gates, including one granted
+    after both were built.
+
+    ``semantics`` is how one runtime's calls become the vocabulary this
+    policy judges. It is a parameter rather than a constant because both
+    runtimes have that decode now, and hardcoding one was what left the
+    other's workers judged by nothing.
+
+    ``sandbox`` is the session's own confinement, read from the declaration
+    the factory opens it with rather than from the runtime. Taking the
+    runtime's word granted an escape the session forbade — rendered onto the
+    wire, dropped without a word, and the call left confined to fail on
+    whatever it wrote first. Asking the session instead is what lets a
+    worker's toolchain be placed outside and actually get there.
+
+    Only the placement is taken from it. What the posture says about
+    confinement stays out of the verdict, because the kernel spends that fact
+    on a substitution this host cannot afford: its arm takes ``defer`` and
+    ``ask`` together, so where there is no human to answer, every guarded
+    verdict becomes a run rather than a refusal — ``find -delete`` and ``git
+    push --delete`` among them, and a ``# lup: escalate:`` marker, which
+    resolves to an ask, turned into the way to avoid the human it exists to
+    summon. A worker keeps the fail-closed floor until it can answer a
+    question through the channel it already holds.
+
+    It composes here, outside the factory that calls it, because the defect
+    this shape exists to prevent was never in a verdict: the kernel answered
+    correctly every time and the session handed it host facts it did not
+    have. A composition only a running resolver can build is one no test
+    reaches, and this one shipped its own widening once already.
+    """
+    return create_policy_hooks(
+        semantic_policy_for(
+            declared_hooks,
+            autonomous=True,
+            interactive=False,
+            escapable=semantics.escapes_from(sandbox),
+            grants=grants,
+        ),
+        semantics.also_refusing(declared_hooks.refused_tools),
+        sandbox=sandbox,
     )
 
 
@@ -1035,6 +1382,7 @@ def chosen_run(state_root: Path, fresh: str, *, start_new: bool, ending: bool) -
     return fresh
 
 
+# lup: ignore[model-free-function] — driver: it leases worktrees and runs sessions
 def run_resolve(
     composition: NativeHarnessComposition,
     run_id: str | None,
@@ -1082,6 +1430,17 @@ def run_resolve(
     # Every worktree this run leases lands under here, which is what makes
     # "a checkout lup created" a structural test rather than a judgement.
     worktree_root = root.parent / f"{root.name}-resolve-{resolved_run_id}"
+    # A run captures one base and cuts every lease from it, so a base already
+    # behind is planned against code that moved: the pass this refusal exists
+    # for planned thirteen concerns on a tree ten commits stale, where merged
+    # work had already done part of them. Following the move instead would
+    # mean re-basing every lease, re-deriving each diff, and re-running intake
+    # mid-flight, which can add or drop concerns while work is leased. Only a
+    # starting run is refused; one already recorded keeps the base it
+    # recorded, so a pull mid-run never strands it.
+    if not ResolverStateRepository(state_root, resolved_run_id).exists():
+        if abort_reason is None:
+            require_fresh_base(probe_base_freshness(launcher, root))
 
     async def execute() -> None:
         from lup.adapters.claude.runtime import (
@@ -1098,21 +1457,17 @@ def run_resolve(
             create_codex_session_factory,
         )
         from lup.adapters.claude.config_home import (
-            configuration_fault,
             selected_config_home,
             untrusted_degradation,
             workspace_config_environment,
         )
         from lup.adapters.claude.hooks import CLAUDE_SEMANTICS
         from lup.adapters.codex.hooks import CODEX_SEMANTICS
-        from lup.harness.enforcement import semantic_policy_for
         from lup.hooks import (
-            LupHooksConfig,
             create_git_inspection_hook,
             create_permission_hooks,
             merge_hooks,
         )
-        from lup.policy.enforcement import NativeSemantics, create_policy_hooks
 
         from lup.adapters.codex.harness_runtime import (
             CodexPluginInstaller,
@@ -1171,7 +1526,7 @@ def run_resolve(
         reviewer_environment = {
             **session_environment,
             **agent_identity_environment(""),
-            **concern_allowances_environment([]),
+            **allowance_grants_environment(None),
         }
         for environment in (worker_environment, reviewer_environment):
             environment.update(codex_policy_environment(adapter, session_environment))
@@ -1226,7 +1581,7 @@ def run_resolve(
         # turned one environmental fault into an exception group of concern
         # failures and burned every lease the run had taken.
         fault = (
-            configuration_fault(selected_config_home(session_environment))
+            selected_config_home(session_environment).configuration_fault()
             if adapter == "claude"
             else None
         )
@@ -1261,6 +1616,31 @@ def run_resolve(
         # that path made writable — the deny looks like the runtime's own
         # protection of its config directory, so test that a grant can override
         # it rather than assuming.
+
+        # A worker is confined to its lease, and the toolchain it verifies
+        # with is declared to run outside that confinement — so the escape has
+        # to be permitted where the session is opened, or the placement is
+        # rendered and dropped, which is the failure the placement exists to
+        # prevent. Claude's channel is a per-call argument, so one object says
+        # this to the session and to the policy at once and the two cannot
+        # come apart.
+        #
+        # A spawned session also inherits none of the settings files a launched
+        # one reads, so the exclusions the declaration states are handed over
+        # here as well: without them a worker is confined by a boundary its own
+        # toolchain does not fit through, and every failure it meets names
+        # something other than the boundary.
+        claude_worker_sandbox = ClaudeSandboxConfig(
+            allow_unsandboxed_commands=True,
+            excluded_commands=plugin.hooks.excluded_commands() if plugin.hooks else [],
+        )
+        # Codex has no such channel: its sandbox is a mode on the whole
+        # session, declared with that session below, and a call placed outside
+        # runs confined there whatever anyone says. So this carries the one
+        # fact the policy can act on — that nothing escapes — and says nothing
+        # about a confinement it could only restate.
+        codex_worker_sandbox = SandboxPosture()
+
         def worker_factory(context: WorkerContext) -> SessionFactory:
             """Open one worker session that can ask its own questions.
 
@@ -1282,12 +1662,13 @@ def run_resolve(
                 lease_root=cwd,
                 actor_kind=context.actor.kind,
             )
-            # Grants are per-concern: a lease carries only what the human
-            # approved with the concern it was leased for.
-            granted = [allowance.value for allowance in context.allowances]
+            # Grants are per-concern, and the environment names where this
+            # lease's are written rather than carrying them: a gate granted
+            # after this session starts reaches it, and one taken back stops
+            # applying, without the restart the environment would have needed.
             concern_environment = {
                 **worker_environment,
-                **concern_allowances_environment(granted),
+                **allowance_grants_environment(context.grants.document),
             }
             # A merger sequences its own join, so it carries the verbs that
             # do it. They are added by actor kind rather than granted to
@@ -1321,7 +1702,7 @@ def run_resolve(
                         cwd=cwd,
                         add_dirs=[cwd, *toolchain_writable_paths()],
                         plugin_dirs=[lease_plugin_dir(cwd, plugin.name)],
-                        sandbox=ClaudeSandboxConfig(),
+                        sandbox=claude_worker_sandbox,
                         environment=isolated_claude_environment(
                             concern_environment, cwd
                         ),
@@ -1334,7 +1715,12 @@ def run_resolve(
                             merge_hooks(
                                 merge_hooks(
                                     create_permission_hooks([cwd], []),
-                                    worker_policy_hooks(granted, CLAUDE_SEMANTICS),
+                                    worker_policy_hooks(
+                                        harness.declared_hooks,
+                                        context.grants,
+                                        CLAUDE_SEMANTICS,
+                                        claude_worker_sandbox.posture(),
+                                    ),
                                 ),
                                 create_git_inspection_hook(),
                             ),
@@ -1356,7 +1742,12 @@ def run_resolve(
                     # because its generated plugin hook is not reached either.
                     approval_policy="onRequest",
                     hooks=merge_hooks(
-                        worker_policy_hooks(granted, CODEX_SEMANTICS),
+                        worker_policy_hooks(
+                            harness.declared_hooks,
+                            context.grants,
+                            CODEX_SEMANTICS,
+                            codex_worker_sandbox,
+                        ),
                         create_inbox_hooks(inbox),
                     ),
                     environment=concern_environment,
@@ -1374,42 +1765,6 @@ def run_resolve(
                     },
                     writable_roots=[cwd],
                 )
-            )
-
-        def worker_policy_hooks(
-            granted: list[str], semantics: NativeSemantics
-        ) -> LupHooksConfig:
-            """Judge a worker's calls by the policy every plugin enforces.
-
-            The directory ACL beside this bounds the worker's filesystem
-            reach and says nothing about what it may fetch or run — so
-            egress and shell passed unjudged, with the OS sandbox as the
-            only floor. This supplies exactly those verdicts, scoped to the
-            tools it has rules for: a headless worker has no human to answer
-            an `ask`, so judging a tool this vocabulary cannot classify
-            would deny it, and would outrank the ACL's own grant.
-
-            The worker is autonomous because its edits are reviewed by an
-            actor of this run, which is the same fact the generated tree
-            derives its autonomous list from.
-
-            ``granted`` carries the concern's approved allowances, the same
-            list the session environment declares — so this judge and the
-            lease's deployed dispatcher release exactly the same gates.
-
-            ``semantics`` is how one runtime's calls become the vocabulary
-            this policy judges. It is a parameter rather than a constant
-            because both runtimes have that decode now, and hardcoding one
-            was what left the other's workers judged by nothing.
-            """
-            return create_policy_hooks(
-                semantic_policy_for(
-                    harness.declared_hooks,
-                    autonomous=True,
-                    interactive=False,
-                    allowances=granted,
-                ),
-                semantics,
             )
 
         def reviewer_factory(cwd: Path) -> SessionFactory:
@@ -1514,40 +1869,43 @@ def run_resolve(
                     )
                 typer.echo(f"aborted {resolved_run_id}: {abort_reason}")
                 return
+            # Evidence offered to a run that does not exist yet seeds one
+            # rather than being refused. What a human arrives with is the work
+            # in their own words, and a refusal here made them write a note
+            # into the tree to name a site the run would only read back.
+            #
+            # A run named explicitly is the one case that still refuses: the
+            # id is a claim that the run exists, so seeding on a typo would
+            # start a second run under the misspelling and lease a worktree
+            # per concern before anyone read the line saying so.
             if admission is not None:
-                if not core.repository.exists():
-                    raise typer.BadParameter(
-                        f"no resolver run {resolved_run_id!r} to admit into"
+                if core.repository.exists():
+                    report_admission(
+                        await core.admit(admission), adapter, resolved_run_id
                     )
-                report_admission(await core.admit(admission), adapter, resolved_run_id)
-                return
+                    return
+                refusal = missing_run_refusal(run_id, resolved_run_id)
+                if refusal is not None:
+                    raise typer.BadParameter(refusal)
+                typer.echo(
+                    f"No resolver run {resolved_run_id!r} yet; seeding one with "
+                    "what was admitted, beside whatever notes the tree holds."
+                )
             try:
                 if core.repository.exists():
                     manifest = await core.resume()
                 else:
-                    # lup: A fresh run can only be seeded from notes already in
-                    # the tree — `--admit` refuses with "no resolver run ... to
-                    # admit into" until one exists. But `/lup:resolve <concerns>`
-                    # is how a human actually arrives, with the concerns in their
-                    # own words and nothing yet written down, so the agent has to
-                    # invent note sites before it can start. Let statements seed
-                    # a run the way they can join one.
-                    intake = resolver_intake(
-                        scan_tracked(find_feedback), generated_artifacts(root)
-                    )
+                    intake = scanned_intake(root)
                     for carried in intake.carried:
-                        typer.echo(carried)
+                        typer.echo(carried.describe())
                     for owned in intake.generated:
-                        typer.echo(f"leaving to its generator: {owned}")
+                        typer.echo(owned.describe())
                     comments = intake.actionable
                     open_issues = fetch_open_issues() if take_issues else []
                     for issue in open_issues:
                         typer.echo(
                             f"taking as evidence: {issue.reference()} {issue.title}"
                         )
-                    if not comments and not open_issues:
-                        typer.echo("No unresolved # lup: comments, and no open issues.")
-                        return
                     note_paths = sorted({Path(comment.file) for comment in comments})
                     source = resolver_source_snapshot(
                         launcher,
@@ -1555,21 +1913,15 @@ def run_resolve(
                         core.repository.root,
                         note_paths,
                     )
-                    manifest = await core.run(
-                        ResolveRequest(
-                            source=source,
-                            notes=[
-                                InventoryNote(
-                                    file=Path(comment.file),
-                                    line=comment.start_line,
-                                    text=comment.marker_text(),
-                                    context=comment.context,
-                                )
-                                for comment in comments
-                            ],
-                            issues=open_issues,
+                    seeded = seed_request(source, comments, open_issues, admission)
+                    if seeded is None:
+                        typer.echo(
+                            "No unresolved # lup: comments, and no open issues. "
+                            "Seed a run with what you want done instead: "
+                            '--admit "<the work, in your own words>".'
                         )
-                    )
+                        return
+                    manifest = await core.run(seeded)
             except ResolverDrained as drained:
                 # Exit zero: an operator asked for this and got it, which is
                 # the command succeeding rather than the run failing.

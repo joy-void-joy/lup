@@ -1,6 +1,7 @@
 """Canonical declaration, native rendering, and reconciliation tests."""
 
 import ast
+import errno
 import json
 import os
 import sys
@@ -12,7 +13,8 @@ from typing import Literal, get_args
 import pytest
 import sh
 import typer
-from pydantic import BaseModel, ConfigDict, Field
+from claude_agent_sdk.types import SandboxNetworkConfig, SandboxSettings
+from pydantic import BaseModel, Field
 
 from lup.policy.identity import AGENT_IDENTITY_ENV
 from lup.types import JsonObject
@@ -36,7 +38,12 @@ from lup.harness.banner import (
     GeneratedBanner,
 )
 from lup.harness.generation import ArtifactValidationError
-from lup.harness.materialization import AtomicMaterializer, MaterializationConflictError
+from lup.harness.materialization import (
+    AtomicMaterializer,
+    MaterializationConflictError,
+    discard_staged_write,
+    refused_write,
+)
 from lup.harness.validation import validated_tree
 from lup.harness.models import (
     GUIDANCE_BYTE_BUDGET,
@@ -50,6 +57,7 @@ from lup.harness.models import (
     Delegate,
     Harness,
     InvocationArgument,
+    MarkdownTable,
     NativePath,
     Plugin,
     PluginPath,
@@ -66,9 +74,9 @@ from lup.harness.models import (
     SpellingExample,
     TextPart,
     document_byte_size,
-    document_text_size,
 )
 from lup.harness.contracts import PromptRenderer
+from lup.markdown import CodeCell, PlainCell
 from lup.harness.ownership import (
     OwnershipManifestError,
     build_manifest,
@@ -93,8 +101,6 @@ from lup.policy.dispatcher import (
     DispatcherDeclaration,
     SourceHalf,
     compile_dispatcher,
-    half_functions,
-    half_imports,
     resolvable,
     source_half,
 )
@@ -110,7 +116,11 @@ from lup_template.devtools.harness.content.docs.catalog import DOCUMENTS
 from lup_template.devtools.harness.content.guidance import DOCUMENT as GUIDANCE
 from lup_template.devtools.harness.content.settings import project_settings
 from lup.devtools.harness import launch
-from lup.devtools.harness.launch import codex_sandbox_arguments
+from lup.devtools.harness.launch import (
+    claude_sandbox_arguments,
+    codex_sandbox_arguments,
+)
+from lup.policy.kernel.shell import sandbox_excluded
 from lup_template.devtools.harness.content.template_claude import (
     DOCUMENT as TEMPLATE_CLAUDE,
 )
@@ -129,10 +139,8 @@ from lup.devtools.harness.generate import (
 )
 
 
-class ClaudeHookDecision(BaseModel):
+class ClaudeHookDecision(BaseModel, frozen=True):
     """Validated decision emitted by the generated Claude dispatcher."""
-
-    model_config = ConfigDict(frozen=True)
 
     hook_event_name: Literal["PreToolUse"] = Field(alias="hookEventName")
     permission_decision: Literal["allow", "ask", "deny"] = Field(
@@ -141,43 +149,33 @@ class ClaudeHookDecision(BaseModel):
     permission_decision_reason: str = Field(alias="permissionDecisionReason")
 
 
-class ClaudeHookOutput(BaseModel):
+class ClaudeHookOutput(BaseModel, frozen=True):
     """Generated Claude hook output envelope."""
-
-    model_config = ConfigDict(frozen=True)
 
     hook_specific_output: ClaudeHookDecision = Field(alias="hookSpecificOutput")
 
 
-class CodexPermissionDecision(BaseModel):
+class CodexPermissionDecision(BaseModel, frozen=True):
     """Validated permission decision emitted by the Codex dispatcher."""
-
-    model_config = ConfigDict(frozen=True)
 
     behavior: Literal["allow", "deny"]
 
 
-class CodexPermissionHookOutput(BaseModel):
+class CodexPermissionHookOutput(BaseModel, frozen=True):
     """Codex PermissionRequest hook-specific output."""
-
-    model_config = ConfigDict(frozen=True)
 
     hook_event_name: Literal["PermissionRequest"] = Field(alias="hookEventName")
     decision: CodexPermissionDecision
 
 
-class CodexPermissionOutput(BaseModel):
+class CodexPermissionOutput(BaseModel, frozen=True):
     """Generated Codex permission hook output envelope."""
-
-    model_config = ConfigDict(frozen=True)
 
     hook_specific_output: CodexPermissionHookOutput = Field(alias="hookSpecificOutput")
 
 
-class ShippedDispatcher(BaseModel):
+class ShippedDispatcher(BaseModel, frozen=True):
     """One hook dispatcher: its declaration, its half, its script, its runtime."""
-
-    model_config = ConfigDict(frozen=True)
 
     declaration: DispatcherDeclaration
     asset: Path
@@ -219,19 +217,15 @@ def compiled_functions(script: str) -> dict[str, str]:  # lup: ignore[dict-str-p
     }
 
 
-class PyrightExecutionEnvironment(BaseModel):
+class PyrightExecutionEnvironment(BaseModel, frozen=True):
     """One type-checking scope and the search paths it resolves imports on."""
-
-    model_config = ConfigDict(frozen=True)
 
     root: Path
     extra_paths: list[Path] = Field(alias="extraPaths", default=[])
 
 
-class PyrightConfiguration(BaseModel):
+class PyrightConfiguration(BaseModel, frozen=True):
     """The workspace type-checking scope, as pyproject.toml declares it."""
-
-    model_config = ConfigDict(frozen=True)
 
     include: list[Path]
     exclude: list[Path] = []
@@ -244,7 +238,7 @@ def test_catalog_has_one_portable_skill_per_baseline_command() -> None:
     harness = portable_harness()
     plugin = harness.plugins[0]
 
-    assert len(plugin.skills) == 31
+    assert len(plugin.skills) == 32
     assert len(plugin.agents) == 4
     assert {skill.name for skill in plugin.skills} >= {
         "resolve",
@@ -314,7 +308,7 @@ def test_guidance_stays_within_its_always_loaded_budget() -> None:
     wherever the document uses non-ASCII punctuation, and would pass a
     document the runtime would silently truncate.
     """
-    declared = document_text_size(GUIDANCE)
+    declared = GUIDANCE.text_size()
     rendered = {
         "claude": claude_prompt_renderer().render(GUIDANCE),
         "codex": codex_prompt_renderer().render(GUIDANCE),
@@ -448,10 +442,8 @@ def test_argument_reference_has_one_semantic_part_and_native_renderings() -> Non
     )
 
 
-class PartExpectation(BaseModel):
+class PartExpectation(BaseModel, frozen=True):
     """One prompt part and whether its two native renderings must differ."""
-
-    model_config = ConfigDict(frozen=True)
 
     part: PromptPart
     diverges: bool
@@ -461,6 +453,13 @@ PART_CONTRACT: dict[str, PartExpectation] = {
     "TextPart": PartExpectation(part=TextPart(text="plain prose"), diverges=False),
     "SpellingExample": PartExpectation(
         part=SpellingExample(text="`/lup:merge` beside `$lup:merge`"), diverges=False
+    ),
+    "MarkdownTable": PartExpectation(
+        part=MarkdownTable(
+            headers=["Rule id", "Diagnostic"],
+            rows=[[CodeCell(text="dict-get"), PlainCell(text="a | b")]],
+        ),
+        diverges=False,
     ),
     "SkillInvocation": PartExpectation(
         part=SkillInvocation(plugin="lup", skill="merge"), diverges=True
@@ -520,10 +519,8 @@ def test_each_prompt_part_keeps_its_cross_runtime_promise(name: str) -> None:
     assert (claude != codex) is expectation.diverges
 
 
-class PartQuestion(BaseModel):
+class PartQuestion(BaseModel, frozen=True):
     """One question the harness asks a part, and the kinds that answer it."""
-
-    model_config = ConfigDict(frozen=True)
 
     ask: Callable[[SemanticPart], bool]
     answered_by: list[str]
@@ -532,7 +529,7 @@ class PartQuestion(BaseModel):
 PART_QUESTIONS: dict[str, PartQuestion] = {
     "text_payload": PartQuestion(
         ask=lambda part: part.text_payload is not None,
-        answered_by=["TextPart", "SpellingExample"],
+        answered_by=["TextPart", "SpellingExample", "MarkdownTable"],
     ),
     "invocation": PartQuestion(
         ask=lambda part: part.invocation is not None, answered_by=["SkillInvocation"]
@@ -612,13 +609,13 @@ def test_an_undeclared_plugin_behind_an_invocation_names_the_invocation() -> Non
         Harness.model_validate(source)
 
 
-class UnansweredPart(SemanticPart):
+class UnansweredPart(SemanticPart, frozen=True):
     """A thirteenth kind that declines to say how it should be spelled."""
 
     type: Literal["unanswered"] = "unanswered"
 
 
-class AnsweredPart(SemanticPart):
+class AnsweredPart(SemanticPart, frozen=True):
     """A thirteenth kind that answers the base and declines everything else."""
 
     type: Literal["answered"] = "answered"
@@ -649,7 +646,7 @@ def test_a_new_kind_of_part_renders_without_editing_a_renderer_or_walk() -> None
     assert codex_prompt_renderer().render(document) == (
         f"{CodexSpellings().runtime_name} answered\n"
     )
-    assert document_text_size(document) == 0
+    assert document.text_size() == 0
 
 
 def test_every_tree_paths_read_the_same_under_either_runtime() -> None:
@@ -885,9 +882,9 @@ def test_both_native_trees_compile_deterministically() -> None:
     assert codex == compile_codex(harness)
     assert (
         len([item for item in claude.artifacts if "/commands/" in item.path.as_posix()])
-        == 31
+        == 32
     )
-    assert len([item for item in codex.artifacts if item.path.name == "SKILL.md"]) == 31
+    assert len([item for item in codex.artifacts if item.path.name == "SKILL.md"]) == 32
     assert Path(".codex/plugins/lup/.codex-plugin/plugin.json") in {
         item.path for item in codex.artifacts
     }
@@ -1080,6 +1077,28 @@ def test_materialization_rejects_stale_base(tmp_path: Path) -> None:
 
     with pytest.raises(MaterializationConflictError, match="stale base"):
         AtomicMaterializer().apply(proposal)
+
+
+def test_a_refused_write_names_the_boundary_and_drops_its_staging(
+    tmp_path: Path,
+) -> None:
+    """A runtime protects its own configuration by mounting it, not by mode.
+
+    So a sandboxed session replacing one of those paths is refused with a
+    busy device — an errno about hardware, which sends a reader looking at
+    the disk instead of at the boundary that actually decided.
+    """
+    staged = tmp_path / ".settings.json.abc123.tmp"
+    staged.write_text("staged\n", encoding="utf-8")
+    error = OSError(errno.EBUSY, "Device or resource busy", str(staged))
+    error.filename2 = str(tmp_path / "settings.json")
+
+    discard_staged_write(error)
+    refusal = str(refused_write(error))
+
+    assert not staged.exists()
+    assert "settings.json" in refusal and ".tmp" not in refusal
+    assert "sandbox" in refusal
 
 
 def test_materialization_rejects_symlink_path_escape(tmp_path: Path) -> None:
@@ -1371,6 +1390,36 @@ def test_generated_codex_permission_request_denies_unapproved_code() -> None:
     assert b"interpreters" in result.stderr
 
 
+def test_generated_codex_hook_refuses_the_declared_calls() -> None:
+    """The refusal table is consulted on both runtimes, not only on Claude.
+
+    Everything the refusal is made of is portable — the field on ``HookSet``,
+    the kernel module both trees carry, the rows this renderer emits — so a
+    tree that shipped all of it and never asked would read as a refusal in
+    force while the call went through. These two names are Claude's own
+    spellings and match nothing Codex offers; what is pinned is that the
+    mechanism reaches this dispatcher, for whatever an adopter refuses here.
+    """
+    hook = sh.Command(str(Path(".codex/plugins/lup/hooks/scripts/policy.py").resolve()))
+
+    def run(name: str, payload: JsonObject) -> sh.RunningCommand:
+        body = json.dumps({"tool_name": name, "tool_input": payload})
+        result = hook(_in=body, _ok_code=[0, 2], _return_cmd=True)
+        assert isinstance(result, sh.RunningCommand)
+        return result
+
+    refused = run("Artifact", {"content": "a page"})
+    assert refused.exit_code == 2
+    assert b"lup-devtools report" in refused.stderr
+
+    narrowed = run("Skill", {"skill": "artifact-design"})
+    assert narrowed.exit_code == 2
+
+    other = run("Skill", {"skill": "lup:commit"})
+    assert other.exit_code == 0
+    assert other.stdout == b""
+
+
 def test_generated_codex_hook_allows_managed_skill_scripts(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -1417,6 +1466,47 @@ def test_generated_claude_hook_allows_managed_skill_scripts(
     assert decision("node /tmp/untrusted-script.mjs") == "deny"
     workspace_script = Path(".claude/plugins/lup/scripts/file_suggest.sh").resolve()
     assert decision(f"sh {workspace_script}") == "deny"
+
+
+def test_generated_claude_hook_refuses_the_declared_calls() -> None:
+    """The refusal this repository declares, as the shipped hook enforces it.
+
+    Routing is half the mechanism and the declared rows are the other half,
+    so this goes through the compiled script rather than the kernel beneath
+    it: a row the hook is never handed refuses nothing, and no unit below
+    this level would notice.
+    """
+    script = Path(".claude/plugins/lup/hooks/scripts/policy.py").resolve()
+
+    def decision(name: str, payload: JsonObject) -> ClaudeHookDecision:
+        body = {"tool_name": name, "tool_input": payload}
+        result = sh.Command(str(script))(_in=json.dumps(body), _return_cmd=True)
+        assert isinstance(result, sh.RunningCommand)
+        return ClaudeHookOutput.model_validate_json(result.stdout).hook_specific_output
+
+    refused = decision("Artifact", {"content": "a page"})
+    assert refused.permission_decision == "deny"
+    assert "lup-devtools report" in refused.permission_decision_reason
+
+    narrowed = decision("Skill", {"skill": "artifact-design"})
+    assert narrowed.permission_decision == "deny"
+
+    escalated = decision(
+        "Artifact", {"content": "# lup: escalate: the user asked for a page\npage"}
+    )
+    assert escalated.permission_decision == "ask"
+
+
+def test_generated_claude_hook_leaves_every_other_skill_to_the_runtime() -> None:
+    """Routing `Skill` must not put every skill invocation to a human."""
+    script = Path(".claude/plugins/lup/hooks/scripts/policy.py").resolve()
+    result = sh.Command(str(script))(
+        _in='{"tool_name":"Skill","tool_input":{"skill":"lup:commit"}}',
+        _return_cmd=True,
+    )
+
+    assert isinstance(result, sh.RunningCommand)
+    assert json.loads(result.stdout) == {}
 
 
 def test_generated_claude_hook_executes_the_canonical_kernel() -> None:
@@ -1508,13 +1598,16 @@ def test_both_dispatchers_are_compiled_from_one_shared_host_half() -> None:
     shared = [
         node.name
         for member in SPLICED_MEMBERS
-        for node in half_functions(source_half(SHARED_PACKAGE, member))
+        for node in source_half(SHARED_PACKAGE, member).functions()
     ]
     claude = compiled_functions(compile_dispatcher(CLAUDE_DISPATCHER))
     codex = compiled_functions(compile_dispatcher(CODEX_DISPATCHER))
 
     assert "sandbox_active" in shared and "existing_write_targets" in shared
     assert "granted_allowances" in shared and "declared_identity" in shared
+    # What a lease currently holds has one reader as well as one document:
+    # two readings of the same file is the same drift as two files.
+    assert "document_allowances" in shared
     # Every kernel call site is shared, which is what stops one runtime from
     # passing a fact the other has quietly stopped passing.
     assert "bash_decision" in shared and "edit_decision" in shared
@@ -1542,9 +1635,9 @@ def test_compiled_dispatcher_reaches_only_what_a_bare_script_resolves(
     script = compile_dispatcher(dispatcher.declaration)
     modules = [
         item.module
-        for item in half_imports(
-            SourceHalf(module=target, text=script, tree=ast.parse(script))
-        )
+        for item in SourceHalf(
+            module=target, text=script, tree=ast.parse(script)
+        ).imports()
     ]
 
     assert modules
@@ -1552,6 +1645,25 @@ def test_compiled_dispatcher_reaches_only_what_a_bare_script_resolves(
     assert SHARED_MEMBER not in modules
     assert not any(module == "lup" or module.startswith("lup.") for module in modules)
     assert script == dispatcher.script.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("target", sorted(SHIPPED_DISPATCHERS))
+def test_compiled_dispatcher_is_already_formatted(target: str) -> None:
+    """What the compiler emits has to be formatted, not merely correct.
+
+    The generated tree is checked by the same formatter as everything else, so
+    a compiler that splices source into a shape the formatter would rewrite
+    fails a gate nothing near the compiler runs. Asserting it here is what
+    couples the two: emitting an unformatted script is a failing test rather
+    than a red sweep somebody meets later, on a file they are told not to
+    edit.
+    """
+    script = compile_dispatcher(SHIPPED_DISPATCHERS[target].declaration)
+    formatted = str(
+        sh.Command("ruff")("format", "-", "--stdin-filename", "policy.py", _in=script)
+    )
+
+    assert script == formatted
 
 
 def test_compilation_refuses_a_dispatcher_that_breaks_its_declaration() -> None:
@@ -2102,6 +2214,7 @@ def test_project_settings_derive_sandbox_from_hook_declaration() -> None:
     assert "code.claude.com" in domains
     assert "github.com" in domains
     assert "sandbox" not in project_settings(None)
+    assert sandbox["excludedCommands"] == hooks.excluded_commands()
 
 
 def test_a_declared_tool_server_is_granted_rather_than_asked_about() -> None:
@@ -2118,6 +2231,89 @@ def test_a_declared_tool_server_is_granted_rather_than_asked_about() -> None:
     for server in plugin.mcp_servers:
         assert f"mcp__plugin_{plugin.name}_{server.name}" in allowed
     assert "WebSearch" in allowed
+
+
+def test_rendered_sandbox_keys_are_the_runtime_documented_ones() -> None:
+    """The block is checked against the runtime's shape rather than assumed.
+
+    A misspelled sandbox key changes nothing and reports nothing, so every
+    key is drawn from the SDK's published shape. Two are settings-file-only,
+    because the SDK routes filesystem and credential limits through
+    permission rules instead — named here so the split reads as a fact about
+    the two surfaces rather than as a mismatch nobody checked.
+    """
+    sandbox = project_settings(portable_harness().plugins[0])["sandbox"]
+    assert isinstance(sandbox, dict)
+    network = sandbox["network"]
+    assert isinstance(network, dict)
+    session_keys = SandboxSettings.__annotations__
+    network_keys = SandboxNetworkConfig.__annotations__
+
+    assert "excludedCommands" in session_keys
+    assert sorted(key for key in sandbox if key not in session_keys) == [
+        "credentials",
+        "filesystem",
+    ]
+    assert [key for key in network if key not in network_keys] == []
+
+
+def test_declared_exclusions_cover_the_commands_the_boundary_cannot_carry() -> None:
+    """Each pattern is checked against the command as the toolchain spells it.
+
+    A pattern matches on a literal prefix, so one that reads convincingly
+    beside the declaration and misses the invocation as typed excludes
+    nothing — and it fails as whatever the boundary blocks, naming neither
+    the pattern nor the sandbox.
+    """
+    hooks = portable_harness().plugins[0].hooks
+    assert hooks is not None
+    excluded = hooks.excluded_commands()
+    for command in (
+        "uv run lup-devtools py eval 'lup.harness.models.HookSandbox'",
+        "git push origin HEAD",
+        "git fetch --all",
+        "gh pr view 47",
+        "ssh -T git@github.com",
+    ):
+        assert sandbox_excluded(command, excluded), command
+    assert not sandbox_excluded("uv run pytest -q", excluded)
+    assert not sandbox_excluded("uv run lup-devtools py info lup.hooks", excluded)
+
+
+def test_claude_sandbox_widens_the_writable_set_to_sibling_worktrees(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Claude roots writes at the launch cwd, so a second checkout is outside.
+
+    The declared paths ride along with the resolved tree: this key is
+    documented as merging across scopes and as overriding per session, and a
+    list carrying both is the same list under either reading.
+    """
+    monkeypatch.setattr(launch, "get_tree_dir", lambda: tmp_path)
+    plugin = portable_harness().plugins[0]
+    assert plugin.hooks is not None and plugin.hooks.sandbox is not None
+    arguments = claude_sandbox_arguments(plugin)
+    widened = json.loads(arguments[arguments.index("--settings") + 1])
+
+    assert widened["sandbox"]["filesystem"]["allowWrite"] == [
+        *plugin.hooks.sandbox.writable_paths,
+        str(tmp_path),
+    ]
+
+
+def test_entering_and_leaving_a_worktree_is_granted_rather_than_asked_about() -> None:
+    """The workflow mandates the worktree, so asking about it asks whether to follow it.
+
+    Neither tool is a shell command, so no vocabulary sweep reaches them and
+    `hooks classify` cannot answer for them: the grant lives in the settings
+    artifact, which is why the pin does too.
+    """
+    permissions = project_settings(portable_harness().plugins[0])["permissions"]
+    assert isinstance(permissions, dict)
+    allowed = permissions["allow"]
+    assert isinstance(allowed, list)
+    assert "EnterWorktree" in allowed
+    assert "ExitWorktree" in allowed
 
 
 def test_codex_sandbox_arguments_establish_the_envelope() -> None:

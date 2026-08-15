@@ -33,8 +33,8 @@ from lup.resolver.state import ResolverStateRepository, StateCorruptionError
 from lup.types import StringMap
 from lup.web.serve import local_page_app, serve_local_page
 from lup.workspace.paths import project_root
-from lup.devtools.layout import SUPERVISOR_PORT
 from lup.devtools.supervisor.events import FRESH_CATCHUP_ENTRIES, stream
+from lup.devtools.supervisor.page import SUPERVISOR_PORT
 from lup.devtools.supervisor.projection import (
     ActorIndex,
     AnswerSubmission,

@@ -32,6 +32,7 @@ from lup.codescan.oracle import DefinitionOracle, DefinitionSite, SourcePosition
 from lup.types import JsonValue
 from lup.workspace.paths import project_root
 
+# lup: ignore[constant-declaration] — the binary pyright installs under
 SERVER_NAME = "pyright-langserver"
 
 RESOLVE_TIMEOUT_SECONDS = 600.0
@@ -86,9 +87,12 @@ async def resolve(
 class PyrightOracle(DefinitionOracle):
     """Answers declaration queries by driving `pyright-langserver` over stdio."""
 
-    def __init__(self, server: Path, root: Path) -> None:
+    def __init__(
+        self, server: Path, root: Path, timeout: float = RESOLVE_TIMEOUT_SECONDS
+    ) -> None:
         self.server = server
         self.root = root
+        self.timeout = timeout
 
     def definitions(
         self, positions: list[SourcePosition]
@@ -100,7 +104,7 @@ class PyrightOracle(DefinitionOracle):
             return asyncio.run(
                 asyncio.wait_for(
                     resolve(self.server, self.root, positions),
-                    timeout=RESOLVE_TIMEOUT_SECONDS,
+                    timeout=self.timeout,
                 )
             )
         except (OSError, EOFError, TimeoutError, ValueError) as error:

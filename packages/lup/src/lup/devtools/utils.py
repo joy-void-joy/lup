@@ -299,14 +299,14 @@ def output_json(
         typer.echo(json.dumps(data, indent=2))
 
 
-def short_sha(sha: str) -> str:
+def short_sha(sha: str, length: int = SHORT_SHA_LENGTH) -> str:
     """Abbreviate a git object name for human-readable display.
 
     The single source of truth for how shas are shortened across devtools so
     every table and message uses one consistent width. Returns shorter input
     unchanged so already-abbreviated shas pass through.
     """
-    return sha[:SHORT_SHA_LENGTH]
+    return sha[:length]
 
 
 def format_table(

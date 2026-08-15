@@ -8,7 +8,7 @@ from pathlib import Path
 
 import jwt
 import tomlkit
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ValidationError
 
 from lup.adapters.codex.login import CODEX_LOGIN
 from lup.types import EnvVars
@@ -19,35 +19,30 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_ACCOUNT_HOME = Path.home() / ".codex"
 DEFAULT_SCOPED_ROOT = Path.home() / ".lup" / "codex" / "worktrees"
+# lup: ignore[constant-declaration] — the keys Codex writes its own state under
 CODEX_CONFIG_STATE_KEYS = ("marketplaces", "plugins")
 
 
-class CodexHomeSelection(BaseModel):
+class CodexHomeSelection(BaseModel, frozen=True):
     """The Codex home selected for one harness launch."""
-
-    model_config = ConfigDict(frozen=True)
 
     path: Path
     isolated: bool
 
 
-class CodexAccessClaims(BaseModel):
+class CodexAccessClaims(BaseModel, extra="ignore"):
     """The one claim this adapter reads out of an access token."""
-
-    model_config = ConfigDict(extra="ignore")
 
     exp: datetime | None = None
 
 
-class CodexTokens(BaseModel):
+class CodexTokens(BaseModel, extra="ignore"):
     """The issued tokens, of which only the access token is ever read."""
-
-    model_config = ConfigDict(extra="ignore")
 
     access_token: str = ""
 
 
-class CodexCredential(BaseModel):
+class CodexCredential(BaseModel, extra="ignore"):
     """The parts of a Codex auth record this adapter reasons about.
 
     Extra keys are ignored, and the access token is read for one purpose: the
@@ -55,8 +50,6 @@ class CodexCredential(BaseModel):
     this project would have to guess at. Nothing here logs or reproduces a
     token, and records move between homes as whole files.
     """
-
-    model_config = ConfigDict(extra="ignore")
 
     last_refresh: datetime | None = None
     tokens: CodexTokens = CodexTokens()
@@ -153,10 +146,8 @@ def seed_config(source: Path, target: Path) -> bool:
     return True
 
 
-class CodexLoginState(BaseModel):
+class CodexLoginState(BaseModel, frozen=True):
     """Whether a home holds a login, and when the issuer stops accepting it."""
-
-    model_config = ConfigDict(frozen=True)
 
     present: bool
     expires_at: datetime | None = None

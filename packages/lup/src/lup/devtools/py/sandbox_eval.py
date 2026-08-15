@@ -15,6 +15,8 @@ from lup.devtools.py.evaluate import sandbox_program
 from lup.sandbox.container import Sandbox
 from lup.workspace.paths import project_root
 
+# lup: ignore[constant-declaration] — the container's own session name, which a
+# later invocation must spell alike to reuse the warm one
 EVAL_SESSION = "py-eval"
 """One session name, so repeated expressions reuse a warm container."""
 
