@@ -374,13 +374,15 @@ def show_status(
     status = run_status(repository, run_id)
     if not status.exists:
         raise typer.BadParameter(f"no resolver run {run_id!r} under {root}")
-    if line:
+    if line and not watch:
         typer.echo(status_header(status))
         return
-    report_status(status)
     if not watch:
+        report_status(status)
         return
-    watch_status(repository, run_id, heartbeat, poll, startup, status)
+    typer.echo(status_header(status))
+    report_waiting(run_id)
+    watch_status(repository, run_id, heartbeat, poll, startup, status, line)
 
 
 SETTLED_STATUSES: tuple[ConcernStatus, ...] = (
@@ -469,6 +471,30 @@ def report_status(status: RunStatus) -> None:
         )
 
 
+def report_waiting(run_id: str) -> None:
+    """Print any question now waiting, whole, beside the change that raised it.
+
+    A watch reports what moved; a question that moved is one somebody has to
+    read, and naming it without carrying it makes every wake-up start with a
+    round trip to fetch what happened. The reader is an agent that must
+    measure a question's claims against the tree before relaying it, so what
+    it needs is the question's own words — the notes it was raised from, the
+    concern's specification, its acceptance criteria — not a count.
+
+    Carrying it also survives a channel that drops: a notification lost after
+    this one still leaves the question in hand, where a count that went
+    missing leaves no trace that anything was ever asked.
+    """
+    waiting = [
+        view
+        for view in pending_views(open_mailbox(run_id))
+        if view.answered is None and view.offer is None
+    ]
+    for view in waiting:
+        for line in describe(view):
+            typer.echo(line)
+
+
 def watch_status(
     repository: ResolverStateRepository,
     run_id: str,
@@ -476,6 +502,7 @@ def watch_status(
     poll: float,
     startup: float,
     first: RunStatus,
+    terse: bool = False,
 ) -> None:
     """Report a run until it parks or finishes, so nobody hand-rolls the loop.
 
@@ -501,7 +528,11 @@ def watch_status(
         if status.watched() != frame:
             frame = status.watched()
             quiet = 0.0
-            report_status(status)
+            if terse:
+                typer.echo(status_header(status))
+            else:
+                report_status(status)
+            report_waiting(run_id)
         elif quiet >= heartbeat:
             quiet = 0.0
             typer.echo(status_header(status))
@@ -511,6 +542,7 @@ def watch_status(
     # change, and a run settled before the first poll was printed by the
     # caller.
     typer.echo(f"{local_stamp()} — watch ended: {run_id} is waiting on you.")
+    report_waiting(run_id)
 
 
 def retire_concern(

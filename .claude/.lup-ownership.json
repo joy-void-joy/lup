@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "8358ab8054ff4286f2fb6b188bcfd5e664a6d86b724423181e8b287f48dc1e33",
+  "source_digest": "5a9b4ad6e98761cb43276c4488dabbfbfb45afd94d3ea59411a58cff80261f92",
   "target_requirements": [
     "claude-code"
   ],
@@ -261,7 +261,7 @@
     {
       "path": ".claude/plugins/lup/commands/resolve.md",
       "category": "generated",
-      "sha256": "32b496984987e554ac7bb6ce4bef2b31ac2c4b6d58f189cbeabe78b9accbb65e",
+      "sha256": "5946b94ae67f1d91a625fb49af54f35032c628fe2bb58f2c5503c94bf0ec9323",
       "semantic_id": "skill.resolve",
       "executable": false
     },
