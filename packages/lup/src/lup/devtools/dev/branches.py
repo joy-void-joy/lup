@@ -53,6 +53,30 @@ class Disposition(BaseModel):
     reason: str
 
 
+class WorktreeChanges(BaseModel):
+    """What a worktree holds that removing it would discard."""
+
+    modified: int = 0
+    untracked: int = 0
+
+    def dirty(self) -> bool:
+        return bool(self.modified or self.untracked)
+
+    def summary(self) -> str:
+        return f"{self.modified} modified, {self.untracked} untracked"
+
+    def compact(self) -> str:
+        """The same count in a table cell, where a sentence would not fit."""
+        if not self.dirty():
+            return "-"
+        return " ".join(
+            [
+                *([f"{self.modified}M"] if self.modified else []),
+                *([f"{self.untracked}U"] if self.untracked else []),
+            ]
+        )
+
+
 class BranchInfo(BaseModel):
     name: str
     commit: str
@@ -65,6 +89,16 @@ class BranchInfo(BaseModel):
     source_diff_lines: int
     disposition: BranchStatus
     reason: str
+    changes: WorktreeChanges | None = None
+    """What this branch's worktree holds uncommitted, where it has one.
+
+    Carried beside the disposition rather than folded into its reason: the
+    classifier is shared with `dev status`, and a verb decided partly on
+    working-tree state there would drift from the same verb decided here.
+    What this changes is the cost of acting, not the action — a DELETE whose
+    worktree is dirty still deletes, but refuses until forced, and a reader
+    handed the disposition alone plans a step that will stop.
+    """
 
 
 class RunHold(BaseModel):
@@ -717,6 +751,7 @@ def survey(as_json: bool) -> None:
 
     def info(b: ParsedBranch) -> BranchInfo:
         name = b["name"]
+        checkout = worktrees.get(name)  # lup: ignore[dict-get] — open map
         contained_in = containment[name]
         pr_merged = name in pr_map and pr_map[name].state == "MERGED"
 
@@ -741,7 +776,7 @@ def survey(as_json: bool) -> None:
             name=name,
             commit=b["commit"],
             tracking=b["tracking"],
-            worktree=worktrees.get(name),  # lup: ignore[dict-get] — open map
+            worktree=checkout,
             is_current=b["is_current"],
             contained_in=contained_in,
             pr=pr_map.get(name),  # lup: ignore[dict-get] — open map
@@ -749,6 +784,7 @@ def survey(as_json: bool) -> None:
             source_diff_lines=diff_lines,
             disposition=verdict.status,
             reason=verdict.reason,
+            changes=worktree_changes(checkout) if checkout else None,
         )
 
     branches_list = [info(b) for b in raw_branches]
@@ -773,11 +809,12 @@ def survey(as_json: bool) -> None:
                 bi.disposition,
                 str(bi.unique_commits),
                 str(bi.source_diff_lines),
+                bi.changes.compact() if bi.changes else "-",
                 pr_str,
                 bi.reason,
             ]
 
-        headers = ("Branch", "Disposition", "Unique", "Diff", "PR", "Reason")
+        headers = ("Branch", "Disposition", "Unique", "Diff", "Dirt", "PR", "Reason")
         typer.echo(format_table(headers, [display_row(bi) for bi in branches_list]))
 
         for hold in result.runs:
@@ -791,19 +828,6 @@ def survey(as_json: bool) -> None:
 
 
 type ActionVerdict = Literal["ok", "forced", "blocked"]
-
-
-class WorktreeChanges(BaseModel):
-    """What a worktree holds that removing it would discard."""
-
-    modified: int = 0
-    untracked: int = 0
-
-    def dirty(self) -> bool:
-        return bool(self.modified or self.untracked)
-
-    def summary(self) -> str:
-        return f"{self.modified} modified, {self.untracked} untracked"
 
 
 class PlannedAction(BaseModel):
