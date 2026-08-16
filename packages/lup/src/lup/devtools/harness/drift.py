@@ -40,12 +40,19 @@ def report_generation(target: str, changed: list[Path], removed: list[Path]) -> 
     )
 
 
+def ownership_state(report: DriftReport) -> str:
+    """How the proof stands: absent, present but behind, or current."""
+    if not report.ownership_present:
+        return "missing"
+    return "present" if report.manifest_current else "stale"
+
+
 def report_drift(report: DriftReport, *, paths: bool = False) -> None:
     proposal = report.proposal
     typer.echo(
         f"{report.target}: {len(proposal.writes)} writes, "
         f"{len(proposal.deletes)} deletes, {len(proposal.conflicts)} conflicts, "
-        f"ownership={'present' if report.ownership_present else 'missing'}"
+        f"ownership={ownership_state(report)}"
     )
     for conflict in proposal.conflicts:
         label = "sensitive local conflict" if conflict.sensitive else conflict.category
@@ -142,6 +149,8 @@ def inspect_drift(
 def report_stale(verdict: DriftVerdict) -> None:
     """Name every stale artifact, then the one command that settles them all."""
     for report in verdict.stale_trees:
+        if not report.manifest_current:
+            typer.echo(f"  stale proof: {report.target} ownership manifest", err=True)
         for write in report.proposal.writes:
             typer.echo(f"  stale: {write.artifact.path}", err=True)
         for delete in report.proposal.deletes:
