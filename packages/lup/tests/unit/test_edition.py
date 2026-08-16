@@ -262,6 +262,27 @@ def test_a_missing_record_reads_as_none(tmp_path: Path) -> None:
     assert read_edition(tmp_path / "nowhere.json") is None
 
 
+def test_a_record_naming_a_removed_workspace_reads_as_none(tmp_path: Path) -> None:
+    """Landing a branch deletes its worktree; the record it published stays.
+
+    A reader that trusts the dead path resolves every relative question
+    against it and answers none of them, which is worse than the fallback
+    it was refining — that one is rooted somewhere that exists.
+    """
+    workspace = tmp_path / "gone"
+    workspace.mkdir()
+    destination = tmp_path / "edition.json"
+    destination.write_text(
+        Edition(workspace=workspace, file=workspace / "edited.py").model_dump_json(),
+        encoding="utf-8",
+    )
+    assert read_edition(destination) is not None
+
+    workspace.rmdir()
+
+    assert read_edition(destination) is None
+
+
 def test_the_published_bytes_are_the_declared_fields(tmp_path: Path) -> None:
     """The hook writes JSON by hand; drift here is drift in the contract."""
     work = checkout(tmp_path / "repo")
