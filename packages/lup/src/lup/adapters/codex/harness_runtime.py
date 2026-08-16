@@ -3,6 +3,8 @@
 import hashlib
 import json
 import os
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 import sh
@@ -11,6 +13,7 @@ from pydantic import BaseModel, Field
 from lup.adapters.codex.login import CODEX_LOGIN
 from lup.harness.contracts import CapabilityProbe
 from lup.harness.models import CapabilityEvidence
+from lup.types import EnvVars
 
 
 class CodexCliEvidence(BaseModel, frozen=True):
@@ -173,19 +176,21 @@ class CodexPluginInstaller:
         self.config = config
         self.executable = executable
 
+    def plugin_environment(self) -> EnvVars:
+        """Environment shared by every Codex plugin lifecycle command."""
+        self.config.codex_home.mkdir(parents=True, exist_ok=True)
+        return {
+            **os.environ,  # lup: ignore[os-environ] — exact child-process inheritance
+            **CODEX_LOGIN.environment(self.config.codex_home),
+        }
+
     def ensure(
         self, source_root: Path, cwd: Path, force: bool = False
     ) -> PluginCacheEvidence:
         before = plugin_cache_evidence(source_root, self.config)
         if before.ready and not force:
             return before
-        # The CLI refuses to resolve a CODEX_HOME that does not exist yet;
-        # the installer owns the cache location, so it creates it.
-        self.config.codex_home.mkdir(parents=True, exist_ok=True)
-        environment = {
-            **os.environ,  # lup: ignore[os-environ] — exact child-process inheritance
-            **CODEX_LOGIN.environment(self.config.codex_home),
-        }
+        environment = self.plugin_environment()
         # The marketplace definition lives in the repository
         # (`.agents/plugins/marketplace.json`). The CLI refuses a name already
         # registered from a different source — which every sibling worktree and
@@ -231,3 +236,35 @@ class CodexPluginInstaller:
                 "Codex reported installation success but cached plugin digest differs"
             )
         return after
+
+    def remove(self, cwd: Path) -> None:
+        """Remove the installed plugin before its temporary marketplace."""
+        environment = self.plugin_environment()
+        selector = f"{self.config.plugin}@{self.config.marketplace}"
+        sh.Command(str(self.executable))(
+            "plugin",
+            "remove",
+            selector,
+            _cwd=str(cwd),
+            _env=environment,
+            _ok_code=[0, 1],
+        )
+        sh.Command(str(self.executable))(
+            "plugin",
+            "marketplace",
+            "remove",
+            self.config.marketplace,
+            _cwd=str(cwd),
+            _env=environment,
+            _ok_code=[0, 1],
+        )
+
+    @contextmanager
+    def temporary(
+        self, source_root: Path, cwd: Path, force: bool = False
+    ) -> Iterator[PluginCacheEvidence]:
+        """Install a plugin for one native Codex process."""
+        try:
+            yield self.ensure(source_root, cwd, force)
+        finally:
+            self.remove(cwd)

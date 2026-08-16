@@ -142,7 +142,7 @@
     {
       "path": ".codex/plugins/lup/hooks/runtime/kernel/shell.py",
       "category": "generated",
-      "sha256": "15134cbebceb8dd56b163e7f852db1fb718d865483adf8d1244b0bf150289101",
+      "sha256": "311f849aa74f9f677197ccc4f471e702e109f0ed931535f121a7bfa361daa9db",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -163,14 +163,14 @@
     {
       "path": ".codex/plugins/lup/hooks/runtime/policy_data.py",
       "category": "generated",
-      "sha256": "93b9a8a7d1fb239048d8e04cdafea9527eaaff0648d50e823436fd2cb3d409bd",
+      "sha256": "d307f3df83ce44d49afee2cb5729934d726db9ef672f27f72e540dbce62b1adc",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
     {
       "path": ".codex/plugins/lup/hooks/scripts/policy.py",
       "category": "generated",
-      "sha256": "79d2b99d9804ba00f4691185f76eddf50b72bbbc1bfbb63f861b209b8b2217ea",
+      "sha256": "df5a66247ff40bdf75c6bc6dd4afee272d9b27be41b9d0bf9e5719882d91ced9",
       "semantic_id": "hooks.lup-policy",
       "executable": true
     },

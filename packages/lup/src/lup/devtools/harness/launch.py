@@ -319,14 +319,9 @@ def launch_codex(
     if home.isolated:
         typer.echo(f"Using worktree-scoped Codex home: {selected_home}")
     codex_login_preflight(selected_home, environment)
-    cache = CodexPluginInstaller(
+    installer = CodexPluginInstaller(
         PluginCacheConfig(codex_home=selected_home, marketplace=plugin.marketplace)
-    ).ensure(
-        project_root() / ".codex" / "plugins" / plugin.name,
-        project_root(),
-        force=force_install,
     )
-    typer.echo(f"Verified installed Codex plugin: {cache.installed_root}")
     arguments: list[str] = list(envelope)
     if profile is not None:
         arguments.extend(["--profile", profile])
@@ -335,7 +330,13 @@ def launch_codex(
     arguments.extend(extra_args)
     environment["CODEX_HOME"] = str(selected_home)
     try:
-        sh.Command("codex")(*arguments, _fg=True, _env=environment)
+        with installer.temporary(
+            project_root() / ".codex" / "plugins" / plugin.name,
+            project_root(),
+            force=force_install,
+        ) as cache:
+            typer.echo(f"Verified installed Codex plugin: {cache.installed_root}")
+            sh.Command("codex")(*arguments, _fg=True, _env=environment)
     except sh.CommandNotFound as error:
         raise typer.BadParameter("Codex CLI is not installed") from error
     except sh.ErrorReturnCode as error:
