@@ -127,8 +127,13 @@ def test_cli_reports_tracker_failure(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_cli_forwards_correction_number(monkeypatch: pytest.MonkeyPatch) -> None:
-    handler = Mock(return_value="https://github.test/o/r/issues/179")
-    monkeypatch.setattr(issues.FrictionReport, "file", handler)
+    calls: list[tuple[issues.FrictionReport, int | None]] = []
+
+    def record(self: issues.FrictionReport, issue: int | None = None) -> str:
+        calls.append((self, issue))
+        return "https://github.test/o/r/issues/179"
+
+    monkeypatch.setattr(issues.FrictionReport, "file", record)
     result = CliRunner().invoke(app, [*friction_arguments(), "--issue", "179"])
     assert result.exit_code == 0
-    handler.assert_called_once_with(issue=179)
+    assert calls == [(friction_report(), 179)]
