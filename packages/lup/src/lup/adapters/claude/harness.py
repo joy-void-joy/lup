@@ -411,7 +411,9 @@ CLAUDE_DISPATCHER = DispatcherDeclaration(
     package="lup.adapters.claude",
     managed_root_env=CLAUDE_LOGIN.config_home_env,
     routed_tools=["Bash", "WebFetch", "Edit", "Write"],
-    hook_events=["PreToolUse"],
+    hook_events=["PreToolUse", "PostToolUse"],
+    observation_event="PostToolUse",
+    observed_tools=["Edit", "Write"],
     failure="conservative_ask",
     runtime_modules=["policy_data"],
 )
@@ -434,25 +436,37 @@ class ClaudeHookRenderer(ArtifactRenderer[HookSet]):
         self.spellings = spellings
 
     def render(self, source: HookSet) -> ArtifactTree:
-        registration = [
+        command = [
+            {
+                "type": "command",
+                "command": 'python3 "$CLAUDE_PLUGIN_ROOT/hooks/scripts/policy.py"',
+                "timeout": 30,
+            }
+        ]
+        decided = [
             {
                 "matcher": "|".join(
                     routed_for(CLAUDE_DISPATCHER.routed_tools, source.refused_tools)
                 ),
-                "hooks": [
-                    {
-                        "type": "command",
-                        "command": (
-                            'python3 "$CLAUDE_PLUGIN_ROOT/hooks/scripts/policy.py"'
-                        ),
-                        "timeout": 30,
-                    }
-                ],
+                "hooks": command,
+            }
+        ]
+        observed = [
+            {
+                "matcher": "|".join(CLAUDE_DISPATCHER.observed_tools),
+                "hooks": command,
             }
         ]
         hooks = {
             "description": "Lup semantic permission policy",
-            "hooks": {event: registration for event in CLAUDE_DISPATCHER.hook_events},
+            "hooks": {
+                event: (
+                    observed
+                    if event == CLAUDE_DISPATCHER.observation_event
+                    else decided
+                )
+                for event in CLAUDE_DISPATCHER.hook_events
+            },
         }
         evidence = {"schemaVersion": 1, "policyIds": source.policy_ids}
         return ArtifactTree(

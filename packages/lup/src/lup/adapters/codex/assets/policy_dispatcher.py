@@ -37,7 +37,12 @@ from decisions import (
     fetch_decision,
     refused_tool_decision,
 )
-from host import declared_identity, read_document, sandbox_active
+from host import (
+    declared_identity,
+    publish_edition,
+    read_document,
+    sandbox_active,
+)
 from kernel.decision import KernelDecision
 from policy_data import AGENT_IDENTITY_ENV, AUTONOMOUS_AGENT_IDENTITIES
 
@@ -102,14 +107,35 @@ def dispatch(payload, permission_request=False):
     return KernelDecision("ask", f"unknown tool {name!r} is not covered by policy")
 
 
+def observe(payload):
+    """Record which checkout an edit landed in, and decide nothing.
+
+    Codex reads the directory it ran in, where Claude reads the edited file.
+    Not a lesser answer here, and not an available one either way: Codex
+    names its files inside the patch envelope, and the parser that decodes
+    one validates its context against the document on disk — which this
+    event runs after the patch already rewrote. Re-decoding it here would
+    fail on exactly the edits it was called for. Codex hands over its
+    working directory instead, which Claude's hook is promised nothing
+    about, and that is the same fact one step coarser.
+    """
+    root = payload["cwd"] if "cwd" in payload else ""
+    if root:
+        publish_edition(root)
+
+
 def main():
     try:
         payload = json.load(sys.stdin)
-        permission_request = (
-            payload["hook_event_name"] == "PermissionRequest"
-            if "hook_event_name" in payload
-            else False
-        )
+        # Watching and deciding are separate events, and this one returns
+        # before a verdict exists: the patch has already applied, so there is
+        # nothing left to permit, and the fail-closed exit below would refuse
+        # a call that already happened.
+        event = payload["hook_event_name"] if "hook_event_name" in payload else ""
+        if event == "PostToolUse":
+            observe(payload)
+            return
+        permission_request = event == "PermissionRequest"
         # A verdict from here places nothing: this hook answers, and the call
         # runs with the arguments the model wrote, so a placement is degraded
         # to its plain effect rather than carrying an intent no channel here

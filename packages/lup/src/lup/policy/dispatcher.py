@@ -130,6 +130,16 @@ class DispatcherDeclaration(BaseModel, frozen=True):
     Each field is required, so answering the whole set is what constructing a
     runtime means. Adding a field is how a new axis of divergence is opened,
     and both runtimes have to close it before the tree compiles again.
+
+    ``hook_events`` is every event the plugin registers, and
+    ``observation_event`` names the one among them that decides nothing.
+    The tools are declared apart because the two are registered for
+    different sets: a deciding event covers everything the dispatcher
+    routes, since a call it is not registered for is a call nobody judged,
+    while the watching event covers the editing tools alone. It exists only
+    to record where editing is happening, and a matcher wide enough for the
+    deciding set would spawn the script after every shell command to find
+    nothing worth recording.
     """
 
     runtime_name: str
@@ -137,6 +147,8 @@ class DispatcherDeclaration(BaseModel, frozen=True):
     managed_root_env: str
     routed_tools: list[str]
     hook_events: list[str]
+    observation_event: str
+    observed_tools: list[str]
     failure: DispatcherFailure
     runtime_modules: list[str]
 

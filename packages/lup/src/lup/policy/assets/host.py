@@ -18,6 +18,7 @@ variable to read — never as a branch on which runtime is asking.
 
 import json
 import os
+import sys
 
 # lup: ignore[subprocess] — `sh` is third-party and this half is compiled into a bare script that has no virtual environment to resolve it from
 import subprocess
@@ -52,14 +53,73 @@ def worktree_path(path_text: str) -> str:
     launch directory; the cwd this script is promised nothing about is not a
     root at all. Both leave the path absolute, and every rule silently misses.
     """
+    root = worktree_root(path_text)
+    if not root:
+        return path_text
+    return Path(path_text).resolve().relative_to(root).as_posix()
+
+
+def worktree_root(path_text: str) -> str:
+    """The checkout a path belongs to, or "" when it belongs to none.
+
+    The same walk :func:`worktree_path` relativizes against, kept whole
+    rather than discarded, because the root is the answer to a second
+    question: a language server asked about this file resolves its imports
+    against exactly this directory, and resolving them against wherever the
+    session was launched reads the same module names out of another tree.
+    """
     path = Path(path_text)
     if not path.is_absolute():
-        return path_text
+        return ""
     resolved = path.resolve()
-    for root in resolved.parents:
+    # The path itself is a candidate, not only its parents: a file never
+    # holds a `.git`, so nothing changes for one, and a directory that is
+    # already a checkout root would otherwise be answered for by whatever
+    # encloses it — or by nothing at all.
+    for root in [resolved, *resolved.parents]:
         if (root / ".git").exists():
-            return resolved.relative_to(root).as_posix()
-    return path_text
+            return str(root)
+    return ""
+
+
+def publish_edition(path_text: str) -> None:
+    """Say which checkout an edit landed in, for the servers that would guess.
+
+    A language server and the code-intelligence tools are started once and
+    hold the directory the session opened in for the rest of their lives.
+    Editing moves — this project asks that it move, into a worktree — and
+    nothing about that reaches them, so they answer about the launch tree
+    with no sign that they have. The edited file is the one thing that knows
+    where editing is happening, and this is the only place that sees it.
+
+    Written after the tool ran, never before: the same call from the
+    permission path would put a filesystem failure between an edit and its
+    verdict, and this must not be able to decide anything. For the same
+    reason an unwritable destination is reported and dropped — a session
+    whose diagnostics stay rooted where they were is worth strictly more
+    than one that stopped editing over it.
+
+    The rename is the whole guarantee, and the temporary is dot-prefixed, for
+    the reasons ``lup.channels.models.write_atomic`` gives. This cannot call
+    that one: it is compiled into a bare script with no ``lup`` to import.
+    """
+    environ = os.environ  # lup: ignore[os-environ]
+    if "LUP_EDITION" not in environ or not environ["LUP_EDITION"]:
+        return
+    root = worktree_root(path_text)
+    if not root:
+        return
+    destination = Path(environ["LUP_EDITION"])
+    record = json.dumps(
+        {"workspace": root, "file": str(Path(path_text).resolve())}, indent=2
+    )
+    temporary_path = destination.with_name(f".{destination.name}.tmp")
+    try:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        temporary_path.write_text(record + "\n", encoding="utf-8")
+        temporary_path.replace(destination)
+    except OSError as error:
+        print(f"lup: could not publish the edition: {error}", file=sys.stderr)
 
 
 def existing_write_targets(targets: list[str]) -> list[str]:

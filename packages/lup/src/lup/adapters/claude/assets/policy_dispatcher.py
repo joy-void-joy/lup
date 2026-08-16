@@ -37,7 +37,12 @@ from decisions import (
     placed_edit_text,
     refused_tool_decision,
 )
-from host import declared_identity, read_document, sandbox_active
+from host import (
+    declared_identity,
+    publish_edition,
+    read_document,
+    sandbox_active,
+)
 from kernel.decision import KernelDecision, escalation_offer, sandbox_escaped
 from policy_data import AGENT_IDENTITY_ENV, AUTONOMOUS_AGENT_IDENTITIES
 
@@ -249,11 +254,35 @@ def rendered(decision, payload, placed):
     }
 
 
+def observe(payload):
+    """Record which checkout an edit landed in, and decide nothing.
+
+    Claude Code names the file the same way for both editing tools, so the
+    one key is the whole reading. A payload without it is a call this event
+    is registered for and has nothing to say about, which is not a failure —
+    the matcher is narrow, but the runtime owns it, and a tool that stops
+    carrying a path should cost a recorded edition rather than an error.
+    """
+    tool_input = payload["tool_input"] if "tool_input" in payload else {}
+    path = tool_input["file_path"] if "file_path" in tool_input else ""
+    if path:
+        publish_edition(path)
+
+
 def main():
     payload = {}
     placed = None
     try:
         payload = json.load(sys.stdin)
+        event = payload["hook_event_name"] if "hook_event_name" in payload else ""
+        # Watching and deciding are separate events, and this one returns
+        # before a verdict exists: the tool has already run, so there is
+        # nothing left to permit, and the conservative ask below would be an
+        # approval prompt for work already done.
+        if event == "PostToolUse":
+            observe(payload)
+            json.dump({}, sys.stdout)
+            return
         decision = dispatch(payload)
         placed = placed_input(payload)
     # Every way this can fail means one thing — the call went unjudged — and
