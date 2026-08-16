@@ -82,23 +82,29 @@ def worktree_root(path_text: str) -> str:
     return ""
 
 
-def shared_repository(path_text: str) -> str:
+def shared_git_directory(path_text: str) -> str:
     """The one directory every worktree of a repository can name alike.
 
     The publisher sits in whichever checkout was edited and the reader in
     whichever one its server was launched from, and neither can see the
-    other's. What they have in common is the repository: a linked worktree's
-    ``.git`` is a file naming the main checkout's git directory, and the main
-    checkout's ``.git`` is that directory. So both ends resolve to one place
-    without either being told where the other is, and without depending on a
-    variable reaching a hook and a server the same way.
+    other's. What they share is git's own directory: a linked worktree's
+    ``.git`` is a file naming its per-worktree directory beneath the common
+    one, and a main checkout's ``.git`` is that common directory. So both
+    ends resolve to one place without either being told where the other is,
+    and without depending on a variable reaching a hook and a server alike.
+
+    The common directory rather than the main checkout, because a checkout
+    is not guaranteed to be there: a repository can keep its git directory
+    beside its worktrees rather than inside one, and then the path above
+    `worktrees/` is not a checkout at all — it is whatever happens to
+    enclose the repository, which is nobody's to write into.
     """
     root = worktree_root(path_text)
     if not root:
         return ""
     marker = Path(root) / ".git"
     if marker.is_dir():
-        return root
+        return str(marker)
     try:
         named = marker.read_text(encoding="utf-8")
     except OSError:
@@ -106,11 +112,11 @@ def shared_repository(path_text: str) -> str:
     gitdir = named.removeprefix("gitdir:").strip()
     if not gitdir:
         return ""
-    # `<main>/.git/worktrees/<name>` — the checkout is three levels above.
+    # `<common>/worktrees/<name>` — two levels up in either layout.
     linked = Path(gitdir)
-    if len(linked.parents) < 3:
+    if len(linked.parents) < 2:
         return ""
-    return str(linked.parents[2])
+    return str(linked.parents[1])
 
 
 def publish_edition(path_text: str) -> None:
@@ -135,10 +141,10 @@ def publish_edition(path_text: str) -> None:
     that one: it is compiled into a bare script with no ``lup`` to import.
     """
     root = worktree_root(path_text)
-    repository = shared_repository(path_text)
-    if not root or not repository:
+    shared = shared_git_directory(path_text)
+    if not root or not shared:
         return
-    destination = Path(repository) / ".lup" / "edition.json"
+    destination = Path(shared) / "lup" / "edition.json"
     record = json.dumps(
         {"workspace": root, "file": str(Path(path_text).resolve())}, indent=2
     )
@@ -149,6 +155,54 @@ def publish_edition(path_text: str) -> None:
         temporary_path.replace(destination)
     except OSError as error:
         print(f"lup: could not publish the edition: {error}", file=sys.stderr)
+
+
+def file_diagnostics(
+    path_text: str, command: list[str], timeout_seconds: float = 20.0
+) -> list[str]:
+    """Type-check one edited file, in the checkout that actually holds it.
+
+    A language server the runtime starts is rooted once, where the session
+    opened, and goes on resolving imports there after work moves to another
+    checkout — same module names, different source, diagnostics about a file
+    nobody edited. Running the checker per edit has no root to go stale:
+    the file names its own checkout, and that is where the check runs.
+
+    Reported for the edited file alone. The checker resolves whatever the
+    file imports, so it can have opinions about the whole tree, and a hook
+    that repeated them would answer every edit with the same backlog.
+
+    Anything that goes wrong is no diagnostics. A checker that is missing, or
+    slow, or writes something this cannot read, is not evidence about the
+    edit — and this runs after the tool, so the alternative to saying
+    nothing is failing an edit that already happened.
+    """
+    if not command:
+        return []
+    root = worktree_root(path_text)
+    if not root:
+        return []
+    executable = Path(root) / command[0]
+    if not executable.is_file():
+        return []
+    edited = str(Path(path_text).resolve())
+    try:
+        finished = subprocess.run(
+            [str(executable), *command[1:], edited],
+            capture_output=True,
+            text=True,
+            cwd=root,
+            timeout=timeout_seconds,
+            check=False,
+        )
+        reported = json.loads(finished.stdout)["generalDiagnostics"]
+    except (OSError, subprocess.SubprocessError, ValueError, KeyError):
+        return []
+    return [
+        f"{item['severity']} {item['range']['start']['line'] + 1}: {item['message']}"
+        for item in reported
+        if item["file"] == edited and item["severity"] != "information"
+    ]
 
 
 def existing_write_targets(targets: list[str]) -> list[str]:

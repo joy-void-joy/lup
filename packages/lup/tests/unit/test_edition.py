@@ -11,8 +11,9 @@ import json
 from pathlib import Path
 
 from lup.policy.assets.host import (
+    file_diagnostics,
     publish_edition,
-    shared_repository,
+    shared_git_directory,
     worktree_root,
 )
 from lup.workspace.edition import Edition, edition_path, read_edition
@@ -71,7 +72,7 @@ def test_a_relative_path_names_none() -> None:
     assert worktree_root("src/module.py") == ""
 
 
-def test_a_worktree_resolves_to_the_repository_it_belongs_to(tmp_path: Path) -> None:
+def test_a_worktree_resolves_to_the_directory_it_shares(tmp_path: Path) -> None:
     """The whole point: two checkouts, one place both of them can name.
 
     The hook runs wherever the edit landed and the reader wherever its
@@ -81,8 +82,28 @@ def test_a_worktree_resolves_to_the_repository_it_belongs_to(tmp_path: Path) -> 
     main = checkout(tmp_path / "repo")
     worktree = linked(main, tmp_path / "feature")
 
-    assert shared_repository(str(edited(worktree))) == str(main)
-    assert shared_repository(str(edited(main))) == str(main)
+    assert shared_git_directory(str(edited(worktree))) == str(main / ".git")
+    assert shared_git_directory(str(edited(main))) == str(main / ".git")
+
+
+def test_a_repository_kept_beside_its_worktrees_resolves_too(tmp_path: Path) -> None:
+    """A git directory need not sit inside a checkout, and this one does not.
+
+    Taking the checkout above `worktrees/` assumes the standard layout. Where
+    the repository is kept beside its worktrees instead, that path is not a
+    checkout at all — it is whatever encloses the repository, and the record
+    lands outside it. The directory they share is one level lower and is
+    there in both layouts.
+    """
+    bare = tmp_path / "repo.git"
+    (bare / "worktrees" / "feature").mkdir(parents=True)
+    work = tmp_path / "tree" / "feature"
+    work.mkdir(parents=True)
+    (work / ".git").write_text(
+        f"gitdir: {bare / 'worktrees' / 'feature'}\n", encoding="utf-8"
+    )
+
+    assert shared_git_directory(str(edited(work))) == str(bare)
 
 
 def test_the_hook_and_the_library_name_one_location(tmp_path: Path) -> None:
@@ -149,6 +170,84 @@ def test_an_unwritable_destination_does_not_raise(tmp_path: Path) -> None:
     (work / ".lup").write_text("occupied\n", encoding="utf-8")
 
     publish_edition(str(edited(work)))
+
+
+def checker(root: Path, payload: str) -> list[str]:
+    """A stand-in type checker emitting *payload*, so the parsing is the subject."""
+    script = root / "fake-checker"
+    script.write_text(f"#!/bin/sh\ncat <<'JSON'\n{payload}\nJSON\n", encoding="utf-8")
+    script.chmod(0o755)
+    return ["fake-checker"]
+
+
+def report(file: Path, severity: str = "error", line: int = 0) -> str:
+    return json.dumps(
+        {
+            "generalDiagnostics": [
+                {
+                    "file": str(file),
+                    "severity": severity,
+                    "range": {"start": {"line": line}},
+                    "message": "something is wrong",
+                }
+            ]
+        }
+    )
+
+
+def test_a_diagnostic_for_the_edited_file_is_reported(tmp_path: Path) -> None:
+    work = checkout(tmp_path / "repo")
+    file = edited(work)
+    command = checker(work, report(file))
+
+    assert file_diagnostics(str(file), command) == [
+        "error 1: something is wrong",
+    ]
+
+
+def test_a_diagnostic_about_another_file_is_not(tmp_path: Path) -> None:
+    """The checker resolves what the file imports, so it can see the whole tree.
+
+    Repeating that would answer every edit with the same standing backlog,
+    most of it about files this edit never touched.
+    """
+    work = checkout(tmp_path / "repo")
+    file = edited(work)
+    command = checker(work, report(work / "elsewhere.py"))
+
+    assert file_diagnostics(str(file), command) == []
+
+
+def test_an_informational_note_is_not_a_diagnostic(tmp_path: Path) -> None:
+    work = checkout(tmp_path / "repo")
+    file = edited(work)
+    command = checker(work, report(file, severity="information"))
+
+    assert file_diagnostics(str(file), command) == []
+
+
+def test_no_declared_checker_reports_nothing(tmp_path: Path) -> None:
+    """Empty declares no checker, rather than guessing at one."""
+    work = checkout(tmp_path / "repo")
+
+    assert file_diagnostics(str(edited(work)), []) == []
+
+
+def test_a_checker_that_is_not_installed_reports_nothing(tmp_path: Path) -> None:
+    """A missing checker is not evidence about the edit."""
+    work = checkout(tmp_path / "repo")
+
+    assert file_diagnostics(str(edited(work)), ["nowhere/pyright"]) == []
+
+
+def test_a_checker_that_writes_nonsense_reports_nothing(tmp_path: Path) -> None:
+    """This runs after the tool, so the alternative to silence is failing an
+    edit that already happened."""
+    work = checkout(tmp_path / "repo")
+    file = edited(work)
+    command = checker(work, "not json at all")
+
+    assert file_diagnostics(str(file), command) == []
 
 
 def test_a_corrupt_record_reads_as_none(tmp_path: Path) -> None:

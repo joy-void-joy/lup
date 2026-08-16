@@ -118,6 +118,12 @@ def observe(payload):
     fail on exactly the edits it was called for. Codex hands over its
     working directory instead, which Claude's hook is promised nothing
     about, and that is the same fact one step coarser.
+
+    Coarser is enough to say which checkout is being edited and not enough
+    to type-check what changed, so Codex records the edition and Claude also
+    reports diagnostics. Checking the directory instead would answer every
+    patch with every finding in the tree, most of them about files this
+    edit never touched.
     """
     root = payload["cwd"] if "cwd" in payload else ""
     if root:

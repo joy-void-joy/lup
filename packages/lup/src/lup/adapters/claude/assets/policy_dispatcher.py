@@ -39,12 +39,17 @@ from decisions import (
 )
 from host import (
     declared_identity,
+    file_diagnostics,
     publish_edition,
     read_document,
     sandbox_active,
 )
 from kernel.decision import KernelDecision, escalation_offer, sandbox_escaped
-from policy_data import AGENT_IDENTITY_ENV, AUTONOMOUS_AGENT_IDENTITIES
+from policy_data import (
+    AGENT_IDENTITY_ENV,
+    AUTONOMOUS_AGENT_IDENTITIES,
+    DIAGNOSTICS_COMMAND,
+)
 
 
 def managed_root():
@@ -255,7 +260,7 @@ def rendered(decision, payload, placed):
 
 
 def observe(payload):
-    """Record which checkout an edit landed in, and decide nothing.
+    """Record where an edit landed and type-check it, deciding nothing.
 
     Claude Code names the file the same way for both editing tools, so the
     one key is the whole reading. A payload without it is a call this event
@@ -265,8 +270,10 @@ def observe(payload):
     """
     tool_input = payload["tool_input"] if "tool_input" in payload else {}
     path = tool_input["file_path"] if "file_path" in tool_input else ""
-    if path:
-        publish_edition(path)
+    if not path:
+        return []
+    publish_edition(path)
+    return file_diagnostics(path, DIAGNOSTICS_COMMAND)
 
 
 def main():
@@ -280,7 +287,14 @@ def main():
         # nothing left to permit, and the conservative ask below would be an
         # approval prompt for work already done.
         if event == "PostToolUse":
-            observe(payload)
+            found = observe(payload)
+            # Exit 2 is the one channel this event has to the agent: the tool
+            # already ran, so nothing is undone, and stdout on a clean exit
+            # reaches a debug log nobody reads. Silence when the file checks
+            # out, so the channel means something when it is used.
+            if found:
+                sys.stderr.write("\n".join(found))
+                raise SystemExit(2)
             json.dump({}, sys.stdout)
             return
         decision = dispatch(payload)

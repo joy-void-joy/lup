@@ -429,9 +429,20 @@ def declaration_breaches(
     """Axes the declaration promised that the runtime half does not keep."""
     constants = string_constants(runtime.tree)
     entrypoint = runtime.function(ENTRYPOINT)
-    closes = entrypoint is not None and any(
+    # Read from the failure handler rather than from the whole entrypoint.
+    # The axis is what a dispatcher does with input it cannot decide from,
+    # and an exit anywhere else answers a different question — a watching
+    # event reporting what it found has no decision channel to answer
+    # through, and exiting is the only way it reaches the agent at all.
+    handlers = (
+        [node for node in ast.walk(entrypoint) if isinstance(node, ast.ExceptHandler)]
+        if entrypoint is not None
+        else []
+    )
+    closes = any(
         isinstance(node, ast.Name) and node.id == "SystemExit"
-        for node in ast.walk(entrypoint)
+        for handler in handlers
+        for node in ast.walk(handler)
     )
     routed = runtime.routed_tools()
     declared = sorted(declaration.routed_tools)

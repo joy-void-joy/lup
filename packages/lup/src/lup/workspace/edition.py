@@ -25,20 +25,26 @@ from pydantic import BaseModel
 from lup.channels.models import publish_atomic
 
 
-def repository_of(root: Path) -> Path:
-    """The checkout every worktree of *root*'s repository shares.
+def shared_git_directory(root: Path) -> Path:
+    """The git directory every worktree of *root*'s repository shares.
 
-    A linked worktree's ``.git`` is a file naming the main checkout's git
-    directory; the main checkout's ``.git`` is that directory. A path in no
-    repository at all answers for itself, so a caller outside one still gets
+    A linked worktree's ``.git`` is a file naming its own directory beneath
+    the common one; a main checkout's ``.git`` is that common directory. The
+    common directory rather than a main checkout, because a repository may
+    keep its git directory beside its worktrees rather than inside one, and
+    then there is no checkout above them to write into.
+
+    A path in no repository answers for itself, so a caller outside one gets
     somewhere to look rather than an exception it has nothing to do with.
     """
     marker = root / ".git"
-    if marker.is_dir() or not marker.is_file():
+    if marker.is_dir():
+        return marker
+    if not marker.is_file():
         return root
     gitdir = marker.read_text("utf-8").removeprefix("gitdir:").strip()
     linked = Path(gitdir)
-    return linked.parents[2] if gitdir and len(linked.parents) >= 3 else root
+    return linked.parents[1] if gitdir and len(linked.parents) >= 2 else root
 
 
 class Edition(BaseModel, frozen=True):
@@ -59,10 +65,10 @@ def edition_path(root: Path) -> Path:
 
     The reader is rooted wherever its server was launched and the writer
     sits in whichever checkout was edited, so the location has to be one
-    neither has to be told. ``git`` already keeps one: every linked worktree
-    names the main checkout's git directory, so both ends resolve there.
+    neither has to be told. ``git`` already keeps one: every worktree names
+    the directory they all share, so both ends resolve to the same file.
     """
-    return repository_of(root) / ".lup" / "edition.json"
+    return shared_git_directory(root) / "lup" / "edition.json"
 
 
 def publish_edition(path: Path, workspace: Path, file: Path) -> None:
