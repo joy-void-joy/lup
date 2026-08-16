@@ -139,12 +139,24 @@ class DriftReport(BaseModel, frozen=True):
 
     target: str
     ownership_present: bool
+    manifest_current: bool
+    """Whether the manifest on disk is the one this source would write.
+
+    The artifacts and the proof that covers them go stale independently. A
+    merge is where they part: the driver resolving a manifest keeps one
+    side, which is a digest of a tree neither branch has now, while the
+    artifacts themselves merged cleanly and match their source. Reading only
+    the artifacts calls that settled, and the regeneration the conflict was
+    supposed to force is then the step nothing asks for.
+    """
+
     proposal: ReconciliationProposal
 
     @property
     def clean(self) -> bool:
         return (
             self.ownership_present
+            and self.manifest_current
             and not self.proposal.writes
             and not self.proposal.deletes
             and not self.proposal.conflicts
@@ -320,12 +332,29 @@ def codex_generation_recipe(
 
 
 # lup: ignore[model-free-function] — recipe is a transparent capability carrier
+def manifest_of(recipe: GenerationRecipe) -> OwnershipManifest:
+    """The proof *recipe* would write, built once for writing and for reading.
+
+    Inspection compares against this and generation saves it, so the manifest
+    a check calls current is the one a regeneration would produce — the two
+    cannot disagree about what settled means.
+    """
+    return build_manifest(
+        recipe.source,
+        recipe.desired,
+        generator_version=recipe.source.generator_version,
+        target_requirements=recipe.target_requirements,
+    )
+
+
+# lup: ignore[model-free-function] — recipe is a transparent capability carrier
 def inspect_generation(recipe: GenerationRecipe) -> DriftReport:
     """Compute ownership-aware drift without changing the working tree."""
     current = recipe.reader.read(recipe.root)
     return DriftReport(
         target=recipe.label,
         ownership_present=recipe.prior is not None,
+        manifest_current=recipe.prior == manifest_of(recipe),
         proposal=recipe.reconciler.propose(current, recipe.desired),
     )
 
@@ -342,12 +371,7 @@ def generate(recipe: GenerationRecipe) -> GenerationReport:
     except OSError as error:
         discard_staged_write(error)
         raise refused_write(error) from error
-    manifest = build_manifest(
-        recipe.source,
-        recipe.desired,
-        generator_version=recipe.source.generator_version,
-        target_requirements=recipe.target_requirements,
-    )
+    manifest = manifest_of(recipe)
     save_manifest(recipe.manifest_path, manifest)
     return GenerationReport(
         target=recipe.label,

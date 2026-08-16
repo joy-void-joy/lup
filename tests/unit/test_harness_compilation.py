@@ -78,6 +78,7 @@ from lup.harness.models import (
 from lup.harness.contracts import PromptRenderer
 from lup.markdown import CodeCell, PlainCell
 from lup.harness.ownership import (
+    OwnershipManifest,
     OwnershipManifestError,
     build_manifest,
     content_digest,
@@ -134,6 +135,7 @@ from lup_template.devtools.harness.composition import (
 from lup.devtools.harness.generate import (
     GenerationRecipe,
     current_reader,
+    manifest_of,
     generate,
     inspect_generation,
 )
@@ -1039,6 +1041,58 @@ def test_generic_generation_accepts_an_injected_third_recipe(tmp_path: Path) -> 
         "third-provider\n"
     )
     assert recipe.manifest_path.is_file()
+
+
+def third_recipe(tmp_path: Path, prior: OwnershipManifest | None) -> GenerationRecipe:
+    """One injected recipe over a settled tree, reading *prior* as its proof."""
+    desired = ArtifactTree(
+        artifacts=[
+            Artifact(
+                path=Path(".third/plugin.txt"),
+                content="third-provider\n",
+                semantic_id="third.plugin",
+            )
+        ]
+    )
+    return GenerationRecipe(
+        label="third-provider",
+        root=tmp_path,
+        source=portable_harness(),
+        desired=desired,
+        manifest_path=tmp_path / ".third" / ".lup-ownership.json",
+        prior=prior,
+        reader=current_reader(prior, desired, sensitive_local_only=[]),
+        target_requirements=["third-cli>=1"],
+    )
+
+
+def test_a_regenerated_tree_reports_its_proof_current(tmp_path: Path) -> None:
+    generate(third_recipe(tmp_path, None))
+    settled = manifest_of(third_recipe(tmp_path, None))
+
+    report = inspect_generation(third_recipe(tmp_path, settled))
+
+    assert report.manifest_current
+    assert report.clean
+
+
+def test_a_proof_from_another_tree_is_stale_though_the_artifacts_match(
+    tmp_path: Path,
+) -> None:
+    """The merge case: the driver keeps one side's proof, the artifacts merge clean.
+
+    Reading only the artifacts calls that settled, and the regeneration the
+    conflict existed to force becomes the step nothing asks for.
+    """
+    generate(third_recipe(tmp_path, None))
+    settled = manifest_of(third_recipe(tmp_path, None))
+    kept = settled.model_copy(update={"source_digest": "0" * 64})
+
+    report = inspect_generation(third_recipe(tmp_path, kept))
+
+    assert not report.proposal.writes, "the artifacts themselves are current"
+    assert not report.manifest_current
+    assert not report.clean
 
 
 def test_reconciliation_preserves_local_and_sensitive_collisions(
