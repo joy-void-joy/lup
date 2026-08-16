@@ -163,6 +163,10 @@ class QuotaWaitingSession(Session):
         )
 
 
+# The config is one decorator's settings, and no one of them is the subject:
+# what this does is compose a config, a sink and a clock into a factory, which
+# belongs to none of the three alone.
+# lup: ignore[model-free-function] — composition root wiring a config into a factory
 def quota_waiting_session_factory(
     inner: SessionFactory,
     config: QuotaWaitConfig,

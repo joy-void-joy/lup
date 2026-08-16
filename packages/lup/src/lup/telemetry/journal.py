@@ -1,3 +1,9 @@
+# lup: ignore[own-model-dispatch]
+# Which journal event a turn event becomes is this layer's reading of it, not
+# something the event knows about itself: `ObservableEventKind` is telemetry's
+# vocabulary, and declaring the projection on the runtime event union would
+# have `lup.runtime` depend on `lup.telemetry`, inverting the one direction
+# these two layers are allowed to point in.
 """Complete observable, hierarchical runtime transcripts.
 
 The ordinary :mod:`lup.telemetry.trace` sidecar is a compact feedback index —
@@ -586,7 +592,7 @@ class TurnRecorder:
                     turn_id=turn_id,
                 )
             case BlockCompletedEvent(block=block):
-                role = block.delegated_role
+                role = block.delegated_role()
                 call_id = block.invoked_call_id
                 if role is not None and call_id is not None:
                     self.roles[call_id] = role

@@ -79,10 +79,16 @@ class EgressPolicy(BaseModel, frozen=True):
         ),
     )
     denied_destinations: tuple[str, ...] = IANA_SPECIAL_PURPOSE
-    denied_names: tuple[str, ...] = CLOUD_METADATA_HOSTS + LOCAL_NAMES
+    denied_metadata_hosts: tuple[str, ...] = CLOUD_METADATA_HOSTS
+    denied_local_names: tuple[str, ...] = LOCAL_NAMES
     allowed_ports: tuple[int, ...] = (80, 443)
     tunnel_ports: tuple[int, ...] = (443,)
     listen_port: int = 3128
+
+    @property
+    def denied_names(self) -> tuple[str, ...]:
+        """Every hostname this policy refuses, from both of its lists."""
+        return self.denied_metadata_hosts + self.denied_local_names
 
     def render(self) -> str:
         """Compile this policy into the proxy configuration enforcing it."""

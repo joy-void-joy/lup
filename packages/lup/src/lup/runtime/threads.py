@@ -22,21 +22,23 @@ THREAD_EXECUTOR = ThreadPoolExecutor(thread_name_prefix="lup")
 THREAD_WAKE_INTERVAL_SECONDS = 0.01
 
 
-async def run_sync[**P, R](
-    function: Callable[P, R],
-    *args: P.args,
-    **kwargs: P.kwargs,
+async def run_sync[R](
+    function: Callable[[], R],
+    wake_interval: float = THREAD_WAKE_INTERVAL_SECONDS,
 ) -> R:
     """Run blocking work with context propagation on Lup's shared executor.
 
     The caller's :mod:`contextvars` context is copied into the worker thread,
     so anything the call reads from context — a trace's current span, a
     session identifier — resolves to what the awaiting side had.
+
+    ``wake_interval`` trades latency for wakeups: how long after the call
+    finishes the awaiting task notices. A caller waiting on something slow can
+    raise it rather than pay the default's polling for hours.
     """
     loop = asyncio.get_running_loop()
     context = contextvars.copy_context()
-    call = partial(context.run, function, *args, **kwargs)
-    future = loop.run_in_executor(THREAD_EXECUTOR, call)
+    future = loop.run_in_executor(THREAD_EXECUTOR, partial(context.run, function))
     while not future.done():
-        await asyncio.sleep(THREAD_WAKE_INTERVAL_SECONDS)
+        await asyncio.sleep(wake_interval)
     return future.result()
