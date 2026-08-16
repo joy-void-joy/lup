@@ -134,6 +134,28 @@ def test_merge_prints_text_result_when_tree_dir_lookup_exits(
     assert "integration_branch: dev" in out
 
 
+def test_merge_defaults_to_a_merge_commit(merge_stubs: FakeGh) -> None:
+    """The branch's own commits stay reachable unless a caller says otherwise."""
+    pr.merge(42, dry_run=False)
+
+    assert "--merge" in merge_stubs.calls[0]
+    assert "--squash" not in merge_stubs.calls[0]
+
+
+def test_merge_takes_the_method_it_is_given(merge_stubs: FakeGh) -> None:
+    pr.merge(42, dry_run=False, method=pr.MergeMethod.squash)
+
+    assert "--squash" in merge_stubs.calls[0]
+    assert "--merge" not in merge_stubs.calls[0]
+
+
+def test_merge_hands_further_flags_to_gh_untouched(merge_stubs: FakeGh) -> None:
+    """What this signature does not name still has a way through."""
+    pr.merge(42, dry_run=False, gh_args=("--admin",))
+
+    assert "--admin" in merge_stubs.calls[0]
+
+
 def test_annotated_downstream_config_raises_a_typed_recovery_error(
     tmp_path: Path,
 ) -> None:

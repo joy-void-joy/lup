@@ -15,6 +15,7 @@ Examples::
 
 import json
 import logging
+from enum import StrEnum
 from pathlib import Path, PurePosixPath
 from typing import Literal
 from urllib.parse import urlparse
@@ -32,6 +33,23 @@ from lup.devtools.layout import get_tree_dir
 from lup.devtools.utils import git, gh, decode_stderr, output_json
 
 logger = logging.getLogger(__name__)
+
+
+class MergeMethod(StrEnum):
+    """How a PR's commits reach the base branch.
+
+    The three GitHub offers. Which one a repository wants is its own
+    decision rather than this command's: one whose history is merge commits
+    reads a squash as a break in it, and one that squashes reads the
+    reverse. A merge commit is the default because it is the only one of the
+    three that loses nothing — the branch's own commits stay reachable, and
+    a PR stacked on this one keeps its base as a real ancestor instead of
+    facing a rewritten copy of the work it already contains.
+    """
+
+    merge = "merge"
+    squash = "squash"
+    rebase = "rebase"
 
 
 def current_branch() -> str:
@@ -324,17 +342,28 @@ def merge(
     pr_number: int,
     dry_run: bool,
     as_json: bool = False,
+    method: MergeMethod = MergeMethod.merge,
+    gh_args: tuple[str, ...] = (),
 ) -> None:
-    """Squash-merge a PR and pull changes into the integration branch."""
+    """Merge a PR and pull changes into the integration branch.
+
+    Args:
+        pr_number: PR to merge.
+        dry_run: Report what would happen, changing nothing.
+        as_json: Emit the result as JSON.
+        method: How the commits reach the base branch.
+        gh_args: Further flags handed to ``gh pr merge`` untouched, for
+            anything this signature does not name.
+    """
     integration = get_integration_branch()
 
     if dry_run:
-        typer.echo(f"Would merge PR #{pr_number} (squash)")
+        typer.echo(f"Would merge PR #{pr_number} ({method})")
         typer.echo(f"Would pull changes into {integration}")
         return
 
     try:
-        gh("pr", "merge", str(pr_number), "--squash", "--delete-branch")
+        gh("pr", "merge", str(pr_number), f"--{method}", "--delete-branch", *gh_args)
         typer.echo(f"Merged PR #{pr_number}")
     except sh.ErrorReturnCode as e:
         typer.echo(f"Merge failed: {decode_stderr(e)}", err=True)
