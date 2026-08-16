@@ -49,6 +49,18 @@ class InstallPackageInput(BaseModel):
     packages: list[str] = Field(min_length=1)
 
 
+class SandboxReplayInput(BaseModel):
+    """Input schema for the sandbox_replay tool.
+
+    Empty because the tool has exactly one thing to replay — the journal
+    this sandbox has been keeping — and no lever worth offering over it. A
+    confirmation field would be the obvious candidate and is deliberately
+    absent: re-running recorded cells is no more consequential than the
+    execution the agent already commands at will, and a flag whose only
+    honest default is "yes" documents a gate that is not there.
+    """
+
+
 class Mount(BaseModel):
     """One entry in the sandbox's container filesystem topology.
 

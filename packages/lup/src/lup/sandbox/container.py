@@ -66,6 +66,7 @@ from docker.models.containers import Container, ExecResult
 from docker.models.networks import Network
 from docker.types import Mount as DockerMount
 from docker.utils.socket import SocketError
+from pydantic import TypeAdapter
 
 from lup.mcp import (
     LupMcpServerConfig,
@@ -73,6 +74,13 @@ from lup.mcp import (
     ToolError,
     create_mcp_server,
     lup_tool,
+)
+from lup.replay.journal import (
+    CellOutcome,
+    JournalCell,
+    JournalStore,
+    ReplayReport,
+    UnreadableJournalError,
 )
 from lup.sandbox.models import (
     MountMode,
@@ -88,6 +96,7 @@ from lup.sandbox.models import (
     NetworkMode,
     ReplCrashedError,
     SandboxNotInitializedError,
+    SandboxReplayInput,
 )
 from lup.sandbox.egress import EgressPolicy
 from lup.sandbox.models import DockerDaemonInfo, RootfulDaemonError
@@ -97,6 +106,14 @@ from lup.sandbox.repl import REPL_SERVER_SCRIPT, ReplSession
 from lup.sandbox.translation import MountTopology
 
 logger = logging.getLogger(__name__)
+
+PACKAGE_LIST = TypeAdapter(list[str])
+"""How an install cell's package list crosses the journal and comes back.
+
+A journal cell carries one string, and the packages an install names are a
+list — so they cross as JSON with a parser on the far side, rather than
+joined on spaces and split back apart on the assumption no name holds one.
+"""
 
 
 def connected_docker_client() -> docker.DockerClient:
@@ -172,6 +189,14 @@ class Sandbox:
     SOURCE_ROOT = "/sources"
     """Where read-only host source trees are mounted, one directory each."""
 
+    REPLAY_DETAIL_CHARS = 200
+    """How much of a replayed cell's output is kept to explain a divergence.
+
+    Enough to carry the exception line that says why a cell went the other
+    way, and bounded because a report covers every cell in the journal at
+    once — a full stderr each would push the finding off the end of it.
+    """
+
     DEFAULT_SHARED_PATH = "/shared"
     """Where the host exchange directory is mounted, absent a caller's choice.
 
@@ -229,6 +254,17 @@ class Sandbox:
         self.filtered_network: Network | None = None
         self.egress_proxy: Container | None = None
         self.proxy_config_path = self.shared_dir.parent / f".{self.proxy_name}.conf"
+        self.journal = JournalStore(
+            self.shared_dir / "sandbox-journal.json",
+            session_id,
+            determinism_claimed=False,
+        )
+        """This sandbox's execution record, claiming nothing about reproducing it.
+
+        The container has network access and installs packages, so a replay
+        may legitimately differ — which is a reason to state the absent claim
+        rather than a reason to keep no account of what was run.
+        """
 
     @property
     def container(self) -> Container:
@@ -936,6 +972,43 @@ class Sandbox:
             packages=packages,
         )
 
+    # --- Journal replay ---
+
+    def replay_cell(self, cell: JournalCell) -> CellOutcome:
+        """Re-run one journaled cell, through the same call that first ran it.
+
+        The kinds are this environment's own vocabulary, written by the tool
+        handlers below and read only here — the journal itself stays generic,
+        so an environment with a different set of calls records its own.
+        """
+        match cell.kind:
+            case "install":
+                installed = self.run_install(PACKAGE_LIST.validate_json(cell.source))
+                return CellOutcome(
+                    ok=installed.exit_code == 0,
+                    detail=installed.output[: self.REPLAY_DETAIL_CHARS],
+                )
+            case "file":
+                executed = self.run_file(cell.source)
+            case _:
+                executed = self.run_code(cell.source)
+        return CellOutcome(
+            ok=executed.exit_code == 0,
+            detail=executed.stderr[: self.REPLAY_DETAIL_CHARS],
+        )
+
+    def replay_journal(self) -> ReplayReport:
+        """Re-run every journaled cell in order and report what differed.
+
+        Into the container as it stands, which is what makes this a replay of
+        the session and not a fresh-machine check: the packages earlier cells
+        installed are still there. A clean replay says the sequence still
+        holds together, not that it would hold together anywhere else.
+        """
+        journal = self.journal.load()
+        self.ensure_started()
+        return journal.compare([self.replay_cell(cell) for cell in journal.cells])
+
     # --- MCP tool creation ---
 
     def create_tools(self, usage_notes: str = "") -> list[LupMcpTool]:
@@ -989,10 +1062,19 @@ class Sandbox:
             try:
                 self.ensure_started()
                 if inp.file is not None:
-                    return self.run_file(inp.file)
-                if inp.code is None:
-                    raise ToolError("pass exactly one of code or file")
-                return self.run_code(inp.code)
+                    ran = self.run_file(inp.file)
+                    kind, source = "file", inp.file
+                else:
+                    if inp.code is None:
+                        raise ToolError("pass exactly one of code or file")
+                    ran = self.run_code(inp.code)
+                    kind, source = "code", inp.code
+                self.journal.record(
+                    JournalCell(kind=kind, source=source, ok=ran.exit_code == 0)
+                )
+                return ran
+            except UnreadableJournalError as e:
+                raise ToolError(str(e)) from e
             except PathNotMountedError as e:
                 raise ToolError(str(e)) from e
             except SandboxNotInitializedError as e:
@@ -1013,7 +1095,17 @@ class Sandbox:
         async def install_package(inp: InstallPackageInput) -> InstallPackageResult:
             try:
                 self.ensure_started()
-                return self.run_install(inp.packages)
+                installed = self.run_install(inp.packages)
+                self.journal.record(
+                    JournalCell(
+                        kind="install",
+                        source=PACKAGE_LIST.dump_json(inp.packages).decode("utf-8"),
+                        ok=installed.exit_code == 0,
+                    )
+                )
+                return installed
+            except UnreadableJournalError as e:
+                raise ToolError(str(e)) from e
             except SandboxNotInitializedError as e:
                 logger.error("Sandbox not initialized: %s", e)
                 raise ToolError(f"Sandbox error: {e}") from e
@@ -1021,7 +1113,39 @@ class Sandbox:
                 logger.exception("Docker execution failed")
                 raise ToolError(f"Docker error: {e}") from e
 
-        return [execute_code, install_package]
+        @lup_tool(
+            "Re-run every cell this sandbox has executed, in order, and report "
+            "which ones came out differently. Use it before relying on a "
+            "sandbox result for anything that matters. This sandbox claims no "
+            "determinism — it has network access and installs packages — so a "
+            "divergence is not a bug here, it is the finding: it says the "
+            "result depended on something outside the recorded code. The "
+            "replay runs in this container as it stands, with everything "
+            "earlier cells installed still present, so a clean replay says the "
+            "sequence still holds together and not that it would hold "
+            "anywhere else. Returns the journal id, how many cells were "
+            "replayed, each divergence, and a finding that reads the result "
+            "against the claim this environment makes.",
+            name="sandbox_replay",
+        )
+        async def sandbox_replay(inp: SandboxReplayInput) -> ReplayReport:
+            try:
+                return self.replay_journal()
+            except UnreadableJournalError as e:
+                raise ToolError(str(e)) from e
+            except PathNotMountedError as e:
+                raise ToolError(str(e)) from e
+            except SandboxNotInitializedError as e:
+                logger.error("Sandbox not initialized: %s", e)
+                raise ToolError(f"Sandbox error: {e}") from e
+            except CodeExecutionTimeoutError as e:
+                logger.warning("Replayed cell timed out")
+                raise ToolError(str(e)) from e
+            except (APIError, DockerException) as e:
+                logger.exception("Docker replay failed")
+                raise ToolError(f"Docker error: {e}") from e
+
+        return [execute_code, install_package, sandbox_replay]
 
     def create_mcp_server(
         self,
