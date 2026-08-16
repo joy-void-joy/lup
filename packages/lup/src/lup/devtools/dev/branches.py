@@ -1112,6 +1112,65 @@ def plan_branch_step(name: str, force: bool) -> PlannedAction:
     )
 
 
+def dependent_pulls(name: str) -> list[int]:
+    """Open PRs based on *name*, which deleting origin's copy would close.
+
+    A stacked PR names its parent as its base, and GitHub closes a pull
+    request whose base branch is deleted rather than moving it. Landing the
+    parent and cleaning up after it is therefore enough to close the child,
+    which is the ordinary end of the parent's life and no part of the
+    child's — and the branch survives, so the closure reads as work lost
+    until somebody recreates the base to reopen it.
+
+    An unanswerable query is no dependents: this refines a deletion the
+    caller already asked for, and a network failure is not a reason to
+    refuse one.
+    """
+    try:
+        rows = json.loads(
+            gh.out(
+                "pr",
+                "list",
+                *repository_arguments(),
+                "--base",
+                name,
+                "--state",
+                "open",
+                "--json",
+                "number",
+            )
+        )
+    except sh.ErrorReturnCode as e:
+        logger.warning(
+            "Could not check for PRs based on %s: %s", name, decode_stderr(e)
+        )
+        return []
+    return [PRStatus.model_validate(row).number for row in rows]
+
+
+def plan_remote_step(name: str, force: bool) -> PlannedAction:
+    """Judge deleting origin's copy by what else is still pointing at it."""
+    description = f"Delete remote branch: origin/{name}"
+    dependents = dependent_pulls(name)
+    if not dependents:
+        return PlannedAction(description=description)
+    listed = ", ".join(f"#{number}" for number in dependents)
+    if force:
+        return PlannedAction(
+            description=description,
+            verdict="forced",
+            detail=f"closes {listed}",
+        )
+    return PlannedAction(
+        description=description,
+        verdict="blocked",
+        detail=(
+            f"{listed} targets this branch and would be closed; "
+            "retarget it first, or --force to close it anyway"
+        ),
+    )
+
+
 def plan_deletion(name: str, force: bool, remote: bool | None = None) -> DeletionPlan:
     """Evaluate every precondition a deletion depends on, changing nothing.
 
@@ -1139,9 +1198,7 @@ def plan_deletion(name: str, force: bool, remote: bool | None = None) -> Deletio
     has_remote = remote_branch_exists(name)
     delete_remote = has_remote and (merged if remote is None else remote)
     if delete_remote:
-        actions.append(
-            PlannedAction(description=f"Delete remote branch: origin/{name}")
-        )
+        actions.append(plan_remote_step(name, force=force))
 
     return DeletionPlan(
         branch=name,
