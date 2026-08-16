@@ -1,5 +1,5 @@
 # lup: ignore[import-re, re-call, empty-collection]
-"""Inline marker scanning for the repo's two marker families.
+"""Inline marker scanning for the repo's one marker family, `# lup:`.
 
 - Review notes (`# lup:` / `// lup:`): actionable feedback left in the code;
   the `ignore` keyword — inline or standalone file-level — is the
@@ -9,11 +9,14 @@
   `lup-devtools dev comments` scanner uses this to list unresolved feedback;
   the edit-permission hook makes the same note/suppression split, prompting
   whenever an edit changes the note count or adds a suppression.
-- Customization todos (`# TEMPLATE:` in comments, bare `TEMPLATE:` in
-  docstrings): the template's domain decision points, gathered by
-  `lup-devtools dev todos` so `/lup:init` walks every one.
+  A `template:` head marks a customization point instead — a decision this
+  scaffold leaves to the domain adopting it, gathered by `lup-devtools dev
+  todos` so `/lup:init` walks every one. It is the note flavor whose lifetime
+  runs the other way: upstream it is the template's product and belongs in no
+  defect count, while downstream it is outstanding work until the domain
+  writes its own code where the placeholder stood and drops the marker.
 
-Both families share one scan (:func:`find_markers`, parameterized over the
+One scan serves every flavor (:func:`find_markers`, parameterized over the
 marker regex); :func:`find_feedback` binds it to the review-note rules. The
 tokenization, docstring detection, ignore matching, and line cursor the scan
 stands on live in :mod:`lup.codescan.common`, shared with the anti-pattern
@@ -37,8 +40,9 @@ documentation examples are not flagged.
 
 import re
 from collections.abc import Callable
+from enum import StrEnum
 from pathlib import Path
-from typing import Literal, Self
+from typing import Self
 
 from pydantic import BaseModel, model_validator
 
@@ -75,11 +79,16 @@ DEFER_HEAD_RE = re.compile(
 # bracket, because the head carries no parameter — what it needs to say is
 # said by keeping the note's own words after it.
 SOLVED_HEAD_RE = re.compile(r"^solved\s*:\s*", re.IGNORECASE)
-# Customization todos are shouty and case-sensitive (like TODO:/FIXME:), so
-# prose about "the template" never matches. The comment prefix is optional
-# because a docstring todo carries no `#`; group 1 still captures the
-# introducer when present, as the scan expects.
-TEMPLATE_MARKER_RE = re.compile(r"(?:(#|//)\s*)?TEMPLATE\s*:")
+# `# lup: template: <decision>` marks a customization point — a choice this
+# scaffold deliberately leaves to whoever adopts it, gathered by `dev todos`
+# so `/lup:init` walks every one. No bracket, because the head carries no
+# parameter. Upstream these are the template's product rather than a defect
+# list, which is why they count in their own section instead of joining open
+# feedback. Like `ignore` and unlike feedback, a customization marker is
+# removed outright rather than converted to a claim: it is answered by writing
+# the domain's own code where the placeholder stood, which leaves no original
+# ask for a claim to be checked against.
+TEMPLATE_HEAD_RE = re.compile(r"^template\s*:\s*", re.IGNORECASE)
 FENCE_RE = re.compile(r"^\s*(```|~~~)")
 COMMENT_PREFIX_RE = re.compile(r"^\s*(#|//)")
 # The whole run a line opens its comment with, so a marker written `## lup:`
@@ -127,10 +136,22 @@ def scan_mode_for(path: Path) -> str:
             return ScanMode.TEXT
 
 
-# The closed vocabulary of review-note flavors: an ordinary actionable note,
-# parked work — behind a stated gate or simply parked — or a claim that a
-# note has been addressed and is waiting to be checked.
-type NoteKind = Literal["note", "defer", "solved"]
+class NoteKind(StrEnum):
+    """The closed vocabulary of review-note flavors.
+
+    An ordinary actionable note, parked work — behind a stated gate or simply
+    parked — a claim that a note has been addressed and is waiting to be
+    checked, or a customization point the scaffold leaves to the domain
+    adopting it. A `StrEnum` rather than a `Literal` so the same declaration
+    is both the type every consumer dispatches on and the choice list
+    `dev comments --kind` offers, which is one fewer place for the vocabulary
+    to drift out of agreement with itself.
+    """
+
+    note = "note"
+    defer = "defer"
+    solved = "solved"
+    template = "template"
 
 
 class MarkerComment(BaseModel):
@@ -150,19 +171,19 @@ class MarkerComment(BaseModel):
     read_start: int
     read_end: int
     text: str
-    kind: NoteKind = "note"
+    kind: NoteKind = NoteKind.note
     condition: str | None = None
 
     @model_validator(mode="after")
     def coherent_kind(self) -> Self:
         match (self.kind, self.condition):
-            case ("note", str()) | ("solved", str()):
+            case ("note", str()) | ("solved", str()) | ("template", str()):
                 raise ValueError("only a defer note carries a wake condition")
             case _:
                 return self
 
     def classify_deferral(self) -> Self:
-        """Split a `defer:` or `solved:` head off this review note, if present.
+        """Split a `defer:`, `solved:`, or `template:` head off this note.
 
         A matching note comes back with the head's kind, the gate a bracketed
         deferral stated parsed out, and ``text`` reduced to the message after
@@ -174,11 +195,15 @@ class MarkerComment(BaseModel):
         has to say something; writing none at all is the ordinary way to park
         work.
         """
-        solved = SOLVED_HEAD_RE.match(self.text)
-        if solved is not None:
-            return self.model_copy(
-                update={"kind": "solved", "text": self.text[solved.end() :]}
-            )
+        for kind, head_re in (
+            (NoteKind.solved, SOLVED_HEAD_RE),
+            (NoteKind.template, TEMPLATE_HEAD_RE),
+        ):
+            plain = head_re.match(self.text)
+            if plain is not None:
+                return self.model_copy(
+                    update={"kind": kind, "text": self.text[plain.end() :]}
+                )
         head = DEFER_HEAD_RE.match(self.text)
         if head is None:
             return self
@@ -191,7 +216,7 @@ class MarkerComment(BaseModel):
                 return self
         return self.model_copy(
             update={
-                "kind": "defer",
+                "kind": NoteKind.defer,
                 "condition": condition,
                 "text": self.text[head.end() :],
             }
@@ -204,13 +229,15 @@ class MarkerComment(BaseModel):
     def marker_text(self) -> str:
         """The note body as written after its marker, any head included."""
         match self.kind:
-            case "defer" if self.condition:
+            case NoteKind.defer if self.condition:
                 return f"defer[{self.condition}]: {self.text}"
-            case "defer":
+            case NoteKind.defer:
                 return f"defer: {self.text}"
-            case "solved":
+            case NoteKind.solved:
                 return f"solved: {self.text}"
-            case "note":
+            case NoteKind.template:
+                return f"template: {self.text}"
+            case NoteKind.note:
                 return self.text
 
 

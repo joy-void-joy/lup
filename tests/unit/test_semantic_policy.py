@@ -2552,6 +2552,29 @@ def test_converting_a_note_into_a_claim_is_the_way_through() -> None:
     assert policy.decide(claimed).effect == "allow"
 
 
+def test_removing_a_customization_marker_is_not_removing_feedback() -> None:
+    """A `template:` marker is answered by writing code, not by claiming.
+
+    It behaves like `ignore` rather than like feedback: nobody is owed an
+    answer to a placeholder, and the domain's own code standing where the
+    scaffold's example stood leaves no original ask for a claim to be checked
+    against. Denying its removal would refuse `/lup:init` the one edit it
+    exists to make, in every repository built from this template.
+    """
+    policy = EditPolicy(protected=[])
+    customized = EditBatch(
+        changes=[
+            EditChange(
+                path=Path("a.py"),
+                before="# lup: template: pick your model tier\nTIER = None",
+                after='TIER = "strongest"',
+            )
+        ]
+    )
+
+    assert policy.decide(customized).effect == "allow"
+
+
 def test_no_allowance_retires_a_claim_through_the_edit_gate() -> None:
     """A claim is checked by someone other than whoever made it.
 

@@ -16,12 +16,10 @@ from pydantic import ValidationError
 from lup.codescan.common import file_level_ignore, ignore_rule_ids
 from lup.policy.kernel.edit import IGNORE_RE
 from lup.codescan.markers import (
-    TEMPLATE_MARKER_RE,
     MarkerComment,
     NoteTarget,
     ScanMode,
     find_feedback,
-    find_markers,
     restore_claims,
     retire_claims,
     scan_mode_for,
@@ -33,7 +31,7 @@ def texts(source: str, mode: str) -> list[str]:
 
 
 def todo_texts(source: str, mode: str) -> list[str]:
-    return [c.text for c in find_markers(source, mode, marker=TEMPLATE_MARKER_RE)]
+    return [c.text for c in find_feedback(source, mode) if c.kind == "template"]
 
 
 def test_python_ignores_marker_inside_ordinary_string() -> None:
@@ -146,41 +144,47 @@ def test_scan_mode_for_routes_by_suffix() -> None:
 
 
 def test_template_comment_marker_is_a_todo() -> None:
-    source = "# TEMPLATE: replace these fields for your domain\nx = 1\n"
+    source = "# lup: template: replace these fields for your domain\nx = 1\n"
     assert todo_texts(source, ScanMode.PYTHON) == [
         "replace these fields for your domain"
     ]
 
 
-def test_template_docstring_marker_needs_no_comment_prefix() -> None:
-    source = '"""Setup flow.\n\nTEMPLATE: Replace with your API scopes.\n"""\n'
+def test_template_docstring_marker_carries_the_lup_prefix() -> None:
+    # A docstring customization point spells the marker in full, the same way
+    # every other note in a docstring does — there is no bare-keyword form.
+    source = '"""Setup flow.\n\n# lup: template: Replace with your API scopes.\n"""\n'
     assert todo_texts(source, ScanMode.PYTHON) == ["Replace with your API scopes."]
 
 
 def test_template_marker_inside_ordinary_string_is_code() -> None:
-    source = 'MESSAGE = "TEMPLATE: not a decision point"\n'
+    source = 'MESSAGE = "# lup: template: not a decision point"\n'
     assert todo_texts(source, ScanMode.PYTHON) == []
 
 
-def test_lowercase_template_prose_is_not_a_todo() -> None:
-    source = "# the template: a scaffold downstream projects customize\n"
+def test_bare_template_keyword_is_no_longer_a_todo() -> None:
+    # The standalone `TEMPLATE:` convention is gone: a customization point is
+    # a `# lup:` note whose head says so, so the old spelling scans as nothing.
+    source = "# TEMPLATE: replace these fields for your domain\n"
     assert todo_texts(source, ScanMode.PYTHON) == []
+    assert find_feedback(source, ScanMode.PYTHON) == []
 
 
-def test_template_mention_mid_comment_is_not_a_todo() -> None:
-    # A marker opens its comment; prose mentioning the convention mid-way
-    # through one is not a decision point.
-    source = "# gathered via the TEMPLATE: convention\n"
+def test_template_mention_mid_note_is_ordinary_feedback() -> None:
+    # The head has to open the note's text. A note that merely goes on to talk
+    # about templates is feedback somebody is owed, not a customization point.
+    source = "# lup: gathered via the template: convention\n"
     assert todo_texts(source, ScanMode.PYTHON) == []
+    (note,) = find_feedback(source, ScanMode.PYTHON)
+    assert note.kind == "note"
 
 
 def test_file_level_ignore_is_not_itself_a_note() -> None:
     # A file-level `# lup: ignore` opts the file out of anti-pattern checks;
     # it is an ignore directive, so neither the feedback listing nor the
     # customization todos report the line itself.
-    source = "# lup: ignore\n# TEMPLATE: still a decision point\n"
+    source = "# lup: ignore\n# lup: template: still a decision point\n"
     assert todo_texts(source, ScanMode.PYTHON) == ["still a decision point"]
-    assert find_feedback(source, ScanMode.PYTHON) == []
 
 
 def test_feedback_note_surfaces_despite_file_level_ignore() -> None:
@@ -194,7 +198,7 @@ def test_feedback_note_surfaces_despite_file_level_ignore() -> None:
 def test_template_continuation_merges_and_stops_at_decoration() -> None:
     source = (
         "# =========================================\n"
-        "# TEMPLATE: pick your integrations —\n"
+        "# lup: template: pick your integrations —\n"
         "# one entry per service\n"
         "# =========================================\n"
         "X = 1\n"
@@ -498,10 +502,14 @@ def test_marker_text_reconstitutes_the_defer_head() -> None:
 
 
 def test_template_todos_are_never_classified_as_deferred() -> None:
-    source = "# TEMPLATE: defer[x]: choose your integrations\n"
-    (todo,) = find_markers(source, ScanMode.PYTHON, marker=TEMPLATE_MARKER_RE)
-    assert todo.kind == "note"
+    # The head that matches first wins: a customization marker whose text goes
+    # on to mention a deferral is a template note carrying those words, never
+    # parked work, so it cannot slip out of the customization walk.
+    source = "# lup: template: defer[x]: choose your integrations\n"
+    (todo,) = find_feedback(source, ScanMode.PYTHON)
+    assert todo.kind == "template"
     assert todo.condition is None
+    assert todo.text == "defer[x]: choose your integrations"
 
 
 def test_defer_classification_survives_model_roundtrip() -> None:
