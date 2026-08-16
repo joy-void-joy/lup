@@ -52,6 +52,28 @@ class WorkflowSpec(BaseModel, frozen=True):
     sync_flags: list[str] = ["--all-extras"]
     """What `uv sync` is given before the gate runs."""
 
+    system_packages: list[str] = []
+    """Distribution packages the gate needs that `uv sync` cannot install.
+
+    A project whose code shells out to a binary — poppler for a page count,
+    a renderer, a compiler — needs it on the runner too, and no lock file
+    reaches it. Without this the failure lands as a test asserting the thing
+    the missing binary would have produced, several steps from the cause.
+
+    Empty is the common case and renders no step at all, so a project that
+    needs nothing carries no apt call it would have to read past.
+    """
+
+    def install_step(self) -> str:
+        """The apt step, or nothing where the project declares no package."""
+        if not self.system_packages:
+            return ""
+        return f"""      - name: System packages
+        run: sudo apt-get update && sudo apt-get install -y {
+            " ".join(self.system_packages)
+        }
+"""
+
     def body(self) -> str:
         """Render the workflow YAML from these declared choices."""
         return f"""name: Quality
@@ -69,7 +91,7 @@ jobs:
       - uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
-      - run: uv sync {" ".join(self.sync_flags)}
+{self.install_step()}      - run: uv sync {" ".join(self.sync_flags)}
       - name: Generated artifact drift
         run: {DRIFT_COMMAND}
       - name: Quality gate
