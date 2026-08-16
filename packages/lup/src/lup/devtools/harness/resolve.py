@@ -1090,10 +1090,10 @@ def detach_resolve(detached: DetachedRun) -> None:
     a run from what a human said and returning is the shape this flag exists
     for.
 
-    A detached child speaks to nobody, so this reports success the moment it
-    forks and cannot take that back. Two things keep that honest: what can be
-    judged before forking is judged here, and what cannot goes to a file this
-    names on the way out, so a child that refuses its own command line leaves
+    The log publishes the run directory before the child forks, so the watcher
+    can attach while inventory is still being planned. It reports success after
+    the fork and cannot retract it. What can be judged first is judged here;
+    what cannot goes to a named file, so a child refusal leaves
     a record instead of a launcher claiming a run that does not exist.
     """
     root = project_root()

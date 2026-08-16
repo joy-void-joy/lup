@@ -331,6 +331,27 @@ def test_a_run_that_does_not_exist_says_so_rather_than_answering(
     assert "no such run" in status.verdict()
 
 
+def test_a_published_run_exists_before_inventory_is_persisted(tmp_path: Path) -> None:
+    repository = ResolverStateRepository(tmp_path, "starting")
+    repository.root.mkdir(parents=True)
+    status = run_status(repository, "starting")
+
+    assert status.exists and status.phase is None
+    assert status.verdict() == "stopped before initialization"
+    assert "initializing" in status_header(status)
+
+
+def test_a_watch_stays_attached_while_inventory_is_being_planned(
+    tmp_path: Path,
+) -> None:
+    repository = ResolverStateRepository(tmp_path, "planning")
+    with repository.exclusive():
+        status = run_status(repository, "planning")
+
+    assert status.verdict() == "initializing"
+    assert not status.settled(running_yet=True)
+
+
 def test_a_log_s_last_record_is_read_without_its_whole_length(tmp_path: Path) -> None:
     """A resolver journal reaches tens of megabytes inside a single run."""
     adapter: TypeAdapter[dict[str, int]] = TypeAdapter(dict[str, int])

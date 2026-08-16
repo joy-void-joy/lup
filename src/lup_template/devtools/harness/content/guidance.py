@@ -115,6 +115,8 @@ Use existing libraries from PyPI before writing raw HTTP or rebuilding a wheel.
 
 `uv` is the package manager — `uv add <package>`, never edit pyproject.toml directly. Formatting and linting are ruff, type checking is pyright; `docs/contributing.md` carries the commands that have to be green.
 
+When policy says a command genuinely has to run outside the sandbox, put that command through the runtime's native per-call sandbox escalation on its first attempt. Do not replace the whole session with an unsandboxed one; the semantic policy still judges the escalated call, so an allowed command can be approved at that narrower boundary.
+
 ### lup-devtools
 
 Development tooling is exposed as the `lup-devtools` CLI entry point, composed in `src/lup_template/devtools/main.py` from two halves: the workflow commands in `packages/lup/src/lup/devtools/`, and what only this repository has beside them. **Always use `lup-devtools` instead of ad-hoc commands.** Never use `uv run python -c "..."` or bare `python`/`python3` — these are denied by the Bash permission hook.
@@ -144,6 +146,8 @@ The `codeintel` tool group answers questions about code by *resolving* it, throu
 ---
 
 ## Process & Communication
+
+**Wait on pushed tool output rather than polling for it.** When a long-lived command returns a resumable tool call and the runtime offers an event-driven waiter, keep that call live and yield to the waiter. Repeated reads of a shell session are polling even when each read has a long timeout; they spend turns asking whether anything changed instead of resuming only when something did.
 
 **Always surface a question as a question**, through whatever structured question facility the harness gives you, rather than as narration the user has to notice. This applies to clarifying requirements, offering choices, confirming destructive actions, proposing changes, and any situation needing user input. Even for open-ended questions, attach concrete options plus a free-form one — structured answers are what downstream notification parsing reads. When in doubt, ask.
 

@@ -2028,6 +2028,8 @@ def test_the_toolchain_carries_its_own_escape_and_is_refused_without_one() -> No
     ).decide(command)
     assert trapped.effect == "deny"
     assert trapped.reason == SANDBOX_TRAPPED_REASON
+    assert "native sandbox escalation" in trapped.reason
+    assert "only a runtime without that channel" in trapped.reason
 
 
 def test_non_interactive_denials_do_not_prescribe_escalation() -> None:

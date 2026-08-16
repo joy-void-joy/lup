@@ -20,7 +20,7 @@ from pathlib import Path
 # resolve, for the interpreter and for a type checker alike.
 sys.path.insert(0, str(Path(__file__).parents[1] / "runtime"))
 from codex_patch import patched_files
-from kernel.decision import KernelDecision
+from kernel.decision import KernelDecision, SANDBOX_TRAPPED_REASON
 from kernel.shell import auto_escape_matches
 from policy_data import AUTO_ESCAPE_PREFIXES
 from policy_data import AGENT_IDENTITY_ENV, AUTONOMOUS_AGENT_IDENTITIES
@@ -528,6 +528,11 @@ def dispatch(payload, permission_request=False):
             # semantic placement before the hook lets the native boundary act.
             escapable=escaped,
         )
+        # PreToolUse can neither see nor place every native escape. Let Codex's
+        # sandbox run a confined call or raise the PermissionRequest where this
+        # same policy can judge the requested escape instead of preempting it.
+        if not permission_request and decision.reason == SANDBOX_TRAPPED_REASON:
+            return KernelDecision("defer", decision.reason)
         if (
             requested_escape
             and decision.effect == "allow"

@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "6cb1549f265bf2de218ff21bd11cdb806920839e7d3267b9acd05cfa09274dd4",
+  "source_digest": "8fb003050da82b91ba75da6c41052abda11a947079a1d59ef06300dfd661f617",
   "target_requirements": [
     "claude-code"
   ],
@@ -9,7 +9,7 @@
     {
       "path": ".claude/CLAUDE.md",
       "category": "generated",
-      "sha256": "1927d5ab95165cefaea54bd5f1faf45b2ab370c181a5411a7a919c23b90647fb",
+      "sha256": "93421a14c9468e43a5012f49d51b824c9ab163274c4ccfa9aa732d2ac44a7177",
       "semantic_id": "harness.guidance",
       "executable": false
     },
@@ -268,7 +268,7 @@
     {
       "path": ".claude/plugins/lup/commands/resolve.md",
       "category": "generated",
-      "sha256": "3556ff2dbe9f11d94eb9ec1a0c3f3f6d34799bcba779063b42245208149dca2f",
+      "sha256": "e13f38ffcf159b9fafe0c6d5fa201b48366c57aa9ebe983536ad405e1920a837",
       "semantic_id": "skill.resolve",
       "executable": false
     },
@@ -324,7 +324,7 @@
     {
       "path": ".claude/plugins/lup/hooks/runtime/kernel/decision.py",
       "category": "generated",
-      "sha256": "31a426b0ff4c4a54488e9ce00029100aa42c9b3e16997ed69f0499d4008509aa",
+      "sha256": "93a9905181cb04949edaded1fa2757b09ebe46a3e6eff88e6d0b88262b6b53b4",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },

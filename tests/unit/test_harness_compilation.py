@@ -431,12 +431,14 @@ def test_generated_resolver_entries_only_launch_the_shared_python_core() -> None
     command = claude[Path(".claude/plugins/lup/commands/resolve.md")]
     skill = codex[Path(".codex/plugins/lup/skills/resolve/SKILL.md")]
 
-    assert "uv run lup-devtools harness resolve --adapter claude" in command
+    assert "uv run lup-devtools harness resolve --adapter claude --detach" in command
     assert "Triage into concerns" not in command
     assert "Workflow(" not in command
-    assert "uv run lup-devtools harness resolve --adapter codex" in skill
+    assert "uv run lup-devtools harness resolve --adapter codex --detach" in skill
     assert "scheduling" not in skill
     for entry in (command, skill):
+        assert "exactly one `status --watch`" in entry
+        assert "event-driven waiter" in entry
         assert "--run-id" in entry and "--answer" in entry
         # The entry named flags the CLI has never had, and the acceptance
         # question it pointed at instead does not exist either. An entry
@@ -1444,6 +1446,15 @@ def test_generated_codex_pretool_accepts_a_safe_automatic_escape() -> None:
         "hook_event_name": "PreToolUse",
         "tool_name": "Bash",
         "tool_input": {"command": "uv run lup-devtools harness resolve intake"},
+    }
+    assert codex_hook_result(body, sandboxed=True).exit_code == 0
+
+
+def test_generated_codex_pretool_defers_an_escape_only_native_codex_can_see() -> None:
+    body: JsonObject = {
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Bash",
+        "tool_input": {"command": "git diff --check"},
     }
     assert codex_hook_result(body, sandboxed=True).exit_code == 0
 

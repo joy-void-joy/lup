@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "6cb1549f265bf2de218ff21bd11cdb806920839e7d3267b9acd05cfa09274dd4",
+  "source_digest": "8fb003050da82b91ba75da6c41052abda11a947079a1d59ef06300dfd661f617",
   "target_requirements": [
     "codex-cli>=0.144"
   ],
@@ -100,7 +100,7 @@
     {
       "path": ".codex/plugins/lup/hooks/runtime/kernel/decision.py",
       "category": "generated",
-      "sha256": "31a426b0ff4c4a54488e9ce00029100aa42c9b3e16997ed69f0499d4008509aa",
+      "sha256": "93a9905181cb04949edaded1fa2757b09ebe46a3e6eff88e6d0b88262b6b53b4",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -170,7 +170,7 @@
     {
       "path": ".codex/plugins/lup/hooks/scripts/policy.py",
       "category": "generated",
-      "sha256": "df5a66247ff40bdf75c6bc6dd4afee272d9b27be41b9d0bf9e5719882d91ced9",
+      "sha256": "4623bd3f6d7d1e7d9c622a7b78635cc3a993d10d60b39e1e3c02e95f0a451011",
       "semantic_id": "hooks.lup-policy",
       "executable": true
     },
@@ -373,7 +373,7 @@
     {
       "path": ".codex/plugins/lup/skills/resolve/SKILL.md",
       "category": "generated",
-      "sha256": "e48fc3b21b0916d1ccf18abcfeabee12bd8ae0e71575823beecc30c29d7abffc",
+      "sha256": "0e1e9956d03034b0c99d2de42aebbdb08856de3a79394183950f76cd6d8ce1f2",
       "semantic_id": "skill.resolve",
       "executable": false
     },
@@ -408,7 +408,7 @@
     {
       "path": "AGENTS.md",
       "category": "generated",
-      "sha256": "7700ae398a2685f03c835c6339e60b2d86f23d2510668592b080dbf7f70e8349",
+      "sha256": "1ae2f53bce0fe384468dd36573db6e63071af9523070b7ae849a28c96d87a750",
       "semantic_id": "harness.guidance",
       "executable": false
     }

@@ -152,6 +152,8 @@ class RunStatus(BaseModel, frozen=True):
         """
         if not self.exists:
             return "no such run under this project's .lup/resolve"
+        if self.phase is None:
+            return "initializing" if self.held else "stopped before initialization"
         if not self.held:
             return "stopped"
         if self.last is None:
@@ -356,8 +358,10 @@ def recheck_bar(state: ResolveState, run_dir: Path) -> PhaseProgress | None:
 def run_status(repository: ResolverStateRepository, run_id: str) -> RunStatus:
     """Everything the run directory can say about where this run stands."""
     held = repository.held()
-    if not repository.exists():
+    if not repository.root.is_dir():
         return RunStatus(run_id=run_id, exists=False, held=held)
+    if not repository.exists():
+        return RunStatus(run_id=run_id, exists=True, held=held)
     state = repository.load()
     tally = Counter(item.status for item in state.progress)
     entry = journal_tail(repository.root)

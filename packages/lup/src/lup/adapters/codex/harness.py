@@ -172,7 +172,7 @@ class CodexSpellings(NativeSpellings):
     def resolver_entry(self) -> Instruction:
         return Instruction(
             sentences(
-                "Run `uv run lup-devtools harness resolve --adapter codex`. "
+                "Run `uv run lup-devtools harness resolve --adapter codex --detach`. "
                 "`uv run lup-devtools harness resolve intake` first prints what a "
                 "run started now would plan from — every actionable note at its "
                 "file and line, the deferred ones it would carry, and the ones it "

@@ -439,7 +439,7 @@ def status_header(
     return " · ".join(
         [
             local_stamp(),
-            str(status.phase),
+            str(status.phase or "initializing"),
             f"{done}/{total} settled",
             *([f"{iterator.label} {iterator.render()}"] if iterator else []),
             *([f"{failed} failed"] if failed else []),
@@ -541,6 +541,11 @@ def watch_status(
     # terminal — so the reading that ended it was already printed as a
     # change, and a run settled before the first poll was printed by the
     # caller.
+    if status.phase is None:
+        typer.echo(
+            f"{local_stamp()} — watch ended before initialization; inspect {repository.root / 'detached.log'}."
+        )
+        return
     typer.echo(f"{local_stamp()} — watch ended: {run_id} is waiting on you.")
     report_waiting(run_id)
 
