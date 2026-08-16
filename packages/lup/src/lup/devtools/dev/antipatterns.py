@@ -36,7 +36,7 @@ from lup.codescan.antipatterns import (
     audit_text,
     patterns_for_suffix,
 )
-from lup.codescan.behaviour import audit_model_free_functions
+from lup.codescan.behaviour import audit_model_methods
 from lup.codescan.boundaries import audit_constant_declarations, audit_path_boundaries
 from lup.codescan.capabilities import audit_capabilities
 from lup.codescan.common import (
@@ -45,6 +45,7 @@ from lup.codescan.common import (
     PythonSource,
     Refutation,
     file_level_ignore,
+    ignore_rule_ids,
     module_name,
 )
 from lup.codescan.dispatch import audit_own_model_dispatch
@@ -55,6 +56,7 @@ from lup.policy.kernel.edit import (
     IGNORE_RE,
     SUPPRESSION_COLUMN_LIMIT,
     inline_suppression,
+    python_comment_columns,
     relocated_suppressions,
     standalone_suppression,
 )
@@ -197,7 +199,7 @@ def scan_antipatterns(
         )
         for finding in [
             *audit_capabilities(sources),
-            *audit_model_free_functions(sources),
+            *audit_model_methods(sources),
             *audit_own_model_dispatch(sources),
             *audit_isinstance_chains(sources),
             *audit_constant_declarations(sources, project.roots),
@@ -317,6 +319,70 @@ def place_directives(
             yield item.rel
 
     return list(moved())
+
+
+def retired_directives(text: str, rule_id: str) -> str:
+    """One file with every typed directive naming a retired rule answered.
+
+    A directive that names the retired rule beside others keeps its line and
+    loses the one id. A directive that named only it has nothing left to say, so
+    its whole comment block goes — a reason wraps across as many lines as it
+    needs, and half a reason left standing reads as a comment about the code.
+
+    Absorption runs downward only. A standalone directive is written *above* the
+    line it guards, so a comment above the directive belongs to whatever its
+    author was explaining and is none of this rewrite's business.
+    """
+    columns = python_comment_columns(text)
+    if columns is None:
+        return text
+
+    def kept() -> Iterator[str]:
+        absorbing = False
+        for number, line in enumerate(text.splitlines(keepends=True), start=1):
+            match = IGNORE_RE.search(line)
+            if absorbing:
+                if match is None and line.lstrip().startswith(("#", "//")):
+                    continue
+                absorbing = False
+            ids = None if match is None else ignore_rule_ids(match)
+            if (
+                match is None
+                or ids is None
+                or rule_id not in ids
+                or number not in columns
+                or columns[number] != match.start()
+            ):
+                yield line
+                continue
+            if len(ids) > 1:
+                remaining = ", ".join(sorted(ids - {rule_id}))
+                opens, closes = match.start("ids"), match.end("ids")
+                yield f"{line[:opens]}{remaining}{line[closes:]}"
+                continue
+            guarded = line[: match.start()]
+            if guarded.strip():
+                yield guarded.rstrip() + line[len(line.rstrip()) :]
+                continue
+            absorbing = True
+
+    return "".join(kept())
+
+
+def retire_directives(project: DevProject, rule_id: str) -> list[str]:
+    """Answer every directive naming a retired rule, reporting each file changed."""
+
+    def changed() -> Iterator[str]:
+        for item in scanned_files(project):
+            if item.path.suffix.lower() not in {".py", ".pyi"}:
+                continue
+            revised = retired_directives(item.text, rule_id)
+            if revised == item.text:
+                continue
+            item.path.write_text(revised, encoding="utf-8")
+            yield item.rel
+
+    return list(changed())
 
 
 def report_directives(
