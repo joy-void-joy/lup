@@ -15,7 +15,7 @@ verdict, because `git` declares its placement at the command its verbs share.
 
 from lup.adapters.codex.harness import codex_allow_prefixes
 from lup.policy.kernel.decision import KernelDecision
-from lup.policy.kernel.shell import decide_shell
+from lup.policy.kernel.shell import auto_escape_matches, decide_shell
 from lup.policy.shell_rules import (
     ROOT_EFFECT,
     ROOT_SANDBOX,
@@ -326,6 +326,14 @@ def test_a_confined_placement_is_never_widened_into_a_native_allow() -> None:
     ]
 
     assert codex_allow_prefixes(confined, []) == []
+
+
+def test_native_auto_escape_matches_only_one_simple_command() -> None:
+    prefixes = [["uv", "run", "lup-devtools"]]
+    assert auto_escape_matches("uv run lup-devtools dev check", prefixes)
+    assert not auto_escape_matches(
+        "uv run lup-devtools dev check && echo done", prefixes
+    )
 
 
 def test_the_forms_escaping_the_sandbox_are_exactly_the_decided_git_ones() -> None:

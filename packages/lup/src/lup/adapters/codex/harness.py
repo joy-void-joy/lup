@@ -699,6 +699,11 @@ class CodexHookRenderer(ArtifactRenderer[HookSet]):
                         recoverable_target_limit=source.recoverable_target_limit,
                         runner_targets=list(source.runner_targets),
                         sandbox_excluded_commands=source.excluded_commands(),
+                        auto_escape_prefixes=codex_allow_prefixes(
+                            source.shell_rules,
+                            list(source.runner_targets),
+                            source.excluded_commands(),
+                        ),
                         diagnostics_command=source.diagnostics_command,
                         rules=antipattern_set_for(
                             self.spellings.read_document(DOCUMENT_IN_HAND)

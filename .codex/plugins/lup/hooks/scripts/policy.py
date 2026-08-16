@@ -21,6 +21,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parents[1] / "runtime"))
 from codex_patch import patched_files
 from kernel.decision import KernelDecision
+from kernel.shell import auto_escape_matches
+from policy_data import AUTO_ESCAPE_PREFIXES
 from policy_data import AGENT_IDENTITY_ENV, AUTONOMOUS_AGENT_IDENTITIES
 
 # lup: ignore[subprocess] — `sh` is third-party and this half is compiled into a bare script that has no virtual environment to resolve it from
@@ -512,18 +514,25 @@ def dispatch(payload, permission_request=False):
     name = payload["tool_name"]
     tool_input = payload["tool_input"]
     if name == "Bash":
-        escaped = spent_escape(tool_input)
+        requested_escape = spent_escape(tool_input)
+        escaped = requested_escape or auto_escape_matches(
+            tool_input["command"], AUTO_ESCAPE_PREFIXES
+        )
         decision = bash_decision(
             tool_input["command"],
             managed_root(),
             False if permission_request else sandbox_active(),
             interactive=permission_request,
-            # This hook cannot rewrite placement, so only a call that already
-            # requested Codex's escape can satisfy an outside verdict; its
-            # prefix rule approves that request rather than performing it.
+            # A native prefix rule can auto-escape one simple command; an explicit
+            # request is the other supported route. Both are checked against
+            # semantic placement before the hook lets the native boundary act.
             escapable=escaped,
         )
-        if escaped and decision.effect == "allow" and decision.sandbox != "outside":
+        if (
+            requested_escape
+            and decision.effect == "allow"
+            and decision.sandbox != "outside"
+        ):
             return KernelDecision(
                 "deny",
                 f"call requested outside but policy places it {decision.sandbox}; remove sandbox_permissions and retry",

@@ -1233,6 +1233,7 @@ def test_assembled_kernel_runs_without_site_packages(tmp_path: Path) -> None:
             recoverable_target_limit=FIXTURE_RECOVERABLE_LIMIT,
             runner_targets=FIXTURE_RUNNER_TARGETS,
             sandbox_excluded_commands=FIXTURE_EXCLUDED_COMMANDS,
+            auto_escape_prefixes=[],
             diagnostics_command=[],
         ),
         encoding="utf-8",
@@ -1297,7 +1298,7 @@ def test_assembled_kernel_runs_without_site_packages(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    sh.Command("python3")("-I", "-S", str(probe))
+    sh.Command("python3")("-I", "-S", str(probe), _truncate_exc=False)
 
 
 def test_equivalent_multi_file_native_edits_decode_identically() -> None:

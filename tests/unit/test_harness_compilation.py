@@ -1432,13 +1432,13 @@ def test_generated_codex_pretool_accepts_a_safe_requested_escape() -> None:
     assert codex_hook_result(body, sandboxed=True).exit_code == 0
 
 
-def test_generated_codex_pretool_stops_an_unrequested_escape() -> None:
+def test_generated_codex_pretool_accepts_a_safe_automatic_escape() -> None:
     body: JsonObject = {
         "hook_event_name": "PreToolUse",
         "tool_name": "Bash",
         "tool_input": {"command": "uv run lup-devtools harness resolve intake"},
     }
-    assert codex_hook_result(body, sandboxed=True).exit_code == 2
+    assert codex_hook_result(body, sandboxed=True).exit_code == 0
 
 
 def test_generated_codex_pretool_refuses_an_ambient_escape() -> None:

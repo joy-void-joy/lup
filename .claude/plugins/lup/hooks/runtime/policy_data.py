@@ -7093,6 +7093,8 @@ SANDBOX_EXCLUDED_COMMANDS: list[str] = [
     "gh *",
 ]
 
+AUTO_ESCAPE_PREFIXES: list[list[str]] = []
+
 DIAGNOSTICS_COMMAND: list[str] = [
     ".venv/bin/pyright",
     "--outputjson",

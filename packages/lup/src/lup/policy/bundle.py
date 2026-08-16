@@ -252,6 +252,13 @@ def string_rows_literal(rows: list[str]) -> str:
     return "[\n" + "".join(f"    {json.dumps(row)},\n" for row in rows) + "]"
 
 
+def string_matrix_literal(rows: list[list[str]]) -> str:
+    """Render a sequence of generated argument vectors."""
+    if not rows:
+        return "[]"
+    return "[\n" + "".join(f"    {json.dumps(row)},\n" for row in rows) + "]"
+
+
 def shell_rule_rows_literal(rows: list[ShellRuleRow]) -> str:
     """Render erased shell rules as Ruff-stable dict literals."""
     if not rows:
@@ -301,6 +308,7 @@ def render_policy_data(
     recoverable_target_limit: int,
     runner_targets: list[RunnerTargetRule],
     sandbox_excluded_commands: list[str],
+    auto_escape_prefixes: list[list[str]],
     diagnostics_command: list[str],
     rules: AntiPatternSet | None = None,
 ) -> str:
@@ -338,6 +346,8 @@ def render_policy_data(
             + runner_target_rows_literal(erase_runner_targets(runner_targets)),
             "SANDBOX_EXCLUDED_COMMANDS: list[str] = "
             + string_rows_literal(sandbox_excluded_commands),
+            "AUTO_ESCAPE_PREFIXES: list[list[str]] = "
+            + string_matrix_literal(auto_escape_prefixes),
             "DIAGNOSTICS_COMMAND: list[str] = "
             + string_rows_literal(diagnostics_command),
         ]
