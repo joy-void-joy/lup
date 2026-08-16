@@ -18,9 +18,24 @@ environment that cannot promise determinism with no durable record at all.
 """
 
 import hashlib
+import logging
 from datetime import datetime
+from pathlib import Path
 
-from pydantic import BaseModel, Field, TypeAdapter
+from pydantic import BaseModel, Field, TypeAdapter, computed_field
+
+logger = logging.getLogger(__name__)
+
+
+class UnreadableJournalError(RuntimeError):
+    """Raised when a journal file exists but does not parse.
+
+    Loud rather than quiet, because the alternative — starting a fresh
+    journal over the unreadable one — would let a replay of nothing report
+    itself as a replay with no divergence. A clean bill of health from a
+    record that could not be read is the one outcome this module exists to
+    make impossible.
+    """
 
 
 def timestamp_now() -> str:
@@ -37,6 +52,20 @@ class JournalCell(BaseModel, frozen=True):
     )
     source: str = Field(description="Exactly what was executed")
     ok: bool = Field(description="Whether it succeeded when it was first run")
+
+
+class CellOutcome(BaseModel, frozen=True):
+    """How one cell went on being re-run.
+
+    The outcome and the note that explains it are one value rather than two
+    parallel lists, so a replay that reports on ten cells cannot hand back
+    nine details and mis-attribute every one of them after the gap.
+    """
+
+    ok: bool = Field(description="Whether it succeeded this time")
+    detail: str = Field(
+        default="", description="What it said, for a divergence that needs explaining"
+    )
 
 
 class ReplayDivergence(BaseModel, frozen=True):
@@ -61,8 +90,18 @@ class ReplayReport(BaseModel, frozen=True):
         """Whether every cell replayed to its recorded outcome."""
         return not self.divergences
 
+    @computed_field(
+        description="What this replay established, in the terms of its own contract"
+    )
+    @property
     def finding(self) -> str:
-        """What this replay established, in the terms of its own contract."""
+        """What this replay established, in the terms of its own contract.
+
+        Computed rather than derived by a reader, so it is carried by every
+        serialization of this report — an agent holding the tool result reads
+        the same sentence a library caller does, instead of being left to
+        re-infer the contract from a list of divergences.
+        """
         if not self.divergences:
             return f"replayed {self.cells_replayed} cells with no divergence"
         indices = ", ".join(str(item.index) for item in self.divergences)
@@ -107,30 +146,83 @@ class ReplayJournal(BaseModel, frozen=True):
         payload = TypeAdapter(list[JournalCell]).dump_json(self.cells)
         return hashlib.sha256(payload).hexdigest()
 
-    def compare(
-        self, replayed_ok: list[bool], details: list[str] | None = None
-    ) -> ReplayReport:
+    def recording(self, cell: JournalCell) -> "ReplayJournal":
+        """This journal with one more executed cell appended.
+
+        A new journal rather than a mutated one, so a caller holding the
+        value it read cannot find the record changing under it.
+        """
+        return self.model_copy(update={"cells": [*self.cells, cell]})
+
+    def compare(self, outcomes: list[CellOutcome]) -> ReplayReport:
         """Compare a replay's per-cell outcomes against what was recorded.
 
         A short replay is compared as far as it went rather than refused: a
         run that stopped early still establishes something about the cells it
         reached, and reporting nothing would discard that.
         """
-        notes = details or [""] * len(replayed_ok)
         return ReplayReport(
             journal_id=self.id,
-            cells_replayed=len(replayed_ok),
+            cells_replayed=len(outcomes),
             divergences=[
                 ReplayDivergence(
                     index=index,
                     recorded_ok=cell.ok,
-                    replayed_ok=actual,
-                    detail=note,
+                    replayed_ok=outcome.ok,
+                    detail=outcome.detail,
                 )
-                for index, (cell, actual, note) in enumerate(
-                    zip(self.cells, replayed_ok, notes, strict=False)
+                for index, (cell, outcome) in enumerate(
+                    zip(self.cells, outcomes, strict=False)
                 )
-                if cell.ok != actual
+                if cell.ok != outcome.ok
             ],
             determinism_claimed=self.determinism_claimed,
         )
+
+
+class JournalStore:
+    """One journal kept on disk, replaced atomically as cells run.
+
+    The contract is fixed here rather than at each append, because it
+    belongs to the environment doing the executing and not to any one cell:
+    a store built by a sealed kernel claims determinism for everything it
+    records, and one built by a networked sandbox claims it for nothing.
+    """
+
+    def __init__(
+        self, path: Path, journal_id: str, *, determinism_claimed: bool = False
+    ) -> None:
+        self.path = path
+        self.journal_id = journal_id
+        self.determinism_claimed = determinism_claimed
+
+    def load(self) -> ReplayJournal:
+        """Read the journal, or an empty one when nothing has run yet.
+
+        A file that exists and does not parse raises instead: nothing has
+        run is a different fact from the record is unreadable, and only the
+        first of them means a replay has no divergence to report.
+        """
+        if not self.path.is_file():
+            return ReplayJournal(
+                id=self.journal_id, determinism_claimed=self.determinism_claimed
+            )
+        try:
+            return ReplayJournal.model_validate_json(
+                self.path.read_text(encoding="utf-8")
+            )
+        except ValueError as e:
+            raise UnreadableJournalError(
+                f"the execution journal at {self.path} does not parse, so what "
+                "ran cannot be established from it; delete the file to start a "
+                "fresh record, knowing the earlier cells are no longer accounted for"
+            ) from e
+
+    def record(self, cell: JournalCell) -> ReplayJournal:
+        """Append one executed cell and replace the file whole."""
+        journal = self.load().recording(cell)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = self.path.with_suffix(".tmp")
+        temporary.write_text(journal.model_dump_json(indent=2), encoding="utf-8")
+        temporary.replace(self.path)  # lup: ignore[string-replace] — atomic rename
+        return journal
