@@ -1233,6 +1233,7 @@ def test_assembled_kernel_runs_without_site_packages(tmp_path: Path) -> None:
             recoverable_target_limit=FIXTURE_RECOVERABLE_LIMIT,
             runner_targets=FIXTURE_RUNNER_TARGETS,
             sandbox_excluded_commands=FIXTURE_EXCLUDED_COMMANDS,
+            diagnostics_command=[],
         ),
         encoding="utf-8",
     )

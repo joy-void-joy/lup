@@ -39,20 +39,40 @@ class TestMountTopology:
         assert workspace.kind == "volume"
         assert workspace.source == sandbox.volume_name
 
-    def test_topology_drives_the_docker_volume_mapping(self, tmp_path: Path) -> None:
-        """The volumes dict start_container builds must round-trip the topology,
-        so a bind that is silently dropped here surfaces as a test failure."""
+    def test_topology_drives_the_docker_mount_specification(
+        self, tmp_path: Path
+    ) -> None:
+        """The specification start_container passes must round-trip the
+        topology, so a bind dropped there surfaces as a test failure here."""
         sandbox = make_sandbox(tmp_path)
-        volumes = {
-            m.source: {"bind": m.container_path, "mode": m.mode}
-            for m in sandbox.mount_topology()
-        }
+        by_target = {m["Target"]: m for m in sandbox.docker_mounts()}
 
-        assert volumes[str((tmp_path / "shared").resolve())] == {
-            "bind": "/shared",
-            "mode": "rw",
-        }
-        assert volumes[sandbox.volume_name]["bind"] == "/workspace"
+        assert by_target["/shared"]["Source"] == str((tmp_path / "shared").resolve())
+        assert by_target["/shared"]["Type"] == "bind"
+        assert not by_target["/shared"]["ReadOnly"]
+        assert by_target["/workspace"]["Source"] == sandbox.volume_name
+        assert by_target["/workspace"]["Type"] == "volume"
+
+    def test_a_read_only_root_reaches_docker_as_read_only(self, tmp_path: Path) -> None:
+        sandbox = Sandbox(
+            session_id="ro",
+            shared_dir=tmp_path / "shared",
+            source_roots={"lup": tmp_path / "lup"},
+        )
+        by_target = {m["Target"]: m for m in sandbox.docker_mounts()}
+
+        assert by_target["/sources/lup"]["ReadOnly"]
+
+    def test_one_directory_at_two_paths_keeps_both(self, tmp_path: Path) -> None:
+        """The mapping Docker also accepts is keyed by host path, so it would
+        keep whichever of these came last and say nothing about the other."""
+        shared = (tmp_path / "shared").resolve()
+        sandbox = Sandbox(session_id="both", shared_dir=shared, shared_path=str(shared))
+        targets = [m["Target"] for m in sandbox.docker_mounts()]
+
+        assert str(shared) in targets
+        assert "/shared" in targets
+        assert [m["Source"] for m in sandbox.docker_mounts()].count(str(shared)) == 2
 
 
 class TestDeclaredMounts:

@@ -209,9 +209,16 @@ def create_dev_app(
                 help="Force delete the branch and a worktree holding modified files",
             ),
         ] = False,
+        remote: Annotated[
+            bool | None,
+            typer.Option(
+                "--remote/--no-remote",
+                help="Delete origin's copy too (default: only if merged)",
+            ),
+        ] = None,
     ) -> None:
-        """Delete a branch, its worktree, and remote tracking branch."""
-        branches.delete_branch(name, dry_run, force)
+        """Delete a branch and its worktree, and origin's copy if it is spent."""
+        branches.delete_branch(name, dry_run, force, remote)
 
     @app.command("resolve-branch")
     def resolve_branch_cmd(
@@ -741,9 +748,17 @@ def create_dev_app(
             bool,
             typer.Option("--json", help="Output as JSON"),
         ] = False,
+        method: Annotated[
+            pr.MergeMethod,
+            typer.Option("--method", help="How the commits reach the base branch"),
+        ] = pr.MergeMethod.merge,
+        gh_args: Annotated[
+            list[str] | None,
+            typer.Option("--gh", help="Further flag handed to `gh pr merge` untouched"),
+        ] = None,
     ) -> None:
-        """Squash-merge a PR and pull changes into the integration branch."""
-        pr.merge(pr_number, dry_run, as_json)
+        """Merge a PR and pull changes into the integration branch."""
+        pr.merge(pr_number, dry_run, as_json, method, tuple(gh_args or ()))
 
     @pr_app.command("sync-base")
     def pr_sync_base_cmd(

@@ -101,8 +101,13 @@ class ResolvePhase(StrEnum):
         """Whether a run in this phase has let go of the branches it leased.
 
         Only a completed run has: it carried every lease through the join
-        machinery, so what those branches held has landed and a sweep may
-        clear them. A failed or aborted run still has its branches out on
+        machinery, so no worker is coming back for those branches. That is
+        not the same as the batch having landed — a run reaches this phase
+        by finishing its own work, and its integration branch may still be
+        sitting on disk unmerged. A branch that outlives its lease is the
+        run's leftover, and is still the run's to answer for rather than
+        work the sweep found abandoned. A failed or aborted run has its
+        branches out on
         lease with nothing answerable for them, which is precisely when a
         survey must leave them alone — the two verbs it would otherwise
         offer both destroy work no one has salvaged yet.
@@ -556,7 +561,7 @@ class WritableRootLease(BaseModel, frozen=True):
 
 
 class HeldLease(BaseModel, frozen=True):
-    """One branch a run that has not finished is still holding.
+    """One branch a run is answerable for — still leased, or left behind.
 
     What a branch survey needs in order to leave it alone: which run, and
     where that run had got to, so the reason it reports is checkable against
@@ -577,10 +582,19 @@ class HeldLease(BaseModel, frozen=True):
         `KEEP` on every sweep, forever, with nothing in the workflow saying
         what to do about it. A live run needs no instruction — it is
         working — so only a dead one carries the two commands that end the
-        holding, in the order worth trying them.
+        holding, in the order worth trying them. A completed run is neither:
+        nothing will resume it and nothing is coming back for the branch, so
+        what it needs is the reading that says whether the work is already
+        somewhere else, not an offer to restart a run that finished.
         """
         if self.alive:
             return f"lease of run {self.run_id} ({self.standing})"
+        if self.standing == ResolvePhase.COMPLETE:
+            return (
+                f"leftover of completed run {self.run_id}; check what of it "
+                f"reached the integration branch with `lup-devtools harness "
+                f"resolve status --run-id {self.run_id}` before clearing it"
+            )
         return (
             f"lease of run {self.run_id} ({self.standing}); resume it with "
             f"`lup-devtools harness resolve --adapter <a> --run-id {self.run_id}`, "

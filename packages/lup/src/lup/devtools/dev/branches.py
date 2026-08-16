@@ -480,13 +480,21 @@ def unlanded_siblings(
 
     The current branch is excluded: work in hand is not work parked out of
     sight, and reporting it every run would train the reader to skip the line.
+
+    So is any branch a resolver run answers for. A run holds its branches
+    out of the sweep deliberately, and its leftovers are one decision about
+    the run rather than a list of parked work; a batch of them here is the
+    same line repeated until the reader skips it, and reads as a backlog
+    nobody is carrying when a run either is carrying it or has finished.
+    Reading the run directory keeps this offline, which the rest of it is.
     """
     integration = get_integration_branch()
     worktrees = parse_worktrees()
     current = git.out("branch", "--show-current")
+    leased = live_lease_branches(project_root() / ".lup" / "resolve")
 
     def measure(name: str) -> UnlandedBranch | None:
-        if name == current or name in protected:
+        if name == current or name in protected or name in leased:
             return None
         if is_ancestor(name, integration):
             return None
@@ -912,7 +920,11 @@ def survey(as_json: bool) -> None:
     if has_remote and not as_json:
         typer.echo("Querying PR status...", err=True)
     pr_map: dict[str, PRStatus] = fetch_pr_status(branch_names) if has_remote else {}
-    leased = live_lease_branches(project_root() / ".lup" / "resolve")
+    # A run records every branch it ever leased, and a completed run keeps
+    # reporting the ones its cleanup did not delete. Only what is still on
+    # disk is a branch this sweep can say anything about.
+    lease_of = live_lease_branches(project_root() / ".lup" / "resolve")
+    leased = {name: lease_of[name] for name in branch_names if name in lease_of}
 
     def info(b: ParsedBranch) -> BranchInfo:
         name = b["name"]
@@ -1023,6 +1035,14 @@ class DeletionPlan(BaseModel):
     worktree: str | None = None
     stranded: bool = False
     has_remote: bool = False
+    delete_remote: bool = False
+    """Whether origin's copy goes too, which is a decision, not an observation.
+
+    ``has_remote`` is a fact about the world and this is an intention about
+    it. Reading both from one field is what made a remote copy delete itself
+    for existing — and a copy that exists is the thing that made deleting
+    the local branch survivable in the first place.
+    """
     actions: list[PlannedAction] = []
 
     def blocked(self) -> list[PlannedAction]:
@@ -1092,11 +1112,19 @@ def plan_branch_step(name: str, force: bool) -> PlannedAction:
     )
 
 
-def plan_deletion(name: str, force: bool) -> DeletionPlan:
+def plan_deletion(name: str, force: bool, remote: bool | None = None) -> DeletionPlan:
     """Evaluate every precondition a deletion depends on, changing nothing.
 
     A dry run and the real path both read this, so what the dry run promises
     is what the real path went on to check.
+
+    Whether origin's copy goes with it defaults to whether the branch is
+    merged, because that is what the answer turns on. Cleaning up after a
+    merged branch should take the remote too — the commits are in the
+    integration branch and the copy is spent. An unmerged branch is the
+    opposite case: origin holds the only copy that outlives this command,
+    which is exactly what a push before deleting was for, so it stays
+    unless a caller says otherwise in so many words.
     """
     worktree = parse_worktrees().get(name)  # lup: ignore[dict-get] — open branch map
     stranded = worktree is not None and not Path(worktree).exists()
@@ -1107,8 +1135,10 @@ def plan_deletion(name: str, force: bool) -> DeletionPlan:
 
     actions.append(plan_branch_step(name, force=force))
 
+    merged = is_ancestor(name, "HEAD")
     has_remote = remote_branch_exists(name)
-    if has_remote:
+    delete_remote = has_remote and (merged if remote is None else remote)
+    if delete_remote:
         actions.append(
             PlannedAction(description=f"Delete remote branch: origin/{name}")
         )
@@ -1118,6 +1148,7 @@ def plan_deletion(name: str, force: bool) -> DeletionPlan:
         worktree=worktree,
         stranded=stranded,
         has_remote=has_remote,
+        delete_remote=delete_remote,
         actions=actions,
     )
 
@@ -1188,28 +1219,34 @@ def run_deletion(plan: DeletionPlan, force: bool) -> None:
             plan, completed, f"branch deletion failed: {decode_stderr(error)}"
         )
 
-    if plan.has_remote:
-        try:
-            git("push", "origin", "--delete", plan.branch)
-            typer.echo(f"Deleted remote branch: origin/{plan.branch}")
-        except sh.ErrorReturnCode as error:
+    if not plan.delete_remote:
+        if plan.has_remote:
             typer.echo(
-                f"Warning: remote deletion failed: {decode_stderr(error)}", err=True
+                f"Kept remote branch: origin/{plan.branch} — it holds these "
+                "commits now (--remote deletes it too)"
             )
+        return
+
+    try:
+        git("push", "origin", "--delete", plan.branch)
+        typer.echo(f"Deleted remote branch: origin/{plan.branch}")
+    except sh.ErrorReturnCode as error:
+        typer.echo(f"Warning: remote deletion failed: {decode_stderr(error)}", err=True)
 
 
 def delete_branch(
     name: str,
     dry_run: bool,
     force: bool,
+    remote: bool | None = None,
 ) -> None:
-    """Delete a branch, its worktree, and remote tracking branch."""
+    """Delete a branch and its worktree, and origin's copy if it is spent."""
     cur = git.out("branch", "--show-current")
     if name == cur:
         typer.echo(f"Error: cannot delete the current branch ({name})", err=True)
         raise typer.Exit(1)
 
-    plan = plan_deletion(name, force)
+    plan = plan_deletion(name, force, remote)
 
     if dry_run:
         typer.echo(f"Would perform {len(plan.actions)} action(s):")
@@ -1224,6 +1261,13 @@ def delete_branch(
             typer.echo(f"  {action.render()}", err=True)
         typer.echo("Use --force to override.", err=True)
         raise typer.Exit(1)
+
+    if plan.delete_remote and not is_ancestor(name, "HEAD"):
+        typer.echo(
+            f"Warning: {name} holds commits HEAD does not, and origin/{name} "
+            "is going with it — after this the work is in no branch.",
+            err=True,
+        )
 
     run_deletion(plan, force)
 

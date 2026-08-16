@@ -72,26 +72,26 @@ This file provides guidance to Claude Code when working with code in this reposi
         ),
         *DIRECTORY_STRUCTURE_THROUGH_TOOLS,
         models.TextPart(
-            text=r"""## Pyright LSP
+            text=r"""## Diagnostics after an edit
 
-The `pyright-lsp` plugin provides code intelligence. **Use these actively** -- they are faster and more accurate than grep-based searches for code understanding and refactoring.
+Every edit is type-checked, by the hook rather than by an editor's language server. The checker runs in the checkout that holds the file you edited, so its answer is about the copy you changed. Findings for that file arrive as a hook error naming the line; nothing arrives when it checks out clean.
+
+That rooting is the point. A language server the runtime starts is rooted once, where the session opened, and keeps that root after work moves to a worktree -- so it resolves the same module names against the launch checkout and reports, with no sign anything is wrong, about a file nobody edited. Anything a session-wide language server tells you about a file in a worktree is worth confirming against this.
+
+The `codeintel` tools answer navigation questions the same way, per question rather than per session. **Use them actively** -- they resolve imports and aliases, which grep cannot.
 
 **Navigation (use before editing unfamiliar code):**
 
-- **go-to-definition** -- Jump to where a symbol is defined. Use this instead of grepping for `def foo` or `class Foo`.
-- **find-references** -- Find all usages of a symbol. Use this instead of grepping for a symbol name.
-- **hover-documentation** -- Get type info and docs for a symbol at a position.
-- **list-symbols** -- List all symbols in a file. Use this instead of grepping for `def ` or `class `.
-- **find-implementations** -- Find implementations of an interface or abstract method.
-- **trace-call-hierarchy** -- Understand call chains. Use this instead of manually tracing function calls.
+- **find_definition** -- Where a symbol is defined. Use instead of grepping for `def foo` or `class Foo`.
+- **find_references** -- Every use of a symbol. Use instead of grepping for a name.
+- **hover** -- The inferred type and documentation at a position.
+- **list_symbols** -- Every symbol a file declares. Use instead of grepping for `def ` or `class `.
 
 **Refactoring:**
 
-- **rename-symbol** -- Rename a symbol across the workspace. **Always prefer this over `Edit` with `replace_all`** for identifier renames -- it understands scope and won't rename unrelated identifiers.
+- **rename_symbol** -- Plan a workspace-wide rename. **Always prefer this over `Edit` with `replace_all`** for identifier renames -- it understands scope and won't rename unrelated identifiers. It reports the edits; you apply them.
 
-**Diagnostics:**
-
-- After every file edit, pyright automatically analyzes changes and reports type errors. Pay attention to these -- they catch issues immediately.
+A relative path resolves against the checkout being edited, which the same hook publishes. Pass an absolute path when you mean a file somewhere else.
 
 **When to use LSP vs grep/Edit:**
 

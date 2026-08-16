@@ -7091,3 +7091,8 @@ SANDBOX_EXCLUDED_COMMANDS: list[str] = [
     "git *",
     "gh *",
 ]
+
+DIAGNOSTICS_COMMAND: list[str] = [
+    ".venv/bin/pyright",
+    "--outputjson",
+]

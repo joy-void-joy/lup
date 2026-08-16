@@ -301,6 +301,7 @@ def render_policy_data(
     recoverable_target_limit: int,
     runner_targets: list[RunnerTargetRule],
     sandbox_excluded_commands: list[str],
+    diagnostics_command: list[str],
     rules: AntiPatternSet | None = None,
 ) -> str:
     """Render one plugin's canonical policy rows without executable logic.
@@ -337,6 +338,8 @@ def render_policy_data(
             + runner_target_rows_literal(erase_runner_targets(runner_targets)),
             "SANDBOX_EXCLUDED_COMMANDS: list[str] = "
             + string_rows_literal(sandbox_excluded_commands),
+            "DIAGNOSTICS_COMMAND: list[str] = "
+            + string_rows_literal(diagnostics_command),
         ]
     )
     return (

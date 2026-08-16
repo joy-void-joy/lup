@@ -59,6 +59,7 @@ except ImportError as exc:
     ) from exc
 from docker.errors import APIError, DockerException, NotFound
 from docker.models.containers import Container, ExecResult
+from docker.types import Mount as DockerMount
 from docker.utils.socket import SocketError
 
 from lup.mcp import (
@@ -72,6 +73,7 @@ from lup.sandbox.models import (
     MountMode,
     DEFAULT_PRE_INSTALL,
     CodeExecutionTimeoutError,
+    PathNotMountedError,
     DockerUnreachableError,
     ExecuteCodeInput,
     ExecuteCodeResult,
@@ -84,6 +86,7 @@ from lup.sandbox.models import (
 )
 from lup.sandbox.process import decode_output, process_is_alive, process_start_token
 from lup.sandbox.repl import REPL_SERVER_SCRIPT, ReplSession
+from lup.sandbox.translation import MountTopology
 
 logger = logging.getLogger(__name__)
 
@@ -106,6 +109,24 @@ def connected_docker_client() -> docker.DockerClient:
         ) from exc
 
 
+def file_cell(container_path: str) -> str:
+    """A cell that runs a file already inside the container.
+
+    The path is embedded as a Python literal rather than pasted, so a name
+    carrying a quote stays one argument instead of becoming syntax. The
+    compiled program keeps the file's own name, so a traceback points at the
+    file the caller named instead of at ``<cell>``.
+
+    ``globals()`` is the session namespace — the REPL executes each cell with
+    it — so a file defines its names into the same session an inline cell
+    would, and a later cell can use them.
+    """
+    return (
+        f"exec(compile(open({container_path!r}, encoding='utf-8').read(), "
+        f"{container_path!r}, 'exec'), globals())"
+    )
+
+
 class Sandbox:
     """Docker-based Python sandbox for isolated code execution.
 
@@ -121,7 +142,10 @@ class Sandbox:
 
     Args:
         session_id: Unique identifier for this session (used in container/volume names).
-        shared_dir: Host directory bound to /shared for host-sandbox file exchange.
+        shared_dir: Host directory bound for host-sandbox file exchange.
+        shared_path: Container path to bind it at, defaulting to
+            :attr:`DEFAULT_SHARED_PATH`. Passing the host directory's own path
+            makes one spelling true on both sides.
         docker_image: Docker image to use for the sandbox.
         network_mode: Network access level ("bridge" or "none").
         timeout_seconds: Default timeout for code execution.
@@ -137,11 +161,20 @@ class Sandbox:
     SOURCE_ROOT = "/sources"
     """Where read-only host source trees are mounted, one directory each."""
 
+    DEFAULT_SHARED_PATH = "/shared"
+    """Where the host exchange directory is mounted, absent a caller's choice.
+
+    Pass ``shared_path=str(shared_dir)`` to mount it at the path the host
+    already calls it. The two sides then agree on one spelling, and an agent
+    holding tools on both cannot pick the wrong one — there is only one.
+    """
+
     def __init__(
         self,
         *,
         session_id: str,
         shared_dir: str | Path,
+        shared_path: str | None = None,
         docker_image: str = DEFAULT_DOCKER_IMAGE,
         network_mode: NetworkMode = "bridge",
         timeout_seconds: int = 30,
@@ -155,6 +188,7 @@ class Sandbox:
         self.docker_image = docker_image
         self.volume_name = f"lup-sandbox-ws-{suffix}"
         self.shared_dir = Path(shared_dir).resolve()
+        self.shared_path = shared_path or self.DEFAULT_SHARED_PATH
         self.network_mode = network_mode
         self.timeout_seconds = timeout_seconds
         self.pre_install = list(pre_install) if pre_install is not None else None
@@ -201,16 +235,7 @@ class Sandbox:
                     "across calls but is not visible on the host."
                 ),
             ),
-            Mount(
-                container_path="/shared",
-                source=str(self.shared_dir),
-                kind="bind",
-                mode="rw",
-                purpose=(
-                    f"File exchange with the host directory {self.shared_dir}; "
-                    "read host inputs and write host outputs here."
-                ),
-            ),
+            *self.shared_mounts(),
             *[
                 Mount(
                     container_path=f"{self.SOURCE_ROOT}/{name}",
@@ -226,6 +251,61 @@ class Sandbox:
             ],
             *self.declared_mounts(),
         ]
+
+    def shared_mounts(self) -> list[Mount]:
+        """The exchange directory, at every path that names it.
+
+        A caller who moved the exchange onto its host path keeps the default
+        path alongside it. Paths are written in the code the sandbox runs as
+        well as in tool arguments, and code carrying the default spelling
+        reaches no boundary where anything could correct it — so the cheaper
+        answer is for both spellings to be true.
+        """
+        primary = Mount(
+            container_path=self.shared_path,
+            source=str(self.shared_dir),
+            kind="bind",
+            mode="rw",
+            purpose=(
+                f"File exchange with the host directory {self.shared_dir}; "
+                "read host inputs and write host outputs here."
+            ),
+        )
+        if self.shared_path == self.DEFAULT_SHARED_PATH:
+            return [primary]
+        return [
+            primary,
+            Mount(
+                container_path=self.DEFAULT_SHARED_PATH,
+                source=str(self.shared_dir),
+                kind="bind",
+                mode="rw",
+                purpose=f"The same directory as {self.shared_path}.",
+            ),
+        ]
+
+    def docker_mounts(self) -> list[DockerMount]:
+        """The topology as Docker's own mount specification.
+
+        A list rather than the ``volumes`` mapping Docker also accepts: that
+        mapping is keyed by host path, so one directory mounted at two
+        container paths loses one of them, and silently — which is exactly
+        what a caller asks for when they want a path to mean the same thing
+        on both sides.
+        """
+        return [
+            DockerMount(
+                target=mount.container_path,
+                source=mount.source,
+                type=mount.kind,
+                read_only=mount.mode == "ro",
+            )
+            for mount in self.mount_topology()
+        ]
+
+    def topology(self) -> MountTopology:
+        """The mount table, asked what a path is called on the other side."""
+        return MountTopology(mounts=self.mount_topology())
 
     def declared_mounts(self) -> list[Mount]:
         """Host directories the caller placed at container paths of its choosing.
@@ -432,16 +512,15 @@ class Sandbox:
             self.container_name,
             self.network_mode,
         )
-        logger.info("Mounting shared directory: %s -> /shared", self.shared_dir)
+        logger.info(
+            "Mounting shared directory: %s -> %s", self.shared_dir, self.shared_path
+        )
         self.active_container = self.docker_client.containers.run(
             self.docker_image,
             name=self.container_name,
             command="sleep infinity",
             detach=True,
-            volumes={
-                mount.source: {"bind": mount.container_path, "mode": mount.mode}
-                for mount in self.mount_topology()
-            },
+            mounts=self.docker_mounts(),
             working_dir="/workspace",
             mem_limit="1g",
             network_mode=self.network_mode,
@@ -565,6 +644,39 @@ class Sandbox:
         except ReplCrashedError as crash:
             logger.warning("REPL crashed, recovering")
             return self.recover_from_crash(self.repl, crash)
+
+    def container_spelling(self, path: str) -> str:
+        """The container's name for a file the caller named from either side.
+
+        An agent holding tools on both sides has whichever spelling it last
+        saw and cannot tell from the path which side that was. Translating
+        rather than refusing is what makes the two sides one namespace to the
+        caller. A path that crosses in neither direction is the genuine
+        error, and carries the topology's own account of where to put it.
+        """
+        topology = self.topology()
+        crossing = topology.to_container(path)
+        if crossing.resolved is not None:
+            return crossing.resolved
+        if topology.contains(path):
+            return path
+        raise PathNotMountedError(crossing.explanation)
+
+    def run_file(
+        self, path: str, timeout_seconds: int | None = None
+    ) -> ExecuteCodeResult:
+        """Execute a file the container can already see, named from either side.
+
+        The file is read inside the container, so this reaches exactly what is
+        mounted and nothing else: a host path that was never mounted is
+        refused rather than copied in, and the sandbox's isolation is the same
+        whether a cell arrives as text or as a file.
+
+        The cell runs for effect: names it defines persist into the session,
+        but a trailing expression is not echoed the way an inline cell's is,
+        because the file is executed rather than parsed here.
+        """
+        return self.run_code(file_cell(self.container_spelling(path)), timeout_seconds)
 
     def recover_from_crash(
         self, repl: ReplSession, crash: ReplCrashedError
@@ -694,6 +806,10 @@ class Sandbox:
             "binds it to '_', so you only need print() for intermediate output. "
             f"{network_text}Timeout: {timeout_seconds}s.\n\n"
             f"Filesystem (use absolute paths; the cwd is /workspace):\n{filesystem_text}\n\n"
+            "Pass code= to run a cell inline, or file= to run a program that is "
+            "already on disk — name it by its host path or its container path, "
+            "whichever you have, and it is translated on arrival. A file runs "
+            "for effect: state persists, but a trailing expression is not echoed.\n\n"
             "Examples:\n"
             "  execute_code(code='import numpy as np; data = [1,2,3]; print(np.mean(data))')\n"
             "  execute_code(code='# Monte Carlo simulation\\nimport numpy as np\\n"
@@ -706,7 +822,13 @@ class Sandbox:
         async def execute_code(inp: ExecuteCodeInput) -> ExecuteCodeResult:
             try:
                 self.ensure_started()
+                if inp.file is not None:
+                    return self.run_file(inp.file)
+                if inp.code is None:
+                    raise ToolError("pass exactly one of code or file")
                 return self.run_code(inp.code)
+            except PathNotMountedError as e:
+                raise ToolError(str(e)) from e
             except SandboxNotInitializedError as e:
                 logger.error("Sandbox not initialized: %s", e)
                 raise ToolError(f"Sandbox error: {e}") from e

@@ -451,7 +451,9 @@ CODEX_DISPATCHER = DispatcherDeclaration(
     package="lup.adapters.codex",
     managed_root_env=CODEX_LOGIN.config_home_env,
     routed_tools=["Bash", "web_fetch", "apply_patch"],
-    hook_events=["PermissionRequest", "PreToolUse"],
+    hook_events=["PermissionRequest", "PreToolUse", "PostToolUse"],
+    observation_event="PostToolUse",
+    observed_tools=["apply_patch"],
     failure="stderr_exit",
     runtime_modules=["codex_patch", "policy_data"],
 )
@@ -571,7 +573,7 @@ class CodexHookRenderer(ArtifactRenderer[HookSet]):
             "statusMessage": "Checking Lup policy",
             "timeout": 30,
         }
-        registration = [
+        decided = [
             {
                 "matcher": "|".join(
                     routed_for(CODEX_DISPATCHER.routed_tools, source.refused_tools)
@@ -579,8 +581,19 @@ class CodexHookRenderer(ArtifactRenderer[HookSet]):
                 "hooks": [policy_hook],
             }
         ]
+        observed = [
+            {
+                "matcher": "|".join(CODEX_DISPATCHER.observed_tools),
+                "hooks": [policy_hook],
+            }
+        ]
         hooks = {
-            "hooks": {event: registration for event in CODEX_DISPATCHER.hook_events}
+            "hooks": {
+                event: (
+                    observed if event == CODEX_DISPATCHER.observation_event else decided
+                )
+                for event in CODEX_DISPATCHER.hook_events
+            }
         }
         evidence = {
             "schemaVersion": 1,
@@ -674,6 +687,7 @@ class CodexHookRenderer(ArtifactRenderer[HookSet]):
                         recoverable_target_limit=source.recoverable_target_limit,
                         runner_targets=list(source.runner_targets),
                         sandbox_excluded_commands=source.excluded_commands(),
+                        diagnostics_command=source.diagnostics_command,
                         rules=antipattern_set_for(
                             self.spellings.read_document(DOCUMENT_IN_HAND)
                         ),
