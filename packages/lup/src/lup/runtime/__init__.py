@@ -27,6 +27,8 @@ concerns:
   session.
 - :mod:`lup.runtime.threads` — blocking calls on a process-lifetime executor,
   so work in flight outlives any one loop's teardown.
+- :mod:`lup.runtime.quota` — waiting out a provider account allowance, as
+  distinct from a budget: the work is still wanted, just not yet runnable.
 
 ``contracts`` and ``models`` define the vocabulary; every other module
 composes them; the named adapter packages implement them.

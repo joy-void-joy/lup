@@ -7,7 +7,7 @@ from collections import deque
 from collections.abc import AsyncGenerator, AsyncIterator, Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from time import perf_counter
 from typing import TYPE_CHECKING, Literal
@@ -30,6 +30,7 @@ from lup.runtime.contracts import (
 from lup.runtime.errors import (
     DeltaStreamingDisabled,
     ProviderTurnError,
+    QuotaExceededError,
     TurnError,
     TurnFailure,
     TurnInterruptedError,
@@ -252,6 +253,35 @@ def environmental_fault(
     return any(signature in message.casefold() for signature in signatures)
 
 
+def quota_exhausted(
+    spent: "claude_types.RateLimitInfo | None",
+    blocks: list[AnyTurnBlock],
+    identifiers: TurnIdentifiers,
+) -> QuotaExceededError:
+    """Build the typed exhaustion carrying the provider's own reset moment.
+
+    A 429 with no accompanying rate-limit event says only that the allowance
+    is gone, so the reset stays ``None`` and a waiter falls back to its own
+    interval rather than inventing a time the provider never gave.
+    """
+    reset_at = (
+        datetime.fromtimestamp(spent.resets_at, tz=UTC)
+        if spent is not None and spent.resets_at is not None
+        else None
+    )
+    until = f" until {reset_at.isoformat()}" if reset_at is not None else ""
+    return QuotaExceededError(
+        TurnFailure(
+            message=f"Claude account allowance exhausted{until}",
+            blocks=blocks,
+            identifiers=identifiers,
+            environmental=True,
+        ),
+        reset_at=reset_at,
+        quota_type=spent.rate_limit_type if spent is not None else None,
+    )
+
+
 HUMAN_CLEARED_SIGNATURES: tuple[str, ...] = (
     "oauth access token has been revoked",
     "failed to authenticate",
@@ -451,6 +481,7 @@ class ClaudeConversationState:
             nonlocal identifiers
             durable: list[TurnEvent] = []  # lup: ignore[empty-collection]
             result: claude_types.ResultMessage | None = None
+            exhausted: claude_types.RateLimitInfo | None = None
             started = perf_counter()
 
             def record(message: TurnMessage) -> None:
@@ -498,6 +529,16 @@ class ClaudeConversationState:
                             )
                         case claude_types.ResultMessage() as terminal:
                             result = terminal
+                        # The provider says an allowance is spent, and says
+                        # when it returns. Read as data rather than matched
+                        # out of the error text, that reset time is what a
+                        # waiter can sleep against exactly.
+                        case claude_types.RateLimitEvent(
+                            rate_limit_info=claude_types.RateLimitInfo(
+                                status="rejected"
+                            ) as spent
+                        ):
+                            exhausted = spent
                         # The CLI persists the transcript under its own id,
                         # not the channel id this side minted — adopting it is
                         # what lets a later resume name a conversation that
@@ -537,6 +578,10 @@ class ClaudeConversationState:
                     )
                 ) from error
 
+            if exhausted is not None or (
+                result is not None and result.api_error_status == 429
+            ):
+                raise quota_exhausted(exhausted, fold_blocks(durable), identifiers)
             if result is None:
                 raise ProviderTurnError(
                     TurnFailure(
