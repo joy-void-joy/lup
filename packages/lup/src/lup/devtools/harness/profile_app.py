@@ -22,22 +22,20 @@ def create_profile_app(directory: ProfileDirectory) -> typer.Typer:
         help="Inspect and curate the accounts a launch can select",
     )
 
-    def acting(name: str, act: Callable[[], Profile]) -> Profile:
+    def acting(act: Callable[[], Profile]) -> Profile:
         """Answer for what an origin refuses, rather than tracebacking.
 
-        An origin that derives its profiles from something else — a directory
-        the project keeps, rather than a registry of its own — cannot honour
-        every curation the tree offers, and says so with a ``ValueError``
-        whose message is already the explanation a caller needs.
+        Both refusals arrive already worded: :class:`UnknownProfile` carries
+        the roster a launcher reports the same way, and an origin that
+        derives its profiles from something else — a directory the project
+        keeps, rather than a registry of its own — cannot honour every
+        curation the tree offers and says so with a ``ValueError`` whose
+        message is the explanation. Rendering theirs is what keeps this tree
+        and the launcher from wording the same refusal two ways.
         """
         try:
             return act()
-        except KeyError as error:
-            known = ", ".join(entry.name for entry in directory.entries())
-            raise typer.BadParameter(
-                f"unknown profile {name!r}; known: {known or 'none'}"
-            ) from error
-        except ValueError as error:
+        except (KeyError, ValueError) as error:
             raise typer.BadParameter(str(error)) from error
 
     @app.command("list")
@@ -65,7 +63,7 @@ def create_profile_app(directory: ProfileDirectory) -> typer.Typer:
         ] = None,
     ) -> None:
         """Register a runtime configuration home under a name."""
-        entry = acting(name, lambda: directory.add(name, config_dir))
+        entry = acting(lambda: directory.add(name, config_dir))
         typer.echo(f"Added {entry.name}: {entry.config_dir}")
         if not entry.logged_in:
             typer.echo(
@@ -78,7 +76,7 @@ def create_profile_app(directory: ProfileDirectory) -> typer.Typer:
         name: Annotated[str, typer.Argument(help="Profile to select")],
     ) -> None:
         """Select the profile a launch uses when none is named."""
-        entry = acting(name, lambda: directory.use(name))
+        entry = acting(lambda: directory.use(name))
         typer.echo(f"Active profile: {entry.name} ({entry.config_dir})")
 
     @app.command("remove")
@@ -86,7 +84,7 @@ def create_profile_app(directory: ProfileDirectory) -> typer.Typer:
         name: Annotated[str, typer.Argument(help="Profile to forget")],
     ) -> None:
         """Forget a profile, leaving its configuration home on disk."""
-        entry = acting(name, lambda: directory.remove(name))
+        entry = acting(lambda: directory.remove(name))
         typer.echo(f"Removed {entry.name} — left {entry.config_dir} on disk")
 
     return app

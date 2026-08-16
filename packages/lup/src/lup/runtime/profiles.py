@@ -7,7 +7,9 @@ reading one and curating one are separate powers and most callers only ever
 need the first — :class:`ProfileNames` says which names exist and what each
 selects, :class:`ProfileRegistrar` registers, selects, and forgets them. Both
 are engines; :class:`ProfileDirectory` is the concrete surface a command tree
-and a launcher hold over whichever pair an application supplied.
+and a launcher hold over whichever pair an application supplied. Both shapes
+ship: :mod:`lup.adapters.claude.profile_store` keeps the registry, and
+:mod:`lup.runtime.profile_tree` keeps the directories.
 
 Nothing here names a provider. A directory carries the :class:`ProviderLogin`
 of the runtime whose homes it holds, so reporting whether one is signed in —
@@ -21,6 +23,29 @@ from pathlib import Path
 from pydantic import BaseModel
 
 from lup.runtime.login import ProviderLogin
+
+
+class UnknownProfile(KeyError):
+    """A name no origin answers to, carrying the roster that would.
+
+    Raised by :class:`ProfileDirectory` rather than formatted wherever one is
+    caught, because both callers that resolve a name — the command tree and
+    the launcher — owe the reader the same answer, and two spellings of it
+    drift apart. It stays a ``KeyError`` because that is what an origin
+    already raises, so no origin has to learn a new type to be reported well.
+    """
+
+    def __init__(self, name: str, known: list[str]) -> None:
+        super().__init__(name)
+        self.name = name
+        self.known = known
+
+    def __str__(self) -> str:
+        """The whole diagnostic, since a caller renders this and nothing else."""
+        return (
+            f"unknown profile {self.name!r}; known: {', '.join(self.known) or 'none'}"
+            f" — register one with `profile add {self.name}`"
+        )
 
 
 class ProfileNames(ABC):
@@ -86,9 +111,20 @@ class ProfileDirectory:
         self.registrar = registrar
         self.login = login
 
+    def unknown(self, name: str) -> UnknownProfile:
+        """The error for a name this origin does not answer to, roster included."""
+        return UnknownProfile(name, self.names.names())
+
+    def resolve(self, name: str) -> Path:
+        """The home one name selects, reporting the roster when there is none."""
+        try:
+            return self.names.config_dir_for(name)
+        except KeyError as error:
+            raise self.unknown(name) from error
+
     def profile(self, name: str) -> Profile:
         """Resolve one name against the origin, login state included."""
-        config_dir = self.names.config_dir_for(name)
+        config_dir = self.resolve(name)
         return Profile(
             name=name,
             config_dir=config_dir,
@@ -116,7 +152,7 @@ class ProfileDirectory:
         selected = name or self.names.active_profile()
         if selected is None:
             return None
-        return self.names.config_dir_for(selected)
+        return self.resolve(selected)
 
     def add(self, name: str, config_dir: Path | None = None) -> Profile:
         """Register a profile and resolve what registering it produced."""
@@ -125,7 +161,10 @@ class ProfileDirectory:
 
     def use(self, name: str) -> Profile:
         """Make one profile the active selection, and resolve it."""
-        self.registrar.set_active(name)
+        try:
+            self.registrar.set_active(name)
+        except KeyError as error:
+            raise self.unknown(name) from error
         return self.profile(name)
 
     def remove(self, name: str) -> Profile:
