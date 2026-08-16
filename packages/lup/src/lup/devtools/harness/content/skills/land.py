@@ -69,7 +69,7 @@ Report which case it is and what the comparison showed, and let the user settle 
             ),
             models.TextPart(
                 text=r"""
-4. Carry out each disposition's action from the table below, taking every `LAND` branch through step 6.
+4. Carry out each disposition's action from the table below, taking every `LAND` branch through step 6 and every branch an open PR is driving through step 7.
 
 ## Full Sweep Mode (no argument)
 
@@ -91,7 +91,7 @@ Do not present a dead run's branches as a to-do list. One decision about the run
 
 ### 4. Present the sweep
 
-One table covering every branch, ordered `LAND` first (that is the work at risk), then `DELETE`/`STALE`, then `KEEP`/`CURRENT`:
+One table covering every branch, ordered `LAND` first (that is the work at risk), then the `KEEP` rows an open PR is driving (work already asked for, waiting on nothing but an order to merge in), then `DELETE`/`STALE`, then the rest of `KEEP`/`CURRENT`:
 
 | Branch | Disposition | Unique | Diff | Dirt | PR | Proposed action |
 
@@ -112,7 +112,7 @@ One table covering every branch, ordered `LAND` first (that is the work at risk)
 | `LAND` | Holds commits the integration branch lacks, with no PR driving it | Land it — step 6 |
 | `DELETE` | Reached the integration branch, or its PR merged | `uv run lup-devtools dev delete <branch>`; where `Dirt` is set it refuses, so compare that worktree against the integration branch and report what forcing would discard before asking |
 | `STALE` | Every commit already cherry-picked into the integration branch | Confirm, then delete |
-| `KEEP` | Protected, an open PR is already driving it, or a resolver run holds its lease | Leave alone — but a run with `alive: false` holds it forever, which step 3 is for |
+| `KEEP` | Protected, an open PR is already driving it, or a resolver run holds its lease | Read which of the three it is: protected leaves it alone; an open PR offers it — step 7; a resolver run is step 3, and one with `alive: false` holds it forever |
 | `CURRENT` | The branch checked out here | Never delete; warn if it would otherwise qualify |
 
 ### 6. Landing a LAND branch
@@ -143,21 +143,38 @@ Ask the user, per branch, which route to take:
 
 Never choose a route on the user's behalf: a `LAND` branch by definition carries no PR expressing intent, so the intent has to come from them.
 
-### 7. Confirm and execute
+### 7. Merging an open-PR branch
+
+A `KEEP` branch an open PR is driving is not finished work — it is work whose intent is already on record. The question step 6 puts to the user is therefore already answered here: never *whether* to land it, only *when*, and that answer belongs to the sweep as a whole rather than to the branch alone.
+
+**Offer these. Leaving one open is a decision the user makes, not one the sweep makes on their behalf.** Present them as their own group, each with its PR's review decision and check state — `uv run lup-devtools dev pr status --branch <branch> --json` — and ask which to merge. A draft PR, a failing check, or a review still owed are all reasons to leave one standing, and each of them is the user's to weigh.
+
+**They share step 6's queue.** Every merge moves the integration branch, so open-PR branches and `LAND` branches form one ordered sequence rather than two independent passes. Take them one at a time, and re-derive the next one's base after each.
+
+**Order by what the branches touch, not by when they started.** Branches cut from the same tip have no divergence to sort by, so compare their file sets — `git diff --name-only <integration>...<branch>` for each — and read the intersection:
+
+- **Disjoint.** Any order serves. Take the smallest first, so the larger rebases onto a base that has stopped moving.
+- **Overlapping source.** Merge the one the other builds on, and expect the second to want a real rebase rather than a fast-forward.
+- **Overlapping generated tree.** A generated artifact's contents are derived, so merging two branches' versions as text yields something no generation run ever emitted — resolving cleanly while answering to nothing. Merge whichever regenerates least first, then reconcile the next where this repository's own merge drivers exist: rebase it inside its worktree, regenerate, and let the drift check report that it settled. A merge performed on the host has none of those drivers, because they are per-clone configuration no repository can ship.
+
+Report the comparison and the order it implies, then ask before the first merge. The order is the decision; the merges only carry it out.
+
+### 8. Confirm and execute
 
 """
             ),
             models.RequestApproval(
-                action="deleting a branch or pushing to a remote",
-                reason="a LAND branch carries no PR expressing intent, so the intent "
-                "has to come from the user",
+                action="deleting a branch, merging a PR, or pushing to a remote",
+                reason="a LAND branch carries no PR expressing intent, and the order "
+                "open PRs merge in is the user's to settle, so the intent has to come "
+                "from them",
             ),
             models.TextPart(
                 text=r""" Then carry out the approved actions.
 
-### 8. Report results
+### 9. Report results
 
-What landed, what was deleted, and what was deliberately left alone.
+What landed, what merged, what was deleted, and what was deliberately left alone.
 
 ## Guidelines
 
