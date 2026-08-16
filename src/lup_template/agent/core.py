@@ -264,7 +264,7 @@ def provider_factory(
             # a session carrying them asks and a session without them cannot.
             approval_policy=(
                 normalize_codex_approval(settings.codex_approval_policy)
-                or ("onRequest" if hooks is not None else "never")
+                or ("on-request" if hooks is not None else "never")
             ),
             hooks=hooks,
             effort=normalize_codex_effort(
@@ -329,19 +329,26 @@ def normalize_codex_sandbox(
 
 def normalize_codex_approval(
     value: str | None,
-) -> Literal["unlessTrusted", "onRequest", "never"] | None:
+) -> Literal["untrusted", "on-request", "granular", "never"] | None:
     """Validate the Codex approval policy before model construction.
 
     The asking policies are answerable now that the adapter replies to the
     app-server's approval requests from a session's declared hooks, so they
-    are settings rather than refusals — but only the app-server's own
-    spellings, since the value is passed to it verbatim.
+    are settings rather than refusals. Legacy configuration aliases normalize
+    here so the app-server wire receives only its current spellings.
     """
-    if value in (None, "unlessTrusted", "onRequest", "never"):
-        return value
+    if value is None:
+        return None
+    match value:
+        case "unlessTrusted":
+            return "untrusted"
+        case "onRequest":
+            return "on-request"
+        case "untrusted" | "on-request" | "granular" | "never":
+            return value
     raise ValueError(
         f"Codex approval policy {value!r} is not one the app-server accepts; "
-        "use 'never', 'onRequest', or 'unlessTrusted'"
+        "use 'never', 'on-request', 'untrusted', or 'granular'"
     )
 
 

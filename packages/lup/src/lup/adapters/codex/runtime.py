@@ -61,10 +61,10 @@ class CodexSessionConfig(BaseModel, frozen=True, arbitrary_types_allowed=True):
     model_provider: str | None = None
     provider_config: JsonObject | None = None
     sandbox: Literal["read-only", "workspace-write", "danger-full-access"] | None = None
-    # The app-server's own spellings. The earlier "untrusted"/"on-request"
-    # pair was never sent, because the validator below refused every value but
-    # "never" — so the mismatch could not surface until approvals were wired.
-    approval_policy: Literal["unlessTrusted", "onRequest", "never"] | None = None
+    # The app-server's own wire spellings, passed through by thread_parameters.
+    approval_policy: Literal["untrusted", "on-request", "granular", "never"] | None = (
+        None
+    )
     hooks: LupHooksConfig | None = None
     effort: Literal["none", "minimal", "low", "medium", "high", "xhigh"] | None = None
     environment: EnvVars = {}

@@ -315,6 +315,16 @@ def test_codex_thread_config_contains_project_mcp_and_writable_roots(
     }
 
 
+def test_codex_thread_config_uses_app_server_approval_spelling(tmp_path: Path) -> None:
+    config = CodexSessionConfig(
+        cwd=tmp_path,
+        approval_policy="on-request",
+        hooks=create_permission_hooks([], []),
+    )
+    state = CodexConversationState(config, CodexAppServer(Path("codex")), None)
+    assert state.thread_parameters()["approvalPolicy"] == "on-request"
+
+
 async def test_thread_parameters_omit_model_for_the_native_default(
     tmp_path: Path,
 ) -> None:

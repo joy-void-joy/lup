@@ -1740,7 +1740,7 @@ def run_resolve(
                     # worker's commands to the hooks below. Left at "never" a
                     # Codex worker ran with the OS sandbox as its only floor,
                     # because its generated plugin hook is not reached either.
-                    approval_policy="onRequest",
+                    approval_policy="on-request",
                     hooks=merge_hooks(
                         worker_policy_hooks(
                             harness.declared_hooks,
@@ -1787,7 +1787,7 @@ def run_resolve(
             return create_codex_session_factory(
                 CodexSessionConfig(
                     model=session_model,
-                    approval_policy="onRequest",
+                    approval_policy="on-request",
                     hooks=create_permission_hooks([], [cwd]),
                     developer_instructions=(
                         "Independently review the persisted resolver change."

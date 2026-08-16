@@ -422,7 +422,7 @@ async def test_app_server_eof_fails_current_turn_with_partial_evidence(
 def test_codex_config_rejects_approvals_nothing_would_answer(tmp_path: Path) -> None:
     """An asking policy with no hooks stalls the turn on its first command."""
     with pytest.raises(ValueError, match="supply hooks to answer them"):
-        CodexSessionConfig(model="gpt", cwd=tmp_path, approval_policy="onRequest")
+        CodexSessionConfig(model="gpt", cwd=tmp_path, approval_policy="on-request")
 
 
 def test_codex_config_accepts_approvals_its_hooks_can_answer(tmp_path: Path) -> None:
@@ -430,11 +430,11 @@ def test_codex_config_accepts_approvals_its_hooks_can_answer(tmp_path: Path) -> 
     config = CodexSessionConfig(
         model="gpt",
         cwd=tmp_path,
-        approval_policy="onRequest",
+        approval_policy="on-request",
         hooks=create_permission_hooks([tmp_path], []),
     )
 
-    assert config.approval_policy == "onRequest"
+    assert config.approval_policy == "on-request"
 
 
 async def test_a_command_approval_is_judged_on_the_command_it_carries() -> None:

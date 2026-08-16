@@ -29,7 +29,11 @@ from lup.runtime.models import (
 from lup.telemetry.trace import TraceLogger
 from lup.types import Usage
 from lup.workspace.notes import NotesConfig
-from lup_template.agent.core import decorate_factory, provider_factory
+from lup_template.agent.core import (
+    decorate_factory,
+    normalize_codex_approval,
+    provider_factory,
+)
 from lup_template.agent.models import AgentOutput
 from lup_template.agent.tool_policy import ToolPolicy
 
@@ -96,6 +100,24 @@ def test_engine_router_explicit_agent_sdk_wins(
     monkeypatch.setattr(settings, "agent_sdk", "claude")
     monkeypatch.setattr(settings, "model", "gpt-5.6-sol")
     assert engine_for_settings() == "claude"
+
+
+def test_codex_approval_normalizes_current_and_legacy_spellings() -> None:
+    expected = {
+        "untrusted": "untrusted",
+        "on-request": "on-request",
+        "granular": "granular",
+        "never": "never",
+        "unlessTrusted": "untrusted",
+        "onRequest": "on-request",
+    }
+    assert {value: normalize_codex_approval(value) for value in expected} == expected
+    assert normalize_codex_approval(None) is None
+
+
+def test_codex_approval_rejects_unknown_spelling() -> None:
+    with pytest.raises(ValueError, match="app-server accepts"):
+        normalize_codex_approval("always")
 
 
 def test_engine_router_claude_prefix_runs_native_claude(
