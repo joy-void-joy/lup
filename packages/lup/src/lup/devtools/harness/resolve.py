@@ -527,7 +527,6 @@ class SupervisorSpawn(BaseModel, frozen=True):
         return max(asked, self.wait_floor) if self.enabled else asked
 
 
-# lup: ignore[model-free-function] — driver: it spawns the supervisor process
 @asynccontextmanager
 async def spawned_supervisor(
     spawn: SupervisorSpawn, run_id: str, adapter: str
@@ -1075,8 +1074,6 @@ class DetachedRun(BaseModel, frozen=True):
         ]
 
 
-# lup: ignore[model-free-function] — driver: it forks a child process and names
-# where its output lands, which no invocation record does to itself
 def detach_resolve(detached: DetachedRun) -> None:
     """Start a run that outlives this command, and say where to reach it.
 
@@ -1157,9 +1154,6 @@ def forwardable_arguments(argv: list[str]) -> list[str]:
     return [argument for argument in argv[1:] if argument != "--detach"]
 
 
-# lup: ignore[model-free-function] — driver: it scans the tree to resolve what
-# the flags name, so the reach into the repository is the operation and the
-# flags are only its subject
 def admission_request(flags: AdmissionFlags) -> AdmissionRequest | None:
     """Build the evidence one invocation asked to admit, if it asked at all."""
     if not flags.named_anything():
@@ -1382,7 +1376,6 @@ def chosen_run(state_root: Path, fresh: str, *, start_new: bool, ending: bool) -
     return fresh
 
 
-# lup: ignore[model-free-function] — driver: it leases worktrees and runs sessions
 def run_resolve(
     composition: NativeHarnessComposition,
     run_id: str | None,

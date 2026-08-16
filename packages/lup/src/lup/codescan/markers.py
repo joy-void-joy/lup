@@ -462,7 +462,6 @@ class NoteRemoval(BaseModel):
     missing: list[NoteTarget]
 
 
-# lup: ignore[model-free-function] — the line buffer is the subject, the note a span
 def without_note(lines: list[str], note: MarkerComment) -> None:
     """Drop a standalone note whole; leave an inline note's code behind."""
     head = lines[note.start_line - 1]

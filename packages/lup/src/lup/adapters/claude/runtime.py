@@ -823,7 +823,6 @@ class ClaudeSessionOpener:
                 await state.disconnect()
 
 
-# lup: ignore[model-free-function] — composition root over the session config
 def create_claude_session_factory(
     config: ClaudeSessionConfig,
 ) -> SessionFactory:
@@ -892,7 +891,6 @@ def build_submission_server(
     )
 
 
-# lup: ignore[model-free-function] — renders the declaration into the SDK's shape
 def build_claude_options(
     config: ClaudeSessionConfig,
     *,

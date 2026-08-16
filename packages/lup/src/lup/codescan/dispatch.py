@@ -39,7 +39,6 @@ from lup.codescan.project import (
 # directive and every deny message name it by
 RULE_ID = "own-model-dispatch"
 
-# lup: ignore[constant-declaration] — the import path pydantic publishes
 MODEL_BASES = {"pydantic.BaseModel"}
 """Roots whose project-defined descendants count as models we declare."""
 
@@ -109,8 +108,15 @@ def dispatch_violations(
     return violations
 
 
-def audit_own_model_dispatch(sources: list[PythonSource]) -> list[RuleFinding]:
-    """Build the project index, enforce the rule, and audit its suppressions."""
+def audit_own_model_dispatch(
+    sources: list[PythonSource], model_bases: set[str] = MODEL_BASES
+) -> list[RuleFinding]:
+    """Build the project index, enforce the rule, and audit its suppressions.
+
+    The roots reach a caller as a default rather than as a table baked in here:
+    a project whose declared unions root somewhere other than pydantic replaces
+    the word and keeps the rule.
+    """
     symbols = build_symbol_index(sources)
-    violations = dispatch_violations(sources, descendants_of(symbols, MODEL_BASES))
+    violations = dispatch_violations(sources, descendants_of(symbols, model_bases))
     return audit_suppressions(sources, violations, RULE_ID)

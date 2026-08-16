@@ -67,7 +67,6 @@ class CodexProfileResolver(ProfileResolver[CodexSessionConfig]):
 
 # The registry declares which profile is selected; naming the resolver and the
 # session factory that act on it would put both inside the declaration.
-# lup: ignore[model-free-function] — composition root over the registry
 def codex_profile_selector(
     registry: CodexProfileRegistry,
 ) -> ProfileSelector[CodexSessionConfig]:

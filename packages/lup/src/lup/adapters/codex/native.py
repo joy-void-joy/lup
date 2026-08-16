@@ -81,7 +81,6 @@ class CodexHookPayload(BaseModel, frozen=True):
     tool_input: JsonObject = {}
 
 
-# lup: ignore[model-free-function] — boundary decoder off Codex's wire payload
 def parse_codex_before_tool(payload: CodexHookPayload) -> CodexBeforeToolEvent:
     """Decode stable Codex hook fields; opaque patches remain conservative."""
     match payload.tool_name, payload.tool_input:

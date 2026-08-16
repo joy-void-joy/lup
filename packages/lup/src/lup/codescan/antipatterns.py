@@ -779,7 +779,6 @@ def antipattern_set_for(
 
 
 # `AntiPatternSet.for_suffix` is the operation; this binds the default table to it.
-# lup: ignore[model-free-function] — the suffix is the subject, the set its table
 def patterns_for_suffix(
     suffix: str, rules: AntiPatternSet | None = None
 ) -> list[AntiPattern] | None:

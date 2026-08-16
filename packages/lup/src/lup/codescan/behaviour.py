@@ -39,6 +39,7 @@ rule that already has the right opinion about seams can reach it.
 """
 
 import ast
+from collections.abc import Collection
 
 from lup.codescan.common import PythonSource
 from lup.codescan.project import (
@@ -74,6 +75,7 @@ def schema_declaration(
     node: ast.FunctionDef | ast.AsyncFunctionDef,
     module: str,
     aliases: dict[str, str],
+    schema_decorators: Collection[str] = SCHEMA_DECORATORS,
 ) -> bool:
     """Whether this member declares the model's schema rather than acting on it.
 
@@ -84,12 +86,14 @@ def schema_declaration(
     """
     return any(
         has_decorator(node, decorator, module, aliases)
-        for decorator in SCHEMA_DECORATORS
+        for decorator in schema_decorators
     )
 
 
 def model_method_violations(
-    sources: list[PythonSource], models: set[str]
+    sources: list[PythonSource],
+    models: set[str],
+    schema_decorators: Collection[str] = SCHEMA_DECORATORS,
 ) -> list[RuleViolation]:
     """Find every member a model we declare defines in its own body."""
 
@@ -108,7 +112,9 @@ def model_method_violations(
                 for member in node.body:
                     if not isinstance(
                         member, ast.FunctionDef | ast.AsyncFunctionDef
-                    ) or schema_declaration(member, source.module, aliases):
+                    ) or schema_declaration(
+                        member, source.module, aliases, schema_decorators
+                    ):
                         continue
                     yield RuleViolation(
                         path=source.path,
@@ -122,8 +128,20 @@ def model_method_violations(
     return list(found())
 
 
-def audit_model_methods(sources: list[PythonSource]) -> list[RuleFinding]:
-    """Build the project index, enforce the rule, and audit its suppressions."""
+def audit_model_methods(
+    sources: list[PythonSource],
+    model_bases: set[str] = MODEL_BASES,
+    schema_decorators: Collection[str] = SCHEMA_DECORATORS,
+) -> list[RuleFinding]:
+    """Build the project index, enforce the rule, and audit its suppressions.
+
+    Both vocabularies reach a caller as defaults rather than as tables baked in
+    here: a project whose records root somewhere other than pydantic, or whose
+    schema is declared by another library's decorators, replaces the word and
+    keeps the rule.
+    """
     symbols = build_symbol_index(sources)
-    violations = model_method_violations(sources, descendants_of(symbols, MODEL_BASES))
+    violations = model_method_violations(
+        sources, descendants_of(symbols, model_bases), schema_decorators
+    )
     return audit_suppressions(sources, violations, RULE_ID)

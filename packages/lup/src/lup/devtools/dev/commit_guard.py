@@ -117,8 +117,6 @@ def hooks_directory(root: Path) -> Path:
     return root / named
 
 
-# lup: ignore[model-free-function] — driver: it reads the hook file on disk, and
-# CommitGuard is the declaration of which hook rather than the thing that reads
 def guard_state(guard: CommitGuard, directory: Path) -> GuardState:
     """Read what is installed at the guard's hook path."""
     path = directory / guard.hook
@@ -131,14 +129,11 @@ def guard_state(guard: CommitGuard, directory: Path) -> GuardState:
     return GuardState(path=path, status="current" if current else "stale")
 
 
-# lup: ignore[model-free-function] — driver: the same disk read, resolved from a
-# checkout root
 def read_guard(guard: CommitGuard, root: Path) -> GuardState:
     """What one checkout would run, or fail to run, before its next commit."""
     return guard_state(guard, hooks_directory(root))
 
 
-# lup: ignore[model-free-function] — driver: it writes the hook file
 def install_guard(guard: CommitGuard, root: Path, *, force: bool = False) -> GuardState:
     """Write the hook, refusing to displace one this command did not write."""
     directory = hooks_directory(root)
@@ -154,7 +149,6 @@ def install_guard(guard: CommitGuard, root: Path, *, force: bool = False) -> Gua
     return guard_state(guard, directory)
 
 
-# lup: ignore[model-free-function] — driver: it removes the hook file
 def uninstall_guard(guard: CommitGuard, root: Path) -> GuardState:
     """Remove the hook, leaving one this command did not write alone."""
     state = read_guard(guard, root)
@@ -166,8 +160,6 @@ def uninstall_guard(guard: CommitGuard, root: Path) -> GuardState:
             return state
 
 
-# lup: ignore[model-free-function] — driver: it installs the hook and reports
-# what a setup command should print, which is the caller's surface not the model's
 def arm(guard: CommitGuard, root: Path) -> str:
     """Install the guard where a setup command can only report a failure.
 
