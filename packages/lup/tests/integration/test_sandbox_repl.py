@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from lup.sandbox.container import Sandbox
+from lup.sandbox.models import PathNotMountedError
 
 pytestmark = pytest.mark.integration
 
@@ -123,6 +124,73 @@ class TestSharedMount:
             assert result.exit_code == 0
 
         assert (shared / "output.txt").read_text() == "from-sandbox"
+
+
+class TestFileForm:
+    """A cell named as a file, run against a real container."""
+
+    def test_a_file_named_by_its_host_path_runs_and_persists(
+        self, tmp_path: Path
+    ) -> None:
+        """The whole point of the form: the caller names the file the way the
+        host does and the session keeps what the file defined."""
+        shared = tmp_path / "shared"
+        shared.mkdir()
+        (shared / "job.py").write_text("answer = 6 * 7\n")
+
+        sandbox = Sandbox(
+            session_id="test-file-form", shared_dir=shared, pre_install=None
+        )
+        with sandbox:
+            ran = sandbox.run_file(str(shared / "job.py"))
+            assert ran.exit_code == 0
+
+            echoed = sandbox.run_code("answer")
+            assert echoed.result == "42"
+
+    def test_a_file_named_by_its_container_path_runs(self, tmp_path: Path) -> None:
+        shared = tmp_path / "shared"
+        shared.mkdir()
+        (shared / "job.py").write_text("print('ran')\n")
+
+        sandbox = Sandbox(
+            session_id="test-file-container", shared_dir=shared, pre_install=None
+        )
+        with sandbox:
+            ran = sandbox.run_file("/shared/job.py")
+
+            assert ran.exit_code == 0
+            assert "ran" in ran.stdout
+
+    def test_a_unified_mount_answers_to_one_spelling(self, tmp_path: Path) -> None:
+        """With the exchange mounted at its own host path, the path the host
+        wrote is the path the container opens — no translation involved."""
+        shared = (tmp_path / "shared").resolve()
+        shared.mkdir()
+        (shared / "job.py").write_text("marker = 'unified'\n")
+
+        sandbox = Sandbox(
+            session_id="test-file-unified",
+            shared_dir=shared,
+            shared_path=str(shared),
+            pre_install=None,
+        )
+        with sandbox:
+            assert sandbox.run_file(str(shared / "job.py")).exit_code == 0
+            assert sandbox.run_code("marker").result == "'unified'"
+
+    def test_an_unmounted_file_is_refused(self, tmp_path: Path) -> None:
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        (outside / "job.py").write_text("marker = 1\n")
+
+        sandbox = Sandbox(
+            session_id="test-file-refused",
+            shared_dir=tmp_path / "shared",
+            pre_install=None,
+        )
+        with sandbox, pytest.raises(PathNotMountedError):
+            sandbox.run_file(str(outside / "job.py"))
 
 
 class TestInstallPackage:

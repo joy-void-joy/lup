@@ -735,7 +735,14 @@ async def run_persistent_agent(
 
 
 def build_session_sandbox(notes: NotesConfig) -> "Sandbox | None":
-    """Build the optional application code-execution sandbox lazily."""
+    """Build the optional application code-execution sandbox lazily.
+
+    The exchange directory is mounted at the path the host already calls it,
+    so a file has one name on both sides. This agent holds file tools and a
+    code-execution tool at once, and nothing in a path tells it which side a
+    path belongs to — giving the two sides one spelling removes the choice
+    rather than asking it to choose correctly.
+    """
     if not settings.sandbox_enabled:
         return None
     try:
@@ -743,9 +750,11 @@ def build_session_sandbox(notes: NotesConfig) -> "Sandbox | None":
     except ImportError:
         logger.warning("docker extra not installed; code execution is unavailable")
         return None
+    shared = (notes.session / "sandbox_shared").resolve()
     return Sandbox(
         session_id=notes.session.name,
-        shared_dir=notes.session / "sandbox_shared",
+        shared_dir=shared,
+        shared_path=str(shared),
         timeout_seconds=settings.sandbox_timeout_seconds,
     )
 

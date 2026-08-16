@@ -22,6 +22,7 @@ import docker
 import pytest
 from docker.errors import APIError, DockerException, NotFound
 from docker.models.containers import Container, ExecResult
+from docker.types import Mount as DockerMount
 
 from lup.sandbox.container import Sandbox, connected_docker_client, sandbox_cleanup
 from lup.sandbox.models import (
@@ -114,7 +115,7 @@ class FakeContainers:
         name: str,
         command: str,
         detach: bool,
-        volumes: dict[str, dict[str, str]],  # lup: ignore[dict-str-payload]
+        mounts: list[DockerMount],
         working_dir: str,
         mem_limit: str,
         network_mode: str,
@@ -127,7 +128,7 @@ class FakeContainers:
         self.existing[name] = created
         self.last_run = {
             "image": image,
-            "volumes": json.dumps(volumes),
+            "mounts": json.dumps(mounts),
             "network_mode": network_mode,
         }
         return created
@@ -326,7 +327,7 @@ class TestStartAndStop:
             assert created.labels[Sandbox.SANDBOX_LABEL] == "1"
             assert created.labels[Sandbox.VOLUME_LABEL] == sandbox.volume_name
             assert created.labels[Sandbox.OWNER_PID_LABEL] == str(os.getpid())
-            assert sandbox.volume_name in client.containers.last_run["volumes"]
+            assert sandbox.volume_name in client.containers.last_run["mounts"]
             assert ["uv", "pip", "install", "--system", "pkgx"] in (
                 created.exec_commands
             )

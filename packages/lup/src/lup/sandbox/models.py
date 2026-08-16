@@ -6,9 +6,9 @@ REPL transport and the container lifecycle both speak. No Docker dependency,
 so importing this never requires the ``docker`` extra.
 """
 
-from typing import Literal
+from typing import Literal, Self
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 NetworkMode = Literal["bridge", "none"]
 MountMode = Literal["rw", "ro"]
@@ -24,9 +24,23 @@ DEFAULT_PRE_INSTALL: tuple[str, ...] = (
 
 
 class ExecuteCodeInput(BaseModel):
-    """Input schema for the execute_code tool."""
+    """Input schema for the execute_code tool.
 
-    code: str = Field(min_length=1)
+    A cell arrives either as ``code`` written inline or as a ``file`` already
+    on disk, never as both. The file form exists so a program long enough to
+    be worth reviewing can be written, read, and diffed as a file instead of
+    escaped into a JSON string argument, and it is named in whichever
+    spelling the caller has — host or container, translated on arrival.
+    """
+
+    code: str | None = Field(default=None, min_length=1)
+    file: str | None = Field(default=None, min_length=1)
+
+    @model_validator(mode="after")
+    def one_source_of_code(self) -> Self:
+        if (self.code is None) == (self.file is None):
+            raise ValueError("pass exactly one of code or file")
+        return self
 
 
 class InstallPackageInput(BaseModel):
@@ -103,3 +117,12 @@ class CodeExecutionTimeoutError(RuntimeError):
 
 class ReplCrashedError(RuntimeError):
     """Raised when the persistent REPL process has exited unexpectedly."""
+
+
+class PathNotMountedError(RuntimeError):
+    """Raised when a named file is reachable from neither side of the boundary.
+
+    Carries the topology's own explanation of where the caller could have put
+    it instead, because a caller that named an unmounted path has just proved
+    it does not know which paths cross.
+    """
