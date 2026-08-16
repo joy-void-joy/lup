@@ -6,10 +6,15 @@ paths on either side have no counterpart, and saying so precisely is the
 whole point of the surface.
 """
 
+import traceback
 from pathlib import Path
 
-from lup.sandbox.container import Sandbox
-from lup.sandbox.models import Mount
+import pytest
+from pydantic import ValidationError
+
+from lup.sandbox.container import Sandbox, file_cell
+from lup.sandbox.repl_server import run_cell
+from lup.sandbox.models import ExecuteCodeInput, Mount, PathNotMountedError
 from lup.sandbox.translation import MountTopology
 
 
@@ -147,6 +152,114 @@ class TestExchanges:
         """``/workspace`` is writable and persistent, and reaches the host
         nowhere — which is exactly the confusion this list exists to end."""
         assert "/workspace" not in topology_of(make_sandbox(tmp_path)).exchanges()
+
+
+class TestFileForm:
+    """A cell named as a file, in whichever spelling the caller holds."""
+
+    def test_a_host_path_is_translated_for_the_container(self, tmp_path: Path) -> None:
+        shared = (tmp_path / "shared").resolve()
+        sandbox = make_sandbox(tmp_path)
+
+        assert sandbox.container_spelling(str(shared / "job.py")) == "/shared/job.py"
+
+    def test_a_container_path_is_left_alone(self, tmp_path: Path) -> None:
+        sandbox = make_sandbox(tmp_path)
+
+        assert sandbox.container_spelling("/shared/job.py") == "/shared/job.py"
+
+    def test_a_workspace_path_is_runnable_though_it_has_no_host_name(
+        self, tmp_path: Path
+    ) -> None:
+        """The volume is unreachable from the host and perfectly ordinary
+        inside the container, so refusing it would deny a valid path."""
+        sandbox = make_sandbox(tmp_path)
+
+        assert sandbox.container_spelling("/workspace/job.py") == "/workspace/job.py"
+
+    def test_an_unmounted_host_path_is_refused_rather_than_copied_in(
+        self, tmp_path: Path
+    ) -> None:
+        """Isolation must not depend on whether a cell arrived as text or as
+        a file: an unmounted file is exactly what the container cannot see."""
+        sandbox = make_sandbox(tmp_path)
+
+        with pytest.raises(PathNotMountedError) as refusal:
+            sandbox.container_spelling(str(tmp_path / "elsewhere" / "secret.env"))
+
+        assert "/shared" in str(refusal.value)
+
+
+class TestFileCell:
+    """The cell a file is run through, checked against the real REPL.
+
+    ``run_cell`` is the same pure-stdlib function that runs inside the
+    container, so these hold the actual execution semantics to account
+    without needing a Docker daemon.
+    """
+
+    def test_a_file_defines_its_names_into_the_session(self, tmp_path: Path) -> None:
+        """The promise that makes the file form worth having: a script leaves
+        the session in the state a caller's next cell expects."""
+        script = tmp_path / "job.py"
+        script.write_text("answer = 6 * 7\n", encoding="utf-8")
+        namespace: dict[str, object] = {}
+
+        run_cell(file_cell(str(script)), namespace)
+
+        assert namespace["answer"] == 42
+
+    def test_a_file_sees_names_the_session_already_holds(self, tmp_path: Path) -> None:
+        script = tmp_path / "job.py"
+        script.write_text("doubled = seed * 2\n", encoding="utf-8")
+        namespace: dict[str, object] = {"seed": 21}
+
+        run_cell(file_cell(str(script)), namespace)
+
+        assert namespace["doubled"] == 42
+
+    def test_a_traceback_names_the_file_rather_than_the_cell(
+        self, tmp_path: Path
+    ) -> None:
+        script = tmp_path / "job.py"
+        script.write_text("raise ValueError('boom')\n", encoding="utf-8")
+
+        with pytest.raises(ValueError) as failure:
+            run_cell(file_cell(str(script)), {})
+
+        rendered = "".join(traceback.format_exception(failure.value))
+        assert str(script) in rendered
+        assert "boom" in str(failure.value)
+
+    def test_a_quote_in_the_path_stays_an_argument(self, tmp_path: Path) -> None:
+        """Embedding the path as a literal is what keeps a hostile name from
+        becoming syntax; pasting it would end the string and run the rest."""
+        odd = tmp_path / "it's a job.py"
+        odd.write_text("marker = 1\n", encoding="utf-8")
+        namespace: dict[str, object] = {}
+
+        run_cell(file_cell(str(odd)), namespace)
+
+        assert namespace["marker"] == 1
+
+
+class TestExecuteCodeInput:
+    """Exactly one of the two ways to name a cell."""
+
+    def test_inline_code_alone_is_accepted(self) -> None:
+        assert ExecuteCodeInput(code="1 + 1").file is None
+
+    def test_a_file_alone_is_accepted(self) -> None:
+        assert ExecuteCodeInput(file="/shared/job.py").code is None
+
+    def test_both_together_are_refused(self) -> None:
+        with pytest.raises(ValidationError):
+            ExecuteCodeInput(code="1 + 1", file="/shared/job.py")
+
+    def test_neither_is_refused(self) -> None:
+        """The shape that would otherwise run an empty cell and report success."""
+        with pytest.raises(ValidationError):
+            ExecuteCodeInput()
 
 
 class TestIndependenceFromDocker:

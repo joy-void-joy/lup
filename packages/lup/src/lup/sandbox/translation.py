@@ -73,6 +73,20 @@ class MountTopology(BaseModel):
             mount.container_path for mount in self.binds() if mount.mode == "rw"
         )
 
+    def contains(self, container_path: str) -> bool:
+        """Whether any mount, volume or bind, holds this container path.
+
+        A different question from what the host calls it: a path under the
+        workspace volume has no host name and is still a perfectly good path
+        to run code against, so :meth:`to_host` returning nothing for it must
+        not be read as the path being unusable.
+        """
+        requested = PurePosixPath(container_path)
+        return any(
+            requested.is_relative_to(PurePosixPath(mount.container_path))
+            for mount in self.mounts
+        )
+
     def to_host(self, container_path: str) -> Translation:
         """Name a container path as the host names it."""
         requested = PurePosixPath(container_path)

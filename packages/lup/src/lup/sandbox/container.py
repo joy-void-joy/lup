@@ -72,6 +72,7 @@ from lup.sandbox.models import (
     MountMode,
     DEFAULT_PRE_INSTALL,
     CodeExecutionTimeoutError,
+    PathNotMountedError,
     DockerUnreachableError,
     ExecuteCodeInput,
     ExecuteCodeResult,
@@ -84,6 +85,7 @@ from lup.sandbox.models import (
 )
 from lup.sandbox.process import decode_output, process_is_alive, process_start_token
 from lup.sandbox.repl import REPL_SERVER_SCRIPT, ReplSession
+from lup.sandbox.translation import MountTopology
 
 logger = logging.getLogger(__name__)
 
@@ -104,6 +106,24 @@ def connected_docker_client() -> docker.DockerClient:
             "this user may open its socket, and that no sandbox is denying "
             f"that socket: {exc}"
         ) from exc
+
+
+def file_cell(container_path: str) -> str:
+    """A cell that runs a file already inside the container.
+
+    The path is embedded as a Python literal rather than pasted, so a name
+    carrying a quote stays one argument instead of becoming syntax. The
+    compiled program keeps the file's own name, so a traceback points at the
+    file the caller named instead of at ``<cell>``.
+
+    ``globals()`` is the session namespace — the REPL executes each cell with
+    it — so a file defines its names into the same session an inline cell
+    would, and a later cell can use them.
+    """
+    return (
+        f"exec(compile(open({container_path!r}, encoding='utf-8').read(), "
+        f"{container_path!r}, 'exec'), globals())"
+    )
 
 
 class Sandbox:
@@ -226,6 +246,10 @@ class Sandbox:
             ],
             *self.declared_mounts(),
         ]
+
+    def topology(self) -> MountTopology:
+        """The mount table, asked what a path is called on the other side."""
+        return MountTopology(mounts=self.mount_topology())
 
     def declared_mounts(self) -> list[Mount]:
         """Host directories the caller placed at container paths of its choosing.
@@ -566,6 +590,39 @@ class Sandbox:
             logger.warning("REPL crashed, recovering")
             return self.recover_from_crash(self.repl, crash)
 
+    def container_spelling(self, path: str) -> str:
+        """The container's name for a file the caller named from either side.
+
+        An agent holding tools on both sides has whichever spelling it last
+        saw and cannot tell from the path which side that was. Translating
+        rather than refusing is what makes the two sides one namespace to the
+        caller. A path that crosses in neither direction is the genuine
+        error, and carries the topology's own account of where to put it.
+        """
+        topology = self.topology()
+        crossing = topology.to_container(path)
+        if crossing.resolved is not None:
+            return crossing.resolved
+        if topology.contains(path):
+            return path
+        raise PathNotMountedError(crossing.explanation)
+
+    def run_file(
+        self, path: str, timeout_seconds: int | None = None
+    ) -> ExecuteCodeResult:
+        """Execute a file the container can already see, named from either side.
+
+        The file is read inside the container, so this reaches exactly what is
+        mounted and nothing else: a host path that was never mounted is
+        refused rather than copied in, and the sandbox's isolation is the same
+        whether a cell arrives as text or as a file.
+
+        The cell runs for effect: names it defines persist into the session,
+        but a trailing expression is not echoed the way an inline cell's is,
+        because the file is executed rather than parsed here.
+        """
+        return self.run_code(file_cell(self.container_spelling(path)), timeout_seconds)
+
     def recover_from_crash(
         self, repl: ReplSession, crash: ReplCrashedError
     ) -> ExecuteCodeResult:
@@ -694,6 +751,10 @@ class Sandbox:
             "binds it to '_', so you only need print() for intermediate output. "
             f"{network_text}Timeout: {timeout_seconds}s.\n\n"
             f"Filesystem (use absolute paths; the cwd is /workspace):\n{filesystem_text}\n\n"
+            "Pass code= to run a cell inline, or file= to run a program that is "
+            "already on disk — name it by its host path or its container path, "
+            "whichever you have, and it is translated on arrival. A file runs "
+            "for effect: state persists, but a trailing expression is not echoed.\n\n"
             "Examples:\n"
             "  execute_code(code='import numpy as np; data = [1,2,3]; print(np.mean(data))')\n"
             "  execute_code(code='# Monte Carlo simulation\\nimport numpy as np\\n"
@@ -706,7 +767,13 @@ class Sandbox:
         async def execute_code(inp: ExecuteCodeInput) -> ExecuteCodeResult:
             try:
                 self.ensure_started()
+                if inp.file is not None:
+                    return self.run_file(inp.file)
+                if inp.code is None:
+                    raise ToolError("pass exactly one of code or file")
                 return self.run_code(inp.code)
+            except PathNotMountedError as e:
+                raise ToolError(str(e)) from e
             except SandboxNotInitializedError as e:
                 logger.error("Sandbox not initialized: %s", e)
                 raise ToolError(f"Sandbox error: {e}") from e
