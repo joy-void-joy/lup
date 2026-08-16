@@ -89,12 +89,15 @@ class IssueRow(BaseModel):
         )
 
 
-def file_friction_report(report: FrictionReport, repository: str = "") -> str:
-    """File one structured report against the checkout's explicit repository."""
+def file_friction_report(
+    report: FrictionReport, repository: str = "", issue: int | None = None
+) -> str:
+    """File or correct one report against the checkout's explicit repository."""
     slug = repository or repository_slug()
     if not slug:
         raise RuntimeError("cannot file friction: origin names no GitHub repository")
-    arguments = ["issue", "create", "--repo", slug]
+    operation = ["create"] if issue is None else ["edit", str(issue)]
+    arguments = ["issue", *operation, "--repo", slug]
     arguments.extend(["--title", report.summary, "--body", report.body()])
     return gh.out(*arguments).strip()
 

@@ -93,9 +93,44 @@ def test_filing_requires_an_explicit_repository(
         issues.file_friction_report(friction_report())
 
 
+def test_correction_edits_the_numbered_issue(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[str, ...]] = []
+    fake_gh = SimpleNamespace(
+        out=lambda *arguments: (
+            calls.append(arguments) or "https://github.test/o/r/issues/179\n"
+        )
+    )
+    monkeypatch.setattr(issues, "gh", fake_gh)
+    url = issues.file_friction_report(
+        friction_report(), repository="owner/repository", issue=179
+    )
+    assert url == "https://github.test/o/r/issues/179"
+    assert calls == [
+        (
+            "issue",
+            "edit",
+            "179",
+            "--repo",
+            "owner/repository",
+            "--title",
+            friction_report().summary,
+            "--body",
+            friction_report().body(),
+        )
+    ]
+
+
 def test_cli_reports_tracker_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     failure = Mock(side_effect=RuntimeError("tracker unavailable"))
     monkeypatch.setattr(issues, "file_friction_report", failure)
     result = CliRunner().invoke(app, friction_arguments())
     assert result.exit_code == 1
     assert "tracker unavailable" in result.output
+
+
+def test_cli_forwards_correction_number(monkeypatch: pytest.MonkeyPatch) -> None:
+    handler = Mock(return_value="https://github.test/o/r/issues/179")
+    monkeypatch.setattr(issues, "file_friction_report", handler)
+    result = CliRunner().invoke(app, [*friction_arguments(), "--issue", "179"])
+    assert result.exit_code == 0
+    handler.assert_called_once_with(friction_report(), issue=179)

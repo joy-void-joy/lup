@@ -161,7 +161,7 @@ File one whenever a command half-completes and leaves inconsistent state, a clas
 
 Record what you observed rather than what you concluded: the exact command, the exact error, the state it left behind, and what the recovery cost. Name the component that owns the fix. A friction report is evidence, which is worth more than a guess at the cause — and evidence is what the self-improvement loop below consumes.
 
-File that evidence with `uv run lup-devtools dev report-friction`; its required fields preserve the report shape and its repository target comes from this checkout. Read `--help` for the exact options.
+File that evidence with `uv run lup-devtools dev report-friction`; its required fields preserve the report shape and its repository target comes from this checkout. Pass `--issue NUMBER` to correct a report in place instead of duplicating it. Read `--help` for the exact options.
 
 ### External Resources
 

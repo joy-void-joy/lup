@@ -594,8 +594,9 @@ def create_dev_app(
         error: Annotated[str, typer.Option("--error")],
         state: Annotated[str, typer.Option("--state")],
         recovery_cost: Annotated[str, typer.Option("--recovery-cost")],
+        issue: Annotated[int | None, typer.Option("--issue", min=1)] = None,
     ) -> None:
-        """File observed workflow friction against this checkout's repository."""
+        """File or correct workflow friction in this checkout's repository."""
         report = issues_mod.FrictionReport(
             summary=summary,
             component=component,
@@ -605,7 +606,7 @@ def create_dev_app(
             recovery_cost=recovery_cost,
         )
         try:
-            url = issues_mod.file_friction_report(report)
+            url = issues_mod.file_friction_report(report, issue=issue)
         except (RuntimeError, sh.ErrorReturnCode) as failure:
             typer.echo(str(failure), err=True)
             raise typer.Exit(1) from failure
