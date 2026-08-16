@@ -15,6 +15,7 @@ Examples::
 
 import json
 import logging
+from enum import StrEnum
 from pathlib import Path, PurePosixPath
 from typing import Literal
 from urllib.parse import urlparse
@@ -32,6 +33,23 @@ from lup.devtools.layout import get_tree_dir
 from lup.devtools.utils import git, gh, decode_stderr, output_json
 
 logger = logging.getLogger(__name__)
+
+
+class MergeMethod(StrEnum):
+    """How a PR's commits reach the base branch.
+
+    The three GitHub offers. Which one a repository wants is its own
+    decision rather than this command's: one whose history is merge commits
+    reads a squash as a break in it, and one that squashes reads the
+    reverse. A merge commit is the default because it is the only one of the
+    three that loses nothing — the branch's own commits stay reachable, and
+    a PR stacked on this one keeps its base as a real ancestor instead of
+    facing a rewritten copy of the work it already contains.
+    """
+
+    merge = "merge"
+    squash = "squash"
+    rebase = "rebase"
 
 
 def current_branch() -> str:
@@ -81,6 +99,7 @@ class GhPrDetail(BaseModel):
     checks: list[GhCheck] = Field(default=[], alias="statusCheckRollup")
     review_decision: str = Field(default="", alias="reviewDecision")
     mergeable: str = ""
+    state: str = ""
 
 
 class GhPrRef(BaseModel):
@@ -320,25 +339,62 @@ def status(
     output_result(result, as_json)
 
 
+def pr_merged(pr_number: int) -> bool:
+    """Whether GitHub says the PR is merged, asked rather than inferred.
+
+    ``gh pr merge`` merges and then deletes the branch, and reports a
+    failure of the second as a failure of the whole. Reading the state back
+    separates a merge that did not happen from a cleanup that did not, which
+    are opposite situations: the first is retried, the second is finished
+    work with a leftover, and treating either as the other is how a landed
+    PR comes to look like one still waiting.
+    """
+    try:
+        detail = GhPrDetail.model_validate_json(
+            gh.out("pr", "view", str(pr_number), "--json", "state")
+        )
+    except sh.ErrorReturnCode:
+        logger.exception("could not read PR #%s state back", pr_number)
+        return False
+    return detail.state == "MERGED"
+
+
 def merge(
     pr_number: int,
     dry_run: bool,
     as_json: bool = False,
+    method: MergeMethod = MergeMethod.merge,
+    gh_args: tuple[str, ...] = (),
 ) -> None:
-    """Squash-merge a PR and pull changes into the integration branch."""
+    """Merge a PR and pull changes into the integration branch.
+
+    Args:
+        pr_number: PR to merge.
+        dry_run: Report what would happen, changing nothing.
+        as_json: Emit the result as JSON.
+        method: How the commits reach the base branch.
+        gh_args: Further flags handed to ``gh pr merge`` untouched, for
+            anything this signature does not name.
+    """
     integration = get_integration_branch()
 
     if dry_run:
-        typer.echo(f"Would merge PR #{pr_number} (squash)")
+        typer.echo(f"Would merge PR #{pr_number} ({method})")
         typer.echo(f"Would pull changes into {integration}")
         return
 
     try:
-        gh("pr", "merge", str(pr_number), "--squash", "--delete-branch")
+        gh("pr", "merge", str(pr_number), f"--{method}", "--delete-branch", *gh_args)
         typer.echo(f"Merged PR #{pr_number}")
     except sh.ErrorReturnCode as e:
-        typer.echo(f"Merge failed: {decode_stderr(e)}", err=True)
-        raise typer.Exit(1)
+        if not pr_merged(pr_number):
+            typer.echo(f"Merge failed: {decode_stderr(e)}", err=True)
+            raise typer.Exit(1)
+        typer.echo(
+            f"Merged PR #{pr_number}, but its cleanup did not finish: "
+            f"{decode_stderr(e)}",
+            err=True,
+        )
 
     try:
         tree_dir = get_tree_dir()
