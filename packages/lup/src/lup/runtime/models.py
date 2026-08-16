@@ -28,6 +28,14 @@ from lup.types import (
 )
 
 
+# The tool names a runtime spells native delegation with. Kept beside the
+# block that answers about a delegation so no reader has to know them.
+DELEGATION_TOOLS = {"Agent", "Task"}
+
+# What a delegation is called when its call named no role.
+UNNAMED_SUBAGENT = "subagent"
+
+
 class SessionId(BaseModel, frozen=True):
     """Opaque native conversation identity."""
 
@@ -97,6 +105,16 @@ class TurnBlock(BaseModel, frozen=True):
         return None
 
     @property
+    def delegated_role(self) -> str | None:
+        """The subagent role this block delegates to, if it delegates.
+
+        Asked of the block so a reader correlating a transcript never has to
+        know which tool a runtime spells delegation with, nor which argument
+        carries the role.
+        """
+        return None
+
+    @property
     def refusal(self) -> "ToolRefusal | None":
         """The refused call this block reports, if it reports one."""
         return None
@@ -152,6 +170,15 @@ class TurnToolCallBlock(TurnBlock, frozen=True):
     @property
     def invoked_call_id(self) -> str | None:
         return self.id
+
+    @property
+    def delegated_role(self) -> str | None:
+        if self.name not in DELEGATION_TOOLS:
+            return None
+        requested = self.arguments.get("subagent_type")  # lup: ignore[dict-get]
+        if not isinstance(requested, str):
+            requested = self.arguments.get("name")  # lup: ignore[dict-get]
+        return requested if isinstance(requested, str) else UNNAMED_SUBAGENT
 
 
 class ToolRefusal(BaseModel, frozen=True):
