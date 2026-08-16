@@ -6,11 +6,12 @@
 """Behavior tests for the lup_tool decorator and LupMcpTool.
 
 Covers the three response paths of the SDK-facing handler (success,
-ToolError, input validation failure) and the direct-call path that
-bypasses MCP serialization.
+ToolError, input validation failure), the direct-call path that bypasses
+MCP serialization, and the JSON mode the serialized path renders in.
 """
 
 import json
+from datetime import datetime, timezone
 from typing import cast
 
 from pydantic import BaseModel, Field
@@ -31,6 +32,18 @@ async def echo(inp: EchoInput) -> EchoOutput:
     if inp.text == "boom":
         raise ToolError("exploded")
     return EchoOutput(text=inp.text)
+
+
+class StampedOutput(BaseModel):
+    at: datetime
+
+
+@lup_tool("Return a fixed timestamp.", name="stamped")
+async def stamped(inp: EchoInput) -> StampedOutput:
+    _ = inp
+    return StampedOutput(
+        at=datetime(2026, 8, 16, 19, 40, 11, 123456, tzinfo=timezone.utc)
+    )
 
 
 def response_text(resp: ToolResponse) -> str:
@@ -63,6 +76,18 @@ async def test_invalid_input_becomes_is_error_with_message() -> None:
     resp = cast(ToolResponse, await echo.handler({"wrong_field": 1}))
     assert resp.get("is_error") is True
     assert "Invalid input" in response_text(resp)
+
+
+async def test_datetime_output_renders_as_iso_8601() -> None:
+    """A result crosses a JSON wire, so pydantic's JSON mode renders it.
+
+    Python mode hands back a live ``datetime`` and leaves ``default=str`` to
+    spell it, which puts a space where ISO 8601 wants a ``T`` — a difference
+    an agent reads, because the rendered string is the value it reasons over.
+    """
+    resp = cast(ToolResponse, await stamped.handler({"text": "x"}))
+    at = json.loads(response_text(resp))["at"]
+    assert at == "2026-08-16T19:40:11.123456Z"
 
 
 def test_models_inferred_from_annotations() -> None:

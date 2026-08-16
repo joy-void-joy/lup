@@ -339,7 +339,7 @@ def lup_tool[I: BaseModel, O: BaseModel](
 
     The handler receives a validated model instance, not a raw dict.
     The handler must return a BaseModel, which is auto-serialized via
-    ``mcp_response(json.dumps(result.model_dump(), default=str))``.
+    ``mcp_response(json.dumps(result.model_dump(mode="json"), default=str))``.
 
     Raise ``ToolError`` in the handler to return an MCP error response.
 
@@ -419,7 +419,14 @@ def lup_tool[I: BaseModel, O: BaseModel](
                         f"got {type(result).__name__}"
                     )
                 guarded = guard_result(tool_name, params, result)
-                return mcp_response(json.dumps(guarded.model_dump(), default=str))
+                # JSON mode, because JSON is what this crosses: python mode
+                # hands back live objects and leaves `default=str` to render
+                # them with `str()`, which spells a datetime with a space
+                # where ISO 8601 wants a T. `default=str` stays as the
+                # fallback for what pydantic's JSON mode still cannot render.
+                return mcp_response(
+                    json.dumps(guarded.model_dump(mode="json"), default=str)
+                )
             except Exception:
                 is_error = True
                 raise
