@@ -31,14 +31,27 @@ tmp/plan_something.md", the same report is written again from scratch, saying
 what remains of that plan — **rewritten whole, never appended to**, so a line
 that is no longer true cannot survive by being further down the file.
 
+The target is `{DEFAULT_REPORT_PATH}` unless the invocation names a file — an
+existing briefing, a report an earlier session left. Then that file is the
+target and it is rewritten in place, because it is the one somebody is already
+reading. Writing the default *as well* would leave two reports disagreeing,
+which is the second tracking file the guidelines below refuse.
+
 ## 1. Ask the surfaces
 
 ```bash
 uv run lup-devtools report --write
 ```
 
-This writes the half no session can see from memory, reading every surface
-that already answers for one topic:
+Writing to a file the invocation named instead? Drop `--write` and read the
+report off stdout, so the default path is never written:
+
+```bash
+uv run lup-devtools report
+```
+
+Either way this is the half no session can see from memory, reading every
+surface that already answers for one topic:
 
 {topic_bullets()}
 It reports what this tree can act on: a note inside a generated artifact is
@@ -46,14 +59,14 @@ the same note twice, so only the source one counts.
 
 ## 2. Read what it wrote
 
-Read `{DEFAULT_REPORT_PATH}`. Those sections are the ground truth about the
-repository — do not re-derive them, contradict them, or drop one because it
-was empty. An empty topic is an answer.
+Read `{DEFAULT_REPORT_PATH}`, or the stdout you just captured. Those sections
+are the ground truth about the repository — do not re-derive them, contradict
+them, or drop one because it was empty. An empty topic is an answer.
 
 ## 3. Rewrite the file whole
 
-Write `{DEFAULT_REPORT_PATH}` again, in full, with every section from step 1
-intact and one more added at the end:
+Write the target file again, in full, with every section from step 1 intact
+and one more added at the end:
 
 ```markdown
 ## From this session
@@ -72,10 +85,12 @@ an edit to one line of a stale report leaves the rest of it stale.
 
 ## Guidelines
 
-- **`{DEFAULT_REPORT_PATH}` is the only file this writes.** It is scratch:
-  gitignored, so it reaches no diff, no reviewer, and no commit. Never create
-  a second one — a `TODO.md`, a backlog, a roadmap — because a tracking file
-  parks work where no workflow will surface it again.
+- **One report file, and only one.** `{DEFAULT_REPORT_PATH}`, or the file the
+  invocation named. It is scratch: gitignored, so it reaches no diff, no
+  reviewer, and no commit. Never write a second — not a `TODO.md`, a backlog,
+  a roadmap, nor the default path beside a named one — because a tracking file
+  parks work where no workflow will surface it again, and two reports park it
+  twice.
 - **Never append.** A report that grew is a report nobody can trust the top
   of. Every invocation replaces the whole file.
 - **Work that belongs in the code goes in the code.** A request about one
