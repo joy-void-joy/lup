@@ -30,6 +30,7 @@ import lup.devtools.dev.relocate as relocate_mod
 import lup.devtools.dev.resolve_review as resolve_review
 import lup.devtools.dev.rules as rules
 import lup.devtools.dev.worktree as worktree
+from lup.codescan.markers import NoteKind
 from lup.devtools.utils import repository_slug
 from lup.devtools.harness.composition import NativeTargets
 from lup.devtools.harness.drift import RepositoryWriter
@@ -465,6 +466,10 @@ def create_dev_app(
             bool,
             typer.Option("--json", help="Output as JSON"),
         ] = False,
+        kind: Annotated[
+            NoteKind | None,
+            typer.Option("--kind", help="Show only this note flavor"),
+        ] = None,
         commit: Annotated[
             bool,
             typer.Option(
@@ -528,7 +533,7 @@ def create_dev_app(
         if clear:
             comments.clear_markers(targets or [], wake=wake)
             return
-        comments.report(as_json, commit)
+        comments.report(as_json, commit, kind)
 
     @app.command("todos")
     def todos_cmd(
@@ -537,15 +542,15 @@ def create_dev_app(
             typer.Option("--json", help="Output as JSON"),
         ] = False,
     ) -> None:
-        """List `TEMPLATE:` customization markers — a scaffold's open decisions.
+        """List `# lup: template:` markers — a scaffold's open decisions.
 
         Every place a scaffolded project needs a domain decision carries a
-        `# TEMPLATE:` comment (or a `TEMPLATE:` docstring line). Initialization
-        runs this to gather them all and walk them one by one, so no
-        customization point depends on someone remembering to mention it. Same
-        file/line/text/context shape as `dev comments`.
+        `# lup: template:` note. Initialization runs this to gather them all
+        and walk them one by one, so no customization point depends on someone
+        remembering to mention it. An alias for `dev comments --kind template`:
+        same scan, same file/line/text/context shape, narrowed to that flavor.
         """
-        comments.todos(as_json)
+        comments.report(as_json, commit=False, kind=NoteKind.template)
 
     @app.command("directives")
     def directives_cmd(

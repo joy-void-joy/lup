@@ -65,12 +65,20 @@ def inline_notes_lines(found: list[FoundComment]) -> list[str]:
     author chose deliberately, so this reports and the reader decides. Their
     `deferred` lines render after the unresolved ones, carrying the gate a
     bracketed deferral stated, so what is still being asked reads first.
+
+    Customization markers are counted but not listed. A scaffold carries them
+    for as long as it is a scaffold, so their detail belongs to `dev todos`,
+    which exists to walk them; repeating all of it in every check would put a
+    permanent wall of text in front of the notes somebody is actually owed.
     """
-    unresolved = [comment for comment in found if comment.kind != "defer"]
+    unresolved = [comment for comment in found if comment.kind in ("note", "solved")]
     deferred = [comment for comment in found if comment.kind == "defer"]
+    customization = [comment for comment in found if comment.kind == "template"]
     counts = f"{len(unresolved)} unresolved"
     if deferred:
         counts += f", {len(deferred)} deferred"
+    if customization:
+        counts += f", {len(customization)} customization"
     lines = [f"inline notes: {counts} (advisory)"]
     lines.extend(
         f"  {comment.file}:{comment.start_line}-{comment.end_line}"
