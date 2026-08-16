@@ -83,10 +83,18 @@ def read_edition(path: Path) -> Edition | None:
     and a corrupt one is a hint rather than a fact — this only ever refines
     a root the caller already has, so refusing to answer costs the caller
     nothing and raising would cost it a working tool.
+
+    A workspace that no longer exists is one more of them. The record
+    outlives the checkout it names — deleting a worktree does not clear it,
+    and this repository's own workflow deletes one whenever a branch lands —
+    and a reader that trusts a dead path resolves every question against it
+    and answers none of them. That is worse than the guess it replaced: the
+    guess was rooted somewhere real.
     """
     if not path.is_file():
         return None
     try:
-        return Edition.model_validate_json(path.read_text("utf-8"))
+        published = Edition.model_validate_json(path.read_text("utf-8"))
     except ValueError:
         return None
+    return published if published.workspace.is_dir() else None
