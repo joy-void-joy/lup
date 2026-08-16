@@ -94,17 +94,19 @@ STRUCTURAL_RULES: list[RegisteredRule] = [
         id=behaviour.RULE_ID,
         family="architecture",
         scope="Python architecture",
-        example="def render_part(part: TextPart) -> str: ...",
+        example="class TextPart(BaseModel):\n    def spell(self) -> str: ...",
         message=(
-            "A model we declare carries what can be done with it. A free function "
-            "taking one as a parameter puts that operation where the model cannot "
-            "see it, so the type's behaviour is spread across whichever modules "
-            "call it. Declare it on the model, or on the ABC the model composes. "
-            "Methods are the shape this steers toward and are never reported; nor "
-            "is a constructor (a model named only in the return), a boundary "
-            "converter (a model another module declares), or a function over a "
-            "vendor payload or a builtin, since the rule fires only on project "
-            "classes inheriting pydantic.BaseModel."
+            "A model is what a value is; an ABC is what can be done with one; a "
+            "concrete class implements the ABC and holds the model as its data. A "
+            "def in a model body collapses the first two, and the declaration of "
+            "what a value holds ends up in the middle of the code acting on it. "
+            "Declare the operation on an ABC and implement it on a class holding "
+            "this model. Schema declarations are exempt — @model_validator and "
+            "@field_validator say what a valid instance is, in the one place that "
+            "can refuse to build an invalid one — while @computed_field is a "
+            "derivation wearing a field's clothes and is reported. The rule fires "
+            "only on project classes descending from pydantic.BaseModel or "
+            "pydantic_settings.BaseSettings."
         ),
         defined_in=behaviour.__name__,
     ),
