@@ -7,6 +7,14 @@ project on a different tracker supplies its own reader rather than waiting for
 the library to learn an API it has no business knowing.
 """
 
+# lup: This module reads and comments, but filing an issue is still a raw
+# `gh issue create --body-file` at the agent's own hand. Reporting friction is
+# a step the workflow prescribes, so it should be a devtools command like every
+# other prescribed step — one that knows the repository, so the report cannot
+# be filed against the wrong one, and that carries the friction report's shape
+# (command, exact error, state left behind, recovery cost, owning component)
+# rather than leaving each session to remember it.
+
 import json
 import logging
 from collections.abc import Iterator
