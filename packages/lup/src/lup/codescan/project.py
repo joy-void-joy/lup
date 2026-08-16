@@ -160,9 +160,16 @@ def has_decorator(
     module: str,
     aliases: dict[str, str],
 ) -> bool:
-    """Recognize a decorator by its resolved terminal symbol."""
+    """Recognize a decorator by its resolved terminal symbol.
+
+    A decorator factory is read through its call: `@model_validator(mode="after")`
+    names `model_validator` exactly as a bare `@abstractmethod` names itself, and
+    a caller asking which decorator a member carries means the same thing in both
+    spellings.
+    """
     for decorator in node.decorator_list:
-        name = dotted_name(decorator)
+        applied = decorator.func if isinstance(decorator, ast.Call) else decorator
+        name = dotted_name(applied)
         if name is None:
             continue
         if resolve_name(name, module, aliases).rsplit(".", 1)[-1] == expected:
