@@ -136,6 +136,39 @@ class TestHostToContainer:
         assert topology.to_container(out.resolved).resolved == "/shared/nested/out.csv"
 
 
+class TestUnifiedSpelling:
+    """Mounting the exchange at its own host path removes the question."""
+
+    def test_a_path_translates_to_itself(self, tmp_path: Path) -> None:
+        shared = (tmp_path / "shared").resolve()
+        sandbox = Sandbox(
+            session_id="unified", shared_dir=shared, shared_path=str(shared)
+        )
+        topology = topology_of(sandbox)
+        named = str(shared / "out.csv")
+
+        assert topology.to_host(named).resolved == named
+        assert topology.to_container(named).resolved == named
+
+    def test_the_default_keeps_the_two_spellings_apart(self, tmp_path: Path) -> None:
+        """Unifying is the caller's choice, not something taken from them."""
+        topology = topology_of(make_sandbox(tmp_path))
+
+        assert topology.to_host("/shared/out.csv") != "/shared/out.csv"
+
+    def test_a_unified_sandbox_runs_a_file_named_either_way(
+        self, tmp_path: Path
+    ) -> None:
+        shared = (tmp_path / "shared").resolve()
+        sandbox = Sandbox(
+            session_id="unified", shared_dir=shared, shared_path=str(shared)
+        )
+
+        assert sandbox.container_spelling(str(shared / "job.py")) == str(
+            shared / "job.py"
+        )
+
+
 class TestExchanges:
     """Where an agent that asked for an impossible crossing should go."""
 

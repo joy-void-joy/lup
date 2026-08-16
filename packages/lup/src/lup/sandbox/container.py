@@ -141,7 +141,10 @@ class Sandbox:
 
     Args:
         session_id: Unique identifier for this session (used in container/volume names).
-        shared_dir: Host directory bound to /shared for host-sandbox file exchange.
+        shared_dir: Host directory bound for host-sandbox file exchange.
+        shared_path: Container path to bind it at, defaulting to
+            :attr:`DEFAULT_SHARED_PATH`. Passing the host directory's own path
+            makes one spelling true on both sides.
         docker_image: Docker image to use for the sandbox.
         network_mode: Network access level ("bridge" or "none").
         timeout_seconds: Default timeout for code execution.
@@ -157,11 +160,20 @@ class Sandbox:
     SOURCE_ROOT = "/sources"
     """Where read-only host source trees are mounted, one directory each."""
 
+    DEFAULT_SHARED_PATH = "/shared"
+    """Where the host exchange directory is mounted, absent a caller's choice.
+
+    Pass ``shared_path=str(shared_dir)`` to mount it at the path the host
+    already calls it. The two sides then agree on one spelling, and an agent
+    holding tools on both cannot pick the wrong one — there is only one.
+    """
+
     def __init__(
         self,
         *,
         session_id: str,
         shared_dir: str | Path,
+        shared_path: str | None = None,
         docker_image: str = DEFAULT_DOCKER_IMAGE,
         network_mode: NetworkMode = "bridge",
         timeout_seconds: int = 30,
@@ -175,6 +187,7 @@ class Sandbox:
         self.docker_image = docker_image
         self.volume_name = f"lup-sandbox-ws-{suffix}"
         self.shared_dir = Path(shared_dir).resolve()
+        self.shared_path = shared_path or self.DEFAULT_SHARED_PATH
         self.network_mode = network_mode
         self.timeout_seconds = timeout_seconds
         self.pre_install = list(pre_install) if pre_install is not None else None
@@ -222,7 +235,7 @@ class Sandbox:
                 ),
             ),
             Mount(
-                container_path="/shared",
+                container_path=self.shared_path,
                 source=str(self.shared_dir),
                 kind="bind",
                 mode="rw",
