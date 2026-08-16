@@ -7,6 +7,10 @@ subprocess that may die without a graceful exit.
 
 Network modes:
 - "bridge": Full network access (default)
+- "filtered": Public HTTP(S) only, through a proxy on a private network — the
+  container itself is given no route out, so a private address it might reach
+  on a shared bridge (a metadata endpoint, a service on the host's LAN) is
+  unreachable rather than merely discouraged
 - "none": No network access at all
 
 Examples:
@@ -59,6 +63,7 @@ except ImportError as exc:
     ) from exc
 from docker.errors import APIError, DockerException, NotFound
 from docker.models.containers import Container, ExecResult
+from docker.models.networks import Network
 from docker.types import Mount as DockerMount
 from docker.utils.socket import SocketError
 
@@ -84,6 +89,8 @@ from lup.sandbox.models import (
     ReplCrashedError,
     SandboxNotInitializedError,
 )
+from lup.sandbox.egress import EgressPolicy
+from lup.types import EnvVars
 from lup.sandbox.process import decode_output, process_is_alive, process_start_token
 from lup.sandbox.repl import REPL_SERVER_SCRIPT, ReplSession
 from lup.sandbox.translation import MountTopology
@@ -158,6 +165,9 @@ class Sandbox:
 
     DEFAULT_DOCKER_IMAGE = "ghcr.io/astral-sh/uv:python3.14-bookworm-slim"
 
+    DEFAULT_EGRESS_PROXY_IMAGE = "ubuntu/squid:6.6-24.04_edge"
+    """The proxy image `filtered` mode bridges the sandbox's network through."""
+
     SOURCE_ROOT = "/sources"
     """Where read-only host source trees are mounted, one directory each."""
 
@@ -177,6 +187,8 @@ class Sandbox:
         shared_path: str | None = None,
         docker_image: str = DEFAULT_DOCKER_IMAGE,
         network_mode: NetworkMode = "bridge",
+        egress: EgressPolicy | None = None,
+        egress_proxy_image: str = DEFAULT_EGRESS_PROXY_IMAGE,
         timeout_seconds: int = 30,
         pre_install: Sequence[str] | None = DEFAULT_PRE_INSTALL,
         source_roots: Mapping[str, Path] | None = None,
@@ -190,6 +202,10 @@ class Sandbox:
         self.shared_dir = Path(shared_dir).resolve()
         self.shared_path = shared_path or self.DEFAULT_SHARED_PATH
         self.network_mode = network_mode
+        self.egress = egress or EgressPolicy()
+        self.egress_proxy_image = egress_proxy_image
+        self.network_name = f"lup-sandbox-net-{suffix}"
+        self.proxy_name = f"lup-sandbox-egress-{suffix}"
         self.timeout_seconds = timeout_seconds
         self.pre_install = list(pre_install) if pre_install is not None else None
         self.source_roots = {
@@ -205,6 +221,9 @@ class Sandbox:
         self.active_container: Container | None = None
         self.docker_client: docker.DockerClient | None = None
         self.repl: ReplSession | None = None
+        self.filtered_network: Network | None = None
+        self.egress_proxy: Container | None = None
+        self.proxy_config_path = self.shared_dir.parent / f".{self.proxy_name}.conf"
 
     @property
     def container(self) -> Container:
@@ -357,6 +376,95 @@ class Sandbox:
     OWNER_START_LABEL = "lup.sandbox.owner_start"
     STALE_AGE_HOURS = 24.0
 
+    def proxy_environment(self) -> EnvVars:
+        """Proxy variables pointing a filtered container at its only way out.
+
+        Both spellings are set because the tools a sandbox runs disagree about
+        which they read, and ``NO_PROXY`` is emptied so nothing arrives from
+        the host claiming an exemption.
+        """
+        proxy = f"http://egress:{self.egress.listen_port}"
+        return {
+            "HTTP_PROXY": proxy,
+            "HTTPS_PROXY": proxy,
+            "ALL_PROXY": proxy,
+            "http_proxy": proxy,
+            "https_proxy": proxy,
+            "all_proxy": proxy,
+            "NO_PROXY": "",
+            "no_proxy": "",
+        }
+
+    def infrastructure_labels(self) -> dict[str, str]:  # lup: ignore[dict-str-payload]
+        """Labels marking one session's containers and networks as ours."""
+        return {
+            self.SANDBOX_LABEL: "1",
+            self.CREATED_AT_LABEL: str(time.time()),
+            self.OWNER_PID_LABEL: str(os.getpid()),
+            self.OWNER_START_LABEL: process_start_token(os.getpid()) or "",
+        }
+
+    def container_environment(self, filtered: bool) -> EnvVars:
+        """The environment the sandbox container starts with."""
+        source = {"PYTHONPATH": self.source_path()} if self.source_roots else {}
+        return source | (self.proxy_environment() if filtered else {})
+
+    def start_filtered_egress(self) -> None:
+        """Create the internal network and the one proxy bridged out of it.
+
+        The network is ``internal``, which is what the mode rests on: Docker
+        gives it no gateway, so the sandbox has no route out at all rather
+        than a route it is asked not to take. The proxy is the only member of
+        both networks, and is stripped of every capability it does not need
+        to bind its port.
+        """
+        if self.docker_client is None:
+            raise SandboxNotInitializedError("Docker client not created")
+        self.proxy_config_path.parent.mkdir(parents=True, exist_ok=True)
+        self.proxy_config_path.write_text(self.egress.render(), encoding="utf-8")
+        labels = self.infrastructure_labels()
+        self.filtered_network = self.docker_client.networks.create(
+            self.network_name, internal=True, labels=labels
+        )
+        self.egress_proxy = self.docker_client.containers.run(
+            self.egress_proxy_image,
+            name=self.proxy_name,
+            detach=True,
+            volumes={
+                str(self.proxy_config_path): {
+                    "bind": "/etc/squid/squid.conf",
+                    "mode": "ro",
+                }
+            },
+            network_mode="bridge",
+            labels=labels,
+            mem_limit="256m",
+            pids_limit=128,
+            cap_drop=["ALL"],
+            cap_add=["SETUID", "SETGID", "CHOWN", "DAC_OVERRIDE"],
+            security_opt=["no-new-privileges:true"],
+        )
+        self.filtered_network.connect(self.egress_proxy, aliases=["egress"])
+
+    def stop_filtered_egress(self) -> None:
+        """Remove the proxy, its network, and the rendered configuration."""
+        if self.egress_proxy is not None:
+            try:
+                self.egress_proxy.stop(timeout=5)
+                self.egress_proxy.remove()
+            except (APIError, DockerException) as error:
+                logger.warning("Failed to clean up egress proxy: %s", error)
+            finally:
+                self.egress_proxy = None
+        if self.filtered_network is not None:
+            try:
+                self.filtered_network.remove()
+            except (APIError, DockerException) as error:
+                logger.warning("Failed to clean up sandbox network: %s", error)
+            finally:
+                self.filtered_network = None
+        self.proxy_config_path.unlink(missing_ok=True)
+
     def remove_stale_container(self) -> None:
         """Remove a pre-existing container with the same name, if any."""
         if self.docker_client is None:
@@ -365,6 +473,20 @@ class Sandbox:
             old = self.docker_client.containers.get(self.container_name)
             logger.warning("Removing stale container: %s", self.container_name)
             old.remove(force=True)
+        except NotFound:
+            pass
+        # A crashed run leaves its proxy holding the network, so the proxy has
+        # to go before the network it is attached to can be recreated.
+        try:
+            proxy = self.docker_client.containers.get(self.proxy_name)
+            logger.warning("Removing stale egress proxy: %s", self.proxy_name)
+            proxy.remove(force=True)
+        except NotFound:
+            pass
+        try:
+            network = self.docker_client.networks.get(self.network_name)
+            logger.warning("Removing stale sandbox network: %s", self.network_name)
+            network.remove()
         except NotFound:
             pass
 
@@ -457,6 +579,8 @@ class Sandbox:
             except (NotFound, APIError):
                 pass
 
+        self.stop_filtered_egress()
+
     def write_repl_script(self) -> None:
         """Write the REPL server script into the container via tar archive."""
         script_bytes = REPL_SERVER_SCRIPT.encode("utf-8")
@@ -507,6 +631,10 @@ class Sandbox:
 
         self.shared_dir.mkdir(parents=True, exist_ok=True)
 
+        filtered = self.network_mode == "filtered"
+        if filtered:
+            self.start_filtered_egress()
+
         logger.info(
             "Creating sandbox container: %s (network=%s)",
             self.container_name,
@@ -523,8 +651,8 @@ class Sandbox:
             mounts=self.docker_mounts(),
             working_dir="/workspace",
             mem_limit="1g",
-            network_mode=self.network_mode,
-            environment={"PYTHONPATH": self.source_path()} if self.source_roots else {},
+            network_mode=self.network_name if filtered else self.network_mode,
+            environment=self.container_environment(filtered),
             labels={
                 self.SANDBOX_LABEL: "1",
                 self.CREATED_AT_LABEL: str(time.time()),

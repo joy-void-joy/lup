@@ -10,7 +10,7 @@ from typing import Literal, Self
 
 from pydantic import BaseModel, Field, model_validator
 
-NetworkMode = Literal["bridge", "none"]
+NetworkMode = Literal["filtered", "bridge", "none"]
 MountMode = Literal["rw", "ro"]
 
 DEFAULT_PRE_INSTALL: tuple[str, ...] = (
