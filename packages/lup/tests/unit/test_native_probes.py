@@ -6,6 +6,7 @@ seams: a probe must classify a missing or failing CLI as unsupported
 evidence, and :class:`CodexPluginInstaller` must short-circuit on a
 verified cache, reinstall a stale one, and refuse to report success
 when the installed digest still differs from the committed source.
+Temporary installations must be removed even when their session fails.
 Fake executables on disk stand in for the real CLIs, so every branch
 runs offline.
 """
@@ -187,6 +188,45 @@ class TestPluginInstallGate:
 
         assert evidence.ready
         assert not bound.exists()
+
+    def test_temporary_installation_is_removed_when_the_session_exits(
+        self, tmp_path: Path
+    ) -> None:
+        source = tmp_path / "source"
+        write_plugin_source(source)
+        config = PluginCacheConfig(
+            codex_home=tmp_path / "codex-home", marketplace=MARKETPLACE
+        )
+        cache = self.cache_root(config)
+        log = tmp_path / "calls.log"
+        installer_cli = fake_cli(
+            tmp_path,
+            "codex",
+            f'echo "$1 $2 $3" >> "{log}"\n'
+            'if [ "$2" = "add" ]; then\n'
+            f'  mkdir -p "{cache}" && cp -R "{source}/." "{cache}/"\n'
+            "fi\n"
+            'if [ "$2" = "remove" ]; then\n'
+            f'  rm -rf "{cache}"\n'
+            "fi",
+        )
+        installer = CodexPluginInstaller(config, installer_cli)
+
+        with pytest.raises(RuntimeError, match="session exited"):
+            with installer.temporary(source, tmp_path) as evidence:
+                assert evidence.ready
+                assert cache.exists()
+                raise RuntimeError("session exited")
+
+        selector = f"{config.plugin}@{config.marketplace}"
+        assert not cache.exists()
+        assert log.read_text(encoding="utf-8").splitlines() == [
+            "plugin marketplace remove",
+            "plugin marketplace add",
+            f"plugin add {selector}",
+            f"plugin remove {selector}",
+            "plugin marketplace remove",
+        ]
 
     def test_install_that_leaves_a_differing_digest_is_refused(
         self, tmp_path: Path
