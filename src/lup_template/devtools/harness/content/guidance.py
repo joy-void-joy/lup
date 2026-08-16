@@ -42,13 +42,16 @@ Harness settings stay project-level, in the tree the harness owns ("""
 
 ### The `# lup:` Marker Vocabulary
 
-A `# lup:` (or `// lup:`) comment is **actionable review feedback** left in the code for the agent to address — a quick bug remark, a feature idea, anything whose subject is the code and small enough that the site it concerns is the right place to keep it. Three flavors carry feedback, and only the removal rules differ; the fourth spelling, `# lup: ignore[<rule>]`, is the anti-pattern hatch above rather than feedback, and goes when its violation does.
+A `# lup:` (or `// lup:`) comment is **actionable review feedback** left in the code for the agent to address — a quick bug remark, a feature idea, anything whose subject is the code and small enough that the site it concerns is the right place to keep it. Three flavors carry feedback, and only the removal rules differ. Two more spellings share the namespace without being feedback, and both go when what they annotate does: `# lup: ignore[<rule>]` is the anti-pattern hatch above, and `# lup: template: <decision>` marks a customization point this scaffold leaves to whoever adopts it.
 
 | Marker | Removing it |
 |---|---|
 | `# lup: <text>` — open feedback | **denied**; resolve it into a claim instead |
 | `# lup: solved: <text>` — a claim you addressed it | **denied**; only the verify-solved review pass retires one |
 | `# lup: defer: <text>` — parked work | **denied** while parked |
+| `# lup: template: <text>` — a customization point | **allowed**; nobody is owed an answer to a placeholder |
+
+A customization marker is answered by writing this domain's own code where the scaffold's example stood, which leaves no original ask for a claim to be checked against — so it is deleted rather than converted, exactly as `ignore` is. `uv run lup-devtools dev todos` lists every one still standing (an alias for `dev comments --kind template`), and initialization walks them one by one.
 
 Resolve open feedback by fixing what it points at, or, for a question, by answering it definitively in the code, the docs, or a recorded user decision. Then rewrite the marker as **`# lup: solved: <the note's original words>`**, text unchanged, so the claim sits beside what it claims to fix and can be checked against what was asked. `docs/contributing.md` carries the full lifecycle (use `"""
         ),

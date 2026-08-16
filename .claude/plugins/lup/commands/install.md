@@ -326,7 +326,7 @@ For each item being installed:
    - Replace `uv run` with target's equivalent (npm run, cargo, make, etc.) in hooks and commands
    - Adjust file path patterns in hooks for target's directory structure
    - Keep command markdown structure but update tool references and examples
-   - Walk the `TEMPLATE:` markers in ported scaffolding files — each marks a domain decision with a one-line description. Adapt the code a marker points at to the target (and remove the marker), or leave it in place as an open decision the target gathers later with `uv run lup-devtools dev todos`
+   - Walk the `# lup: template:` markers in ported scaffolding files — each marks a domain decision with a one-line description. Adapt the code a marker points at to the target (and remove the marker), or leave it in place as an open decision the target gathers later with `uv run lup-devtools dev todos`
 3. **Write to the target repo** — create directories as needed
 4. **Never overwrite** existing files without asking (even in non-interactive mode, warn and skip)
 

@@ -229,7 +229,7 @@ uv run pytest
 
 ## Phase 3: Generate Scaffolding
 
-**Start by gathering every customization point.** Each decision the template leaves to a domain carries a `TEMPLATE:` marker (`# TEMPLATE:` in comments, `TEMPLATE:` in docstrings) with a one-line description of the decision. Collect them all:
+**Start by gathering every customization point.** Each decision the template leaves to a domain carries a `# lup: template:` marker with a one-line description of the decision. Collect them all:
 
 ```bash
 uv run lup-devtools dev todos --json
@@ -335,7 +335,7 @@ Customize the feedback loop command for the domain's specific:
 
 After generating files:
 
-1. Run `uv run lup-devtools dev todos` -- any remaining `TEMPLATE:` marker is a decision not yet made; resolve or consciously defer each one
+1. Run `uv run lup-devtools dev todos` -- any remaining `# lup: template:` marker is a decision not yet made; resolve or consciously defer each one. Resolving one means writing this domain's code where the placeholder stood and deleting the marker: it is not feedback, so it takes no `solved:` claim
 2. Run `uv run pyright` to check types
 3. Run `uv run ruff check .` to check lint
 4. Run `uv run lup --help` to verify CLI
