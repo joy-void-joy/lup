@@ -205,6 +205,35 @@ def test_a_diagnostic_for_the_edited_file_is_reported(tmp_path: Path) -> None:
     ]
 
 
+def test_a_file_the_checker_cannot_read_is_not_checked(tmp_path: Path) -> None:
+    """A type checker handed a manifest reports the manifest as broken.
+
+    Every line of `pyproject.toml` is a syntax error to a Python parser, so an
+    edit to one answered with the checker's whole opinion of the file — dozens
+    of errors about lines the edit never touched, none of them true. Output
+    that is noise on sight is output a reader learns to scroll past, including
+    on the edits where it was worth reading.
+    """
+    work = checkout(tmp_path / "repo")
+    manifest = work / "pyproject.toml"
+    manifest.write_text('[project]\nname = "x"\n', encoding="utf-8")
+    command = checker(work, report(manifest))
+
+    assert file_diagnostics(str(manifest), command) == []
+
+
+def test_the_readable_suffixes_are_the_callers_to_choose(tmp_path: Path) -> None:
+    """The checker is the caller's, so what it reads is declared, not assumed."""
+    work = checkout(tmp_path / "repo")
+    file = edited(work, "module.qs")
+    command = checker(work, report(file))
+
+    assert file_diagnostics(str(file), command) == []
+    assert file_diagnostics(str(file), command, suffixes=(".qs",)) == [
+        "error 1: something is wrong",
+    ]
+
+
 def test_a_diagnostic_about_another_file_is_not(tmp_path: Path) -> None:
     """The checker resolves what the file imports, so it can see the whole tree.
 

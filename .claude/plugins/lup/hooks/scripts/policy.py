@@ -183,7 +183,10 @@ def publish_edition(path_text: str) -> None:
 
 
 def file_diagnostics(
-    path_text: str, command: list[str], timeout_seconds: float = 20.0
+    path_text: str,
+    command: list[str],
+    suffixes: tuple[str, ...] = (".py", ".pyi"),
+    timeout_seconds: float = 20.0,
 ) -> list[str]:
     """Type-check one edited file, in the checkout that actually holds it.
 
@@ -201,8 +204,16 @@ def file_diagnostics(
     slow, or writes something this cannot read, is not evidence about the
     edit — and this runs after the tool, so the alternative to saying
     nothing is failing an edit that already happened.
+
+    *suffixes* is what the checker can read. A type checker handed a manifest,
+    a document, or a lockfile parses it as source and reports the whole file
+    as broken, so every edit to one answers with a wall of errors about lines
+    the edit never touched — which teaches a reader to scroll past the output
+    that exists to be read. It is a default rather than a constant because the
+    checker is the caller's choice: a project whose checker reads more than
+    Python says so instead of editing this.
     """
-    if not command:
+    if not command or Path(path_text).suffix.lower() not in suffixes:
         return []
     root = worktree_root(path_text)
     if not root:
