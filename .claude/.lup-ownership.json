@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "c405879cbe3a3b353fad30592d9c95c6fd424de79609e18cc371e08ef2e374f1",
+  "source_digest": "5a7d4a66d900925332c313669298c32bba0b5bc3467369ed2ce73b02f961287a",
   "target_requirements": [
     "claude-code"
   ],
@@ -9,7 +9,7 @@
     {
       "path": ".claude/CLAUDE.md",
       "category": "generated",
-      "sha256": "6906d6af98e83317b6e2b428e0c1fcbe0976e21afc2f02e4f35652f6504d315f",
+      "sha256": "ec9ecc842a8d295441a8dc988acfe27c17102442eb220ef81c1a913f4854e572",
       "semantic_id": "harness.guidance",
       "executable": false
     },
@@ -268,7 +268,7 @@
     {
       "path": ".claude/plugins/lup/commands/resolve.md",
       "category": "generated",
-      "sha256": "b7ed617dd29f3383c16a8a6b17249965507c4cdeb1a75ce9a3a1041db26fd680",
+      "sha256": "3556ff2dbe9f11d94eb9ec1a0c3f3f6d34799bcba779063b42245208149dca2f",
       "semantic_id": "skill.resolve",
       "executable": false
     },
@@ -492,7 +492,7 @@
     {
       "path": "docs/platform-differentiation.md",
       "category": "generated",
-      "sha256": "1d7d2f8df85c33fb2840c3fe23620fcc44da81aa2e9f8f3808b85d4071cfa1c6",
+      "sha256": "497d88210385e5db8b77105c574a43fe3218d81ae54431571c0213391dbe1cec",
       "semantic_id": "docs.platform-differentiation",
       "executable": false
     },

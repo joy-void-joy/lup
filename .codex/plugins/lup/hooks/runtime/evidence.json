@@ -1,5 +1,5 @@
 {
-  "askApproximation": "PermissionRequest defers asks to native approval",
+  "askApproximation": "asks defer only on PermissionRequest; PreToolUse fails closed",
   "policyIds": [
     "fetch",
     "shell",
