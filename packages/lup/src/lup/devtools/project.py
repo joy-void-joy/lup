@@ -12,6 +12,7 @@ them as a declaration is what lets any adopter supply its own.
 from pydantic import BaseModel
 
 from lup.codescan.boundaries import ApplicationRoots
+from lup.codescan.common import RuleSelection
 from lup.policy.kernel.rows import PathRoleRow
 
 
@@ -32,6 +33,14 @@ class DevProject(BaseModel, frozen=True):
     A test root is judged by whether it exercises production rather than by
     production's own conventions, so a scan that read them all the same way
     would report a fixture as a defect.
+    """
+
+    rules: RuleSelection = RuleSelection()
+    """Which of the library's scan rules this repository holds itself to.
+
+    Carried here so the sweep reads the selection the edit hook was compiled
+    with: an application declares it once on its ``HookSet`` and hands it
+    over, the way it already hands over its path roles.
     """
 
     roots: ApplicationRoots = ApplicationRoots()

@@ -32,6 +32,7 @@ from pydantic import BaseModel
 from lup.codescan.antipatterns import (
     AntiPattern,
     AntiPatternFinding,
+    AntiPatternSet,
     audit_text,
     patterns_for_suffix,
 )
@@ -118,11 +119,12 @@ def scanned_files(
     never enforces in a test or scratch tree is not read there either.
     """
     roles = project.path_roles
+    declared = AntiPatternSet().selected(project.rules)
 
     def found() -> Iterator[ScannedFile]:
         for rel in git.lines("ls-files", "--cached", "--others", "--exclude-standard"):
             path = Path(rel)
-            patterns = patterns_for_suffix(path.suffix.lower())
+            patterns = patterns_for_suffix(path.suffix.lower(), declared)
             if patterns is None or path_role(rel, roles) != "production":
                 continue
             if paths is not None and not any(
@@ -232,7 +234,9 @@ def scan_antipatterns(
         for path, finding in boundary_findings
     )
     return AntiPatternScan(
-        findings=results,
+        findings=[
+            finding for finding in results if project.rules.keeps(finding.rule_id)
+        ],
         refuted=[
             FoundRefutation(file=file, **refutation.model_dump())
             for file, refutations in sorted(refuted.items())

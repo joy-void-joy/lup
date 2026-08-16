@@ -5,6 +5,7 @@ from pathlib import Path
 import lup.harness.models as models
 from lup.adapters.harness import claude_prompt_renderer
 from lup.codescan.common import RuleStrength
+from lup.codescan.common import RuleSelection
 from lup.codescan.registry import RULE_REFERENCE, RegisteredRule, all_rules
 from lup.harness.banner import GeneratedBanner
 from lup.harness.materialization import write_generated_file
@@ -107,9 +108,16 @@ def rule_table(rules: list[RegisteredRule]) -> models.MarkdownTable:
     )
 
 
-def rule_reference_document() -> models.PromptDocument:
-    """Every executable Lup rule and typed-suppression convention, as a document."""
-    rules = all_rules()
+def rule_reference_document(
+    selection: RuleSelection | None = None,
+) -> models.PromptDocument:
+    """Every Lup rule this repository enforces, and how each is suppressed.
+
+    Generated from the project's own selection, so a rule it retired is
+    absent here rather than documented as enforced by a page whose whole
+    job is to be the thing a denial can be looked up in.
+    """
+    rules = all_rules(selection=selection)
     structural = sorted(
         (rule for rule in rules if rule.family != "anti-pattern"),
         key=lambda item: item.id,
@@ -144,14 +152,14 @@ the two cannot name different files."""
 RULE_REFERENCE_COMMAND = "uv run lup-devtools dev rules"
 
 
-def rule_reference_artifact() -> Artifact:
+def rule_reference_artifact(selection: RuleSelection | None = None) -> Artifact:
     """The rule reference as one artifact, gated like any other generated file.
 
     Rendered through one runtime's vocabulary because a document has to be
     rendered through some runtime's, and this one names none: it is prose and
     tables end to end, so either vocabulary produces the same bytes.
     """
-    document = rule_reference_document()
+    document = rule_reference_document(selection)
     return Artifact.generated(
         path=RULE_REFERENCE_PATH,
         body=claude_prompt_renderer().render(document),
@@ -162,10 +170,15 @@ def rule_reference_artifact() -> Artifact:
     )
 
 
-def write_rule_reference(root: Path | None = None, *, check: bool = False) -> Path:
+def write_rule_reference(
+    root: Path | None = None,
+    *,
+    check: bool = False,
+    selection: RuleSelection | None = None,
+) -> Path:
     """Write or verify the generated rule reference."""
     return write_generated_file(
-        rule_reference_artifact(),
+        rule_reference_artifact(selection),
         root or project_root(),
         RULE_REFERENCE_COMMAND,
         check=check,

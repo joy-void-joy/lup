@@ -21,7 +21,11 @@ from lup.devtools.harness.generate import (
     NativeHarnessComposition,
     ProjectContent,
 )
-from lup_template.devtools.harness.catalog import WORKFLOW, portable_harness
+from lup_template.devtools.harness.catalog import (
+    WORKFLOW,
+    declared_hook_set,
+    portable_harness,
+)
 from lup_template.devtools.harness.content.docs.catalog import DOCUMENTS
 from lup_template.devtools.harness.content.settings import project_settings
 from lup_template.devtools.harness.content.template_claude import (
@@ -62,7 +66,7 @@ TARGETS = NativeTargets(builders={"claude": claude_target, "codex": codex_target
 # lup: ignore[constant-declaration] — which files outside a runtime tree this
 # project generates, decided here because nothing sits above it to be asked
 REPOSITORY_WIDE: list[RepositoryWriter] = [
-    write_rule_reference,
+    partial(write_rule_reference, selection=declared_hook_set().rules),
     partial(write_workflow, WORKFLOW),
 ]
 """Every project-owned generated file outside a native runtime tree."""

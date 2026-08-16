@@ -208,13 +208,15 @@ def dev_project() -> DevProject:
     The package name is derived from where this file actually sits rather
     than written down, so initialization renaming the package moves the
     scans with it instead of leaving them resolving against a name that is
-    gone. The roles come from the same hook set the generated trees enforce,
-    so a scan and a hook cannot disagree about what a path is for.
+    gone. The roles and the rule selection come from the same hook set the
+    generated trees enforce, so a scan and a hook cannot disagree about what
+    a path is for, nor about which rules are live here.
     """
     hooks = declared_hook_set()
     return DevProject(
         package=Path(__file__).resolve().parents[2].name,
         roots=application_roots(),
+        rules=hooks.rules,
         path_roles=[
             PathRoleRow(root=role.root.as_posix(), role=role.role)
             for role in hooks.path_roles

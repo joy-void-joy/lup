@@ -54,6 +54,34 @@ on it. Those are refused, and the message says to write the replacement.
 type RuleContext = Literal["code", "comment"]
 """The syntactic surface a scan rule inspects: masked code, or comment text."""
 
+
+class RuleSelection(BaseModel, frozen=True):
+    """Which of the rules this library ships a project holds itself to.
+
+    A rule is a convention written down and a convention is a judgement, so a
+    repository that settled one differently is not defective there — it is
+    answering a question this library had no standing to close. The tables
+    reach a project as a starting point rather than as a fixture, named by the
+    same ids a directive, a denial, and the generated reference already use.
+
+    Subtractive, because a project disagreeing with three rules should say
+    those three rather than restate the thirty it still keeps: a replacement
+    table would have to be re-copied every time the library adds a rule, and
+    the copy that fell behind would look like a decision.
+
+    One selection reaches the sweep, the edit hook, and the generated
+    reference together, so the three cannot disagree about which rules are
+    live here.
+    """
+
+    retired: list[str] = []
+    """Rule ids this project does not hold itself to."""
+
+    def keeps(self, rule_id: str) -> bool:
+        """Whether a rule is live here, for a scan deciding to run it."""
+        return rule_id not in self.retired
+
+
 # Both directive spellings come from the kernel rather than being restated
 # here. The hook and this audit have to agree on what a directive *is* before
 # they can agree on what it silences, and two regexes drifted apart is exactly

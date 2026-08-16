@@ -22,6 +22,7 @@ from pydantic import (
     model_validator,
 )
 
+from lup.codescan.common import RuleSelection
 from lup.harness.banner import ArtifactBanner, GeneratedBanner
 from lup.markdown import TableCell, escaped
 from lup.policy.kernel.rows import PathRoleName
@@ -766,6 +767,17 @@ class HookSet(BaseModel, frozen=True):
             "library holds no opinion: an "
             "empty list judges every runner invocation by the ordinary shell "
             "vocabulary instead"
+        ),
+    )
+    rules: RuleSelection = Field(
+        default=RuleSelection(),
+        description=(
+            "Which of the scan rules the library ships this project holds "
+            "itself to, named subtractively so a project states the few it "
+            "retired rather than restating the many it keeps. One selection "
+            "reaches the edit hook compiled from this set, the repository "
+            "sweep, and the generated rule reference, so none of the three "
+            "can enforce a rule the others stopped enforcing"
         ),
     )
     recoverable_target_limit: int = Field(

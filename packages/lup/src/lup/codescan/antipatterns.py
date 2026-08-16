@@ -70,6 +70,7 @@ from lup.codescan.common import (
     PythonContext,
     Refutation,
     RuleContext,
+    RuleSelection,
     RuleStrength,
     file_level_ignore,
     ignore_rule_ids,
@@ -745,15 +746,36 @@ class AntiPatternSet(BaseModel, frozen=True, arbitrary_types_allowed=True):
             return self.typescript
         return None
 
+    def selected(self, selection: RuleSelection) -> "AntiPatternSet":
+        """This set with the rules a project retired taken out of both tables.
 
-def antipattern_set_for(document_reader: Spelling) -> AntiPatternSet:
+        Narrowing the table rather than filtering findings afterwards is what
+        keeps a retired rule from reaching any surface at all: it does not
+        fire, it does not render into the compiled plugin, and a directive
+        naming it is not graded against a rule that stopped existing here.
+        """
+        return AntiPatternSet(
+            python=[rule for rule in self.python if selection.keeps(rule.id)],
+            typescript=[rule for rule in self.typescript if selection.keeps(rule.id)],
+        )
+
+
+def antipattern_set_for(
+    document_reader: Spelling, selection: RuleSelection | None = None
+) -> AntiPatternSet:
     """The tables one native plugin ships, its own reader spelled into them.
 
     Generation reaches this once per runtime, so the rows compiled into a
     plugin say what that runtime can actually do — and a runtime that declines
     ships the rule with its reason stated and no tool it does not have named.
+
+    The project's selection narrows the same tables here, so a retired rule is
+    absent from the compiled plugin rather than enforced by a hook the sweep
+    stopped agreeing with.
     """
-    return AntiPatternSet(python=python_anti_patterns(document_reader))
+    return AntiPatternSet(python=python_anti_patterns(document_reader)).selected(
+        selection or RuleSelection()
+    )
 
 
 # `AntiPatternSet.for_suffix` is the operation; this binds the default table to it.

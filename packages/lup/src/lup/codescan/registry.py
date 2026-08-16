@@ -27,7 +27,7 @@ import lup.codescan.dispatch as dispatch
 import lup.codescan.grammar as grammar
 import lup.codescan.narrowing as narrowing
 import lup.codescan.portable as portable
-from lup.codescan.common import RuleStrength
+from lup.codescan.common import RuleSelection, RuleStrength
 
 type RuleFamily = Literal["anti-pattern", "boundary", "spelling", "architecture"]
 
@@ -234,6 +234,17 @@ def anti_pattern_rules(
 
 def all_rules(
     rules: antipatterns.AntiPatternSet | None = None,
+    selection: RuleSelection | None = None,
 ) -> list[RegisteredRule]:
-    """Every registered rule across all families, structural rules first."""
-    return [*STRUCTURAL_RULES, *anti_pattern_rules(rules)]
+    """Every rule this repository holds itself to, structural family first.
+
+    The reference is generated from the same selection the sweep and the
+    compiled plugin read, so a rule a project retired is absent from all
+    three rather than documented as enforced by a page nothing enforces.
+    """
+    kept = selection or RuleSelection()
+    return [
+        rule
+        for rule in [*STRUCTURAL_RULES, *anti_pattern_rules(rules)]
+        if kept.keeps(rule.id)
+    ]
