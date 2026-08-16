@@ -606,7 +606,7 @@ def create_dev_app(
             recovery_cost=recovery_cost,
         )
         try:
-            url = issues_mod.file_friction_report(report, issue=issue)
+            url = report.file(issue=issue)
         except (RuntimeError, sh.ErrorReturnCode) as failure:
             typer.echo(str(failure), err=True)
             raise typer.Exit(1) from failure

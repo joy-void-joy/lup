@@ -69,7 +69,7 @@ def test_filing_targets_the_checkout_repository(
     )
     monkeypatch.setattr(issues, "gh", fake_gh)
     monkeypatch.setattr(issues, "repository_slug", lambda: "owner/repository")
-    url = issues.file_friction_report(friction_report())
+    url = friction_report().file()
     assert url == "https://github.test/o/r/issues/9"
     assert calls == [
         (
@@ -90,7 +90,7 @@ def test_filing_requires_an_explicit_repository(
 ) -> None:
     monkeypatch.setattr(issues, "repository_slug", lambda: "")
     with pytest.raises(RuntimeError, match="origin names no GitHub repository"):
-        issues.file_friction_report(friction_report())
+        friction_report().file()
 
 
 def test_correction_edits_the_numbered_issue(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -101,9 +101,7 @@ def test_correction_edits_the_numbered_issue(monkeypatch: pytest.MonkeyPatch) ->
         )
     )
     monkeypatch.setattr(issues, "gh", fake_gh)
-    url = issues.file_friction_report(
-        friction_report(), repository="owner/repository", issue=179
-    )
+    url = friction_report().file(repository="owner/repository", issue=179)
     assert url == "https://github.test/o/r/issues/179"
     assert calls == [
         (
@@ -122,7 +120,7 @@ def test_correction_edits_the_numbered_issue(monkeypatch: pytest.MonkeyPatch) ->
 
 def test_cli_reports_tracker_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     failure = Mock(side_effect=RuntimeError("tracker unavailable"))
-    monkeypatch.setattr(issues, "file_friction_report", failure)
+    monkeypatch.setattr(issues.FrictionReport, "file", failure)
     result = CliRunner().invoke(app, friction_arguments())
     assert result.exit_code == 1
     assert "tracker unavailable" in result.output
@@ -130,7 +128,7 @@ def test_cli_reports_tracker_failure(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_cli_forwards_correction_number(monkeypatch: pytest.MonkeyPatch) -> None:
     handler = Mock(return_value="https://github.test/o/r/issues/179")
-    monkeypatch.setattr(issues, "file_friction_report", handler)
+    monkeypatch.setattr(issues.FrictionReport, "file", handler)
     result = CliRunner().invoke(app, [*friction_arguments(), "--issue", "179"])
     assert result.exit_code == 0
-    handler.assert_called_once_with(friction_report(), issue=179)
+    handler.assert_called_once_with(issue=179)
