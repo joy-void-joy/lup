@@ -124,7 +124,7 @@ async def fill_missing_snippets(results: list[SearchResult]) -> list[SearchResul
     async def repaired(result: SearchResult) -> SearchResult:
         if result.snippet is not None:
             return result
-        # TEMPLATE: recover the field from a real fallback endpoint
+        # lup: template: recover the field from a real fallback endpoint
         # Example:
         #
         # summary = await fallback_api.page_summary(result.url)
@@ -146,7 +146,7 @@ async def fetch_wiki_article(url: str) -> FetchOutput:
     """
     title = PurePosixPath(urlparse(url).path).name
 
-    # TEMPLATE: implement the structured API call for this host
+    # lup: template: implement the structured API call for this host
     # Example with the Wikipedia REST API:
     #
     # async with httpx.AsyncClient() as client:
@@ -173,7 +173,7 @@ async def fetch_wiki_article(url: str) -> FetchOutput:
 async def fetch_generic(url: str) -> FetchOutput:
     """Plain fetch for hosts without a specialized handler."""
 
-    # TEMPLATE: implement real fetching here, or delete this example tool
+    # lup: template: implement real fetching here, or delete this example tool
     # Example with httpx:
     #
     # try:
@@ -251,7 +251,7 @@ async def search_example(params: SearchInput) -> SearchOutput:
     if not params.query:
         raise ToolError("Query is required")
 
-    # TEMPLATE: implement real search here, or delete this example tool
+    # lup: template: implement real search here, or delete this example tool
     # Example with a real search API:
     #
     # try:

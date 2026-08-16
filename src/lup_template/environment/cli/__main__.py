@@ -113,7 +113,7 @@ async def run_session(
 def commit_results() -> None:
     """Commit any uncommitted session results.
 
-    TEMPLATE: customize the commit message/scope, or remove auto-commit.
+    # lup: template: customize the commit message/scope, or remove auto-commit.
     This commits session outputs (notes/traces/) after each run. For
     domains like forecasting, game playing, or batch processing, it keeps
     data commits atomic and automatic; interactive domains (e.g. coaching)
@@ -218,7 +218,7 @@ def loop(
 ) -> None:
     """Run multiple agent sessions and auto-commit results.
 
-    TEMPLATE: adapt the task format and post-processing for your domain.
+    # lup: template: adapt the task format and post-processing for your domain.
     This is the primary entry point for batch processing: for a
     forecasting bot, tasks might be question IDs; for a game-playing
     agent, game configs.

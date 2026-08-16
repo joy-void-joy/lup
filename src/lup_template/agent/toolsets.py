@@ -12,7 +12,7 @@ serve-tools``) and selects them by name; both assemblies live in
 ``core.build_session_options`` — so adding a group or tool here reaches every
 backend, and there is deliberately nowhere else to add one.
 
-TEMPLATE: register tool groups in build_session_toolset + tool_group_names.
+# lup: template: register tool groups in build_session_toolset + tool_group_names.
 Add each domain group in :func:`build_session_toolset`, and its name in
 :func:`tool_group_names` when it should be served to subprocess backends.
 """

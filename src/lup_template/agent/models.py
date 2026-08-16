@@ -21,7 +21,7 @@ from lup.workspace.history import SessionResult
 class Factor(BaseModel):
     """A single factor influencing the output.
 
-    TEMPLATE: redefine the factor fields for your domain. Examples:
+    # lup: template: redefine the factor fields for your domain. Examples:
     - For forecasting: text, direction (pro/con), weight
     - For coaching: insight, relevance, actionability
     - For game playing: consideration, evaluation, confidence
@@ -67,7 +67,7 @@ class AgentOutput(BaseModel):
         description="Confidence in the output (0-1)",
     )
 
-    # TEMPLATE: add your domain's output fields
+    # lup: template: add your domain's output fields
     # probability: float  # For forecasting
     # move: str           # For game playing
     # response: str       # For coaching

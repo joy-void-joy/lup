@@ -64,7 +64,7 @@ MISSING_SLEEP_MESSAGE = (
 )
 """Corrective nudge for a turn that ended without sleeping.
 
-TEMPLATE: this domain expects a meta assessment before sleep, so the nudge
+# lup: template: this domain expects a meta assessment before sleep, so the nudge
 names that step. Pass it to ``run_relay_session(missing_sleep_message=...)``;
 drop the meta wording for domains that don't gate sleep on reflection.
 """
@@ -141,7 +141,7 @@ def create_realtime_tools(
 ) -> list[LupMcpTool]:
     """Create the standard set of real-time MCP tools.
 
-    TEMPLATE: customize these tools' wording and context for your domain.
+    # lup: template: customize these tools' wording and context for your domain.
     The tools are closures bound to the session state via the scheduler
     and build_context callback.
 
@@ -412,7 +412,7 @@ def create_observer(
 ) -> BackgroundAgent[ObserverState, ObserverSummary]:
     """Create an observer background agent.
 
-    TEMPLATE: customize the observer's prompt, model, and build_message.
+    # lup: template: customize the observer's prompt, model, and build_message.
 
     The environment supplies an :class:`ObserverState` on each wake. The
     background turn returns a typed replacement summary; no provider-specific

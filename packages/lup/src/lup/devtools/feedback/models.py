@@ -47,7 +47,7 @@ class LoadedSession(SessionRecord):
 
 
 # =============================================================================
-# TEMPLATE: replace these models' fields with what your domain scores on
+# lup: template: replace these models' fields with what your domain scores on
 # =============================================================================
 
 

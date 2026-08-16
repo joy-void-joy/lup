@@ -41,7 +41,7 @@ class ToolPolicy(BaseToolPolicy):
       opts it back in — ``execute_code`` in the sandbox is the sanctioned code
       path, so host shell is never granted implicitly, sandbox present or not.
 
-    TEMPLATE: customize ``__init__`` to define your exclusion logic; override
+    # lup: template: customize ``__init__`` to define your exclusion logic; override
     ``group_enabled`` to gate groups on your domain's conditions (e.g. a
     ``live_data`` group only outside restricted mode) and ``get_mcp_servers``
     to register your domain's servers, e.g.::
@@ -65,7 +65,7 @@ class ToolPolicy(BaseToolPolicy):
         tags: ExclusionReasons = dict(excluded_tags or {})
         names: ExclusionReasons = dict(excluded_tools or {})
 
-        # TEMPLATE: map each unmet requirement to its tag and the reason —
+        # lup: template: map each unmet requirement to its tag and the reason —
         # replace the example-api check with your domain's keys
         if not settings.example_api_key:
             tags["requires:example-api"] = "EXAMPLE_API_KEY is not configured"
@@ -79,7 +79,7 @@ class ToolPolicy(BaseToolPolicy):
                 "it back in); execute_code is the sanctioned code path"
             )
 
-        # TEMPLATE: add more name exclusions for tools you don't own here
+        # lup: template: add more name exclusions for tools you don't own here
 
         super().__init__(
             restricted_mode=restricted_mode,

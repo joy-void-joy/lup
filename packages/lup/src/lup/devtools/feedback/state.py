@@ -52,7 +52,7 @@ def load_sessions(
 def load_outcomes() -> dict[str, JsonValue]:
     """Load outcome data for sessions.
 
-    TEMPLATE: implement your domain's outcome loading (customization step 9).
+    # lup: template: implement your domain's outcome loading (customization step 9).
     This stub raises so callers can tell "not implemented" from
     "implemented, no outcomes yet" instead of silently aggregating
     nothing.
