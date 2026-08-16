@@ -29,7 +29,10 @@ What is held here instead is the shape of the gates themselves, and the
 judgements no gate fires on.
 """
 
+from pydantic import BaseModel
+
 import lup.harness.models as models
+from lup.codescan.common import RuleSelection
 
 PLAN_AT_AGENT_SPEED: list[models.PromptPart] = [
     models.TextPart(
@@ -90,9 +93,74 @@ live in the generated index, which carries every rule rather than whichever
 subset a prose list happened to name, and cannot fall behind the registry.
 """
 
-DESIGN_PRINCIPLES: list[models.PromptPart] = [
-    models.TextPart(
-        text=r"""### Design Principles
+
+class ShapingRule(BaseModel, frozen=True):
+    """One rule worth knowing before the fact, and the shape it steers to."""
+
+    id: str
+    steers_to: str
+
+    def named(self) -> str:
+        """This rule as the guidance spells it, id first and gloss beside it."""
+        return f"`{self.id}` ({self.steers_to})"
+
+
+SHAPING_RULES: list[ShapingRule] = [
+    ShapingRule(
+        id="own-model-dispatch",
+        steers_to=(
+            "a union answers through its members, never through `isinstance` "
+            "over our own types"
+        ),
+    ),
+    ShapingRule(
+        id="abc-capability",
+        steers_to="a capability ABC is an engine, never a surface a consumer holds",
+    ),
+    ShapingRule(
+        id="model-free-function", steers_to="a model carries its own operations"
+    ),
+    ShapingRule(
+        id="constant-declaration",
+        steers_to="a judgement reaches its caller as an overridable default",
+    ),
+]
+"""The rules worth naming before the fact, each with the shape it steers to.
+
+Held as a declaration rather than inside the sentence because the sentence
+has to name only the rules a project still enforces: one that retired a rule
+and went on being told to know it by name would be reading advice about a
+gate that cannot stop it, which is the drift this module exists to prevent.
+"""
+
+
+def shaping_sentence(selection: RuleSelection) -> str:
+    """The paragraph naming the live shaping rules, or nothing where none are."""
+    kept = [rule.named() for rule in SHAPING_RULES if selection.keeps(rule.id)]
+    if not kept:
+        return ""
+    listed = kept[0] if len(kept) == 1 else f"{', '.join(kept[:-1])}, and {kept[-1]}"
+    return (
+        "\nSome rules shape a design before any gate could catch it. Know these by "
+        "name and read them in `docs/rules.md` while choosing a shape rather than "
+        f"after being stopped: {listed}.\n"
+    )
+
+
+def design_principles(
+    selection: RuleSelection | None = None,
+) -> list[models.PromptPart]:
+    """What no rule fires on, plus the rule ids this project still enforces.
+
+    Everything mechanical was removed on the test that a denial would have
+    named it in time. What survived either has no executable rule at all, or
+    has one that arrives too late to change the shape being chosen — for
+    those, the id is a lookup key rather than the rule restated, and only
+    while the project still holds itself to it.
+    """
+    return [
+        models.TextPart(
+            text=r"""### Design Principles
 
 A gate catches a violation once it is written. These change what gets written, so they are here rather than in the index.
 
@@ -101,19 +169,12 @@ A gate catches a violation once it is written. These change what gets written, s
 - **Placement decides the package** — would another project built on this library want it? Then it belongs to the library. Only this application? Then it stays in the application. The same test applies to values, not only to code, which is why a judgement reaches a caller as an overridable default rather than as a constant they would have to fork.
 - **The code is the source of truth** — it should read as though it had always been written this way. Never reference what code used to do, and never write "now", "new", "updated", "fixed", or "changed" in a comment. Change history belongs in commit messages.
 - Reach for `for` and comprehensions over `while`, and for `match`/`case` over an `if`/`elif` chain dispatching on a value or a range.
-
-Some rules shape a design before any gate could catch it. Know these by name and read them in `docs/rules.md` while choosing a shape rather than after being stopped: `own-model-dispatch` (a union answers through its members, never through `isinstance` over our own types), `abc-capability` (a capability ABC is an engine, never a surface a consumer holds), `model-free-function` (a model carries its own operations), and `constant-declaration` with `library-default` (a judgement reaches its caller as an overridable default).
-
 """
-    ),
-]
-"""What no rule fires on, plus the rule ids worth knowing before the fact.
+        ),
+        models.TextPart(text=shaping_sentence(selection or RuleSelection())),
+        models.TextPart(text="\n"),
+    ]
 
-Everything mechanical was removed on the test that a denial would have named
-it in time. What survived either has no executable rule at all, or has one
-that arrives too late to change the shape being chosen — for those, the id
-is given as a lookup key rather than the rule restated.
-"""
 
 SANCTIONED_EXCEPTIONS: list[models.PromptPart] = [
     models.TextPart(

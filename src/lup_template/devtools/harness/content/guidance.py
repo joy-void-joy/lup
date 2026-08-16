@@ -15,10 +15,12 @@ for as long as it agrees.
 
 import lup.devtools.harness.content.conventions as conventions
 import lup.harness.models as models
+from lup.codescan.common import RuleSelection
 
-DOCUMENT = models.PromptDocument(
-    source=__name__,
-    parts=[
+
+def guidance_parts(selection: RuleSelection) -> list[models.PromptPart]:
+    """This repository's guidance, naming only the rules it still enforces."""
+    return [
         models.TextPart(
             text=r"""# Lup repository guidance
 
@@ -104,7 +106,7 @@ Use existing libraries from PyPI before writing raw HTTP or rebuilding a wheel.
 
 """
         ),
-        *conventions.DESIGN_PRINCIPLES,
+        *conventions.design_principles(selection),
         *conventions.SANCTIONED_EXCEPTIONS,
         models.TextPart(
             text=r"""---
@@ -180,5 +182,16 @@ When a question is about the harness you are running under, its agent SDK, or it
             text=r"""The durable fix is a capability, not a rule: trace the failure to the missing input or the workflow step where the wrong decision entered, and change that. A prompt rule coexists peacefully with the failure it warns about.
 """
         ),
-    ],
-)
+    ]
+
+
+def document(selection: RuleSelection | None = None) -> models.PromptDocument:
+    """The guidance as one document, built against the project's selection.
+
+    Taking the selection rather than reading one keeps the catalog free to
+    import this module: the catalog owns the declaration and hands it down,
+    so nothing here reaches back up for it.
+    """
+    return models.PromptDocument(
+        source=__name__, parts=guidance_parts(selection or RuleSelection())
+    )

@@ -42,7 +42,7 @@ from lup.policy.refused_tools import RefusedTool
 from lup.workspace.paths import project_root, read_project_name
 from lup_template.agent.toolsets import tool_group_names
 from lup_template.devtools.harness.content.catalog import AGENTS, SKILLS
-from lup_template.devtools.harness.content.guidance import DOCUMENT as GUIDANCE
+from lup_template.devtools.harness.content.guidance import document as guidance_document
 from lup_template.devtools.harness.content.shell_vocabulary import (
     RUNNER_TARGETS,
     SHELL_RULES,
@@ -349,7 +349,7 @@ def portable_harness(version: str = "0.2.0", root: Path | None = None) -> Harnes
         generator_version=version,
         source_evidence={"content": "typed-python"},
         plugins=[plugin],
-        guidance=GUIDANCE,
+        guidance=guidance_document(plugin.hooks.rules if plugin.hooks else None),
         resolver=ResolveSpec(
             id="resolver.lup",
             worker_identity="resolver-worker",
