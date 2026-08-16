@@ -42,7 +42,7 @@ from lup.policy.refused_tools import RefusedTool
 from lup.workspace.paths import project_root, read_project_name
 from lup_template.agent.toolsets import tool_group_names
 from lup_template.devtools.harness.content.catalog import AGENTS, SKILLS
-from lup_template.devtools.harness.content.guidance import DOCUMENT as GUIDANCE
+from lup_template.devtools.harness.content.guidance import document as guidance_document
 from lup_template.devtools.harness.content.shell_vocabulary import (
     RUNNER_TARGETS,
     SHELL_RULES,
@@ -208,13 +208,15 @@ def dev_project() -> DevProject:
     The package name is derived from where this file actually sits rather
     than written down, so initialization renaming the package moves the
     scans with it instead of leaving them resolving against a name that is
-    gone. The roles come from the same hook set the generated trees enforce,
-    so a scan and a hook cannot disagree about what a path is for.
+    gone. The roles and the rule selection come from the same hook set the
+    generated trees enforce, so a scan and a hook cannot disagree about what
+    a path is for, nor about which rules are live here.
     """
     hooks = declared_hook_set()
     return DevProject(
         package=Path(__file__).resolve().parents[2].name,
         roots=application_roots(),
+        rules=hooks.rules,
         path_roles=[
             PathRoleRow(root=role.root.as_posix(), role=role.role)
             for role in hooks.path_roles
@@ -347,7 +349,7 @@ def portable_harness(version: str = "0.2.0", root: Path | None = None) -> Harnes
         generator_version=version,
         source_evidence={"content": "typed-python"},
         plugins=[plugin],
-        guidance=GUIDANCE,
+        guidance=guidance_document(plugin.hooks.rules if plugin.hooks else None),
         resolver=ResolveSpec(
             id="resolver.lup",
             worker_identity="resolver-worker",

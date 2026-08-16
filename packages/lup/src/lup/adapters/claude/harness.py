@@ -544,7 +544,8 @@ class ClaudeHookRenderer(ArtifactRenderer[HookSet]):
                         auto_escape_prefixes=[],
                         diagnostics_command=source.diagnostics_command,
                         rules=antipattern_set_for(
-                            self.spellings.read_document(DOCUMENT_IN_HAND)
+                            self.spellings.read_document(DOCUMENT_IN_HAND),
+                            source.rules,
                         ),
                     ),
                     semantic_id=source.id,

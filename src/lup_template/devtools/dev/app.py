@@ -18,7 +18,7 @@ import lup_template.devtools.dev.library as library
 import lup_template.devtools.harness.catalog as catalog
 from lup.devtools.dev.app import DevDeclarations, create_dev_app
 from lup_template.devtools.harness.composition import REPOSITORY_WIDE, TARGETS
-from lup_template.devtools.harness.content.guidance import DOCUMENT as GUIDANCE
+from lup_template.devtools.harness.content.guidance import document as guidance_document
 
 
 def declared() -> DevDeclarations:
@@ -43,7 +43,7 @@ app = create_dev_app(
     declared=declared,
     native_targets=TARGETS,
     repository_writers=REPOSITORY_WIDE,
-    guidance=GUIDANCE,
+    guidance=guidance_document(catalog.declared_hook_set().rules),
     relocate_roots=[
         Path("src"),
         Path("packages"),
