@@ -59,6 +59,7 @@ except ImportError as exc:
     ) from exc
 from docker.errors import APIError, DockerException, NotFound
 from docker.models.containers import Container, ExecResult
+from docker.types import Mount as DockerMount
 from docker.utils.socket import SocketError
 
 from lup.mcp import (
@@ -234,16 +235,7 @@ class Sandbox:
                     "across calls but is not visible on the host."
                 ),
             ),
-            Mount(
-                container_path=self.shared_path,
-                source=str(self.shared_dir),
-                kind="bind",
-                mode="rw",
-                purpose=(
-                    f"File exchange with the host directory {self.shared_dir}; "
-                    "read host inputs and write host outputs here."
-                ),
-            ),
+            *self.shared_mounts(),
             *[
                 Mount(
                     container_path=f"{self.SOURCE_ROOT}/{name}",
@@ -258,6 +250,57 @@ class Sandbox:
                 for name, root in sorted(self.source_roots.items())
             ],
             *self.declared_mounts(),
+        ]
+
+    def shared_mounts(self) -> list[Mount]:
+        """The exchange directory, at every path that names it.
+
+        A caller who moved the exchange onto its host path keeps the default
+        path alongside it. Paths are written in the code the sandbox runs as
+        well as in tool arguments, and code carrying the default spelling
+        reaches no boundary where anything could correct it — so the cheaper
+        answer is for both spellings to be true.
+        """
+        primary = Mount(
+            container_path=self.shared_path,
+            source=str(self.shared_dir),
+            kind="bind",
+            mode="rw",
+            purpose=(
+                f"File exchange with the host directory {self.shared_dir}; "
+                "read host inputs and write host outputs here."
+            ),
+        )
+        if self.shared_path == self.DEFAULT_SHARED_PATH:
+            return [primary]
+        return [
+            primary,
+            Mount(
+                container_path=self.DEFAULT_SHARED_PATH,
+                source=str(self.shared_dir),
+                kind="bind",
+                mode="rw",
+                purpose=f"The same directory as {self.shared_path}.",
+            ),
+        ]
+
+    def docker_mounts(self) -> list[DockerMount]:
+        """The topology as Docker's own mount specification.
+
+        A list rather than the ``volumes`` mapping Docker also accepts: that
+        mapping is keyed by host path, so one directory mounted at two
+        container paths loses one of them, and silently — which is exactly
+        what a caller asks for when they want a path to mean the same thing
+        on both sides.
+        """
+        return [
+            DockerMount(
+                target=mount.container_path,
+                source=mount.source,
+                type=mount.kind,
+                read_only=mount.mode == "ro",
+            )
+            for mount in self.mount_topology()
         ]
 
     def topology(self) -> MountTopology:
@@ -469,16 +512,15 @@ class Sandbox:
             self.container_name,
             self.network_mode,
         )
-        logger.info("Mounting shared directory: %s -> /shared", self.shared_dir)
+        logger.info(
+            "Mounting shared directory: %s -> %s", self.shared_dir, self.shared_path
+        )
         self.active_container = self.docker_client.containers.run(
             self.docker_image,
             name=self.container_name,
             command="sleep infinity",
             detach=True,
-            volumes={
-                mount.source: {"bind": mount.container_path, "mode": mount.mode}
-                for mount in self.mount_topology()
-            },
+            mounts=self.docker_mounts(),
             working_dir="/workspace",
             mem_limit="1g",
             network_mode=self.network_mode,

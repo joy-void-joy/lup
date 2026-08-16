@@ -150,6 +150,26 @@ class TestUnifiedSpelling:
         assert topology.to_host(named).resolved == named
         assert topology.to_container(named).resolved == named
 
+    def test_the_default_spelling_still_answers(self, tmp_path: Path) -> None:
+        """Code the sandbox runs carries paths too, and reaches no boundary
+        where a stale spelling could be corrected — so both stay true."""
+        shared = (tmp_path / "shared").resolve()
+        sandbox = Sandbox(
+            session_id="unified", shared_dir=shared, shared_path=str(shared)
+        )
+        topology = topology_of(sandbox)
+
+        assert (
+            topology.to_host("/shared/out.csv").resolved
+            == topology.to_host(str(shared / "out.csv")).resolved
+            == str(shared / "out.csv")
+        )
+
+    def test_a_default_sandbox_gains_no_second_mount(self, tmp_path: Path) -> None:
+        paths = [m.container_path for m in make_sandbox(tmp_path).mount_topology()]
+
+        assert paths.count("/shared") == 1
+
     def test_the_default_keeps_the_two_spellings_apart(self, tmp_path: Path) -> None:
         """Unifying is the caller's choice, not something taken from them."""
         topology = topology_of(make_sandbox(tmp_path))
