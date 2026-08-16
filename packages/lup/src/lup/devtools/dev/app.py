@@ -569,6 +569,13 @@ def create_dev_app(
                 "--fix", help="Move each directive to its canonical placement"
             ),
         ] = False,
+        retire: Annotated[
+            str,
+            typer.Option(
+                "--retire",
+                help="Answer every directive naming this now-retired rule id",
+            ),
+        ] = "",
     ) -> None:
         """Measure every `# lup: ignore` against the canonical inline placement.
 
@@ -578,6 +585,12 @@ def create_dev_app(
         which only fit above, so the fallback is sized against the tree rather
         than assumed.
         """
+        if retire:
+            answered = antipatterns_mod.retire_directives(declared().project, retire)
+            typer.echo(f"{len(answered)} file(s) answered for {retire}")
+            for rel in answered:
+                typer.echo(f"  {rel}")
+            return
         if fix:
             moved = antipatterns_mod.place_directives(declared().project, limit)
             typer.echo(f"{len(moved)} file(s) replaced")
