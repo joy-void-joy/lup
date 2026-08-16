@@ -19,6 +19,9 @@ Examples::
 
 import re
 from pathlib import Path
+import tomlkit
+from tomlkit.container import Container
+from tomlkit.items import Comment
 import typer
 
 from lup.workspace.paths import find_project_root
@@ -138,6 +141,50 @@ def rename_in_pyproject(path: Path, new_name: str, dry_run: bool) -> list[str]:
     return changes
 
 
+def clear_scaffold_flag(path: Path, dry_run: bool) -> list[str]:
+    """Drop ``[tool.lup] template`` — this repository has adopted the template.
+
+    Adopting is what turns the scaffold's customization markers from inventory
+    into decisions this domain has not made yet, so the flag that says "still
+    the scaffold" goes when the name does.
+
+    Edited through tomlkit rather than by matching the line, because the key
+    carries an explanatory comment and matching text would put a second copy
+    of that comment here to drift against the first — a reworded comment would
+    silently stop clearing the flag, and the repository that adopted the
+    template would never be told what it still owes. The parser sees the key
+    whatever the prose around it says, and preserves the rest of the file's
+    formatting.
+
+    The comment goes with it. Deleting the key alone leaves the paragraph that
+    explains it standing over nothing, which downstream reads as an
+    instruction about a setting that is not there.
+    """
+
+    def drop_with_preamble(table: Container, name: str) -> None:
+        """Remove one key and the standalone comment lines introducing it."""
+        body = table.body
+        index = next(
+            position
+            for position, (key, _) in enumerate(body)
+            if key is not None and key.key == name
+        )
+        start = index
+        while start and isinstance(body[start - 1][1], Comment):
+            start -= 1
+        del body[start : index + 1]
+
+    document = tomlkit.parse(path.read_text())
+    match document:
+        case {"tool": {"lup": {"template": _} as lup}}:
+            drop_with_preamble(lup.value, "template")
+        case _:
+            return []
+    if not dry_run:
+        path.write_text(tomlkit.dumps(document))
+    return ["  scaffold flag: cleared — dev check now lists open decisions"]
+
+
 def rename_cli_app_name(cli_path: Path, new_name: str, dry_run: bool) -> list[str]:
     """Update the Typer app name in the CLI module."""
     if not cli_path.exists():
@@ -231,6 +278,7 @@ def rename_package(
     pyproject = root / "pyproject.toml"
     typer.echo("\npyproject.toml:" if dry_run else "Updating pyproject.toml...")
     all_changes.extend(rename_in_pyproject(pyproject, new_name, dry_run))
+    all_changes.extend(clear_scaffold_flag(pyproject, dry_run))
 
     cli_path = old_pkg / "environment" / "cli" / "__main__.py"
     typer.echo("\nCLI app name:" if dry_run else "Updating CLI app name...")

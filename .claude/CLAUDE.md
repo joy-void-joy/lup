@@ -54,6 +54,8 @@ A `# lup:` (or `// lup:`) comment is **actionable review feedback** left in the 
 
 A customization marker is answered by writing this domain's own code where the scaffold's example stood, which leaves no original ask for a claim to be checked against — so it is deleted rather than converted, exactly as `ignore` is. `uv run lup-devtools dev todos` lists every one still standing (an alias for `dev comments --kind template`), and initialization walks them one by one.
 
+The same marker reads two ways, and `[tool.lup] template` in `pyproject.toml` says which. While that flag stands, this repository is the scaffold itself and its markers are inventory: `dev check` counts them and says no more. Initialization clears the flag in the same rewrite that renames the package, and from then on every marker still standing lists in `dev check` as a decision this domain has not made. Advisory either way — a domain that means to leave one standing writes `# lup: defer:` and says why.
+
 Resolve open feedback by fixing what it points at, or, for a question, by answering it definitively in the code, the docs, or a recorded user decision. Then rewrite the marker as **`# lup: solved: <the note's original words>`**, text unchanged, so the claim sits beside what it claims to fix and can be checked against what was asked. `docs/contributing.md` carries the full lifecycle (use `/lup:resolve`).
 
 ### Deferred Work

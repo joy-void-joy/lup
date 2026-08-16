@@ -67,6 +67,11 @@ where = ["src"]
 
 [tool.lup]
 agent_version = "0.2.0"
+# This repository is the scaffold itself, so its `# lup: template:` markers are
+# inventory rather than outstanding work. `dev init` clears this when a domain
+# adopts the template, and from then on `dev check` lists every marker still
+# standing. Never set it in a repository built from this one.
+template = true
 
 [tool.uv]
 exclude-newer = "3 days"

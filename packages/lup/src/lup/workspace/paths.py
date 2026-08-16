@@ -92,6 +92,23 @@ def declares_lup(table: JsonObject | None) -> bool:
     return False
 
 
+def is_template_scaffold(root: Path) -> bool:
+    """Whether this repository is still the unadopted scaffold itself.
+
+    ``[tool.lup] template = true`` says so, and initialization clears it in the
+    same rewrite that renames the package. The flag is what lets one rule read
+    two ways: a customization marker is inventory in the scaffold that ships
+    it and outstanding work in the repository that adopted it, and nothing
+    else in the tree distinguishes those two readings. Absent or false — the
+    state of every downstream repository — answers false, so a repo that never
+    carried the flag is treated as adopted rather than as a scaffold.
+    """
+    match manifest_table(root / "pyproject.toml"):
+        case {"tool": {"lup": {"template": True}}}:
+            return True
+    return False
+
+
 def declared_project_root(start: Path) -> Path | None:
     """The nearest enclosing directory whose pyproject declares ``[tool.lup]``.
 

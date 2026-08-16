@@ -244,6 +244,31 @@ def test_inline_notes_list_deferred_after_unresolved() -> None:
     ]
 
 
+def test_customization_markers_are_inventory_in_the_scaffold_and_work_downstream() -> (
+    None
+):
+    """One marker, two readings, chosen by whether this repo is still the scaffold.
+
+    Upstream the scaffold ships these on purpose, so listing them would put a
+    permanent wall of text in front of the notes somebody is actually owed.
+    Downstream they are decisions the adopting domain has not made, so they
+    have to say where they are.
+    """
+    markers = [
+        note_at("a.py", 3, kind=NoteKind.template, text="pick a model tier"),
+        note_at("b.py", 9, kind=NoteKind.template, text="name your outputs"),
+    ]
+
+    assert inline_notes_lines(markers, scaffold=True) == [
+        "inline notes: 0 unresolved, 2 customization (advisory)"
+    ]
+    assert inline_notes_lines(markers, scaffold=False) == [
+        "inline notes: 0 unresolved, 2 customization (advisory)",
+        "  customization a.py:3-3",
+        "  customization b.py:9-9",
+    ]
+
+
 def test_open_notes_report_without_refusing_the_tree_that_carries_them() -> None:
     """A note asks somebody for something; a branch is expected to carry open ones."""
     lines = inline_notes_lines(
