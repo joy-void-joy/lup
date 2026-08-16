@@ -99,6 +99,7 @@ class GhPrDetail(BaseModel):
     checks: list[GhCheck] = Field(default=[], alias="statusCheckRollup")
     review_decision: str = Field(default="", alias="reviewDecision")
     mergeable: str = ""
+    state: str = ""
 
 
 class GhPrRef(BaseModel):
@@ -338,6 +339,26 @@ def status(
     output_result(result, as_json)
 
 
+def pr_merged(pr_number: int) -> bool:
+    """Whether GitHub says the PR is merged, asked rather than inferred.
+
+    ``gh pr merge`` merges and then deletes the branch, and reports a
+    failure of the second as a failure of the whole. Reading the state back
+    separates a merge that did not happen from a cleanup that did not, which
+    are opposite situations: the first is retried, the second is finished
+    work with a leftover, and treating either as the other is how a landed
+    PR comes to look like one still waiting.
+    """
+    try:
+        detail = GhPrDetail.model_validate_json(
+            gh.out("pr", "view", str(pr_number), "--json", "state")
+        )
+    except sh.ErrorReturnCode:
+        logger.exception("could not read PR #%s state back", pr_number)
+        return False
+    return detail.state == "MERGED"
+
+
 def merge(
     pr_number: int,
     dry_run: bool,
@@ -366,8 +387,14 @@ def merge(
         gh("pr", "merge", str(pr_number), f"--{method}", "--delete-branch", *gh_args)
         typer.echo(f"Merged PR #{pr_number}")
     except sh.ErrorReturnCode as e:
-        typer.echo(f"Merge failed: {decode_stderr(e)}", err=True)
-        raise typer.Exit(1)
+        if not pr_merged(pr_number):
+            typer.echo(f"Merge failed: {decode_stderr(e)}", err=True)
+            raise typer.Exit(1)
+        typer.echo(
+            f"Merged PR #{pr_number}, but its cleanup did not finish: "
+            f"{decode_stderr(e)}",
+            err=True,
+        )
 
     try:
         tree_dir = get_tree_dir()

@@ -15,6 +15,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+import sh
 import typer
 from typer.testing import CliRunner
 
@@ -154,6 +155,60 @@ def test_merge_hands_further_flags_to_gh_untouched(merge_stubs: FakeGh) -> None:
     pr.merge(42, dry_run=False, gh_args=("--admin",))
 
     assert "--admin" in merge_stubs.calls[0]
+
+
+class GhExitOne(sh.ErrorReturnCode):
+    """A concrete non-zero exit; the sh base leaves ``exit_code`` to subclasses."""
+
+    exit_code = 1
+
+
+class FailingGh:
+    """gh exiting non-zero, over a PR left in *state*."""
+
+    def __init__(self, state: str) -> None:
+        self.state = state
+        self.calls: list[tuple[str, ...]] = []
+
+    def __call__(self, *args: str) -> str:
+        self.calls.append(args)
+        raise GhExitOne(
+            "gh pr merge", b"", b"failed to delete local branch: used by worktree"
+        )
+
+    def out(self, *args: str) -> str:
+        self.calls.append(args)
+        return f'{{"state": "{self.state}"}}'
+
+
+def test_a_cleanup_that_failed_is_not_a_merge_that_failed(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """gh deletes the branch after merging, and reports the second as the whole.
+
+    A worktree holding the branch is enough to fail that step, which leaves a
+    landed PR reported as an unlanded one — and a caller who believes it
+    merges again, or hand-lands work that is already in.
+    """
+    monkeypatch.setattr(pr, "gh", FailingGh("MERGED"))
+    monkeypatch.setattr(pr, "get_integration_branch", lambda: "dev")
+    monkeypatch.setattr(pr, "get_tree_dir", raise_typer_exit)
+
+    pr.merge(42, dry_run=False)
+
+    assert "cleanup did not finish" in capsys.readouterr().err
+
+
+def test_a_merge_that_did_not_happen_still_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(pr, "gh", FailingGh("OPEN"))
+    monkeypatch.setattr(pr, "get_integration_branch", lambda: "dev")
+    monkeypatch.setattr(pr, "get_tree_dir", raise_typer_exit)
+
+    with pytest.raises(typer.Exit):
+        pr.merge(42, dry_run=False)
 
 
 def test_annotated_downstream_config_raises_a_typed_recovery_error(
