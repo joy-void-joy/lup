@@ -35,6 +35,7 @@ from lup.codeintel.replies import (
 )
 from lup.mcp import LupMcpTool, ToolError, lup_tool
 from lup.types import JsonValue
+from lup.workspace.edition import edition_path, read_edition
 
 REQUEST_TIMEOUT_SECONDS = 120.0
 """Budget for one question. A server that stops answering fails the tool."""
@@ -154,11 +155,36 @@ def sites_of(result: JsonValue) -> list[SymbolSite]:
     ]
 
 
+def workspace_for(
+    file: Path, fallback: Path, markers: tuple[str, ...] = WORKSPACE_MARKERS
+) -> Path:
+    """The checkout that should answer about *file*, not the one launched in.
+
+    A language server is started once, against the directory the session
+    opened, and keeps that root for its lifetime. Ask it about a file in
+    another checkout of the same repository — a worktree, which is where
+    this project asks that every change be made — and it resolves the
+    imports against the launch directory: same module names, different
+    source, and an answer that is well-formed and about the wrong tree.
+
+    The file is the one thing a question carries that knows where it lives,
+    so it is what picks the workspace. Module scope rather than a closure
+    because every consumer that drives a language server needs the same
+    answer, and one of them getting it right by accident of process
+    lifetime is how this went unnoticed.
+    """
+    for directory in file.parents:
+        if any((directory / marker).exists() for marker in markers):
+            return directory
+    return fallback
+
+
 def create_codeintel_tools(
     server: Path,
     root: Path,
     request_timeout: float = REQUEST_TIMEOUT_SECONDS,
     markers: tuple[str, ...] = WORKSPACE_MARKERS,
+    edition: Path | None = None,
 ) -> list[LupMcpTool]:
     """Build the code-intelligence tools driving *server* over *root*.
 
@@ -167,6 +193,11 @@ def create_codeintel_tools(
         root: Checkout a relative path resolves against, and the workspace
             for a file that sits in no discoverable one.
         markers: What makes a directory a workspace root, nearest first.
+        edition: Where the permission hook publishes where editing is
+            happening. Defaults to the location both halves derive from the
+            repository, which is the only one either can name without being
+            told; a caller supplies its own to keep a test out of the real
+            repository's state.
 
     Returns:
         Tools answering definition, reference, hover, symbol, and rename
@@ -183,34 +214,34 @@ def create_codeintel_tools(
             ) from error
 
     def located(path: str) -> Path:
-        resolved = (root / path).resolve()
+        against = editing_root() or root
+        resolved = (against / path).resolve()
         if not resolved.is_file():
-            raise ToolError(f"no such file under {root}: {path}")
+            raise ToolError(f"no such file under {against}: {path}")
         return resolved
 
-    def workspace_for(file: Path) -> Path:
-        """The checkout that should answer about *file*, not the one launched in.
+    def editing_root() -> Path | None:
+        """The checkout being edited, for a path that names no checkout itself.
 
-        A server is started once, against the directory the session opened,
-        and keeps that root for its lifetime. Ask it about a file in another
-        checkout of the same repository — a worktree, which is where this
-        project asks that every change be made — and it would resolve the
-        imports against the launch directory: same module names, different
-        source, and an answer that is well-formed and about the wrong tree.
-        The file is the only thing a question carries that knows where it
-        lives, so it is what picks the workspace.
+        An absolute path answers this for itself and never reaches here. A
+        relative one cannot: it is relative to the working directory of
+        whoever asked, and this server is a separate process whose own is
+        fixed at launch — so joining it to the launch checkout is a guess
+        that reads another tree's file whenever work has moved, silently,
+        because both trees hold that path.
+
+        The permission hook publishes where editing is happening on every
+        edit, which is the fact the guess was standing in for.
         """
-        for directory in file.parents:
-            if any((directory / marker).exists() for marker in markers):
-                return directory
-        return root
+        published = read_edition(edition or edition_path(root))
+        return published.workspace if published is not None else None
 
     async def at_position(method: str, params: PositionInput) -> JsonValue:
         resolved = located(params.path)
 
         async def run() -> JsonValue:
             async with lsp_session(
-                server, workspace_for(resolved), name=server.name
+                server, workspace_for(resolved, root, markers), name=server.name
             ) as session:
                 return await session.request(
                     method,
@@ -239,7 +270,7 @@ def create_codeintel_tools(
 
         async def run() -> JsonValue:
             async with lsp_session(
-                server, workspace_for(resolved), name=server.name
+                server, workspace_for(resolved, root, markers), name=server.name
             ) as session:
                 request = await session.position_in(
                     resolved, params.line, params.column
@@ -270,7 +301,7 @@ def create_codeintel_tools(
 
         async def run() -> JsonValue:
             async with lsp_session(
-                server, workspace_for(resolved), name=server.name
+                server, workspace_for(resolved, root, markers), name=server.name
             ) as session:
                 await session.open(resolved)
                 return await session.request(
@@ -301,7 +332,7 @@ def create_codeintel_tools(
 
         async def run() -> JsonValue:
             async with lsp_session(
-                server, workspace_for(resolved), name=server.name
+                server, workspace_for(resolved, root, markers), name=server.name
             ) as session:
                 request = await session.position_in(
                     resolved, params.line, params.column

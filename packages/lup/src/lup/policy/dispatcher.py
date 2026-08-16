@@ -130,6 +130,16 @@ class DispatcherDeclaration(BaseModel, frozen=True):
     Each field is required, so answering the whole set is what constructing a
     runtime means. Adding a field is how a new axis of divergence is opened,
     and both runtimes have to close it before the tree compiles again.
+
+    ``hook_events`` is every event the plugin registers, and
+    ``observation_event`` names the one among them that decides nothing.
+    The tools are declared apart because the two are registered for
+    different sets: a deciding event covers everything the dispatcher
+    routes, since a call it is not registered for is a call nobody judged,
+    while the watching event covers the editing tools alone. It exists only
+    to record where editing is happening, and a matcher wide enough for the
+    deciding set would spawn the script after every shell command to find
+    nothing worth recording.
     """
 
     runtime_name: str
@@ -137,6 +147,8 @@ class DispatcherDeclaration(BaseModel, frozen=True):
     managed_root_env: str
     routed_tools: list[str]
     hook_events: list[str]
+    observation_event: str
+    observed_tools: list[str]
     failure: DispatcherFailure
     runtime_modules: list[str]
 
@@ -417,9 +429,20 @@ def declaration_breaches(
     """Axes the declaration promised that the runtime half does not keep."""
     constants = string_constants(runtime.tree)
     entrypoint = runtime.function(ENTRYPOINT)
-    closes = entrypoint is not None and any(
+    # Read from the failure handler rather than from the whole entrypoint.
+    # The axis is what a dispatcher does with input it cannot decide from,
+    # and an exit anywhere else answers a different question — a watching
+    # event reporting what it found has no decision channel to answer
+    # through, and exiting is the only way it reaches the agent at all.
+    handlers = (
+        [node for node in ast.walk(entrypoint) if isinstance(node, ast.ExceptHandler)]
+        if entrypoint is not None
+        else []
+    )
+    closes = any(
         isinstance(node, ast.Name) and node.id == "SystemExit"
-        for node in ast.walk(entrypoint)
+        for handler in handlers
+        for node in ast.walk(handler)
     )
     routed = runtime.routed_tools()
     declared = sorted(declaration.routed_tools)

@@ -317,6 +317,10 @@ def portable_harness(version: str = "0.2.0", root: Path | None = None) -> Harnes
             ],
             human_owned_files=[Path("README.md")],
             refused_tools=REFUSED_TOOLS,
+            # Which checker answers for an edit is this project's toolchain,
+            # not the library's: the path is relative to the checkout that
+            # holds the edited file, so a worktree runs its own.
+            diagnostics_command=[".venv/bin/pyright", "--outputjson"],
             shell_rules=SHELL_RULES,
             # This project's toolchain: what `uv run <target>` may reach here
             # without a question, which is nothing any other project inherits.

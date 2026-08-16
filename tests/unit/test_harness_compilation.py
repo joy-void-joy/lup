@@ -385,6 +385,31 @@ def test_codex_recipe_registers_semantic_permission_approval() -> None:
     assert "hooks/scripts/policy.py" in hook_config
 
 
+def test_the_watching_event_is_registered_for_editing_tools_alone() -> None:
+    """A narrow matcher, because this event is registered to record, not judge.
+
+    The deciding events cover everything the dispatcher routes, so sharing
+    one registration would spawn the script after every shell command and
+    every fetch to find no edited file to record. The two are separate keys
+    for that reason, and the compiler still proves the dispatcher may name
+    the event at all.
+    """
+    for target, plugin_root, edits in (
+        (claude_target, ".claude", "Edit|Write"),
+        (codex_target, ".codex", "apply_patch"),
+    ):
+        artifacts = {
+            artifact.path: artifact
+            for artifact in target(Path.cwd()).recipe.desired.artifacts
+        }
+        registered = json.loads(
+            artifacts[Path(f"{plugin_root}/plugins/lup/hooks/hooks.json")].content
+        )["hooks"]
+
+        assert registered["PostToolUse"][0]["matcher"] == edits
+        assert registered["PreToolUse"][0]["matcher"] != edits
+
+
 def test_generated_resolver_entries_only_launch_the_shared_python_core() -> None:
     harness = portable_harness()
     claude = {

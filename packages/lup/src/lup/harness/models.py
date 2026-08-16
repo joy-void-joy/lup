@@ -741,6 +741,14 @@ class HookSet(BaseModel, frozen=True):
             "denied; declare a downstream toolchain here, not in the kernel"
         ),
     )
+    diagnostics_command: list[str] = Field(
+        default=[],
+        description=(
+            "How to type-check one edited file, run from the checkout that "
+            "holds it with the file appended. Empty declares no checker, and "
+            "reports nothing rather than guessing at one"
+        ),
+    )
     refused_tools: list[RefusedTool] = Field(
         default=[],
         description=(

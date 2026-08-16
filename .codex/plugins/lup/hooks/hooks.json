@@ -13,6 +13,19 @@
         "matcher": "Bash|web_fetch|apply_patch|Artifact|Skill"
       }
     ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "command": "python3 \"$PLUGIN_ROOT/hooks/scripts/policy.py\"",
+            "statusMessage": "Checking Lup policy",
+            "timeout": 30,
+            "type": "command"
+          }
+        ],
+        "matcher": "apply_patch"
+      }
+    ],
     "PreToolUse": [
       {
         "hooks": [

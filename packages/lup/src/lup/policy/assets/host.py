@@ -18,6 +18,7 @@ variable to read — never as a branch on which runtime is asking.
 
 import json
 import os
+import sys
 
 # lup: ignore[subprocess] — `sh` is third-party and this half is compiled into a bare script that has no virtual environment to resolve it from
 import subprocess
@@ -52,14 +53,156 @@ def worktree_path(path_text: str) -> str:
     launch directory; the cwd this script is promised nothing about is not a
     root at all. Both leave the path absolute, and every rule silently misses.
     """
+    root = worktree_root(path_text)
+    if not root:
+        return path_text
+    return Path(path_text).resolve().relative_to(root).as_posix()
+
+
+def worktree_root(path_text: str) -> str:
+    """The checkout a path belongs to, or "" when it belongs to none.
+
+    The same walk :func:`worktree_path` relativizes against, kept whole
+    rather than discarded, because the root is the answer to a second
+    question: a language server asked about this file resolves its imports
+    against exactly this directory, and resolving them against wherever the
+    session was launched reads the same module names out of another tree.
+    """
     path = Path(path_text)
     if not path.is_absolute():
-        return path_text
+        return ""
     resolved = path.resolve()
-    for root in resolved.parents:
+    # The path itself is a candidate, not only its parents: a file never
+    # holds a `.git`, so nothing changes for one, and a directory that is
+    # already a checkout root would otherwise be answered for by whatever
+    # encloses it — or by nothing at all.
+    for root in [resolved, *resolved.parents]:
         if (root / ".git").exists():
-            return resolved.relative_to(root).as_posix()
-    return path_text
+            return str(root)
+    return ""
+
+
+def shared_git_directory(path_text: str) -> str:
+    """The one directory every worktree of a repository can name alike.
+
+    The publisher sits in whichever checkout was edited and the reader in
+    whichever one its server was launched from, and neither can see the
+    other's. What they share is git's own directory: a linked worktree's
+    ``.git`` is a file naming its per-worktree directory beneath the common
+    one, and a main checkout's ``.git`` is that common directory. So both
+    ends resolve to one place without either being told where the other is,
+    and without depending on a variable reaching a hook and a server alike.
+
+    The common directory rather than the main checkout, because a checkout
+    is not guaranteed to be there: a repository can keep its git directory
+    beside its worktrees rather than inside one, and then the path above
+    `worktrees/` is not a checkout at all — it is whatever happens to
+    enclose the repository, which is nobody's to write into.
+    """
+    root = worktree_root(path_text)
+    if not root:
+        return ""
+    marker = Path(root) / ".git"
+    if marker.is_dir():
+        return str(marker)
+    try:
+        named = marker.read_text(encoding="utf-8")
+    except OSError:
+        return ""
+    gitdir = named.removeprefix("gitdir:").strip()
+    if not gitdir:
+        return ""
+    # `<common>/worktrees/<name>` — two levels up in either layout.
+    linked = Path(gitdir)
+    if len(linked.parents) < 2:
+        return ""
+    return str(linked.parents[1])
+
+
+def publish_edition(path_text: str) -> None:
+    """Say which checkout an edit landed in, for the servers that would guess.
+
+    A language server and the code-intelligence tools are started once and
+    hold the directory the session opened in for the rest of their lives.
+    Editing moves — this project asks that it move, into a worktree — and
+    nothing about that reaches them, so they answer about the launch tree
+    with no sign that they have. The edited file is the one thing that knows
+    where editing is happening, and this is the only place that sees it.
+
+    Written after the tool ran, never before: the same call from the
+    permission path would put a filesystem failure between an edit and its
+    verdict, and this must not be able to decide anything. For the same
+    reason an unwritable destination is reported and dropped — a session
+    whose diagnostics stay rooted where they were is worth strictly more
+    than one that stopped editing over it.
+
+    The rename is the whole guarantee, and the temporary is dot-prefixed, for
+    the reasons ``lup.channels.models.write_atomic`` gives. This cannot call
+    that one: it is compiled into a bare script with no ``lup`` to import.
+    """
+    root = worktree_root(path_text)
+    shared = shared_git_directory(path_text)
+    if not root or not shared:
+        return
+    destination = Path(shared) / "lup" / "edition.json"
+    record = json.dumps(
+        {"workspace": root, "file": str(Path(path_text).resolve())}, indent=2
+    )
+    temporary_path = destination.with_name(f".{destination.name}.tmp")
+    try:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        temporary_path.write_text(record + "\n", encoding="utf-8")
+        temporary_path.replace(destination)
+    except OSError as error:
+        print(f"lup: could not publish the edition: {error}", file=sys.stderr)
+
+
+def file_diagnostics(
+    path_text: str, command: list[str], timeout_seconds: float = 20.0
+) -> list[str]:
+    """Type-check one edited file, in the checkout that actually holds it.
+
+    A language server the runtime starts is rooted once, where the session
+    opened, and goes on resolving imports there after work moves to another
+    checkout — same module names, different source, diagnostics about a file
+    nobody edited. Running the checker per edit has no root to go stale:
+    the file names its own checkout, and that is where the check runs.
+
+    Reported for the edited file alone. The checker resolves whatever the
+    file imports, so it can have opinions about the whole tree, and a hook
+    that repeated them would answer every edit with the same backlog.
+
+    Anything that goes wrong is no diagnostics. A checker that is missing, or
+    slow, or writes something this cannot read, is not evidence about the
+    edit — and this runs after the tool, so the alternative to saying
+    nothing is failing an edit that already happened.
+    """
+    if not command:
+        return []
+    root = worktree_root(path_text)
+    if not root:
+        return []
+    executable = Path(root) / command[0]
+    if not executable.is_file():
+        return []
+    edited = str(Path(path_text).resolve())
+    try:
+        finished = subprocess.run(
+            [str(executable), *command[1:], edited],
+            capture_output=True,
+            text=True,
+            cwd=root,
+            timeout=timeout_seconds,
+            check=False,
+        )
+        reported = json.loads(finished.stdout)["generalDiagnostics"]
+    except (OSError, subprocess.SubprocessError, ValueError, KeyError):
+        return []
+    return [
+        f"{item['severity']} {item['range']['start']['line'] + 1}: {item['message']}"
+        for item in reported
+        if item["file"] == edited and item["severity"] != "information"
+    ]
 
 
 def existing_write_targets(targets: list[str]) -> list[str]:
