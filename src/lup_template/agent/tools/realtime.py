@@ -56,18 +56,16 @@ from lup.telemetry.trace import TraceLogger
 logger = logging.getLogger(__name__)
 
 
+# lup: template: this domain expects a meta assessment before sleep, so the nudge
+# names that step. Pass it to ``run_relay_session(missing_sleep_message=...)``;
+# drop the meta wording for domains that don't gate sleep on reflection.
 MISSING_SLEEP_MESSAGE = (
     "Your turn ended without calling sleep. This is a persistent session: "
     "you yield control with the sleep tool, and the environment wakes you "
     "when something happens. Finish any pending replies, record a meta "
     "assessment, then call sleep."
 )
-"""Corrective nudge for a turn that ended without sleeping.
-
-# lup: template: this domain expects a meta assessment before sleep, so the nudge
-names that step. Pass it to ``run_relay_session(missing_sleep_message=...)``;
-drop the meta wording for domains that don't gate sleep on reflection.
-"""
+"""Corrective nudge for a turn that ended without sleeping."""
 
 
 # =====================================================================
@@ -133,6 +131,7 @@ class ObserverSummary(BaseModel):
 # =====================================================================
 
 
+# lup: template: customize these tools' wording and context for your domain.
 def create_realtime_tools(
     *,
     scheduler: Scheduler,
@@ -141,7 +140,6 @@ def create_realtime_tools(
 ) -> list[LupMcpTool]:
     """Create the standard set of real-time MCP tools.
 
-    # lup: template: customize these tools' wording and context for your domain.
     The tools are closures bound to the session state via the scheduler
     and build_context callback.
 
@@ -405,14 +403,13 @@ def create_observer_tools(
     return [observer_notes_tool]
 
 
+# lup: template: customize the observer's prompt, model, and build_message.
 def create_observer(
     *,
     notes: list[str],
     model: str | None = None,
 ) -> BackgroundAgent[ObserverState, ObserverSummary]:
     """Create an observer background agent.
-
-    # lup: template: customize the observer's prompt, model, and build_message.
 
     The environment supplies an :class:`ObserverState` on each wake. The
     background turn returns a typed replacement summary; no provider-specific

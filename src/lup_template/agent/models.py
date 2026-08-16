@@ -18,14 +18,12 @@ from lup.workspace.history import SessionResult
 # =============================================================================
 
 
+# lup: template: redefine the factor fields for your domain. Examples:
+# - For forecasting: text, direction (pro/con), weight
+# - For coaching: insight, relevance, actionability
+# - For game playing: consideration, evaluation, confidence
 class Factor(BaseModel):
-    """A single factor influencing the output.
-
-    # lup: template: redefine the factor fields for your domain. Examples:
-    - For forecasting: text, direction (pro/con), weight
-    - For coaching: insight, relevance, actionability
-    - For game playing: consideration, evaluation, confidence
-    """
+    """A single factor influencing the output."""
 
     text: str = Field(description="Description of the factor")
     factor_type: str = Field(description="Type of factor (customize for your domain)")

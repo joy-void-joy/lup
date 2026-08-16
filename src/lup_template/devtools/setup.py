@@ -78,11 +78,9 @@ def slack_status(env: EnvVars) -> IntegrationStatus:
     return IntegrationStatus(ok=False, detail="not configured")
 
 
+# lup: template: Replace with your Google API scopes and services.
 def setup_google() -> EnvVars:
-    """Walk through Google OAuth setup (Gmail, Calendar, etc).
-
-    # lup: template: Replace with your Google API scopes and services.
-    """
+    """Walk through Google OAuth setup (Gmail, Calendar, etc)."""
     console.print()
     console.rule("[bold]Google (OAuth)[/]")
     console.print()

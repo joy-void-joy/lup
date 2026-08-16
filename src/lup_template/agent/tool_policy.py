@@ -30,6 +30,17 @@ if TYPE_CHECKING:
     from lup_template.agent.config import Settings
 
 
+# lup: template: customize ``__init__`` to define your exclusion logic; override
+# ``group_enabled`` to gate groups on your domain's conditions (e.g. a
+# ``live_data`` group only outside restricted mode) and ``get_mcp_servers``
+# to register your domain's servers, e.g.::
+#
+#     def get_mcp_servers(self, *additional_servers):
+#         servers = super().get_mcp_servers(*additional_servers)
+#         servers["search"] = search_server
+#         if not self.restricted_mode:
+#             servers["live_data"] = live_data_server
+#         return servers
 class ToolPolicy(BaseToolPolicy):
     """Map application settings to tool exclusions.
 
@@ -40,18 +51,6 @@ class ToolPolicy(BaseToolPolicy):
     - Host shell: raw shell (Bash) is dropped unless ``AGENT_SANDBOX_ALLOW_SHELL``
       opts it back in — ``execute_code`` in the sandbox is the sanctioned code
       path, so host shell is never granted implicitly, sandbox present or not.
-
-    # lup: template: customize ``__init__`` to define your exclusion logic; override
-    ``group_enabled`` to gate groups on your domain's conditions (e.g. a
-    ``live_data`` group only outside restricted mode) and ``get_mcp_servers``
-    to register your domain's servers, e.g.::
-
-        def get_mcp_servers(self, *additional_servers):
-            servers = super().get_mcp_servers(*additional_servers)
-            servers["search"] = search_server
-            if not self.restricted_mode:
-                servers["live_data"] = live_data_server
-            return servers
     """
 
     def __init__(
