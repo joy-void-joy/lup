@@ -57,15 +57,15 @@ def test_a_plain_method_is_reported() -> None:
 
 
 def test_a_property_is_reported_at_its_decorator() -> None:
-    assert audit("    @property\n    def payload(self) -> str:\n        return ''\n") == [
-        "missing:@property"
-    ]
+    assert audit(
+        "    @property\n    def payload(self) -> str:\n        return ''\n"
+    ) == ["missing:@property"]
 
 
 def test_an_abstract_method_is_reported() -> None:
-    assert audit(
-        "    @abstractmethod\n    def spell(self) -> str: ...\n"
-    ) == ["missing:@abstractmethod"]
+    assert audit("    @abstractmethod\n    def spell(self) -> str: ...\n") == [
+        "missing:@abstractmethod"
+    ]
 
 
 def test_a_classmethod_is_reported() -> None:
@@ -116,7 +116,9 @@ def test_a_class_we_do_not_declare_as_a_model_is_not_reported() -> None:
     assert (
         reported(
             "class Plain:\n    def act(self) -> None: ...\n",
-            audit_model_methods([source("class Plain:\n    def act(self) -> None: ...\n")]),
+            audit_model_methods(
+                [source("class Plain:\n    def act(self) -> None: ...\n")]
+            ),
         )
         == []
     )
@@ -161,6 +163,6 @@ def test_a_bare_suppression_is_reported_as_untyped() -> None:
 
 
 def test_a_suppression_guarding_nothing_is_reported_as_spurious() -> None:
-    assert audit(
-        "    text: str = ''  # lup: ignore[model-method] — stale\n"
-    ) == ["spurious:text: str = ''  # lup: ignore[model-method] — stale"]
+    assert audit("    text: str = ''  # lup: ignore[model-method] — stale\n") == [
+        "spurious:text: str = ''  # lup: ignore[model-method] — stale"
+    ]

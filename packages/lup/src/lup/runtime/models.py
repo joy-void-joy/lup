@@ -342,12 +342,10 @@ class TurnRequest[T: BaseModel | None](
 # answers for itself: `input` is the value being packaged, in either of the two
 # spellings a caller may hand it, and the operation is building the request
 # around it rather than anything a TurnInput does to itself.
-# lup: ignore[model-free-function] — a constructor; TurnInput is what it packages
 @overload
 def turn_request(input: str | TurnInput) -> TurnRequest[None]: ...
 
 
-# lup: ignore[model-free-function] — a constructor; TurnInput is what it packages
 @overload
 def turn_request[T: BaseModel](
     input: str | TurnInput,
@@ -355,7 +353,6 @@ def turn_request[T: BaseModel](
 ) -> TurnRequest[T]: ...
 
 
-# lup: ignore[model-free-function] — a constructor; TurnInput is what it packages
 def turn_request[T: BaseModel](
     input: str | TurnInput,
     output_type: type[T] | None = None,

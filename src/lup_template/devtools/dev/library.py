@@ -254,7 +254,6 @@ def apply_dependency(document: tomlkit.TOMLDocument, version: str | None) -> lis
 
 # GitSource's own share of this is `git.entry()`; what is left is the edit to
 # `[tool.uv.sources]`, which the document owns and one mode's argument does not.
-# lup: ignore[model-free-function] — the TOML document is the subject
 def apply_source(
     document: tomlkit.TOMLDocument,
     mode: LibraryMode,
@@ -406,7 +405,6 @@ def guard_leaving_local(root: Path, force: bool) -> None:
 
 # Rewriting `pyproject.toml` is about the checkout, and `git` is the argument
 # exactly one mode reads — beside `version` and `checkout`, which the others do.
-# lup: ignore[model-free-function] — the checkout is the subject, git one mode's input
 def set_mode(
     root: Path,
     mode: LibraryMode,
@@ -480,7 +478,6 @@ def use_library(
 
 # The body of `dev library git`, beside the other three command entries: its
 # subject is the command line, and GitSource is what the flags parsed into.
-# lup: ignore[model-free-function] — CLI command body over its parsed flags
 def git_library(
     source: GitSource, keep_vendored: bool, force: bool, dry_run: bool
 ) -> None:

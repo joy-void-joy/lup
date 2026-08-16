@@ -96,7 +96,6 @@ class ClaudeHookPayload(BaseModel, frozen=True):
     tool_input: JsonObject = {}
 
 
-# lup: ignore[model-free-function] — boundary decoder off Claude's wire payload
 def parse_claude_before_tool(payload: ClaudeHookPayload) -> ClaudeBeforeToolEvent:
     """Decode Claude names and payload fields at the adapter boundary."""
     match payload.tool_name, payload.tool_input:

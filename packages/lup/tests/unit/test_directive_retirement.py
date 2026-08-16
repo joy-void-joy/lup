@@ -40,7 +40,9 @@ def test_an_unrelated_comment_above_the_directive_is_kept() -> None:
 
 
 def test_a_directive_naming_other_rules_keeps_them() -> None:
-    text = f"# lup: ignore[dict-get, {RULE}, set-shape] — reason\ndef act() -> None: ...\n"
+    text = (
+        f"# lup: ignore[dict-get, {RULE}, set-shape] — reason\ndef act() -> None: ...\n"
+    )
     assert retired_directives(text, RULE) == (
         "# lup: ignore[dict-get, set-shape] — reason\ndef act() -> None: ...\n"
     )

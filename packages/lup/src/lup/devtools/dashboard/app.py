@@ -104,7 +104,6 @@ def find_integration(integrations: list[Integration], command: str) -> Integrati
     return integration
 
 
-# lup: ignore[model-free-function] — subject is the registry, not the payload
 def save_integration(
     integrations: list[Integration], command: str, update: IntegrationUpdate
 ) -> DashboardState:

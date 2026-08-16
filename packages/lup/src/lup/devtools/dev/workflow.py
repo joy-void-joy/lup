@@ -86,7 +86,6 @@ jobs:
         )
 
 
-# lup: ignore[model-free-function] — driver writing the artifact into a tree
 def write_workflow(
     spec: WorkflowSpec, root: Path | None = None, *, check: bool = False
 ) -> Path:

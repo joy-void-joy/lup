@@ -76,7 +76,6 @@ class UrlScope(BaseModel, frozen=True):
 # The three erasures to the kernel's primitive rows read alike on purpose, and
 # `antipattern_row` erases a model another module declares, so it could not be
 # a method even if these two were.
-# lup: ignore[model-free-function] — one of that erasure family
 def url_scope_row(scope: UrlScope) -> UrlScopeRow:
     """Erase a validated URL scope into the kernel's primitive row."""
     parsed = urlsplit(str(scope.origin))
@@ -233,7 +232,6 @@ class PathRule(BaseModel, frozen=True):
         )
 
 
-# lup: ignore[model-free-function] — the same erasure family as url_scope_row
 def path_rule_row(rule: PathRule) -> PathRuleRow:
     """Erase one validated path rule into the kernel's primitive row."""
     return PathRuleRow(

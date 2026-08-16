@@ -81,7 +81,6 @@ def allowed_network_domains(hooks: HookSet) -> list[str]:
     return list(dict.fromkeys(merged))
 
 
-# lup: ignore[model-free-function] — renderer over a declaration and a plugin
 def project_settings(declared: Settings, plugin: Plugin | None) -> JsonObject:
     """Render the settings artifact, deriving every block it can.
 

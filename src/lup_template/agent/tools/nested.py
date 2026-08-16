@@ -50,7 +50,6 @@ class CritiqueOutput(BaseModel):
 # a session, bounding its output, folding it into CritiqueOutput. CritiqueInput
 # is the schema `lup_tool` infers the tool's arguments from, so it names how the
 # agent calls in rather than a subject the critique could be declared on.
-# lup: ignore[model-free-function] — MCP tool handler; CritiqueInput is its input schema
 @lup_tool(
     "Get an independent second opinion on a draft from a nested agent. Use when "
     "the main agent wants a fresh critique without spending its own context on a "
