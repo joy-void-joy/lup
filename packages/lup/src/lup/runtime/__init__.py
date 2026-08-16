@@ -25,6 +25,8 @@ concerns:
 - :mod:`lup.runtime.background` — a debounced consumer of the session
   capabilities that coalesces state wakes into turns on one persistent
   session.
+- :mod:`lup.runtime.threads` — blocking calls on a process-lifetime executor,
+  so work in flight outlives any one loop's teardown.
 
 ``contracts`` and ``models`` define the vocabulary; every other module
 composes them; the named adapter packages implement them.

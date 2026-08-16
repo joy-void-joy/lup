@@ -9,6 +9,7 @@ from queue import Queue
 import sh
 from pydantic import BaseModel
 
+from lup.runtime.threads import run_sync
 from lup.types import EnvVars, JsonObject, JsonValue
 
 
@@ -184,7 +185,7 @@ class CodexAppServer:
     async def watch_process(self, process: sh.RunningCommand) -> None:
         """Wake the JSON-RPC reader when the native process exits or reaches EOF."""
         try:
-            await asyncio.to_thread(process.wait)
+            await run_sync(process.wait)
         except sh.ErrorReturnCode as error:
             if not self.closing:
                 stderr = "".join(self.stderr).strip()
