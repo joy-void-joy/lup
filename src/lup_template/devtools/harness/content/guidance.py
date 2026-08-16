@@ -32,11 +32,39 @@ Lup is a reusable framework and template for autonomous, tool-using agents. Keep
         models.TextPart(text=r"""Change the policy those gates enforce with """),
         models.SkillInvocation(plugin="lup", skill="hooks"),
         models.TextPart(
-            text=r""", which edits the canonical inputs in `lup.policy` and the `HookSet` in `devtools/harness/catalog.py`, regenerates both native plugins, and runs the shared fixture suite. Harness generation compiles one hermetic dispatcher and runtime per plugin; never edit a generated dispatcher or runtime, and keep harness settings project-level, in the tree the harness owns ("""
+            text=r""", which edits the canonical inputs in `lup.policy` and the `HookSet` in `devtools/harness/catalog.py`, regenerates both native plugins, and runs the shared fixture suite. Harness generation compiles one hermetic dispatcher and runtime per plugin, so never edit a generated dispatcher or runtime.
+
+Harness settings stay project-level, in the tree the harness owns ("""
         ),
         models.NativePath(location="project_settings"),
         models.TextPart(
             text=r"""), which holds only the native settings outside that semantic policy boundary — never user-level.
+
+### The `# lup:` Marker Vocabulary
+
+A `# lup:` (or `// lup:`) comment is **actionable review feedback** left in the code for the agent to address — a quick bug remark, a feature idea, anything whose subject is the code and small enough that the site it concerns is the right place to keep it. Three flavors carry feedback, and only the removal rules differ; the fourth spelling, `# lup: ignore[<rule>]`, is the anti-pattern hatch above rather than feedback, and goes when its violation does.
+
+| Marker | Removing it |
+|---|---|
+| `# lup: <text>` — open feedback | **denied**; resolve it into a claim instead |
+| `# lup: solved: <text>` — a claim you addressed it | **denied**; only the verify-solved review pass retires one |
+| `# lup: defer: <text>` — parked work | **denied** while parked |
+
+Resolve open feedback by fixing what it points at, or, for a question, by answering it definitively in the code, the docs, or a recorded user decision. Then rewrite the marker as **`# lup: solved: <the note's original words>`**, text unchanged, so the claim sits beside what it claims to fix and can be checked against what was asked. `docs/contributing.md` carries the full lifecycle (use `"""
+        ),
+        models.SkillInvocation(plugin="lup", skill="resolve"),
+        models.TextPart(
+            text=r"""`).
+
+### Deferred Work
+
+**Never create tracking files.** A `TODO.md`, backlog, or roadmap file parks a decision where no workflow will surface it again — deferral by tracking file is delegation to nobody. Work that is not being done now lives in one of three places, chosen by what it is attached to:
+
+- **A `# lup: defer: <text>` note**, when the work belongs to a site in this code, where `dev check` keeps it visible until somebody wakes it. Default to the bare `defer:`; a bracketed `defer[<gate>]: <text>` states a real, externally-checkable gate, never that this code might change again.
+- **A GitHub issue**, when the subject is the tooling misbehaving rather than the code — friction, a command that half-completes, a classifier reporting a failed probe as fact, output that makes no sense. Nothing in the tree owns that, so a note would have nowhere to sit; Reporting Friction below says what to record.
+- **A question to the user**, when whether to defer at all is itself the open question.
+
+`docs/contributing.md` carries the first and the last, and the one exception to all three — a `tmp/` briefing, which starts a fresh session on a situation this one cannot finish, and is rewritten whole rather than appended to.
 
 ---
 
@@ -65,7 +93,7 @@ Use existing libraries from PyPI before writing raw HTTP or rebuilding a wheel.
 
 **Model selection.** Default to the **strongest** tier for the main agent, every subagent, reviewer, and background agent. This runs on a subscription where the best model is the point: reach for a **balanced** tier only when latency or cost provably dominates and quality is non-critical, and for the **fast** tier almost never. A role that genuinely warrants a cheaper model declares that tier explicitly with a reason; otherwise it inherits the strongest default. Agent declarations state the tier, not a model id — each runtime spells the tier in its own lineup.
 
-**Error handling.** MCP tools return `{"content": [...], "is_error": True}` for recoverable errors, logged with `logger.exception()` and carrying an actionable message. Agent code raises for unrecoverable errors, wraps transient failures in `with_retry`, and validates inputs early with Pydantic. Never swallow one silently — log it, handle it, or re-raise. A catch-all `except Exception` is fine at a boundary that does one of those, such as a task loop or subagent delegation, which is why no rule refuses it.
+**Error handling.** A `@lup_tool` handler takes a validated model and returns one; raise `ToolError` to send a recoverable failure back as an MCP error, with a message saying what to do about it. The `is_error` envelope and the input-validation reply are the decorator's, not yours to assemble. Elsewhere, agent code raises for unrecoverable errors, wraps transient failures in `with_retry`, and validates inputs early with Pydantic. Never swallow one silently — log it, handle it, or re-raise. A catch-all `except Exception` is fine at a boundary that does one of those, such as a task loop or subagent delegation, which is why no rule refuses it.
 
 **Placement, in this repository.** Reusable utilities belong in `packages/lup/`; what only this application needs belongs in `src/lup_template/`. If logic already exists in `lup`, import it rather than copying it. `docs/library.md` carries the criterion and the target layout.
 
@@ -74,27 +102,7 @@ Use existing libraries from PyPI before writing raw HTTP or rebuilding a wheel.
         *conventions.DESIGN_PRINCIPLES,
         *conventions.SANCTIONED_EXCEPTIONS,
         models.TextPart(
-            text=r"""### Inline `# lup:` Notes
-
-A `# lup:` (or `// lup:`) comment is **actionable review feedback** left in the code for the agent to address. Three flavors carry feedback, and only the removal rules differ; the fourth spelling, `# lup: ignore[<rule>]`, is an anti-pattern hatch rather than feedback and goes when its violation does.
-
-| Marker | Removing it |
-|---|---|
-| `# lup: <text>` — open feedback | **denied**; resolve it into a claim instead |
-| `# lup: solved: <text>` — a claim you addressed it | **denied**; only the verify-solved review pass retires one |
-| `# lup: defer: <text>` — parked work | **denied** while parked |
-
-Resolve open feedback by fixing what it points at, or, for a question, by answering it definitively in the code, the docs, or a recorded user decision. Then rewrite the marker as **`# lup: solved: <the note's original words>`**, text unchanged, so the claim sits beside what it claims to fix and can be checked against what was asked. `docs/contributing.md` carries the full lifecycle (use `"""
-        ),
-        models.SkillInvocation(plugin="lup", skill="resolve"),
-        models.TextPart(
-            text=r"""`).
-
-### Deferred Work
-
-**Never create tracking files.** A `TODO.md`, backlog, or roadmap file parks a decision where no workflow will surface it again — deferral by tracking file is delegation to nobody. Deferred work lives in exactly two places: a `# lup: defer: <text>` note at the site it concerns, where `dev check` keeps it visible; or a question to the user, when whether to defer is itself the open question. Default to the bare `defer:`; a bracket states a real, externally-checkable gate, never that this code might change again. `docs/contributing.md` carries both, and the one exception — a `tmp/` briefing, which starts a fresh session on a situation this one cannot finish, and is rewritten whole rather than appended to.
-
----
+            text=r"""---
 
 ## Tooling
 
@@ -164,9 +172,7 @@ When a question is about the harness you are running under, its agent SDK, or it
         ),
         *conventions.FAILURE_ANALYSIS,
         models.TextPart(
-            text=r"""The durable fix is a capability, not a rule: trace the failure to the missing
-input or the workflow step where the wrong decision entered, and change that.
-A prompt rule coexists peacefully with the failure it warns about.
+            text=r"""The durable fix is a capability, not a rule: trace the failure to the missing input or the workflow step where the wrong decision entered, and change that. A prompt rule coexists peacefully with the failure it warns about.
 """
         ),
     ],

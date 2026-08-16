@@ -122,8 +122,9 @@ SANCTIONED_EXCEPTIONS: list[models.PromptPart] = [
 A rule states the shape it refuses. These carve-outs are ours, and its diagnostic does not carry them:
 
 - **Barrel files.** `__all__` and `__init__.py` re-exports are refused, and import goes directly to the module that defines the symbol. The exception is a standalone package's own top-level `__init__.py`, which may declare a public API that way — the package root only, never a subpackage.
-- **Private prefixes.** Nothing is private, so a `_` prefix is refused on functions, methods, classes, and constants. An unused parameter (`_context`, `_exc_type`) is exempt: that is a linting convention, not a privacy one. A helper that genuinely should not pollute the module namespace nests inside its only caller rather than taking a prefix.
-- **Mini-wrappers.** A function whose only purpose is to call another with no logic of its own should be inlined instead.
+- **Private prefixes.** Nothing is private, so a `_` prefix is refused on functions, methods, classes, and constants. An unused parameter (`_context`, `_exc_type`) is exempt: that is a linting convention, not a privacy one. What to do instead depends on why you wanted the prefix:
+  - A helper that genuinely should not pollute the module namespace **nests inside its only caller**, which hides it without claiming privacy.
+  - A wrapper whose only purpose is to call one other function, with no logic of its own, is not a helper worth hiding at all — inline it and let the caller reach the target directly.
 
 """
     ),
