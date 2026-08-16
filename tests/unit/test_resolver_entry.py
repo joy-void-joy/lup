@@ -321,7 +321,7 @@ def test_the_page_and_console_doors_are_refused_the_same_way(tmp_path: Path) -> 
 
 
 def intake_note(
-    kind: NoteKind = "note",
+    kind: NoteKind = NoteKind.note,
     condition: str | None = None,
     file: str = "parked.py",
 ) -> FoundComment:
@@ -340,8 +340,8 @@ def intake_note(
 
 def test_resolver_intake_excludes_deferred_notes_from_the_inventory() -> None:
     open_note = intake_note()
-    parked = intake_note(kind="defer", condition="until v2 lands")
-    bare = intake_note(kind="defer")
+    parked = intake_note(kind=NoteKind.defer, condition="until v2 lands")
+    bare = intake_note(kind=NoteKind.defer)
 
     intake = resolver_intake([open_note, parked, bare], GeneratedArtifacts(by_path={}))
 
@@ -626,7 +626,7 @@ def test_an_admitted_note_target_that_names_no_open_note_is_refused() -> None:
         admission_notes(
             [NoteTargetRef(file=Path("parked.py"), line=2)],
             resolver_intake(
-                [intake_note(kind="defer", condition="until v2 lands")],
+                [intake_note(kind=NoteKind.defer, condition="until v2 lands")],
                 GeneratedArtifacts(by_path={}),
             ).actionable,
         )

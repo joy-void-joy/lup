@@ -24,8 +24,14 @@ NOTE_RE = re.compile(r"(#|//)\s*lup\s*:(?!\s*ignore\b)", re.IGNORECASE)
 # An open note is one still owed an answer, so `solved` is excluded alongside
 # `ignore`: a resolution claim is a note that has been acted on and is waiting
 # to be checked, and counting it as open would make converting one read as
-# deleting it.
-OPEN_NOTE_RE = re.compile(r"(#|//)\s*lup\s*:(?!\s*(?:ignore|solved)\b)", re.IGNORECASE)
+# deleting it. `template` is excluded for the reason `ignore` is: it is not
+# feedback anybody is owed an answer to. A customization marker is answered by
+# writing the domain's own code where the scaffold's placeholder stood, which
+# leaves no original ask for a claim to be checked against — so it is removed
+# outright, and `/lup:init` removing one must not read as deleting feedback.
+OPEN_NOTE_RE = re.compile(
+    r"(#|//)\s*lup\s*:(?!\s*(?:ignore|solved|template)\b)", re.IGNORECASE
+)
 SOLVED_NOTE_RE = re.compile(r"(#|//)\s*lup\s*:\s*solved\b", re.IGNORECASE)
 IGNORE_RE = re.compile(
     r"(#|//)\s*lup\s*:\s*ignore\b(?:\s*\[(?P<ids>[^\]]*)\])?",

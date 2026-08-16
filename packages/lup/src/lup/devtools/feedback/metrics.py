@@ -16,10 +16,10 @@ from lup.devtools.feedback.models import (
 )
 
 
+# lup: template: aggregate the outcome fields your domain scores on.
 def compute_metrics(results: list[SessionResult]) -> FeedbackMetrics:
     """Compute aggregate metrics from session results.
 
-    TEMPLATE: aggregate the outcome fields your domain scores on.
     Examples: a mean Brier score, win rate, or rating average.
 
     Sessions are counted per backend (``sessions_by_sdk``) so mixed

@@ -10,6 +10,7 @@ generated from the same declaration, so the roster is pinned here too.
 from pathlib import Path
 
 from lup.adapters.harness import claude_prompt_renderer
+from lup.codescan.markers import NoteKind
 from lup.devtools.dev.comments import FoundComment
 from lup.devtools.harness.content.skills.report import SKILL
 from lup.devtools.report.build import note_items
@@ -70,7 +71,9 @@ def test_a_note_copied_into_a_generated_tree_is_not_counted_twice() -> None:
     ]
 
     items = note_items(
-        scanned, "note", owning(".claude/plugins/lup/hooks/runtime/kernel/edit.py")
+        scanned,
+        NoteKind.note,
+        owning(".claude/plugins/lup/hooks/runtime/kernel/edit.py"),
     )
 
     assert [item.where for item in items] == [
@@ -82,14 +85,14 @@ def test_each_flavour_of_note_answers_only_its_own_topic() -> None:
     """One scan is split by kind, so a deferral is not reported as a request."""
     scanned = [
         found("a.py", "asking for something"),
-        found("b.py", "parked", kind="defer"),
-        found("c.py", "claimed", kind="solved"),
+        found("b.py", "parked", kind=NoteKind.defer),
+        found("c.py", "claimed", kind=NoteKind.solved),
     ]
     nothing_owned = owning()
 
-    assert len(note_items(scanned, "note", nothing_owned)) == 1
-    assert len(note_items(scanned, "defer", nothing_owned)) == 1
-    assert len(note_items(scanned, "solved", nothing_owned)) == 1
+    assert len(note_items(scanned, NoteKind.note, nothing_owned)) == 1
+    assert len(note_items(scanned, NoteKind.defer, nothing_owned)) == 1
+    assert len(note_items(scanned, NoteKind.solved, nothing_owned)) == 1
 
 
 def test_an_empty_topic_still_prints_its_section() -> None:

@@ -119,9 +119,9 @@ def build_report(
     owned = generated_artifacts(root)
     return Report(
         parts=[
-            ReportPart(topic=NOTES, items=note_items(found, "note", owned)),
-            ReportPart(topic=DEFERRALS, items=note_items(found, "defer", owned)),
-            ReportPart(topic=CLAIMS, items=note_items(found, "solved", owned)),
+            ReportPart(topic=NOTES, items=note_items(found, NoteKind.note, owned)),
+            ReportPart(topic=DEFERRALS, items=note_items(found, NoteKind.defer, owned)),
+            ReportPart(topic=CLAIMS, items=note_items(found, NoteKind.solved, owned)),
             ReportPart(
                 topic=DRIFT, items=drift_items(compositions, repository_writers)
             ),

@@ -6,8 +6,10 @@ Backs two `lup-devtools dev` commands (wired in `lup.devtools.dev.app`):
   deferred (`defer:`) notes in their own section;
   `report`, `commit_prompts`, and `clear_markers` back its default listing
   and its `--commit` / `--clear` modes.
-- `dev todos` lists `TEMPLATE:` customization markers — the template's
-  domain decision points that `/lup:init` walks one by one.
+- `dev todos` lists `# lup: template:` customization markers — the template's
+  domain decision points that `/lup:init` walks one by one. An alias for
+  `dev comments --kind template`, which is the same scan narrowed to that
+  flavor rather than a second scanner with a convention of its own.
 
 Examples::
 
@@ -26,11 +28,10 @@ import sh
 import typer
 
 from lup.codescan.markers import (
-    TEMPLATE_MARKER_RE,
     MarkerComment,
+    NoteKind,
     NoteTarget,
     find_feedback,
-    find_markers,
     remove_notes,
     restore_claims,
     retire_claims,
@@ -76,11 +77,6 @@ def scan_tracked(
                 FoundComment(file=rel, context=context, **comment.model_dump())
             )
     return results
-
-
-def find_todos(text: str, mode: str) -> list[MarkerComment]:
-    """Customization markers in one file's text (the `TEMPLATE:` convention)."""
-    return find_markers(text, mode, marker=TEMPLATE_MARKER_RE)
 
 
 def targets_by_file(targets: list[str]) -> dict[str, list[int]]:
@@ -222,6 +218,7 @@ def render(found: list[FoundComment], *, as_json: bool, empty: str) -> None:
         return
     deferred = [comment for comment in found if comment.kind == "defer"]
     solved = [comment for comment in found if comment.kind == "solved"]
+    customization = [comment for comment in found if comment.kind == "template"]
     for comment in found:
         if comment.kind != "note":
             continue
@@ -237,11 +234,17 @@ def render(found: list[FoundComment], *, as_json: bool, empty: str) -> None:
         for comment in solved:
             typer.echo(comment.location_line())
             typer.echo(f"    solved: {comment.text}")
+    if customization:
+        typer.echo("\nCustomization points — decisions this scaffold leaves open:")
+        for comment in customization:
+            typer.echo(comment.location_line())
+            typer.echo(f"    {comment.text}")
     files = {comment.file for comment in found}
     summary = f"\n{len(found)} comment(s) in {len(files)} file(s)"
     counted = [
         f"{len(deferred)} deferred" if deferred else "",
         f"{len(solved)} claimed" if solved else "",
+        f"{len(customization)} customization" if customization else "",
     ]
     stated = [item for item in counted if item]
     if stated:
@@ -249,22 +252,26 @@ def render(found: list[FoundComment], *, as_json: bool, empty: str) -> None:
     typer.echo(summary)
 
 
-def report(as_json: bool, commit: bool) -> None:
-    """List unresolved feedback comments; --json for tooling, --commit to snapshot them."""
+def report(as_json: bool, commit: bool, kind: NoteKind | None = None) -> None:
+    """List unresolved feedback comments; --json for tooling, --commit to snapshot them.
+
+    `kind` narrows the listing to one flavor. Left unset, the listing is the
+    repo's open feedback and excludes `template:` customization markers: those
+    are the scaffold's product rather than anybody's outstanding request, and
+    letting them join the count would put a permanent floor under it.
+    """
     if commit:
         commit_prompts()
         return
-    render(
-        scan_tracked(find_feedback),
-        as_json=as_json,
-        empty="No unresolved # lup: comments.",
-    )
-
-
-def todos(as_json: bool) -> None:
-    """List `TEMPLATE:` customization markers across tracked files."""
-    render(
-        scan_tracked(find_todos),
-        as_json=as_json,
-        empty="No TEMPLATE: markers — no customization decisions pending.",
-    )
+    found = scan_tracked(find_feedback)
+    selected = [
+        note
+        for note in found
+        if note.kind == kind or (kind is None and note.kind != "template")
+    ]
+    match kind:
+        case "template":
+            empty = "No # lup: template: markers — no customization decisions pending."
+        case _:
+            empty = "No unresolved # lup: comments."
+    render(selected, as_json=as_json, empty=empty)

@@ -64,7 +64,7 @@ def detect_system_timezone() -> str:
 
 
 # =====================================================================
-# TEMPLATE: example integration flows below (Slack, Google, timezone) —
+# lup: template: example integration flows below (Slack, Google, timezone) —
 # replace these setup/status functions with your domain's services
 # =====================================================================
 
@@ -78,11 +78,9 @@ def slack_status(env: EnvVars) -> IntegrationStatus:
     return IntegrationStatus(ok=False, detail="not configured")
 
 
+# lup: template: Replace with your Google API scopes and services.
 def setup_google() -> EnvVars:
-    """Walk through Google OAuth setup (Gmail, Calendar, etc).
-
-    TEMPLATE: Replace with your Google API scopes and services.
-    """
+    """Walk through Google OAuth setup (Gmail, Calendar, etc)."""
     console.print()
     console.rule("[bold]Google (OAuth)[/]")
     console.print()
@@ -201,7 +199,7 @@ def timezone_status(env: EnvVars) -> IntegrationStatus:
 # =====================================================================
 # Integration registry — order matters (services first, timezone last)
 #
-# TEMPLATE: Replace these with your domain's actual integrations. A
+# lup: template: Replace these with your domain's actual integrations. A
 # token-based one is just data: name, env keys, intro, browser URL, and
 # the fields to prompt for. Bespoke flows pass ``setup_func`` instead.
 # =====================================================================

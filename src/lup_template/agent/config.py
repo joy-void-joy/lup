@@ -40,7 +40,7 @@ class Settings(BaseSettings, env_file=(".env", ".env.local"), extra="ignore"):
 
         Customize this for your domain's optional dependencies.
         """
-        # TEMPLATE: list your domain's optional API keys here, e.g.
+        # lup: template: list your domain's optional API keys here, e.g.
         # "EXAMPLE_API_KEY": self.example_api_key,
         optional_keys: dict[str, str | None] = {}  # lup: ignore[dict-str-payload]
         missing = [name for name, value in optional_keys.items() if not value]
@@ -55,7 +55,7 @@ class Settings(BaseSettings, env_file=(".env", ".env.local"), extra="ignore"):
     # OPTIONAL API KEYS (tools degrade gracefully without these)
     # ==========================================================================
 
-    # TEMPLATE: replace with your domain's keys, one "requires:" tag per
+    # lup: template: replace with your domain's keys, one "requires:" tag per
     # service — tools tagged "requires:example-api" are excluded by
     # ToolPolicy when this key is missing.
     example_api_key: str | None = Field(

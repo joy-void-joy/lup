@@ -37,7 +37,7 @@ the full catalog. Where the siblings live:
 from lup.types import SubagentSpec
 
 # =============================================================================
-# TEMPLATE: tool lists — grant each subagent only the tools its job needs
+# lup: template: tool lists — grant each subagent only the tools its job needs
 # =============================================================================
 
 
@@ -66,7 +66,7 @@ def analysis_tools() -> list[str]:
 
 
 # =============================================================================
-# TEMPLATE: subagent definitions — replace researcher/analyzer with your
+# lup: template: subagent definitions — replace researcher/analyzer with your
 # domain's specialists (each spec: prompt, tool subset, pinned model)
 # =============================================================================
 

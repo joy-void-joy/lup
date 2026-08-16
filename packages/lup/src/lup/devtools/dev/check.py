@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from lup.adapters.harness import claude_prompt_renderer, codex_prompt_renderer
 from lup.codescan.markers import find_feedback
 from lup.harness.models import GUIDANCE_BYTE_BUDGET, PromptDocument, document_byte_size
+from lup.workspace.paths import is_template_scaffold, project_root
 
 from lup.devtools.dev.antipatterns import FoundAntiPattern, scan_antipatterns
 from lup.devtools.project import DevProject
@@ -56,7 +57,7 @@ class TestRoot(BaseModel):
     directory: Path
 
 
-def inline_notes_lines(found: list[FoundComment]) -> list[str]:
+def inline_notes_lines(found: list[FoundComment], scaffold: bool = False) -> list[str]:
     """The inline-notes header and detail lines.
 
     Advisory rather than gating: a note is a standing request to somebody, and
@@ -65,12 +66,24 @@ def inline_notes_lines(found: list[FoundComment]) -> list[str]:
     author chose deliberately, so this reports and the reader decides. Their
     `deferred` lines render after the unresolved ones, carrying the gate a
     bracketed deferral stated, so what is still being asked reads first.
+
+    Customization markers read two ways, and *scaffold* says which. In the
+    scaffold itself they are inventory — counted, never listed, because a
+    permanent wall of text would sit in front of the notes somebody is
+    actually owed, and `dev todos` exists to walk them. In a repository that
+    adopted the template they are decisions nobody has made yet, so they list
+    like any other note. Advisory either way: a domain that means to leave one
+    standing writes `# lup: defer:`, and that is the sentence it should have
+    to write rather than a red branch it learns to ignore.
     """
-    unresolved = [comment for comment in found if comment.kind != "defer"]
+    unresolved = [comment for comment in found if comment.kind in ("note", "solved")]
     deferred = [comment for comment in found if comment.kind == "defer"]
+    customization = [comment for comment in found if comment.kind == "template"]
     counts = f"{len(unresolved)} unresolved"
     if deferred:
         counts += f", {len(deferred)} deferred"
+    if customization:
+        counts += f", {len(customization)} customization"
     lines = [f"inline notes: {counts} (advisory)"]
     lines.extend(
         f"  {comment.file}:{comment.start_line}-{comment.end_line}"
@@ -80,6 +93,10 @@ def inline_notes_lines(found: list[FoundComment]) -> list[str]:
         f"  {comment.deferral_label()} "
         f"{comment.file}:{comment.start_line}-{comment.end_line}"
         for comment in deferred
+    )
+    lines.extend(
+        f"  customization {comment.file}:{comment.start_line}-{comment.end_line}"
+        for comment in ([] if scaffold else customization)
     )
     return lines
 
@@ -232,7 +249,9 @@ def run_checks(
     # advisory — a note asks somebody for something, and a tree is expected to
     # carry open ones; what it says is worth reading, not worth refusing over
     found = owned_comments(scan_tracked(find_feedback), scope)
-    for line in inline_notes_lines(found) if found else ["inline notes: none"]:
+    scaffold = is_template_scaffold(project_root())
+    listed = inline_notes_lines(found, scaffold) if found else ["inline notes: none"]
+    for line in listed:
         typer.echo(line)
 
     scan = scan_antipatterns(project)

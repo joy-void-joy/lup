@@ -42,7 +42,7 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# TEMPLATE: reviewer system prompt — target your domain's failure modes
+# lup: template: reviewer system prompt — target your domain's failure modes
 # ---------------------------------------------------------------------------
 
 REVIEWER_SYSTEM_PROMPT = """\
@@ -104,7 +104,7 @@ number you're questioning.
 
 
 # ---------------------------------------------------------------------------
-# TEMPLATE: reflection input — add your domain's self-assessment fields
+# lup: template: reflection input — add your domain's self-assessment fields
 # ---------------------------------------------------------------------------
 
 
