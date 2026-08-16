@@ -29,8 +29,10 @@ from lup.sandbox.models import (
     CodeExecutionTimeoutError,
     DockerUnreachableError,
     ReplCrashedError,
+    RootfulDaemonError,
     SandboxNotInitializedError,
 )
+from lup.types import JsonObject
 from lup.sandbox.process import process_start_token
 from lup.sandbox.repl import REPL_SERVER_SCRIPT, ReplSession
 
@@ -216,9 +218,13 @@ class FakeDockerClient:
         self.containers = FakeContainers()
         self.volumes = FakeVolumes()
         self.networks = FakeNetworks()
+        self.daemon_info: JsonObject = {}
         self.api = FakeApi([])
         self.peers: list[socket.socket] = []
         self.closed = False
+
+    def info(self) -> JsonObject:
+        return self.daemon_info
 
     def prepare_repl_socket(self, *replies: bytes) -> None:
         """Queue an exec socket whose peer has ``replies`` pre-buffered."""
@@ -254,6 +260,39 @@ def make_sandbox(client: FakeDockerClient, **overrides: str) -> Sandbox:
     )
     sandbox.docker_client = as_client(client)
     return sandbox
+
+
+class TestRootlessRequirement:
+    def rootless_client(self, *options: str) -> FakeDockerClient:
+        client = FakeDockerClient()
+        client.daemon_info = {"SecurityOptions": list(options)}
+        return client
+
+    def test_a_rootful_daemon_is_refused_when_the_boundary_is_required(self) -> None:
+        sandbox = make_sandbox(self.rootless_client("name=seccomp,profile=builtin"))
+        sandbox.require_rootless = True
+
+        with pytest.raises(RootfulDaemonError):
+            sandbox.verify_rootless_daemon()
+
+    def test_a_rootless_daemon_satisfies_the_requirement(self) -> None:
+        sandbox = make_sandbox(self.rootless_client("name=rootless"))
+        sandbox.require_rootless = True
+
+        sandbox.verify_rootless_daemon()
+
+    def test_a_daemon_reporting_nothing_is_refused(self) -> None:
+        # Absent evidence reads as absent boundary, not as a pass.
+        sandbox = make_sandbox(self.rootless_client())
+        sandbox.require_rootless = True
+
+        with pytest.raises(RootfulDaemonError):
+            sandbox.verify_rootless_daemon()
+
+    def test_the_check_is_off_unless_a_caller_asks(self) -> None:
+        sandbox = make_sandbox(self.rootless_client("name=seccomp"))
+
+        sandbox.verify_rootless_daemon()
 
 
 class TestFilteredEgress:

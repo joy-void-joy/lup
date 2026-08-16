@@ -111,6 +111,20 @@ class DockerUnreachableError(RuntimeError):
     """Raised when the Docker daemon cannot be reached at all."""
 
 
+class RootfulDaemonError(RuntimeError):
+    """Raised when a caller requiring the rootless boundary does not have it."""
+
+
+class DockerDaemonInfo(BaseModel, extra="ignore"):
+    """The part of Docker's daemon-info response this library reads.
+
+    Validated rather than indexed, so a daemon that stops reporting the field
+    fails as a missing declaration instead of silently reading as unhardened.
+    """
+
+    security_options: list[str] = Field(validation_alias="SecurityOptions", default=[])
+
+
 class CodeExecutionTimeoutError(RuntimeError):
     """Raised when code execution exceeds the timeout."""
 

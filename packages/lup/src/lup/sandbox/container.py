@@ -90,6 +90,7 @@ from lup.sandbox.models import (
     SandboxNotInitializedError,
 )
 from lup.sandbox.egress import EgressPolicy
+from lup.sandbox.models import DockerDaemonInfo, RootfulDaemonError
 from lup.types import EnvVars
 from lup.sandbox.process import decode_output, process_is_alive, process_start_token
 from lup.sandbox.repl import REPL_SERVER_SCRIPT, ReplSession
@@ -187,6 +188,7 @@ class Sandbox:
         shared_path: str | None = None,
         docker_image: str = DEFAULT_DOCKER_IMAGE,
         network_mode: NetworkMode = "bridge",
+        require_rootless: bool = False,
         egress: EgressPolicy | None = None,
         egress_proxy_image: str = DEFAULT_EGRESS_PROXY_IMAGE,
         timeout_seconds: int = 30,
@@ -202,6 +204,7 @@ class Sandbox:
         self.shared_dir = Path(shared_dir).resolve()
         self.shared_path = shared_path or self.DEFAULT_SHARED_PATH
         self.network_mode = network_mode
+        self.require_rootless = require_rootless
         self.egress = egress or EgressPolicy()
         self.egress_proxy_image = egress_proxy_image
         self.network_name = f"lup-sandbox-net-{suffix}"
@@ -375,6 +378,34 @@ class Sandbox:
     OWNER_PID_LABEL = "lup.sandbox.owner_pid"
     OWNER_START_LABEL = "lup.sandbox.owner_start"
     STALE_AGE_HOURS = 24.0
+
+    def verify_rootless_daemon(self) -> None:
+        """Refuse a rootful daemon when the caller asked for the boundary.
+
+        A container escape against a rootful daemon lands as root on the host;
+        against a rootless one it lands as the unprivileged user the daemon
+        runs as. For generated code that difference is the whole containment
+        story, so a caller running it can insist on the boundary being there
+        rather than assuming it.
+
+        Off by default, because a standard Docker install is rootful and
+        turning this on for everyone would refuse to start a sandbox that
+        works today.
+        """
+        if not self.require_rootless:
+            return
+        if self.docker_client is None:
+            raise SandboxNotInitializedError("Docker client not created")
+        info = DockerDaemonInfo.model_validate(self.docker_client.info())
+        if not any(
+            option == "rootless" or option.endswith("=rootless")
+            for option in info.security_options
+        ):
+            raise RootfulDaemonError(
+                "This sandbox requires a rootless Docker daemon. Point "
+                "DOCKER_HOST at the rootless user socket, or construct the "
+                "sandbox with require_rootless=False."
+            )
 
     def proxy_environment(self) -> EnvVars:
         """Proxy variables pointing a filtered container at its only way out.
@@ -626,6 +657,7 @@ class Sandbox:
         """Create the container and bring up the REPL (assumes a client)."""
         if self.docker_client is None:
             raise SandboxNotInitializedError("Docker client not created")
+        self.verify_rootless_daemon()
         self.remove_stale_container()
         self.sweep_orphaned_containers()
 
