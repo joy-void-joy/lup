@@ -37,7 +37,7 @@
     {
       "path": ".claude/plugins/lup/TEMPLATE_CLAUDE.md",
       "category": "generated",
-      "sha256": "f33e659bd3771c886b31f6881bd97131087edf31408942e8fc837a232a7de371",
+      "sha256": "12aa97c47c0ab0bb25ac72956f2b6a4cb73530452c979ef4910461d24d6593b8",
       "semantic_id": "harness.template-guidance",
       "executable": false
     },
@@ -450,14 +450,14 @@
     {
       "path": "docs/harness.md",
       "category": "generated",
-      "sha256": "080095ed87bdefd92165daee626a057dd23fff5db867575084dfcec0dc9eb107",
+      "sha256": "67876c151398837b0979c224a618e210cc32ebc610781ca2b55126c5d5fde0e6",
       "semantic_id": "docs.harness",
       "executable": false
     },
     {
       "path": "docs/library.md",
       "category": "generated",
-      "sha256": "326f4cb6dd94f3f34fda2376e6b0a2f539229f327153362d22dded08b58090f4",
+      "sha256": "ae75e56fb488c3f093b72763611ca1ae7fc6e95e1802d769395175354b3336ce",
       "semantic_id": "docs.library",
       "executable": false
     },
