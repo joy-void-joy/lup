@@ -499,24 +499,34 @@ class ClaudeConversationState:
             try:
                 async for message in client.receive_response():
                     match message:
-                        case claude_types.AssistantMessage(content=content):
+                        case claude_types.AssistantMessage(
+                            content=content,
+                            parent_tool_use_id=delegated_under,
+                            model=message_model,
+                            message_id=message_id,
+                        ):
                             record(
                                 TurnMessage(
                                     role="assistant",
                                     blocks=[
                                         convert_claude_block(block) for block in content
                                     ],
+                                    parent_tool_call_id=delegated_under,
+                                    model=message_model,
+                                    message_id=message_id,
                                 )
                             )
-                        case claude_types.UserMessage(content=content) if isinstance(
-                            content, list
-                        ):
+                        case claude_types.UserMessage(
+                            content=content,
+                            parent_tool_use_id=delegated_under,
+                        ) if isinstance(content, list):
                             record(
                                 TurnMessage(
                                     role="tool",
                                     blocks=[
                                         convert_claude_block(block) for block in content
                                     ],
+                                    parent_tool_call_id=delegated_under,
                                 )
                             )
                         case claude_types.UserMessage(content=str(text)):

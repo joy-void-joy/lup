@@ -531,7 +531,11 @@ async def test_claude_partial_events_are_live_and_completed_replay_is_preserved(
     ]
     assert completed.blocks == [TurnTextBlock(text="hello")]
     assert completed.messages == [
-        TurnMessage(role="assistant", blocks=[TurnTextBlock(text="hello")])
+        TurnMessage(
+            role="assistant",
+            blocks=[TurnTextBlock(text="hello")],
+            model="claude",
+        )
     ]
 
 

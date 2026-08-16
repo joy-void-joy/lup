@@ -6,7 +6,7 @@ from collections.abc import Awaitable, Callable
 from datetime import timedelta
 from typing import Annotated, Literal, Self, overload
 
-from pydantic import BaseModel, Discriminator
+from pydantic import BaseModel, Discriminator, Field
 
 from lup.runtime.contracts import (
     EventStream,
@@ -202,6 +202,22 @@ class TurnMessage(BaseModel, frozen=True):
 
     role: Literal["user", "assistant", "tool", "system"]
     blocks: list[AnyTurnBlock]
+    parent_tool_call_id: str | None = Field(
+        default=None,
+        description=(
+            "The delegation tool call this message was produced under, when "
+            "the provider attributes it to one — the only evidence that "
+            "separates a native subagent's messages from its parent's"
+        ),
+    )
+    model: str | None = Field(
+        default=None,
+        description="Model the provider reports for this message, when it does",
+    )
+    message_id: str | None = Field(
+        default=None,
+        description="Provider's own message identifier, for correlating replays",
+    )
 
 
 class TurnEventBase(BaseModel, frozen=True):
