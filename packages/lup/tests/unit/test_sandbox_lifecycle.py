@@ -262,6 +262,42 @@ def make_sandbox(client: FakeDockerClient, **overrides: str) -> Sandbox:
     return sandbox
 
 
+class TestDurableInfrastructure:
+    def test_an_ordinary_sandbox_names_the_process_that_created_it(self) -> None:
+        # Which is what lets the sweep reap it the moment that process dies.
+        labels = make_sandbox(FakeDockerClient()).infrastructure_labels()
+
+        assert labels[Sandbox.OWNER_PID_LABEL] == str(os.getpid())
+        assert Sandbox.DURABLE_LABEL not in labels
+
+    def test_a_durable_sandbox_names_no_owner(self) -> None:
+        # The work it holds outlives the process that queued it, so an owner
+        # label would have the sweep reap it as soon as that process exits.
+        sandbox = make_sandbox(FakeDockerClient())
+        sandbox.durable = True
+
+        labels = sandbox.infrastructure_labels()
+
+        assert labels[Sandbox.DURABLE_LABEL] == "1"
+        assert Sandbox.OWNER_PID_LABEL not in labels
+
+    def test_a_durable_sandbox_is_still_reaped_once_it_ages_out(self) -> None:
+        # Naming no owner must not mean living forever.
+        sandbox = make_sandbox(FakeDockerClient())
+        sandbox.durable = True
+        aged = sandbox.infrastructure_labels() | {
+            Sandbox.CREATED_AT_LABEL: str(time.time() - 48 * 3600)
+        }
+
+        assert sandbox.container_is_orphaned(aged)
+
+    def test_a_fresh_durable_sandbox_survives_the_sweep(self) -> None:
+        sandbox = make_sandbox(FakeDockerClient())
+        sandbox.durable = True
+
+        assert not sandbox.container_is_orphaned(sandbox.infrastructure_labels())
+
+
 class TestRootlessRequirement:
     def rootless_client(self, *options: str) -> FakeDockerClient:
         client = FakeDockerClient()

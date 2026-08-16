@@ -189,6 +189,7 @@ class Sandbox:
         docker_image: str = DEFAULT_DOCKER_IMAGE,
         network_mode: NetworkMode = "bridge",
         require_rootless: bool = False,
+        durable: bool = False,
         egress: EgressPolicy | None = None,
         egress_proxy_image: str = DEFAULT_EGRESS_PROXY_IMAGE,
         timeout_seconds: int = 30,
@@ -205,6 +206,7 @@ class Sandbox:
         self.shared_path = shared_path or self.DEFAULT_SHARED_PATH
         self.network_mode = network_mode
         self.require_rootless = require_rootless
+        self.durable = durable
         self.egress = egress or EgressPolicy()
         self.egress_proxy_image = egress_proxy_image
         self.network_name = f"lup-sandbox-net-{suffix}"
@@ -377,6 +379,7 @@ class Sandbox:
     VOLUME_LABEL = "lup.sandbox.volume"
     OWNER_PID_LABEL = "lup.sandbox.owner_pid"
     OWNER_START_LABEL = "lup.sandbox.owner_start"
+    DURABLE_LABEL = "lup.sandbox.durable"
     STALE_AGE_HOURS = 24.0
 
     def verify_rootless_daemon(self) -> None:
@@ -427,13 +430,22 @@ class Sandbox:
         }
 
     def infrastructure_labels(self) -> dict[str, str]:  # lup: ignore[dict-str-payload]
-        """Labels marking one session's containers and networks as ours."""
-        return {
-            self.SANDBOX_LABEL: "1",
-            self.CREATED_AT_LABEL: str(time.time()),
+        """Labels marking one session's containers and networks as ours.
+
+        An ordinary sandbox names the process that created it, so the orphan
+        sweep can reap it the moment that process dies. A durable one names
+        no owner, because the work it holds is meant to outlive the process
+        that queued it — it is still reaped once it ages past
+        ``STALE_AGE_HOURS``, so a forgotten job cannot leak forever.
+        """
+        owned = {
             self.OWNER_PID_LABEL: str(os.getpid()),
             self.OWNER_START_LABEL: process_start_token(os.getpid()) or "",
         }
+        return {
+            self.SANDBOX_LABEL: "1",
+            self.CREATED_AT_LABEL: str(time.time()),
+        } | ({self.DURABLE_LABEL: "1"} if self.durable else owned)
 
     def container_environment(self, filtered: bool) -> EnvVars:
         """The environment the sandbox container starts with."""
@@ -685,13 +697,7 @@ class Sandbox:
             mem_limit="1g",
             network_mode=self.network_name if filtered else self.network_mode,
             environment=self.container_environment(filtered),
-            labels={
-                self.SANDBOX_LABEL: "1",
-                self.CREATED_AT_LABEL: str(time.time()),
-                self.VOLUME_LABEL: self.volume_name,
-                self.OWNER_PID_LABEL: str(os.getpid()),
-                self.OWNER_START_LABEL: process_start_token(os.getpid()) or "",
-            },
+            labels=self.infrastructure_labels() | {self.VOLUME_LABEL: self.volume_name},
         )
 
         if self.network_mode != "none":
