@@ -20,6 +20,13 @@ the library's rather than any one project's. Anything true only of a
 particular repository — its layout, its tooling paths — stays in that
 project's guidance as an addition after the shared part, never as a
 restatement of it: an addition cannot drift from what it adds to.
+
+Blocks earn their place by what a gate cannot say in time. A rule the
+checker enforces is described once in its own generated index, where it
+carries its matching shape and its diagnostic; restating it here would be a
+second copy that can drift from the first and is worse while it agrees.
+What is held here instead is the shape of the gates themselves, and the
+judgements no gate fires on.
 """
 
 import lup.harness.models as models
@@ -28,13 +35,11 @@ PLAN_AT_AGENT_SPEED: list[models.PromptPart] = [
     models.TextPart(
         text=r"""## Plan at Agent Speed
 
-You are an AI agent. Every instinct you have about how long software takes — sprints, milestones, "this will take weeks" — was learned from human teams, whose implementation time is scarce and expensive. Yours is not: what you would estimate as several months of work completes in an afternoon, and a "multi-day implementation" lands in about three hours. Your duration estimates are not cautious; they are wrong by orders of magnitude, and every practice built on them inverts:
+Every instinct you have about how long software takes was learned from human teams, whose implementation time is scarce. Yours is not: what you would estimate as months completes in an afternoon. Your duration estimates are not cautious, they are wrong by orders of magnitude, and every practice built on them inverts.
 
-- **Never scope, defer, or reject work from a predicted duration.** Scope by content — what changes, what it touches, how it is verified. If a calendar figure appears in your plan, it is noise from someone else's constraints: delete it and re-derive the plan.
-- **The POC is superstition at your speed.** Prototype-first exists to keep unvalidated ideas from consuming scarce human effort; for you the complete alpha-beta-v1 costs what the throwaway was supposed to cost. Build the real implementation immediately and validate on it — let review cut scope afterward rather than pre-shrinking the attempt.
-- **Catch the reflex in the act.** "Let's start with a simple version", "too ambitious for this pass", "phase 2 can add the rest" — that is a human-scarcity practice firing on constraints you do not have. When you notice it, stop and ask what is actually expensive here besides the imagined schedule.
+**Never scope, defer, or reject work from a predicted duration.** Scope by content — what changes, what it touches, how it is verified. A calendar figure in a plan is noise from someone else's constraints: delete it and re-derive the plan. Prototype-first exists to protect scarce human effort, and for you the real implementation costs what the throwaway was supposed to cost, so build it and let review cut scope afterward rather than pre-shrinking the attempt.
 
-**README.md is human-owned.** The root `README.md` is deliberately human-written, and the edit policy surfaces every change to it as Ask — as it does for any file declared under `human_owned_files` in the harness hook catalog. Never edit a human-owned file yourself — propose the exact change as a question and let the user apply or approve it.
+Catch the reflex in the act. "Let's start with a simple version", "too ambitious for this pass", "phase 2 can add the rest" — that is a human-scarcity practice firing on constraints you do not have. When you notice it, ask what is actually expensive here besides the imagined schedule.
 
 """
     ),
@@ -55,64 +60,83 @@ Guidance that says "subagent" unqualified means the native kind. `docs/orchestra
     ),
 ]
 
-TYPE_SAFETY: list[models.PromptPart] = [
+THE_GATES: list[models.PromptPart] = [
     models.TextPart(
-        text=r"""### Type Safety
+        text=r"""## The Gates You Will Meet
 
-- **Never silently swallow exceptions** — no `except ...: pass`, no `contextlib.suppress`; log with `logger.exception()`, handle meaningfully, or re-raise. Catch-all `except Exception` is fine at boundaries (task loops, subagent delegation) that do so; bare `except:` and `except BaseException` are never fine
-- **Every function must specify input and output types**
-- **Never use `Any`, `dict[str, Any]`, or `dict[str, object]`** — Use `TypedDict` for dict-like data, `BaseModel` for validated models, or specific types
-  - `docs/conventions.md` maps each origin of dict-shaped data to its typed stand-in, and lists the SDK types to prefer
-- **Python 3.12+ generics**: `class A[T]`, not `Generic[T]`
-- Use `TypedDict` and Pydantic models for structured data
-- Never manually parse agent output — use structured outputs via Pydantic
-- **Never use `# type: ignore`** — Ask the user how to properly fix type errors
-- **`# lup: ignore` escape hatch** — when `Any` or another anti-pattern is genuinely needed at an untyped boundary, an inline ignore requests user approval instead of silencing the check; prefer the typed `# lup: ignore[rule-id]` over the bare form (`docs/contributing.md`), and `docs/rules.md` indexes every rule id a denial can cite
-- **Use Pydantic BaseModel instead of dataclasses**
-- **Use `match`/`case` instead of `if`/`elif` chains** for dispatching on values or ranges
-- **Never dispatch on the type of our own models** — no `isinstance` over a union we declare, no `case ClassName()` arms, no `assert_never` net. The union's base declares the operation and each subtype answers or declines it, so a new variant is one class instead of an edit to every walk that would have to notice it, and a filter cannot go stale by omission. Narrowing untyped data at a boundary — a vendor payload, a `JsonValue` — is the different case where `isinstance` is right, because those alternatives are not ours to give a method to. The `own-model-dispatch` rule enforces exactly this line: it fires only on classes we define that inherit `BaseModel`
-- **Compiling is stronger than emitting** — build an artifact from a typed declaration and it cannot diverge; transport checked source and a checker can only warn once it already has. When tempted to add a check that two things still match, ask whether one can be derived from the other instead (`docs/patterns.md`)
-- **A constant should probably be an overridable default** — a canonical value (a native tool's real name, a vendor's field) is fine hardcoded; a non-canonical one (an allowlist, a ceiling, a retry count) is our judgement, so give it a default a caller can override rather than a constant they must fork to change (`docs/patterns.md`)
-- **A capability ABC is an engine, not a surface** — a consumer never holds or calls one directly; it holds a concrete plain class that composes the seam and is parametrized by which implementation fills it. `ModelRouter` over `ModelMatcher` is the shape, `SessionFactory` over a `SessionOpener` the surface. The test is behaviour: a frozen value that only carries capabilities is a transparent carrier, and a seam that is only ever injected says so in its own docstring (`docs/patterns.md`)
-- **Use `for`/comprehensions over `while`** — reach for structured iteration whenever the iteration space is expressible (a range, a sequence, an iterator, `enumerate`/`zip`); reserve `while` for genuinely unbounded, condition-driven loops
+You are not expected to hold this repository's conventions in memory. Gates enforce them, each names what it caught and how to answer, and their diagnostics are written to be read cold. What is worth knowing up front is that they exist, and what a refusal from each one looks like.
+
+**The rule checker.** Executable rules in anti-pattern, boundary, spelling, and architecture families run on every edit and in `dev check`. A denial cites its rule id, and `docs/rules.md` indexes every rule with the shape it matches, its diagnostic, and the module that enforces it — generated from the same registry that runs, so it cannot drift from what stopped you.
+
+Suppress one deliberate site with `# lup: ignore[rule-id]` and a reason, comma-separating ids where a line trips several. The directive sits on the line it guards, or alone directly above it when the reason will not fit inline; nowhere else reaches, and one placed in a file's opening comment block applies file-wide. A bare `# lup: ignore` still parses but is reported untyped. A stale directive blocks. A rule marked **refused** takes no directive at all — its replacement is right every time, so a directive there could only express a decision to keep the defect, and the way past is to write what the diagnostic names. `# noqa`, `# type: ignore`, and `# pyright: ignore` are forbidden shapes rather than suppressions.
+
+**The permission policy.** Every shell command, URL scope, and edit in a batch is classified. Segments join deny > ask > defer > allow, and malformed input fails conservatively. A denial names what tripped and the recovery, so you rarely need to read the lattice first. `# lup: escalate: <why>` as the leading line of a shell command promotes a classified deny or ask into an approval question carrying that reason.
+
+**The edit budget.** A change block of at most three "real" changed lines is auto-allowed, so split large changes — imports in one edit, logic in another. A file declared human-owned surfaces every change as an approval instead: propose the exact edit as a question and let the user apply it, rather than writing it yourself.
+
+**The drift check.** Generated trees are regenerated, never hand-edited and never hand-merged. Take either side of a conflict, regenerate, and let the check confirm it settled.
+
+`docs/permissions.md` carries the full lattice, what counts as a real changed line, how the escalation marker scopes, and the recovery when work is denied as unjudged; `docs/contributing.md` carries the suppression marker's scoping.
 
 """
     ),
 ]
+"""The four gates, taught as mechanisms rather than as their contents.
 
-NO_BARREL_FILES: list[models.PromptPart] = [
+An agent that knows a checker exists, that a denial names a rule id, and how
+a suppression is spelled can meet a rule it has never read. An agent handed
+twenty rules and no mechanism is stopped by the twenty-first. The contents
+live in the generated index, which carries every rule rather than whichever
+subset a prose list happened to name, and cannot fall behind the registry.
+"""
+
+DESIGN_PRINCIPLES: list[models.PromptPart] = [
     models.TextPart(
-        text=r"""### Imports: No Barrel Files
+        text=r"""### Design Principles
 
-**Never use `__init__.py` re-exports or `__all__` in internal packages.** Import directly from the module that defines the symbol.
+A gate catches a violation once it is written. These change what gets written, so they are here rather than in the index.
 
-- `from lup.mcp import lup_tool` — not `from lup import lup_tool`
-- `__init__.py` files should contain only the module docstring (no imports, no `__all__`)
-- Barrel files drift out of sync and hide real dependencies
+- **Compiling is stronger than emitting** — build an artifact from a typed declaration and it cannot diverge; transport checked source and a checker can only warn once it already has. When tempted to add a check that two things still match, ask whether one can be derived from the other instead (`docs/patterns.md`).
+- **Structured data, not strings** — reaching for `re`, `.replace()`, `.split()`, or slicing to process structured data means a parser was missed, and `docs/conventions.md` names one per format. Never hand-parse an agent's output either: take a structured output through a Pydantic model.
+- **Placement decides the package** — would another project built on this library want it? Then it belongs to the library. Only this application? Then it stays in the application. The same test applies to values, not only to code, which is why a judgement reaches a caller as an overridable default rather than as a constant they would have to fork.
+- **The code is the source of truth** — it should read as though it had always been written this way. Never reference what code used to do, and never write "now", "new", "updated", "fixed", or "changed" in a comment. Change history belongs in commit messages.
+- Reach for `for` and comprehensions over `while`, and for `match`/`case` over an `if`/`elif` chain dispatching on a value or a range.
 
-**Exception:** Standalone library packages under `packages/` may use re-exports with `__all__` in their top-level `__init__.py` to declare a public API. Only the package root — not subpackages.
+Some rules shape a design before any gate could catch it. Know these by name and read them in `docs/rules.md` while choosing a shape rather than after being stopped: `own-model-dispatch` (a union answers through its members, never through `isinstance` over our own types), `abc-capability` (a capability ABC is an engine, never a surface a consumer holds), `model-free-function` (a model carries its own operations), and `constant-declaration` with `library-default` (a judgement reaches its caller as an overridable default).
 
 """
     ),
 ]
+"""What no rule fires on, plus the rule ids worth knowing before the fact.
 
-NO_PRIVATE_PREFIXES: list[models.PromptPart] = [
+Everything mechanical was removed on the test that a denial would have named
+it in time. What survived either has no executable rule at all, or has one
+that arrives too late to change the shape being chosen — for those, the id
+is given as a lookup key rather than the rule restated.
+"""
+
+SANCTIONED_EXCEPTIONS: list[models.PromptPart] = [
     models.TextPart(
-        text=r"""### Naming: No Private Prefixes
+        text=r"""### Exceptions No Rule Can See
 
-**Never use `_` prefixes** on functions, methods, classes, or constants. Nothing is private.
+A rule states the shape it refuses. These carve-outs are ours, and its diagnostic does not carry them:
 
-This holds for module-level functions, class methods, constants, and classes alike; `docs/conventions.md` shows each form beside the prefixed name it replaces.
-
-**If a helper truly shouldn't pollute the module namespace**, nest it inside its only caller rather than marking it private.
-
-**Avoid useless mini-wrappers.** If a function's only purpose is to call another function with no additional logic, inline it.
-
-**Exceptions:** `_` prefix is fine for unused parameters (`_context`, `_exc_type`) — that's a linting convention, not a privacy convention.
+- **Barrel files.** `__all__` and `__init__.py` re-exports are refused, and import goes directly to the module that defines the symbol. The exception is a standalone package's own top-level `__init__.py`, which may declare a public API that way — the package root only, never a subpackage.
+- **Private prefixes.** Nothing is private, so a `_` prefix is refused on functions, methods, classes, and constants. An unused parameter (`_context`, `_exc_type`) is exempt: that is a linting convention, not a privacy one. What to do instead depends on why you wanted the prefix:
+  - A helper that genuinely should not pollute the module namespace **nests inside its only caller**, which hides it without claiming privacy.
+  - A wrapper whose only purpose is to call one other function, with no logic of its own, is not a helper worth hiding at all — inline it and let the caller reach the target directly.
 
 """
     ),
 ]
+"""The carve-outs a rule id cannot deliver.
+
+Dropping the enumerated conventions is safe exactly where the checker says
+the same thing at the moment it matters. These three are what the checker
+does *not* say: its diagnostic names the refused shape and stops, so an
+agent obeying it literally would remove a package's public API or refuse a
+linting convention. They stay because nothing else carries them.
+"""
 
 FAILURE_ANALYSIS: list[models.PromptPart] = [
     models.TextPart(

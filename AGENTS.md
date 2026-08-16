@@ -6,13 +6,11 @@ Lup is a reusable framework and template for autonomous, tool-using agents. Keep
 
 ## Plan at Agent Speed
 
-You are an AI agent. Every instinct you have about how long software takes — sprints, milestones, "this will take weeks" — was learned from human teams, whose implementation time is scarce and expensive. Yours is not: what you would estimate as several months of work completes in an afternoon, and a "multi-day implementation" lands in about three hours. Your duration estimates are not cautious; they are wrong by orders of magnitude, and every practice built on them inverts:
+Every instinct you have about how long software takes was learned from human teams, whose implementation time is scarce. Yours is not: what you would estimate as months completes in an afternoon. Your duration estimates are not cautious, they are wrong by orders of magnitude, and every practice built on them inverts.
 
-- **Never scope, defer, or reject work from a predicted duration.** Scope by content — what changes, what it touches, how it is verified. If a calendar figure appears in your plan, it is noise from someone else's constraints: delete it and re-derive the plan.
-- **The POC is superstition at your speed.** Prototype-first exists to keep unvalidated ideas from consuming scarce human effort; for you the complete alpha-beta-v1 costs what the throwaway was supposed to cost. Build the real implementation immediately and validate on it — let review cut scope afterward rather than pre-shrinking the attempt.
-- **Catch the reflex in the act.** "Let's start with a simple version", "too ambitious for this pass", "phase 2 can add the rest" — that is a human-scarcity practice firing on constraints you do not have. When you notice it, stop and ask what is actually expensive here besides the imagined schedule.
+**Never scope, defer, or reject work from a predicted duration.** Scope by content — what changes, what it touches, how it is verified. A calendar figure in a plan is noise from someone else's constraints: delete it and re-derive the plan. Prototype-first exists to protect scarce human effort, and for you the real implementation costs what the throwaway was supposed to cost, so build it and let review cut scope afterward rather than pre-shrinking the attempt.
 
-**README.md is human-owned.** The root `README.md` is deliberately human-written, and the edit policy surfaces every change to it as Ask — as it does for any file declared under `human_owned_files` in the harness hook catalog. Never edit a human-owned file yourself — propose the exact change as a question and let the user apply or approve it.
+Catch the reflex in the act. "Let's start with a simple version", "too ambitious for this pass", "phase 2 can add the rest" — that is a human-scarcity practice firing on constraints you do not have. When you notice it, ask what is actually expensive here besides the imagined schedule.
 
 ## Agent Vocabulary
 
@@ -23,9 +21,51 @@ Two kinds of delegated agents look alike and must not be conflated:
 
 Guidance that says "subagent" unqualified means the native kind. `docs/orchestration.md` carries the full delegation catalog — subagent, nested, background, deferred tool schemas — and when to reach for each. `docs/patterns.md` carries the recurring *code* shapes: declaration-plus-renderer, closed-by-construction, the typed-matcher router, and the engine-versus-surface split.
 
-## Development Workflow
+## The Gates You Will Meet
 
-### Git Workflow
+You are not expected to hold this repository's conventions in memory. Gates enforce them, each names what it caught and how to answer, and their diagnostics are written to be read cold. What is worth knowing up front is that they exist, and what a refusal from each one looks like.
+
+**The rule checker.** Executable rules in anti-pattern, boundary, spelling, and architecture families run on every edit and in `dev check`. A denial cites its rule id, and `docs/rules.md` indexes every rule with the shape it matches, its diagnostic, and the module that enforces it — generated from the same registry that runs, so it cannot drift from what stopped you.
+
+Suppress one deliberate site with `# lup: ignore[rule-id]` and a reason, comma-separating ids where a line trips several. The directive sits on the line it guards, or alone directly above it when the reason will not fit inline; nowhere else reaches, and one placed in a file's opening comment block applies file-wide. A bare `# lup: ignore` still parses but is reported untyped. A stale directive blocks. A rule marked **refused** takes no directive at all — its replacement is right every time, so a directive there could only express a decision to keep the defect, and the way past is to write what the diagnostic names. `# noqa`, `# type: ignore`, and `# pyright: ignore` are forbidden shapes rather than suppressions.
+
+**The permission policy.** Every shell command, URL scope, and edit in a batch is classified. Segments join deny > ask > defer > allow, and malformed input fails conservatively. A denial names what tripped and the recovery, so you rarely need to read the lattice first. `# lup: escalate: <why>` as the leading line of a shell command promotes a classified deny or ask into an approval question carrying that reason.
+
+**The edit budget.** A change block of at most three "real" changed lines is auto-allowed, so split large changes — imports in one edit, logic in another. A file declared human-owned surfaces every change as an approval instead: propose the exact edit as a question and let the user apply it, rather than writing it yourself.
+
+**The drift check.** Generated trees are regenerated, never hand-edited and never hand-merged. Take either side of a conflict, regenerate, and let the check confirm it settled.
+
+`docs/permissions.md` carries the full lattice, what counts as a real changed line, how the escalation marker scopes, and the recovery when work is denied as unjudged; `docs/contributing.md` carries the suppression marker's scoping.
+
+Change the policy those gates enforce with $lup:hooks, which edits the canonical inputs in `lup.policy` and the `HookSet` in `devtools/harness/catalog.py`, regenerates both native plugins, and runs the shared fixture suite. Harness generation compiles one hermetic dispatcher and runtime per plugin, so never edit a generated dispatcher or runtime.
+
+Harness settings stay project-level, in the tree the harness owns (.codex/config.toml), which holds only the native settings outside that semantic policy boundary — never user-level.
+
+### The `# lup:` Marker Vocabulary
+
+A `# lup:` (or `// lup:`) comment is **actionable review feedback** left in the code for the agent to address — a quick bug remark, a feature idea, anything whose subject is the code and small enough that the site it concerns is the right place to keep it. Three flavors carry feedback, and only the removal rules differ; the fourth spelling, `# lup: ignore[<rule>]`, is the anti-pattern hatch above rather than feedback, and goes when its violation does.
+
+| Marker | Removing it |
+|---|---|
+| `# lup: <text>` — open feedback | **denied**; resolve it into a claim instead |
+| `# lup: solved: <text>` — a claim you addressed it | **denied**; only the verify-solved review pass retires one |
+| `# lup: defer: <text>` — parked work | **denied** while parked |
+
+Resolve open feedback by fixing what it points at, or, for a question, by answering it definitively in the code, the docs, or a recorded user decision. Then rewrite the marker as **`# lup: solved: <the note's original words>`**, text unchanged, so the claim sits beside what it claims to fix and can be checked against what was asked. `docs/contributing.md` carries the full lifecycle (use `$lup:resolve`).
+
+### Deferred Work
+
+**Never create tracking files.** A `TODO.md`, backlog, or roadmap file parks a decision where no workflow will surface it again — deferral by tracking file is delegation to nobody. Work that is not being done now lives in one of three places, chosen by what it is attached to:
+
+- **A `# lup: defer: <text>` note**, when the work belongs to a site in this code, where `dev check` keeps it visible until somebody wakes it. Default to the bare `defer:`; a bracketed `defer[<gate>]: <text>` states a real, externally-checkable gate, never that this code might change again.
+- **A GitHub issue**, when the subject is the tooling misbehaving rather than the code — friction, a command that half-completes, a classifier reporting a failed probe as fact, output that makes no sense. Nothing in the tree owns that, so a note would have nowhere to sit; Reporting Friction below says what to record.
+- **A question to the user**, when whether to defer at all is itself the open question.
+
+`docs/contributing.md` carries the first and the last, and the one exception to all three — a `tmp/` briefing, which starts a fresh session on a situation this one cannot finish, and is rewritten whole rather than appended to.
+
+---
+
+## Development Workflow
 
 Work in a **git worktree**, not a branch switched in place, and never commit _code_ directly to `dev`. Create one with `uv run lup-devtools dev worktree create feat-name` — it lands as a sibling under `tree/`, never nested inside another checkout — and then start a session rooted at <the path it prints> and continue there — this runtime cannot move a running session, so work carried on here would land in the checkout it started from, because creating a worktree does not move the session, and edits left in the old checkout never reach the branch.
 
@@ -39,8 +79,6 @@ Before completing any merge, **audit for deletions**: compare the result against
 
 Use `$lup:merge` (with no argument) for guided conflict resolution. See the command for the full decision tree.
 
-**Generated artifacts are regenerated, never hand-merged.** Take either side of the conflict, regenerate, and let the drift check confirm it settled; `docs/contributing.md` carries the manifest driver and the recovery.
-
 ### Commit Guidelines
 
 - **Commit before responding** — Don't accumulate changes across responses
@@ -51,137 +89,44 @@ Use `$lup:merge` (with no argument) for guided conflict resolution. See the comm
 
 **Format:** `type(scope): description`
 
-`docs/contributing.md` carries the type vocabulary.
-
-### Editing Style
-
-**Prefer small, atomic edits.** The edit hook auto-allows a change block of at most three "real" changed lines. `docs/permissions.md` carries what counts as real, and which gates stay explicit approvals in every mode.
-
-- Split large changes into multiple small edits (<=3 real lines per Edit call)
-- Separate concerns — imports in one edit, logic in another
-- Use `rename_symbol` for identifier renames instead of `Edit` with `replace_all`
-
 ---
 
 ## Code Conventions
 
-### Primary Libraries
+Build on claude-agent-sdk and pydantic; `docs/conventions.md` names each library and what it is for, and puts each typed form beside the raw dict it replaces — including tool inputs, which are BaseModel classes with `Field(description=...)` that give both the `@tool` schema and the validation.
 
-Build on claude-agent-sdk and pydantic; `docs/conventions.md` names each library and what it is for.
+Use existing libraries from PyPI before writing raw HTTP or rebuilding a wheel.
 
-### Model Selection
+**Model selection.** Default to the **strongest** tier for the main agent, every subagent, reviewer, and background agent. This runs on a subscription where the best model is the point: reach for a **balanced** tier only when latency or cost provably dominates and quality is non-critical, and for the **fast** tier almost never. A role that genuinely warrants a cheaper model declares that tier explicitly with a reason; otherwise it inherits the strongest default. Agent declarations state the tier, not a model id — each runtime spells the tier in its own lineup.
 
-Default to the **strongest** tier for the main agent, every subagent, reviewer, and background agent. This runs on a subscription where the best model is the point: reach for a **balanced** tier only when latency or cost provably dominates and quality is non-critical, and for the **fast** tier almost never. A role that genuinely warrants a cheaper model declares that tier explicitly with a reason; otherwise it inherits the strongest default. Agent declarations state the tier, not a model id — each runtime spells the tier in its own lineup.
+**Error handling.** A `@lup_tool` handler takes a validated model and returns one; raise `ToolError` to send a recoverable failure back as an MCP error, with a message saying what to do about it. The `is_error` envelope and the input-validation reply are the decorator's, not yours to assemble. Elsewhere, agent code raises for unrecoverable errors, wraps transient failures in `with_retry`, and validates inputs early with Pydantic. Never swallow one silently — log it, handle it, or re-raise. A catch-all `except Exception` is fine at a boundary that does one of those, such as a task loop or subagent delegation, which is why no rule refuses it.
 
-### Type Safety
+**Placement, in this repository.** Reusable utilities belong in `packages/lup/`; what only this application needs belongs in `src/lup_template/`. If logic already exists in `lup`, import it rather than copying it. `docs/library.md` carries the criterion and the target layout.
 
-- **Never silently swallow exceptions** — no `except ...: pass`, no `contextlib.suppress`; log with `logger.exception()`, handle meaningfully, or re-raise. Catch-all `except Exception` is fine at boundaries (task loops, subagent delegation) that do so; bare `except:` and `except BaseException` are never fine
-- **Every function must specify input and output types**
-- **Never use `Any`, `dict[str, Any]`, or `dict[str, object]`** — Use `TypedDict` for dict-like data, `BaseModel` for validated models, or specific types
-  - `docs/conventions.md` maps each origin of dict-shaped data to its typed stand-in, and lists the SDK types to prefer
-- **Python 3.12+ generics**: `class A[T]`, not `Generic[T]`
-- Use `TypedDict` and Pydantic models for structured data
-- Never manually parse agent output — use structured outputs via Pydantic
-- **Never use `# type: ignore`** — Ask the user how to properly fix type errors
-- **`# lup: ignore` escape hatch** — when `Any` or another anti-pattern is genuinely needed at an untyped boundary, an inline ignore requests user approval instead of silencing the check; prefer the typed `# lup: ignore[rule-id]` over the bare form (`docs/contributing.md`), and `docs/rules.md` indexes every rule id a denial can cite
-- **Use Pydantic BaseModel instead of dataclasses**
-- **Use `match`/`case` instead of `if`/`elif` chains** for dispatching on values or ranges
-- **Never dispatch on the type of our own models** — no `isinstance` over a union we declare, no `case ClassName()` arms, no `assert_never` net. The union's base declares the operation and each subtype answers or declines it, so a new variant is one class instead of an edit to every walk that would have to notice it, and a filter cannot go stale by omission. Narrowing untyped data at a boundary — a vendor payload, a `JsonValue` — is the different case where `isinstance` is right, because those alternatives are not ours to give a method to. The `own-model-dispatch` rule enforces exactly this line: it fires only on classes we define that inherit `BaseModel`
-- **Compiling is stronger than emitting** — build an artifact from a typed declaration and it cannot diverge; transport checked source and a checker can only warn once it already has. When tempted to add a check that two things still match, ask whether one can be derived from the other instead (`docs/patterns.md`)
-- **A constant should probably be an overridable default** — a canonical value (a native tool's real name, a vendor's field) is fine hardcoded; a non-canonical one (an allowlist, a ceiling, a retry count) is our judgement, so give it a default a caller can override rather than a constant they must fork to change (`docs/patterns.md`)
-- **A capability ABC is an engine, not a surface** — a consumer never holds or calls one directly; it holds a concrete plain class that composes the seam and is parametrized by which implementation fills it. `ModelRouter` over `ModelMatcher` is the shape, `SessionFactory` over a `SessionOpener` the surface. The test is behaviour: a frozen value that only carries capabilities is a transparent carrier, and a seam that is only ever injected says so in its own docstring (`docs/patterns.md`)
-- **Use `for`/comprehensions over `while`** — reach for structured iteration whenever the iteration space is expressible (a range, a sequence, an iterator, `enumerate`/`zip`); reserve `while` for genuinely unbounded, condition-driven loops
+### Design Principles
 
-### Tool Input Schemas
+A gate catches a violation once it is written. These change what gets written, so they are here rather than in the index.
 
-Define tool inputs as BaseModel classes with `Field(description=...)`, and take both the `@tool` schema and the validation from that model. `docs/conventions.md` puts each form beside the raw dict it replaces.
+- **Compiling is stronger than emitting** — build an artifact from a typed declaration and it cannot diverge; transport checked source and a checker can only warn once it already has. When tempted to add a check that two things still match, ask whether one can be derived from the other instead (`docs/patterns.md`).
+- **Structured data, not strings** — reaching for `re`, `.replace()`, `.split()`, or slicing to process structured data means a parser was missed, and `docs/conventions.md` names one per format. Never hand-parse an agent's output either: take a structured output through a Pydantic model.
+- **Placement decides the package** — would another project built on this library want it? Then it belongs to the library. Only this application? Then it stays in the application. The same test applies to values, not only to code, which is why a judgement reaches a caller as an overridable default rather than as a constant they would have to fork.
+- **The code is the source of truth** — it should read as though it had always been written this way. Never reference what code used to do, and never write "now", "new", "updated", "fixed", or "changed" in a comment. Change history belongs in commit messages.
+- Reach for `for` and comprehensions over `while`, and for `match`/`case` over an `if`/`elif` chain dispatching on a value or a range.
 
-### Error Handling
+Some rules shape a design before any gate could catch it. Know these by name and read them in `docs/rules.md` while choosing a shape rather than after being stopped: `own-model-dispatch` (a union answers through its members, never through `isinstance` over our own types), `abc-capability` (a capability ABC is an engine, never a surface a consumer holds), `model-free-function` (a model carries its own operations), and `constant-declaration` with `library-default` (a judgement reaches its caller as an overridable default).
 
-**MCP tools:** Return `{"content": [...], "is_error": True}` for recoverable errors. Log with `logger.exception()`. Include actionable messages.
+### Exceptions No Rule Can See
 
-**Agent code:** Raise exceptions for unrecoverable errors. Use `with_retry` for transient failures. Validate inputs early with Pydantic.
+A rule states the shape it refuses. These carve-outs are ours, and its diagnostic does not carry them:
 
-**Never silently swallow errors** — handle them meaningfully or let them propagate.
-
-### Structured Data, Not Strings
-
-If you're reaching for `re`, `.replace()`, `.split()`, or string slicing to process structured data, something is wrong. `docs/conventions.md` names the parser to reach for, per format.
-
-`import re` is a code smell — look for the structured API first.
-
-### Standard Libraries
-
-Use existing Python libraries from PyPI before writing raw HTTP requests. Don't rebuild the wheel.
-
-### Code as Documentation
-
-The codebase should read as a **monolithic source of truth** — understandable without knowledge of its history.
-
-**The test:** "Would this comment exist if the code had always been written this way?" If no — don't add it.
-
-- Never reference what code used to do or explain modifications you made
-- Never use "now", "new", "updated", "fixed", or "changed" in comments
-- Use commit messages for change history, not code comments
-
-### Inline `# lup:` Notes
-
-A `# lup:` (or `// lup:`) comment is **actionable review feedback** left in the code for the agent to address. Four flavors, and only the removal rules differ:
-
-| Marker | Removing it |
-|---|---|
-| `# lup: <text>` — open feedback | **denied**; resolve it into a claim instead |
-| `# lup: solved: <text>` — a claim you addressed it | **denied**; only the verify-solved review pass retires one |
-| `# lup: defer: <text>` — parked work (§ Deferred Work) | **denied** while parked |
-| `# lup: ignore[<rule>]` — an anti-pattern hatch (§ Type Safety), not feedback | fine once the violation is gone |
-
-Resolve open feedback by fixing what it points at, or, for a question, by answering it definitively in the code, the docs, or a recorded user decision. Then rewrite the marker as **`# lup: solved: <the note's original words>`**, text unchanged, so the claim sits beside what it claims to fix and can be checked against what was asked. `docs/contributing.md` carries the full lifecycle (use `$lup:resolve`).
-
-### Deferred Work
-
-**Never create tracking files.** A `TODO.md`, backlog, or roadmap file parks a decision where no workflow will surface it again — deferral by tracking file is delegation to nobody. Deferred work lives in exactly two places: a `# lup: defer: <text>` note at the site it concerns, where `dev check` keeps it visible; or a question to the user, when whether to defer is itself the open question. Default to the bare `defer:`; a bracket states a real, externally-checkable gate, never that this code might change again. `docs/contributing.md` carries both, and the one exception — a `tmp/` briefing, which starts a fresh session on a situation this one cannot finish, and is rewritten whole rather than appended to.
-
-### DRY: Don't Repeat Yourself
-
-- If logic exists in `lup` (the library), import it. Don't copy-paste.
-- Reusable utilities belong in `packages/lup/`, not `src/lup_template/`.
-- Placement test: would another project built on lup want this? Then it belongs
-  in `packages/lup/`. If it only makes sense for this application, it belongs in
-  `src/lup_template/`.
-
-### A Constant Should Be an Overridable Default
-
-The placement test applies to values, not only to code, and it applies everywhere: `packages/lup` freezes a choice for every adopter and `src/lup_template` freezes one for its own callers, so both may declare a value only when they could not have chosen otherwise — a language's file suffixes, a provider's wire spelling, a closed enum the code itself defines. Ask: *could a second implementer with the same intent have written a different value?* If yes it is a judgement, and it reaches a caller as an overridable default instead of being made for them.
-
-**Having defaults is fine; assuming a non-canonical choice with no parameter to replace it is the defect.** `HookSet` is the shape. Two audited rules check the mechanical half and partition the subject between them: `library-default` judges the library's own multi-entry tables, `constant-declaration` every other module-level constant, wherever it sits. Canonicity neither can see, so declare that at the site with `# lup: ignore[<the rule that fired>]` and a reason. Where the constant only exists because a value was carved out of text by hand, the fix is the parser, not a parameter — the rule says so and names it. `docs/library.md` carries the criterion, every library table's classification, and the target layout.
-
-### Imports: No Barrel Files
-
-**Never use `__init__.py` re-exports or `__all__` in internal packages.** Import directly from the module that defines the symbol.
-
-- `from lup.mcp import lup_tool` — not `from lup import lup_tool`
-- `__init__.py` files should contain only the module docstring (no imports, no `__all__`)
-- Barrel files drift out of sync and hide real dependencies
-
-**Exception:** Standalone library packages under `packages/` may use re-exports with `__all__` in their top-level `__init__.py` to declare a public API. Only the package root — not subpackages.
-
-### Naming: No Private Prefixes
-
-**Never use `_` prefixes** on functions, methods, classes, or constants. Nothing is private.
-
-This holds for module-level functions, class methods, constants, and classes alike; `docs/conventions.md` shows each form beside the prefixed name it replaces.
-
-**If a helper truly shouldn't pollute the module namespace**, nest it inside its only caller rather than marking it private.
-
-**Avoid useless mini-wrappers.** If a function's only purpose is to call another function with no additional logic, inline it.
-
-**Exceptions:** `_` prefix is fine for unused parameters (`_context`, `_exc_type`) — that's a linting convention, not a privacy convention.
+- **Barrel files.** `__all__` and `__init__.py` re-exports are refused, and import goes directly to the module that defines the symbol. The exception is a standalone package's own top-level `__init__.py`, which may declare a public API that way — the package root only, never a subpackage.
+- **Private prefixes.** Nothing is private, so a `_` prefix is refused on functions, methods, classes, and constants. An unused parameter (`_context`, `_exc_type`) is exempt: that is a linting convention, not a privacy one. What to do instead depends on why you wanted the prefix:
+  - A helper that genuinely should not pollute the module namespace **nests inside its only caller**, which hides it without claiming privacy.
+  - A wrapper whose only purpose is to call one other function, with no logic of its own, is not a helper worth hiding at all — inline it and let the caller reach the target directly.
 
 ---
 
 ## Tooling
-
-### Package Tools
 
 `uv` is the package manager — `uv add <package>`, never edit pyproject.toml directly. Formatting and linting are ruff, type checking is pyright; `docs/contributing.md` carries the commands that have to be green.
 
@@ -193,60 +138,17 @@ If you find yourself running the same command repeatedly, **add a command** — 
 
 `tmp/` is scratch: gitignored, so nothing written there reaches a diff, a reviewer, or the human — which is why it does not execute. Match the rung to the question: to **read** code, `py info`/`py source`/`py search`/`py imports` plus the codeintel tools answer without running anything; to **compute** something, `lup-devtools py eval '<expression>'` auto-imports and evaluates in the sandbox; with no sandbox available, add a devtools command. `docs/contributing.md` carries the rest of the ladder, down to a heredoc behind a `# lup: escalate: <why>` marker. The argument is reviewability, not power — an agent may already edit `devtools/` and run it.
 
-Run `uv run lup-devtools --help` for the command tree;
-`docs/template.md` lists the sub-apps, rendered from the same typed roster the
-CLI itself wires.
+Run `uv run lup-devtools --help` for the command tree; `docs/template.md` lists the sub-apps, rendered from the same typed roster the CLI itself wires.
 
-`lup-devtools harness generate all` regenerates and reconciles every native
-plugin; `harness <runtime>` regenerates one and launches it. `docs/harness.md`
-carries the rest of the loop and how a launch reaches the plugin on each
-runtime. Personal cache, trust, and session state are never committed.
+### Generated Trees
 
-### Lup Skills & Agents
+`lup-devtools harness generate all` regenerates and reconciles every native plugin; `harness <runtime>` regenerates one and launches it. `docs/harness.md` carries the rest of the loop, how a launch reaches the plugin on each runtime, and the roster of every skill and agent this plugin ships. Personal cache, trust, and session state are never committed.
 
-`docs/harness.md` carries the roster of every skill and agent this plugin
-ships, each with the one line that describes it. Both lists are rendered from
-the typed declarations: the ones about agent work in
-`packages/lup/src/lup/devtools/harness/content/catalog.py`, the ones about
-being a template in
-`src/lup_template/devtools/harness/content/catalog.py`, which composes both.
-Change the catalog that owns the subject, then regenerate.
-
-### Permission Hooks
-
-Permissions come from the canonical semantic policies in `lup.policy` and the
-application-owned `HookSet` in `devtools/harness/catalog.py`. Harness generation
-compiles one hermetic dispatcher and runtime for each native
-plugin. Never edit generated dispatcher or runtime files.
-
-Every shell command, URL scope, and edit in a batch is classified. Segments
-join deny > ask > defer > allow, and malformed input fails conservatively.
-`docs/permissions.md` carries the full lattice — shell vocabulary, `$(...)`
-recursion, write targets, fetch scopes, and edit gates. You rarely need to
-read it first: a denial names what tripped and how to recover.
-
-**Two markers change a decision, so keep them in mind before you are stopped:**
-
-- `# lup: escalate: <why>` as the leading line of a shell command promotes a
-  classified deny or ask into an approval question carrying that reason.
-- `# lup: ignore[<rule-id>]` on the offending line suppresses exactly that
-  anti-pattern, and no other.
-
-`docs/permissions.md` carries how the escalation marker scopes and the recovery
-path when work is denied as unjudged; `docs/contributing.md` carries the
-suppression marker's scoping.
-
-Use `$lup:hooks` to change the canonical policy inputs, regenerate both native
-plugins, and run the shared fixture suite. `settings.json`
-holds only native settings outside this semantic policy boundary.
+Both rosters are rendered from typed declarations: what is about agent work lives in `packages/lup/src/lup/devtools/harness/content/catalog.py`, what is about being a template in `src/lup_template/devtools/harness/content/catalog.py`, which composes both. Change the catalog that owns the subject, then regenerate.
 
 ### Code Intelligence
 
-The `codeintel` tool group answers questions about code by *resolving* it, through a language server. **Prefer them over grep for anything about a name.** `docs/conventions.md` lists what each tool answers.
-
-**Always prefer `rename_symbol` over `Edit` with `replace_all`**, which cannot tell one scope from another; apply the edits it reports yourself.
-
-`grep` through `Bash` is still right for what is genuinely characters: a string literal, a comment, a non-Python file.
+The `codeintel` tool group answers questions about code by *resolving* it, through a language server. **Prefer them over grep for anything about a name**, and prefer `rename_symbol` over an edit with `replace_all`, which cannot tell one scope from another; apply the edits it reports yourself. `docs/conventions.md` lists what each tool answers. `grep` is still right for what is genuinely characters: a string literal, a comment, a non-Python file.
 
 ---
 
@@ -254,35 +156,17 @@ The `codeintel` tool group answers questions about code by *resolving* it, throu
 
 `.env` holds template defaults; `.env.local` holds secrets, is gitignored, and overrides them. Configuration is loaded through pydantic-settings in `src/lup_template/agent/config.py`, which is the only module that reads the environment. `docs/template.md` lists the variables.
 
-Harness settings changes stay **project-level**, in the tree the harness owns (.codex/config.toml), never user-level.
-
 ---
 
 ## Process & Communication
 
-### Asking Questions
+**Always surface a question as a question**, through whatever structured question facility the harness gives you, rather than as narration the user has to notice. This applies to clarifying requirements, offering choices, confirming destructive actions, proposing changes, and any situation needing user input. Even for open-ended questions, attach concrete options plus a free-form one — structured answers are what downstream notification parsing reads. When in doubt, ask.
 
-**Always surface a question as a question**, through whatever structured question facility the harness gives you, rather than as narration the user has to notice. This applies to clarifying requirements, offering choices, confirming destructive actions, proposing changes, and any situation needing user input.
-
-Even for open-ended questions, attach concrete options plus a free-form one. Structured answers are what downstream notification parsing reads.
-
-**When proposing changes:** Propose (don't assume), show relevant current state, explain rationale, offer alternatives.
-
-**Explain from scratch, and walk through the options.** A finding handed over as a verdict cannot be judged — only accepted or refused on trust. Explain the underlying problem as though the reader has none of your context, then the options, then your own recommendation marked as yours. Prefer being slow and complete over being brief: the reader is deciding, and a decision made without the reasoning is one they have to re-derive later.
+**Explain from scratch, and walk through the options.** A finding handed over as a verdict cannot be judged, only accepted or refused on trust. Explain the underlying problem as though the reader has none of your context, then the options, then your own recommendation marked as yours. Propose rather than assume: show the relevant current state, give the rationale, offer alternatives. Prefer being slow and complete over being brief — the reader is deciding, and a decision made without the reasoning is one they have to re-derive later.
 
 This is what makes a claim checkable rather than plausible. Verify each one against **what was actually asked** — the note's own words, the issue's own report — not against a title, a commit subject, or your own earlier summary. A claim that survives that check is worth stating plainly; one that does not is worth correcting out loud, including when the claim was yours.
 
-**When in doubt, ask.**
-
-### Slash Commands & Skills
-
-**After every command invocation**, reflect on how it was actually used vs. documented:
-
-1. Compare intent vs usage
-2. Notice patterns — user corrections signal the command should evolve
-3. Proactively propose updates, as a question the user answers
-
-**Evolution signals:** User provides external docs, corrects your approach, asks for something the command should cover, or ignores sections.
+**After every command invocation**, compare how it was actually used against how it is documented, and propose an update as a question the user answers. A user who supplies external docs, corrects your approach, asks for something the command should have covered, or ignores a section is telling you the command should evolve.
 
 ### Reporting Friction
 
@@ -294,26 +178,16 @@ Record what you observed rather than what you concluded: the exact command, the 
 
 ### External Resources
 
-When a question is about the harness you are running under, its agent SDK, or its model API, read that runtime's own documentation rather than answering from memory:
-
-1. Delegate to the documentation subagent your harness ships, where it has one.
-2. Fetch the vendor's documentation directly — the Codex documentation at https://developers.openai.com/codex/ and https://learn.chatgpt.com/. The fetch scopes the permission policy admits are declared in `harness/catalog.py`.
-
-When the user provides documentation links, incorporate that knowledge into the guidance source or the relevant skill declaration.
+When a question is about the harness you are running under, its agent SDK, or its model API, read that runtime's own documentation rather than answering from memory: delegate to the documentation subagent your harness ships where it has one, or fetch the vendor's documentation directly — the Codex documentation at https://developers.openai.com/codex/ and https://learn.chatgpt.com/. The fetch scopes the permission policy admits are declared in `harness/catalog.py`. When the user provides documentation links, incorporate that knowledge into the guidance source or the relevant skill declaration.
 
 ---
 
 ## Self-Improvement Loop
 
-`docs/self-improvement.md` carries the full loop: how to diagnose a failure
-through the pipeline, the three levels of analysis, what to track per session,
-and the anti-patterns to avoid. Read it when running the feedback-loop,
-review, or meta skills — each of them works from it.
+`docs/self-improvement.md` carries the full loop: how to diagnose a failure through the pipeline, the three levels of analysis, what to track per session, and the anti-patterns to avoid. Read it when running the feedback-loop, review, or meta skills — each of them works from it.
 
 **When analyzing failures:** Ask "what general principle would have prevented this?" not "what specific rule would catch this case?" The fix is almost never a prompt line about a specific decision. Instead: does the agent have enough context? The right tools? A strong enough model?
 
 When the principle points to a workflow failure, fix the workflow at the exact juncture where the failure enters — don't add a warning about it. A step named "Classify each commit" invites whole-commit thinking regardless of how many times the text says "decompose." Renaming the step to "Extract portable pieces" and separating reading from judging makes the failure structurally impossible. Warnings coexist peacefully with the workflows they warn against; structural changes don't.
 
-The durable fix is a capability, not a rule: trace the failure to the missing
-input or the workflow step where the wrong decision entered, and change that.
-A prompt rule coexists peacefully with the failure it warns about.
+The durable fix is a capability, not a rule: trace the failure to the missing input or the workflow step where the wrong decision entered, and change that. A prompt rule coexists peacefully with the failure it warns about.

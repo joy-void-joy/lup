@@ -69,10 +69,17 @@ Never create a tracking file. A `TODO.md`, backlog, or roadmap parks a
 decision where no workflow surfaces it again. Deferred work lives as a
 `# lup: defer: <text>` note at the site it concerns — where `dev comments`
 lists it in its own parked section and `dev check` keeps it visible until
-somebody wakes it — or as a question to the user. That bare spelling is the
+somebody wakes it. That bare spelling is the
 default: nothing evaluates a wake condition mechanically, so a bracketed
 `defer[<gate>]: <text>` is for a real, externally-checkable gate ("until the
 v2 API ships"), never for restating that this code might change again.
+
+A note is right when the subject is the code: a bug worth remarking on, an
+idea for a feature, anything the site it concerns can hold. Work whose
+subject is the tooling misbehaving — friction, a command that half-completes,
+a classifier reporting a failed probe as fact — has no site to sit at, and
+becomes a GitHub issue instead. When whether to defer at all is the open
+question, it becomes a question to the user rather than any note.
 
 ## Git workflow
 
