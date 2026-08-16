@@ -1,7 +1,3 @@
-# lup: ignore[constant-declaration]
-# The env var name is one half of a contract the permission hook spells in its
-# own vendored source, which cannot import this module. A caller replacing it
-# would be naming a variable the other half does not write.
 """Where editing is currently happening, published for whoever resolves code.
 
 A language server is started once, against the directory a session opened in,
@@ -15,9 +11,11 @@ the permission hook already sees it on every edit. So the hook publishes the
 checkout it belongs to, and the servers that would otherwise guess read it.
 
 The reader and the writer never share a process, and the writer is the
-hermetic hook runtime, which may not import this module. What crosses is a
-path in the environment and a JSON object at the end of it — so this module
-owns the shape, and a test pins the hook's bytes against it.
+hermetic hook runtime, which may not import this module. Nothing is passed
+between them: each resolves the same location out of the repository they are
+both in, and the record at the end of it is a JSON object this module owns
+the shape of. Tests pin both halves against each other, since no type checker
+spans the boundary.
 """
 
 from pathlib import Path
@@ -26,13 +24,21 @@ from pydantic import BaseModel
 
 from lup.channels.models import publish_atomic
 
-EDITION_ENV = "LUP_EDITION"
-"""Names the file below. Absent means nobody published, which is not an error.
 
-A session that never edits anything, a devtools command run by hand, a test:
-all of them read no edition and fall back to the root they were given. The
-variable is how the harness tells one process where the other one writes.
-"""
+def repository_of(root: Path) -> Path:
+    """The checkout every worktree of *root*'s repository shares.
+
+    A linked worktree's ``.git`` is a file naming the main checkout's git
+    directory; the main checkout's ``.git`` is that directory. A path in no
+    repository at all answers for itself, so a caller outside one still gets
+    somewhere to look rather than an exception it has nothing to do with.
+    """
+    marker = root / ".git"
+    if marker.is_dir() or not marker.is_file():
+        return root
+    gitdir = marker.read_text("utf-8").removeprefix("gitdir:").strip()
+    linked = Path(gitdir)
+    return linked.parents[2] if gitdir and len(linked.parents) >= 3 else root
 
 
 class Edition(BaseModel, frozen=True):
@@ -48,12 +54,23 @@ class Edition(BaseModel, frozen=True):
     file: Path
 
 
+def edition_path(root: Path) -> Path:
+    """Where the hook publishes, named from any worktree of the repository.
+
+    The reader is rooted wherever its server was launched and the writer
+    sits in whichever checkout was edited, so the location has to be one
+    neither has to be told. ``git`` already keeps one: every linked worktree
+    names the main checkout's git directory, so both ends resolve there.
+    """
+    return repository_of(root) / ".lup" / "edition.json"
+
+
 def publish_edition(path: Path, workspace: Path, file: Path) -> None:
     """Record that editing is happening in *workspace*, atomically."""
     publish_atomic(path, Edition(workspace=workspace, file=file))
 
 
-def read_edition(path: Path | None) -> Edition | None:
+def read_edition(path: Path) -> Edition | None:
     """The last published edition, or None when nobody has published one.
 
     Every failure is the same answer. A missing file is the ordinary case,
@@ -61,7 +78,7 @@ def read_edition(path: Path | None) -> Edition | None:
     a root the caller already has, so refusing to answer costs the caller
     nothing and raising would cost it a working tool.
     """
-    if path is None or not path.is_file():
+    if not path.is_file():
         return None
     try:
         return Edition.model_validate_json(path.read_text("utf-8"))

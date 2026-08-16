@@ -103,6 +103,37 @@ def worktree_root(path_text: str) -> str:
     return ""
 
 
+def shared_repository(path_text: str) -> str:
+    """The one directory every worktree of a repository can name alike.
+
+    The publisher sits in whichever checkout was edited and the reader in
+    whichever one its server was launched from, and neither can see the
+    other's. What they have in common is the repository: a linked worktree's
+    ``.git`` is a file naming the main checkout's git directory, and the main
+    checkout's ``.git`` is that directory. So both ends resolve to one place
+    without either being told where the other is, and without depending on a
+    variable reaching a hook and a server the same way.
+    """
+    root = worktree_root(path_text)
+    if not root:
+        return ""
+    marker = Path(root) / ".git"
+    if marker.is_dir():
+        return root
+    try:
+        named = marker.read_text(encoding="utf-8")
+    except OSError:
+        return ""
+    gitdir = named.removeprefix("gitdir:").strip()
+    if not gitdir:
+        return ""
+    # `<main>/.git/worktrees/<name>` — the checkout is three levels above.
+    linked = Path(gitdir)
+    if len(linked.parents) < 3:
+        return ""
+    return str(linked.parents[2])
+
+
 def publish_edition(path_text: str) -> None:
     """Say which checkout an edit landed in, for the servers that would guess.
 
@@ -124,13 +155,11 @@ def publish_edition(path_text: str) -> None:
     the reasons ``lup.channels.models.write_atomic`` gives. This cannot call
     that one: it is compiled into a bare script with no ``lup`` to import.
     """
-    environ = os.environ  # lup: ignore[os-environ]
-    if "LUP_EDITION" not in environ or not environ["LUP_EDITION"]:
-        return
     root = worktree_root(path_text)
-    if not root:
+    repository = shared_repository(path_text)
+    if not root or not repository:
         return
-    destination = Path(environ["LUP_EDITION"])
+    destination = Path(repository) / ".lup" / "edition.json"
     record = json.dumps(
         {"workspace": root, "file": str(Path(path_text).resolve())}, indent=2
     )

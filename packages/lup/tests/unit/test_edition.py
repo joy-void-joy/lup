@@ -1,38 +1,58 @@
 """Where editing is happening, published by one process and read by another.
 
 The writer is the hermetic hook runtime, which may not import the module that
-owns the record — so the shape is a contract across a boundary no type checker
-spans, and these pin both ends of it against each other.
+owns the record. Nothing passes between them: each resolves the location out
+of the repository they are both in, and each spells the record's shape for
+itself — so these pin both ends against each other, since no type checker
+spans that boundary.
 """
 
 import json
 from pathlib import Path
 
-from lup.policy.assets.host import publish_edition, worktree_root
-from lup.workspace.edition import Edition, read_edition
+from lup.policy.assets.host import (
+    publish_edition,
+    shared_repository,
+    worktree_root,
+)
+from lup.workspace.edition import Edition, edition_path, read_edition
 
 
 def checkout(root: Path) -> Path:
-    """A directory that looks like a checkout to the walk that finds one."""
+    """A main checkout: `.git` is the git directory itself."""
     (root / ".git").mkdir(parents=True)
     return root
 
 
+def linked(main: Path, root: Path) -> Path:
+    """A worktree of *main*: `.git` is a file naming the main git directory."""
+    root.mkdir(parents=True)
+    (root / ".git").write_text(
+        f"gitdir: {main / '.git' / 'worktrees' / root.name}\n", encoding="utf-8"
+    )
+    return root
+
+
+def edited(root: Path, name: str = "module.py") -> Path:
+    file = root / name
+    file.write_text("x = 1\n", encoding="utf-8")
+    return file
+
+
 def test_a_file_belongs_to_the_checkout_that_holds_it(tmp_path: Path) -> None:
     work = checkout(tmp_path / "repo")
-    edited = work / "src" / "module.py"
-    edited.parent.mkdir(parents=True)
-    edited.write_text("x = 1\n", encoding="utf-8")
+    file = work / "src" / "module.py"
+    file.parent.mkdir(parents=True)
+    file.write_text("x = 1\n", encoding="utf-8")
 
-    assert worktree_root(str(edited)) == str(work)
+    assert worktree_root(str(file)) == str(work)
 
 
 def test_a_checkout_root_answers_for_itself(tmp_path: Path) -> None:
     """Codex hands over a directory, and the walk has to admit one.
 
-    Only the parents were candidates, so the one directory that is already
-    a checkout was answered for by whatever encloses it — or, at the top of
-    a filesystem, by nothing.
+    Only the parents were candidates, so a directory that is already a
+    checkout was answered for by whatever encloses it — or by nothing.
     """
     work = checkout(tmp_path / "repo")
 
@@ -46,70 +66,89 @@ def test_a_path_in_no_checkout_names_none(tmp_path: Path) -> None:
     assert worktree_root(str(loose)) == ""
 
 
-def test_a_relative_path_names_none(tmp_path: Path) -> None:
+def test_a_relative_path_names_none() -> None:
     """The hook is promised no working directory to resolve one against."""
     assert worktree_root("src/module.py") == ""
 
 
-def test_what_the_hook_writes_is_what_the_library_reads(
-    tmp_path: Path, monkeypatch
-) -> None:
-    """The contract: the hermetic writer cannot import the model it satisfies."""
+def test_a_worktree_resolves_to_the_repository_it_belongs_to(tmp_path: Path) -> None:
+    """The whole point: two checkouts, one place both of them can name.
+
+    The hook runs wherever the edit landed and the reader wherever its
+    server was launched. Neither can see the other's directory, so a record
+    written beside the edit would be looked for somewhere it never was.
+    """
+    main = checkout(tmp_path / "repo")
+    worktree = linked(main, tmp_path / "feature")
+
+    assert shared_repository(str(edited(worktree))) == str(main)
+    assert shared_repository(str(edited(main))) == str(main)
+
+
+def test_the_hook_and_the_library_name_one_location(tmp_path: Path) -> None:
+    """Neither half can import the other, so the paths are pinned equal."""
+    main = checkout(tmp_path / "repo")
+    worktree = linked(main, tmp_path / "feature")
+    file = edited(worktree)
+
+    publish_edition(str(file))
+
+    assert edition_path(worktree).is_file()
+    assert edition_path(worktree) == edition_path(main)
+
+
+def test_what_the_hook_writes_is_what_the_library_reads(tmp_path: Path) -> None:
     work = checkout(tmp_path / "repo")
-    edited = work / "module.py"
-    edited.write_text("x = 1\n", encoding="utf-8")
-    destination = tmp_path / "state" / "edition.json"
-    monkeypatch.setenv("LUP_EDITION", str(destination))
+    file = edited(work)
 
-    publish_edition(str(edited))
+    publish_edition(str(file))
 
-    published = read_edition(destination)
-    assert published == Edition(workspace=work, file=edited)
+    assert read_edition(edition_path(work)) == Edition(workspace=work, file=file)
 
 
-def test_a_later_edit_replaces_an_earlier_one(tmp_path: Path, monkeypatch) -> None:
-    first = checkout(tmp_path / "one")
-    second = checkout(tmp_path / "two")
-    for work in (first, second):
-        (work / "module.py").write_text("x = 1\n", encoding="utf-8")
-    destination = tmp_path / "edition.json"
-    monkeypatch.setenv("LUP_EDITION", str(destination))
+def test_an_edit_in_a_worktree_publishes_that_worktree(tmp_path: Path) -> None:
+    """The record names where editing happened, not where it was recorded."""
+    main = checkout(tmp_path / "repo")
+    worktree = linked(main, tmp_path / "feature")
 
-    publish_edition(str(first / "module.py"))
-    publish_edition(str(second / "module.py"))
+    publish_edition(str(edited(worktree)))
 
-    read = read_edition(destination)
-    assert read is not None and read.workspace == second
+    published = read_edition(edition_path(main))
+    assert published is not None and published.workspace == worktree
 
 
-def test_nothing_is_published_without_a_destination(
-    tmp_path: Path, monkeypatch
-) -> None:
-    """Absent means nobody asked for one, which is not a failure."""
-    monkeypatch.delenv("LUP_EDITION", raising=False)
-    work = checkout(tmp_path / "repo")
-    (work / "module.py").write_text("x = 1\n", encoding="utf-8")
+def test_a_later_edit_replaces_an_earlier_one(tmp_path: Path) -> None:
+    main = checkout(tmp_path / "repo")
+    worktree = linked(main, tmp_path / "feature")
 
-    publish_edition(str(work / "module.py"))
+    publish_edition(str(edited(main)))
+    publish_edition(str(edited(worktree)))
+
+    published = read_edition(edition_path(main))
+    assert published is not None and published.workspace == worktree
+
+
+def test_a_path_in_no_repository_publishes_nothing(tmp_path: Path) -> None:
+    loose = tmp_path / "loose.py"
+    loose.write_text("x = 1\n", encoding="utf-8")
+
+    publish_edition(str(loose))
 
     assert list(tmp_path.glob("**/edition.json")) == []
 
 
-def test_an_unwritable_destination_does_not_raise(tmp_path: Path, monkeypatch) -> None:
+def test_an_unwritable_destination_does_not_raise(tmp_path: Path) -> None:
     """A verdict must never turn on this, and neither must an edit.
 
-    The permission path already converts anything raised into a conservative
-    ask. Publishing runs after the tool, where there is no verdict left to
-    corrupt — but a failure that propagated would still reach that handler,
-    and the edit would be answered for by a filesystem error.
+    The permission path converts anything raised into a conservative ask.
+    Publishing runs after the tool, where no verdict is left to corrupt, but
+    a failure that propagated would still reach that handler and answer for
+    the edit with a filesystem error.
     """
     work = checkout(tmp_path / "repo")
-    (work / "module.py").write_text("x = 1\n", encoding="utf-8")
-    blocked = tmp_path / "file-not-a-dir"
-    blocked.write_text("occupied\n", encoding="utf-8")
-    monkeypatch.setenv("LUP_EDITION", str(blocked / "edition.json"))
+    (work / ".lup").write_text("occupied\n", encoding="utf-8")
 
-    publish_edition(str(work / "module.py"))
+    publish_edition(str(edited(work)))
 
 
 def test_a_corrupt_record_reads_as_none(tmp_path: Path) -> None:
@@ -122,20 +161,13 @@ def test_a_corrupt_record_reads_as_none(tmp_path: Path) -> None:
 
 def test_a_missing_record_reads_as_none(tmp_path: Path) -> None:
     assert read_edition(tmp_path / "nowhere.json") is None
-    assert read_edition(None) is None
 
 
-def test_the_published_bytes_are_the_declared_fields(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_the_published_bytes_are_the_declared_fields(tmp_path: Path) -> None:
     """The hook writes JSON by hand; drift here is drift in the contract."""
     work = checkout(tmp_path / "repo")
-    edited = work / "module.py"
-    edited.write_text("x = 1\n", encoding="utf-8")
-    destination = tmp_path / "edition.json"
-    monkeypatch.setenv("LUP_EDITION", str(destination))
 
-    publish_edition(str(edited))
+    publish_edition(str(edited(work)))
 
-    written = json.loads(destination.read_text(encoding="utf-8"))
+    written = json.loads(edition_path(work).read_text(encoding="utf-8"))
     assert set(written) == set(Edition.model_fields)
