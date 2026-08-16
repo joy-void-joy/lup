@@ -33,7 +33,7 @@ from zoneinfo import ZoneInfoNotFoundError
 import typer
 from tzlocal import get_localzone_name
 
-from lup.devtools.harness.composition import claude_profile_directory
+from lup_template.devtools.harness.composition import profile_directory
 from lup.devtools.setup import (
     Integration,
     IntegrationStatus,
@@ -310,4 +310,4 @@ INTEGRATIONS: list[Integration] = [
 ]
 
 
-app = create_setup_app(INTEGRATIONS, claude_profile_directory())
+app = create_setup_app(INTEGRATIONS, profile_directory())

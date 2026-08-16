@@ -15,12 +15,15 @@ from lup.devtools.harness.composition import (
     NativeTargets,
     claude_composition,
     codex_composition,
+    local_claude_profile_directory,
 )
 from lup.devtools.harness.drift import RepositoryWriter
 from lup.devtools.harness.generate import (
     NativeHarnessComposition,
     ProjectContent,
 )
+from lup.runtime.profiles import ProfileDirectory
+from lup.workspace.paths import project_root
 from lup_template.devtools.harness.catalog import (
     WORKFLOW,
     declared_hook_set,
@@ -47,6 +50,17 @@ def project_content(root: Path) -> ProjectContent:
         assets=[CONTENT_ROOT / "assets" / "file_suggest.sh"],
         settings=project_settings(harness.plugins[0]),
     )
+
+
+def profile_directory() -> ProfileDirectory:
+    """The Claude accounts this checkout keeps, under ``.lup/profiles``.
+
+    Named once and reached by both the launcher and the setup wizard, so a
+    name means the same account whichever tree the caller curates it through
+    — which is the whole reason to keep the profiles here rather than let
+    each entry point fall back to the operator's personal registry.
+    """
+    return local_claude_profile_directory(project_root())
 
 
 def claude_target(root: Path) -> NativeHarnessComposition:

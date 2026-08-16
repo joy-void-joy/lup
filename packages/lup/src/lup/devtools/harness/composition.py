@@ -36,7 +36,24 @@ from lup.devtools.harness.generate import (
     codex_generation_recipe,
 )
 from lup.harness.models import CapabilityEvidence, PromptDocument
+from lup.runtime.profile_tree import (
+    ProfileFolders,
+    TreeProfileNames,
+    TreeProfileRegistrar,
+)
 from lup.runtime.profiles import ProfileDirectory
+
+CLAUDE_PROFILE_ROOT = Path(".lup") / "profiles"
+"""Default place a project keeps its own profiles, relative to its root.
+
+Under ``.lup`` because that is already where a checkout's personal state
+lives — reconciliation proposals, resolver runs — and is already ignored, so
+a login cannot be committed by a rule nobody remembered to write.
+"""
+
+CLAUDE_PROFILE_HOME = "claude-config"
+"""Default subdirectory a Claude configuration home takes inside a profile,
+leaving the rest of the directory for whatever else that account earns."""
 
 
 def claude_profile_directory() -> ProfileDirectory:
@@ -48,6 +65,25 @@ def claude_profile_directory() -> ProfileDirectory:
     accounts = AccountFile()
     return ProfileDirectory(
         ClaudeProfileNames(accounts), ClaudeProfileRegistrar(accounts), CLAUDE_LOGIN
+    )
+
+
+def local_claude_profile_directory(
+    root: Path,
+    profile_root: Path = CLAUDE_PROFILE_ROOT,
+    home_subdir: str = CLAUDE_PROFILE_HOME,
+) -> ProfileDirectory:
+    """The Claude accounts a project keeps itself, as directories under it.
+
+    What a project supplies instead of falling back to the personal registry:
+    one name means one directory in this checkout, so an account reaches a
+    launch without anything under the operator's home deciding which. A
+    checkout that has started no profiles resolves nothing, which leaves a
+    launch on whatever account its environment already selected.
+    """
+    folders = ProfileFolders(root / profile_root, home_subdir)
+    return ProfileDirectory(
+        TreeProfileNames(folders), TreeProfileRegistrar(folders), CLAUDE_LOGIN
     )
 
 

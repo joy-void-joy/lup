@@ -43,7 +43,11 @@ from lup.devtools.feedback.models import AgentPrompt
 from lup.devtools.harness.app import create_harness_app
 from lup.devtools.harness.resolve import ConfiguredModel
 from lup_template.agent.config import engine_for_model, settings
-from lup_template.devtools.harness.composition import REPOSITORY_WIDE, TARGETS
+from lup_template.devtools.harness.composition import (
+    REPOSITORY_WIDE,
+    TARGETS,
+    profile_directory,
+)
 from lup_template.devtools.setup import INTEGRATIONS
 from lup_template.devtools.hooks.app import app as hooks_app
 from lup.devtools.report.app import create_report_app
@@ -75,6 +79,7 @@ APPLICATION_APPS = {
         TARGETS,
         REPOSITORY_WIDE,
         ConfiguredModel(name=settings.model, adapter=engine_for_model(settings.model)),
+        profile_directory(),
     ),
     "hooks": hooks_app,
     "report": create_report_app(TARGETS, REPOSITORY_WIDE),
