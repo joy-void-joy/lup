@@ -11,6 +11,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Annotated
 
+import sh
 import typer
 from pydantic import BaseModel
 
@@ -584,6 +585,31 @@ def create_dev_app(
                 typer.echo(f"  {rel}")
             return
         antipatterns_mod.report_directives(declared().project, as_json, limit)
+
+    @app.command("report-friction")
+    def report_friction_cmd(
+        summary: Annotated[str, typer.Option("--summary")],
+        component: Annotated[str, typer.Option("--component")],
+        command: Annotated[str, typer.Option("--command")],
+        error: Annotated[str, typer.Option("--error")],
+        state: Annotated[str, typer.Option("--state")],
+        recovery_cost: Annotated[str, typer.Option("--recovery-cost")],
+    ) -> None:
+        """File observed workflow friction against this checkout's repository."""
+        report = issues_mod.FrictionReport(
+            summary=summary,
+            component=component,
+            command=command,
+            error=error,
+            state=state,
+            recovery_cost=recovery_cost,
+        )
+        try:
+            url = issues_mod.file_friction_report(report)
+        except (RuntimeError, sh.ErrorReturnCode) as failure:
+            typer.echo(str(failure), err=True)
+            raise typer.Exit(1) from failure
+        typer.echo(url)
 
     @app.command("issues")
     def issues_cmd(

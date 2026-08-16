@@ -7,7 +7,7 @@ project on a different tracker supplies its own reader rather than waiting for
 the library to learn an API it has no business knowing.
 """
 
-# lup: This module reads and comments, but filing an issue is still a raw
+# lup: solved: This module reads and comments, but filing an issue is still a raw
 # `gh issue create --body-file` at the agent's own hand. Reporting friction is
 # a step the workflow prescribes, so it should be a devtools command like every
 # other prescribed step — one that knows the repository, so the report cannot
@@ -18,9 +18,10 @@ the library to learn an API it has no business knowing.
 import json
 import logging
 from collections.abc import Iterator
+from html import escape
 
 import sh
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from lup.devtools.utils import decode_stderr, gh, repository_slug
 from lup.resolver.models import IssueEvidence
@@ -38,6 +39,30 @@ caller passes its own.
 # lup: ignore[constant-declaration] — the fields the models below parse, spelled
 # as `gh issue list --json` names them
 ISSUE_FIELDS = "number,url,title,body,labels"
+
+
+class FrictionReport(BaseModel, frozen=True, extra="forbid"):
+    """Observed workflow friction in the shape the improvement loop consumes."""
+
+    summary: str = Field(min_length=1, description="Concise issue title")
+    component: str = Field(min_length=1, description="Component that owns the fix")
+    command: str = Field(min_length=1, description="Exact command that was run")
+    error: str = Field(min_length=1, description="Exact error that was observed")
+    state: str = Field(
+        min_length=1, description="State the failed operation left behind"
+    )
+    recovery_cost: str = Field(min_length=1, description="Work required to recover")
+
+    def body(self) -> str:
+        """Render the evidence without letting its contents alter Markdown."""
+        sections: list[str] = [
+            f"## Owning component\n\n<pre><code>{escape(self.component)}</code></pre>",
+            f"## Exact command\n\n<pre><code>{escape(self.command)}</code></pre>",
+            f"## Exact error\n\n<pre><code>{escape(self.error)}</code></pre>",
+            f"## State left behind\n\n<pre><code>{escape(self.state)}</code></pre>",
+            f"## Recovery cost\n\n<pre><code>{escape(self.recovery_cost)}</code></pre>",
+        ]
+        return "\n\n".join(sections)
 
 
 class IssueLabel(BaseModel):
@@ -62,6 +87,16 @@ class IssueRow(BaseModel):
         return IssueEvidence(
             number=self.number, url=self.url, title=self.title, body=self.body
         )
+
+
+def file_friction_report(report: FrictionReport, repository: str = "") -> str:
+    """File one structured report against the checkout's explicit repository."""
+    slug = repository or repository_slug()
+    if not slug:
+        raise RuntimeError("cannot file friction: origin names no GitHub repository")
+    arguments = ["issue", "create", "--repo", slug]
+    arguments.extend(["--title", report.summary, "--body", report.body()])
+    return gh.out(*arguments).strip()
 
 
 def fetch_open_issues(
