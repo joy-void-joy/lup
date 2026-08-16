@@ -25,6 +25,12 @@ concerns:
 - :mod:`lup.runtime.background` — a debounced consumer of the session
   capabilities that coalesces state wakes into turns on one persistent
   session.
+- :mod:`lup.runtime.threads` — blocking calls on a process-lifetime executor,
+  so work in flight outlives any one loop's teardown.
+- :mod:`lup.runtime.quota` — waiting out a provider account allowance, as
+  distinct from a budget: the work is still wanted, just not yet runnable.
+- :mod:`lup.runtime.budget` — a durable, shared spending ceiling over a
+  rolling period, which waits for the window rather than failing the turn.
 
 ``contracts`` and ``models`` define the vocabulary; every other module
 composes them; the named adapter packages implement them.

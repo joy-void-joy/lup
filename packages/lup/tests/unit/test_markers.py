@@ -140,6 +140,8 @@ def test_scan_mode_for_routes_by_suffix() -> None:
     assert scan_mode_for(Path("a.py")) == ScanMode.PYTHON
     assert scan_mode_for(Path("a.pyi")) == ScanMode.PYTHON
     assert scan_mode_for(Path("README.md")) == ScanMode.MARKDOWN
+    assert scan_mode_for(Path("trace.json")) == ScanMode.JSON
+    assert scan_mode_for(Path("trace.jsonl")) == ScanMode.JSON
     assert scan_mode_for(Path("notes.txt")) == ScanMode.TEXT
 
 
@@ -257,6 +259,14 @@ def test_url_before_a_trailing_note_does_not_swallow_it() -> None:
     assert texts(shell, ScanMode.TEXT) == ["pin this endpoint"]
     js = 'const at = "https://example.com";  // lup: pin this endpoint\n'
     assert texts(js, ScanMode.JS) == ["pin this endpoint"]
+
+
+def test_json_holds_no_comment_so_a_marker_in_one_is_never_a_note() -> None:
+    # Neither introducer opens a comment in JSON, so every marker in one is
+    # string content — a note a trace recorded, not feedback left on the trace.
+    recorded = '{"text": "# lup: fix the retry backoff"}\n'
+    assert find_feedback(recorded, ScanMode.JSON) == []
+    assert texts(recorded, ScanMode.TEXT) == ['fix the retry backoff"}']
 
 
 def test_doubled_introducer_opens_a_note_and_ends_the_one_above() -> None:

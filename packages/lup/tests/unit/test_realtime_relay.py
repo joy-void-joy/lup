@@ -465,6 +465,37 @@ class TestRelaySession:
         assert conversation.prompts[1].startswith("[wake] reason: timer")
         assert conversation.prompts[2] == MISSING_SLEEP_MESSAGE
 
+    async def test_turn_completion_checkpoints_the_cumulative_count(
+        self, tmp_path: Path
+    ) -> None:
+        # A durable caller checkpoints after each turn, so the count it is
+        # handed has to arrive once per turn and already include that turn.
+        tools = tool_map(tmp_path)
+        checkpoints: list[int] = []
+
+        async def on_action(_content: str) -> None:
+            return None
+
+        async def on_turn_complete(turns: int) -> None:
+            checkpoints.append(turns)
+
+        conversation = FakeConversation(
+            [AgentTurn(tools, [META, SLEEP]), AgentTurn(tools, [META, SLEEP])]
+        )
+
+        turns = await run_relay_session(
+            conversation,
+            scheduler=Scheduler(on_action=on_action),
+            mailbox=RealtimeMailbox(tmp_path),
+            initial_prompt="[session start]",
+            on_turn_complete=on_turn_complete,
+            should_continue=lambda: len(conversation.prompts) < 2,
+            poll_interval_seconds=0.01,
+        )
+
+        assert checkpoints == [1, 2]
+        assert turns == 2
+
     async def test_events_applied_during_turn_not_after(self, tmp_path: Path) -> None:
         tools = tool_map(tmp_path)
         delivered_during_turn: list[bool] = []

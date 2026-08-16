@@ -10,7 +10,7 @@ from typing import Literal, Self
 
 from pydantic import BaseModel, Field, model_validator
 
-NetworkMode = Literal["bridge", "none"]
+NetworkMode = Literal["filtered", "bridge", "none"]
 MountMode = Literal["rw", "ro"]
 
 DEFAULT_PRE_INSTALL: tuple[str, ...] = (
@@ -47,6 +47,18 @@ class InstallPackageInput(BaseModel):
     """Input schema for the install_package tool."""
 
     packages: list[str] = Field(min_length=1)
+
+
+class SandboxReplayInput(BaseModel):
+    """Input schema for the sandbox_replay tool.
+
+    Empty because the tool has exactly one thing to replay — the journal
+    this sandbox has been keeping — and no lever worth offering over it. A
+    confirmation field would be the obvious candidate and is deliberately
+    absent: re-running recorded cells is no more consequential than the
+    execution the agent already commands at will, and a flag whose only
+    honest default is "yes" documents a gate that is not there.
+    """
 
 
 class Mount(BaseModel):
@@ -109,6 +121,20 @@ class SandboxNotInitializedError(RuntimeError):
 
 class DockerUnreachableError(RuntimeError):
     """Raised when the Docker daemon cannot be reached at all."""
+
+
+class RootfulDaemonError(RuntimeError):
+    """Raised when a caller requiring the rootless boundary does not have it."""
+
+
+class DockerDaemonInfo(BaseModel, extra="ignore"):
+    """The part of Docker's daemon-info response this library reads.
+
+    Validated rather than indexed, so a daemon that stops reporting the field
+    fails as a missing declaration instead of silently reading as unhardened.
+    """
+
+    security_options: list[str] = Field(validation_alias="SecurityOptions", default=[])
 
 
 class CodeExecutionTimeoutError(RuntimeError):

@@ -623,6 +623,7 @@ async def run_relay_session(
     build_wake_message: Callable[[SleepResult], str] | None = None,
     build_state: Callable[[], RelayState] | None = None,
     on_event: Callable[[RelayEvent], Awaitable[None]] | None = None,
+    on_turn_complete: Callable[[int], Awaitable[None]] | None = None,
     should_continue: Callable[[], bool] | None = None,
     poll_interval_seconds: float = 0.3,
     max_missing_sleep_retries: int = 3,
@@ -654,6 +655,8 @@ async def run_relay_session(
         on_event: Optional domain hook invoked after each applied event
             (e.g. mark inbox messages read for an event reporting
             ``events_read``).
+        on_turn_complete: Optional durable-checkpoint hook invoked after every
+            completed turn with the cumulative turn count.
         should_continue: Pure predicate ending the session when False.
             Checked at each cycle start and again before sleeping (a
             finished session must not wait out a final sleep). None runs
@@ -715,6 +718,8 @@ async def run_relay_session(
             await watcher
         await apply_new_events()
         turns += 1
+        if on_turn_complete is not None:
+            await on_turn_complete(turns)
 
         request = mailbox.consume_sleep_request()
         if request is None:

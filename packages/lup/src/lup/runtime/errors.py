@@ -1,6 +1,6 @@
 """Typed errors for unsuccessful turns and invalid session transitions."""
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from pydantic import BaseModel, Field
 
@@ -66,6 +66,27 @@ class TurnTimeoutError(TurnError):
 
 class BudgetExceededError(TurnError):
     """The whole logical turn exhausted its configured budget."""
+
+
+class QuotaExceededError(TurnError):
+    """A provider account allowance is exhausted until its reset time.
+
+    Distinct from :class:`BudgetExceededError`, which is our own ceiling on a
+    turn: nothing was overspent here, the account simply cannot buy more work
+    until the provider's window rolls over. Carrying that moment as data is
+    what lets a caller wait exactly long enough instead of retrying blind.
+    """
+
+    def __init__(
+        self,
+        failure: TurnFailure,
+        *,
+        reset_at: datetime | None = None,
+        quota_type: str | None = None,
+    ) -> None:
+        super().__init__(failure)
+        self.reset_at = reset_at
+        self.quota_type = quota_type
 
 
 class TurnInterruptedError(TurnError):

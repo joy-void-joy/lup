@@ -33,9 +33,12 @@ How a file is scanned depends on its language, because where a note can live
 does. Python source is parsed so a marker counts only where prose belongs — in a
 comment or a docstring. A ``# lup:`` inside an ordinary string literal (such
 as a tool's own "no notes" message) is code, not a note, and must not be
-reported. Other text has no Python parser to lean on, so it is line-scanned;
-Markdown additionally skips fenced and inline code so notes quoted in
-documentation examples are not flagged.
+reported. The same rule decides the other modes by which introducer can open a
+comment at all: in JS only `//` can, and in JSON neither can, so a marker there
+is always inside a literal — a note quoted in a recorded trace or a config
+string, never feedback. Remaining text has no parser to lean on, so it is
+line-scanned; Markdown additionally skips fenced and inline code so notes
+quoted in documentation examples are not flagged.
 """
 
 import re
@@ -104,6 +107,10 @@ MARKDOWN_SUFFIXES = {".md", ".markdown"}
 # only `//` markers count as notes there.
 # lup: ignore[library-default] — the suffixes where `#` opens no comment, a language fact
 JS_SUFFIXES = {".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs"}
+# JSON has no comment syntax at all, so every marker in one is string content —
+# a note quoted inside a recorded trace, a tool message, or a config value.
+# lup: ignore[library-default] — JSON's own suffixes, a format fact
+JSON_SUFFIXES = {".json", ".jsonl"}
 
 CONTEXT_BEFORE = 2
 CONTEXT_AFTER = 25
@@ -115,6 +122,7 @@ class ScanMode:
     PYTHON = "python"
     MARKDOWN = "markdown"
     JS = "js"
+    JSON = "json"
     TEXT = "text"
 
 
@@ -123,7 +131,8 @@ def scan_mode_for(path: Path) -> str:
 
     The single source of truth for routing each tracked file: Python source is
     parsed (comments and docstrings only), Markdown is line-scanned with code
-    skipped, everything else is plain line-scanned.
+    skipped, JSON holds no comments so it yields none, and everything else is
+    plain line-scanned.
     """
     match path.suffix.lower():
         case suffix if suffix in PYTHON_SUFFIXES:
@@ -132,6 +141,8 @@ def scan_mode_for(path: Path) -> str:
             return ScanMode.MARKDOWN
         case suffix if suffix in JS_SUFFIXES:
             return ScanMode.JS
+        case suffix if suffix in JSON_SUFFIXES:
+            return ScanMode.JSON
         case _:
             return ScanMode.TEXT
 
@@ -321,6 +332,8 @@ class MarkerScan:
         if self.ignore is not None and self.ignore.match(line, match.start()):
             return False
         if self.mode == ScanMode.JS and match.group(1) == "#":
+            return False
+        if self.mode == ScanMode.JSON:
             return False
         if inside_inline_code(line, match.start()):
             return False

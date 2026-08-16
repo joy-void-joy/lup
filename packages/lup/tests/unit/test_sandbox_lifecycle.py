@@ -29,8 +29,10 @@ from lup.sandbox.models import (
     CodeExecutionTimeoutError,
     DockerUnreachableError,
     ReplCrashedError,
+    RootfulDaemonError,
     SandboxNotInitializedError,
 )
+from lup.types import JsonObject
 from lup.sandbox.process import process_start_token
 from lup.sandbox.repl import REPL_SERVER_SCRIPT, ReplSession
 
@@ -113,14 +115,18 @@ class FakeContainers:
         self,
         image: str,
         name: str,
-        command: str,
         detach: bool,
-        mounts: list[DockerMount],
-        working_dir: str,
-        mem_limit: str,
-        network_mode: str,
-        environment: dict[str, str],  # lup: ignore[dict-str-payload]
         labels: dict[str, str],  # lup: ignore[dict-str-payload]
+        network_mode: str,
+        command: str | None = None,
+        mounts: list[DockerMount] | None = None,
+        working_dir: str | None = None,
+        mem_limit: str | None = None,
+        environment: dict[str, str] | None = None,  # lup: ignore[dict-str-payload]
+        # The egress proxy is run with its own hardening arguments, which this
+        # accepts without asserting on: what they are is the container's
+        # concern, and pinning them here would only restate the call.
+        **hardening: object,
     ) -> FakeContainer:
         if self.run_error is not None:
             raise self.run_error
@@ -128,7 +134,7 @@ class FakeContainers:
         self.existing[name] = created
         self.last_run = {
             "image": image,
-            "mounts": json.dumps(mounts),
+            "mounts": json.dumps(mounts or []),
             "network_mode": network_mode,
         }
         return created
@@ -143,6 +149,41 @@ class FakeVolumes:
         if found is None:
             raise NotFound(f"no such volume: {name}")
         return found
+
+
+class FakeNetwork:
+    """One network the filtered mode creates and attaches the proxy to."""
+
+    def __init__(self, name: str) -> None:
+        self.name = name
+        self.connected: list[str] = []
+        self.removed = False
+
+    def connect(self, container: object, aliases: list[str] | None = None) -> None:
+        self.connected.extend(aliases or [])
+
+    def remove(self) -> None:
+        self.removed = True
+
+
+class FakeNetworks:
+    def __init__(self) -> None:
+        self.existing: dict[str, FakeNetwork] = {}
+        self.created: list[str] = []
+
+    def get(self, name: str) -> FakeNetwork:
+        found = self.existing.get(name)
+        if found is None:
+            raise NotFound(f"no such network: {name}")
+        return found
+
+    def create(
+        self, name: str, internal: bool = False, labels: object = None
+    ) -> FakeNetwork:
+        self.created.append(name)
+        network = FakeNetwork(name)
+        self.existing[name] = network
+        return network
 
 
 class FakeApi:
@@ -176,9 +217,14 @@ class FakeDockerClient:
     def __init__(self) -> None:
         self.containers = FakeContainers()
         self.volumes = FakeVolumes()
+        self.networks = FakeNetworks()
+        self.daemon_info: JsonObject = {}
         self.api = FakeApi([])
         self.peers: list[socket.socket] = []
         self.closed = False
+
+    def info(self) -> JsonObject:
+        return self.daemon_info
 
     def prepare_repl_socket(self, *replies: bytes) -> None:
         """Queue an exec socket whose peer has ``replies`` pre-buffered."""
@@ -214,6 +260,137 @@ def make_sandbox(client: FakeDockerClient, **overrides: str) -> Sandbox:
     )
     sandbox.docker_client = as_client(client)
     return sandbox
+
+
+class TestDurableInfrastructure:
+    def test_an_ordinary_sandbox_names_the_process_that_created_it(self) -> None:
+        # Which is what lets the sweep reap it the moment that process dies.
+        labels = make_sandbox(FakeDockerClient()).infrastructure_labels()
+
+        assert labels[Sandbox.OWNER_PID_LABEL] == str(os.getpid())
+        assert Sandbox.DURABLE_LABEL not in labels
+
+    def test_a_durable_sandbox_names_no_owner(self) -> None:
+        # The work it holds outlives the process that queued it, so an owner
+        # label would have the sweep reap it as soon as that process exits.
+        sandbox = make_sandbox(FakeDockerClient())
+        sandbox.durable = True
+
+        labels = sandbox.infrastructure_labels()
+
+        assert labels[Sandbox.DURABLE_LABEL] == "1"
+        assert Sandbox.OWNER_PID_LABEL not in labels
+
+    def test_a_durable_sandbox_is_still_reaped_once_it_ages_out(self) -> None:
+        # Naming no owner must not mean living forever.
+        sandbox = make_sandbox(FakeDockerClient())
+        sandbox.durable = True
+        aged = sandbox.infrastructure_labels() | {
+            Sandbox.CREATED_AT_LABEL: str(time.time() - 48 * 3600)
+        }
+
+        assert sandbox.container_is_orphaned(aged)
+
+    def test_a_fresh_durable_sandbox_survives_the_sweep(self) -> None:
+        sandbox = make_sandbox(FakeDockerClient())
+        sandbox.durable = True
+
+        assert not sandbox.container_is_orphaned(sandbox.infrastructure_labels())
+
+
+class TestRootlessRequirement:
+    def rootless_client(self, *options: str) -> FakeDockerClient:
+        client = FakeDockerClient()
+        client.daemon_info = {"SecurityOptions": list(options)}
+        return client
+
+    def test_a_rootful_daemon_is_refused_when_the_boundary_is_required(self) -> None:
+        sandbox = make_sandbox(self.rootless_client("name=seccomp,profile=builtin"))
+        sandbox.require_rootless = True
+
+        with pytest.raises(RootfulDaemonError):
+            sandbox.verify_rootless_daemon()
+
+    def test_a_rootless_daemon_satisfies_the_requirement(self) -> None:
+        sandbox = make_sandbox(self.rootless_client("name=rootless"))
+        sandbox.require_rootless = True
+
+        sandbox.verify_rootless_daemon()
+
+    def test_a_daemon_reporting_nothing_is_refused(self) -> None:
+        # Absent evidence reads as absent boundary, not as a pass.
+        sandbox = make_sandbox(self.rootless_client())
+        sandbox.require_rootless = True
+
+        with pytest.raises(RootfulDaemonError):
+            sandbox.verify_rootless_daemon()
+
+    def test_the_check_is_off_unless_a_caller_asks(self) -> None:
+        sandbox = make_sandbox(self.rootless_client("name=seccomp"))
+
+        sandbox.verify_rootless_daemon()
+
+
+class TestFilteredEgress:
+    def test_the_sandbox_network_is_internal_and_the_proxy_bridges_it(
+        self, tmp_path: Path
+    ) -> None:
+        # The mode rests on the network having no gateway: the proxy is the
+        # only member of both sides, reached under a fixed alias.
+        client = FakeDockerClient()
+        sandbox = Sandbox(
+            session_id="t1",
+            shared_dir=tmp_path / "shared",
+            network_mode="filtered",
+            pre_install=None,
+        )
+        sandbox.docker_client = as_client(client)
+
+        sandbox.start_filtered_egress()
+
+        assert client.networks.created == [sandbox.network_name]
+        assert client.networks.existing[sandbox.network_name].connected == ["egress"]
+        assert sandbox.proxy_config_path.read_text(encoding="utf-8").startswith(
+            "http_port"
+        )
+
+    def test_a_filtered_container_is_pointed_at_the_proxy(self, tmp_path: Path) -> None:
+        sandbox = Sandbox(
+            session_id="t1",
+            shared_dir=tmp_path / "shared",
+            network_mode="filtered",
+            pre_install=None,
+        )
+
+        environment = sandbox.container_environment(filtered=True)
+
+        assert environment["HTTPS_PROXY"] == "http://egress:3128"
+        assert environment["NO_PROXY"] == ""
+
+    def test_a_bridge_container_is_given_no_proxy(self, tmp_path: Path) -> None:
+        sandbox = Sandbox(
+            session_id="t1", shared_dir=tmp_path / "shared", pre_install=None
+        )
+
+        assert sandbox.container_environment(filtered=False) == {}
+
+    def test_teardown_removes_the_proxy_network_and_config(
+        self, tmp_path: Path
+    ) -> None:
+        client = FakeDockerClient()
+        sandbox = Sandbox(
+            session_id="t1",
+            shared_dir=tmp_path / "shared",
+            network_mode="filtered",
+            pre_install=None,
+        )
+        sandbox.docker_client = as_client(client)
+        sandbox.start_filtered_egress()
+
+        sandbox.stop_filtered_egress()
+
+        assert client.networks.existing[sandbox.network_name].removed
+        assert not sandbox.proxy_config_path.exists()
 
 
 class TestStaleRemoval:

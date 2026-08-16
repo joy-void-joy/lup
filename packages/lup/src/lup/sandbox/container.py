@@ -7,6 +7,10 @@ subprocess that may die without a graceful exit.
 
 Network modes:
 - "bridge": Full network access (default)
+- "filtered": Public HTTP(S) only, through a proxy on a private network — the
+  container itself is given no route out, so a private address it might reach
+  on a shared bridge (a metadata endpoint, a service on the host's LAN) is
+  unreachable rather than merely discouraged
 - "none": No network access at all
 
 Examples:
@@ -59,8 +63,10 @@ except ImportError as exc:
     ) from exc
 from docker.errors import APIError, DockerException, NotFound
 from docker.models.containers import Container, ExecResult
+from docker.models.networks import Network
 from docker.types import Mount as DockerMount
 from docker.utils.socket import SocketError
+from pydantic import TypeAdapter
 
 from lup.mcp import (
     LupMcpServerConfig,
@@ -68,6 +74,13 @@ from lup.mcp import (
     ToolError,
     create_mcp_server,
     lup_tool,
+)
+from lup.replay.journal import (
+    CellOutcome,
+    JournalCell,
+    JournalStore,
+    ReplayReport,
+    UnreadableJournalError,
 )
 from lup.sandbox.models import (
     MountMode,
@@ -83,12 +96,24 @@ from lup.sandbox.models import (
     NetworkMode,
     ReplCrashedError,
     SandboxNotInitializedError,
+    SandboxReplayInput,
 )
+from lup.sandbox.egress import EgressPolicy
+from lup.sandbox.models import DockerDaemonInfo, RootfulDaemonError
+from lup.types import EnvVars
 from lup.sandbox.process import decode_output, process_is_alive, process_start_token
 from lup.sandbox.repl import REPL_SERVER_SCRIPT, ReplSession
 from lup.sandbox.translation import MountTopology
 
 logger = logging.getLogger(__name__)
+
+PACKAGE_LIST = TypeAdapter(list[str])
+"""How an install cell's package list crosses the journal and comes back.
+
+A journal cell carries one string, and the packages an install names are a
+list — so they cross as JSON with a parser on the far side, rather than
+joined on spaces and split back apart on the assumption no name holds one.
+"""
 
 
 def connected_docker_client() -> docker.DockerClient:
@@ -158,8 +183,19 @@ class Sandbox:
 
     DEFAULT_DOCKER_IMAGE = "ghcr.io/astral-sh/uv:python3.14-bookworm-slim"
 
+    DEFAULT_EGRESS_PROXY_IMAGE = "ubuntu/squid:6.6-24.04_edge"
+    """The proxy image `filtered` mode bridges the sandbox's network through."""
+
     SOURCE_ROOT = "/sources"
     """Where read-only host source trees are mounted, one directory each."""
+
+    REPLAY_DETAIL_CHARS = 200
+    """How much of a replayed cell's output is kept to explain a divergence.
+
+    Enough to carry the exception line that says why a cell went the other
+    way, and bounded because a report covers every cell in the journal at
+    once — a full stderr each would push the finding off the end of it.
+    """
 
     DEFAULT_SHARED_PATH = "/shared"
     """Where the host exchange directory is mounted, absent a caller's choice.
@@ -177,6 +213,10 @@ class Sandbox:
         shared_path: str | None = None,
         docker_image: str = DEFAULT_DOCKER_IMAGE,
         network_mode: NetworkMode = "bridge",
+        require_rootless: bool = False,
+        durable: bool = False,
+        egress: EgressPolicy | None = None,
+        egress_proxy_image: str = DEFAULT_EGRESS_PROXY_IMAGE,
         timeout_seconds: int = 30,
         pre_install: Sequence[str] | None = DEFAULT_PRE_INSTALL,
         source_roots: Mapping[str, Path] | None = None,
@@ -190,6 +230,12 @@ class Sandbox:
         self.shared_dir = Path(shared_dir).resolve()
         self.shared_path = shared_path or self.DEFAULT_SHARED_PATH
         self.network_mode = network_mode
+        self.require_rootless = require_rootless
+        self.durable = durable
+        self.egress = egress or EgressPolicy()
+        self.egress_proxy_image = egress_proxy_image
+        self.network_name = f"lup-sandbox-net-{suffix}"
+        self.proxy_name = f"lup-sandbox-egress-{suffix}"
         self.timeout_seconds = timeout_seconds
         self.pre_install = list(pre_install) if pre_install is not None else None
         self.source_roots = {
@@ -205,6 +251,20 @@ class Sandbox:
         self.active_container: Container | None = None
         self.docker_client: docker.DockerClient | None = None
         self.repl: ReplSession | None = None
+        self.filtered_network: Network | None = None
+        self.egress_proxy: Container | None = None
+        self.proxy_config_path = self.shared_dir.parent / f".{self.proxy_name}.conf"
+        self.journal = JournalStore(
+            self.shared_dir / "sandbox-journal.json",
+            session_id,
+            determinism_claimed=False,
+        )
+        """This sandbox's execution record, claiming nothing about reproducing it.
+
+        The container has network access and installs packages, so a replay
+        may legitimately differ — which is a reason to state the absent claim
+        rather than a reason to keep no account of what was run.
+        """
 
     @property
     def container(self) -> Container:
@@ -355,7 +415,134 @@ class Sandbox:
     VOLUME_LABEL = "lup.sandbox.volume"
     OWNER_PID_LABEL = "lup.sandbox.owner_pid"
     OWNER_START_LABEL = "lup.sandbox.owner_start"
+    DURABLE_LABEL = "lup.sandbox.durable"
     STALE_AGE_HOURS = 24.0
+
+    def verify_rootless_daemon(self) -> None:
+        """Refuse a rootful daemon when the caller asked for the boundary.
+
+        A container escape against a rootful daemon lands as root on the host;
+        against a rootless one it lands as the unprivileged user the daemon
+        runs as. For generated code that difference is the whole containment
+        story, so a caller running it can insist on the boundary being there
+        rather than assuming it.
+
+        Off by default, because a standard Docker install is rootful and
+        turning this on for everyone would refuse to start a sandbox that
+        works today.
+        """
+        if not self.require_rootless:
+            return
+        if self.docker_client is None:
+            raise SandboxNotInitializedError("Docker client not created")
+        info = DockerDaemonInfo.model_validate(self.docker_client.info())
+        if not any(
+            option == "rootless" or option.endswith("=rootless")
+            for option in info.security_options
+        ):
+            raise RootfulDaemonError(
+                "This sandbox requires a rootless Docker daemon. Point "
+                "DOCKER_HOST at the rootless user socket, or construct the "
+                "sandbox with require_rootless=False."
+            )
+
+    def proxy_environment(self) -> EnvVars:
+        """Proxy variables pointing a filtered container at its only way out.
+
+        Both spellings are set because the tools a sandbox runs disagree about
+        which they read, and ``NO_PROXY`` is emptied so nothing arrives from
+        the host claiming an exemption.
+        """
+        proxy = f"http://egress:{self.egress.listen_port}"
+        return {
+            "HTTP_PROXY": proxy,
+            "HTTPS_PROXY": proxy,
+            "ALL_PROXY": proxy,
+            "http_proxy": proxy,
+            "https_proxy": proxy,
+            "all_proxy": proxy,
+            "NO_PROXY": "",
+            "no_proxy": "",
+        }
+
+    def infrastructure_labels(self) -> dict[str, str]:  # lup: ignore[dict-str-payload]
+        """Labels marking one session's containers and networks as ours.
+
+        An ordinary sandbox names the process that created it, so the orphan
+        sweep can reap it the moment that process dies. A durable one names
+        no owner, because the work it holds is meant to outlive the process
+        that queued it — it is still reaped once it ages past
+        ``STALE_AGE_HOURS``, so a forgotten job cannot leak forever.
+        """
+        owned = {
+            self.OWNER_PID_LABEL: str(os.getpid()),
+            self.OWNER_START_LABEL: process_start_token(os.getpid()) or "",
+        }
+        return {
+            self.SANDBOX_LABEL: "1",
+            self.CREATED_AT_LABEL: str(time.time()),
+        } | ({self.DURABLE_LABEL: "1"} if self.durable else owned)
+
+    def container_environment(self, filtered: bool) -> EnvVars:
+        """The environment the sandbox container starts with."""
+        source = {"PYTHONPATH": self.source_path()} if self.source_roots else {}
+        return source | (self.proxy_environment() if filtered else {})
+
+    def start_filtered_egress(self) -> None:
+        """Create the internal network and the one proxy bridged out of it.
+
+        The network is ``internal``, which is what the mode rests on: Docker
+        gives it no gateway, so the sandbox has no route out at all rather
+        than a route it is asked not to take. The proxy is the only member of
+        both networks, and is stripped of every capability it does not need
+        to bind its port.
+        """
+        if self.docker_client is None:
+            raise SandboxNotInitializedError("Docker client not created")
+        self.proxy_config_path.parent.mkdir(parents=True, exist_ok=True)
+        self.proxy_config_path.write_text(self.egress.render(), encoding="utf-8")
+        labels = self.infrastructure_labels()
+        self.filtered_network = self.docker_client.networks.create(
+            self.network_name, internal=True, labels=labels
+        )
+        self.egress_proxy = self.docker_client.containers.run(
+            self.egress_proxy_image,
+            name=self.proxy_name,
+            detach=True,
+            volumes={
+                str(self.proxy_config_path): {
+                    "bind": "/etc/squid/squid.conf",
+                    "mode": "ro",
+                }
+            },
+            network_mode="bridge",
+            labels=labels,
+            mem_limit="256m",
+            pids_limit=128,
+            cap_drop=["ALL"],
+            cap_add=["SETUID", "SETGID", "CHOWN", "DAC_OVERRIDE"],
+            security_opt=["no-new-privileges:true"],
+        )
+        self.filtered_network.connect(self.egress_proxy, aliases=["egress"])
+
+    def stop_filtered_egress(self) -> None:
+        """Remove the proxy, its network, and the rendered configuration."""
+        if self.egress_proxy is not None:
+            try:
+                self.egress_proxy.stop(timeout=5)
+                self.egress_proxy.remove()
+            except (APIError, DockerException) as error:
+                logger.warning("Failed to clean up egress proxy: %s", error)
+            finally:
+                self.egress_proxy = None
+        if self.filtered_network is not None:
+            try:
+                self.filtered_network.remove()
+            except (APIError, DockerException) as error:
+                logger.warning("Failed to clean up sandbox network: %s", error)
+            finally:
+                self.filtered_network = None
+        self.proxy_config_path.unlink(missing_ok=True)
 
     def remove_stale_container(self) -> None:
         """Remove a pre-existing container with the same name, if any."""
@@ -365,6 +552,20 @@ class Sandbox:
             old = self.docker_client.containers.get(self.container_name)
             logger.warning("Removing stale container: %s", self.container_name)
             old.remove(force=True)
+        except NotFound:
+            pass
+        # A crashed run leaves its proxy holding the network, so the proxy has
+        # to go before the network it is attached to can be recreated.
+        try:
+            proxy = self.docker_client.containers.get(self.proxy_name)
+            logger.warning("Removing stale egress proxy: %s", self.proxy_name)
+            proxy.remove(force=True)
+        except NotFound:
+            pass
+        try:
+            network = self.docker_client.networks.get(self.network_name)
+            logger.warning("Removing stale sandbox network: %s", self.network_name)
+            network.remove()
         except NotFound:
             pass
 
@@ -457,6 +658,8 @@ class Sandbox:
             except (NotFound, APIError):
                 pass
 
+        self.stop_filtered_egress()
+
     def write_repl_script(self) -> None:
         """Write the REPL server script into the container via tar archive."""
         script_bytes = REPL_SERVER_SCRIPT.encode("utf-8")
@@ -502,10 +705,15 @@ class Sandbox:
         """Create the container and bring up the REPL (assumes a client)."""
         if self.docker_client is None:
             raise SandboxNotInitializedError("Docker client not created")
+        self.verify_rootless_daemon()
         self.remove_stale_container()
         self.sweep_orphaned_containers()
 
         self.shared_dir.mkdir(parents=True, exist_ok=True)
+
+        filtered = self.network_mode == "filtered"
+        if filtered:
+            self.start_filtered_egress()
 
         logger.info(
             "Creating sandbox container: %s (network=%s)",
@@ -523,15 +731,9 @@ class Sandbox:
             mounts=self.docker_mounts(),
             working_dir="/workspace",
             mem_limit="1g",
-            network_mode=self.network_mode,
-            environment={"PYTHONPATH": self.source_path()} if self.source_roots else {},
-            labels={
-                self.SANDBOX_LABEL: "1",
-                self.CREATED_AT_LABEL: str(time.time()),
-                self.VOLUME_LABEL: self.volume_name,
-                self.OWNER_PID_LABEL: str(os.getpid()),
-                self.OWNER_START_LABEL: process_start_token(os.getpid()) or "",
-            },
+            network_mode=self.network_name if filtered else self.network_mode,
+            environment=self.container_environment(filtered),
+            labels=self.infrastructure_labels() | {self.VOLUME_LABEL: self.volume_name},
         )
 
         if self.network_mode != "none":
@@ -770,6 +972,43 @@ class Sandbox:
             packages=packages,
         )
 
+    # --- Journal replay ---
+
+    def replay_cell(self, cell: JournalCell) -> CellOutcome:
+        """Re-run one journaled cell, through the same call that first ran it.
+
+        The kinds are this environment's own vocabulary, written by the tool
+        handlers below and read only here — the journal itself stays generic,
+        so an environment with a different set of calls records its own.
+        """
+        match cell.kind:
+            case "install":
+                installed = self.run_install(PACKAGE_LIST.validate_json(cell.source))
+                return CellOutcome(
+                    ok=installed.exit_code == 0,
+                    detail=installed.output[: self.REPLAY_DETAIL_CHARS],
+                )
+            case "file":
+                executed = self.run_file(cell.source)
+            case _:
+                executed = self.run_code(cell.source)
+        return CellOutcome(
+            ok=executed.exit_code == 0,
+            detail=executed.stderr[: self.REPLAY_DETAIL_CHARS],
+        )
+
+    def replay_journal(self) -> ReplayReport:
+        """Re-run every journaled cell in order and report what differed.
+
+        Into the container as it stands, which is what makes this a replay of
+        the session and not a fresh-machine check: the packages earlier cells
+        installed are still there. A clean replay says the sequence still
+        holds together, not that it would hold together anywhere else.
+        """
+        journal = self.journal.load()
+        self.ensure_started()
+        return journal.compare([self.replay_cell(cell) for cell in journal.cells])
+
     # --- MCP tool creation ---
 
     def create_tools(self, usage_notes: str = "") -> list[LupMcpTool]:
@@ -823,10 +1062,19 @@ class Sandbox:
             try:
                 self.ensure_started()
                 if inp.file is not None:
-                    return self.run_file(inp.file)
-                if inp.code is None:
-                    raise ToolError("pass exactly one of code or file")
-                return self.run_code(inp.code)
+                    ran = self.run_file(inp.file)
+                    kind, source = "file", inp.file
+                else:
+                    if inp.code is None:
+                        raise ToolError("pass exactly one of code or file")
+                    ran = self.run_code(inp.code)
+                    kind, source = "code", inp.code
+                self.journal.record(
+                    JournalCell(kind=kind, source=source, ok=ran.exit_code == 0)
+                )
+                return ran
+            except UnreadableJournalError as e:
+                raise ToolError(str(e)) from e
             except PathNotMountedError as e:
                 raise ToolError(str(e)) from e
             except SandboxNotInitializedError as e:
@@ -847,7 +1095,17 @@ class Sandbox:
         async def install_package(inp: InstallPackageInput) -> InstallPackageResult:
             try:
                 self.ensure_started()
-                return self.run_install(inp.packages)
+                installed = self.run_install(inp.packages)
+                self.journal.record(
+                    JournalCell(
+                        kind="install",
+                        source=PACKAGE_LIST.dump_json(inp.packages).decode("utf-8"),
+                        ok=installed.exit_code == 0,
+                    )
+                )
+                return installed
+            except UnreadableJournalError as e:
+                raise ToolError(str(e)) from e
             except SandboxNotInitializedError as e:
                 logger.error("Sandbox not initialized: %s", e)
                 raise ToolError(f"Sandbox error: {e}") from e
@@ -855,7 +1113,39 @@ class Sandbox:
                 logger.exception("Docker execution failed")
                 raise ToolError(f"Docker error: {e}") from e
 
-        return [execute_code, install_package]
+        @lup_tool(
+            "Re-run every cell this sandbox has executed, in order, and report "
+            "which ones came out differently. Use it before relying on a "
+            "sandbox result for anything that matters. This sandbox claims no "
+            "determinism — it has network access and installs packages — so a "
+            "divergence is not a bug here, it is the finding: it says the "
+            "result depended on something outside the recorded code. The "
+            "replay runs in this container as it stands, with everything "
+            "earlier cells installed still present, so a clean replay says the "
+            "sequence still holds together and not that it would hold "
+            "anywhere else. Returns the journal id, how many cells were "
+            "replayed, each divergence, and a finding that reads the result "
+            "against the claim this environment makes.",
+            name="sandbox_replay",
+        )
+        async def sandbox_replay(inp: SandboxReplayInput) -> ReplayReport:
+            try:
+                return self.replay_journal()
+            except UnreadableJournalError as e:
+                raise ToolError(str(e)) from e
+            except PathNotMountedError as e:
+                raise ToolError(str(e)) from e
+            except SandboxNotInitializedError as e:
+                logger.error("Sandbox not initialized: %s", e)
+                raise ToolError(f"Sandbox error: {e}") from e
+            except CodeExecutionTimeoutError as e:
+                logger.warning("Replayed cell timed out")
+                raise ToolError(str(e)) from e
+            except (APIError, DockerException) as e:
+                logger.exception("Docker replay failed")
+                raise ToolError(f"Docker error: {e}") from e
+
+        return [execute_code, install_package, sandbox_replay]
 
     def create_mcp_server(
         self,

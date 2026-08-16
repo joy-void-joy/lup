@@ -6,7 +6,7 @@ from collections.abc import Awaitable, Callable
 from datetime import timedelta
 from typing import Annotated, Literal, Self, overload
 
-from pydantic import BaseModel, Discriminator
+from pydantic import BaseModel, Discriminator, Field
 
 from lup.runtime.contracts import (
     EventStream,
@@ -26,6 +26,14 @@ from lup.types import (
     LupToolUseBlock,
     Usage,
 )
+
+
+# The tool names a runtime spells native delegation with. Kept beside the
+# block that answers about a delegation so no reader has to know them.
+DELEGATION_TOOLS = ("Agent", "Task")
+
+# What a delegation is called when its call named no role.
+UNNAMED_SUBAGENT = "subagent"
 
 
 class SessionId(BaseModel, frozen=True):
@@ -96,6 +104,21 @@ class TurnBlock(BaseModel, frozen=True):
         """The id of the call this block makes, if it makes one."""
         return None
 
+    def delegated_role(
+        self,
+        tools: tuple[str, ...] = DELEGATION_TOOLS,
+        unnamed: str = UNNAMED_SUBAGENT,
+    ) -> str | None:
+        """The subagent role this block delegates to, if it delegates.
+
+        Asked of the block so a reader correlating a transcript never has to
+        know which tool a runtime spells delegation with, nor which argument
+        carries the role. Both are parameters because a runtime this library
+        has not met spells them its own way, and a caller should not have to
+        fork a block to say so.
+        """
+        return None
+
     @property
     def refusal(self) -> "ToolRefusal | None":
         """The refused call this block reports, if it reports one."""
@@ -153,6 +176,18 @@ class TurnToolCallBlock(TurnBlock, frozen=True):
     def invoked_call_id(self) -> str | None:
         return self.id
 
+    def delegated_role(
+        self,
+        tools: tuple[str, ...] = DELEGATION_TOOLS,
+        unnamed: str = UNNAMED_SUBAGENT,
+    ) -> str | None:
+        if self.name not in tools:
+            return None
+        requested = self.arguments.get("subagent_type")  # lup: ignore[dict-get]
+        if not isinstance(requested, str):
+            requested = self.arguments.get("name")  # lup: ignore[dict-get]
+        return requested if isinstance(requested, str) else unnamed
+
 
 class ToolRefusal(BaseModel, frozen=True):
     """One tool call that returned an error instead of a result."""
@@ -202,6 +237,22 @@ class TurnMessage(BaseModel, frozen=True):
 
     role: Literal["user", "assistant", "tool", "system"]
     blocks: list[AnyTurnBlock]
+    parent_tool_call_id: str | None = Field(
+        default=None,
+        description=(
+            "The delegation tool call this message was produced under, when "
+            "the provider attributes it to one — the only evidence that "
+            "separates a native subagent's messages from its parent's"
+        ),
+    )
+    model: str | None = Field(
+        default=None,
+        description="Model the provider reports for this message, when it does",
+    )
+    message_id: str | None = Field(
+        default=None,
+        description="Provider's own message identifier, for correlating replays",
+    )
 
 
 class TurnEventBase(BaseModel, frozen=True):
