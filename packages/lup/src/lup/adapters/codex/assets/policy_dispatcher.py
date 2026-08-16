@@ -53,6 +53,14 @@ def managed_root():
     return Path(environ["CODEX_HOME"]) if "CODEX_HOME" in environ else None
 
 
+def spent_escape(tool_input):
+    """Whether this call requested Codex's per-command sandbox escape."""
+    return (
+        "sandbox_permissions" in tool_input
+        and tool_input["sandbox_permissions"] == "require_escalated"
+    )
+
+
 def joined(decisions):
     """Join one envelope's files: deny beats ask beats defer beats allow."""
     for effect in ("deny", "ask", "defer"):
@@ -66,16 +74,23 @@ def dispatch(payload, permission_request=False):
     name = payload["tool_name"]
     tool_input = payload["tool_input"]
     if name == "Bash":
-        return bash_decision(
+        escaped = spent_escape(tool_input)
+        decision = bash_decision(
             tool_input["command"],
             managed_root(),
             False if permission_request else sandbox_active(),
             interactive=permission_request,
-            # This hook answers without rewriting the call, so a verdict that
-            # has to leave the sandbox is stopped with that reason instead:
-            # the one route out a rule can compile was decided before this ran.
-            escapable=False,
+            # This hook cannot rewrite placement, so only a call that already
+            # requested Codex's escape can satisfy an outside verdict; its
+            # prefix rule approves that request rather than performing it.
+            escapable=escaped,
         )
+        if escaped and decision.effect == "allow" and decision.sandbox != "outside":
+            return KernelDecision(
+                "deny",
+                f"call requested outside but policy places it {decision.sandbox}; remove sandbox_permissions and retry",
+            )
+        return decision
     if name == "web_fetch":
         return fetch_decision(tool_input["url"])
     if name == "apply_patch":

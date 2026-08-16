@@ -940,10 +940,11 @@ def test_codex_compiles_prefix_safe_shell_allows_to_native_rules() -> None:
     }
     rules = artifacts[Path(".codex/rules/lup.rules")]
 
-    assert 'pattern = ["uv", "run", "pytest"]' in rules
+    assert 'pattern = ["uv", "run", "lup-devtools"]' in rules
     assert 'pattern = ["git", "status"]' in rules
     assert 'pattern = ["gh", "pr", "view"]' in rules
     assert 'pattern = ["uv"]' not in rules
+    assert 'pattern = ["uv", "run", "pytest"]' not in rules
     assert 'pattern = ["env"]' not in rules
     assert 'pattern = ["sort"]' not in rules
     assert 'pattern = ["git", "push"]' not in rules
@@ -1400,6 +1401,13 @@ def test_executable_mode_drift_is_not_treated_as_generated(tmp_path: Path) -> No
     assert proposal.writes[0].artifact.executable
 
 
+def codex_hook_result(body: JsonObject, sandboxed: bool) -> sh.RunningCommand:
+    environment = {**os.environ, "LUP_SANDBOX_ACTIVE": "1" if sandboxed else "0"}
+    return sh.Command(
+        str(Path(".codex/plugins/lup/hooks/scripts/policy.py").resolve())
+    )(_in=json.dumps(body), _env=environment, _ok_code=[0, 2], _return_cmd=True)
+
+
 def test_generated_codex_hook_fails_closed_for_inline_code() -> None:
     script = Path(".codex/plugins/lup/hooks/scripts/policy.py").resolve()
     result = sh.Command(str(script))(
@@ -1410,6 +1418,39 @@ def test_generated_codex_hook_fails_closed_for_inline_code() -> None:
     assert isinstance(result, sh.RunningCommand)
     assert result.exit_code == 2
     assert b"interpreters" in result.stderr
+
+
+def test_generated_codex_pretool_accepts_a_safe_requested_escape() -> None:
+    body: JsonObject = {
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Bash",
+        "tool_input": {
+            "command": "uv run lup-devtools harness resolve intake",
+            "sandbox_permissions": "require_escalated",
+        },
+    }
+    assert codex_hook_result(body, sandboxed=True).exit_code == 0
+
+
+def test_generated_codex_pretool_stops_an_unrequested_escape() -> None:
+    body: JsonObject = {
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Bash",
+        "tool_input": {"command": "uv run lup-devtools harness resolve intake"},
+    }
+    assert codex_hook_result(body, sandboxed=True).exit_code == 2
+
+
+def test_generated_codex_pretool_refuses_an_ambient_escape() -> None:
+    body: JsonObject = {
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Bash",
+        "tool_input": {
+            "command": "cat README.md",
+            "sandbox_permissions": "require_escalated",
+        },
+    }
+    assert codex_hook_result(body, sandboxed=True).exit_code == 2
 
 
 def test_generated_codex_permission_request_allows_safe_resolver() -> None:

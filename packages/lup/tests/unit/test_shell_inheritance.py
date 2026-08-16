@@ -302,6 +302,7 @@ def test_a_native_prefix_reads_the_resolved_effect_and_not_the_declared_one() ->
         ShellCommandRule(
             name="tool",
             default_effect="allow",
+            sandbox="outside",
             subcommands=[ShellSubcommandRule(name="show")],
         )
     ]
@@ -310,9 +311,9 @@ def test_a_native_prefix_reads_the_resolved_effect_and_not_the_declared_one() ->
 
 
 def test_a_confined_placement_is_never_widened_into_a_native_allow() -> None:
-    """A prefix rule bypasses the sandbox, which is the one thing `inside` denies.
+    """A prefix rule auto-approves an escape, which is what `inside` denies.
 
-    The effect axis alone would admit this row, and admitting it would run
+    The effect axis alone would admit this row, and an escaped call would run
     unconfined a call whose whole declaration is that it runs confined.
     """
     confined = [

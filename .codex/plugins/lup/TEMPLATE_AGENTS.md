@@ -761,7 +761,7 @@ shared canonical/bundled fixture suite.
 
 Project Codex configuration is the generated `.codex/config.toml`, loaded only for a trusted project. Personal sandbox and approval defaults belong in `~/.codex/config.toml`; `sandbox_mode = "workspace-write"` with `approval_policy = "on-request"` is the low-friction guarded default. Never edit the generated project file.
 
-Prefix-safe shell allows from the canonical policy are generated as project-local rules in `.codex/rules/lup.rules`. A matching native `allow` runs outside the sandbox without prompting; the PreToolUse hook remains the semantic gate and blocks unsafe variants. Commands whose safety depends on flags, paths, shell structure, or runtime content stay under the sandbox and approval flow.
+Prefix-safe outside shell allows from the canonical policy are generated as project-local rules in `.codex/rules/lup.rules`. A matching native `allow` approves the command without choosing its sandbox placement. When the semantic policy places a command outside, set `sandbox_permissions = "require_escalated"` on the first call; the native rule removes the prompt and the PreToolUse hook still blocks unsafe variants. Commands whose safety depends on flags, paths, shell structure, or runtime content stay under the sandbox and approval flow.
 
 ---
 

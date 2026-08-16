@@ -57,7 +57,9 @@ from lup.policy.dispatcher import (
     compile_dispatcher,
     dispatcher_banner,
 )
+from lup.policy.kernel.decision import SandboxPlacement
 from lup.policy.kernel.rows import PathRoleRow
+from lup.policy.kernel.shell import sandbox_excluded
 from lup.policy.refused_tools import routed_for
 from lup.policy.kernel.words import (
     INTERPRETERS,
@@ -135,9 +137,9 @@ class CodexSpellings(NativeSpellings):
         unmentioned. ``codex-rs/core/src/tools/handlers/shell_spec.rs`` puts
         ``sandbox_permissions`` on the shell tool the model calls, describing
         it to the model as a per-command sandbox override whose
-        ``require_escalated`` value means unsandboxed execution, beside a
-        ``justification`` field that becomes the approval question a human
-        answers; the value is pushed into that enum unconditionally, so it is
+        ``require_escalated`` value means unsandboxed execution, beside the
+        ``justification`` the approval policy records; the value is pushed into
+        that enum unconditionally, so it is
         offered on every session.
         ``codex-rs/core/src/tools/sandboxing.rs`` is where it lands, mapping
         ``requires_escalated_permissions()`` to a first attempt that bypasses
@@ -150,9 +152,10 @@ class CodexSpellings(NativeSpellings):
         """
         return Spelled(
             words=Instruction(
-                "Re-issue it with `sandbox_permissions` set to "
-                "`require_escalated`, and a `justification` saying why, which "
-                f"is the approval question the user answers. {reason}"
+                "Issue it on the first attempt with `sandbox_permissions` set to "
+                "`require_escalated`, and a `justification` saying why. A "
+                "semantically allowed command is auto-approved; do not add a "
+                f"shell `# lup: escalate` marker. {reason}"
             )
         )
 
@@ -493,13 +496,15 @@ def codex_allow_prefixes(
     rules: list[ShellCommandRule],
     runner_targets: list[RunnerTargetRule],
     dynamic: Collection[str] = CODEX_DYNAMIC_COMMANDS,
+    excluded_commands: Collection[str] = (),
 ) -> list[list[str]]:
     """Compile semantic allows that stay allowed for every suffix.
 
-    Codex prefix rules bypass the sandbox, so flag-guarded rows cannot be
-    widened into a native allow, and neither can one placed ``inside``, whose
-    whole statement is that the call runs confined however the session is
-    running. The runtime hook continues to classify those forms, along with
+    Codex prefix rules approve commands but do not choose sandbox placement.
+    Because the same rule also approves a caller-requested escape, only forms
+    placed ``outside`` can be widened into a native allow; ambient forms stay
+    inside, and one placed ``inside`` is never approved for an escape. The runtime
+    hook continues to classify those forms, along with
     every command whose safety depends on parsed content.
 
     The erased rows are what this reads rather than the declarations they came
@@ -508,18 +513,21 @@ def codex_allow_prefixes(
     terms of one that spelled it out, which is the same reading the dispatcher
     and the canonical policy take.
 
-    That bypass is the whole of the escape this compiler can declare, which is
-    why a runner target's placement does not narrow what is emitted here: a
-    target declared ``outside`` reaches the outside through its prefix rule or
-    not at all. What a rule cannot reach is the escape the model spends on its
-    own call, which exists but is chosen a call at a time rather than compiled
+    The prefix is the approval half of an escape the caller requests with
+    ``sandbox_permissions=require_escalated``. A runner target declared
+    ``outside`` receives that approval; an ambient target does not. The escape
+    itself is chosen on the model's own call rather than compiled
     in advance — :meth:`CodexSpellings.escape_sandbox` carries it. The forms
     this cannot widen — a target behind a global flag, or one joined into a
     compound command — reach the hook, where a confined session is stopped
     with the reason rather than left to fail on the first write.
     """
 
-    def add(prefix: list[str]) -> None:
+    excluded = list(excluded_commands)
+
+    def add(prefix: list[str], sandbox: SandboxPlacement) -> None:
+        if sandbox != "outside" and not sandbox_excluded(shlex.join(prefix), excluded):
+            return
         if prefix not in prefixes:
             prefixes.append(prefix)
 
@@ -534,13 +542,13 @@ def codex_allow_prefixes(
             continue
         if not row["subcommand"]:
             if row["command"] not in gated and row["command"] not in dynamic:
-                add([row["command"]])
+                add([row["command"]], row["sandbox"])
         elif row["operation"]:
-            add([row["command"], row["subcommand"], row["operation"]])
+            add([row["command"], row["subcommand"], row["operation"]], row["sandbox"])
         elif f"{row['command']} {row['subcommand']}" not in operational:
-            add([row["command"], row["subcommand"]])
+            add([row["command"], row["subcommand"]], row["sandbox"])
     for target in runner_targets:
-        add(["uv", "run", target.name])
+        add(["uv", "run", target.name], target.sandbox)
     return sorted(prefixes)
 
 
@@ -550,7 +558,11 @@ def render_codex_rules(source: HookSet) -> str:
         f"prefix_rule(pattern = {json.dumps(prefix)}, decision = "
         '"allow", justification = "Allowed by Lup semantic shell policy")'
         for prefix in codex_allow_prefixes(
-            source.shell_rules, list(source.runner_targets)
+            source.shell_rules,
+            list(source.runner_targets),
+            excluded_commands=source.sandbox.excluded_commands
+            if source.sandbox
+            else (),
         )
     ]
     return "\n".join([*rows, ""])

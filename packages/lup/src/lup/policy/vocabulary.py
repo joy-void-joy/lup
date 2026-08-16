@@ -471,14 +471,14 @@ GIT_READ_ONLY_SUBCOMMANDS = (
     "rev-list",
     "name-rev",
     "merge-base",
-    # lup: This toolchain should carry an automatic sandbox escalation rather
+    # lup: solved: This toolchain should carry an automatic sandbox escalation rather
     # than each caller remembering a flag. Every `lup-devtools` command that
     # opens agent sessions is broken inside the sandbox, and the resolver is
     # only the case that cost 90 minutes to notice. Whatever mechanism lands —
     # a declared escape list, or the sandbox axis on a decision — the toolchain
     # that runs the workflow should be on it by declaration.
     #
-    # lup: A command that will fail this way should be *blocked*, with the
+    # lup: solved: A command that will fail this way should be *blocked*, with the
     # reason, rather than allowed to run and die on a bare `EROFS`. The agent
     # cannot tell that failure from a broken repository, so it retries, works
     # around it, or reports success from a session that never ran a command.

@@ -159,9 +159,9 @@ class CodexDecisionRenderer(NativeDecisionRenderer[CodexDecisionOutput]):
     arguments the model wrote, so a verdict of its own has no way to move one
     outside the sandbox. Saying so is what keeps a placement from reading as
     honoured — dropped in silence, an escape this boundary cannot perform
-    would look performed to everything upstream of it. The ``outside`` Codex
-    does have is compiled ahead of the session as a prefix rule, in
-    :func:`~lup.adapters.codex.harness.codex_allow_prefixes`, not decided here.
+    would look performed to everything upstream of it. Codex's agent requests
+    ``outside`` on its call; :func:`~lup.adapters.codex.harness.codex_allow_prefixes`
+    compiles the approval for safe outside commands, not the placement itself.
 
     A permission to escalate survives the degrading, because it was never
     addressed to this boundary: the agent spends it on its own next call, with
