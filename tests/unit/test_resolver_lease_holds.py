@@ -14,8 +14,13 @@ whose work nobody has salvaged — the two verbs that each destroy something.
 from pathlib import Path
 
 import pytest
+import sh
 
-from lup.devtools.dev.branches import disposition_for, runs_holding
+from lup.devtools.dev.branches import (
+    disposition_for,
+    runs_holding,
+    unlanded_siblings,
+)
 from lup.harness.models import ResolveSpec, SkillInvocation
 from lup.resolver.models import (
     AcceptanceCriterion,
@@ -93,9 +98,59 @@ def test_a_run_that_died_still_holds_its_branches(
     assert BRANCH in held(tmp_path, run_state(phase))
 
 
-def test_completion_releases_the_lease(tmp_path: Path) -> None:
-    """The one phase that carried every lease through the join machinery."""
-    assert held(tmp_path, run_state(ResolvePhase.COMPLETE)) == {}
+def test_a_completed_run_still_reports_the_branch_it_left_behind(
+    tmp_path: Path,
+) -> None:
+    """Completion releases the lease; it does not dispose of the branch.
+
+    A run reaches this phase by finishing its own work, not by getting its
+    batch onto the integration branch, and cleanup deactivates every lease
+    whether or not it managed to delete the branch. So the branch that
+    survives reads as loose work — commits the integration branch lacks and
+    no pull request driving them — which is textbook LAND, and both verbs a
+    sweep offers for that destroy or duplicate a batch that may already have
+    landed under some other branch's pull request.
+    """
+    assert BRANCH in held(tmp_path, run_state(ResolvePhase.COMPLETE, active=False))
+
+
+def test_a_completed_run_s_leftover_is_offered_a_reading_not_a_resume(
+    tmp_path: Path,
+) -> None:
+    """Nothing restarts a run that finished, so the reason must not offer to."""
+    reason = held(tmp_path, run_state(ResolvePhase.COMPLETE, active=False))[BRANCH]
+
+    assert "resume" not in reason
+    assert "--abort" not in reason
+    assert f"resolve status --run-id {RUN_ID}" in reason
+
+
+def test_a_completed_run_s_leftover_surveys_as_keep_rather_than_land(
+    tmp_path: Path,
+) -> None:
+    """One decision about the run, not one per branch it happened to leave."""
+    reasons = held(tmp_path, run_state(ResolvePhase.COMPLETE, active=False))
+    verdict = disposition_for(
+        BRANCH,
+        integration="dev",
+        current="dev-checkout",
+        contained_in=[],
+        pr=None,
+        unique_commits=108,
+        held=reasons[BRANCH],
+    )
+
+    assert verdict.status == "KEEP"
+
+
+def test_a_completed_run_is_reported_as_not_alive(tmp_path: Path) -> None:
+    """Nothing is coming back for these, so a sweep asks about the run first."""
+    ResolverStateRepository(tmp_path, RUN_ID).save(
+        run_state(ResolvePhase.COMPLETE, active=False)
+    )
+    assert [hold.alive for hold in runs_holding(live_lease_branches(tmp_path))] == [
+        False
+    ]
 
 
 def test_a_working_run_holds_its_branches(tmp_path: Path) -> None:
@@ -182,6 +237,40 @@ def test_holds_group_under_the_run_answerable_for_them() -> None:
 
 def test_no_run_holding_anything_is_no_entries() -> None:
     assert runs_holding({}) == []
+
+
+def test_a_run_s_branches_stay_out_of_the_unlanded_advisory(
+    tmp_lup_project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The advisory reads the two signals that make a run's branch look loose.
+
+    It runs inside every `dev check`, offline, so it sees neither the lease
+    nor the pull request — just commits the integration branch lacks. A run's
+    branches answer that description while the run is carrying them, and its
+    leftovers answer it after it finished, so a batch of them prints the same
+    line until the reader skips it. The run directory is local, which is the
+    one thing this may read without going online for it.
+    """
+    repo = tmp_lup_project
+    git = sh.Command("git").bake("-C", str(repo), _tty_out=False)
+    git("init", "-q", "-b", "dev")
+    git("config", "user.email", "test@example.com")
+    git("config", "user.name", "Test")
+    git("add", ".")
+    git("commit", "-q", "-m", "init")
+    for branch in (BRANCH, "loose-work"):
+        git("checkout", "-q", "-b", branch, "dev")
+        (repo / f"{branch.replace('/', '-')}.txt").write_text("work\n")
+        git("add", ".")
+        git("commit", "-q", "-m", f"work on {branch}")
+    git("checkout", "-q", "dev")
+
+    ResolverStateRepository(repo / ".lup" / "resolve", RUN_ID).save(
+        run_state(ResolvePhase.COMPLETE, active=False)
+    )
+    monkeypatch.chdir(repo)
+
+    assert [found.name for found in unlanded_siblings()] == ["loose-work"]
 
 
 def test_a_held_branch_surveys_as_keep_rather_than_land(tmp_path: Path) -> None:

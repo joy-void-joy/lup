@@ -84,13 +84,28 @@ def test_a_parked_run_still_holds_its_leases(tmp_path: Path) -> None:
     )
 
 
-def test_a_finished_run_holds_nothing(tmp_path: Path) -> None:
+def test_a_finished_run_still_reports_what_it_left_behind(tmp_path: Path) -> None:
+    """Completion releases the lease without disposing of the branch.
+
+    Cleanup deactivates every lease whether or not it managed to delete the
+    branch it named, so a survivor reads as loose work carrying the whole
+    batch's commits. A sweep meeting it that way offers to land a batch that
+    may already have gone in under another branch's pull request.
+    """
     state_root = tmp_path / ".lup" / "resolve"
     ResolverStateRepository(state_root, "run-1").save(
-        run_state("run-1", ResolvePhase.COMPLETE, [lease("alpha", tmp_path / "leases")])
+        run_state(
+            "run-1",
+            ResolvePhase.COMPLETE,
+            [lease("alpha", tmp_path / "leases", active=False)],
+        )
     )
 
-    assert live_lease_branches(state_root) == {}
+    held = live_lease_branches(state_root)
+
+    assert list(held) == ["resolve/run-1/alpha"]
+    assert held["resolve/run-1/alpha"].alive is False
+    assert "resolve status --run-id run-1" in held["resolve/run-1/alpha"].reason()
 
 
 def test_a_released_lease_is_not_held(tmp_path: Path) -> None:

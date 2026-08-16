@@ -480,13 +480,21 @@ def unlanded_siblings(
 
     The current branch is excluded: work in hand is not work parked out of
     sight, and reporting it every run would train the reader to skip the line.
+
+    So is any branch a resolver run answers for. A run holds its branches
+    out of the sweep deliberately, and its leftovers are one decision about
+    the run rather than a list of parked work; a batch of them here is the
+    same line repeated until the reader skips it, and reads as a backlog
+    nobody is carrying when a run either is carrying it or has finished.
+    Reading the run directory keeps this offline, which the rest of it is.
     """
     integration = get_integration_branch()
     worktrees = parse_worktrees()
     current = git.out("branch", "--show-current")
+    leased = live_lease_branches(project_root() / ".lup" / "resolve")
 
     def measure(name: str) -> UnlandedBranch | None:
-        if name == current or name in protected:
+        if name == current or name in protected or name in leased:
             return None
         if is_ancestor(name, integration):
             return None
@@ -912,7 +920,11 @@ def survey(as_json: bool) -> None:
     if has_remote and not as_json:
         typer.echo("Querying PR status...", err=True)
     pr_map: dict[str, PRStatus] = fetch_pr_status(branch_names) if has_remote else {}
-    leased = live_lease_branches(project_root() / ".lup" / "resolve")
+    # A run records every branch it ever leased, and a completed run keeps
+    # reporting the ones its cleanup did not delete. Only what is still on
+    # disk is a branch this sweep can say anything about.
+    lease_of = live_lease_branches(project_root() / ".lup" / "resolve")
+    leased = {name: lease_of[name] for name in branch_names if name in lease_of}
 
     def info(b: ParsedBranch) -> BranchInfo:
         name = b["name"]

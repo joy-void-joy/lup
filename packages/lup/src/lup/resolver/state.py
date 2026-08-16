@@ -550,7 +550,7 @@ class ResolverStateRepository:
 
 
 def held_leases(state_root: Path) -> Iterator[HeldLease]:
-    """Each lease a run that has not completed is still holding.
+    """Each branch a resolver run answers for — held, or left behind by it.
 
     A lease looks exactly like abandoned work to a branch survey: commits the
     integration branch lacks, and no pull request driving them. So a sweep
@@ -567,7 +567,16 @@ def held_leases(state_root: Path) -> Iterator[HeldLease]:
     Failing is not finishing. A run that died mid-flight still has its
     branches out on lease, and the hazard above is if anything sharper then:
     the join machinery it was partway through never ran, and nobody has come
-    back for the work. Only completion releases a lease.
+    back for the work.
+
+    Completion releases a lease but does not dispose of the branch, and the
+    two are not the same fact: a run reaches ``COMPLETE`` by finishing its
+    own work, not by getting its batch onto the integration branch. So a
+    branch that survives a completed run is reported here too. Cleanup
+    deletes the branches it managed to, and those never match a survey's
+    branch list; the ones left are exactly the leftovers worth a decision,
+    and reporting them as one run is what keeps a sweep from meeting them
+    as unrelated abandoned work carrying the whole batch's commit count.
     """
     if not state_root.is_dir():
         return
@@ -580,11 +589,10 @@ def held_leases(state_root: Path) -> Iterator[HeldLease]:
         except (StateCorruptionError, OSError, ValidationError):
             logger.exception("resolver run %s could not be read", run.name)
             continue
-        if state.phase.released_leases():
-            continue
         progress = {record.concern_id: record.status for record in state.progress}
+        leftover = state.phase.released_leases()
         for lease in state.leases:
-            if lease.active:
+            if lease.active or leftover:
                 yield HeldLease(
                     branch=lease.branch,
                     run_id=state.run_id,
