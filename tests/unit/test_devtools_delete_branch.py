@@ -159,6 +159,36 @@ def test_an_unmerged_branch_leaves_origin_s_copy_standing(
     assert "Kept remote branch: origin/solo" in capsys.readouterr().out
 
 
+def test_a_branch_another_pr_is_based_on_is_blocked(
+    pushed: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A stacked PR names its parent as its base, and GitHub closes it.
+
+    The parent is spent exactly when its own PR merged, which is when this
+    command is called on it — so the ordinary end of the parent's life
+    closes the child, and the child's branch survives, leaving a closure
+    that reads as work lost.
+    """
+    monkeypatch.chdir(pushed)
+    monkeypatch.setattr(branches, "dependent_pulls", lambda name: [161])
+
+    branches.delete_branch("spent", dry_run=True, force=False)
+
+    assert "#161 targets this branch and would be closed" in capsys.readouterr().out
+    assert "spent" in remote_branch_names(pushed)
+
+
+def test_forcing_past_a_dependent_says_which_pr_it_closes(
+    pushed: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.chdir(pushed)
+    monkeypatch.setattr(branches, "dependent_pulls", lambda name: [161, 162])
+
+    branches.delete_branch("spent", dry_run=True, force=True)
+
+    assert "force: closes #161, #162" in capsys.readouterr().out
+
+
 def test_origin_s_copy_of_unmerged_work_goes_only_when_named(
     pushed: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
