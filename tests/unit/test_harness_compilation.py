@@ -64,6 +64,7 @@ from lup.harness.models import (
     PromptDocument,
     PromptPart,
     RelocateSession,
+    WatchOutput,
     RequestApproval,
     ResolverEntry,
     RuntimeDocs,
@@ -437,8 +438,7 @@ def test_generated_resolver_entries_only_launch_the_shared_python_core() -> None
     assert "uv run lup-devtools harness resolve --adapter codex --detach" in skill
     assert "scheduling" not in skill
     for entry in (command, skill):
-        assert "exactly one `status --watch`" in entry
-        assert "event-driven waiter" in entry
+        assert "exactly one watch" in entry
         assert "--run-id" in entry and "--answer" in entry
         # The entry named flags the CLI has never had, and the acceptance
         # question it pointed at instead does not exist either. An entry
@@ -446,6 +446,14 @@ def test_generated_resolver_entries_only_launch_the_shared_python_core() -> None
         # the reader spends a turn on `No such option`.
         assert "--accept" not in entry and "--reject" not in entry
         assert "integration-assembly" in entry
+    # Each entry names its own runtime's waiter rather than the idea of one.
+    # The neutral wording — "the runtime's event-driven waiter" — was true of
+    # Claude and false of Codex, where reading the session is the mechanism
+    # rather than the mistake, so a reader on either had to guess which tool
+    # was meant. The guess is an ordinary command with a long timeout, which
+    # reports once, at the end.
+    assert "`Monitor`" in command
+    assert "exec_command" in skill and "write_stdin" in skill
 
 
 def test_invocation_renderers_own_complete_spelling_and_escaping() -> None:
@@ -522,6 +530,10 @@ PART_CONTRACT: dict[str, PartExpectation] = {
     ),
     "RelocateSession": PartExpectation(
         part=RelocateSession(path="the path step 1 prints"), diverges=True
+    ),
+    "WatchOutput": PartExpectation(
+        part=WatchOutput(command="lup-devtools harness resolve status --watch"),
+        diverges=True,
     ),
     "ResolverEntry": PartExpectation(part=ResolverEntry(), diverges=True),
     "ArgumentsRef": PartExpectation(part=ArgumentsRef(), diverges=True),

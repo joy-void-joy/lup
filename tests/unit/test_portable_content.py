@@ -37,6 +37,7 @@ def instruction_text(runtime: NativeSpellings) -> str:
             runtime.delegate("plugin:agent", MARK),
             runtime.request_approval(MARK, MARK),
             runtime.relocate_session(MARK),
+            runtime.watch_output(MARK),
             runtime.resolver_entry(),
             runtime.runtime_docs(),
             runtime.escape_sandbox(MARK).in_prose(),
