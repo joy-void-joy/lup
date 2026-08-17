@@ -25,8 +25,10 @@ import typer
 from pydantic import BaseModel, Field
 
 from lup.devtools.dev.branches import (
+    delete_branch,
     detect_base_branch,
     get_integration_branch,
+    parse_branches,
 )
 from lup.devtools.layout import get_tree_dir
 
@@ -100,6 +102,7 @@ class GhPrDetail(BaseModel):
     review_decision: str = Field(default="", alias="reviewDecision")
     mergeable: str = ""
     state: str = ""
+    head_ref: str = Field(default="", alias="headRefName")
 
 
 class GhPrRef(BaseModel):
@@ -359,6 +362,47 @@ def pr_merged(pr_number: int) -> bool:
     return detail.state == "MERGED"
 
 
+def pr_head_ref(pr_number: int) -> str:
+    """Which branch the PR merges from, asked before its cleanup needs it.
+
+    Read from the PR rather than taken from the checkout, because the branch
+    a PR merges from is the PR's own fact and whoever runs this may be
+    anywhere — the integration worktree, another feature's, or a clone that
+    never fetched the head at all.
+    """
+    try:
+        detail = GhPrDetail.model_validate_json(
+            gh.out("pr", "view", str(pr_number), "--json", "headRefName")
+        )
+    except sh.ErrorReturnCode:
+        logger.exception("could not read PR #%s head branch", pr_number)
+        return ""
+    return detail.head_ref
+
+
+def cleanup_merged_branch(name: str) -> None:
+    """Delete a merged PR's branch through the path that knows about worktrees.
+
+    ``gh pr merge --delete-branch`` cannot. It runs a plain ``git branch -d``,
+    which refuses while any worktree holds the branch, so in a tree of
+    worktrees every merge reported a cleanup failure and left the branch and
+    its checkout behind. :func:`delete_branch` removes the worktree first,
+    archives the branch's traces — usually their only copy, and gone for good
+    once the checkout is — and takes origin's copy once the commits are in the
+    integration branch.
+
+    A failure here is reported rather than raised, keeping the distinction
+    :func:`pr_merged` draws: the merge already happened, so a branch left
+    standing is finished work with a loose end, not work to retry.
+    """
+    if not any(branch["name"] == name for branch in parse_branches()):
+        return
+    try:
+        delete_branch(name, dry_run=False, force=False)
+    except (typer.Exit, SystemExit):
+        typer.echo(f"The merge stands; {name} is still here to remove.", err=True)
+
+
 def merge(
     pr_number: int,
     dry_run: bool,
@@ -383,8 +427,10 @@ def merge(
         typer.echo(f"Would pull changes into {integration}")
         return
 
+    head_ref = pr_head_ref(pr_number)
+
     try:
-        gh("pr", "merge", str(pr_number), f"--{method}", "--delete-branch", *gh_args)
+        gh("pr", "merge", str(pr_number), f"--{method}", *gh_args)
         typer.echo(f"Merged PR #{pr_number}")
     except sh.ErrorReturnCode as e:
         if not pr_merged(pr_number):
@@ -411,6 +457,12 @@ def merge(
             typer.echo(
                 f"Warning: pull failed in {integration}: {decode_stderr(e)}", err=True
             )
+
+    # After the pull, so the branch is an ancestor of the integration branch
+    # by the time the deletion plan asks: that is what lets it go without
+    # --force and what marks origin's copy spent.
+    if head_ref:
+        cleanup_merged_branch(head_ref)
 
     result = MergeResult(
         pr_number=pr_number,

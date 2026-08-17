@@ -92,10 +92,17 @@ def test_readonly_command_exits_cleanly(args: list[str]) -> None:
 class FakeGh:
     def __init__(self) -> None:
         self.calls: list[tuple[str, ...]] = []
+        self.reads: list[tuple[str, ...]] = []
+        self.cleaned: list[str] = []
 
     def __call__(self, *args: str) -> str:
         self.calls.append(args)
         return ""
+
+    def out(self, *args: str) -> str:
+        """Reads are kept apart from actions, so ``calls`` stays the merge's own."""
+        self.reads.append(args)
+        return '{"headRefName": "feature"}'
 
 
 def raise_typer_exit() -> Path:
@@ -108,6 +115,9 @@ def merge_stubs(monkeypatch: pytest.MonkeyPatch) -> FakeGh:
     monkeypatch.setattr(pr, "gh", fake)
     monkeypatch.setattr(pr, "get_integration_branch", lambda: "dev")
     monkeypatch.setattr(pr, "get_tree_dir", raise_typer_exit)
+    # Stubbed rather than let through: the real one deletes whatever branch the
+    # stubbed head ref names, and these tests run inside a live checkout.
+    monkeypatch.setattr(pr, "cleanup_merged_branch", fake.cleaned.append)
     return fake
 
 
@@ -157,6 +167,21 @@ def test_merge_hands_further_flags_to_gh_untouched(merge_stubs: FakeGh) -> None:
     assert "--admin" in merge_stubs.calls[0]
 
 
+def test_merge_clears_the_branch_itself_rather_than_asking_gh_to(
+    merge_stubs: FakeGh,
+) -> None:
+    """``--delete-branch`` runs a plain ``git branch -d``, blind to worktrees.
+
+    Doing it here instead reaches the deletion path that removes the checkout
+    first and archives the branch's traces, so a merge in a tree of worktrees
+    finishes rather than leaving both behind.
+    """
+    pr.merge(42, dry_run=False)
+
+    assert "--delete-branch" not in merge_stubs.calls[0]
+    assert merge_stubs.cleaned == ["feature"]
+
+
 class GhExitOne(sh.ErrorReturnCode):
     """A concrete non-zero exit; the sh base leaves ``exit_code`` to subclasses."""
 
@@ -185,11 +210,12 @@ def test_a_cleanup_that_failed_is_not_a_merge_that_failed(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """gh deletes the branch after merging, and reports the second as the whole.
+    """A non-zero gh over a PR GitHub calls merged is a leftover, not a failure.
 
-    A worktree holding the branch is enough to fail that step, which leaves a
-    landed PR reported as an unlanded one — and a caller who believes it
-    merges again, or hand-lands work that is already in.
+    Reading the state back is what separates them, and the difference is the
+    whole of what the caller does next: a merge that did not happen is retried,
+    where a landed PR reported as unlanded gets merged again, or hand-landed
+    work that is already in.
     """
     monkeypatch.setattr(pr, "gh", FailingGh("MERGED"))
     monkeypatch.setattr(pr, "get_integration_branch", lambda: "dev")
