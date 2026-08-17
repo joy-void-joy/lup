@@ -467,6 +467,7 @@ def create_dev_app(
             compositions=native_targets.resolve(native_targets.every, project_root()),
             repository_writers=repository_writers,
             guidance=guidance,
+            git_guards=declarations.git_guards,
             scope=check.changed_paths(since) if since is not None else None,
         )
 

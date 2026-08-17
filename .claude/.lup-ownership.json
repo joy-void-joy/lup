@@ -506,7 +506,7 @@
     {
       "path": "docs/quality-pipeline.md",
       "category": "generated",
-      "sha256": "e00271f11cb1f278e700f89f6160431f44b75eb23af030601aa63bc449d039fc",
+      "sha256": "7a7d09ac75b5bad396dee94409e7bf0bc8725a3ecd882923c5f02a7bf0fb77ee",
       "semantic_id": "docs.quality-pipeline",
       "executable": false
     },

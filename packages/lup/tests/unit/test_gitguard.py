@@ -7,11 +7,11 @@ import sh
 from lup.devtools.dev.git_guards import DECLARED_GUARDS, DRIFT_COMMAND, GitGuard
 from lup.gitguard import (
     GIT_ENVIRONMENT,
-    committer_identity,
     guard_report,
     moved_refs,
     repository_refs,
     repository_state,
+    watched_config,
 )
 
 
@@ -117,9 +117,28 @@ def test_a_fixture_that_writes_a_committer_identity_is_caught(tmp_path: Path) ->
     before = repository_state(tmp_path)
     git("config", "user.email", "fixture@example.test")
 
-    assert committer_identity(tmp_path) == {"config user.email": "fixture@example.test"}
+    assert watched_config(tmp_path) == {"config user.email": "fixture@example.test"}
     assert moved_refs(before, repository_state(tmp_path)) == [
         "config user.email: created"
+    ]
+
+
+def test_a_fixture_that_writes_a_hooks_path_is_caught(tmp_path: Path) -> None:
+    """The half that takes the alarm out with it.
+
+    `core.hooksPath` in the shared config points every worktree cut from the
+    repository at a directory a fixture built, so the checkout runs no hooks
+    at all — and one whose guards are gone reports exactly what one whose
+    guards pass reports. Watched here because nothing else would say so: the
+    guards cannot report their own absence.
+    """
+    git = sh.Command("git").bake("-C", str(tmp_path), _tty_out=False)
+    git("init", "-b", "main")
+    before = repository_state(tmp_path)
+    git("config", "core.hooksPath", str(tmp_path / "hooks"))
+
+    assert moved_refs(before, repository_state(tmp_path)) == [
+        "config core.hooksPath: created"
     ]
 
 
@@ -129,4 +148,4 @@ def test_a_repository_leaving_identity_to_the_global_config_reads_empty(
     """Absent is the normal case, so it must not read as a change from nothing."""
     sh.Command("git").bake("-C", str(tmp_path), _tty_out=False)("init", "-b", "main")
 
-    assert committer_identity(tmp_path) == {}
+    assert watched_config(tmp_path) == {}
