@@ -7,7 +7,6 @@ project on a different tracker supplies its own reader rather than waiting for
 the library to learn an API it has no business knowing.
 """
 
-
 import json
 import logging
 from collections.abc import Iterator

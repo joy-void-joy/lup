@@ -58,7 +58,6 @@ class MarkdownCell(BaseModel, frozen=True):
     a new kind of formatting is one class and cannot be the one that forgot.
     """
 
-
     text: str
 
     @abstractmethod
