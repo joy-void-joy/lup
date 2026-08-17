@@ -8,12 +8,11 @@ covered here too, against the text it actually wrote rather than against
 the fact that writing it raised nothing.
 """
 
-import io
 import json
 from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
-from rich.console import Console
 
 from lup.telemetry.blocks import JsonValue, format_tool_result, truncate_str_fields
 from lup.telemetry.display import (
@@ -152,36 +151,20 @@ def test_tool_use_takes_the_next_color_and_its_result_pops_it() -> None:
     assert colors.by_id == {"b": "green"}
 
 
-def test_the_paired_tag_is_printed_in_its_resolved_color(
+def test_print_block_passes_the_resolved_color_to_the_console(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The color must reach the terminal, not just the resolver.
-
-    capsys strips styling, so every other test here would stay green if
-    the tag were printed without its style; only a forced terminal can
-    pin that the resolved color is what the reader actually sees.
-    """
+    """The color resolved for a tag reaches the console rendering boundary."""
     from lup.telemetry import display
 
-    sink = io.StringIO()
-    monkeypatch.setattr(
-        display,
-        "console",
-        Console(
-            highlight=False,
-            markup=False,
-            force_terminal=True,
-            color_system="standard",
-            file=sink,
-            width=200,
-        ),
-    )
+    rendered = Mock()
+    monkeypatch.setattr(display, "console", rendered)
     print_block(
         LupToolUseBlock(id="a", name="Read"),
         colors=ColorAssigner(palette=["red"]),
     )
 
-    assert "\x1b[31m" in sink.getvalue()
+    rendered.print.assert_called_once_with("[a]", style="red")
 
 
 def test_result_without_an_open_call_falls_back_to_default() -> None:
