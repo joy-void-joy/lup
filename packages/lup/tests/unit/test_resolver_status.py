@@ -8,7 +8,7 @@ from pydantic import TypeAdapter
 
 from lup.channels.models import local_stamp, utc_now
 from lup.channels.stream import Stream
-from lup.resolver.join_desk import JoinDesk, JoinLanding
+from lup.resolver.join_desk import JoinDesk, JoinLanding, JoinPlan, JoinTip
 from lup.harness.models import ResolveSpec, SkillInvocation
 from lup.resolver.models import (
     SETTLED_STATUSES,
@@ -102,9 +102,42 @@ def test_a_finished_bar_estimates_nothing_further() -> None:
     assert "ETA" not in done.render()
 
 
+def test_a_live_eta_advances_but_a_stopped_estimate_stays_recorded() -> None:
+    completed = utc_now()
+    progress = PhaseProgress(
+        label="joins",
+        done=2,
+        total=5,
+        per_item=timedelta(minutes=10),
+        last_completed_at=completed,
+    )
+
+    observed = completed + timedelta(minutes=4)
+
+    assert progress.remaining(at=observed) == timedelta(minutes=26)
+    assert progress.remaining(active=False, at=observed) == timedelta(minutes=30)
+
+
 def absorbed(joined: list[str], planned: int) -> JoinProgress:
     """What the orchestrator has written back, as of its last turn."""
     return JoinProgress(joined=joined, commit="b" * 40, planned=planned)
+
+
+def write_join_plan(desk: JoinDesk, root: Path, count: int) -> None:
+    """Put one integration sequence on the desk a status reader watches."""
+    desk.write_plan(
+        JoinPlan(
+            concern_id="integration",
+            worktree=root / "integration",
+            base="a" * 40,
+            title="resolve: integrate",
+            purpose="integration",
+            tips=[
+                JoinTip(commit=f"{index:040d}", concern_id=f"concern-{index}")
+                for index in range(count)
+            ],
+        )
+    )
 
 
 def test_the_bar_moves_while_the_join_turn_is_still_running(tmp_path: Path) -> None:
@@ -116,6 +149,7 @@ def test_the_bar_moves_while_the_join_turn_is_still_running(tmp_path: Path) -> N
     precisely so they do not have to judge by silence.
     """
     desk = JoinDesk(tmp_path)
+    write_join_plan(desk, tmp_path, 13)
     for index in range(10):
         desk.record(JoinLanding(commit=f"{index:040d}", head="c" * 40), planned=13)
 
@@ -150,6 +184,7 @@ def test_a_parent_recorded_without_a_merge_does_not_set_the_rate(
     joins remaining will not come close to.
     """
     desk = JoinDesk(tmp_path)
+    write_join_plan(desk, tmp_path, 13)
     for index in range(4):
         desk.record(
             JoinLanding(commit=f"{index:040d}", head="c" * 40, merged=False),
@@ -161,6 +196,29 @@ def test_a_parent_recorded_without_a_merge_does_not_set_the_rate(
     assert progress is not None
     assert progress.done == 4
     assert progress.per_item is None
+
+
+def test_a_live_join_plan_excludes_an_earlier_sequences_count_and_rate(
+    tmp_path: Path,
+) -> None:
+    """One active plan supplies one numerator, denominator, and rate."""
+    desk = JoinDesk(tmp_path)
+    write_join_plan(desk, tmp_path, 5)
+    for index in range(2):
+        desk.record(JoinLanding(commit=f"{index:040d}", head="c" * 40), planned=5)
+    start = utc_now()
+    earlier = JoinProgress(
+        joined=["older"],
+        commit="d" * 40,
+        planned=9,
+        completions=[start, start + timedelta(minutes=24)],
+    )
+
+    progress = join_bar(earlier, tmp_path)
+
+    assert progress is not None
+    assert (progress.done, progress.total) == (2, 5)
+    assert progress.per_item != timedelta(minutes=24)
 
 
 def verifying(concerns: list[str], examined: str | None) -> ResolveState:
@@ -353,17 +411,52 @@ def test_the_console_outside_a_settling_phase_prints_what_it_always_did(
     assert capsys.readouterr().out.strip() == ("[resolve] progress: integrating 1 of 1")
 
 
-def test_only_a_settling_phase_draws_a_settled_bar(tmp_path: Path) -> None:
-    """Integration takes a verified concern back out of the settled set.
-
-    Drawn there, the bar would retreat as each concern moved to integrating
-    and return as it landed, which is the one thing a progress bar may not do.
-    """
+def test_integration_without_a_join_plan_draws_no_bar(tmp_path: Path) -> None:
+    """Integration earns its own iterator only once a merge plan exists."""
     integrating = verifying(["a"], None).model_copy(
         update={"phase": ResolvePhase.INTEGRATION}
     )
 
     assert phase_progress(integrating, tmp_path) is None
+
+
+def test_integrating_decisions_remain_settled() -> None:
+    status = RunStatus(
+        run_id="run-1",
+        exists=True,
+        held=True,
+        phase=ResolvePhase.INTEGRATION,
+        counts=[
+            StatusCount(status=ConcernStatus.INTEGRATING, concerns=9),
+            StatusCount(status=ConcernStatus.RETIRED, concerns=2),
+        ],
+    )
+
+    assert "11/11 settled" in status_header(status)
+
+
+def test_the_console_draws_the_same_join_units_as_status(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    start = utc_now()
+    integrating = worker_tally(
+        [*[ConcernStatus.INTEGRATING] * 9, *[ConcernStatus.RETIRED] * 2], []
+    ).model_copy(
+        update={
+            "phase": ResolvePhase.INTEGRATION,
+            "joined": 2,
+            "join_total": 5,
+            "join_completions": [start, start + timedelta(minutes=5)],
+        }
+    )
+
+    ConsoleResolverObserver().tally_changed(integrating)
+
+    printed = capsys.readouterr().out.strip()
+    assert "joins " in printed
+    assert printed.count("2/5") == 1
+    assert "2/9" not in printed
+    assert printed.endswith("integrating 9 · retired 2 of 11")
 
 
 def test_the_desk_stamps_a_record_so_a_caller_cannot_forget_to(

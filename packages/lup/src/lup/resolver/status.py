@@ -103,14 +103,28 @@ class PhaseProgress(BaseModel, frozen=True):
     done: int
     total: int
     per_item: timedelta | None = None
+    last_completed_at: datetime | None = None
 
-    def remaining(self) -> timedelta | None:
-        """How long the rest of this phase should take at the observed rate."""
+    def remaining(
+        self, active: bool = True, at: datetime | None = None
+    ) -> timedelta | None:
+        """How long the rest of this phase should take at the observed rate.
+
+        An active iterator consumes the expected interval already spent on its
+        current item; a stopped run preserves the estimate it last recorded.
+        """
         if not self.per_item or self.done >= self.total:
             return None
-        return self.per_item * (self.total - self.done)
+        estimate = self.per_item * (self.total - self.done)
+        if not active or self.last_completed_at is None:
+            return estimate
+        elapsed = (at if at is not None else utc_now()) - self.last_completed_at
+        active_interval = max(elapsed, timedelta())
+        return estimate - min(active_interval, self.per_item)
 
-    def render(self, width: int = 16, shades: str = BAR_SHADES) -> str:
+    def render(
+        self, width: int = 16, shades: str = BAR_SHADES, active: bool = True
+    ) -> str:
         """The bar, its count, and the two figures a reader plans around.
 
         The cells are tqdm's and the durations are ours, which is the split
@@ -126,7 +140,7 @@ class PhaseProgress(BaseModel, frozen=True):
         exists to avoid. `elapsed` is zero for the same reason — no segment
         drawn here reads it.
         """
-        eta = self.remaining()
+        eta = self.remaining(active=active)
         cells = tqdm.format_meter(
             n=self.done,
             total=self.total,
@@ -322,8 +336,10 @@ def phase_progress(state: ResolveState, run_dir: Path) -> PhaseProgress | None:
             return recheck_bar(state, run_dir)
         case phase if phase.settling():
             return worker_bar(state.tally())
-        case _:
+        case ResolvePhase.INTEGRATION:
             return join_bar(state.join_progress, run_dir)
+        case _:
+            return None
 
 
 def worker_bar(tally: RunTally) -> PhaseProgress | None:
@@ -348,21 +364,58 @@ def worker_bar(tally: RunTally) -> PhaseProgress | None:
         done=tally.settled,
         total=tally.total,
         per_item=elapsed_per_item(tally.settled_at),
+        last_completed_at=max(tally.settled_at, default=None),
+    )
+
+
+def tally_bar(tally: RunTally) -> PhaseProgress | None:
+    """The iterator represented by one persisted aggregate."""
+    match tally.phase:
+        case phase if phase.settling():
+            return worker_bar(tally)
+        case ResolvePhase.INTEGRATION:
+            return join_tally_bar(tally)
+        case _:
+            return None
+
+
+def join_tally_bar(tally: RunTally) -> PhaseProgress | None:
+    """The active merge sequence as recorded in resolver state."""
+    if not tally.join_total:
+        return None
+    return PhaseProgress(
+        label="joins",
+        done=tally.joined,
+        total=tally.join_total,
+        per_item=elapsed_per_item(tally.join_completions),
+        last_completed_at=max(tally.join_completions, default=None),
     )
 
 
 def join_bar(progress: JoinProgress | None, run_dir: Path) -> PhaseProgress | None:
     """How far the join sequence has got.
 
-    Read from both records the sequence writes, because neither is complete
-    on its own. The merger drives a whole join inside one turn, so the
-    orchestrator's copy does not move until the turn returns and a reader
-    watching it sees nothing for the length of the phase; the checkpoint
-    ``land_parent`` writes is current between two parents but starts empty
-    for a run whose earlier joins a previous sequence recorded. Their union
-    is what has landed, so the count can never go backwards.
+    A live desk plan is authoritative while a merger works: every landing it
+    records belongs to that plan, so its numerator, denominator, and rate have
+    one unit and one sequence. Persisted progress is the fallback before the
+    plan appears, after it clears, and when an older run has no live plan.
     """
-    checkpoint = JoinDesk(run_dir).progress()
+    desk = JoinDesk(run_dir)
+    plan = desk.plan()
+    checkpoint = desk.progress()
+    live_completions = sorted(
+        datetime.fromisoformat(landing.at)
+        for landing in checkpoint.landings
+        if landing.merged and landing.at
+    )
+    if plan is not None:
+        return PhaseProgress(
+            label="joins",
+            done=len(checkpoint.joined),
+            total=len(plan.tips),
+            per_item=elapsed_per_item(live_completions),
+            last_completed_at=max(live_completions, default=None),
+        )
     planned = max(progress.planned if progress else 0, checkpoint.planned)
     if not planned:
         return None
@@ -412,13 +465,15 @@ def recheck_bar(state: ResolveState, run_dir: Path) -> PhaseProgress | None:
         for record in RecheckDesk(run_dir).examined(examined)
         if record.concern_id in facing
     ]
+    completed_at = sorted(
+        datetime.fromisoformat(record.at) for record in records if record.at
+    )
     return PhaseProgress(
         label="re-checks",
         done=len(records),
         total=len(facing),
-        per_item=elapsed_per_item(
-            sorted(datetime.fromisoformat(record.at) for record in records if record.at)
-        ),
+        per_item=elapsed_per_item(completed_at),
+        last_completed_at=max(completed_at, default=None),
     )
 
 

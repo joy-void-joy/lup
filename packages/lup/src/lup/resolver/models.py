@@ -118,9 +118,9 @@ class ResolvePhase(StrEnum):
         """Whether concerns reach their terminal state during this phase.
 
         Which is what makes a settled count worth drawing a bar from. Outside
-        these, the count moves backwards: integration takes a verified concern
-        back out of the settled set and returns it, and a bar that retreats is
-        worse than no bar at all.
+        these phases, another iterator is more useful: integration has merges
+        and verification has re-checks. A settled bar would duplicate them,
+        obscuring the work the current phase is actually performing.
 
         Asked by the iterator a status view draws and by the console a live
         run prints to, so it is a question the phase answers rather than a
@@ -155,6 +155,7 @@ class ConcernStatus(StrEnum):
 
 SETTLED_STATUSES: tuple[ConcernStatus, ...] = (
     ConcernStatus.VERIFIED,
+    ConcernStatus.INTEGRATING,
     ConcernStatus.INELIGIBLE,
     ConcernStatus.RETIRED,
     ConcernStatus.FAILED,
@@ -164,8 +165,8 @@ SETTLED_STATUSES: tuple[ConcernStatus, ...] = (
 )
 """Which statuses mean a concern is done being decided, however it ended.
 
-Ours to draw rather than the lifecycle's own, so a caller redraws it: a
-reader could reasonably count `integrating` as finished, and this does not.
+Ours to draw rather than the lifecycle's own, so a caller redraws it.
+Integration keeps a verified decision settled while assembling its work.
 Naming the settled half rather than the working one makes an unlisted status
 read as still in flight, which is the safer way to be wrong — a new state
 counted as finished would inflate the fraction silently.
@@ -1288,23 +1289,10 @@ class ResolveState(BaseModel, frozen=True):
                 item.settled_at for item in self.progress if item.settled_at is not None
             ),
             joined=len(self.join_progress.joined) if self.join_progress else 0,
-            # lup: This counts every concern holding a commit, but `integrate` joins
-            # only the verified ones, so the total over-reads by each concern that
-            # failed or retired still holding work — and the bar can never reach it.
-            # Measured on resolve-9e060ad9bb53: 22 against 20 real parents, the two
-            # extras being composition-seam-abc (failed) and git-sandbox-lock-diagnosis
-            # (retired), both of which the assembly gate lists as exclusions rather
-            # than merging. Count what that gate will actually join. If the wider
-            # number is worth showing, it is a second figure — "20 of 22 on the
-            # table" says something true, where one number pretending to be both
-            # cannot.
-            join_total=(
-                len(
-                    [outcome for outcome in self.outcomes if outcome.commit is not None]
-                )
-                if self.join_progress
-                else 0
+            join_completions=(
+                self.join_progress.completions if self.join_progress else []
             ),
+            join_total=(self.join_progress.planned if self.join_progress else 0),
         )
 
     @model_validator(mode="after")
@@ -1329,6 +1317,8 @@ class RunTally(BaseModel, frozen=True):
     by_status: dict[ConcernStatus, int]
     joined: int
     join_total: int
+    join_completions: list[datetime] = []
+    """When merges in the active join sequence landed, in order."""
     settled: int = 0
     """How many concerns are done being decided, however each one ended.
 
@@ -1346,34 +1336,15 @@ class RunTally(BaseModel, frozen=True):
     stamp, which costs an ETA its precision and no count its accuracy.
     """
 
-    def concerns_line(self) -> str:
+    def concerns_line(self, include_joins: bool = True) -> str:
         """The tally as one compact human line."""
         counted = " · ".join(
             f"{status} {count}" for status, count in self.by_status.items() if count
         )
         line = f"{counted or 'no concerns'} of {self.total}"
-        if self.join_total:
+        if include_joins and self.phase is ResolvePhase.INTEGRATION and self.join_total:
             line += f" · joins {self.joined}/{self.join_total}"
         return line
-
-
-# lup: ignore[model-free-function] — dead: every caller uses ResolveState.tally,
-# which computes the same aggregate. It should be deleted, and cannot be: it
-# carries a copy of an open note, and the removal gate counts open notes across
-# the file rather than checking the text survives, so removing either copy reads
-# as destroying feedback. Delete both once that check compares text.
-def run_tally(state: ResolveState) -> RunTally:
-    """Fold one persisted state into the aggregate a watcher wants."""
-    statuses = [item.status for item in state.progress]
-    return RunTally(
-        phase=state.phase,
-        total=len(statuses),
-        by_status={
-            status: statuses.count(status) for status in dict.fromkeys(statuses)
-        },
-        joined=len(state.join_progress.joined) if state.join_progress else 0,
-        join_total=state.join_progress.planned if state.join_progress else 0,
-    )
 
 
 class ResolveManifest(BaseModel, frozen=True):

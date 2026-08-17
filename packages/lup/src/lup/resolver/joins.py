@@ -24,9 +24,9 @@ assumed.
 import asyncio
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from datetime import datetime
 from pathlib import Path
 
-from lup.channels.models import utc_now
 from lup.resolver.contracts import ResolverDrained
 from lup.resolver.dag import ConcernGraph
 from lup.resolver.journal import (
@@ -159,6 +159,10 @@ class Joiner:
         tips = [parent for parent in ordered if parent not in riding]
         self.journal.record(JoinPlannedEvent(tips=tips, carried=carried))
         desk = JoinDesk(self.run.repository.root)
+        existing_plan = desk.plan()
+        if existing_plan is None:
+            desk.clear()
+            self.begin_join_progress(base, len(tips))
         desk.write_plan(
             JoinPlan(
                 concern_id=lease.concern_id,
@@ -175,7 +179,7 @@ class Joiner:
         blocked = await self.drive_join(lease, desk, purpose)
         progress = desk.progress()
         current = progress.commit or self.worktrees.head(lease)
-        self.record_join_progress(progress.joined, current, len(tips))
+        self.record_join_progress(progress, current, len(tips))
         outstanding = [tip for tip in tips if tip not in progress.joined]
         if outstanding:
             # A drain is the one way to leave parents on the table, and it is
@@ -394,8 +398,16 @@ class Joiner:
         fork = self.worktrees.merge_base(lease, base, commit)
         return self.worktrees.authored_between(lease, fork, commit)
 
+    def begin_join_progress(self, commit: str, planned: int) -> None:
+        """Start one join sequence without carrying an earlier phase's samples."""
+        state = self.run.state
+        if state is None:
+            return
+        progress = JoinProgress(joined=[], commit=commit, planned=planned)
+        self.run.persist(state.model_copy(update={"join_progress": progress}))
+
     def record_join_progress(
-        self, joined: list[str], commit: str, planned: int = 0
+        self, progress: JoinProgressRecord, commit: str, planned: int = 0
     ) -> None:
         """Say where the join sequence got to, as each parent lands.
 
@@ -406,15 +418,19 @@ class Joiner:
         state = self.run.state
         if state is None:
             return
-        before = state.join_progress.completions if state.join_progress else []
+        completions = [
+            datetime.fromisoformat(landing.at)
+            for landing in progress.landings
+            if landing.merged and landing.at
+        ]
         self.run.persist(
             state.model_copy(
                 update={
                     "join_progress": JoinProgress(
-                        joined=list(joined),
+                        joined=list(progress.joined),
                         commit=commit,
                         planned=planned,
-                        completions=[*before, utc_now()],
+                        completions=completions,
                     )
                 }
             )

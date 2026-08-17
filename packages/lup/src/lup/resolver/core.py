@@ -1319,7 +1319,11 @@ class ResolverCore:
             else:
                 leases = state.leases
             state = state.model_copy(
-                update={"phase": ResolvePhase.INTEGRATION, "leases": leases}
+                update={
+                    "phase": ResolvePhase.INTEGRATION,
+                    "leases": leases,
+                    "join_progress": None,
+                }
             )
             state = self.run_state.progress_state(
                 state,

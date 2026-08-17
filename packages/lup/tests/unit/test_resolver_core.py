@@ -65,7 +65,6 @@ from lup.resolver.journal import Journal, LeaseDriftEvent
 from lup.resolver.models import (
     AdmissionRequest,
     AnswerBatch,
-    run_tally,
     AcceptanceCriterion,
     CarriedParent,
     Concern,
@@ -1226,7 +1225,7 @@ def test_the_join_tally_counts_the_parents_that_will_be_merged() -> None:
         JoinProgress(joined=["one", "two", "three"], commit="j3", planned=13),
     )
 
-    tally = run_tally(state)
+    tally = state.tally()
 
     assert (tally.joined, tally.join_total) == (3, 13)
     assert "joins 3/13" in tally.concerns_line()
