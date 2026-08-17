@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "c10e809d5c54ac17e3d9d69b730083a119a5603772d4fc4617edd588ed7b2f7c",
+  "source_digest": "350a39e22a76d431926e0a36d7c58ad490fd22cce335c70363cb80c7b4b596d1",
   "target_requirements": [
     "codex-cli>=0.144"
   ],
@@ -107,7 +107,7 @@
     {
       "path": ".codex/plugins/lup/hooks/runtime/kernel/edit.py",
       "category": "generated",
-      "sha256": "4b455cdb76582c412d2092857acba3b3bb78f829978c32a6a4366f7e16172d52",
+      "sha256": "5446cba74afae5cce2e1876a5e380c20ed718e03cf5d532d7bf6fd9487f79bd3",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -128,14 +128,14 @@
     {
       "path": ".codex/plugins/lup/hooks/runtime/kernel/roles.py",
       "category": "generated",
-      "sha256": "8779c9edb5e0b86ed1f29854922b29afbd61db5f1dd9c9f4e141988a03a3cdfa",
+      "sha256": "e49cd9b9828c0d26acd89cad6bb70a80537ad1e51ff892be342728728d7390f8",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
     {
       "path": ".codex/plugins/lup/hooks/runtime/kernel/rows.py",
       "category": "generated",
-      "sha256": "c7c0ce69c36c74efb293b60fe0509c6cf56e720e05b6d881031bbb2cb8ae4701",
+      "sha256": "a5d6da3278a0d6b734ed8c057352636738f757f3803c190fee47b3865a2bfeab",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -163,7 +163,7 @@
     {
       "path": ".codex/plugins/lup/hooks/runtime/policy_data.py",
       "category": "generated",
-      "sha256": "97546ede7ffe0b7bd5d3e9819d674eac229f2c13e59ea1da2e7ddb1aa8982534",
+      "sha256": "beaf2c923db3b4554ff37c324774f9e73272271efcc252b90b50c153cd6975c6",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -268,7 +268,7 @@
     {
       "path": ".codex/plugins/lup/skills/hooks/SKILL.md",
       "category": "generated",
-      "sha256": "0506c5c3c709ad0fa89db55c3e143ae4370d9b762ab51c89bc64dc5f701f746b",
+      "sha256": "1f6262c69c143cadd4dc32519aa3af59447a49436b04399061e255e54958f19c",
       "semantic_id": "skill.hooks",
       "executable": false
     },
