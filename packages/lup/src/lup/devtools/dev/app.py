@@ -20,7 +20,7 @@ import lup.devtools.dev.boundaries as boundaries_mod
 import lup.devtools.dev.branches as branches
 import lup.devtools.dev.check as check
 import lup.devtools.dev.comments as comments
-import lup.devtools.dev.commit_guard as commit_guard
+import lup.devtools.dev.git_guards as git_guards_mod
 import lup.devtools.dev.conflicts as conflicts
 import lup.devtools.dev.issues as issues_mod
 import lup.devtools.dev.model_config as model_config_mod
@@ -55,6 +55,12 @@ class DevDeclarations(BaseModel, frozen=True):
     hooks: HookSet
     plugin: Plugin
     test_roots: list[check.TestRoot]
+    git_guards: list[git_guards_mod.GitGuard] = git_guards_mod.DECLARED_GUARDS
+    """Which checks this repository installs as git hooks.
+
+    A default rather than a fixture: the pair lup arms is what most projects
+    want, and one that guards a third moment — or runs its gate under another
+    name — says so here instead of forking the module that writes them."""
 
 
 def create_dev_app(
@@ -79,8 +85,8 @@ def create_dev_app(
     app.add_typer(plugin_app, name="plugin", help="Local plugin marketplace wiring")
     app.add_typer(
         guard_app,
-        name="commit-guard",
-        help="The pre-commit hook refusing stale generated artifacts",
+        name="git-hooks",
+        help="The git hooks refusing stale artifacts and a failing gate",
     )
     app.add_typer(
         model_config_mod.create_model_config_app(),
@@ -329,38 +335,47 @@ def create_dev_app(
         """Finalize the merge/rebase/cherry-pick after all conflicts are resolved."""
         conflicts.conflict_complete(dry_run)
 
-    # -- commit-guard commands --
-
-    GUARD = commit_guard.CommitGuard()
+    # -- git-hooks commands --
 
     @guard_app.command("install")
     def guard_install_cmd(
         force: Annotated[
             bool,
-            typer.Option("--force", help="Replace a pre-commit hook written elsewhere"),
+            typer.Option("--force", help="Replace a hook written elsewhere"),
         ] = False,
     ) -> None:
-        """Install the pre-commit hook that refuses stale generated artifacts.
+        """Install every git hook this repository declares.
 
         Idempotent, and shared by every worktree of the clone it is run from,
         so re-running it after a library upgrade refreshes an older body.
+
+        One occupied hook path stops the whole command rather than half of
+        it: `--force` is an answer about a file somebody wrote deliberately,
+        and installing the rest first would leave the reader working out
+        which of them the error was about.
         """
-        try:
-            state = commit_guard.install_guard(GUARD, project_root(), force=force)
-        except commit_guard.GuardConflict as error:
-            typer.echo(str(error), err=True)
-            raise typer.Exit(1) from error
-        typer.echo(state.describe())
+        root = project_root()
+        for guard in declared().git_guards:
+            try:
+                state = git_guards_mod.install_guard(guard, root, force=force)
+            except git_guards_mod.GuardConflict as error:
+                typer.echo(str(error), err=True)
+                raise typer.Exit(1) from error
+            typer.echo(state.describe())
 
     @guard_app.command("status")
     def guard_status_cmd() -> None:
-        """Report whether this clone refuses a stale artifact at commit time."""
-        typer.echo(commit_guard.read_guard(GUARD, project_root()).describe())
+        """Report what this clone refuses, at each moment it declares a hook."""
+        root = project_root()
+        for guard in declared().git_guards:
+            typer.echo(git_guards_mod.read_guard(guard, root).describe())
 
     @guard_app.command("uninstall")
     def guard_uninstall_cmd() -> None:
-        """Remove the hook, leaving a pre-commit hook written elsewhere alone."""
-        typer.echo(commit_guard.uninstall_guard(GUARD, project_root()).describe())
+        """Remove them, leaving hooks written elsewhere alone."""
+        root = project_root()
+        for guard in declared().git_guards:
+            typer.echo(git_guards_mod.uninstall_guard(guard, root).describe())
 
     # -- check command --
 
