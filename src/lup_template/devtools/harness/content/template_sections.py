@@ -9,6 +9,11 @@
 import lup.harness.models as models
 
 import lup.devtools.harness.content.conventions as conventions
+from lup.codeintel.tools import CODEINTEL_TOOL_DECLARATIONS
+
+CODEINTEL_TOOL_ROSTER: list[models.PromptPart] = [
+    models.ToolRoster(tools=list(CODEINTEL_TOOL_DECLARATIONS))
+]
 
 SETUP_THROUGH_NAMING: list[models.PromptPart] = [
     models.TextPart(

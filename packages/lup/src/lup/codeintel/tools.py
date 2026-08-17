@@ -33,7 +33,7 @@ from lup.codeintel.replies import (
     LOCATIONS,
     WORKSPACE_EDIT,
 )
-from lup.mcp import LupMcpTool, ToolError, lup_tool
+from lup.mcp import LupMcpTool, ToolDeclaration, ToolError, lup_tool
 from lup.types import JsonValue
 from lup.workspace.edition import edition_path, read_edition
 
@@ -47,6 +47,57 @@ Both are markers a checkout carries at its own root, so the search stops at
 the checkout holding the file rather than walking on to whatever encloses it.
 A project that roots on something else passes its own.
 """
+
+FIND_DEFINITION = ToolDeclaration(
+    name="find_definition",
+    description=(
+        "Find where a symbol is defined. Use instead of grepping for `def name` "
+        "or `class name`: this resolves imports and aliases, so it finds the "
+        "real declaration rather than a line that looks like one."
+    ),
+)
+
+FIND_REFERENCES = ToolDeclaration(
+    name="find_references",
+    description=(
+        "Find every use of a symbol across the workspace. Use instead of "
+        "grepping for a name: this excludes look-alikes in other scopes and "
+        "includes uses reached through an alias or a re-export."
+    ),
+)
+
+HOVER_TOOL = ToolDeclaration(
+    name="hover",
+    description=(
+        "Read a symbol's inferred type and documentation. Use before assuming "
+        "what a value is: the checker knows the type that was resolved."
+    ),
+)
+
+LIST_SYMBOLS = ToolDeclaration(
+    name="list_symbols",
+    description=(
+        "List every symbol a file declares, with its line. Use instead of "
+        "grepping for `def ` or `class ` to learn a file's shape."
+    ),
+)
+
+RENAME_SYMBOL = ToolDeclaration(
+    name="rename_symbol",
+    description=(
+        "Plan a workspace-wide rename of the symbol at a position. Reports the "
+        "files and edit counts without writing anything. Always prefer this "
+        "over a find-and-replace, which cannot tell one scope from another."
+    ),
+)
+
+CODEINTEL_TOOL_DECLARATIONS = (
+    FIND_DEFINITION,
+    FIND_REFERENCES,
+    HOVER_TOOL,
+    LIST_SYMBOLS,
+    RENAME_SYMBOL,
+)
 
 
 class SymbolSite(BaseModel):
@@ -250,21 +301,13 @@ def create_codeintel_tools(
 
         return await guarded(run(), method)
 
-    @lup_tool(
-        "Find where a symbol is defined. Use instead of grepping for `def name` "
-        "or `class name`: this resolves imports and aliases, so it finds the "
-        "real declaration rather than a line that looks like one."
-    )
+    @lup_tool(FIND_DEFINITION.description, name=FIND_DEFINITION.name)
     async def find_definition(params: PositionInput) -> SiteList:
         return SiteList(
             sites=sites_of(await at_position("textDocument/definition", params))
         )
 
-    @lup_tool(
-        "Find every use of a symbol across the workspace. Use instead of "
-        "grepping for a name: this excludes look-alikes in other scopes and "
-        "includes uses reached through an alias or a re-export."
-    )
+    @lup_tool(FIND_REFERENCES.description, name=FIND_REFERENCES.name)
     async def find_references(params: PositionInput) -> SiteList:
         resolved = located(params.path)
 
@@ -280,10 +323,7 @@ def create_codeintel_tools(
 
         return SiteList(sites=sites_of(await guarded(run(), "references")))
 
-    @lup_tool(
-        "Read a symbol's inferred type and documentation. Use before assuming "
-        "what a value is: the checker knows the type that was resolved."
-    )
+    @lup_tool(HOVER_TOOL.description, name=HOVER_TOOL.name)
     async def hover(params: PositionInput) -> Documentation:
         result = await at_position("textDocument/hover", params)
         try:
@@ -292,10 +332,7 @@ def create_codeintel_tools(
             return Documentation(text="")
         return Documentation(text="" if decoded is None else decoded.text())
 
-    @lup_tool(
-        "List every symbol a file declares, with its line. Use instead of "
-        "grepping for `def ` or `class ` to learn a file's shape."
-    )
+    @lup_tool(LIST_SYMBOLS.description, name=LIST_SYMBOLS.name)
     async def list_symbols(params: DocumentInput) -> SymbolList:
         resolved = located(params.path)
 
@@ -322,11 +359,7 @@ def create_codeintel_tools(
             ]
         )
 
-    @lup_tool(
-        "Plan a workspace-wide rename of the symbol at a position. Reports the "
-        "files and edit counts without writing anything. Always prefer this "
-        "over a find-and-replace, which cannot tell one scope from another."
-    )
+    @lup_tool(RENAME_SYMBOL.description, name=RENAME_SYMBOL.name)
     async def rename_symbol(params: RenameInput) -> RenamePlan:
         resolved = located(params.path)
 

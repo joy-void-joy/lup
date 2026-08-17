@@ -16,6 +16,7 @@ import typer
 from claude_agent_sdk.types import SandboxNetworkConfig, SandboxSettings
 from pydantic import BaseModel, Field
 
+from lup.codeintel.tools import CODEINTEL_TOOL_DECLARATIONS
 from lup.policy.identity import AGENT_IDENTITY_ENV
 from lup.types import JsonObject
 from lup.adapters.claude.harness import CLAUDE_DISPATCHER, ClaudeSpellings
@@ -74,6 +75,7 @@ from lup.harness.models import (
     SkillPattern,
     SpellingExample,
     TextPart,
+    ToolRoster,
     document_byte_size,
 )
 from lup.harness.contracts import PromptRenderer
@@ -374,6 +376,13 @@ def test_template_flavors_share_sections_and_differ_natively() -> None:
     assert "ExitWorktree" not in codex_render
 
 
+def test_template_flavors_render_the_declared_codeintel_tools() -> None:
+    expected = ToolRoster(tools=list(CODEINTEL_TOOL_DECLARATIONS)).text_payload
+
+    assert expected in claude_prompt_renderer().render(TEMPLATE_CLAUDE)
+    assert expected in codex_prompt_renderer().render(TEMPLATE_CODEX)
+
+
 def test_claude_recipe_overrides_legacy_hook_entry_with_hermetic_dispatcher() -> None:
     recipe = claude_target(Path.cwd()).recipe
     artifacts = {artifact.path: artifact for artifact in recipe.desired.artifacts}
@@ -505,6 +514,10 @@ PART_CONTRACT: dict[str, PartExpectation] = {
         ),
         diverges=False,
     ),
+    "ToolRoster": PartExpectation(
+        part=ToolRoster(tools=list(CODEINTEL_TOOL_DECLARATIONS)),
+        diverges=False,
+    ),
     "SkillInvocation": PartExpectation(
         part=SkillInvocation(plugin="lup", skill="merge"), diverges=True
     ),
@@ -577,7 +590,7 @@ class PartQuestion(BaseModel, frozen=True):
 PART_QUESTIONS: dict[str, PartQuestion] = {
     "text_payload": PartQuestion(
         ask=lambda part: part.text_payload is not None,
-        answered_by=["TextPart", "SpellingExample", "MarkdownTable"],
+        answered_by=["TextPart", "SpellingExample", "MarkdownTable", "ToolRoster"],
     ),
     "invocation": PartQuestion(
         ask=lambda part: part.invocation is not None, answered_by=["SkillInvocation"]

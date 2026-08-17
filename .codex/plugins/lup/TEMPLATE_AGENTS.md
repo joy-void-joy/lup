@@ -695,6 +695,14 @@ Nothing type-checks an edit for you here. Codex names the files it changed insid
 
 The `codeintel` tools do answer definitions, usages, and types, resolving imports and aliases as the checker does. Prefer them over word-boundary searches, and confirm a guess against them rather than acting on it. A relative path resolves against the checkout being edited, which the hook publishes on every patch; pass an absolute path when you mean a file somewhere else.
 
+| Tool | Contract |
+| --- | --- |
+| `find_definition` | Find where a symbol is defined. Use instead of grepping for `def name` or `class name`: this resolves imports and aliases, so it finds the real declaration rather than a line that looks like one. |
+| `find_references` | Find every use of a symbol across the workspace. Use instead of grepping for a name: this excludes look-alikes in other scopes and includes uses reached through an alias or a re-export. |
+| `hover` | Read a symbol&#x27;s inferred type and documentation. Use before assuming what a value is: the checker knows the type that was resolved. |
+| `list_symbols` | List every symbol a file declares, with its line. Use instead of grepping for `def ` or `class ` to learn a file&#x27;s shape. |
+| `rename_symbol` | Plan a workspace-wide rename of the symbol at a position. Reports the files and edit counts without writing anything. Always prefer this over a find-and-replace, which cannot tell one scope from another. |
+
 ---
 
 <!-- section: Tooling -->

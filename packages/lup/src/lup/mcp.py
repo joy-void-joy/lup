@@ -283,6 +283,13 @@ class ToolError(Exception):
     """Raise in a tool handler to return an MCP error response."""
 
 
+class ToolDeclaration(BaseModel, frozen=True):
+    """The name and agent-facing contract a tool registration compiles from."""
+
+    name: str
+    description: str
+
+
 class LupMcpTool[I: BaseModel, O: BaseModel]:
     """MCP tool with typed input/output models for introspection.
 
