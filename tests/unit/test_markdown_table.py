@@ -11,7 +11,6 @@ kind of cell escapes, not that some helper was called correctly.
 """
 
 import pytest
-from pydantic import ValidationError
 
 from lup.adapters.harness import claude_prompt_renderer, codex_prompt_renderer
 from lup.harness.models import MarkdownTable, PromptDocument, TextPart
@@ -32,7 +31,7 @@ def test_a_pipe_or_a_newline_cannot_break_out_of_the_cell_holding_it() -> None:
         ],
     )
 
-    lines = table.text_payload.splitlines()
+    lines = table.rendered().splitlines()
 
     assert lines == [
         r"| Rule \| id | Diagnostic |",
@@ -60,14 +59,14 @@ def test_a_code_span_carries_markup_as_it_reads_where_a_raw_element_escapes_it()
         rows=[[CodeCell(text='<b x="1">')], [HtmlCodeCell(text='<b x="1">')]],
     )
 
-    assert '| `<b x="1">` |' in table.text_payload
-    assert "| <code>&lt;b x=&quot;1&quot;&gt;</code> |" in table.text_payload
+    assert '| `<b x="1">` |' in table.rendered()
+    assert "| <code>&lt;b x=&quot;1&quot;&gt;</code> |" in table.rendered()
 
 
 def test_markup_in_a_value_is_shown_rather_than_interpreted() -> None:
     table = MarkdownTable(headers=["Example"], rows=[[PlainCell(text='<b x="1">')]])
 
-    assert "| &lt;b x=&quot;1&quot;&gt; |" in table.text_payload
+    assert "| &lt;b x=&quot;1&quot;&gt; |" in table.rendered()
 
 
 def test_a_table_composes_into_a_document_like_any_other_part() -> None:
@@ -90,5 +89,5 @@ def test_a_table_composes_into_a_document_like_any_other_part() -> None:
 
 def test_a_row_that_does_not_fit_the_header_is_refused() -> None:
     """A ragged row renders as a broken table rather than as an error."""
-    with pytest.raises(ValidationError, match="under 2 headers"):
+    with pytest.raises(ValueError, match="under 2 headers"):
         MarkdownTable(headers=["Page", "Answers"], rows=[[PlainCell(text="alone")]])

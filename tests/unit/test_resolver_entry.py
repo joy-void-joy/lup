@@ -33,7 +33,7 @@ from lup.resolver.models import (
     SourceSnapshot,
 )
 from lup.resolver.state import ResolverStateRepository
-from lup.harness.models import ResolveSpec, SkillInvocation
+from lup.harness.models import ResolveSpec, SkillRef
 from lup.devtools.dev.comments import FoundComment
 from lup.harness.ownership import (
     OWNERSHIP_FILENAME,
@@ -99,9 +99,9 @@ def persisted_run(state_root: Path, run_id: str, phase: ResolvePhase) -> None:
             spec=ResolveSpec(
                 id="resolve",
                 worker_identity="resolver-worker",
-                worker_skill=SkillInvocation(plugin="lup", skill="worker"),
-                review_skill=SkillInvocation(plugin="lup", skill="review"),
-                merge_skill=SkillInvocation(plugin="lup", skill="merge"),
+                worker_skill=SkillRef(plugin="lup", skill="worker"),
+                review_skill=SkillRef(plugin="lup", skill="review"),
+                merge_skill=SkillRef(plugin="lup", skill="merge"),
             ),
             concerns=[],
             progress=[],

@@ -14,7 +14,7 @@ from lup.workspace.paths import project_root
 
 def test_readme_capability_matrix_is_current() -> None:
     readme = (project_root() / "README.md").read_text(encoding="utf-8")
-    expected = capability_matrix(canonical_capability_matrix()).text_payload
+    expected = capability_matrix(canonical_capability_matrix()).rendered()
 
     assert expected in readme, (
         "README capability matrix is stale. Regenerate with "

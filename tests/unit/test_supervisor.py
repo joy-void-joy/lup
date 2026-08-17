@@ -24,7 +24,7 @@ import typer
 from httpx import ASGITransport, AsyncClient
 
 from lup.adapters.harness import AdapterName
-from lup.harness.models import ResolveSpec, SkillInvocation
+from lup.harness.models import ResolveSpec, SkillRef
 from lup.channels.models import utc_now
 from lup.resolver.journal import Journal, JournalEntry, PhaseChangedEvent, RunEvent
 from lup.runtime.models import TurnEvent
@@ -102,9 +102,9 @@ def persisted_state(
         spec=ResolveSpec(
             id="resolve",
             worker_identity="resolver-worker",
-            worker_skill=SkillInvocation(plugin="lup", skill="worker"),
-            review_skill=SkillInvocation(plugin="lup", skill="review"),
-            merge_skill=SkillInvocation(plugin="lup", skill="merge"),
+            worker_skill=SkillRef(plugin="lup", skill="worker"),
+            review_skill=SkillRef(plugin="lup", skill="review"),
+            merge_skill=SkillRef(plugin="lup", skill="merge"),
         ),
         concerns=[concern_of("alpha")],
         progress=[ConcernProgress(concern_id="alpha")],

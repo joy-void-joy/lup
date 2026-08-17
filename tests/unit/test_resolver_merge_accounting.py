@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from lup.harness.models import ResolveSpec, SkillInvocation
+from lup.harness.models import ResolveSpec, SkillRef
 from lup.harness.process import ExitStatus, LaunchRequest, ProcessLauncher
 from lup.resolver.join_tools import merge_problems
 from lup.resolver.models import (
@@ -54,9 +54,9 @@ def run_state(concerns: list[Concern]) -> ResolveState:
         spec=ResolveSpec(
             id="resolve",
             worker_identity="resolver-worker",
-            worker_skill=SkillInvocation(plugin="lup", skill="worker"),
-            review_skill=SkillInvocation(plugin="lup", skill="review"),
-            merge_skill=SkillInvocation(plugin="lup", skill="merge"),
+            worker_skill=SkillRef(plugin="lup", skill="worker"),
+            review_skill=SkillRef(plugin="lup", skill="review"),
+            merge_skill=SkillRef(plugin="lup", skill="merge"),
         ),
         concerns=concerns,
         progress=[ConcernProgress(concern_id=item.id) for item in concerns],

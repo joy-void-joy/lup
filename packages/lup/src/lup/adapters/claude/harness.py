@@ -33,7 +33,7 @@ from lup.harness.models import (
     PluginLocation,
     QualifiedAgentName,
     Skill,
-    SkillInvocation,
+    SkillRef,
     TreeLocation,
 )
 from lup.policy.bundle import (
@@ -80,7 +80,7 @@ class ClaudeSpellings(NativeSpellings):
             Atom("code.claude.com"),
         ]
 
-    def render(self, invocation: SkillInvocation) -> str:
+    def render(self, invocation: SkillRef) -> str:
         command = f"/{invocation.plugin}:{invocation.skill}"
         arguments = " ".join(
             f"{argument.name}={shlex.quote(argument_text(argument.value))}"

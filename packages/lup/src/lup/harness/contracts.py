@@ -27,7 +27,7 @@ if TYPE_CHECKING:
         PluginLocation,
         PromptDocument,
         QualifiedAgentName,
-        SkillInvocation,
+        SkillRef,
         TreeLocation,
     )
     from lup.harness.reconciliation import CurrentTree, ReconciliationProposal
@@ -45,7 +45,7 @@ class SkillInvocationRenderer(ABC):
     """Own one native runtime's complete skill invocation spelling."""
 
     @abstractmethod
-    def render(self, invocation: SkillInvocation) -> str:
+    def render(self, invocation: SkillRef) -> str:
         """Render qualification, escaping, and arguments together."""
 
 

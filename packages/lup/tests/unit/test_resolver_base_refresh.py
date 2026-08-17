@@ -13,7 +13,7 @@ import pytest
 import typer
 
 from lup.devtools.harness import resolve
-from lup.harness.models import ResolveSpec, SkillInvocation
+from lup.harness.models import ResolveSpec, SkillRef
 from lup.harness.process import LaunchRequest, LocalProcessLauncher
 from lup.resolver.journal import Journal, LeaseRefreshedEvent
 from lup.resolver.models import (
@@ -248,9 +248,9 @@ def run_state(source: SourceSnapshot, leases: list[WritableRootLease]) -> Resolv
         spec=ResolveSpec(
             id="resolve",
             worker_identity="resolver-worker",
-            worker_skill=SkillInvocation(plugin="lup", skill="worker"),
-            review_skill=SkillInvocation(plugin="lup", skill="review"),
-            merge_skill=SkillInvocation(plugin="lup", skill="merge"),
+            worker_skill=SkillRef(plugin="lup", skill="worker"),
+            review_skill=SkillRef(plugin="lup", skill="review"),
+            merge_skill=SkillRef(plugin="lup", skill="merge"),
         ),
         concerns=concerns,
         progress=[

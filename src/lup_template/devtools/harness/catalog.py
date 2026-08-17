@@ -29,7 +29,7 @@ from lup.harness.models import (
     Plugin,
     ProjectRootWord,
     ResolveSpec,
-    SkillInvocation,
+    SkillRef,
 )
 from lup.adapters.claude.harness import ClaudeSpellings
 from lup.adapters.codex.harness import CodexSpellings
@@ -353,8 +353,8 @@ def portable_harness(version: str = "0.2.0", root: Path | None = None) -> Harnes
         resolver=ResolveSpec(
             id="resolver.lup",
             worker_identity="resolver-worker",
-            worker_skill=SkillInvocation(plugin="lup", skill="implementer"),
-            review_skill=SkillInvocation(plugin="lup", skill="resolve-reviewer"),
-            merge_skill=SkillInvocation(plugin="lup", skill="merge"),
+            worker_skill=SkillRef(plugin="lup", skill="implementer"),
+            review_skill=SkillRef(plugin="lup", skill="resolve-reviewer"),
+            merge_skill=SkillRef(plugin="lup", skill="merge"),
         ),
     )
