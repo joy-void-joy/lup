@@ -51,7 +51,8 @@ from policy_data import AGENT_IDENTITY_ENV, AUTONOMOUS_AGENT_IDENTITIES
 
 def hook_environment():
     """The native environment passed to this bare hook process."""
-    return os.environ  # lup: ignore[os-environ]
+    # lup: ignore[os-environ] — bare hooks have no settings package
+    return os.environ
 
 
 def managed_root():
