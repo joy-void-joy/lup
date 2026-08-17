@@ -100,6 +100,19 @@ CODEINTEL_TOOL_DECLARATIONS = (
 )
 
 
+def rendered_tool_declarations(
+    declarations: tuple[ToolDeclaration, ...] = CODEINTEL_TOOL_DECLARATIONS,
+) -> list[ToolDeclaration]:
+    """What a guidance surface renders a code-intelligence roster from.
+
+    The set is this library's answer rather than every adopter's: a project
+    whose checker answers fewer questions, or which serves resolution tools of
+    its own beside these, renders its own roster by passing them here instead
+    of forking the module that writes ours down.
+    """
+    return list(declarations)
+
+
 class SymbolSite(BaseModel):
     """One resolved source location, in the one-based terms an editor shows."""
 

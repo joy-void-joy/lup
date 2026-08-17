@@ -9,7 +9,7 @@ every turn.
 """
 
 import lup.harness.models as models
-from lup.codeintel.tools import CODEINTEL_TOOL_DECLARATIONS
+from lup.codeintel.tools import rendered_tool_declarations
 
 DOCUMENT = models.PromptDocument(
     source=__name__,
@@ -106,6 +106,6 @@ knows them:
 
 """
         ),
-        models.ToolRoster(tools=list(CODEINTEL_TOOL_DECLARATIONS)),
+        models.ToolRoster(tools=rendered_tool_declarations()),
     ],
 )
