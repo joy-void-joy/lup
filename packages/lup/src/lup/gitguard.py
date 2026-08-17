@@ -1,0 +1,141 @@
+# lup: ignore[dict-str-payload] — ref name to object id, keyed by whatever
+# refs a repository happens to hold; there is no closed set to model
+"""Catching a test suite that wrote into the repository it is running inside.
+
+A test that builds a throwaway repository binds git to it — `git -C <tmp>` —
+and one that forgets inherits the process working directory instead, which
+during a test run is a real checkout. Nothing about that fails: git finds a
+repository, commits succeed, and the suite passes green while the branch the
+developer is standing on has moved. It was found here the slow way, by a
+`dev pr sync-base` merging a `dev` whose tip had become a fixture's `chore:
+base` commit deleting the entire application source, an hour after the fixture
+ran.
+
+The suite cannot be trusted to notice, because noticing is exactly what it
+failed to do. So the check sits outside every test: the refs of the enclosing
+repository are read once before the session and once after, and any difference
+fails the run naming the refs that moved. Detection rather than prevention — a
+ceiling that stopped git discovering the enclosing repository would also stop
+the tests that legitimately read it, and a suite that cannot run is a worse
+trade than one that reports what it broke.
+
+Nothing here needs the repository to exist: a suite running outside a checkout
+gets an empty snapshot both times and never fails.
+"""
+
+from pathlib import Path
+
+import sh
+
+REF_FORMAT = "%(refname) %(objectname)"
+"""One ref per line, as `repository_refs` reads it."""
+
+IDENTITY_SETTINGS = ("user.name", "user.email")
+"""The config a fixture overwrites to commit as somebody, and never puts back.
+
+Watched beside the refs because it is the quieter half of the same accident and
+the more expensive one. A moved ref is visible the moment anybody looks at the
+branch; a committer identity written into the shared config is inherited by
+every worktree cut from the repository and shows up only as authorship on work
+done hours later, by someone who never ran the suite.
+"""
+
+
+def repository_refs(root: Path, ref_format: str = REF_FORMAT) -> dict[str, str]:
+    """Every ref in the repository enclosing `root`, or nothing if there is none.
+
+    Read through git rather than by walking `.git`, because a worktree's refs
+    live in the repository it was cut from and only git knows where that is.
+    A failure to read is reported as no repository rather than raised: this
+    runs before and after a suite whose result matters more than the guard's
+    own footing, and a guard that can break the run it protects is worse than
+    one that stays quiet.
+    """
+    try:
+        listed = sh.Command("git")(
+            "-C", str(root), "for-each-ref", f"--format={ref_format}", _tty_out=False
+        )
+    except (sh.ErrorReturnCode, sh.CommandNotFound):
+        return {}
+    pairs = [
+        # lup: ignore[string-split] — git's own for-each-ref output, whose two
+        # fields REF_FORMAT put either side of one space
+        line.split(" ", 1)
+        for line in str(listed).splitlines()
+        if line
+    ]
+    return {pair[0]: pair[1] for pair in pairs if len(pair) == 2}
+
+
+def committer_identity(
+    root: Path, settings: tuple[str, ...] = IDENTITY_SETTINGS
+) -> dict[str, str]:
+    """Who the repository enclosing `root` would commit as, setting by setting.
+
+    Absent settings are simply absent, so a repository that leaves identity to
+    the user's global config reads as empty here and a fixture writing one in
+    shows up as a creation rather than as a change from nothing.
+    """
+    found = {}
+    for setting in settings:
+        try:
+            value = sh.Command("git")(
+                "-C", str(root), "config", "--local", "--get", setting, _tty_out=False
+            )
+        except (sh.ErrorReturnCode, sh.CommandNotFound):
+            continue
+        found[f"config {setting}"] = str(value).strip()
+    return found
+
+
+def repository_state(root: Path) -> dict[str, str]:
+    """Everything the guard watches: every ref, and who the repository commits as."""
+    return {**repository_refs(root), **committer_identity(root)}
+
+
+def moved_refs(before: dict[str, str], after: dict[str, str]) -> list[str]:
+    """Each ref the session created, deleted, or moved, as a readable line."""
+    return [
+        *(
+            f"{name}: {before[name][:12]} -> {after[name][:12]}"
+            for name in sorted(before.keys() & after.keys())
+            if before[name] != after[name]
+        ),
+        *(f"{name}: created" for name in sorted(after.keys() - before.keys())),
+        *(f"{name}: deleted" for name in sorted(before.keys() - after.keys())),
+    ]
+
+
+def guard_report(before: dict[str, str], after: dict[str, str]) -> str:
+    """What to tell a developer whose checkout the suite just wrote into.
+
+    Empty when nothing moved, which is the caller's signal to say nothing.
+    The wording names the cause the evidence actually supports — a fixture
+    that reached the enclosing repository — because the alternative reading,
+    that the developer moved a branch mid-run, is one they can rule out
+    themselves and the suite cannot.
+    """
+    moved = moved_refs(before, after)
+    if not moved:
+        return ""
+    return "\n".join(
+        [
+            "This test run modified the repository it is running inside.",
+            "",
+            "A fixture bound git to the working directory rather than to its",
+            "own throwaway repository, so this much of the real checkout",
+            "changed:",
+            "",
+            *(f"  {line}" for line in moved),
+            "",
+            "A ref is recovered from `git reflog show <ref>`. A `config` line",
+            "is worse than it looks: the shared config is inherited by every",
+            "worktree cut from this repository, so commits made afterwards —",
+            "including in other sessions — carry that author until it is",
+            "unset. Check `git log --format='%an <%ae>'` on recent work.",
+            "",
+            "Then find the fixture: it is one that runs git without",
+            "`-C <tmp_path>` or without `monkeypatch.chdir` into the",
+            "repository it built.",
+        ]
+    )
