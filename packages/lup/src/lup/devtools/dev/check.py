@@ -302,6 +302,22 @@ def run_checks(
         typer.echo("application placement: ok")
     results.append(CheckOutcome(name="application placement", passed=True))
 
+    # advisory — a retirement is a decision, and a decision nobody meets again
+    # becomes permanent by default while the roster it was taken from grows
+    retired = [
+        f"{roster}: {name}"
+        for roster, names in (
+            ("sub-app", project.subapps.retired),
+            ("skill or agent", project.content.retired),
+            ("rule", project.rules.retired),
+        )
+        for name in names
+    ]
+    if retired:
+        typer.echo(f"retired from lup: {len(retired)} (advisory)")
+        for entry in retired:
+            typer.echo(f"  {entry}")
+
     # The same reading the commit hook and the pipeline refuse on, asked here
     # rather than recomposed, so a tree cannot be stale at one gate and current
     # at another.

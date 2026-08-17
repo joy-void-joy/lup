@@ -43,7 +43,7 @@ from lup.adapters.codex.usage.reader import codex_usage_entry
 from lup.devtools.dev import conflicts
 from lup.devtools.feedback.models import AgentPrompt
 from lup.devtools.harness.resolve import ConfiguredModel
-from lup.devtools.roster import DevtoolsDeclarations, default_subapps
+from lup.devtools.roster import DevtoolsDeclarations
 from lup.devtools.subapps import SubApp, compose
 from lup.workspace.paths import find_nearest_pyproject
 from lup_template.agent.config import engine_for_model, settings
@@ -122,7 +122,7 @@ app = typer.Typer(
 ROSTER = {
     entry.spec.name: entry
     for entry in SELECTION.over(
-        default_subapps(DECLARATIONS),
+        DECLARATIONS.roster(),
         [
             SubApp(spec=spec, app=APPLICATION_APPS[spec.name])
             for spec in APPLICATION_SPECS

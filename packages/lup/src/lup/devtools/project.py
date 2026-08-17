@@ -13,6 +13,8 @@ from pydantic import BaseModel
 
 from lup.codescan.boundaries import ApplicationRoots
 from lup.codescan.common import RuleSelection
+from lup.devtools.subapps import SubAppSelection
+from lup.harness.models import ContentSelection
 from lup.policy.kernel.rows import PathRoleRow
 
 
@@ -42,6 +44,18 @@ class DevProject(BaseModel, frozen=True):
     with: an application declares it once on its ``HookSet`` and hands it
     over, the way it already hands over its path roles.
     """
+
+    subapps: SubAppSelection = SubAppSelection()
+    """Which of the library's sub-apps this repository's CLI serves."""
+
+    content: ContentSelection = ContentSelection()
+    """Which of the library's skills and agents this repository's plugin ships.
+
+    Carried beside the other two because every one of them is the same kind of
+    fact — something this repository declined that the library still ships —
+    and the gate reports them together. A retirement nobody can see becomes
+    permanent by default: the roster it was taken from goes on growing, and
+    the project that opted out once never meets the decision again."""
 
     roots: ApplicationRoots = ApplicationRoots()
     """Where this application is allowed to name a concrete implementation.
