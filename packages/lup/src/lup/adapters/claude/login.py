@@ -13,5 +13,6 @@ CLAUDE_CONFIG_DIR = "CLAUDE_CONFIG_DIR"
 CLAUDE_LOGIN = ProviderLogin(
     config_home_env=CLAUDE_CONFIG_DIR,
     credentials_file=".credentials.json",
+    home_subdir="claude-config",
 )
 """Where Claude Code stores a completed login, and how to select one."""

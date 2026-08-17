@@ -13,5 +13,6 @@ CODEX_HOME = "CODEX_HOME"
 CODEX_LOGIN = ProviderLogin(
     config_home_env=CODEX_HOME,
     credentials_file="auth.json",
+    home_subdir="codex-home",
 )
 """Where Codex stores a completed login, and how to select one."""

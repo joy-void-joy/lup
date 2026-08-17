@@ -26,6 +26,16 @@ class ProviderLogin(BaseModel, frozen=True):
     credentials_file: str
     """What this runtime writes a completed login into, inside that home."""
 
+    home_subdir: str
+    """Subdirectory this runtime's configuration home takes inside a profile.
+
+    A project keeping its accounts as directories gives each one a directory
+    and each runtime a place inside it, so one name can hold a login for every
+    runtime that name runs. The word is the runtime's own, for the same reason
+    the two above are: naming it anywhere else would decide for one provider in
+    a module every provider passes through.
+    """
+
     def environment(self, home: Path) -> EnvVars:
         """The environment routing a spawned CLI at that configuration home."""
         return {self.config_home_env: str(home)}
