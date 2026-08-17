@@ -158,10 +158,6 @@ def judged_ask_rules(
         JudgedCommand(name="rmdir", reason="deleting directories requires approval"),
         JudgedCommand(name="mv", reason="moving files requires approval"),
         JudgedCommand(name="cp", reason="copying over files requires approval"),
-        JudgedCommand(
-            name="touch",
-            reason="creating files requires approval — prefer the Write tool",
-        ),
         JudgedCommand(name="chmod", reason="changing permissions requires approval"),
         JudgedCommand(name="chown", reason="changing ownership requires approval"),
         JudgedCommand(name="ln", reason="creating links requires approval"),
@@ -298,6 +294,16 @@ def guarded_tool_rules() -> list[ShellCommandRule]:
             # nothing to run. Everything landing inside it still passes the
             # write and edit gates on its own path.
             name="mkdir",
+            default_effect="allow",
+        ),
+        ShellCommandRule(
+            # The same test `mkdir` passes, for the same reason. `touch` has
+            # no form that writes content: on a path that exists it moves
+            # timestamps and nothing else, and on one that does not it
+            # authors an empty file, which holds nothing to run. Whatever
+            # lands in that file afterwards passes the write and edit gates
+            # on its own path, so asking here buys a prompt and no decision.
+            name="touch",
             default_effect="allow",
         ),
         ShellCommandRule(

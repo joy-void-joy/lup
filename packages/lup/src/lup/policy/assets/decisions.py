@@ -25,6 +25,7 @@ from pathlib import Path
 
 from host import (
     directory_write_targets,
+    empty_directory_targets,
     existing_write_targets,
     granted_allowances,
     managed_script_roots,
@@ -100,6 +101,7 @@ def bash_decision(
             [*shell_write_targets(command), *acted_on]
         ),
         directory_targets=directory_write_targets(acted_on),
+        empty_directories=empty_directory_targets(acted_on),
         recoverable_target_limit=RECOVERABLE_TARGET_LIMIT,
         runner_targets=RUNNER_TARGETS,
         target_tables=RUNNER_TARGET_TABLES,

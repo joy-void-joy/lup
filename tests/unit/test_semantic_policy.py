@@ -10,7 +10,7 @@ import importlib
 import importlib.util
 import json
 import sys
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from types import ModuleType
 from typing import Literal, get_args
 
@@ -108,6 +108,33 @@ class DecisionCase(BaseModel, frozen=True):
     existing: list[str] = Field(default_factory=list)
     """Repository-relative files that already exist when the case is judged."""
 
+    empty: list[str] = Field(default_factory=list)
+    """Repository-relative directories that exist and hold nothing.
+
+    An archive unpacked into one replaces nothing whatever the archive turns
+    out to hold, which is the only way to answer that without reading the
+    archive. Declared separately from ``existing`` because these are made
+    rather than written, and a directory holding a file is a different fact."""
+
+    def host_existing(self) -> list[str]:
+        """Every path a host stat'ing this case's tree would report present.
+
+        The runner that builds a real tree gets each declared file's parent
+        directories for free, and the two runners handed the literal list do
+        not. Deriving them here is what keeps all three judging the same
+        filesystem — without it, a destination directory reads as absent to
+        one and occupied to another, which is the difference between a grant
+        and an ask.
+        """
+        return sorted(
+            {
+                str(ancestor)
+                for name in [*self.existing, *self.empty]
+                for ancestor in [PurePosixPath(name), *PurePosixPath(name).parents]
+                if str(ancestor) != "."
+            }
+        )
+
 
 class HostShape(BaseModel, frozen=True):
     """The host facts a case is judged under, as one hashable identity."""
@@ -131,11 +158,11 @@ class EditDecisionCase(BaseModel, frozen=True):
 # The roles this repository declares, mirrored so the fixtures judge the same
 # vocabulary the generated runtime is rendered with.
 FIXTURE_PATH_ROLES = [
-    PathRoleRow(root="tests", role="test", kind="subtree"),
-    PathRoleRow(root="tmp", role="scratch", kind="contains_part"),
-    PathRoleRow(root=".venv", role="scratch", kind="subtree"),
-    PathRoleRow(root="build", role="scratch", kind="subtree"),
-    PathRoleRow(root="node_modules", role="scratch", kind="subtree"),
+    PathRoleRow(root="tests", role="test"),
+    PathRoleRow(root="**/tmp", role="scratch"),
+    PathRoleRow(root=".venv", role="scratch"),
+    PathRoleRow(root="build", role="scratch"),
+    PathRoleRow(root="**/node_modules", role="scratch"),
 ]
 
 FIXTURE_PATH_RULES = declared_path_rules(declared_hook_set())
@@ -359,12 +386,41 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="touch tmp/marker", effect="allow"),
     DecisionCase(input="rmdir tmp/run", effect="allow"),
     DecisionCase(input="mv tmp/draft.md src/final.md", effect="ask"),
-    # An empty directory anywhere, unlike the file beside it: `mkdir` cannot
-    # overwrite and leaves nothing to run, so what lands inside is judged on
-    # its own path rather than the directory being refused up front.
+    # An empty directory anywhere, and the empty file beside it: neither
+    # `mkdir` nor `touch` can overwrite, and both leave nothing to run, so
+    # what lands inside is judged on its own path rather than the container
+    # being refused up front. `touch` on a path that exists moves timestamps
+    # and no content at all.
     DecisionCase(input="mkdir src/newpkg", effect="allow"),
-    DecisionCase(input="touch src/newfile.py", effect="ask"),
+    DecisionCase(input="touch src/newfile.py", effect="allow"),
+    DecisionCase(input="touch -m src/existing.py", effect="allow"),
     DecisionCase(input="cp --archive tmp/a tmp/b", effect="ask"),
+    # An archive replaces nothing where nothing stands, and what it holds
+    # never has to be read to establish that. The destination carries the
+    # question instead: absent, empty, or disposable by role is a grant, and
+    # an occupied one keeps the ask because what would be replaced there is
+    # exactly what the listing would have had to say.
+    DecisionCase(input="tar -xzf a.tgz -C fresh", effect="allow"),
+    DecisionCase(input="tar -xzf a.tgz -C blank", effect="allow", empty=["blank"]),
+    DecisionCase(input="tar -xzf a.tgz -C tmp/out", effect="allow"),
+    DecisionCase(input="unzip a.zip -d fresh", effect="allow"),
+    DecisionCase(input="tar -xzf a.tgz -C src", effect="ask", existing=["src/main.py"]),
+    # Naming no destination unpacks over the repository itself.
+    DecisionCase(input="tar -xzf a.tgz", effect="ask"),
+    DecisionCase(input="unzip a.zip", effect="ask"),
+    # `-P` lets members carry absolute paths, so the destination stops
+    # bounding where they land and the question it answered comes back.
+    DecisionCase(input="tar -xzf a.tgz -C fresh -P", effect="ask"),
+    # Creating an archive authors one path, judged as any creation is.
+    DecisionCase(input="tar -czf out.tgz src", effect="allow"),
+    DecisionCase(input="tar -czf out.tgz src", effect="ask", existing=["out.tgz"]),
+    # Compression consumes its operand rather than adding beside it, so the
+    # delete half decides: restorable passes, and anything else asks.
+    DecisionCase(input="gzip tmp/notes.txt", effect="allow"),
+    DecisionCase(input="gzip untracked.txt", effect="ask", existing=["untracked.txt"]),
+    DecisionCase(input="gunzip tmp/notes.txt.gz", effect="allow"),
+    # A generated tree refuses whatever verb reaches it.
+    DecisionCase(input="tar -xzf a.tgz -C .claude/plugins/lup", effect="deny"),
     # Copying reads its sources and writes only its destination, so landing
     # production in a scratch root destroys nothing; moving out of one does,
     # because the source is removed, and that keeps the verb's ask.
@@ -1294,7 +1350,10 @@ def test_assembled_kernel_runs_without_site_packages(tmp_path: Path) -> None:
     fixtures.write_text(
         json.dumps(
             {
-                "shell": [item.model_dump() for item in SHELL_POLICY_CASES],
+                "shell": [
+                    {**item.model_dump(), "existing": item.host_existing()}
+                    for item in SHELL_POLICY_CASES
+                ],
                 "fetch": [item.model_dump() for item in FETCH_POLICY_CASES],
                 "edit": [item.model_dump() for item in EDIT_POLICY_CASES],
             }
@@ -1327,6 +1386,7 @@ def test_assembled_kernel_runs_without_site_packages(tmp_path: Path) -> None:
         "        path_roles=PATH_ROLES,\n"
         "        path_rules=PATH_RULES,\n"
         "        existing_targets=case['existing'],\n"
+        "        empty_directories=case['empty'],\n"
         "        runner_targets=RUNNER_TARGETS,\n"
         "    )\n"
         "    assert result.effect == case['effect'], case\n"
@@ -2093,6 +2153,8 @@ def test_shell_policy_preserves_golden_compound_and_wrapper_outcomes(
             present = root / name
             present.parent.mkdir(parents=True, exist_ok=True)
             present.write_text("already here", encoding="utf-8")
+        for name in case.empty:
+            (root / name).mkdir(parents=True, exist_ok=True)
         decided = active.decide(ShellCommand(command=case.input, cwd=root))
         assert decided.effect == case.effect, case.input
         bundled_effect = bundled.decide_shell(
@@ -2104,7 +2166,8 @@ def test_shell_policy_preserves_golden_compound_and_wrapper_outcomes(
             interactive=case.interactive,
             path_roles=FIXTURE_PATH_ROLES,
             path_rules=policy.path_rules,
-            existing_targets=case.existing,
+            existing_targets=case.host_existing(),
+            empty_directories=case.empty,
             runner_targets=policy.runner_targets,
         ).effect
         assert bundled_effect == case.effect, case.input
