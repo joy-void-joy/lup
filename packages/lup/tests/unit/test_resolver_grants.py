@@ -14,7 +14,7 @@ import pytest
 from pydantic import BaseModel
 
 from lup.harness.contracts import SkillInvocationRenderer
-from lup.harness.models import ResolveSpec, SkillInvocation
+from lup.harness.models import ResolveSpec, SkillRef
 from lup.policy.grants import LeaseGrants, read_allowance_grants
 from lup.policy.identity import ConcernAllowance
 from lup.policy.models import EditBatch, EditChange
@@ -106,9 +106,9 @@ def broker(root: Path, concerns: list[Concern]) -> QuestionBroker:
         spec=ResolveSpec(
             id="resolve",
             worker_identity="resolver-worker",
-            worker_skill=SkillInvocation(plugin="lup", skill="worker"),
-            review_skill=SkillInvocation(plugin="lup", skill="review"),
-            merge_skill=SkillInvocation(plugin="lup", skill="merge"),
+            worker_skill=SkillRef(plugin="lup", skill="worker"),
+            review_skill=SkillRef(plugin="lup", skill="review"),
+            merge_skill=SkillRef(plugin="lup", skill="merge"),
         ),
         concerns=concerns,
         progress=[
@@ -174,7 +174,7 @@ class IdleSession(Session):
 
 
 class LiteralRenderer(SkillInvocationRenderer):
-    def render(self, invocation: SkillInvocation) -> str:
+    def render(self, invocation: SkillRef) -> str:
         return f"{invocation.plugin}:{invocation.skill}"
 
 

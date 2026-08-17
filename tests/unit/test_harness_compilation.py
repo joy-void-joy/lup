@@ -2,6 +2,7 @@
 
 import ast
 import errno
+from collections.abc import Iterator
 import json
 import os
 import sys
@@ -67,7 +68,9 @@ from lup.harness.models import (
     RequestApproval,
     ResolverEntry,
     RuntimeDocs,
+    PartPayload,
     SemanticPart,
+    SkillRef,
     Skill,
     SkillInvocation,
     SkillPattern,
@@ -82,6 +85,7 @@ from lup.harness.ownership import (
     OwnershipManifestError,
     build_manifest,
     content_digest,
+    source_digest,
     generated_artifacts,
     load_manifest,
     save_manifest,
@@ -455,10 +459,10 @@ def test_invocation_renderers_own_complete_spelling_and_escaping() -> None:
         arguments=[InvocationArgument(name="target", value="feature with spaces")],
     )
 
-    assert ClaudeSpellings().render(invocation) == (
+    assert ClaudeSpellings().render(invocation.ref) == (
         "/lup:merge target='feature with spaces'"
     )
-    assert CodexSpellings().render(invocation) == (
+    assert CodexSpellings().render(invocation.ref) == (
         "$lup:merge target='feature with spaces'"
     )
 
@@ -478,7 +482,7 @@ def test_argument_reference_has_one_semantic_part_and_native_renderings() -> Non
     )
 
 
-class PartExpectation(BaseModel, frozen=True):
+class PartExpectation(BaseModel, frozen=True, arbitrary_types_allowed=True):
     """One prompt part and whether its two native renderings must differ."""
 
     part: PromptPart
@@ -529,6 +533,28 @@ PART_CONTRACT: dict[str, PartExpectation] = {
 """Every prompt part, with the cross-runtime promise its renderings make."""
 
 
+def declared_part_kinds() -> list[str]:
+    """Every kind of part the harness declares, found through the base.
+
+    Read off the subclass graph rather than off a union, because there is no
+    union any more: a document holds parts as objects, so the base is what a
+    field names. Kinds a test declares are excluded by module — the roster
+    under test is the harness's own.
+    """
+
+    def descend(base: type[SemanticPart]) -> Iterator[type[SemanticPart]]:
+        for kind in base.__subclasses__():
+            yield from descend(kind)
+            if not getattr(kind, "__abstractmethods__", ()):
+                yield kind
+
+    return sorted(
+        kind.__name__
+        for kind in descend(SemanticPart)
+        if kind.__module__ == SemanticPart.__module__
+    )
+
+
 def test_every_prompt_part_states_what_it_promises_across_runtimes() -> None:
     """A part neither renderer handles renders as nothing, silently.
 
@@ -536,11 +562,7 @@ def test_every_prompt_part_states_what_it_promises_across_runtimes() -> None:
     the kind nobody decided about — whether its two renderings agree is a
     design choice no type can hold.
     """
-    union, _ = get_args(PromptPart.__value__)
-
-    assert sorted(PART_CONTRACT) == sorted(
-        member.__name__ for member in get_args(union)
-    )
+    assert sorted(PART_CONTRACT) == declared_part_kinds()
 
 
 @pytest.mark.parametrize("name", sorted(PART_CONTRACT))
@@ -564,21 +586,24 @@ class PartQuestion(BaseModel, frozen=True):
 
 PART_QUESTIONS: dict[str, PartQuestion] = {
     "text_payload": PartQuestion(
-        ask=lambda part: part.text_payload is not None,
+        ask=lambda part: part.payload().text is not None,
         answered_by=["TextPart", "SpellingExample", "MarkdownTable"],
     ),
     "invocation": PartQuestion(
-        ask=lambda part: part.invocation is not None, answered_by=["SkillInvocation"]
+        ask=lambda part: part.payload().invocation is not None,
+        answered_by=["SkillInvocation"],
     ),
     "named_plugin": PartQuestion(
-        ask=lambda part: part.named_plugin is not None,
+        ask=lambda part: part.payload().named_plugin is not None,
         answered_by=["SkillInvocation", "PluginPath", "SkillPattern"],
     ),
     "named_agent": PartQuestion(
-        ask=lambda part: part.named_agent is not None, answered_by=["Delegate"]
+        ask=lambda part: part.payload().named_agent is not None,
+        answered_by=["Delegate"],
     ),
     "references_arguments": PartQuestion(
-        ask=lambda part: part.references_arguments, answered_by=["ArgumentsRef"]
+        ask=lambda part: part.payload().references_arguments,
+        answered_by=["ArgumentsRef"],
     ),
 }
 """Every question a walk asks a part rather than deciding about it from outside."""
@@ -607,27 +632,39 @@ def test_each_question_is_answered_by_exactly_the_parts_that_carry_it(
 
 
 @pytest.mark.parametrize("name", sorted(PART_CONTRACT))
-def test_each_prompt_part_round_trips_through_its_discriminator(name: str) -> None:
-    """Answering for itself leaves a part exactly as parseable as it was."""
-    document = PromptDocument(parts=[PART_CONTRACT[name].part])
+def test_each_prompt_part_keeps_its_kind_inside_a_document(name: str) -> None:
+    """A document holds the kind it was given, rather than a flattened base.
 
-    restored = PromptDocument.model_validate_json(document.model_dump_json())
+    This is what the discriminated alias used to buy, and why one existed: a
+    pydantic field naming the base rebuilt every part as that base and dropped
+    its payload. A document holding objects cannot flatten one, so the kind is
+    whatever was put in.
+    """
+    part = PART_CONTRACT[name].part
+    document = PromptDocument(parts=[part])
 
-    assert restored == document
-    assert type(restored.parts[0]) is type(document.parts[0])
+    assert type(document.parts[0]) is type(part)
+    assert document.parts[0] is part
 
 
-def test_prompt_documents_parse_every_part_from_its_discriminator() -> None:
-    """One document holding every kind still validates through ``type`` alone."""
-    payload = {
-        "parts": [
-            expectation.part.model_dump() for expectation in PART_CONTRACT.values()
-        ]
-    }
+def harness_with_guidance_part(part: SemanticPart) -> Harness:
+    """The declared harness, rebuilt with one more part in its guidance.
 
-    document = PromptDocument.model_validate(payload)
-
-    assert [type(part).__name__ for part in document.parts] == list(PART_CONTRACT)
+    Rebuilt rather than copied, because what is under test is a gate that runs
+    when a harness is constructed: a copy carries the fields across without
+    asking any of them again.
+    """
+    declared = portable_harness()
+    return Harness(
+        schema_version=declared.schema_version,
+        plugins=declared.plugins,
+        guidance=PromptDocument(
+            parts=[*declared.guidance.parts, part],
+            source=declared.guidance.source,
+        ),
+        resolver=declared.resolver,
+        generator_version=declared.generator_version,
+    )
 
 
 def test_an_undeclared_plugin_behind_an_invocation_names_the_invocation() -> None:
@@ -636,25 +673,19 @@ def test_an_undeclared_plugin_behind_an_invocation_names_the_invocation() -> Non
     An invocation names a plugin, so both the plugin gate and the invocation
     gate see it — but only one of them can say which skill went missing.
     """
-    source = portable_harness().model_dump()
-    source["guidance"]["parts"].append(
-        SkillInvocation(plugin="absent", skill="merge").model_dump()
-    )
-
     with pytest.raises(ValueError, match="unknown declaration: absent:merge"):
-        Harness.model_validate(source)
+        harness_with_guidance_part(SkillInvocation(plugin="absent", skill="merge"))
 
 
-class UnansweredPart(SemanticPart, frozen=True):
+class UnansweredPart(SemanticPart):
     """A thirteenth kind that declines to say how it should be spelled."""
 
-    type: Literal["unanswered"] = "unanswered"
 
-
-class AnsweredPart(SemanticPart, frozen=True):
+class AnsweredPart(SemanticPart):
     """A thirteenth kind that answers the base and declines everything else."""
 
-    type: Literal["answered"] = "answered"
+    def payload(self) -> PartPayload:
+        return PartPayload()
 
     def spell(self, renderer: PromptRenderer) -> str:
         return f"{renderer.own.runtime_name} answered"
@@ -824,7 +855,6 @@ NAMES_RATHER_THAN_PROSE = [
     "Plugin.id",
     "Plugin.version",
     "Skill.id",
-    "SpellingExample.text",
 ]
 """Declared strings deliberately exempt from the portable-prose constraint.
 
@@ -849,6 +879,40 @@ def test_every_free_text_declaration_field_is_portable_prose() -> None:
     ]
 
     assert sorted(unconstrained) == NAMES_RATHER_THAN_PROSE
+
+
+PARTS_CARRYING_NO_PROSE = [
+    "ArgumentsRef",
+    "MarkdownTable",
+    "NativePath",
+    "PluginPath",
+    "ResolverEntry",
+    "RuntimeDocs",
+    "SkillInvocation",
+    "SkillPattern",
+    "SpellingExample",
+]
+"""Kinds of part that hold no authored prose, and so answer for none.
+
+Most carry a location or a name the harness derived rather than words anyone
+wrote. ``MarkdownTable`` holds data in its cells and is checked where the
+assembled document is. ``SpellingExample`` is the one that does hold words and
+is exempt anyway: its whole subject is what each runtime spells.
+"""
+
+
+def test_every_kind_of_part_decides_about_the_prose_it_carries() -> None:
+    """A new kind cannot quietly hold words nothing holds to the invariant.
+
+    While parts were models this fell out of the field walk above, which saw
+    every declared string. Parts answer through their own constructors now, so
+    the roster is what keeps a kind from being added without the question
+    being asked of it.
+    """
+    answered = {name.split(".")[0] for name in PROSE_DECLARATIONS}
+    decided = answered.union(PARTS_CARRYING_NO_PROSE)
+
+    assert [kind for kind in declared_part_kinds() if kind not in decided] == []
 
 
 @pytest.mark.parametrize("field", sorted(PROSE_DECLARATIONS))
@@ -886,22 +950,13 @@ def test_no_runtime_spells_an_invocation_portable_prose_would_admit() -> None:
     """
     for runtime in (ClaudeSpellings(), CodexSpellings()):
         for spelling in (
-            runtime.render(SkillInvocation(plugin="lup", skill="merge")),
+            runtime.render(SkillRef(plugin="lup", skill="merge")),
             runtime.invocation_pattern("lup", "*"),
             runtime.invocation_pattern("lup", "<name>"),
         ):
             assert spelling[0] in INVOCATION_SIGILS
             with pytest.raises(ValueError, match="portable prose spells"):
                 TextPart(text=f"Run {spelling}")
-
-
-def test_deserializing_a_harness_refuses_an_invocation_in_guidance() -> None:
-    """Reading a harness back is a declaration too, and refuses the same words."""
-    source = portable_harness().model_dump()
-    source["guidance"]["parts"].append({"type": "text", "text": "Run $lup:merge"})
-
-    with pytest.raises(ValueError, match="portable prose spells"):
-        Harness.model_validate(source)
 
 
 def test_artifact_paths_reject_backslash_traversal() -> None:
@@ -985,7 +1040,7 @@ def test_every_commentable_generated_file_carries_the_one_banner_form() -> None:
         for artifact in tree.artifacts:
             spelled = ARTIFACT_COMMENT_ROUTER.route_for(artifact.path)
             assert (artifact.banner is not None) == (spelled is not None)
-    assert harness == portable_harness()
+    assert source_digest(harness) == source_digest(portable_harness())
 
 
 def test_a_generated_file_that_states_no_provenance_fails_the_check() -> None:

@@ -242,7 +242,7 @@ def run_capabilities(markdown: bool) -> None:
 
     matrix = canonical_capability_matrix()
     if markdown:
-        typer.echo(capability_matrix(matrix).text_payload)
+        typer.echo(capability_matrix(matrix).rendered())
         return
 
     label_width = max(len(cell.capability) for cell in matrix[0].cells)

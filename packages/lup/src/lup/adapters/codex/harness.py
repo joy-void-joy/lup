@@ -43,7 +43,7 @@ from lup.harness.models import (
     PluginLocation,
     QualifiedAgentName,
     Skill,
-    SkillInvocation,
+    SkillRef,
     TreeLocation,
 )
 from lup.policy.bundle import (
@@ -94,7 +94,7 @@ class CodexSpellings(NativeSpellings):
     def native_identifiers(self) -> list[Atom]:
         return [Atom("developers.openai.com"), Atom("learn.chatgpt.com")]
 
-    def render(self, invocation: SkillInvocation) -> str:
+    def render(self, invocation: SkillRef) -> str:
         mention = f"${invocation.plugin}:{invocation.skill}"
         arguments = " ".join(
             f"{argument.name}={shlex.quote(argument_text(argument.value))}"

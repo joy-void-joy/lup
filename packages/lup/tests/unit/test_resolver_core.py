@@ -10,7 +10,7 @@ import pytest
 from pydantic import BaseModel
 
 from lup.harness.contracts import SkillInvocationRenderer
-from lup.harness.models import ResolveSpec, SkillInvocation
+from lup.harness.models import ResolveSpec, SkillRef
 from lup.harness.ownership import GeneratedArtifacts, OwnedArtifact
 from lup.harness.process import (
     LaunchRequest,
@@ -206,9 +206,9 @@ def resolve_spec() -> ResolveSpec:
     return ResolveSpec(
         id="resolve",
         worker_identity="resolver-worker",
-        worker_skill=SkillInvocation(plugin="lup", skill="worker"),
-        review_skill=SkillInvocation(plugin="lup", skill="review"),
-        merge_skill=SkillInvocation(plugin="lup", skill="merge"),
+        worker_skill=SkillRef(plugin="lup", skill="worker"),
+        review_skill=SkillRef(plugin="lup", skill="review"),
+        merge_skill=SkillRef(plugin="lup", skill="merge"),
     )
 
 
@@ -566,7 +566,7 @@ def unused_session_factory() -> SessionFactory:
 
 
 class UnusedInvocationRenderer(SkillInvocationRenderer):
-    def render(self, invocation: SkillInvocation) -> str:
+    def render(self, invocation: SkillRef) -> str:
         raise AssertionError(f"invocation should not be rendered: {invocation}")
 
 
@@ -767,7 +767,7 @@ def worker_recipe(
 
 
 class LiteralInvocationRenderer(SkillInvocationRenderer):
-    def render(self, invocation: SkillInvocation) -> str:
+    def render(self, invocation: SkillRef) -> str:
         return f"{invocation.plugin}:{invocation.skill}"
 
 

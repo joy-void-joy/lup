@@ -8,7 +8,7 @@ beside its managing module instead (see the package docstring).
 """
 
 import re  # lup: ignore[import-re] — prose has no parser; its shape is the rule
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Annotated, Literal
 
@@ -18,6 +18,7 @@ from pydantic import (
     BaseModel,
     Discriminator,
     Field,
+    PlainSerializer,
     StringConstraints,
     model_validator,
 )
@@ -84,67 +85,82 @@ invariant is answered where an author writes the words rather than by a scan
 over the harness they eventually compose into."""
 
 
-class SemanticPart(BaseModel, frozen=True):
+class PartPayload(BaseModel, frozen=True, arbitrary_types_allowed=True):
+    """What a part carries, as every walk across a document asks for it.
+
+    One shape rather than a question per kind, because these are asked of a
+    part whose kind the caller does not know: a walk weighing what a
+    declaration literally says reaches every kind that holds prose, including
+    kinds written long after it was. A kind carrying none of something leaves
+    the default, which is what makes omission safe.
+    """
+
+    text: str | None = None
+    """Portable prose this part carries verbatim, if it carries any."""
+
+    invocation: "SkillRef | None" = None
+    """The skill invocation this part issues, if it issues one."""
+
+    named_plugin: NativeName | None = None
+    """The plugin this part names, which the harness must have declared."""
+
+    named_agent: QualifiedAgentName | None = None
+    """The agent this part delegates to, which must also be declared."""
+
+    references_arguments: bool = False
+    """Whether this part reaches the arguments its invocation supplied."""
+
+
+class PartRecord(BaseModel, frozen=True):
+    """One part as a declaration digest writes it down.
+
+    Not a wire format anybody reads back: it exists so the whole declaration
+    graph has a canonical encoding, which is what tells a changed declaration
+    from a changed renderer. ``kind`` names the class and ``fields`` its own
+    data, both stable across runs — a part is not rebuilt from one of these,
+    so nothing here has to be enough to reconstruct it, only enough to differ
+    when the declaration differs.
+    """
+
+    kind: str
+    fields: dict[str, JsonValue] = {}
+
+
+class SemanticPart(ABC):
     """One element of a prompt document, answering every question about itself.
 
-    Whatever the rest of the harness needs to know about a part is declared
-    here and answered — or declined — by the part, so a new kind of part is one
-    class rather than an edit to every walk that would have to notice it. The
-    declining answers are what make omission safe: a caller asking
-    ``text_payload`` reaches every kind that carries prose, including kinds
-    written long after the caller was.
+    Two projections and no state: what the part carries, and how the runtime
+    reading it spells the part. A new kind of part is one class rather than an
+    edit to every walk that would have to notice it.
 
-    Pydantic's metaclass is an ``ABCMeta``, so ``spell`` binds like any
-    abstract method: a subtype that does not answer it cannot be constructed.
+    A kind holding portable prose passes it through :func:`portable_prose` as
+    it is built, so text spelling one runtime's invocation is refused where it
+    is written rather than wherever it is eventually rendered.
     """
+
+    @abstractmethod
+    def payload(self) -> PartPayload:
+        """What this part carries, for a caller that does not know its kind."""
 
     @abstractmethod
     def spell(self, renderer: "PromptRenderer") -> str:
         """Render this part in the vocabulary of the runtime that reads it."""
 
-    @property
-    def text_payload(self) -> str | None:
-        """Portable prose this part carries verbatim, if it carries any.
 
-        Everything that weighs or reads what a declaration literally says asks
-        this instead of naming the kinds of part that hold text.
-        """
-        return None
+class TextPart(SemanticPart):
+    """Portable prose, refused if it spells any runtime's invocation."""
 
-    @property
-    def invocation(self) -> "SkillInvocation | None":
-        """The skill invocation this part issues, if it issues one."""
-        return None
+    def __init__(self, text: str) -> None:
+        self.text = portable_prose(text)
 
-    @property
-    def named_plugin(self) -> NativeName | None:
-        """The plugin this part names, which the harness must have declared."""
-        return None
-
-    @property
-    def named_agent(self) -> QualifiedAgentName | None:
-        """The agent this part delegates to, which must also be declared."""
-        return None
-
-    @property
-    def references_arguments(self) -> bool:
-        """Whether this part reaches the arguments its invocation supplied."""
-        return False
-
-
-class TextPart(SemanticPart, frozen=True):
-    type: Literal["text"] = "text"
-    text: PortableText
+    def payload(self) -> PartPayload:
+        return PartPayload(text=self.text)
 
     def spell(self, renderer: "PromptRenderer") -> str:
         return self.text
 
-    @property
-    def text_payload(self) -> str:
-        return self.text
 
-
-class SpellingExample(SemanticPart, frozen=True):
+class SpellingExample(SemanticPart):
     """Prose whose subject is a runtime's own spelling, quoted verbatim.
 
     Ordinary prose refuses a rendered invocation because a reader on the other
@@ -155,18 +171,17 @@ class SpellingExample(SemanticPart, frozen=True):
     which is what :class:`SkillInvocation` is for.
     """
 
-    type: Literal["spelling_example"] = "spelling_example"
-    text: str
+    def __init__(self, text: str) -> None:
+        self.text = text
+
+    def payload(self) -> PartPayload:
+        return PartPayload(text=self.text)
 
     def spell(self, renderer: "PromptRenderer") -> str:
         return self.text
 
-    @property
-    def text_payload(self) -> str:
-        return self.text
 
-
-class MarkdownTable(SemanticPart, frozen=True):
+class MarkdownTable(SemanticPart):
     """A table derived from declarations, laid out and escaped as it renders.
 
     Rows arrive as the values they stand for rather than as finished Markdown,
@@ -182,24 +197,16 @@ class MarkdownTable(SemanticPart, frozen=True):
     through a cell is caught where the assembled document is checked.
     """
 
-    type: Literal["markdown_table"] = "markdown_table"
-    headers: list[str]
-    rows: list[list[TableCell]]
-
-    @model_validator(mode="after")
-    def rows_match_the_header(self) -> "MarkdownTable":
-        ragged = [len(row) for row in self.rows if len(row) != len(self.headers)]
+    def __init__(self, headers: list[str], rows: list[list[TableCell]]) -> None:
+        ragged = [len(row) for row in rows if len(row) != len(headers)]
         if ragged:
             raise ValueError(
-                f"table rows hold {ragged} cells under {len(self.headers)} headers"
+                f"table rows hold {ragged} cells under {len(headers)} headers"
             )
-        return self
+        self.headers = headers
+        self.rows = rows
 
-    def spell(self, renderer: "PromptRenderer") -> str:
-        return self.text_payload
-
-    @property
-    def text_payload(self) -> str:
+    def rendered(self) -> str:
         """The table as Markdown, one line per row, newline-terminated."""
         lines = [
             [escaped(header) for header in self.headers],
@@ -208,28 +215,50 @@ class MarkdownTable(SemanticPart, frozen=True):
         ]
         return "".join(f"| {' | '.join(line)} |\n" for line in lines)
 
+    def payload(self) -> PartPayload:
+        return PartPayload(text=self.rendered())
+
+    def spell(self, renderer: "PromptRenderer") -> str:
+        return self.rendered()
+
 
 class InvocationArgument(BaseModel, frozen=True):
     name: NativeName
     value: JsonValue
 
 
-class SkillInvocation(SemanticPart, frozen=True):
-    type: Literal["skill_invocation"] = "skill_invocation"
+class SkillRef(BaseModel, frozen=True):
+    """Which skill to issue, and with what — the value, not the part.
+
+    A part is an object a document holds; this is data a declaration stores.
+    They were one class until ``ResolveSpec`` had to name three of them and a
+    resolver run started saving its state, which put a prompt part inside a
+    file. Split, each is only what it is: the ref persists, the part spells.
+    """
+
     plugin: NativeName
     skill: NativeName
     arguments: list[InvocationArgument] = []
 
+
+class SkillInvocation(SemanticPart):
+    """One skill this prompt issues, resolved against the declarations."""
+
+    def __init__(
+        self,
+        plugin: NativeName,
+        skill: NativeName,
+        arguments: list[InvocationArgument] | None = None,
+    ) -> None:
+        self.ref = SkillRef(
+            plugin=plugin, skill=skill, arguments=arguments if arguments else []
+        )
+
+    def payload(self) -> PartPayload:
+        return PartPayload(invocation=self.ref, named_plugin=self.ref.plugin)
+
     def spell(self, renderer: "PromptRenderer") -> str:
-        return renderer.own.render(self)
-
-    @property
-    def invocation(self) -> "SkillInvocation":
-        return self
-
-    @property
-    def named_plugin(self) -> NativeName:
-        return self.plugin
+        return renderer.own.render(self.ref)
 
 
 type TreeLocation = Literal[
@@ -264,7 +293,10 @@ type PathMember = Annotated[
 """One leaf inside a location: a name, a ``<placeholder>``, or ``*``."""
 
 
-class LocatedPart(SemanticPart, frozen=True):
+# lup: ignore[abc-capability] — a located kind is a part before it is a
+# location, so the two seams nest rather than compose: the document holds it as
+# a part and only the renderer asks it to spell a place
+class LocatedPart(SemanticPart):
     """One path a prompt names, spelled by whichever adapter renders it.
 
     Scope is the same question for every location — whether the reader's own
@@ -278,21 +310,29 @@ class LocatedPart(SemanticPart, frozen=True):
     def spell_in(self, runtime: "NativeSpellings") -> str:
         """Spell this location in one runtime's own vocabulary."""
 
+    # lup: ignore[abc-capability] — scope is one question for every location, so
+    # the renderer asks it once and each kind only spells itself
     def spell(self, renderer: "PromptRenderer") -> str:
         return renderer.location(self)
 
+    # lup: ignore[abc-capability] — a location carries none of what a payload
+    # asks about, and saying so once beats saying it in each located kind
+    def payload(self) -> PartPayload:
+        return PartPayload()
 
-class NativePath(LocatedPart, frozen=True):
+
+class NativePath(LocatedPart):
     """One harness-tree location, spelled by whichever adapter renders it."""
 
-    type: Literal["native_path"] = "native_path"
-    location: TreeLocation
+    def __init__(self, location: TreeLocation, scope: PathScope = "this_tree") -> None:
+        self.location: TreeLocation = location
+        self.scope: PathScope = scope
 
     def spell_in(self, runtime: "NativeSpellings") -> str:
         return runtime.tree(self.location)
 
 
-class PluginPath(LocatedPart, frozen=True):
+class PluginPath(LocatedPart):
     """One plugin-owned location, spelled by whichever adapter renders it.
 
     ``member`` selects a leaf whose whole path differs per runtime — a skill is
@@ -300,20 +340,26 @@ class PluginPath(LocatedPart, frozen=True):
     it names the containing directory.
     """
 
-    type: Literal["plugin_path"] = "plugin_path"
-    plugin: NativeName
-    location: PluginLocation
-    member: PathMember | None = None
+    def __init__(
+        self,
+        plugin: NativeName,
+        location: PluginLocation,
+        member: PathMember | None = None,
+        scope: PathScope = "this_tree",
+    ) -> None:
+        self.plugin = plugin
+        self.location: PluginLocation = location
+        self.member = member
+        self.scope: PathScope = scope
 
     def spell_in(self, runtime: "NativeSpellings") -> str:
         return runtime.plugin(self.plugin, self.location, self.member)
 
-    @property
-    def named_plugin(self) -> NativeName:
-        return self.plugin
+    def payload(self) -> PartPayload:
+        return PartPayload(named_plugin=self.plugin)
 
 
-class SkillPattern(SemanticPart, frozen=True):
+class SkillPattern(SemanticPart):
     """An invocation shape standing in for a skill the reader will name.
 
     ``SkillInvocation`` resolves against the declaration registry, so it cannot
@@ -321,58 +367,69 @@ class SkillPattern(SemanticPart, frozen=True):
     of an invocation rather than issuing one.
     """
 
-    type: Literal["skill_pattern"] = "skill_pattern"
-    plugin: NativeName
-    placeholder: PathMember
+    def __init__(self, plugin: NativeName, placeholder: PathMember) -> None:
+        self.plugin = plugin
+        self.placeholder = placeholder
+
+    def payload(self) -> PartPayload:
+        return PartPayload(named_plugin=self.plugin)
 
     def spell(self, renderer: "PromptRenderer") -> str:
         return renderer.own.invocation_pattern(self.plugin, self.placeholder)
 
-    @property
-    def named_plugin(self) -> NativeName:
-        return self.plugin
 
-
-class RuntimeDocs(SemanticPart, frozen=True):
+class RuntimeDocs(SemanticPart):
     """The reader's own runtime documentation, wherever that runtime is."""
 
-    type: Literal["runtime_docs"] = "runtime_docs"
+    def payload(self) -> PartPayload:
+        return PartPayload()
 
     def spell(self, renderer: "PromptRenderer") -> str:
         return renderer.own.runtime_docs()
 
 
-class AskUser(SemanticPart, frozen=True):
-    type: Literal["ask_user"] = "ask_user"
-    question: PortableText
+class AskUser(SemanticPart):
+    """A question the reader puts to whoever asked for the work."""
+
+    def __init__(self, question: str) -> None:
+        self.question = portable_prose(question)
+
+    def payload(self) -> PartPayload:
+        return PartPayload()
 
     def spell(self, renderer: "PromptRenderer") -> str:
         return renderer.own.ask_user(self.question)
 
 
-class Delegate(SemanticPart, frozen=True):
-    type: Literal["delegate"] = "delegate"
-    subagent_type: QualifiedAgentName
-    prompt: PortableText
+class Delegate(SemanticPart):
+    """Work handed to a declared agent rather than done in this session."""
+
+    def __init__(self, subagent_type: QualifiedAgentName, prompt: str) -> None:
+        self.subagent_type = subagent_type
+        self.prompt = portable_prose(prompt)
+
+    def payload(self) -> PartPayload:
+        return PartPayload(named_agent=self.subagent_type)
 
     def spell(self, renderer: "PromptRenderer") -> str:
         return renderer.own.delegate(self.subagent_type, self.prompt)
 
-    @property
-    def named_agent(self) -> QualifiedAgentName:
-        return self.subagent_type
 
+class RequestApproval(SemanticPart):
+    """An action the reader asks approval for before taking it."""
 
-class RequestApproval(SemanticPart, frozen=True):
-    type: Literal["request_approval"] = "request_approval"
-    action: PortableText
-    reason: PortableText
+    def __init__(self, action: str, reason: str) -> None:
+        self.action = portable_prose(action)
+        self.reason = portable_prose(reason)
+
+    def payload(self) -> PartPayload:
+        return PartPayload()
 
     def spell(self, renderer: "PromptRenderer") -> str:
         return renderer.own.request_approval(self.action, self.reason)
 
 
-class RelocateSession(SemanticPart, frozen=True):
+class RelocateSession(SemanticPart):
     """Continue work inside an already-created worktree.
 
     Runtimes differ on whether a running session can move: one relocates in
@@ -380,52 +437,86 @@ class RelocateSession(SemanticPart, frozen=True):
     the intent lets each adapter spell the move it actually supports.
     """
 
-    type: Literal["relocate_session"] = "relocate_session"
-    path: PortableText
-    """Where the reader finds the path, e.g. "the path step 1 prints"."""
+    def __init__(self, path: str) -> None:
+        self.path = portable_prose(path)
+        """Where the reader finds the path, e.g. "the path step 1 prints"."""
+
+    def payload(self) -> PartPayload:
+        return PartPayload()
 
     def spell(self, renderer: "PromptRenderer") -> str:
         return renderer.own.relocate_session(self.path)
 
 
-class ResolverEntry(SemanticPart, frozen=True):
-    type: Literal["resolver_entry"] = "resolver_entry"
+class ResolverEntry(SemanticPart):
+    """The reader's way into a resolver run, spelled by its own runtime."""
+
+    def payload(self) -> PartPayload:
+        return PartPayload()
 
     def spell(self, renderer: "PromptRenderer") -> str:
         return renderer.own.resolver_entry()
 
 
-class ArgumentsRef(SemanticPart, frozen=True):
-    type: Literal["arguments_ref"] = "arguments_ref"
+class ArgumentsRef(SemanticPart):
+    """The arguments this skill's invocation supplied, wherever they land."""
+
+    def payload(self) -> PartPayload:
+        return PartPayload(references_arguments=True)
 
     def spell(self, renderer: "PromptRenderer") -> str:
         return renderer.own.arguments_ref()
 
-    @property
-    def references_arguments(self) -> bool:
-        return True
+
+def part_record(part: SemanticPart) -> PartRecord:
+    """One part written down, for a digest over the whole declaration graph.
+
+    Read off the part's own attributes rather than answered by each kind,
+    because writing a value down is what a digest does to a part rather than
+    something a part does to itself — and a per-kind answer is one more thing
+    a new kind could forget.
+
+    An attribute of a shape this cannot encode raises rather than falling back
+    to ``str``: a default repr carries an address, and a digest that changes
+    when a value moves in memory reports a declaration change on every run.
+    """
+
+    def written(value: object) -> JsonValue:  # lup: ignore[bare-object]
+        match value:
+            case str() | int() | float() | bool() | None:
+                return value
+            case Path() | PurePosixPath():
+                return value.as_posix()
+            case BaseModel():
+                return value.model_dump(mode="json")
+            case list():
+                return [written(item) for item in value]
+        raise TypeError(
+            f"{type(part).__name__} holds {type(value).__name__}, which a "
+            "declaration digest has no stable encoding for"
+        )
+
+    return PartRecord(
+        kind=type(part).__name__,
+        fields={name: written(value) for name, value in vars(part).items()},
+    )
 
 
-type PromptPart = Annotated[
-    TextPart
-    | SpellingExample
-    | MarkdownTable
-    | SkillInvocation
-    | NativePath
-    | PluginPath
-    | SkillPattern
-    | RuntimeDocs
-    | AskUser
-    | Delegate
-    | RequestApproval
-    | RelocateSession
-    | ResolverEntry
-    | ArgumentsRef,
-    Discriminator("type"),
-]
+type PromptPart = Annotated[SemanticPart, PlainSerializer(part_record)]
+"""One element of a document, whatever kind it is.
+
+Formerly a discriminated union of every kind, because a pydantic field holding
+the base rebuilt each part as that base and dropped its payload. Nothing
+validates a part into being — a catalog constructs one directly — so the base
+is what a field names, and the kinds answer for themselves.
+
+The serializer is what keeps the declaration graph digestible: parts are
+objects, and a digest over the graph is how a changed declaration is told from
+a changed renderer.
+"""
 
 
-class PromptDocument(BaseModel, frozen=True):
+class PromptDocument(BaseModel, frozen=True, arbitrary_types_allowed=True):
     parts: list[PromptPart]
     source: str | None = None
     """The module declaring this document, for the banner of an artifact
@@ -440,7 +531,9 @@ class PromptDocument(BaseModel, frozen=True):
 
     def prose(self) -> list[str]:
         """Every literal prose payload this document carries, in reading order."""
-        return [text for part in self.parts if (text := part.text_payload) is not None]
+        return [
+            text for part in self.parts if (text := part.payload().text) is not None
+        ]
 
     def text_size(self) -> int:
         """Lower bound on what this document costs a session, in UTF-8 bytes.
@@ -527,7 +620,7 @@ class Skill(BaseModel, frozen=True):
                     f"skill {self.id!r} has a required argument after an optional one"
                 )
         references_arguments = any(
-            part.references_arguments for part in self.prompt.parts
+            part.payload().references_arguments for part in self.prompt.parts
         )
         if bool(self.arguments) != references_arguments:
             raise ValueError(
@@ -809,9 +902,9 @@ class ResolveSpec(BaseModel, frozen=True):
     grants autonomy to. Both adapters derive their autonomous list from this
     single fact, so a runtime cannot silently ship an empty one."""
 
-    worker_skill: SkillInvocation
-    review_skill: SkillInvocation
-    merge_skill: SkillInvocation
+    worker_skill: SkillRef
+    review_skill: SkillRef
+    merge_skill: SkillRef
 
 
 class Plugin(BaseModel, frozen=True):
@@ -904,7 +997,7 @@ class Harness(BaseModel, frozen=True):
             issued
             for prompt in prompts
             for part in prompt.parts
-            if (issued := part.invocation) is not None
+            if (issued := part.payload().invocation) is not None
         ]
         invocations.extend(
             [
@@ -960,14 +1053,15 @@ class Harness(BaseModel, frozen=True):
         unknown_plugins = [
             named
             for part in parts
-            if (named := part.named_plugin) is not None and named not in plugin_names
+            if (named := part.payload().named_plugin) is not None
+            and named not in plugin_names
         ]
         if unknown_plugins:
             raise ValueError(f"prompt parts name unknown plugins: {unknown_plugins}")
         unknown_agents = [
             delegated
             for part in parts
-            if (delegated := part.named_agent) is not None
+            if (delegated := part.payload().named_agent) is not None
             and delegated not in declared_agents
         ]
         if unknown_agents:

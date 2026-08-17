@@ -9,7 +9,7 @@ from pydantic import TypeAdapter
 from lup.channels.models import local_stamp, utc_now
 from lup.channels.stream import Stream
 from lup.resolver.join_desk import JoinDesk, JoinLanding
-from lup.harness.models import ResolveSpec, SkillInvocation
+from lup.harness.models import ResolveSpec, SkillRef
 from lup.resolver.models import (
     AcceptanceCriterion,
     Concern,
@@ -162,9 +162,9 @@ def verifying(concerns: list[str], examined: str | None) -> ResolveState:
         spec=ResolveSpec(
             id="resolve",
             worker_identity="resolver-worker",
-            worker_skill=SkillInvocation(plugin="lup", skill="worker"),
-            review_skill=SkillInvocation(plugin="lup", skill="review"),
-            merge_skill=SkillInvocation(plugin="lup", skill="merge"),
+            worker_skill=SkillRef(plugin="lup", skill="worker"),
+            review_skill=SkillRef(plugin="lup", skill="review"),
+            merge_skill=SkillRef(plugin="lup", skill="merge"),
         ),
         concerns=[
             Concern(
