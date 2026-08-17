@@ -10,6 +10,12 @@ SPELLING = provenance.Provenance(
 )
 """One checkout, unqualified: this skill turns the library's clone into the project."""
 
+# lup: `/lup:init` never asks who owns README.md. `human_owned_files` in
+# src/lup_template/devtools/harness/catalog.py locks it, so an initialized
+# domain inherits an approval gate on the one file it most wants the agent to
+# write, and no phase surfaces the choice. Ask it here alongside the other
+# ownership decisions, and make unlocking a `lup-devtools` command that edits
+# the declaration and regenerates — not a hand edit of the catalog.
 SKILL = models.Skill(
     id="skill.init",
     name="init",
