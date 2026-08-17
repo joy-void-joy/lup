@@ -1660,52 +1660,50 @@ PATH_ROLES: list[PathRoleRow] = [
     {
         "root": "tests",
         "role": "test",
-        "kind": "subtree",
     },
     {
         "root": "packages/lup/tests",
         "role": "test",
-        "kind": "subtree",
-    },
-    {
-        "root": "tmp",
-        "role": "scratch",
-        "kind": "contains_part",
     },
     {
         "root": ".venv",
         "role": "scratch",
-        "kind": "subtree",
-    },
-    {
-        "root": ".ruff_cache",
-        "role": "scratch",
-        "kind": "subtree",
-    },
-    {
-        "root": ".pytest_cache",
-        "role": "scratch",
-        "kind": "subtree",
     },
     {
         "root": "build",
         "role": "scratch",
-        "kind": "subtree",
     },
     {
         "root": "dist",
         "role": "scratch",
-        "kind": "subtree",
     },
     {
         "root": "htmlcov",
         "role": "scratch",
-        "kind": "subtree",
     },
     {
-        "root": "node_modules",
+        "root": "**/tmp",
         "role": "scratch",
-        "kind": "subtree",
+    },
+    {
+        "root": "**/__pycache__",
+        "role": "scratch",
+    },
+    {
+        "root": "**/*.egg-info",
+        "role": "scratch",
+    },
+    {
+        "root": "**/.ruff_cache",
+        "role": "scratch",
+    },
+    {
+        "root": "**/.pytest_cache",
+        "role": "scratch",
+    },
+    {
+        "root": "**/node_modules",
+        "role": "scratch",
     },
 ]
 
@@ -2766,20 +2764,6 @@ SHELL_RULES: list[ShellRuleRow] = [
         "reason": "copying over files requires approval",
     },
     {
-        "command": "touch",
-        "subcommand": "",
-        "operation": "",
-        "effect": "ask",
-        "effect_source": "command",
-        "ask_flags": [],
-        "allow_flags": [],
-        "read_verbs": [],
-        "value_flags": [],
-        "sandbox": "ambient",
-        "sandbox_source": "root",
-        "reason": "creating files requires approval \u2014 prefer the Write tool",
-    },
-    {
         "command": "chmod",
         "subcommand": "",
         "operation": "",
@@ -3269,6 +3253,20 @@ SHELL_RULES: list[ShellRuleRow] = [
     },
     {
         "command": "mkdir",
+        "subcommand": "",
+        "operation": "",
+        "effect": "allow",
+        "effect_source": "command",
+        "ask_flags": [],
+        "allow_flags": [],
+        "read_verbs": [],
+        "value_flags": [],
+        "sandbox": "ambient",
+        "sandbox_source": "root",
+        "reason": "",
+    },
+    {
+        "command": "touch",
         "subcommand": "",
         "operation": "",
         "effect": "allow",
@@ -7080,7 +7078,7 @@ KNOWN_ALLOWANCES: list[str] = [
 
 MAXIMUM_ADDED_LINES = 3
 
-RECOVERABLE_TARGET_LIMIT = 5
+RECOVERABLE_TARGET_LIMIT = 20
 
 RUNNER_TARGETS: list[RunnerTargetRow] = [
     {
