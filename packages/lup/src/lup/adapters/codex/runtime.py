@@ -35,7 +35,7 @@ from lup.runtime.models import (
     SessionHandle,
     SessionId,
     SubmissionGateResolver,
-    AnyTurnBlock,
+    TurnBlock,
     TurnCompletedEvent,
     TurnEvent,
     TurnStartedEvent,
@@ -185,7 +185,7 @@ class CodexTurnChannel:
             asyncio.get_running_loop().create_future()
         )
         self.durable: list[TurnEvent] = []
-        self.blocks: list[AnyTurnBlock] = []
+        self.blocks: list[TurnBlock] = []
         self.usage = Usage()
         self.started = perf_counter()
 
@@ -256,13 +256,15 @@ class CodexTurnChannel:
                 for block in completed:
                     self.blocks.append(block)
                     self.emit(
-                        BlockCompletedEvent(identifiers=self.identifiers(), block=block)
+                        BlockCompletedEvent(
+                            identifiers=self.identifiers(), block=block.record()
+                        )
                     )
                 if completed:
                     self.emit(
                         MessageCompletedEvent(
                             identifiers=self.identifiers(),
-                            message=TurnMessage(
+                            completed_message=TurnMessage(
                                 role=message_role(item), blocks=completed
                             ),
                         )
@@ -344,8 +346,8 @@ class CodexLiveEventStream(EventStream):
 
     async def durable(self) -> AsyncIterator[TurnEvent]:
         async for event in self.iterate():
-            if (durable := event.durable) is not None:
-                yield durable
+            if event.type != "block_delta":
+                yield event
 
     def events(self) -> AsyncIterator[TurnEvent]:
         return self.durable()
@@ -675,7 +677,7 @@ def message_role(payload: JsonObject) -> Literal["user", "assistant", "tool", "s
             return "assistant"
 
 
-def decode_completed_item(payload: JsonObject) -> list[AnyTurnBlock]:
+def decode_completed_item(payload: JsonObject) -> list[TurnBlock]:
     """Decode one typed completed app-server item into canonical blocks."""
     from lup.runtime.models import (
         TurnTextBlock,
@@ -698,7 +700,7 @@ def decode_completed_item(payload: JsonObject) -> list[AnyTurnBlock]:
             "aggregatedOutput": output,
             "status": status,
         }:
-            blocks: list[AnyTurnBlock] = [
+            blocks: list[TurnBlock] = [
                 TurnToolCallBlock(
                     id=identifier,
                     name="ShellCommand",

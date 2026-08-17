@@ -49,7 +49,7 @@ from lup.hooks import create_permission_hooks
 from lup.runtime.errors import ProviderTurnError, TurnInterruptedError
 from lup.types import JsonObject, JsonValue, SubagentSpec
 from lup.runtime.models import (
-    AnyTurnBlock,
+    TurnBlock,
     BlockCompletedEvent,
     BlockDeltaEvent,
     LiveTurnEvent,
@@ -1111,7 +1111,7 @@ class CompletedItemCase(BaseModel, frozen=True):
     name: str
     arm: str
     payload: JsonObject
-    blocks: list[AnyTurnBlock] = Field(default_factory=list)
+    blocks: list[TurnBlock] = Field(default_factory=list)
 
 
 TURN_IDENTITY_CASES = [
@@ -1154,11 +1154,12 @@ NOTIFICATION_CASES = [
         params={"turnId": "turn-1", "item": {"type": "agentMessage", "text": "hello"}},
         events=[
             BlockCompletedEvent(
-                identifiers=turn_identifiers(), block=TurnTextBlock(text="hello")
+                identifiers=turn_identifiers(),
+                block=TurnTextBlock(text="hello").record(),
             ),
             MessageCompletedEvent(
                 identifiers=turn_identifiers(),
-                message=TurnMessage(
+                completed_message=TurnMessage(
                     role="assistant", blocks=[TurnTextBlock(text="hello")]
                 ),
             ),
@@ -1188,15 +1189,17 @@ NOTIFICATION_CASES = [
                 identifiers=turn_identifiers(),
                 block=TurnToolCallBlock(
                     id="c1", name="ShellCommand", arguments={"command": "uv run pytest"}
-                ),
+                ).record(),
             ),
             BlockCompletedEvent(
                 identifiers=turn_identifiers(),
-                block=TurnToolResultBlock(tool_call_id="c1", content="2 passed"),
+                block=TurnToolResultBlock(
+                    tool_call_id="c1", content="2 passed"
+                ).record(),
             ),
             MessageCompletedEvent(
                 identifiers=turn_identifiers(),
-                message=TurnMessage(
+                completed_message=TurnMessage(
                     role="tool",
                     blocks=[
                         TurnToolCallBlock(

@@ -28,7 +28,7 @@ def identifiers() -> TurnIdentifiers:
 
 def block_event(text: str) -> BlockCompletedEvent:
     return BlockCompletedEvent(
-        identifiers=identifiers(), block=TurnTextBlock(text=text)
+        identifiers=identifiers(), block=TurnTextBlock(text=text).record()
     )
 
 
@@ -109,7 +109,7 @@ def test_reasoning_speech_calls_and_results_all_reach_the_record(
         )
 
     recorded = [
-        entry.event.block.type
+        entry.event.block.kind
         for entry in journal.for_actor(WORKER)
         if isinstance(entry.event, BlockCompletedEvent)
     ]
@@ -123,7 +123,7 @@ def test_one_entry_is_readable_whole_for_an_expanding_reader(tmp_path: Path) -> 
         REVIEWER,
         MessageCompletedEvent(
             identifiers=identifiers(),
-            message=TurnMessage(
+            completed_message=TurnMessage(
                 role="assistant", blocks=[TurnTextBlock(text="x" * 5000)]
             ),
         ),
@@ -133,7 +133,8 @@ def test_one_entry_is_readable_whole_for_an_expanding_reader(tmp_path: Path) -> 
     assert entry is not None
     assert entry.actor == REVIEWER
     assert isinstance(entry.event, MessageCompletedEvent)
-    block = entry.event.message.blocks[0]
+    assert entry.event.completed_message is not None
+    block = entry.event.completed_message.blocks[0]
     assert isinstance(block, TurnTextBlock)
     assert len(block.text) == 5000
 

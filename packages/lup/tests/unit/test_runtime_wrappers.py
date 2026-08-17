@@ -563,7 +563,7 @@ class ScriptedEventStream(EventStream):
     async def iterate(self) -> AsyncIterator[TurnEvent]:
         yield BlockCompletedEvent(
             identifiers=self.identifiers,
-            block=TurnTextBlock(text=self.label),
+            block=TurnTextBlock(text=self.label).record(),
         )
         self.drained.set()
 

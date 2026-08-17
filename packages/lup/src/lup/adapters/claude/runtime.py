@@ -43,7 +43,7 @@ from lup.runtime.models import (
     SessionHandle,
     SessionId,
     SubmissionGateResolver,
-    AnyTurnBlock,
+    TurnBlock,
     TurnIdentifiers,
     TurnId,
     TurnCompletedEvent,
@@ -457,11 +457,13 @@ class ClaudeConversationState:
                 """Emit one message and its blocks, so both views agree."""
                 for block in message.blocks:
                     completed = BlockCompletedEvent(
-                        identifiers=identifiers, block=block
+                        identifiers=identifiers, block=block.record()
                     )
                     durable.append(completed)
                     events.put_nowait(completed)
-                whole = MessageCompletedEvent(identifiers=identifiers, message=message)
+                whole = MessageCompletedEvent(
+                    identifiers=identifiers, completed_message=message
+                )
                 durable.append(whole)
                 events.put_nowait(whole)
 
@@ -622,8 +624,8 @@ class ClaudeLiveEventStream(EventStream):
 
     async def durable(self) -> AsyncIterator[TurnEvent]:
         async for event in self.iterate():
-            if (durable := event.durable) is not None:
-                yield durable
+            if event.type != "block_delta":
+                yield event
 
     def events(self) -> AsyncIterator[TurnEvent]:
         return self.durable()
@@ -934,7 +936,7 @@ def build_claude_options(
     )
 
 
-def convert_claude_block(block: "claude.ContentBlock") -> AnyTurnBlock:
+def convert_claude_block(block: "claude.ContentBlock") -> TurnBlock:
     """Convert one SDK block directly into the portable runtime vocabulary."""
     import claude_agent_sdk as claude
     from claude_agent_sdk import types as claude_types

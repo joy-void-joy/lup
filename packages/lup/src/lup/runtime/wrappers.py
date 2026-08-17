@@ -31,7 +31,8 @@ from lup.runtime.factory import SessionFactory
 from lup.runtime.models import (
     SessionHandle,
     SessionId,
-    AnyTurnBlock,
+    TurnBlock,
+    turn_record,
     TurnHandle,
     TurnIdentifiers,
     LiveTurnEvent,
@@ -95,12 +96,12 @@ class UsageRecord(BaseModel, frozen=True):
     duration: timedelta
 
 
-class DisplayRecord(BaseModel, frozen=True):
+class DisplayRecord(BaseModel, frozen=True, arbitrary_types_allowed=True):
     """Completed replay data, deliberately distinct from live events."""
 
     identifiers: TurnIdentifiers
     messages: list[TurnMessage]
-    blocks: list[AnyTurnBlock]
+    blocks: list[TurnBlock]
 
 
 type TraceSink = Callable[[TraceRecord], Awaitable[None]]
@@ -193,8 +194,8 @@ class SwitchingEventStream(EventStream):
 
     async def durable(self) -> AsyncIterator[TurnEvent]:
         async for event in self.iterate(deltas=False):
-            if (durable := event.durable) is not None:
-                yield durable
+            if event.type != "block_delta":
+                yield event
 
     def events(self) -> AsyncIterator[TurnEvent]:
         return self.durable()
@@ -382,7 +383,7 @@ class PersistingTurn[T: BaseModel | None](Turn[T]):
                 f"{result.identifiers.session.value}\0{result.identifiers.turn.value}"
             )
             name = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:24] + ".json"
-            publish_atomic(self.config.directory / name, result)
+            publish_atomic(self.config.directory / name, turn_record(result))
         except Exception as error:
             raise ProviderTurnError(failure_from_result(result, str(error))) from error
         return result
@@ -687,12 +688,13 @@ def accumulated_result[T: BaseModel | None](
     for failure in failures:
         usage = add_usage(usage, failure.usage)
         duration += failure.duration
-    return result.model_copy(
-        update={
-            "blocks": [*blocks, *result.blocks],
-            "usage": add_usage(usage, result.usage),
-            "duration": duration + result.duration,
-        }
+    return TurnResult(
+        output=result.output,
+        messages=result.messages,
+        blocks=[*blocks, *result.blocks],
+        usage=add_usage(usage, result.usage),
+        duration=duration + result.duration,
+        identifiers=result.identifiers,
     )
 
 

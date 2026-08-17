@@ -11,7 +11,13 @@ import json
 from collections.abc import Callable, Sequence
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, Discriminator, Field, StringConstraints
+from pydantic import (
+    BaseModel,
+    Discriminator,
+    Field,
+    StringConstraints,
+    model_validator,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -358,12 +364,14 @@ class LupMessage(BaseModel):
     rather than naming the kinds of message that carry them, so a kind added
     later is reached by every existing walk and a kind that carries none — a
     status line — declines once, here.
+
+    It is a field rather than a member because what a message carries is data:
+    a kind that holds blocks fills it as it is built, and one that holds none
+    takes the empty default without answering anything.
     """
 
-    @property
-    def content_blocks(self) -> list[LupContentBlock]:
-        """The blocks this message carries, empty when it carries none."""
-        return []
+    content_blocks: list[LupContentBlock] = []
+    """The blocks this message carries, empty when it carries none."""
 
 
 class LupAssistantMessage(LupMessage):
@@ -372,9 +380,11 @@ class LupAssistantMessage(LupMessage):
     role: Literal["assistant"] = "assistant"
     content: list[MessageContentBlock]
 
-    @property
-    def content_blocks(self) -> list[LupContentBlock]:
-        return list(self.content)
+    @model_validator(mode="after")
+    def blocks_are_its_content(self) -> "LupAssistantMessage":
+        """Carry the content as blocks, so a walk needs no per-kind knowledge."""
+        self.content_blocks = list(self.content)
+        return self
 
 
 class LupUserMessage(LupMessage):
@@ -383,9 +393,12 @@ class LupUserMessage(LupMessage):
     role: Literal["user"] = "user"
     content: list[MessageContentBlock] | str
 
-    @property
-    def content_blocks(self) -> list[LupContentBlock]:
-        return [] if isinstance(self.content, str) else list(self.content)
+    @model_validator(mode="after")
+    def blocks_are_its_content(self) -> "LupUserMessage":
+        """Prose carries no blocks; a content list carries its own."""
+        carried = () if isinstance(self.content, str) else self.content
+        self.content_blocks = list(carried)
+        return self
 
 
 class LupSystemMessage(LupMessage):

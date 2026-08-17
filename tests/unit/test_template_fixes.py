@@ -242,7 +242,9 @@ async def test_main_factory_decoration_wires_persistence_display_and_trace(
     decorated = decorate_factory(inner, notes=notes, trace_logger=trace)
     result = await decorated.query(turn_request("run one turn"))
 
-    assert result.blocks == [TurnTextBlock(text="decorated turn")]
+    assert [block.record() for block in result.blocks] == [
+        TurnTextBlock(text="decorated turn").record()
+    ]
     assert len(list((notes.trace_log.parent / "turns").glob("*.json"))) == 1
     assert notes.trace_log.exists()
     assert "decorated turn" in capsys.readouterr().out
