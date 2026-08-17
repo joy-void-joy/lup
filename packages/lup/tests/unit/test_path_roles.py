@@ -1,13 +1,20 @@
 """Path-role resolution: what a repository path is for, decided lexically."""
 
+from typing import cast
+
 from lup.policy.kernel.decision import KernelDecision
 from lup.policy.kernel.edit import decide_edit
 from lup.policy.kernel.roles import path_role
 from lup.policy.kernel.rows import AcceptanceGuardRow, PathRoleRow
 
 ROLES = [
-    PathRoleRow(root="tests", role="test"),
-    PathRoleRow(root="tmp", role="scratch"),
+    PathRoleRow(root="tests", role="test", kind="subtree"),
+    PathRoleRow(root="tmp", role="scratch", kind="subtree"),
+]
+
+NESTED = [
+    PathRoleRow(root="tests", role="test", kind="subtree"),
+    PathRoleRow(root="tmp", role="scratch", kind="contains_part"),
 ]
 
 
@@ -26,6 +33,48 @@ def test_an_undeclared_path_is_production() -> None:
 def test_a_root_never_matches_a_sibling_that_merely_shares_its_prefix() -> None:
     assert path_role("tests_helpers/x.py", ROLES) == "production"
     assert path_role("tmpfile.py", ROLES) == "production"
+
+
+def test_a_subtree_root_reaches_only_the_repository_top() -> None:
+    """The default, and what a laid-out tree means by naming a directory."""
+    assert path_role("packages/lup/tmp/briefing.md", ROLES) == "production"
+    assert path_role("src/app/tests/helper.py", ROLES) == "production"
+
+
+def test_a_part_matched_root_is_that_directory_wherever_it_sits() -> None:
+    """A package opens its own scratch directory beside itself.
+
+    What makes one scratch is what it is, not which package happens to hold
+    it, so the declaration matches the segment rather than the prefix.
+    """
+    assert path_role("packages/lup/tmp/briefing.md", NESTED) == "scratch"
+    assert path_role("src/lup_template/tmp/notes.md", NESTED) == "scratch"
+    assert path_role("tmp/briefing.md", NESTED) == "scratch"
+    assert path_role("tmp", NESTED) == "scratch"
+
+
+def test_a_part_matched_root_matches_a_segment_and_not_a_substring() -> None:
+    """`tmpfile` holds the characters; it is not the directory."""
+    assert path_role("packages/tmpfile.py", NESTED) == "production"
+    assert path_role("packages/mytmp/x.py", NESTED) == "production"
+    assert path_role("packages/tmp_old/x.py", NESTED) == "production"
+
+
+def test_part_matching_widens_no_root_that_did_not_ask_for_it() -> None:
+    """The axis is per declaration, so `tests` keeps the reach it declared."""
+    assert path_role("src/app/tests/helper.py", NESTED) == "production"
+
+
+def test_a_table_generated_before_the_axis_existed_reads_as_anchored() -> None:
+    """A row is primitive data, and an older branch renders one without `kind`.
+
+    The gate that decides every edit is also the gate whose recovery is
+    regenerating the table, so a missing field reads as the behaviour that
+    predates it rather than failing the decision.
+    """
+    older = cast(PathRoleRow, {"root": "tmp", "role": "scratch"})  # lup: ignore[cast]
+    assert path_role("tmp/briefing.md", [older]) == "scratch"
+    assert path_role("packages/lup/tmp/briefing.md", [older]) == "production"
 
 
 def test_traversal_cannot_carry_a_role_out_of_its_root() -> None:
@@ -92,6 +141,57 @@ def test_the_edit_gate_consumes_the_role_resolution_produces() -> None:
     assert authoring("/tmp/claude-1000/session/scratchpad/note.md") == "allow"
     assert authoring("tmp/briefing.md") == "allow"
     assert authoring("src/module.py") == "ask"
+
+
+def creating(path: str, content: str) -> str:
+    """The verdict on creating a production file with this exact content."""
+    return decide_edit(
+        path,
+        None,
+        content,
+        path_exists=False,
+        path_rules=[],
+        antipattern_rows=[],
+        path_roles=ROLES,
+        python_source=True,
+    ).effect
+
+
+def test_a_package_marker_is_created_without_a_question() -> None:
+    """The full write asks so a reviewer can read the file; there is no file.
+
+    A package marker declares a package by existing. Its docstring says which
+    one, and the conventions here allow it nothing else, so the question it
+    would raise has no answer that depends on the content.
+    """
+    assert (
+        creating("src/app/thing/__init__.py", '"""The thing package."""\n') == "allow"
+    )
+    assert creating("src/app/thing/__init__.py", "") == "allow"
+    assert creating("packages/lup/src/lup/deep/__init__.py", '"""Deep."""') == "allow"
+
+
+def test_a_marker_carrying_content_is_the_module_it_became() -> None:
+    """The allowance is the empty content, not the name.
+
+    An `__init__.py` is also where a package root declares its public API, and
+    that is a file somebody has to read — so it buys its creation the way
+    every other new module does.
+    """
+    barrel = '"""Public API."""\n\nfrom lup.thing import Thing\n'
+    assert creating("packages/lup/src/lup/__init__.py", barrel) == "ask"
+    assert creating("src/app/thing/__init__.py", "VERSION = 1\n") == "ask"
+
+
+def test_an_ordinary_module_buys_its_creation_however_empty_it_is() -> None:
+    """Nothing here widens past the names declared as markers."""
+    assert creating("src/app/thing/helper.py", '"""Helper."""\n') == "ask"
+    assert creating("src/app/thing/helper.py", "") == "ask"
+
+
+def test_a_marker_that_does_not_parse_is_not_treated_as_empty() -> None:
+    """What it says is exactly what could not be established."""
+    assert creating("src/app/thing/__init__.py", '"""Unterminated\n') == "ask"
 
 
 GUARD = AcceptanceGuardRow(

@@ -38,7 +38,7 @@ from lup.codescan.boundaries import ApplicationRoots, generated_tree_paths
 from lup.devtools.dev.workflow import WorkflowSpec
 from lup.devtools.project import DevProject
 from lup.harness.contracts import NativeSpellings
-from lup.policy.kernel.rows import PathRoleRow
+from lup.harness.enforcement import declared_role_rows
 from lup.policy.refused_tools import RefusedTool
 from lup.workspace.paths import project_root, read_project_name
 from lup_template.agent.toolsets import tool_group_names
@@ -225,10 +225,7 @@ def dev_project() -> DevProject:
         rules=hooks.rules,
         subapps=SELECTION,
         content=RETIRED,
-        path_roles=[
-            PathRoleRow(root=role.root.as_posix(), role=role.role)
-            for role in hooks.path_roles
-        ],
+        path_roles=declared_role_rows(list(hooks.path_roles)),
     )
 
 
@@ -316,7 +313,13 @@ def portable_harness(version: str = "0.2.0", root: Path | None = None) -> Harnes
                 # production made `rm` and `cp` ask about caches and virtual
                 # environments, which is an approval that teaches nobody
                 # anything.
-                HookPathRole(root=Path("tmp"), role="scratch"),
+                # Scratch by name rather than by place: a package opens its own
+                # `tmp/` beside itself, and a briefing written there is as
+                # disposable as one at the top. The protected-path table
+                # already reads `tmp` this way, so anchoring the role at the
+                # repository top left the two halves disagreeing about which
+                # directories the word covers.
+                HookPathRole(root=Path("tmp"), role="scratch", kind="contains_part"),
                 HookPathRole(root=Path(".venv"), role="scratch"),
                 HookPathRole(root=Path(".ruff_cache"), role="scratch"),
                 HookPathRole(root=Path(".pytest_cache"), role="scratch"),

@@ -25,7 +25,7 @@ from pydantic import (
 from lup.codescan.common import RuleSelection
 from lup.harness.banner import ArtifactBanner, GeneratedBanner
 from lup.markdown import TableCell, escaped
-from lup.policy.kernel.rows import AcceptanceGuardRow, PathRoleName
+from lup.policy.kernel.rows import AcceptanceGuardRow, PathRoleKind, PathRoleName
 from lup.policy.models import PolicyId, UrlPathPrefix
 from lup.policy.refused_tools import RefusedTool
 from lup.policy.shell_rules import RunnerTargetRule, ShellCommandRule
@@ -705,10 +705,16 @@ class HookPathRole(BaseModel, frozen=True):
     exercises production rather than by production's own shape, and a
     ``scratch`` root holds files that are disposable by construction, so the
     verbs that ask before destroying something have nothing to protect there.
+
+    ``kind`` says how far the declaration reaches. A root is anchored at the
+    repository top by default, which is what a laid-out tree means; a
+    directory that is what it is wherever it sits — a scratch directory beside
+    whichever package opened it — declares ``contains_part`` instead.
     """
 
     root: Path
     role: PathRoleName
+    kind: PathRoleKind = "subtree"
 
 
 class AcceptanceGuard(BaseModel, frozen=True):
