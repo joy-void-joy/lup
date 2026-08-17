@@ -56,9 +56,22 @@ def linked_worktree(tmp_path: Path) -> Path:
     work = tmp_path / "work"
     for arguments in (
         ["git", "init", "-b", "source", str(work)],
-        ["git", "-C", str(work), "config", "user.email", "locks@example.test"],
-        ["git", "-C", str(work), "config", "user.name", "Lock Test"],
-        ["git", "-C", str(work), "commit", "--allow-empty", "-m", "base"],
+        # Identity per invocation, never `git config` — a misbound command then
+        # writes nothing, where a persisted setting lands in the shared config
+        # every worktree of a real repository inherits (see `lup.gitguard`).
+        [
+            "git",
+            "-C",
+            str(work),
+            "-c",
+            "user.email=locks@example.test",
+            "-c",
+            "user.name=Lock Test",
+            "commit",
+            "--allow-empty",
+            "-m",
+            "base",
+        ],
         ["git", "-C", str(work), "worktree", "add", str(tmp_path / "leased")],
     ):
         status = launcher.launch(LaunchRequest(arguments=arguments, cwd=tmp_path))

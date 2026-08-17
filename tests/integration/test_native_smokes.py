@@ -193,8 +193,12 @@ def fixture_repository(root: Path) -> Path:
     repo.mkdir()
     git = sh.Command("git")
     git("init", "--initial-branch=main", _cwd=str(repo))
-    git("config", "user.email", "smoke@example.invalid", _cwd=str(repo))
-    git("config", "user.name", "Native Smoke", _cwd=str(repo))
+    # Identity per invocation, never `git config` — a misbound command then
+    # writes nothing, where a persisted setting lands in the shared config every
+    # worktree of a real repository inherits (see `lup.gitguard`).
+    git = git.bake(
+        "-c", "user.email=smoke@example.invalid", "-c", "user.name=Native Smoke"
+    )
     module = repo / "greeting.py"
     module.write_text(
         '# lup: rename GREETING_TEXT to WELCOME_TEXT\nGREETING_TEXT = "hello"\n',

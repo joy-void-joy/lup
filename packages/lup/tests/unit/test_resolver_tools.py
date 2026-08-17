@@ -271,12 +271,25 @@ def lease_with(tmp_path: Path, *, tracked: str, edits: dict[str, str]) -> Path:
     (root / tracked).write_text("committed\n", encoding="utf-8")
     for arguments in (
         ["init"],
-        ["config", "user.email", "lease@example.invalid"],
-        ["config", "user.name", "lease"],
         ["add", "-A"],
         ["commit", "-m", "base"],
     ):
-        status = launcher.launch(LaunchRequest(arguments=["git", *arguments], cwd=root))
+        # Identity per invocation, never `git config` — a misbound command then
+        # writes nothing, where a persisted setting lands in the shared config
+        # every worktree of a real repository inherits (see `lup.gitguard`).
+        status = launcher.launch(
+            LaunchRequest(
+                arguments=[
+                    "git",
+                    "-c",
+                    "user.email=lease@example.invalid",
+                    "-c",
+                    "user.name=lease",
+                    *arguments,
+                ],
+                cwd=root,
+            )
+        )
         assert status.code == 0, status.stderr
     for name, content in edits.items():
         (root / name).write_text(content, encoding="utf-8")

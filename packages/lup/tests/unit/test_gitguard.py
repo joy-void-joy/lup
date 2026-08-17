@@ -47,10 +47,16 @@ def test_the_report_names_the_refs_and_how_to_get_them_back() -> None:
 
 def test_refs_are_read_from_a_real_repository(tmp_path: Path) -> None:
     """Read through git, so a worktree's refs are found where git keeps them."""
-    git = sh.Command("git").bake("-C", str(tmp_path), _tty_out=False)
+    git = sh.Command("git").bake(
+        "-C",
+        str(tmp_path),
+        "-c",
+        "user.email=guard@example.test",
+        "-c",
+        "user.name=Guard",
+        _tty_out=False,
+    )
     git("init", "-b", "main")
-    git("config", "user.email", "guard@example.test")
-    git("config", "user.name", "Guard")
     (tmp_path / "file.txt").write_text("one\n", encoding="utf-8")
     git("add", "file.txt")
     git("commit", "-m", "one")

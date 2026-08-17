@@ -252,10 +252,19 @@ def test_a_run_s_branches_stay_out_of_the_unlanded_advisory(
     one thing this may read without going online for it.
     """
     repo = tmp_lup_project
-    git = sh.Command("git").bake("-C", str(repo), _tty_out=False)
+    # Identity per invocation, never `git config` — a misbound command then
+    # writes nothing, where a persisted setting lands in the shared config every
+    # worktree of a real repository inherits (see `lup.gitguard`).
+    git = sh.Command("git").bake(
+        "-C",
+        str(repo),
+        "-c",
+        "user.email=test@example.com",
+        "-c",
+        "user.name=Test",
+        _tty_out=False,
+    )
     git("init", "-q", "-b", "dev")
-    git("config", "user.email", "test@example.com")
-    git("config", "user.name", "Test")
     git("add", ".")
     git("commit", "-q", "-m", "init")
     for branch in (BRANCH, "loose-work"):

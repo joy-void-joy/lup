@@ -1246,8 +1246,21 @@ def test_a_parent_inside_another_is_carried_rather_than_merged(
     workspace = failure_leg_workspace(tmp_path, launcher)
 
     def git(*arguments: str) -> str:
+        # Identity per invocation, never `git config`: a misbound command then
+        # writes nothing, where a persisted setting lands in the shared config
+        # every worktree of a real repository inherits (see `lup.gitguard`).
         status = launcher.launch(
-            LaunchRequest(arguments=["git", *arguments], cwd=workspace)
+            LaunchRequest(
+                arguments=[
+                    "git",
+                    "-c",
+                    "user.email=resolver@example.test",
+                    "-c",
+                    "user.name=Resolver Test",
+                    *arguments,
+                ],
+                cwd=workspace,
+            )
         )
         assert status.code == 0, status.stderr
         return status.stdout.strip()
@@ -1291,8 +1304,21 @@ def test_a_parent_is_credited_only_with_the_paths_it_wrote(tmp_path: Path) -> No
     workspace = failure_leg_workspace(tmp_path, launcher)
 
     def git(*arguments: str) -> str:
+        # Identity per invocation, never `git config`: a misbound command then
+        # writes nothing, where a persisted setting lands in the shared config
+        # every worktree of a real repository inherits (see `lup.gitguard`).
         status = launcher.launch(
-            LaunchRequest(arguments=["git", *arguments], cwd=workspace)
+            LaunchRequest(
+                arguments=[
+                    "git",
+                    "-c",
+                    "user.email=resolver@example.test",
+                    "-c",
+                    "user.name=Resolver Test",
+                    *arguments,
+                ],
+                cwd=workspace,
+            )
         )
         assert status.code == 0, status.stderr
         return status.stdout.strip()
@@ -1986,14 +2012,25 @@ async def test_complete_resolver_lifecycle_uses_real_isolated_git_worktrees(
     launcher = LocalProcessLauncher()
 
     def git(*arguments: str, cwd: Path = workspace) -> str:
-        status = launcher.launch(LaunchRequest(arguments=["git", *arguments], cwd=cwd))
+        # Identity per invocation, never `git config` — see `lup.gitguard`.
+        status = launcher.launch(
+            LaunchRequest(
+                arguments=[
+                    "git",
+                    "-c",
+                    "user.email=resolver@example.test",
+                    "-c",
+                    "user.name=Resolver Test",
+                    *arguments,
+                ],
+                cwd=cwd,
+            )
+        )
         if status.code != 0:
             raise AssertionError(status.stderr)
         return status.stdout.strip()
 
     git("init", "-b", "source")
-    git("config", "user.email", "resolver@example.test")
-    git("config", "user.name", "Resolver Test")
     (workspace / "README.md").write_text("base\n", encoding="utf-8")
     git("add", "README.md")
     git("commit", "-m", "base")
@@ -2171,15 +2208,26 @@ async def test_resume_after_a_kill_past_workers_completes_without_backward_phase
     launcher = LocalProcessLauncher()
 
     def git(*arguments: str) -> str:
+        # Identity per invocation, never `git config`: a misbound command then
+        # writes nothing, where a persisted setting lands in the shared config
+        # every worktree of a real repository inherits (see `lup.gitguard`).
         status = launcher.launch(
-            LaunchRequest(arguments=["git", *arguments], cwd=workspace)
+            LaunchRequest(
+                arguments=[
+                    "git",
+                    "-c",
+                    "user.email=resolver@example.test",
+                    "-c",
+                    "user.name=Resolver Test",
+                    *arguments,
+                ],
+                cwd=workspace,
+            )
         )
         assert status.code == 0, status.stderr
         return status.stdout.strip()
 
     git("init", "-b", "source")
-    git("config", "user.email", "resolver@example.test")
-    git("config", "user.name", "Resolver Test")
     (workspace / "README.md").write_text("base\n", encoding="utf-8")
     git("add", "README.md")
     git("commit", "-m", "base")
@@ -2270,8 +2318,21 @@ async def test_a_resume_with_nothing_left_to_lease_still_takes_the_landed_fix(
     launcher = LocalProcessLauncher()
 
     def git(*arguments: str) -> str:
+        # Identity per invocation, never `git config`: a misbound command then
+        # writes nothing, where a persisted setting lands in the shared config
+        # every worktree of a real repository inherits (see `lup.gitguard`).
         status = launcher.launch(
-            LaunchRequest(arguments=["git", *arguments], cwd=workspace)
+            LaunchRequest(
+                arguments=[
+                    "git",
+                    "-c",
+                    "user.email=resolver@example.test",
+                    "-c",
+                    "user.name=Resolver Test",
+                    *arguments,
+                ],
+                cwd=workspace,
+            )
         )
         assert status.code == 0, status.stderr
         return status.stdout.strip()
@@ -2347,8 +2408,6 @@ def failure_leg_workspace(tmp_path: Path, launcher: LocalProcessLauncher) -> Pat
             raise AssertionError(status.stderr)
 
     git("init", "-b", "source")
-    git("config", "user.email", "resolver@example.test")
-    git("config", "user.name", "Resolver Test")
     (workspace / "README.md").write_text("base\n", encoding="utf-8")
     git("add", "README.md")
     git("commit", "-m", "base")
@@ -2394,8 +2453,21 @@ def failure_leg_core(
 
 def snapshot(workspace: Path, launcher: LocalProcessLauncher) -> SourceSnapshot:
     def git(*arguments: str) -> str:
+        # Identity per invocation, never `git config`: a misbound command then
+        # writes nothing, where a persisted setting lands in the shared config
+        # every worktree of a real repository inherits (see `lup.gitguard`).
         status = launcher.launch(
-            LaunchRequest(arguments=["git", *arguments], cwd=workspace)
+            LaunchRequest(
+                arguments=[
+                    "git",
+                    "-c",
+                    "user.email=resolver@example.test",
+                    "-c",
+                    "user.name=Resolver Test",
+                    *arguments,
+                ],
+                cwd=workspace,
+            )
         )
         assert status.code == 0, status.stderr
         return status.stdout.strip()
@@ -3439,8 +3511,21 @@ async def test_a_standing_recheck_costs_a_turn_only_when_it_is_asked_for(
     workspace.mkdir()
 
     def git(*arguments: str) -> str:
+        # Identity per invocation, never `git config`: a misbound command then
+        # writes nothing, where a persisted setting lands in the shared config
+        # every worktree of a real repository inherits (see `lup.gitguard`).
         status = launcher.launch(
-            LaunchRequest(arguments=["git", *arguments], cwd=workspace)
+            LaunchRequest(
+                arguments=[
+                    "git",
+                    "-c",
+                    "user.email=resolver@example.test",
+                    "-c",
+                    "user.name=Resolver Test",
+                    *arguments,
+                ],
+                cwd=workspace,
+            )
         )
         assert status.code == 0, status.stderr
         return status.stdout.strip()
@@ -3455,8 +3540,6 @@ async def test_a_standing_recheck_costs_a_turn_only_when_it_is_asked_for(
         return git("rev-parse", "HEAD")
 
     git("init", "-b", "source")
-    git("config", "user.email", "resolver@example.test")
-    git("config", "user.name", "Resolver Test")
     (workspace / "shared.txt").write_text(
         "\n".join(["top", *["middle"] * 12, "bottom"]) + "\n", encoding="utf-8"
     )
@@ -3542,8 +3625,21 @@ async def test_a_drain_stops_integration_between_two_parents(tmp_path: Path) -> 
     workspace = failure_leg_workspace(tmp_path, launcher)
 
     def git(*arguments: str) -> str:
+        # Identity per invocation, never `git config`: a misbound command then
+        # writes nothing, where a persisted setting lands in the shared config
+        # every worktree of a real repository inherits (see `lup.gitguard`).
         status = launcher.launch(
-            LaunchRequest(arguments=["git", *arguments], cwd=workspace)
+            LaunchRequest(
+                arguments=[
+                    "git",
+                    "-c",
+                    "user.email=resolver@example.test",
+                    "-c",
+                    "user.name=Resolver Test",
+                    *arguments,
+                ],
+                cwd=workspace,
+            )
         )
         assert status.code == 0, status.stderr
         return status.stdout.strip()
@@ -6049,8 +6145,21 @@ async def test_the_final_recheck_reads_the_tree_from_a_checkout_of_its_own(
     workspace = failure_leg_workspace(tmp_path, launcher)
 
     def git(*arguments: str) -> str:
+        # Identity per invocation, never `git config`: a misbound command then
+        # writes nothing, where a persisted setting lands in the shared config
+        # every worktree of a real repository inherits (see `lup.gitguard`).
         status = launcher.launch(
-            LaunchRequest(arguments=["git", *arguments], cwd=workspace)
+            LaunchRequest(
+                arguments=[
+                    "git",
+                    "-c",
+                    "user.email=resolver@example.test",
+                    "-c",
+                    "user.name=Resolver Test",
+                    *arguments,
+                ],
+                cwd=workspace,
+            )
         )
         assert status.code == 0, status.stderr
         return status.stdout.strip()
@@ -6173,8 +6282,21 @@ async def test_a_capped_wave_holds_the_cap_and_resumes_what_it_never_started(
     workspace = failure_leg_workspace(tmp_path, launcher)
 
     def git(*arguments: str) -> str:
+        # Identity per invocation, never `git config`: a misbound command then
+        # writes nothing, where a persisted setting lands in the shared config
+        # every worktree of a real repository inherits (see `lup.gitguard`).
         status = launcher.launch(
-            LaunchRequest(arguments=["git", *arguments], cwd=workspace)
+            LaunchRequest(
+                arguments=[
+                    "git",
+                    "-c",
+                    "user.email=resolver@example.test",
+                    "-c",
+                    "user.name=Resolver Test",
+                    *arguments,
+                ],
+                cwd=workspace,
+            )
         )
         assert status.code == 0, status.stderr
         return status.stdout.strip()

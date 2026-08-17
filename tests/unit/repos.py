@@ -18,11 +18,21 @@ from pathlib import Path
 import sh
 
 TEST_IDENTITY = {"user.email": "test@example.com", "user.name": "Test"}
-"""The committer a throwaway repository commits as."""
+"""The committer a throwaway repository commits as.
+
+Carried as `-c` flags on every invocation rather than written once with
+`git config`, and that is the whole point of it. A fixture that misbinds and
+reaches the enclosing checkout writes nothing: `-c` lives for one command,
+where `git config user.email` lands in the repository's shared config, which
+every worktree cut from it inherits. It happened — commits made hours later in
+other sessions carried a fixture's name until somebody noticed the authorship.
+`lup.gitguard` is the check that catches the next one; this is the shape that
+stops the identity half from being possible.
+"""
 
 
 def git_in(work: Path, hooks: Path) -> sh.Command:
-    """A git bound to one worktree, with signing and the user's hooks disabled."""
+    """A git bound to one worktree, with signing, hooks, and identity per call."""
     return sh.Command("git").bake(
         "-C",
         str(work),
@@ -30,6 +40,11 @@ def git_in(work: Path, hooks: Path) -> sh.Command:
         "commit.gpgsign=false",
         "-c",
         f"core.hooksPath={hooks}",
+        *(
+            argument
+            for setting, value in TEST_IDENTITY.items()
+            for argument in ("-c", f"{setting}={value}")
+        ),
         _tty_out=False,
     )
 
@@ -44,8 +59,6 @@ def initialized_repo(work: Path, hooks: Path, branch: str = "main") -> sh.Comman
     hooks.mkdir(parents=True, exist_ok=True)
     git = git_in(work, hooks)
     git("init", "-b", branch)
-    for setting, value in TEST_IDENTITY.items():
-        git("config", setting, value)
     return git
 
 
