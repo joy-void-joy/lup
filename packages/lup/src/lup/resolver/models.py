@@ -1283,7 +1283,13 @@ class ResolveState(BaseModel, frozen=True):
             by_status={
                 status: statuses.count(status) for status in dict.fromkeys(statuses)
             },
-            settled=len([status for status in statuses if status in SETTLED_STATUSES]),
+            settled=len(
+                [
+                    item
+                    for item in self.progress
+                    if item.settled_at is not None or item.status in SETTLED_STATUSES
+                ]
+            ),
             settled_at=sorted(
                 item.settled_at for item in self.progress if item.settled_at is not None
             ),
@@ -1332,9 +1338,18 @@ class RunTally(BaseModel, frozen=True):
     settled: int = 0
     """How many concerns are done being decided, however each one ended.
 
-    Derived from ``by_status`` against ``SETTLED_STATUSES`` rather than left
-    to each reader to sum, so the bar a run prints and the supervisor's own
-    header cannot answer "how far along" differently.
+    Counted from the stamp a settling concern carries, falling back to its
+    current status, so the figure only ever rises. Membership alone cannot
+    do that: the lifecycle legitimately moves work back out of a settled
+    status — ``verified`` to ``integrating`` as assembly opens, and
+    ``verified`` or ``failed`` to ``eligible`` on rework — and a reader
+    watching the count fall reads a healthy run as a broken one. The stamp
+    is written once and never cleared, which is what makes this monotonic
+    by construction rather than by a rule about which statuses to list.
+
+    Derived here rather than left to each reader to sum, so the bar a run
+    prints and the supervisor's own header cannot answer "how far along"
+    differently.
     """
     settled_at: list[datetime] = []
     """When each settled concern landed, in order, as far as it is recorded.

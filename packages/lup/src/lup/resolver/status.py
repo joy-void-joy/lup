@@ -25,6 +25,7 @@ from lup.channels.models import utc_now
 from lup.resolver.join_desk import JoinDesk
 from lup.resolver.journal import journal_tail
 from lup.resolver.models import (
+    SETTLED_STATUSES,
     ConcernStatus,
     JoinProgress,
     ResolvePhase,
@@ -168,10 +169,42 @@ class RunStatus(BaseModel, frozen=True):
 
     phase: ResolvePhase | None = None
     counts: list[StatusCount] = []
+    settled_concerns: int | None = None
+    """How many concerns are done being decided, as the run's tally counts it.
+
+    None where the projection was assembled without one, which is what
+    :meth:`settled_count` falls back for. Carried rather than summed out of
+    ``counts`` by each reporter, because the tally counts a concern settled
+    once it has been stamped and a per-status breakdown has no stamp in it.
+
+    Named for the concerns rather than sharing :meth:`settled`'s word, which
+    asks whether the run itself has come to rest.
+    """
     unanswered: int = 0
     last: LastRecorded | None = None
     progress: PhaseProgress | None = None
     """The current phase's iterator, where the phase has one worth drawing."""
+
+    def settled_count(self) -> int:
+        """How many concerns are done being decided, however the caller has it.
+
+        The tally's figure where the projection carries one, because only it
+        knows which concerns have been stamped and so only it stays put when
+        assembly moves verified work to ``integrating``. Where it does not,
+        the statuses are all there is, and summing them is the same figure
+        the tally would give for every concern that has not moved back out
+        of a settled status — right for a finished run, and low by the
+        concerns in flight for a live one.
+
+        Degrading to the weaker answer rather than to nothing, because a
+        projection built by hand reports on a run either way, and a zero
+        beside a total of four reads as a run that has achieved nothing.
+        """
+        if self.settled_concerns is not None:
+            return self.settled_concerns
+        return sum(
+            count.concerns for count in self.counts if count.status in SETTLED_STATUSES
+        )
 
     def verdict(self) -> str:
         """Whether anything is driving this run, in the words to say it in.
@@ -447,6 +480,7 @@ def run_status(repository: ResolverStateRepository, run_id: str) -> RunStatus:
                 tally.items(), key=lambda pair: (-pair[1], pair[0])
             )
         ],
+        settled_concerns=state.tally().settled,
         unanswered=sum(
             1
             for question in (state.questions.questions if state.questions else [])
