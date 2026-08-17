@@ -11,6 +11,7 @@ from lup.channels.stream import Stream
 from lup.resolver.join_desk import JoinDesk, JoinLanding
 from lup.harness.models import ResolveSpec, SkillInvocation
 from lup.resolver.models import (
+    SETTLED_STATUSES,
     AcceptanceCriterion,
     Concern,
     ConcernProgress,
@@ -19,6 +20,7 @@ from lup.resolver.models import (
     JoinProgress,
     ResolvePhase,
     ResolveState,
+    RunTally,
     SourceSnapshot,
 )
 from lup.resolver.recheck_desk import RecheckDesk, RecheckRecord
@@ -33,7 +35,9 @@ from lup.resolver.status import (
     phase_progress,
     recheck_bar,
     run_status,
+    worker_bar,
 )
+from lup.devtools.harness.resolve import ConsoleResolverObserver
 from lup.devtools.supervisor.doors import report_status, status_header
 
 
@@ -74,11 +78,18 @@ def test_a_bar_without_a_rate_still_draws_its_count() -> None:
 
 
 def test_a_bar_carries_the_two_figures_a_reader_plans_around() -> None:
+    """Both figures in the spelling a reader says out loud, on a finer bar.
+
+    The durations stay ours — tqdm would write `131.00s/it` and `17:28` for
+    these — while the cells become tqdm's, which is where the bar gains a
+    partial: five of thirteen is a hair over an eighth of the way through
+    four cells, which `█▌` says and a rounded `██` did not.
+    """
     fifth = PhaseProgress(
         label="joins", done=5, total=13, per_item=timedelta(minutes=2, seconds=11)
     )
 
-    assert fifth.render(width=4) == "██░░ 5/13 · 2m11s/it · ETA 17m28s"
+    assert fifth.render(width=4) == "█▌░░ 5/13 · 2m11s/it · ETA 17m28s"
 
 
 def test_a_finished_bar_estimates_nothing_further() -> None:
@@ -233,6 +244,126 @@ def test_a_recheck_of_another_tree_is_not_progress_through_this_one(
 def test_a_verification_with_nothing_examined_earns_no_bar(tmp_path: Path) -> None:
     """An integration with no commit has nothing a record could be keyed to."""
     assert recheck_bar(verifying(["a"], None), tmp_path) is None
+
+
+def worker_tally(statuses: list[ConcernStatus], stamps: list[datetime]) -> RunTally:
+    """A worker phase that has settled some of what it faces."""
+    return RunTally(
+        phase=ResolvePhase.WORKERS,
+        total=len(statuses),
+        by_status={
+            status: statuses.count(status) for status in dict.fromkeys(statuses)
+        },
+        joined=0,
+        join_total=0,
+        settled=len([status for status in statuses if status in SETTLED_STATUSES]),
+        settled_at=stamps,
+    )
+
+
+def test_a_concern_that_failed_still_counts_as_settled() -> None:
+    """However a concern ended, it is done being decided.
+
+    Counted against only the ones that produced work, the fraction would stop
+    short by every concern retired or found ineligible — and a bar that can
+    never reach its own end teaches a reader to stop believing it.
+    """
+    bar = worker_bar(
+        worker_tally(
+            [
+                ConcernStatus.VERIFIED,
+                ConcernStatus.FAILED,
+                ConcernStatus.RETIRED,
+                ConcernStatus.RUNNING,
+            ],
+            [],
+        )
+    )
+
+    assert bar is not None
+    assert (bar.done, bar.total) == (3, 4)
+
+
+def test_the_settled_bar_takes_its_rate_from_the_stamps() -> None:
+    """The samples are the moments concerns landed, not the count of them."""
+    start = utc_now()
+    minutes = timedelta(minutes=3)
+    bar = worker_bar(
+        worker_tally(
+            [ConcernStatus.VERIFIED, ConcernStatus.VERIFIED, ConcernStatus.RUNNING],
+            [start, start + minutes],
+        )
+    )
+
+    assert bar is not None
+    assert bar.per_item == minutes
+    assert bar.remaining() == minutes
+
+
+def test_a_settled_concern_with_no_stamp_costs_the_rate_and_not_the_count() -> None:
+    """An older run, or a path that moved a status without stamping it.
+
+    The count is read from the status and the rate from the stamps, so the
+    fraction stays exact where the estimate degrades — which is the safe
+    direction for the two to disagree in.
+    """
+    bar = worker_bar(
+        worker_tally([ConcernStatus.VERIFIED, ConcernStatus.VERIFIED], [utc_now()])
+    )
+
+    assert bar is not None
+    assert bar.done == 2
+    assert bar.per_item is None
+
+
+def test_the_console_leads_with_the_bar_and_keeps_the_breakdown(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Two questions, one line: how much is left, and what it is doing.
+
+    The bar answers the first and the per-status breakdown the second, and
+    this line is the only place either is asked during a long worker phase.
+    """
+    start = utc_now()
+    ConsoleResolverObserver().tally_changed(
+        worker_tally(
+            [ConcernStatus.VERIFIED, ConcernStatus.VERIFIED, ConcernStatus.RUNNING],
+            [start, start + timedelta(minutes=3)],
+        )
+    )
+
+    printed = capsys.readouterr().out.strip()
+
+    assert printed == (
+        "[resolve] progress: settled ██████████▋░░░░░ 2/3 · 3m00s/it · ETA 3m00s"
+        " · verified 2 · running 1 of 3"
+    )
+
+
+def test_the_console_outside_a_settling_phase_prints_what_it_always_did(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """No bar to lead with, so the breakdown stands alone as before."""
+    integrating = worker_tally([ConcernStatus.INTEGRATING], []).model_copy(
+        update={"phase": ResolvePhase.INTEGRATION}
+    )
+
+    ConsoleResolverObserver().tally_changed(integrating)
+
+    assert capsys.readouterr().out.strip() == ("[resolve] progress: integrating 1 of 1")
+
+
+def test_only_a_settling_phase_draws_a_settled_bar(tmp_path: Path) -> None:
+    """Integration takes a verified concern back out of the settled set.
+
+    Drawn there, the bar would retreat as each concern moved to integrating
+    and return as it landed, which is the one thing a progress bar may not do.
+    """
+    integrating = verifying(["a"], None).model_copy(
+        update={"phase": ResolvePhase.INTEGRATION}
+    )
+
+    assert phase_progress(integrating, tmp_path) is None
 
 
 def test_the_desk_stamps_a_record_so_a_caller_cannot_forget_to(

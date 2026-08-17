@@ -43,12 +43,24 @@ class Repository:
         self.launcher = LocalProcessLauncher()
         root.mkdir(parents=True, exist_ok=True)
         self.git("init", "-b", "dev")
-        self.git("config", "user.email", "resolver@example.test")
-        self.git("config", "user.name", "Resolver Test")
 
     def git(self, *arguments: str) -> str:
+        # Identity per invocation rather than written once with `git config`:
+        # a misbound command then writes nothing, where a persisted setting
+        # lands in the shared config every worktree of a real repository
+        # inherits. See `lup.gitguard` for the run that found this out.
         status = self.launcher.launch(
-            LaunchRequest(arguments=["git", *arguments], cwd=self.root)
+            LaunchRequest(
+                arguments=[
+                    "git",
+                    "-c",
+                    "user.email=resolver@example.test",
+                    "-c",
+                    "user.name=Resolver Test",
+                    *arguments,
+                ],
+                cwd=self.root,
+            )
         )
         if status.code != 0:
             raise AssertionError(f"{arguments}: {status.stderr}")

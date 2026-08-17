@@ -17,14 +17,23 @@ def test_git_output_stays_plain_under_pager_environments(tmp_path: Path) -> None
     launcher = LocalProcessLauncher()
 
     def git(*arguments: str) -> None:
+        # Identity per invocation, never `git config` — see `lup.gitguard`.
         status = launcher.launch(
-            LaunchRequest(arguments=["git", *arguments], cwd=tmp_path)
+            LaunchRequest(
+                arguments=[
+                    "git",
+                    "-c",
+                    "user.email=launcher@example.test",
+                    "-c",
+                    "user.name=Launcher Test",
+                    *arguments,
+                ],
+                cwd=tmp_path,
+            )
         )
         assert status.code == 0, status.stderr
 
     git("init", "-b", "main")
-    git("config", "user.email", "launcher@example.test")
-    git("config", "user.name", "Launcher Test")
     (tmp_path / "tracked.txt").write_text("base\n", encoding="utf-8")
     git("add", "tracked.txt")
     git("commit", "-m", "base")
@@ -47,15 +56,24 @@ def test_resolver_snapshot_includes_notes_without_mutating_the_checkout(
     launcher = LocalProcessLauncher()
 
     def git(*arguments: str) -> str:
+        # Identity per invocation, never `git config` — see `lup.gitguard`.
         status = launcher.launch(
-            LaunchRequest(arguments=["git", *arguments], cwd=tmp_path)
+            LaunchRequest(
+                arguments=[
+                    "git",
+                    "-c",
+                    "user.email=snapshot@example.test",
+                    "-c",
+                    "user.name=Snapshot Test",
+                    *arguments,
+                ],
+                cwd=tmp_path,
+            )
         )
         assert status.code == 0, status.stderr
         return status.stdout.strip()
 
     git("init", "-b", "feature")
-    git("config", "user.email", "snapshot@example.test")
-    git("config", "user.name", "Snapshot Test")
     note = tmp_path / "tracked.py"
     note.write_text("value = 1\n", encoding="utf-8")
     git("add", "tracked.py")

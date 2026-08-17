@@ -15,6 +15,7 @@ non-forward moves, and both stay owned by the repository's ``save``.
 
 import asyncio
 
+from lup.channels.models import utc_now
 from lup.resolver.contracts import ResolverObserver
 from lup.resolver.journal import (
     ConcernProgressedEvent,
@@ -22,6 +23,7 @@ from lup.resolver.journal import (
     PhaseChangedEvent,
 )
 from lup.resolver.models import (
+    SETTLED_STATUSES,
     ConcernOutcome,
     ConcernStatus,
     DependencyBase,
@@ -114,12 +116,27 @@ class ResolveRun:
         status: ConcernStatus,
         reason: str = "",
     ) -> ResolveState:
-        """Return one state with the selected concern transitions applied."""
+        """Return one state with the selected concern transitions applied.
+
+        A concern moving into a settled status is stamped with the moment it
+        landed, unless it already carries one from an earlier settlement.
+        Stamped where the transition is applied rather than where the state
+        is written, because the in-memory copy is what the observer reads to
+        draw its bar: a stamp added at the write boundary would reach the
+        file and never the surface watching it move.
+        """
         selected = dict.fromkeys(concern_ids)
+        landed = utc_now() if status in SETTLED_STATUSES else None
         return state.model_copy(
             update={
                 "progress": [
-                    item.model_copy(update={"status": status, "reason": reason})
+                    item.model_copy(
+                        update={
+                            "status": status,
+                            "reason": reason,
+                            "settled_at": item.settled_at or landed,
+                        }
+                    )
                     if item.concern_id in selected
                     else item
                     for item in state.progress

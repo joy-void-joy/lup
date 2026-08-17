@@ -20,7 +20,7 @@ from lup.devtools.dev.branches import (
     require_fresh_base,
 )
 from lup.harness.process import LocalProcessLauncher
-from tests.unit.repos import commit_file, initialized_repo
+from tests.unit.repos import TEST_IDENTITY, commit_file, initialized_repo
 
 
 @pytest.fixture
@@ -33,14 +33,24 @@ def origin(tmp_path: Path) -> Path:
 
 
 def repo_git(work: Path) -> sh.Command:
-    return sh.Command("git").bake("-C", str(work), _tty_out=False)
+    # Identity per invocation, never `git config` — a misbound command then
+    # writes nothing, where a persisted setting lands in the shared config every
+    # worktree of a real repository inherits (see `lup.gitguard`).
+    return sh.Command("git").bake(
+        "-C",
+        str(work),
+        *(
+            argument
+            for setting, value in TEST_IDENTITY.items()
+            for argument in ("-c", f"{setting}={value}")
+        ),
+        _tty_out=False,
+    )
 
 
 def clone_of(origin: Path, into: Path) -> Path:
     """A clone whose checked-out branch tracks the branch it was cloned from."""
     sh.Command("git")("clone", str(origin), str(into), _tty_out=False)
-    for setting, value in (("user.email", "t@example.com"), ("user.name", "T")):
-        repo_git(into)("config", setting, value)
     return into
 
 

@@ -48,7 +48,7 @@ from lup.resolver.orchestrator import WorktreeOrchestrator
 from lup.resolver.rebase import BaseRefresher
 from lup.resolver.run import ResolveRun
 from lup.resolver.state import ResolverStateRepository
-from lup.resolver.status import unfinished_runs
+from lup.resolver.status import unfinished_runs, worker_bar
 from lup.resolver.models import (
     AdmissionRequest,
     Concern,
@@ -305,7 +305,7 @@ class ConsoleResolverObserver(ResolverObserver):
         typer.echo(line)
 
     def tally_changed(self, tally: RunTally) -> None:
-        # lup: The worker phase should get the same bar the join and re-check
+        # lup: solved: The worker phase should get the same bar the join and re-check
         # phases already have — settled/total with a rate and an ETA — rather
         # than this flat line repeated per tally change, which never says how
         # much is left. `phase_progress` in lup/resolver/status.py declines it
@@ -321,7 +321,18 @@ class ConsoleResolverObserver(ResolverObserver):
         # rather than driving a loop, its lines are read from logs as often as
         # watched, and a repainting bar would hold a second copy of the count
         # in process memory beside the one on disk every other surface reads.
-        typer.echo(f"[resolve] progress: {tally.concerns_line()}")
+        #
+        # The bar leads and the per-status breakdown follows it: the bar
+        # answers "how much is left", the breakdown answers "what is it
+        # doing", and dropping either for the other loses a question this
+        # line is the only place to ask. Outside a settling phase there is no
+        # bar to lead with, and the breakdown stands alone as before.
+        bar = worker_bar(tally) if tally.phase.settling() else None
+        reported = [
+            *([f"{bar.label} {bar.render()}"] if bar is not None else []),
+            tally.concerns_line(),
+        ]
+        typer.echo(f"[resolve] progress: {' · '.join(reported)}")
 
 
 def parse_answer_flags(

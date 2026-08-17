@@ -1,6 +1,8 @@
-"""Shared test fixtures.
+"""Shared fixtures for the library's own suite.
 
-Add fixtures here that are used across multiple test files.
+Separate from the template's `tests/conftest.py` and deliberately not importing
+it: a library test reaching for a template fixture passes here and fails where
+the library ships.
 """
 
 from collections.abc import Iterator
@@ -29,13 +31,11 @@ def committer_identity_armed() -> Iterator[None]:
 def enclosing_repository_untouched() -> Iterator[None]:
     """Fail the session if it wrote into the checkout it is running inside.
 
-    Autouse and session-scoped because the failure it catches is one no test
-    can be asked to notice: a fixture that binds git to the working directory
-    instead of its own throwaway repository commits successfully, passes, and
-    leaves the developer's branch moved. See :mod:`lup.gitguard` for how that
-    was found here, and what it cost.
+    The same guard the template suite arms, for the same reason: this suite
+    builds throwaway repositories too, and a fixture that forgets to bind git
+    to one reaches the developer's checkout instead. See :mod:`lup.gitguard`.
     """
-    root = Path(__file__).resolve().parent.parent
+    root = Path(__file__).resolve().parents[3]
     before = repository_state(root)
     yield
     report = guard_report(before, repository_state(root))

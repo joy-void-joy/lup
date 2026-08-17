@@ -18,10 +18,19 @@ from lup.devtools.dev.branches import parse_branches
 
 def init_repo(path: Path) -> sh.Command:
     """Initialize a one-commit repo with color forced on; return a baked git."""
-    git = sh.Command("git").bake("-C", str(path), _tty_out=False)
+    # Identity per invocation, never `git config` — a misbound command then
+    # writes nothing, where a persisted setting lands in the shared config every
+    # worktree of a real repository inherits (see `lup.gitguard`).
+    git = sh.Command("git").bake(
+        "-C",
+        str(path),
+        "-c",
+        "user.email=test@example.com",
+        "-c",
+        "user.name=Test",
+        _tty_out=False,
+    )
     git("init", "-q", "-b", "main")
-    git("config", "user.email", "test@example.com")
-    git("config", "user.name", "Test")
     git("config", "color.ui", "always")
     (path / "file.txt").write_text("hello\n")
     git("add", ".")
