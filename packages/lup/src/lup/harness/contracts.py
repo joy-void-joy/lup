@@ -14,7 +14,6 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
 
-from pydantic import BaseModel
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -50,7 +49,7 @@ class SkillInvocationRenderer(ABC):
         """Render qualification, escaping, and arguments together."""
 
 
-class Spelling(BaseModel, frozen=True):
+class Spelling(ABC):
     """What one runtime says for a portable idea, or why it has nothing to say.
 
     A portable idea one runtime cannot express is the case absence handles
@@ -93,7 +92,7 @@ class Instruction(str):
     """
 
 
-class Spelled(Spelling, frozen=True):
+class Spelled(Spelling):
     """The runtime's own words for the idea, ready to be placed in prose.
 
     What a runtime hands over is an :class:`Instruction`, since these
@@ -103,7 +102,8 @@ class Spelled(Spelling, frozen=True):
     judge, not about the object that survives validation.
     """
 
-    words: str
+    def __init__(self, words: str) -> None:
+        self.words = words
 
     def in_prose(self) -> str:
         return self.words
@@ -112,7 +112,7 @@ class Spelled(Spelling, frozen=True):
         return self.words
 
 
-class Unsupported(Spelling, frozen=True):
+class Unsupported(Spelling):
     """One portable idea this runtime has no way to say, and why not.
 
     The reason is the whole point: a runtime declines because of something
@@ -124,8 +124,9 @@ class Unsupported(Spelling, frozen=True):
     approximation from the real thing until it fails.
     """
 
-    reason: str
-    """Why this runtime cannot say it, in words that stand on their own."""
+    def __init__(self, reason: str) -> None:
+        self.reason = reason
+        """Why this runtime cannot say it, in words that stand on their own."""
 
     def in_prose(self) -> str:
         return ""
