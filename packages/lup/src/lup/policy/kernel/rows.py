@@ -72,6 +72,24 @@ class PathRoleRow(TypedDict):
     role: PathRoleName
 
 
+class AcceptanceGuardRow(TypedDict):
+    """One erased decision to hold a project's acceptance tests still.
+
+    A test states the behaviour production owes; editing one moves the target
+    the implementation is aimed at, which is a judgement about what the work
+    is rather than about how it was done. The two reasons are separate
+    because the two callers are: an ordinary session is asked, since a test
+    that genuinely encodes the wrong behaviour has to be changeable by
+    someone who can weigh that, while a session implementing *against* these
+    tests is refused, because for it the tests are the specification and
+    rewriting a specification to match the implementation is the failure the
+    guard exists to catch.
+    """
+
+    ask_reason: str
+    autonomous_reason: str
+
+
 class AntiPatternRow(TypedDict):
     """One erased anti-pattern rule and the syntactic context it inspects."""
 

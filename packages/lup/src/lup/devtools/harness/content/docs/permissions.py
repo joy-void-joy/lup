@@ -100,6 +100,21 @@ auto-allow outright; a multi-line `replace_all` falls through to the size
 gate, and a full-file write never auto-allows. The anti-pattern audit runs
 before any auto-allow, so keeping an edit small cannot outrun it.
 
+A project that declares an **acceptance guard** adds one gate ahead of all
+of those, over every root it gave the `test` role. An ordinary session is
+asked before it edits a test, because a test that encodes the wrong
+behaviour has to be fixable by someone who can weigh that; a session
+declared autonomous is refused, because for it these tests are the
+specification it is implementing against, and rewriting a specification to
+match an implementation is the failure the guard exists to catch. It answers
+before the gates below rather than through them — including pure deletion,
+which would otherwise wave through removing the test outright, and the
+protected-path rules, whose autonomous release must not survive a refusal
+aimed at exactly that caller. This is the one place autonomy costs a caller
+more rather than less. Declaring no guard leaves tests judged by the
+ordinary lattice, which is right for a project that does not implement
+against fixed acceptance tests.
+
 The
 resolver's worker receives only its declared autonomous edit exceptions;
 temporary paths, human-owned files like `README.md`, marker changes, and

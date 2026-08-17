@@ -32,6 +32,7 @@ from lup.policy.kernel.lex import (
     shell_write_targets,
 )
 from lup.policy.kernel.rows import (
+    AcceptanceGuardRow,
     AntiPatternRow,
     PathRoleRow,
     PathRuleKind,
@@ -298,7 +299,9 @@ class EditPolicy(DecisionPolicy[EditBatch]):
         autonomous: bool = False,
         path_roles: list[PathRoleRow] | None = None,
         grants: LeaseGrants | None = None,
+        acceptance_guard: AcceptanceGuardRow | None = None,
     ) -> None:
+        self.acceptance_guard = acceptance_guard
         self.path_roles = path_roles or []
         self.grants = LeaseGrants() if grants is None else grants
         self.protected = list(protected)
@@ -333,5 +336,6 @@ class EditPolicy(DecisionPolicy[EditBatch]):
                 autonomous=self.autonomous,
                 allowances=self.grants.granted(),
                 python_source=suffix in (".py", ".pyi"),
+                acceptance_guard=self.acceptance_guard,
             )
         )

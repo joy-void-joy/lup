@@ -38,6 +38,7 @@ from kernel.lex import shell_path_verb_targets, shell_write_targets
 from kernel.shell import decide_shell
 from kernel.tools import decide_tool
 from policy_data import (
+    ACCEPTANCE_GUARD,
     ALLOWANCE_GRANTS_ENV,
     ALLOWED_FETCH_SCOPES,
     ANTI_PATTERN_ROWS,
@@ -172,4 +173,5 @@ def edit_decision(
         autonomous=autonomous,
         allowances=granted_allowances(ALLOWANCE_GRANTS_ENV, KNOWN_ALLOWANCES),
         python_source=suffix in (".py", ".pyi"),
+        acceptance_guard=ACCEPTANCE_GUARD,
     )

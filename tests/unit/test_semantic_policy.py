@@ -1228,6 +1228,7 @@ def test_assembled_kernel_runs_without_site_packages(tmp_path: Path) -> None:
             human_owned_files=["README.md"],
             autonomous_agent_identities=["resolver-worker"],
             path_roles=FIXTURE_PATH_ROLES,
+            acceptance_guard=None,
             shell_rules=SHELL_RULES,
             refused_tools=FIXTURE_REFUSED_TOOLS,
             recoverable_target_limit=FIXTURE_RECOVERABLE_LIMIT,

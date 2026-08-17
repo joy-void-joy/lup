@@ -1,8 +1,9 @@
 """Path-role resolution: what a repository path is for, decided lexically."""
 
+from lup.policy.kernel.decision import KernelDecision
 from lup.policy.kernel.edit import decide_edit
 from lup.policy.kernel.roles import path_role
-from lup.policy.kernel.rows import PathRoleRow
+from lup.policy.kernel.rows import AcceptanceGuardRow, PathRoleRow
 
 ROLES = [
     PathRoleRow(root="tests", role="test"),
@@ -91,3 +92,79 @@ def test_the_edit_gate_consumes_the_role_resolution_produces() -> None:
     assert authoring("/tmp/claude-1000/session/scratchpad/note.md") == "allow"
     assert authoring("tmp/briefing.md") == "allow"
     assert authoring("src/module.py") == "ask"
+
+
+GUARD = AcceptanceGuardRow(
+    ask_reason="weigh the test", autonomous_reason="report instead"
+)
+
+
+def guarded(
+    path: str, before: str | None, after: str | None, autonomous: bool = False
+) -> KernelDecision:
+    """One edit judged with the acceptance guard declared."""
+    return decide_edit(
+        path,
+        before,
+        after,
+        path_exists=before is not None,
+        path_rules=[],
+        antipattern_rows=[],
+        path_roles=ROLES,
+        autonomous=autonomous,
+        acceptance_guard=GUARD,
+    )
+
+
+def test_a_declared_guard_asks_before_an_ordinary_session_edits_a_test() -> None:
+    """Someone has to be able to fix a test that encodes wrong behaviour.
+
+    The gate is a question rather than a refusal for exactly that case, and
+    the reason is what tells the human which of the two they are looking at.
+    """
+    decision = guarded("tests/unit/test_thing.py", "old body", "new body")
+    assert decision.effect == "ask"
+    assert decision.reason == "weigh the test"
+
+
+def test_a_declared_guard_refuses_the_session_implementing_against_the_test() -> None:
+    """The one caller for whom these tests are the specification.
+
+    This is the only gate where autonomy costs a caller more rather than
+    less, because everywhere else autonomy means the caller reviews its own
+    edits, and here the edit is to the thing doing the reviewing.
+    """
+    decision = guarded("tests/unit/test_thing.py", "old body", "new body", True)
+    assert decision.effect == "deny"
+    assert decision.reason == "report instead"
+
+
+def test_the_guard_answers_before_deletion_is_waved_through() -> None:
+    """Removing the test outright is the cheapest way to stop it failing.
+
+    Pure deletion allows unconditionally further down, so a guard that ran
+    in declaration order would refuse edits to a test while permitting its
+    removal — which is the same defect, faster.
+    """
+    assert guarded("tests/unit/test_thing.py", "old body", None).effect == "ask"
+    assert guarded("tests/unit/test_thing.py", "old body", "").effect == "ask"
+
+
+def test_the_guard_reaches_only_what_a_test_root_declares() -> None:
+    """It is scoped by role, so nothing outside a declared test root moves."""
+    assert guarded("src/module.py", "old", "new").effect == "allow"
+    assert guarded("tmp/scratch.py", "old", "new").effect == "allow"
+
+
+def test_an_undeclared_guard_leaves_tests_judged_by_the_ordinary_lattice() -> None:
+    """Off is the library's answer, so adopting lup changes no verdict."""
+    unguarded = decide_edit(
+        "tests/unit/test_thing.py",
+        "old body",
+        "new body",
+        path_exists=True,
+        path_rules=[],
+        antipattern_rows=[],
+        path_roles=ROLES,
+    )
+    assert unguarded.effect == "allow"
