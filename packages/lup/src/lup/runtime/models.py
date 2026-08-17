@@ -1,10 +1,10 @@
 """Immutable semantic values shared by all runtime implementations."""
 
 import json
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
 from datetime import timedelta
-from typing import Annotated, Literal, Self, overload
+from typing import Annotated, Literal, overload
 
 from pydantic import BaseModel, Discriminator, Field
 
@@ -61,7 +61,53 @@ class TurnInput(BaseModel, frozen=True):
     text: str
 
 
-class TurnBlock(BaseModel, frozen=True):
+class TextBlockRecord(BaseModel, frozen=True):
+    """One assistant text block as a turn document writes it."""
+
+    kind: Literal["text"] = "text"
+    text: str
+
+
+class ThinkingBlockRecord(BaseModel, frozen=True):
+    """One reasoning block as a turn document writes it."""
+
+    kind: Literal["thinking"] = "thinking"
+    thinking: str
+    redacted: bool = False
+
+
+class ToolCallBlockRecord(BaseModel, frozen=True):
+    """One tool invocation as a turn document writes it."""
+
+    kind: Literal["tool_call"] = "tool_call"
+    id: str
+    name: str
+    arguments: JsonObject = {}
+
+
+class ToolResultBlockRecord(BaseModel, frozen=True):
+    """One tool result as a turn document writes it."""
+
+    kind: Literal["tool_result"] = "tool_result"
+    tool_call_id: str
+    content: str
+    is_error: bool = False
+
+
+type BlockRecord = Annotated[
+    TextBlockRecord | ThinkingBlockRecord | ToolCallBlockRecord | ToolResultBlockRecord,
+    Discriminator("kind"),
+]
+"""One block as it is written to, and read back from, a turn document.
+
+Discriminated because this one genuinely is a wire format: pydantic has to
+rebuild the right variant from JSON, which is the case a discriminator exists
+for. The blocks themselves need none — nothing validates a block into being,
+so in memory they are objects that answer for themselves.
+"""
+
+
+class TurnBlock(ABC):
     """One completed block of a turn, answering every question about itself.
 
     Whatever a caller needs to know about a block is declared here and
@@ -71,38 +117,37 @@ class TurnBlock(BaseModel, frozen=True):
     ``text_payload`` reaches every kind that carries prose, including kinds
     written long after the caller was.
 
-    Pydantic's metaclass is an ``ABCMeta``, so ``telemetry_block`` binds like
-    any abstract property: a kind that does not answer it cannot be built.
+    What a block *carries* is data, and stands here as an attribute a kind
+    overrides by assigning it; only what has to be computed from that data is
+    a member. That split is what keeps the seam at a single abstract method,
+    and it is why no kind carries a discriminator any more: nothing validates
+    a block into existence, so there was never anything to discriminate — the
+    alias existed because a pydantic model held these, not because a wire
+    format did.
     """
 
-    @property
+    text_payload: str | None = None
+    """Prose this block carries verbatim, if it carries any."""
+
+    tool_call_name: str | None = None
+    """The tool this block invokes, if it invokes one."""
+
+    tool_arguments: JsonObject | None = None
+    """The arguments this block invokes its tool with, if it invokes one."""
+
+    invoked_call_id: str | None = None
+    """The id of the call this block makes, if it makes one."""
+
+    refusal: "ToolRefusal | None" = None
+    """The refused call this block reports, if it reports one."""
+
     @abstractmethod
     def telemetry_block(self) -> LupContentBlock:
         """This block as the telemetry vocabulary spells it."""
 
-    @property
-    def text_payload(self) -> str | None:
-        """Prose this block carries verbatim, if it carries any.
-
-        Everything that reads what a turn actually said asks this instead of
-        naming the kinds of block that hold text.
-        """
-        return None
-
-    @property
-    def tool_call_name(self) -> str | None:
-        """The tool this block invokes, if it invokes one."""
-        return None
-
-    @property
-    def tool_arguments(self) -> JsonObject | None:
-        """The arguments this block invokes its tool with, if it invokes one."""
-        return None
-
-    @property
-    def invoked_call_id(self) -> str | None:
-        """The id of the call this block makes, if it makes one."""
-        return None
+    @abstractmethod
+    def record(self) -> BlockRecord:
+        """This block as a turn document writes it."""
 
     def delegated_role(
         self,
@@ -110,6 +155,10 @@ class TurnBlock(BaseModel, frozen=True):
         unnamed: str = UNNAMED_SUBAGENT,
     ) -> str | None:
         """The subagent role this block delegates to, if it delegates.
+
+        A member rather than an attribute because it is computed from what
+        the block carries rather than carried: the tool name and arguments
+        are the data, and which of them names a role is the question.
 
         Asked of the block so a reader correlating a transcript never has to
         know which tool a runtime spells delegation with, nor which argument
@@ -119,62 +168,51 @@ class TurnBlock(BaseModel, frozen=True):
         """
         return None
 
-    @property
-    def refusal(self) -> "ToolRefusal | None":
-        """The refused call this block reports, if it reports one."""
-        return None
 
-
-class TurnTextBlock(TurnBlock, frozen=True):
+class TurnTextBlock(TurnBlock):
     """One completed assistant text block."""
 
-    type: Literal["text"] = "text"
-    text: str
+    def __init__(self, text: str) -> None:
+        self.text = text
+        self.text_payload = text
 
-    @property
     def telemetry_block(self) -> LupContentBlock:
         return LupTextBlock(text=self.text)
 
-    @property
-    def text_payload(self) -> str | None:
-        return self.text
+    def record(self) -> BlockRecord:
+        return TextBlockRecord(text=self.text)
 
 
-class TurnThinkingBlock(TurnBlock, frozen=True):
+class TurnThinkingBlock(TurnBlock):
     """One completed reasoning block."""
 
-    type: Literal["thinking"] = "thinking"
-    thinking: str
-    redacted: bool = False
+    def __init__(self, thinking: str, redacted: bool = False) -> None:
+        self.thinking = thinking
+        self.redacted = redacted
 
-    @property
     def telemetry_block(self) -> LupContentBlock:
         return LupThinkingBlock(thinking=self.thinking, redacted=self.redacted)
 
+    def record(self) -> BlockRecord:
+        return ThinkingBlockRecord(thinking=self.thinking, redacted=self.redacted)
 
-class TurnToolCallBlock(TurnBlock, frozen=True):
+
+class TurnToolCallBlock(TurnBlock):
     """One completed tool invocation."""
 
-    type: Literal["tool_call"] = "tool_call"
-    id: str
-    name: str
-    arguments: JsonObject = {}
+    def __init__(self, id: str, name: str, arguments: JsonObject | None = None) -> None:
+        self.id = id
+        self.name = name
+        self.arguments: JsonObject = arguments or {}
+        self.tool_call_name = name
+        self.tool_arguments = self.arguments
+        self.invoked_call_id = id
 
-    @property
     def telemetry_block(self) -> LupContentBlock:
         return LupToolUseBlock(id=self.id, name=self.name, input=self.arguments)
 
-    @property
-    def tool_call_name(self) -> str | None:
-        return self.name
-
-    @property
-    def tool_arguments(self) -> JsonObject | None:
-        return self.arguments
-
-    @property
-    def invoked_call_id(self) -> str | None:
-        return self.id
+    def record(self) -> BlockRecord:
+        return ToolCallBlockRecord(id=self.id, name=self.name, arguments=self.arguments)
 
     def delegated_role(
         self,
@@ -196,21 +234,17 @@ class ToolRefusal(BaseModel, frozen=True):
     detail: str
 
 
-class TurnToolResultBlock(TurnBlock, frozen=True):
+class TurnToolResultBlock(TurnBlock):
     """One completed tool result."""
 
-    type: Literal["tool_result"] = "tool_result"
-    tool_call_id: str
-    content: str
-    is_error: bool = False
+    def __init__(self, tool_call_id: str, content: str, is_error: bool = False) -> None:
+        self.tool_call_id = tool_call_id
+        self.content = content
+        self.is_error = is_error
+        self.refusal = (
+            ToolRefusal(call_id=tool_call_id, detail=content) if is_error else None
+        )
 
-    @property
-    def refusal(self) -> ToolRefusal | None:
-        if not self.is_error:
-            return None
-        return ToolRefusal(call_id=self.tool_call_id, detail=self.content)
-
-    @property
     def telemetry_block(self) -> LupContentBlock:
         rendered = (
             json.dumps({"is_error": True, "content": self.content})
@@ -219,24 +253,31 @@ class TurnToolResultBlock(TurnBlock, frozen=True):
         )
         return LupToolResultBlock(tool_use_id=self.tool_call_id, content=rendered)
 
-
-type AnyTurnBlock = Annotated[
-    TurnTextBlock | TurnThinkingBlock | TurnToolCallBlock | TurnToolResultBlock,
-    Discriminator("type"),
-]
-"""One block as a pydantic *field* validates it: the closed set, discriminated.
-
-Annotations that only read a block name :class:`TurnBlock`, the base. A field
-must name this alias instead — validating against the base alone would rebuild
-every block as a base instance and drop its payload.
-"""
+    def record(self) -> BlockRecord:
+        return ToolResultBlockRecord(
+            tool_call_id=self.tool_call_id,
+            content=self.content,
+            is_error=self.is_error,
+        )
 
 
-class TurnMessage(BaseModel, frozen=True):
-    """A portable transcript message derived from canonical blocks."""
+type TurnRole = Literal["user", "assistant", "tool", "system"]
+"""Who a transcript message is from."""
 
-    role: Literal["user", "assistant", "tool", "system"]
-    blocks: list[AnyTurnBlock]
+
+class TurnMessage(BaseModel, frozen=True, arbitrary_types_allowed=True):
+    """A portable transcript message derived from canonical blocks.
+
+    Still a model, because ``role`` is data worth validating and the message
+    carries no behaviour. Its blocks are objects that answer for themselves
+    rather than records pydantic rebuilds, so they arrive as arbitrary types —
+    which is also what retires the discriminated alias that used to sit here:
+    it existed only so a pydantic field would not flatten every block to its
+    base, and a field that validates nothing cannot flatten anything.
+    """
+
+    role: TurnRole
+    blocks: list[TurnBlock]
     parent_tool_call_id: str | None = Field(
         default=None,
         description=(
@@ -255,68 +296,77 @@ class TurnMessage(BaseModel, frozen=True):
     )
 
 
+class MessageRecord(BaseModel, frozen=True):
+    """One transcript message as a turn document writes it."""
+
+    role: TurnRole
+    blocks: list[BlockRecord]
+
+
 class TurnEventBase(BaseModel, frozen=True):
     """One thing that happened during a turn, answering about itself.
 
     The same arrangement :class:`TurnBlock` uses, for the same reason: a walk
     over events asks the event, so a new kind of event is one class rather
-    than an edit to every filter that would have to notice it. The declining
-    answers are what make omission safe — a caller folding ``completed_message``
-    reaches every kind that carries one, including kinds written later.
+    than an edit to every filter that would have to notice it. What an event
+    *carries* is an attribute a kind overrides by assigning it — a caller
+    folding ``completed_message`` reaches every kind that carries one,
+    including kinds written later.
+
+    ``durable`` is one of them too. It used to answer with the event itself so
+    a caller could keep the narrower type; a ``Literal`` flag narrows a union
+    exactly as well, and being data it needs no member at all — which is what
+    leaves these kinds as records with no behaviour between them.
+
+    Each kind names itself in a ``type`` of its own. The strings were never
+    only pydantic's: a run's status line records its last event by that name,
+    across a union spanning resolver events and these alike.
     """
 
-    @property
-    def durable(self) -> "Self | None":
-        """This event, if it survives into the transcript.
-
-        Returning the event rather than a flag is what lets a caller keep the
-        narrower type: a walk filtering on this gets exactly the durable
-        kinds, the way naming them in an ``isinstance`` used to do. Only
-        in-flight fragments decline, so the default is every terminal event's
-        answer.
-        """
-        return self
-
-    @property
-    def completed_message(self) -> "TurnMessage | None":
-        """The whole transcript message this event completed, if it completed one."""
-        return None
+    completed_message: "TurnMessage | None" = None
+    """The whole transcript message this event completed, if it completed one."""
 
 
 class TurnStartedEvent(TurnEventBase, frozen=True):
     """A native turn was accepted."""
 
     type: Literal["turn_started"] = "turn_started"
+    durable: Literal[True] = True
     identifiers: TurnIdentifiers
 
 
 class BlockStartedEvent(TurnEventBase, frozen=True):
-    """A native content block started."""
+    """A native content block started.
+
+    The block arrives as its record rather than as the live object: nothing
+    reads a block off an event, and this is what a journal entry has to write
+    down.
+    """
 
     type: Literal["block_started"] = "block_started"
+    durable: Literal[True] = True
     identifiers: TurnIdentifiers
-    block: AnyTurnBlock
+    block: BlockRecord
 
 
 class BlockDeltaEvent(TurnEventBase, frozen=True):
     """One text or thinking delta from an active native block."""
 
     type: Literal["block_delta"] = "block_delta"
+    durable: Literal[False] = False
+    """A fragment of a block still being written survives nothing."""
+
     identifiers: TurnIdentifiers
     delta: str
-
-    @property
-    def durable(self) -> None:
-        """A fragment of a block still being written survives nothing."""
-        return None
 
 
 class BlockCompletedEvent(TurnEventBase, frozen=True):
     """One native content block completed."""
 
     type: Literal["block_completed"] = "block_completed"
+    durable: Literal[True] = True
     identifiers: TurnIdentifiers
-    block: AnyTurnBlock
+    block: BlockRecord
 
 
 class MessageCompletedEvent(TurnEventBase, frozen=True):
@@ -329,18 +379,15 @@ class MessageCompletedEvent(TurnEventBase, frozen=True):
     """
 
     type: Literal["message_completed"] = "message_completed"
+    durable: Literal[True] = True
     identifiers: TurnIdentifiers
-    message: TurnMessage
-
-    @property
-    def completed_message(self) -> TurnMessage:
-        return self.message
 
 
 class TurnCompletedEvent(TurnEventBase, frozen=True):
     """A native turn reached a terminal state."""
 
     type: Literal["turn_completed"] = "turn_completed"
+    durable: Literal[True] = True
     identifiers: TurnIdentifiers
 
 
@@ -429,15 +476,50 @@ def turn_request[T: BaseModel](
     return TurnRequest[T](input=prompt, output_type=output_type)
 
 
-class TurnResult[T: BaseModel | None](BaseModel, frozen=True):
+class TurnResult[T: BaseModel | None](
+    BaseModel, frozen=True, arbitrary_types_allowed=True
+):
     """Successful terminal result; failures are represented only by errors."""
 
     output: T
     messages: list[TurnMessage]
-    blocks: list[AnyTurnBlock]
+    blocks: list[TurnBlock]
     usage: Usage
     duration: timedelta
     identifiers: TurnIdentifiers
+
+
+class TurnRecord[T: BaseModel | None](BaseModel, frozen=True):
+    """One successful turn as its document on disk."""
+
+    output: T
+    messages: list[MessageRecord]
+    blocks: list[BlockRecord]
+    usage: Usage
+    duration: timedelta
+    identifiers: TurnIdentifiers
+
+
+def turn_record[T: BaseModel | None](result: TurnResult[T]) -> TurnRecord[T]:
+    """One result as its document on disk.
+
+    A free function rather than a member: the result is data, and writing it
+    down is what the persistence wrapper does to it rather than something the
+    value does to itself.
+    """
+    return TurnRecord[T](
+        output=result.output,
+        messages=[
+            MessageRecord(
+                role=message.role, blocks=[block.record() for block in message.blocks]
+            )
+            for message in result.messages
+        ],
+        blocks=[block.record() for block in result.blocks],
+        usage=result.usage,
+        duration=result.duration,
+        identifiers=result.identifiers,
+    )
 
 
 class SessionHandle(BaseModel, frozen=True, arbitrary_types_allowed=True):

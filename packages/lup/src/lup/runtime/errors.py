@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 
 from pydantic import BaseModel, Field
 
-from lup.runtime.models import AnyTurnBlock, TurnIdentifiers
+from lup.runtime.models import TurnBlock, TurnIdentifiers
 from lup.types import Usage
 
 
@@ -14,11 +14,11 @@ class ValidationAttempt(BaseModel, frozen=True):
     message: str
 
 
-class TurnFailure(BaseModel, frozen=True):
+class TurnFailure(BaseModel, frozen=True, arbitrary_types_allowed=True):
     """Partial evidence available when a logical turn fails."""
 
     message: str
-    blocks: list[AnyTurnBlock] = []
+    blocks: list[TurnBlock] = []
     usage: Usage = Field(default_factory=Usage)
     duration: timedelta = timedelta()
     identifiers: TurnIdentifiers | None = None

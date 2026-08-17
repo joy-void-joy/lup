@@ -24,7 +24,7 @@ from lup.runtime.errors import (
     TurnFailure,
 )
 from lup.runtime.models import (
-    AnyTurnBlock,
+    TurnBlock,
     TurnHandle,
     TurnIdentifiers,
     TurnMessage,
@@ -39,11 +39,11 @@ from lup.runtime.output import InMemorySubmittedOutputStore, submission_history
 from lup.types import Usage
 
 
-class CompletedTurn(BaseModel, frozen=True):
+class CompletedTurn(BaseModel, frozen=True, arbitrary_types_allowed=True):
     """Native-neutral completed evidence before typed submission assembly."""
 
     messages: list[TurnMessage] = []
-    blocks: list[AnyTurnBlock] = []
+    blocks: list[TurnBlock] = []
     usage: Usage = Field(default_factory=Usage)
     duration: timedelta = timedelta()
     identifiers: TurnIdentifiers | None = Field(
@@ -88,7 +88,7 @@ def is_output_model(
     return output_type is not None and issubclass(output_type, BaseModel)
 
 
-def refusal_of(blocks: list[AnyTurnBlock], tool: str) -> str | None:
+def refusal_of(blocks: list[TurnBlock], tool: str) -> str | None:
     """Why *tool* was refused this turn, if it was called and refused.
 
     An empty output store reads the same whether the model never submitted

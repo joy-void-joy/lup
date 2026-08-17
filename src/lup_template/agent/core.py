@@ -397,7 +397,7 @@ def decorate_factory(
         async def display_result(record: DisplayRecord) -> None:
             for block in record.blocks:
                 print_block(
-                    block.telemetry_block,
+                    block.telemetry_block(),
                     trace=trace_logger,
                     colors=colors,
                 )
@@ -405,7 +405,7 @@ def decorate_factory(
         async def trace_result(record: TraceRecord) -> None:
             if not record.succeeded and record.failure is not None:
                 for block in record.failure.blocks:
-                    trace_logger.log_block(block.telemetry_block)
+                    trace_logger.log_block(block.telemetry_block())
                 trace_logger.log_text(record.failure.message, heading="Turn error")
                 trace_logger.emit_event(
                     TraceEvent(
