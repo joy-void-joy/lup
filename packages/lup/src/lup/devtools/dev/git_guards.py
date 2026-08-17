@@ -30,6 +30,7 @@ from typing import Literal
 import sh
 from pydantic import BaseModel
 
+from lup.gitguard import GIT_ENVIRONMENT
 from lup.harness.banner import REGENERATE_COMMAND
 from lup.devtools.utils import git
 
@@ -84,6 +85,14 @@ class GitGuard(BaseModel, frozen=True):
     hook: str = "pre-commit"
     """Which git hook the check is installed as."""
 
+    environment: tuple[str, ...] = GIT_ENVIRONMENT
+    """What the hook drops before running its check.
+
+    A project whose check wants one of these kept names a shorter tuple, and
+    one that wants none of them dropped names an empty one, which writes no
+    line at all.
+    """
+
     refusal: str = (
         "Refuses this commit while a generated artifact differs from what\n"
         f"# its source renders. Settle it with `{REGENERATE_COMMAND}`."
@@ -96,11 +105,25 @@ class GitGuard(BaseModel, frozen=True):
     """
 
     def body(self) -> str:
-        """The hook script: the marker that claims it, then the check itself."""
+        """The hook script: the marker that claims it, the scrub, then the check.
+
+        Git names this repository to a hook through the environment, which
+        outranks the `-C` any command the check runs binds itself with. A
+        check whose suite builds throwaway repositories would resolve this one
+        instead and commit into the branch being pushed, so the names go
+        before the check rather than travelling into it.
+        """
+        scrub = (
+            "# Dropped so the check below resolves this repository from the\n"
+            "# directory it runs in. Git names it here too, and that name would\n"
+            "# outrank the `-C` a test's throwaway repository binds git with.\n"
+            f"unset {' '.join(self.environment)}\n"
+        )
         return (
             "#!/bin/sh\n"
             f"# {GUARD_MARKER}: written by `{INSTALL_COMMAND}`.\n"
             f"# {self.refusal}\n"
+            f"{scrub if self.environment else ''}"
             f"exec {self.command}\n"
         )
 
