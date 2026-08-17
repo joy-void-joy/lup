@@ -1372,16 +1372,6 @@ def run_tally(state: ResolveState) -> RunTally:
             status: statuses.count(status) for status in dict.fromkeys(statuses)
         },
         joined=len(state.join_progress.joined) if state.join_progress else 0,
-        # lup: solved: This counts every concern holding a commit, but `integrate`
-        # joins only the verified ones, so the total over-reads by each concern
-        # that failed or retired still holding work — and the bar can never reach
-        # it. Measured on resolve-9e060ad9bb53: 22 against 20 real parents, the two
-        # extras being composition-seam-abc (failed) and git-sandbox-lock-diagnosis
-        # (retired), both of which the assembly gate lists as exclusions rather
-        # than merging. Count what that gate will actually join. If the wider
-        # number is worth showing, it is a second figure — "20 of 22 on the
-        # table" says something true, where one number pretending to be both
-        # cannot.
         join_total=state.join_progress.planned if state.join_progress else 0,
     )
 

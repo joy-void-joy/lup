@@ -477,24 +477,6 @@ GIT_READ_ONLY_SUBCOMMANDS = (
     "rev-list",
     "name-rev",
     "merge-base",
-    # lup: solved: This toolchain should carry an automatic sandbox escalation rather
-    # than each caller remembering a flag. Every `lup-devtools` command that
-    # opens agent sessions is broken inside the sandbox, and the resolver is
-    # only the case that cost 90 minutes to notice. Whatever mechanism lands —
-    # a declared escape list, or the sandbox axis on a decision — the toolchain
-    # that runs the workflow should be on it by declaration.
-    #
-    # lup: solved: A command that will fail this way should be *blocked*, with the
-    # reason, rather than allowed to run and die on a bare `EROFS`. The agent
-    # cannot tell that failure from a broken repository, so it retries, works
-    # around it, or reports success from a session that never ran a command.
-    # A denial naming the sandbox and the escape costs one turn; this cost a
-    # whole planning run whose output looked normal.
-    # lup: solved: `git merge-tree` belongs on this list and is missing, so
-    # probing whether a branch still merges is refused as "not classified as
-    # read-only or reversible". Even with `--write-tree` it only adds objects
-    # to the store: no ref, no index, no working tree. Sweep the rest of git's
-    # query verbs the same way rather than adding this one word.
     "show-ref",
     "for-each-ref",
     "count-objects",

@@ -805,10 +805,6 @@ class WorktreeOrchestrator:
             raise RuntimeError(f"worktree branch changed for {lease.concern_id}")
         return lines[0]
 
-    # lup: solved: reset lost its production caller when restore_worktree chose to
-    # preserve the interrupted turn (a park is a pause, not an abandonment);
-    # decide whether any retry path still owes a hard discard, or remove
-    # this method and the three tests that exercise it.
     def head(self, lease: WritableRootLease) -> str:
         """Read the exact current commit identity for an orchestrated worktree."""
         identified = self.require(

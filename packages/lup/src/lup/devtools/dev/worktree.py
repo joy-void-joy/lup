@@ -316,26 +316,6 @@ def create(
     # them, so a confinement that owns `config.lock` is said once here rather
     # than discovered as `File exists` against a half-created worktree.
     #
-    # lup: solved: The mechanism behind the note below, measured downstream: the sandbox
-    # bind-mounts `/dev/null` over `.git/config.lock` and `.git/config.worktree`
-    # (device 1:3, read-only devtmpfs) and mounts `.git/config` read-only, so git
-    # cannot take its lock and every config write fails. This function does three
-    # of them. It reaches far past `worktree create`: the resolver leases a
-    # worktree per concern through this same path, so a sandboxed run dies at the
-    # first lease with a message naming nothing about the sandbox. Detect it —
-    # `.git/config` read-only, or `.git/config.lock` a device node — and say "git
-    # config writes are blocked by the sandbox, rerun outside it" instead of
-    # letting `File exists` send a reader after a stale lock that does not exist.
-    #
-    # lup: solved: This config write is what fails under the sandbox, and the reported
-    # cause is wrong. Sibling worktrees are *not* read-only — writing into
-    # `tree/main/` succeeds, because the allowlist covers the whole repository
-    # root. What fails is git's lock protocol: `config.lock` sits on a read-only
-    # mount, so no config write can acquire it and git reports `File exists`,
-    # which reads like a stale lock somebody forgot to delete. It is not one, and
-    # deleting it does nothing. `git worktree prune`/`remove` fail the same way
-    # on the admin dirs. Any fix deriving writable paths from the worktree set
-    # misses this entirely.
     refuse_blocked_config_writes()
     current_dir = Path.cwd()
 
