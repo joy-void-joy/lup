@@ -18,6 +18,7 @@ from pydantic import BaseModel
 import lup.devtools.dev.antipatterns as antipatterns_mod
 import lup.devtools.dev.boundaries as boundaries_mod
 import lup.devtools.dev.branches as branches
+import lup.devtools.dev.persistence as persistence
 import lup.devtools.dev.check as check
 import lup.devtools.dev.comments as comments
 import lup.devtools.dev.commit_guard as commit_guard
@@ -598,6 +599,28 @@ def create_dev_app(
                 typer.echo(f"  {rel}")
             return
         antipatterns_mod.report_directives(declared().project, as_json, limit)
+
+    @app.command("persistence")
+    def persistence_cmd(
+        as_json: Annotated[
+            bool,
+            typer.Option("--json", help="Output as JSON"),
+        ] = False,
+    ) -> None:
+        """Name every model that can reach disk, and every call left unresolved.
+
+        Whether a value may stop being a model turns on whether anything writes
+        it out, and that is a property of the whole type graph rather than of
+        the file it is declared in: a class reaches disk by being held, at any
+        depth, by one that a persistence call names. Searching for pydantic's
+        own method names answers it wrongly, because the write is behind a
+        helper and the class at risk is rarely the one that helper is handed.
+
+        A call whose argument cannot be named is reported rather than skipped,
+        so the walk never answers "safe to convert" by having looked at
+        nothing.
+        """
+        persistence.report_persistence(declared().project, as_json)
 
     @app.command("report-friction")
     def report_friction_cmd(
