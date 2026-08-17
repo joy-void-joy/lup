@@ -742,6 +742,7 @@ class CodexHookRenderer(ArtifactRenderer[HookSet]):
                         rules=antipattern_set_for(
                             self.spellings.read_document(DOCUMENT_IN_HAND),
                             source.rules,
+                            source.anti_patterns,
                         ),
                     ),
                     semantic_id=source.id,

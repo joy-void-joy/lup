@@ -52,7 +52,6 @@ consumers and the auditor import directly.
 """
 
 import re
-from collections.abc import Callable
 
 from pydantic import BaseModel, Field
 
@@ -66,12 +65,12 @@ from lup.codescan.boundaries import (
 from lup.codescan.capabilities import RULE_ID as ABC_CAPABILITY_RULE_ID
 from lup.codescan.dispatch import RULE_ID as OWN_MODEL_DISPATCH_RULE_ID
 from lup.codescan.common import (
+    AntiPattern,
     LineProjections,
     PythonContext,
+    Refiner,
     Refutation,
-    RuleContext,
     RuleSelection,
-    RuleStrength,
     file_level_ignore,
     ignore_rule_ids,
 )
@@ -81,67 +80,11 @@ from lup.policy.kernel.edit import (
     default_factory_exempt_lines,
     dict_get_exempt_lines,
     empty_collection_exempt_lines,
+    slice_exempt_lines,
     suppression_placement,
     suppression_reaches,
     tuple_shape_exempt_lines,
 )
-
-
-class Refiner(BaseModel, arbitrary_types_allowed=True):
-    """An AST context that narrows one rule, and what a cleared match really is.
-
-    ``exempt`` returns the lines the context clears, and ``evidence`` says why
-    in the words a refuted finding carries. The kernel owns these functions
-    because the hook must apply them with no types and no dependencies to
-    hand; the rule holds the same object so the narrowing is visible where
-    the rule is declared.
-    """
-
-    exempt: Callable[[str], set[int]]
-    evidence: str
-
-
-class AntiPattern(BaseModel, arbitrary_types_allowed=True):
-    """One forbidden code shape: a stable id, the regex that detects it, and why.
-
-    ``id`` is a stable kebab-case name a typed `# lup: ignore[id]` directive
-    targets, so a single site can silence exactly one rule without opting out
-    of the rest. Ids are pinned alongside the pattern and message by
-    ``tests/unit/test_antipatterns.py`` and must stay in step with the hook.
-
-    ``context`` declares the syntactic surface the pattern inspects. A "code"
-    rule is matched against token-masked source — string literals and comments
-    both blanked — so an identifier quoted in prose never trips it; a
-    "comment" rule targets comment directives (`# type: ignore`, `# noqa`) and
-    is matched with comments intact. Where no tokenizer applies (the
-    TypeScript-family table, text that fails to tokenize) every rule scans the
-    raw line — those rules are genuinely text-shaped.
-
-    ``refiner`` is present when the regex is wider than the defect the rule
-    names and an AST context settles the difference. It carries the function
-    itself, so reading the rule tells you what narrows it rather than only
-    that something does. The row carries its name, which
-    :func:`lup.policy.kernel.edit.refiner_named` resolves back to the function,
-    because a row projected into the hermetic runtime is primitive and cannot
-    carry a callable; ``test_declared_refiners_are_the_kernel_refiners`` pins
-    the two to the same objects, since a rule refined on one side only is
-    exactly the split that makes a marker unremovable.
-    """
-
-    id: str
-    pattern: re.Pattern[str]
-    message: str
-    context: RuleContext = "code"
-    refiner: Refiner | None = None
-    strength: RuleStrength = "soft"
-    """Whether a `# lup: ignore` may silence this rule at all.
-
-    Soft by default, because most of these name a shape that is usually wrong
-    and occasionally the only thing that works, and the audit exists to grade
-    those exceptions. A rule is ``strong`` only when its replacement is right
-    every time — then a suppression is not a reasoned exception but the defect
-    with a comment on it, and this refuses to be silenced.
-    """
 
 
 PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
@@ -384,6 +327,28 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         message="Avoid .strip(chars)/.lstrip/.rstrip for structured data — parse it "
         "instead (urllib.parse for URLs, pathlib.Path for paths, json for JSON, "
         "datetime for dates)",
+    ),
+    AntiPattern(
+        # A literal or a SCREAMING_CASE constant is a bound decided in the
+        # code; a lowercase name is one the caller passed, which makes
+        # `results[:limit]` a request rather than a truncation and keeps it out
+        # of the net. Single digits go with it: `rest[:1]` and `data[:2]` are
+        # parser bounds, never a cut artifact. What is left is a size somebody
+        # chose for content, which is the shape this names — the refiner clears
+        # the digests, splits, and sniffs that also wear it.
+        id="silent-truncation",
+        pattern=re.compile(r"\[\s*:\s*(?:\d[\d_]*\d|[A-Z][A-Z0-9_]{2,})\s*\]"),
+        refiner=Refiner(
+            exempt=slice_exempt_lines,
+            evidence="a digest, a split, or a sniff, not a cut artifact",
+        ),
+        message="Slicing a prefix discards the rest with nothing said, and a cut artifact "
+        "looks exactly like a complete one. Emit the whole value: the container grows to "
+        "fit what it holds, not the reverse. Cut only for a hard limit a document format "
+        "or a function contract imposes — never for printing space, log volume, or ease of "
+        "reading — and where a cut is forced, save the full copy and point at it from what "
+        "survives. On a bound that is genuinely one of those, add "
+        "`# lup: ignore[silent-truncation]` naming which",
     ),
     AntiPattern(
         id="bare-except",
@@ -719,7 +684,7 @@ def refined_refutations(text: str, patterns: list[AntiPattern]) -> list[Refutati
         Refutation(
             rule_id=rule.id,
             line=line,
-            subject=lines[line - 1].strip()[:80],
+            subject=lines[line - 1].strip(),
             evidence=rule.refiner.evidence,
         )
         for rule in patterns
@@ -770,7 +735,9 @@ class AntiPatternSet(BaseModel, frozen=True, arbitrary_types_allowed=True):
 
 
 def antipattern_set_for(
-    document_reader: Spelling, selection: RuleSelection | None = None
+    document_reader: Spelling,
+    selection: RuleSelection | None = None,
+    declared: list[AntiPattern] | None = None,
 ) -> AntiPatternSet:
     """The tables one native plugin ships, its own reader spelled into them.
 
@@ -778,13 +745,19 @@ def antipattern_set_for(
     plugin say what that runtime can actually do — and a runtime that declines
     ships the rule with its reason stated and no tool it does not have named.
 
-    The project's selection narrows the same tables here, so a retired rule is
-    absent from the compiled plugin rather than enforced by a hook the sweep
-    stopped agreeing with.
+    ``declared`` carries the shapes a project refuses beyond these, appended
+    before the selection runs so a project can retire one of its own the same
+    way it retires one of the library's. The two compose in that order because
+    a project that added a rule and then thought better of it should not have
+    to delete the declaration to stop enforcing it.
+
+    The project's selection narrows the result, so a retired rule is absent
+    from the compiled plugin rather than enforced by a hook the sweep stopped
+    agreeing with.
     """
-    return AntiPatternSet(python=python_anti_patterns(document_reader)).selected(
-        selection or RuleSelection()
-    )
+    return AntiPatternSet(
+        python=[*python_anti_patterns(document_reader), *(declared or [])]
+    ).selected(selection or RuleSelection())
 
 
 # `AntiPatternSet.for_suffix` is the operation; this binds the default table to it.
@@ -984,8 +957,14 @@ def audit_text(
         if number != file_ignore_line and number not in context.docstring_lines
     }
 
-    def preview_of(line_no: int) -> str:
-        return original_lines[line_no - 1].strip()[:80]
+    def quoted(line_no: int) -> str:
+        """The line a finding shows, whole.
+
+        A diagnostic is the last place to elide: the reader is here because
+        something is wrong with this line, and the end of it — where a
+        directive is written — is what a cut takes first.
+        """
+        return original_lines[line_no - 1].strip()
 
     file_live: set[str] = set()
     findings: list[AntiPatternFinding] = []
@@ -1002,7 +981,7 @@ def audit_text(
                     AntiPatternFinding(
                         kind="missing",
                         line=index,
-                        text=preview_of(index),
+                        text=quoted(index),
                         message=f"{ap.message} (no suppression: write the replacement)",
                         rule_id=ap.id,
                     )
@@ -1022,7 +1001,7 @@ def audit_text(
                 AntiPatternFinding(
                     kind="missing",
                     line=index,
-                    text=preview_of(index),
+                    text=quoted(index),
                     message=f"{ap.message} — suppress on {suppression_placement(index)}",
                     rule_id=ap.id,
                 )
@@ -1051,7 +1030,7 @@ def audit_text(
                 AntiPatternFinding(
                     kind="spurious",
                     line=index,
-                    text=preview_of(index),
+                    text=quoted(index),
                     message=f"`# lup: ignore[{rid}]` guards a line that does not trip `{rid}` — remove it",
                     rule_id=rid,
                 )
@@ -1064,7 +1043,7 @@ def audit_text(
                 AntiPatternFinding(
                     kind="untyped",
                     line=index,
-                    text=preview_of(index),
+                    text=quoted(index),
                     message="`# lup: ignore` is untyped — name the rule(s) it silences: "
                     f"`# lup: ignore[{', '.join(covered)}]`",
                     rule_id=covered[0] if covered else "",
@@ -1075,13 +1054,13 @@ def audit_text(
                 AntiPatternFinding(
                     kind="spurious",
                     line=index,
-                    text=preview_of(index),
+                    text=quoted(index),
                     message="`# lup: ignore` guards a line that matches no anti-pattern — remove it",
                 )
             )
 
     if file_ignore is not None:
-        directive_text = text.splitlines()[file_ignore.line - 1].strip()[:80]
+        directive_text = text.splitlines()[file_ignore.line - 1].strip()
         for rid in sorted(file_disabled - file_live - FOREIGN_RULE_IDS):
             findings.append(
                 AntiPatternFinding(
