@@ -36,6 +36,25 @@ from io import StringIO
 from types import FrameType
 
 MAX_OUTPUT = 1_048_576
+"""How much of one stream a single response may carry.
+
+A response is one JSON line over a pipe, so a cell that printed without bound
+has to stop somewhere rather than take the channel down with it.
+"""
+
+
+def carried(text: str) -> str:
+    """`text` as the protocol can carry it, saying so where it cannot carry all.
+
+    Output that ended and output that stopped are otherwise the same string,
+    and the agent reading it has no other way to tell which one it holds — so
+    where the budget bites, what it held back is named in the payload.
+    """
+    if len(text) <= MAX_OUTPUT:
+        return text
+    # lup: ignore[silent-truncation] — one JSON line is the hard bound, and the
+    # count of what did not fit rides along in the value itself
+    return f"{text[:MAX_OUTPUT]}\n… {len(text) - MAX_OUTPUT} more character(s)"
 
 
 class CellTimeout(Exception):
@@ -166,8 +185,8 @@ def serve() -> None:
             json.dumps(
                 {
                     "exit_code": exit_code,
-                    "stdout": out_buf.getvalue()[:MAX_OUTPUT],
-                    "stderr": err_buf.getvalue()[:MAX_OUTPUT],
+                    "stdout": carried(out_buf.getvalue()),
+                    "stderr": carried(err_buf.getvalue()),
                     "result": result,
                     "duration_ms": duration_ms,
                 }

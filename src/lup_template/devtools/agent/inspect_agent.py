@@ -24,6 +24,15 @@ from lup_template.devtools.agent.serve import collect_registry_tools
 from lup.mcp import LupMcpTool
 from lup.types import JsonObject
 
+# lup: ignore[constant-declaration] — how much of a prompt the default view
+# opens with is this command's own presentation, and `--full` is the whole
+PROMPT_HEAD_CHARS = 500
+"""How much of a system prompt the default inspection shows.
+
+The whole prompt is one `--full` away and the line says so, which is what
+makes the opening a sample rather than the prompt as this command found it.
+"""
+
 
 def print_model_source(
     out: io.StringIO, model: type, label: str, indent: str = "    "
@@ -216,11 +225,14 @@ def run_inspect(as_json: bool, full: bool) -> None:
     out.write(f"\n{'─' * 60}\n")
     out.write("  System Prompt\n")
     out.write(f"{'─' * 60}\n")
-    if full or len(prompt) <= 500:
+    if full or len(prompt) <= PROMPT_HEAD_CHARS:
         out.write(prompt + "\n")
     else:
         out.write(
-            f"{prompt[:500]}... ({len(prompt)} chars total, use --full to see all)\n"
+            # lup: ignore[silent-truncation] — the full length and the flag
+            # that prints all of it are both stated in the same line
+            f"{prompt[:PROMPT_HEAD_CHARS]}... "
+            f"({len(prompt)} chars total, use --full to see all)\n"
         )
 
     out.write("\n")

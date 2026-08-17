@@ -236,7 +236,7 @@ def loop(
 
     for i, task in enumerate(tasks, 1):
         typer.echo(f"\n{'=' * 60}")
-        typer.echo(f"Task {i}/{len(tasks)}: {task[:80]}")
+        typer.echo(f"Task {i}/{len(tasks)}: {task}")
         typer.echo(f"{'=' * 60}")
 
         try:

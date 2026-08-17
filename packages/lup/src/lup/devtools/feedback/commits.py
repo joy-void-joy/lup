@@ -17,6 +17,16 @@ from lup.devtools.utils import git
 
 logger = logging.getLogger(__name__)
 
+# lup: ignore[constant-declaration] — git's own subject convention, not a
+# number this repository chose or a caller could sensibly disagree with
+COMMIT_SUBJECT_CHARS = 50
+"""How much of a session summary the commit subject names it by.
+
+Git's own convention, which every log viewer and `--oneline` is laid out for.
+The subject is a name for the commit rather than its content, and the summary
+it is drawn from ships whole inside the record the commit adds.
+"""
+
 
 def get_uncommitted_session_ids() -> list[str]:
     """Find session IDs with uncommitted result files, deduplicated, file order.
@@ -71,7 +81,7 @@ def get_session_summary(session_id: str) -> str:
         return f"session {session_id}"
     match record.output:
         case {"summary": str(summary)}:
-            return summary[:50]
+            return summary
     return f"session {session_id}"
 
 
@@ -109,7 +119,10 @@ def commit_session(session_id: str, *, dry_run: bool = False) -> bool:
         return False
 
     summary = get_session_summary(session_id)
-    slug = summary[:50].strip().rstrip(".")  # lup: ignore[string-strip] — prose slug
+    # lup: ignore[silent-truncation, string-strip] — a commit subject names the
+    # change rather than carrying it, and the whole summary is inside the
+    # session record this very commit is adding
+    slug = summary[:COMMIT_SUBJECT_CHARS].strip().rstrip(".")
     git.commit("-m", f"data(sessions): {slug}")
     typer.echo(f"  Committed {session_id}: {slug}")
     return True

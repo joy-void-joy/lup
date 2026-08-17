@@ -683,7 +683,7 @@ class Sandbox:
             logger.warning(
                 "Package pre-install failed (exit %d): %s",
                 result.exit_code,
-                decode_output(result.output)[:500],
+                decode_output(result.output),
             )
         else:
             logger.info("Pre-installed packages successfully")

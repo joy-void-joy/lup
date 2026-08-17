@@ -52,6 +52,16 @@ from lup.devtools.utils import format_table, output_json
 
 logger = logging.getLogger(__name__)
 
+# lup: ignore[constant-declaration] — how long a status report reads is this
+# command's own presentation, and every id is one named command away
+LISTED_SESSIONS = 20
+"""How many unanalyzed session ids the status report prints before summarising.
+
+A status report is read to decide whether to look closer, so it names the
+count it held back and the command that prints every one — which is what makes
+the shorter list a summary rather than an answer that looks complete.
+"""
+
 
 class ToolBucket(TypedDict):
     """One tool's aggregated call/error/duration tallies."""
@@ -231,10 +241,12 @@ def status(
 
     if unanalyzed_ids:
         typer.echo("\n=== Unanalyzed Sessions ===\n")
-        for sid in unanalyzed_ids[:20]:
+        # lup: ignore[silent-truncation] — the count of what is held back and
+        # the command that prints all of it are both stated below
+        for sid in unanalyzed_ids[:LISTED_SESSIONS]:
             typer.echo(f"  {sid}")
-        if len(unanalyzed_ids) > 20:
-            typer.echo(f"  ... and {len(unanalyzed_ids) - 20} more")
+        if len(unanalyzed_ids) > LISTED_SESSIONS:
+            typer.echo(f"  ... and {len(unanalyzed_ids) - LISTED_SESSIONS} more")
         typer.echo(
             "\nTo list all unanalyzed IDs: uv run lup-devtools feedback unanalyzed"
         )
@@ -559,7 +571,7 @@ def prompt_health(prompt: AgentPrompt, as_json: bool) -> None:
         prose = section_text.strip()
         first_line = prose.splitlines()[0] if prose else "(empty)"
         return {
-            "name": first_line[:60],
+            "name": first_line,
             "lines": len(section_text.splitlines()),
             "characters": len(section_text),
         }

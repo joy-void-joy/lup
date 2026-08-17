@@ -144,7 +144,7 @@ class SessionRecord(BaseModel, extra="allow"):
 
         output = self.output
         if "summary" in output:
-            lines.append(f"**Summary**: {str(output['summary'])[:200]}...")
+            lines.append(f"**Summary**: {output['summary']}")
         if "confidence" in output:
             confidence = output["confidence"]
             if isinstance(confidence, (int, float)):
