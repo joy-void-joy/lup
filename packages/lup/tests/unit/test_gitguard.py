@@ -4,13 +4,43 @@ from pathlib import Path
 
 import sh
 
+from lup.devtools.dev.git_guards import DECLARED_GUARDS, DRIFT_COMMAND, GitGuard
 from lup.gitguard import (
+    GIT_ENVIRONMENT,
     committer_identity,
     guard_report,
     moved_refs,
     repository_refs,
     repository_state,
 )
+
+
+def test_every_installed_hook_scrubs_the_environment_before_its_check() -> None:
+    """A hook is handed this repository in the environment, which outranks `-C`.
+
+    That is the one way in that a suite cannot close from its own side, however
+    carefully each helper binds its git, so the hook closes it instead. Before
+    the check rather than anywhere inside it: the names have to be gone by the
+    time anything the check runs asks git which repository it is in.
+    """
+    for guard in DECLARED_GUARDS:
+        body = guard.body()
+
+        assert guard.environment == GIT_ENVIRONMENT
+        assert f"unset {' '.join(guard.environment)}" in body
+        assert body.index("unset ") < body.index(f"exec {guard.command}")
+
+
+def test_a_guard_that_wants_nothing_dropped_writes_no_scrub() -> None:
+    """The names are a default, so a project can decline them.
+
+    Declining has to leave a hook that still runs, rather than one carrying a
+    bare `unset` and a comment explaining a line that is not there.
+    """
+    body = GitGuard(environment=()).body()
+
+    assert "unset" not in body
+    assert body.endswith(f"exec {DRIFT_COMMAND}\n")
 
 
 def test_a_session_that_touched_nothing_reports_nothing() -> None:
