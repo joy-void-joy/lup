@@ -114,6 +114,23 @@ class ResolvePhase(StrEnum):
         """
         return self is ResolvePhase.COMPLETE
 
+    def settling(self) -> bool:
+        """Whether concerns reach their terminal state during this phase.
+
+        Which is what makes a settled count worth drawing a bar from. Outside
+        these, the count moves backwards: integration takes a verified concern
+        back out of the settled set and returns it, and a bar that retreats is
+        worse than no bar at all.
+
+        Asked by the iterator a status view draws and by the console a live
+        run prints to, so it is a question the phase answers rather than a
+        table each of them matches against.
+        """
+        return self in {
+            ResolvePhase.WORKERS,
+            ResolvePhase.REVIEW,
+        }
+
 
 class ConcernStatus(StrEnum):
     """Persisted lifecycle of one independently scheduled concern."""
@@ -134,6 +151,30 @@ class ConcernStatus(StrEnum):
     RETAINED = "retained"
     RETIRED = "retired"
     FAILED = "failed"
+
+
+SETTLED_STATUSES: tuple[ConcernStatus, ...] = (
+    ConcernStatus.VERIFIED,
+    ConcernStatus.INELIGIBLE,
+    ConcernStatus.RETIRED,
+    ConcernStatus.FAILED,
+    ConcernStatus.INTEGRATED,
+    ConcernStatus.CLEANED,
+    ConcernStatus.RETAINED,
+)
+"""Which statuses mean a concern is done being decided, however it ended.
+
+Ours to draw rather than the lifecycle's own, so a caller redraws it: a
+reader could reasonably count `integrating` as finished, and this does not.
+Naming the settled half rather than the working one makes an unlisted status
+read as still in flight, which is the safer way to be wrong — a new state
+counted as finished would inflate the fraction silently.
+
+Beside the lifecycle it partitions rather than beside its first reader,
+because the aggregate a watcher reads and the supervisor's own header now
+both count against it, and the two must not drift into separate answers to
+"how far along is this run".
+"""
 
 
 class ConcernOrigin(StrEnum):
@@ -551,6 +592,20 @@ class ConcernProgress(BaseModel, frozen=True):
     concern_id: str
     status: ConcernStatus = ConcernStatus.DISCOVERED
     reason: str = ""
+    settled_at: datetime | None = None
+    """When this concern first reached a settled status, if it has yet.
+
+    The sample a worker-phase rate is taken from, the way
+    ``JoinProgress.completions`` serves the join sequence: without one the
+    phase knows how many concerns it faces and not when any of them landed,
+    which is the gap that kept it from drawing a bar at all.
+
+    Written once and never moved, so a concern that settles, re-opens into
+    integration, and settles again keeps the moment it first landed. A
+    missing stamp costs the rate one sample and never the count, which is
+    read from the status — so an older run, or a path that forgets, degrades
+    to the bar it already had rather than to a wrong one.
+    """
 
 
 class WritableRootLease(BaseModel, frozen=True):
@@ -1228,6 +1283,10 @@ class ResolveState(BaseModel, frozen=True):
             by_status={
                 status: statuses.count(status) for status in dict.fromkeys(statuses)
             },
+            settled=len([status for status in statuses if status in SETTLED_STATUSES]),
+            settled_at=sorted(
+                item.settled_at for item in self.progress if item.settled_at is not None
+            ),
             joined=len(self.join_progress.joined) if self.join_progress else 0,
             # lup: This counts every concern holding a commit, but `integrate` joins
             # only the verified ones, so the total over-reads by each concern that
@@ -1270,6 +1329,22 @@ class RunTally(BaseModel, frozen=True):
     by_status: dict[ConcernStatus, int]
     joined: int
     join_total: int
+    settled: int = 0
+    """How many concerns are done being decided, however each one ended.
+
+    Derived from ``by_status`` against ``SETTLED_STATUSES`` rather than left
+    to each reader to sum, so the bar a run prints and the supervisor's own
+    header cannot answer "how far along" differently.
+    """
+    settled_at: list[datetime] = []
+    """When each settled concern landed, in order, as far as it is recorded.
+
+    The rate samples, carried beside the counts for the reason
+    ``JoinProgress.completions`` gives: the journal these could be scanned
+    out of reaches tens of megabytes and is read by a status view that runs
+    often. Shorter than ``settled`` whenever a concern settled without a
+    stamp, which costs an ETA its precision and no count its accuracy.
+    """
 
     def concerns_line(self) -> str:
         """The tally as one compact human line."""

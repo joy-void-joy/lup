@@ -18,6 +18,7 @@ import typer
 from lup.channels.models import local_stamp, utc_now
 from lup.resolver.journal import Journal
 from lup.resolver.models import (
+    SETTLED_STATUSES,
     ConcernRetirement,
     ConcernStatus,
     VerificationAcceptance,
@@ -383,25 +384,6 @@ def show_status(
     typer.echo(status_header(status))
     report_waiting(run_id)
     watch_status(repository, run_id, heartbeat, poll, startup, status, line)
-
-
-SETTLED_STATUSES: tuple[ConcernStatus, ...] = (
-    ConcernStatus.VERIFIED,
-    ConcernStatus.INELIGIBLE,
-    ConcernStatus.RETIRED,
-    ConcernStatus.FAILED,
-    ConcernStatus.INTEGRATED,
-    ConcernStatus.CLEANED,
-    ConcernStatus.RETAINED,
-)
-"""Which statuses mean a concern is done being decided, however it ended.
-
-Ours to draw rather than the lifecycle's own, so a caller redraws it: a
-reader could reasonably count `integrating` as finished, and this does not.
-Naming the settled half rather than the working one makes an unlisted status
-read as still in flight, which is the safer way to be wrong — a new state
-counted as finished would inflate the fraction silently.
-"""
 
 
 def status_header(

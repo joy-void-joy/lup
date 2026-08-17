@@ -384,6 +384,69 @@ def test_state_repository_records_and_replaces_an_acceptance(tmp_path: Path) -> 
     ]
 
 
+def running_on(statuses: dict[str, ConcernStatus]) -> ResolveState:
+    """A worker phase holding one concern per named status."""
+    return ResolveState(
+        config_digest="config-sha",
+        run_id="run-1",
+        phase=ResolvePhase.WORKERS,
+        source=SourceSnapshot(branch="dev", commit="source-sha"),
+        spec=resolve_spec(),
+        concerns=[concern(name) for name in statuses],
+        progress=[
+            ConcernProgress(concern_id=name, status=status)
+            for name, status in statuses.items()
+        ],
+    )
+
+
+def test_a_concern_is_stamped_with_the_moment_it_settles(tmp_path: Path) -> None:
+    """The sample every worker-phase rate is taken from.
+
+    Written where the transition is applied rather than where the state is
+    saved, because the in-memory copy is what the observer reads to draw its
+    bar; stamped at the write boundary it would reach the file and never the
+    surface watching it move.
+    """
+    run = ResolveRun(ResolverStateRepository(tmp_path, "run-1"), Journal(tmp_path))
+    working = running_on({"a": ConcernStatus.RUNNING})
+
+    landed = run.progress_state(working, ["a"], ConcernStatus.VERIFIED)
+
+    assert landed.progress[0].settled_at is not None
+
+
+def test_a_concern_moving_between_working_statuses_is_not_stamped(
+    tmp_path: Path,
+) -> None:
+    """Only settling is a landing; the rest is a concern still in flight."""
+    run = ResolveRun(ResolverStateRepository(tmp_path, "run-1"), Journal(tmp_path))
+    working = running_on({"a": ConcernStatus.LEASED})
+
+    moved = run.progress_state(working, ["a"], ConcernStatus.RUNNING)
+
+    assert moved.progress[0].settled_at is None
+
+
+def test_a_concern_that_settles_twice_keeps_the_moment_it_first_landed(
+    tmp_path: Path,
+) -> None:
+    """Integration takes a verified concern back out and returns it settled.
+
+    Re-stamping on the way back would move the sample to the integration
+    phase's pace, which is a different rate measured over the same concern —
+    and would drag every earlier interval along with it.
+    """
+    run = ResolveRun(ResolverStateRepository(tmp_path, "run-1"), Journal(tmp_path))
+    working = running_on({"a": ConcernStatus.RUNNING})
+
+    verified = run.progress_state(working, ["a"], ConcernStatus.VERIFIED)
+    integrating = run.progress_state(verified, ["a"], ConcernStatus.INTEGRATING)
+    integrated = run.progress_state(integrating, ["a"], ConcernStatus.INTEGRATED)
+
+    assert integrated.progress[0].settled_at == verified.progress[0].settled_at
+
+
 def test_a_refused_save_leaves_behind_no_belief_in_what_it_refused(
     tmp_path: Path,
 ) -> None:
