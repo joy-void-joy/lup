@@ -21,9 +21,18 @@ from tests.unit.repos import commit_file, initialized_repo
 
 @pytest.fixture
 def repo(tmp_path: Path) -> Path:
+    """A checkout with an origin, which is what worktrees are cut in.
+
+    The remote is part of the fixture rather than one test's setup because a
+    branch is given one at creation: without it every case here would run the
+    offline path, and the step that pushes would never be exercised at all.
+    """
     work = tmp_path / "repo"
     git = initialized_repo(work, tmp_path / "no-hooks")
     commit_file(git, work, "file.txt", "base\n", "chore: base")
+    sh.Command("git")("init", "--bare", str(tmp_path / "origin.git"), _tty_out=False)
+    git("remote", "add", "origin", str(tmp_path / "origin.git"))
+    git("push", "-u", "origin", "main")
     return work
 
 
@@ -188,3 +197,72 @@ def test_the_gitignored_extras_are_finished_too(
     create("topic", no_copy_data=False)
 
     assert (path / ".env.local").read_text(encoding="utf-8") == "SECRET=1\n"
+
+
+@pytest.mark.usefixtures("tree_dir")
+def test_a_new_branch_is_given_a_remote_to_track(
+    repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An upstream is what a later session's pull and push both name.
+
+    Without one the freshness reading has nothing to keep this checkout level
+    with, and the branch has no copy anywhere but this disk until somebody
+    opens a pull request.
+    """
+    monkeypatch.chdir(repo)
+
+    create("topic")
+
+    tracked = repo_git(repo)(
+        "rev-parse", "--abbrev-ref", "--symbolic-full-name", "topic@{upstream}"
+    )
+    assert str(tracked).strip() == "origin/topic"
+
+
+def test_a_checkout_with_no_remote_is_still_handed_over(
+    repo: Path,
+    tree_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A worktree that could not be pushed is a worktree to work in.
+
+    Every other step answers for whether the checkout is usable; this one
+    answers for whether a remote was told about it, and failing the command
+    over that would cost more than the step is worth.
+    """
+    repo_git(repo)("remote", "remove", "origin")
+    monkeypatch.chdir(repo)
+
+    create("topic")
+
+    assert "the remote branch tracking topic" in capsys.readouterr().out
+    assert (tree_dir / "topic").is_dir()
+
+
+def test_commits_no_remote_holds_are_left_for_the_gated_push(
+    repo: Path,
+    tree_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Creation pushes a tip the remote already has, and nothing else.
+
+    The pre-push guard is armed a step earlier and runs the whole gate on any
+    push, so creation only ever pushes where there is nothing to gate. A
+    branch that has advanced is `dev pr push`'s to send, with the guard doing
+    what it is there for.
+    """
+    interrupted_creation(repo, tree_dir, "topic")
+    commit_file(
+        repo_git(tree_dir / "topic"),
+        tree_dir / "topic",
+        "mine.txt",
+        "mine",
+        "feat: mine",
+    )
+    monkeypatch.chdir(repo)
+
+    create("topic")
+
+    assert "Not pushing topic" in capsys.readouterr().out

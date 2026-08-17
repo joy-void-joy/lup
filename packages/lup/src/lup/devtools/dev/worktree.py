@@ -144,6 +144,18 @@ class SetupStep(BaseModel, frozen=True):
     def run(self) -> None:
         """Carry the step out; whether it worked is re-read, never reported."""
 
+    def required(self) -> bool:
+        """Whether a worktree without this step's effect is unusable.
+
+        A step that answers no is still run and still re-read, and is still
+        named where it did not finish — what it does not do is fail the
+        command. Anything reaching the network belongs here: a checkout made
+        offline is a checkout to work in, and refusing to hand one over
+        because a remote could not be told about it would cost more than the
+        step itself is worth.
+        """
+        return True
+
 
 class MergeDriver(SetupStep, frozen=True):
     """The merge driver ``.gitattributes`` names, registered for this clone."""
@@ -216,6 +228,52 @@ class RecordedBase(SetupStep, frozen=True):
         git("config", f"branch.{self.branch}.lup-base", self.origin)
 
 
+class PushedBranch(SetupStep, frozen=True):
+    """The branch given a remote to track, from the moment it exists.
+
+    An upstream is what lets a later session keep this checkout level without
+    asking anybody: a fast-forward pull and a push both name a remote branch,
+    and a branch that has none has nothing to be kept level with and no copy
+    anywhere but this disk until a pull request is opened. Pushed at creation
+    rather than at that point, because the whole span between them is when
+    the work happens.
+    """
+
+    branch: str
+
+    def label(self) -> str:
+        return f"the remote branch tracking {self.branch}"
+
+    def satisfied(self) -> bool:
+        return bool(
+            git.out("config", "--get", f"branch.{self.branch}.merge", _ok_code=[0, 1])
+        )
+
+    def carries_unpushed_work(self) -> bool:
+        """Whether this branch holds commits no remote does, unknown counting as yes."""
+        counted = git.out(
+            "rev-list", "--count", self.branch, "--not", "--remotes", _ok_code=[0, 1]
+        )
+        return not counted.isdigit() or bool(int(counted))
+
+    def run(self) -> None:
+        if self.carries_unpushed_work():
+            typer.echo(
+                f"Not pushing {self.branch}: it holds commits no remote does, and "
+                "`dev pr push` pushes those with the pre-push gate running."
+            )
+            return
+        # The guards were armed a step ago, and the pre-push one runs the whole
+        # gate on any push at all. This push carries a tip some remote already
+        # holds, so there is nothing there for the gate to judge and a full
+        # check to wait through — which is why the branch is only ever given
+        # its remote here while that is still true of it.
+        git("push", "--no-verify", "-u", "origin", self.branch)
+
+    def required(self) -> bool:
+        return False
+
+
 class CopiedExtras(SetupStep, frozen=True):
     """The gitignored files a checkout needs that ``worktree add`` leaves behind."""
 
@@ -260,8 +318,8 @@ class SyncedEnvironment(SetupStep, frozen=True):
         sync_dependencies(self.worktree)
 
 
-def finish(steps: Sequence[SetupStep]) -> Iterator[str]:
-    """Run each step given, naming the ones still unfinished afterwards.
+def finish(steps: Sequence[SetupStep]) -> Iterator[SetupStep]:
+    """Run each step given, yielding the ones still unfinished afterwards.
 
     Whether a step worked is re-read from the worktree rather than taken from
     whether it raised: a step whose tool exited badly and a step that quietly
@@ -274,7 +332,7 @@ def finish(steps: Sequence[SetupStep]) -> Iterator[str]:
         except sh.ErrorReturnCode as e:
             typer.echo(f"Warning: {step.label()} failed: {decode_stderr(e)}", err=True)
         if not step.satisfied():
-            yield step.label()
+            yield step
 
 
 def register_worktree(name: str, worktree_path: Path, base_branch: str | None) -> None:
@@ -370,6 +428,7 @@ def create(
         yield RecordedBase(
             branch=name, origin=base_branch or git.out("branch", "--show-current")
         )
+        yield PushedBranch(branch=name)
         if not no_copy_data:
             yield CopiedExtras(
                 source=current_dir, worktree=worktree_path, extras=extras
@@ -386,14 +445,21 @@ def create(
         typer.echo(f"Worktree exists, but its setup never finished: {worktree_path}")
 
     incomplete = list(finish(pending))
+    unusable = [step for step in incomplete if step.required()]
 
     typer.echo()
     typer.echo(f"Worktree path: {worktree_path}")
 
-    if incomplete:
+    for step in incomplete:
+        if not step.required():
+            typer.echo(
+                f"Without {step.label()}, which this worktree is usable without."
+            )
+
+    if unusable:
         typer.echo("This worktree is not ready — these steps did not complete:")
-        for label in incomplete:
-            typer.echo(f"  - {label}")
+        for step in unusable:
+            typer.echo(f"  - {step.label()}")
         typer.echo("Re-run the same command to finish them.", err=True)
         raise typer.Exit(1)
 

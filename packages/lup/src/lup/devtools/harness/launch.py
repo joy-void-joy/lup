@@ -8,7 +8,6 @@ native CLI with the non-interactive environment applied.
 import json
 import os
 import shutil
-import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -30,7 +29,7 @@ from lup.adapters.codex.home import (
     login_state,
     select_codex_home,
 )
-from lup.devtools.dev.branches import confirm_base_freshness, probe_base_freshness
+from lup.devtools.dev.branches import settle_base_freshness
 from lup.devtools.harness.drift import generate_with_report
 from lup.devtools.harness.generate import NativeHarnessComposition
 from lup.devtools.dev.worktree import RelocationHint
@@ -69,24 +68,21 @@ def ready_to_open(composition: NativeHarnessComposition, generate_only: bool) ->
     Answers whether to go on: a generate-only invocation has already done
     everything it was asked for.
 
-    The base check is one of those gates rather than a workflow's own step. A
+    Settling the base is one of those steps rather than a workflow's own. A
     tree whose base has moved is self-consistent and says nothing about it, so
     a session opened on one plans and edits against code that is no longer
     there — which cost a planning pass over thirteen concerns on a tree ten
     commits behind its remote, where two merged pull requests had already done
-    part of the work being planned.
+    part of the work being planned. Being behind is not itself grounds for
+    refusing a session, so what happens here is a sync and a report: a clean
+    checkout is brought level with its own remote, and a base that has moved
+    is named on the way in.
     """
     generate_with_report(composition)
     if generate_only:
         return False
     runtime_preflight(composition)
-    confirm_base_freshness(
-        probe_base_freshness(LocalProcessLauncher(), project_root()),
-        # A launcher hands the terminal to a native CLI, so the human who ran
-        # it is the one this count is put to. Nobody is there for a session
-        # spawned from a script, and that is the run the incident happened on.
-        interactive=sys.stdin.isatty(),
-    )
+    settle_base_freshness(LocalProcessLauncher(), project_root())
     return True
 
 

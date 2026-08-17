@@ -2,7 +2,9 @@
 
 import json
 import logging
+from abc import abstractmethod
 from collections import defaultdict
+from collections.abc import Iterator
 from collections.abc import Set as AbstractSet
 from itertools import groupby
 from operator import attrgetter
@@ -610,27 +612,98 @@ def detect_base_branch(branch: str | None = None) -> BaseCandidate:
     return best
 
 
-class BaseFreshness(BaseModel, frozen=True):
-    """How far a checkout sits behind the remote branch its base answers to."""
+class RemoteMeasure(BaseModel, frozen=True):
+    """One remote branch, and how many of its commits this checkout is missing.
 
-    tracked: str = ""
-    """The remote branch measured against; empty when there is none to measure."""
+    The commits arrive by a different route depending on which remote was
+    measured, so the route is a property of the reading rather than a setting
+    a reader passes alongside it. Each member answers with its own, which is
+    what keeps a remedy from being printed beside a count it cannot close.
+    """
+
+    tracked: str
+    """The remote branch measured against."""
 
     behind: int = 0
     """Commits that branch holds which this checkout does not."""
 
-    unreachable: str = ""
-    """Why the remote could not be asked; empty when it answered."""
+    @abstractmethod
+    def update_command(self) -> str:
+        """What a reader runs to take the commits this reading found missing."""
 
-    update_command: str = "git pull --ff-only"
-    """What a reader runs to take the commits they are missing."""
+    @abstractmethod
+    def subject(self) -> str:
+        """What a report calls the thing that is behind."""
 
     def stale(self) -> bool:
         """Whether the remote is known to hold commits this checkout does not."""
         return self.behind > 0
 
     def report(self) -> str:
-        """One line naming what the probe found, in whichever case it found it.
+        """One line naming the count and the way to close it."""
+        if not self.behind:
+            return f"{self.subject()} is current with {self.tracked}"
+        return (
+            f"{self.subject()} is {self.behind} commit(s) behind {self.tracked}: "
+            f"update with `{self.update_command()}`"
+        )
+
+
+class UpstreamMeasure(RemoteMeasure, frozen=True):
+    """The branch's own remote, whose commits arrive by fast-forward."""
+
+    def update_command(self) -> str:
+        return "git pull --ff-only"
+
+    def subject(self) -> str:
+        return "branch"
+
+
+class BaseMeasure(RemoteMeasure, frozen=True):
+    """The remote of the base a worktree was cut from, taken by merge.
+
+    A feature branch holds commits its base does not, so there is nothing
+    here to fast-forward. Naming a pull would name the one command that
+    exits non-zero on the only checkout this reading is ever printed for.
+    """
+
+    def update_command(self) -> str:
+        return f"git merge {self.tracked}"
+
+    def subject(self) -> str:
+        return "base"
+
+
+class BaseFreshness(BaseModel, frozen=True):
+    """What the remote says about a checkout: its own branch, and its base.
+
+    Two readings rather than one, because which of them a checkout happens to
+    have says nothing about which one a reader wants. Asking only the first
+    ref that resolves answers "am I behind my own push" wherever a branch has
+    been pushed and "has my base moved" wherever it has not — so the same
+    gate called a base three commits gone current, and offered a base
+    forty-one commits gone a pull that cannot run there.
+    """
+
+    upstream: UpstreamMeasure | None = None
+    """The branch's own remote, when it tracks one."""
+
+    base: BaseMeasure | None = None
+    """The remote of the base recorded at worktree creation, when one was."""
+
+    unreachable: str = ""
+    """Why the remote could not be asked; empty when it answered."""
+
+    def measures(self) -> list[RemoteMeasure]:
+        """Every reading taken, in the order a report names them."""
+        return [reading for reading in (self.upstream, self.base) if reading]
+
+    def stale(self) -> bool:
+        """Whether either remote is known to hold commits this checkout does not."""
+        return any(reading.stale() for reading in self.measures())
+
+    def report(self) -> str:
+        """Every reading on its own line, or the one reason there are none.
 
         An unknown answer says so rather than reading as a clean bill: a
         checkout that could not reach its remote knows exactly as much about
@@ -638,13 +711,8 @@ class BaseFreshness(BaseModel, frozen=True):
         """
         if self.unreachable:
             return f"base freshness unknown: {self.unreachable}"
-        if not self.tracked:
-            return "base freshness unknown: this checkout answers to no remote branch"
-        if not self.behind:
-            return f"base is current with {self.tracked}"
-        return (
-            f"base is {self.behind} commit(s) behind {self.tracked}: "
-            f"update with `{self.update_command}`"
+        return "\n".join(reading.report() for reading in self.measures()) or (
+            "base freshness unknown: this checkout answers to no remote branch"
         )
 
 
@@ -670,42 +738,92 @@ def git_line(launcher: ProcessLauncher, root: Path, arguments: list[str]) -> str
     return lines[0].strip() if status.code == 0 and lines else ""
 
 
-def tracked_remote_branch(launcher: ProcessLauncher, root: Path) -> str:
-    """The remote branch a checkout answers to, empty when it answers to none.
+def upstream_of(launcher: ProcessLauncher, root: Path, branch: str) -> str:
+    """The remote branch a local branch tracks, empty when it tracks none.
 
-    A branch that tracks one names it outright. A feature worktree tracks
-    nothing, so the base recorded when it was created is asked what *it*
-    tracks — which is how a worktree cut from an integration branch is still
-    measured against that branch on the remote, the case a plain upstream
-    question answers nothing about.
+    An empty ``branch`` asks about whichever is checked out, which is how a
+    detached HEAD answers nothing at all rather than answering for the commit
+    it happens to sit on.
     """
-    named = ["rev-parse", "--abbrev-ref", "--symbolic-full-name"]
-    direct = git_line(launcher, root, [*named, "@{upstream}"])
-    if direct:
-        return direct
+    return git_line(
+        launcher,
+        root,
+        ["rev-parse", "--abbrev-ref", "--symbolic-full-name", f"{branch}@{{upstream}}"],
+    )
+
+
+class TrackedRemotes(BaseModel, frozen=True):
+    """Which remote branches a checkout answers to; either may be absent.
+
+    A feature worktree tracks nothing until it is pushed, so the base
+    recorded when it was created is asked what *it* tracks — which is how a
+    worktree cut from an integration branch is measured against that branch
+    on the remote. Both are asked rather than whichever resolves first,
+    because they answer different questions and a checkout having one is no
+    reason to stop asking the other.
+    """
+
+    upstream: str = ""
+    """The branch's own remote, when it tracks one."""
+
+    base: str = ""
+    """The remote of the base recorded at worktree creation, when one was."""
+
+    def named(self) -> bool:
+        """Whether there is any remote here to measure against."""
+        return bool(self.upstream or self.base)
+
+    def counted(self, launcher: ProcessLauncher, root: Path) -> BaseFreshness:
+        """How far this checkout sits behind each, off refs already fetched.
+
+        Separate from fetching so that a caller which has just moved HEAD can
+        re-read the counts without paying for the network a second time.
+        """
+
+        def behind(tracked: str) -> int | None:
+            answer = git_line(
+                launcher, root, ["rev-list", "--count", f"HEAD..{tracked}"]
+            )
+            return int(answer) if answer.isdigit() else None
+
+        own = behind(self.upstream) if self.upstream else 0
+        cut = behind(self.base) if self.base else 0
+        if own is None or cut is None:
+            return BaseFreshness(
+                unreachable=f"git did not count {self.upstream if own is None else self.base}"
+            )
+        return BaseFreshness(
+            upstream=UpstreamMeasure(tracked=self.upstream, behind=own)
+            if self.upstream
+            else None,
+            base=BaseMeasure(tracked=self.base, behind=cut) if self.base else None,
+        )
+
+
+def tracked_remotes(launcher: ProcessLauncher, root: Path) -> TrackedRemotes:
+    """Ask git which remote branches this checkout answers to."""
     branch = git_line(launcher, root, ["branch", "--show-current"])
     recorded = (
         git_line(launcher, root, ["config", "--get", base_config_key(branch)])
         if branch
         else ""
     )
-    return (
-        git_line(launcher, root, [*named, f"{recorded}@{{upstream}}"])
-        if recorded
-        else ""
+    return TrackedRemotes(
+        upstream=upstream_of(launcher, root, ""),
+        base=upstream_of(launcher, root, recorded) if recorded else "",
     )
 
 
 def probe_base_freshness(launcher: ProcessLauncher, root: Path) -> BaseFreshness:
-    """Fetch, then count what the tracked branch holds and this checkout does not.
+    """Fetch, then count what each remote holds and this checkout does not.
 
     A tree whose base has moved is self-consistent and says nothing about it,
-    so only the remote can answer the question — one fetch and one count. A
-    remote that cannot be reached leaves the answer unknown rather than
-    guessing it either way.
+    so only the remote can answer the question — one fetch, then a count per
+    ref found. A remote that cannot be reached leaves the answer unknown
+    rather than guessing it either way.
     """
-    tracked = tracked_remote_branch(launcher, root)
-    if not tracked:
+    remotes = tracked_remotes(launcher, root)
+    if not remotes.named():
         return BaseFreshness()
     fetched = launcher.launch(
         LaunchRequest(
@@ -716,35 +834,94 @@ def probe_base_freshness(launcher: ProcessLauncher, root: Path) -> BaseFreshness
     )
     if fetched.code != 0:
         return BaseFreshness(
-            tracked=tracked,
             unreachable=fetched.stderr.strip() or f"`git fetch` exited {fetched.code}",
         )
-    counted = git_line(launcher, root, ["rev-list", "--count", f"HEAD..{tracked}"])
-    if not counted.isdigit():
-        return BaseFreshness(
-            tracked=tracked, unreachable=f"git did not count {tracked}"
-        )
-    return BaseFreshness(tracked=tracked, behind=int(counted))
+    return remotes.counted(launcher, root)
 
 
-# lup: ignore[model-free-function] — driver: it puts a question to whoever is at
-# the terminal, which is the command's business rather than the reading's
-def confirm_base_freshness(freshness: BaseFreshness, interactive: bool) -> None:
-    """Report the count, and let whoever is there answer for a moved base.
+def git_ran(launcher: ProcessLauncher, root: Path, arguments: list[str]) -> str:
+    """Run one git command through the same seam, answering with its complaint.
 
-    A human at the terminal is shown what moved and decides; for an
-    autonomous session nobody is, so the same count refuses to open one
-    rather than scrolling past unread. A remote that could not be reached
-    stops nothing — an offline checkout is still a checkout to work in.
+    Empty means it worked. The probes beside this one ask questions with a
+    blank answer, where a failure and no output mean the same thing; a
+    command run for its effect has to say which of the two happened.
     """
+    status = launcher.launch(
+        LaunchRequest(
+            arguments=["git", *arguments],
+            cwd=root,
+            environment=non_interactive_environment({}),
+        )
+    )
+    if not status.code:
+        return ""
+    return status.stderr.strip() or f"`git {' '.join(arguments)}` exited {status.code}"
+
+
+# lup: ignore[model-free-function] — driver: it writes to the checkout, where
+# UpstreamMeasure is only the reading that says whether there is anything to write
+def sync_upstream(
+    launcher: ProcessLauncher, root: Path, measure: UpstreamMeasure
+) -> Iterator[str]:
+    """Take what the branch's own remote holds, and hand it what it lacks.
+
+    Both halves are what a reader would have done by hand and neither can go
+    wrong quietly: ``--ff-only`` cannot invent a merge, and a push that would
+    not fast-forward is refused by the remote. What makes them safe to do
+    unattended is the clean tree, so a checkout with work in it is left
+    exactly as it was — the mistake this prevents is smaller than the one it
+    would risk. A diverged branch stops after the failed pull rather than
+    pushing on top of the divergence it just failed to close.
+    """
+    if git_line(launcher, root, ["status", "--porcelain"]):
+        yield f"not synced with {measure.tracked}: the working tree has changes"
+        return
+    if measure.behind:
+        complaint = git_ran(launcher, root, ["pull", "--ff-only"])
+        if complaint:
+            yield f"not synced with {measure.tracked}: {complaint}"
+            return
+        yield f"pulled {measure.behind} commit(s) from {measure.tracked}"
+    ahead = git_line(
+        launcher, root, ["rev-list", "--count", f"{measure.tracked}..HEAD"]
+    )
+    if not ahead.isdigit() or not int(ahead):
+        return
+    complaint = git_ran(launcher, root, ["push"])
+    yield (
+        f"not pushed to {measure.tracked}: {complaint}"
+        if complaint
+        else f"pushed {ahead} commit(s) to {measure.tracked}"
+    )
+
+
+def settle_base_freshness(launcher: ProcessLauncher, root: Path) -> None:
+    """Make the checkout current where that is free, and report what is left.
+
+    Being behind is not grounds for refusing a session. A clean checkout is
+    brought level with its own remote, which costs nothing and heads off the
+    divergence that comes of committing onto a branch the remote has moved
+    past; a base that has moved needs a merge, so it is named along with the
+    merge that would take it and the session opens either way.
+
+    Whether anybody is at the terminal changes none of this. There is no
+    question to put to them — every part is either safe unattended or a line
+    of output — and the refusal that used to stand here fell on exactly the
+    scripted sessions nobody was watching.
+    """
+    freshness = probe_base_freshness(launcher, root)
+    synced = (
+        list(sync_upstream(launcher, root, freshness.upstream))
+        if freshness.upstream
+        else []
+    )
+    for line in synced:
+        typer.echo(line)
+    if synced:
+        # A pull moves HEAD, which is what the base is measured from, so the
+        # counts are re-read — off the refs the probe has already fetched.
+        freshness = tracked_remotes(launcher, root).counted(launcher, root)
     typer.echo(freshness.report())
-    if not freshness.stale():
-        return
-    if interactive and typer.confirm(
-        "Open a session against the moved base anyway?", default=False
-    ):
-        return
-    raise typer.BadParameter(freshness.report())
 
 
 # lup: ignore[model-free-function] — driver: it ends the command, so what it

@@ -1,10 +1,11 @@
-"""Behavior tests for the base-freshness probe and the two gates that read it.
+"""Behavior tests for the base-freshness probe, the sync, and the gate reading it.
 
 A checkout cannot tell from its own contents that its base has moved, so the
 probe asks the remote and every entry point that opens a session asks the
 probe. These run against real repositories with a local path as origin: what
-is under test is which ref a checkout answers to and what git says about it,
-and a scripted double would only restate the answers.
+is under test is which refs a checkout answers to, what git says about them,
+and what the sync then does to the checkout — and a scripted double would only
+restate the answers.
 """
 
 from pathlib import Path
@@ -15,9 +16,12 @@ import typer
 
 from lup.devtools.dev.branches import (
     BaseFreshness,
-    confirm_base_freshness,
+    BaseMeasure,
+    UpstreamMeasure,
     probe_base_freshness,
     require_fresh_base,
+    settle_base_freshness,
+    sync_upstream,
 )
 from lup.harness.process import LocalProcessLauncher
 from tests.unit.repos import TEST_IDENTITY, commit_file, initialized_repo
@@ -54,6 +58,20 @@ def clone_of(origin: Path, into: Path) -> Path:
     return into
 
 
+def worktree_clone(origin: Path, into: Path, branch: str = "feature") -> Path:
+    """A clone on a feature branch that records its base, as creation does.
+
+    This is the shape the whole gate is about: `dev worktree create` cuts a
+    branch, records what it was cut from, and leaves it tracking nothing until
+    something pushes it.
+    """
+    clone = clone_of(origin, into)
+    git = repo_git(clone)
+    git("switch", "-c", branch)
+    git("config", f"branch.{branch}.lup-base", "main")
+    return clone
+
+
 def advance(origin: Path, name: str) -> None:
     """Commit one more file on the origin, which no clone has yet."""
     commit_file(repo_git(origin), origin, name, name, f"feat: {name}")
@@ -63,7 +81,15 @@ def probe(root: Path) -> BaseFreshness:
     return probe_base_freshness(LocalProcessLauncher(), root)
 
 
-def test_the_count_a_checkout_is_behind_is_reported_with_the_way_out(
+def settle(root: Path) -> None:
+    settle_base_freshness(LocalProcessLauncher(), root)
+
+
+def head_of(work: Path, revision: str = "HEAD") -> str:
+    return str(repo_git(work)("rev-parse", revision)).strip()
+
+
+def test_the_count_a_checkout_is_behind_its_own_remote_carries_the_pull(
     origin: Path, tmp_path: Path
 ) -> None:
     clone = clone_of(origin, tmp_path / "clone")
@@ -72,11 +98,11 @@ def test_the_count_a_checkout_is_behind_is_reported_with_the_way_out(
 
     freshness = probe(clone)
 
-    assert freshness.tracked == "origin/main"
-    assert freshness.behind == 2
+    assert freshness.upstream == UpstreamMeasure(tracked="origin/main", behind=2)
+    assert freshness.base is None
     assert freshness.stale()
     assert freshness.report() == (
-        "base is 2 commit(s) behind origin/main: update with `git pull --ff-only`"
+        "branch is 2 commit(s) behind origin/main: update with `git pull --ff-only`"
     )
 
 
@@ -88,28 +114,48 @@ def test_a_checkout_holding_everything_the_remote_holds_is_current(
     freshness = probe(clone)
 
     assert not freshness.stale()
-    assert freshness.report() == "base is current with origin/main"
+    assert freshness.report() == "branch is current with origin/main"
 
 
-def test_a_worktree_branch_is_measured_against_the_base_it_was_cut_from(
+def test_a_moved_base_carries_the_merge_that_takes_it_not_a_pull(
     origin: Path, tmp_path: Path
 ) -> None:
-    """A feature branch tracks nothing, so the recorded base is asked instead.
+    """The remedy a reading names has to be one that runs where it is printed.
 
-    Without it every worktree this project's own workflow prescribes would
-    answer "no remote branch" and the gate would pass on the case it exists
-    for.
+    A feature branch holds commits its base does not, so there is nothing to
+    fast-forward: `git pull --ff-only` exits non-zero on the only checkout
+    this line was ever shown for.
     """
-    clone = clone_of(origin, tmp_path / "clone")
-    git = repo_git(clone)
-    git("switch", "-c", "feature")
-    git("config", "branch.feature.lup-base", "main")
+    clone = worktree_clone(origin, tmp_path / "clone")
+    commit_file(repo_git(clone), clone, "mine.txt", "mine", "feat: mine")
     advance(origin, "one.txt")
 
     freshness = probe(clone)
 
-    assert freshness.tracked == "origin/main"
-    assert freshness.behind == 1
+    assert freshness.base == BaseMeasure(tracked="origin/main", behind=1)
+    assert freshness.report().endswith(
+        "base is 1 commit(s) behind origin/main: update with `git merge origin/main`"
+    )
+
+
+def test_a_pushed_branch_is_still_measured_against_the_base_it_was_cut_from(
+    origin: Path, tmp_path: Path
+) -> None:
+    """Whether a branch was pushed says nothing about whether its base moved.
+
+    Asking only the first ref that resolves answers a different question in a
+    pushed worktree than in an unpushed one, so a base three commits gone
+    reported as current — the false negative that hid two stale worktrees.
+    """
+    clone = worktree_clone(origin, tmp_path / "clone")
+    repo_git(clone)("push", "-u", "origin", "feature")
+    advance(origin, "one.txt")
+
+    freshness = probe(clone)
+
+    assert freshness.upstream == UpstreamMeasure(tracked="origin/feature", behind=0)
+    assert freshness.base == BaseMeasure(tracked="origin/main", behind=1)
+    assert freshness.stale()
 
 
 def test_a_checkout_answering_to_no_remote_branch_says_so(
@@ -129,7 +175,7 @@ def test_a_checkout_answering_to_no_remote_branch_says_so(
 def test_an_unreachable_remote_is_stated_rather_than_blocking(
     origin: Path, tmp_path: Path
 ) -> None:
-    """Neither gate stops on an unknown answer: offline is still workable."""
+    """Neither the gate nor the sync stops on an unknown answer: offline works."""
     clone = clone_of(origin, tmp_path / "clone")
     repo_git(clone)("remote", "set-url", "origin", str(tmp_path / "gone"))
 
@@ -138,31 +184,91 @@ def test_an_unreachable_remote_is_stated_rather_than_blocking(
     assert freshness.unreachable
     assert not freshness.stale()
     assert freshness.report().startswith("base freshness unknown:")
-    confirm_base_freshness(freshness, interactive=False)
+    settle(clone)
     require_fresh_base(freshness)
 
 
-def stale_freshness() -> BaseFreshness:
-    return BaseFreshness(tracked="origin/main", behind=10)
+def synced(root: Path) -> list[str]:
+    """Run the sync against whatever the probe says this checkout's own remote is."""
+    measure = probe(root).upstream
+    assert measure is not None
+    return list(sync_upstream(LocalProcessLauncher(), root, measure))
 
 
-def test_a_session_nobody_is_watching_is_refused_the_moved_base() -> None:
-    with pytest.raises(typer.BadParameter, match="10 commit"):
-        confirm_base_freshness(stale_freshness(), interactive=False)
-
-
-def test_a_human_at_the_terminal_answers_for_the_moved_base(
-    monkeypatch: pytest.MonkeyPatch,
+def test_a_clean_checkout_behind_its_own_remote_is_fast_forwarded(
+    origin: Path, tmp_path: Path
 ) -> None:
-    monkeypatch.setattr(typer, "confirm", lambda *_, **__: True)
-    confirm_base_freshness(stale_freshness(), interactive=True)
+    """The whole point of the reading: pulling first is free and prevents divergence."""
+    clone = clone_of(origin, tmp_path / "clone")
+    advance(origin, "one.txt")
 
-    monkeypatch.setattr(typer, "confirm", lambda *_, **__: False)
-    with pytest.raises(typer.BadParameter, match="10 commit"):
-        confirm_base_freshness(stale_freshness(), interactive=True)
+    settle(clone)
+
+    assert head_of(clone) == head_of(origin)
+
+
+def test_local_commits_on_a_clean_checkout_are_pushed(
+    origin: Path, tmp_path: Path
+) -> None:
+    clone = worktree_clone(origin, tmp_path / "clone")
+    repo_git(clone)("push", "-u", "origin", "feature")
+    commit_file(repo_git(clone), clone, "mine.txt", "mine", "feat: mine")
+
+    settle(clone)
+
+    assert head_of(clone) == head_of(origin, "refs/heads/feature")
+
+
+def test_a_checkout_with_work_in_it_is_left_exactly_as_it_was(
+    origin: Path, tmp_path: Path
+) -> None:
+    """A clean tree is what makes the sync safe, so a dirty one is not touched."""
+    clone = clone_of(origin, tmp_path / "clone")
+    (clone / "file.txt").write_text("edited\n", encoding="utf-8")
+    advance(origin, "one.txt")
+    before = head_of(clone)
+
+    lines = synced(clone)
+
+    assert lines == ["not synced with origin/main: the working tree has changes"]
+    assert head_of(clone) == before
+    assert (clone / "file.txt").read_text(encoding="utf-8") == "edited\n"
+
+
+def test_a_diverged_branch_stops_after_the_pull_it_could_not_fast_forward(
+    origin: Path, tmp_path: Path
+) -> None:
+    """Pushing on top of a divergence the pull just failed to close helps nobody."""
+    clone = clone_of(origin, tmp_path / "clone")
+    commit_file(repo_git(clone), clone, "mine.txt", "mine", "feat: mine")
+    advance(origin, "one.txt")
+    before = head_of(clone)
+
+    lines = synced(clone)
+
+    assert len(lines) == 1
+    assert lines[0].startswith("not synced with origin/main: ")
+    assert head_of(clone) == before
+
+
+def test_a_moved_base_is_reported_and_the_session_opens_anyway(
+    origin: Path, tmp_path: Path
+) -> None:
+    """Being behind a base is not grounds for refusing to open a session."""
+    clone = worktree_clone(origin, tmp_path / "clone")
+    commit_file(repo_git(clone), clone, "mine.txt", "mine", "feat: mine")
+    advance(origin, "one.txt")
+    before = head_of(clone)
+
+    settle(clone)
+
+    assert head_of(clone) == before
+    assert probe(clone).base == BaseMeasure(tracked="origin/main", behind=1)
 
 
 def test_a_run_refuses_to_pin_a_base_the_remote_has_moved_past() -> None:
     """A run cuts every lease from one base, so it never starts on a stale one."""
-    with pytest.raises(typer.BadParameter, match="git pull --ff-only"):
-        require_fresh_base(stale_freshness())
+    stale = BaseFreshness(base=BaseMeasure(tracked="origin/main", behind=10))
+
+    with pytest.raises(typer.BadParameter, match="git merge origin/main"):
+        require_fresh_base(stale)
