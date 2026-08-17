@@ -185,8 +185,15 @@ class RunStatus(BaseModel, frozen=True):
     progress: PhaseProgress | None = None
     """The current phase's iterator, where the phase has one worth drawing."""
 
-    def settled_count(self) -> int:
+    def settled_count(
+        self, settled: tuple[ConcernStatus, ...] = SETTLED_STATUSES
+    ) -> int:
         """How many concerns are done being decided, however the caller has it.
+
+        Where the line falls is the caller's, which is why it arrives as an
+        argument: the default deliberately excludes ``integrating``, and a
+        reader who counts assembly as finished is not wrong, only counting
+        something else.
 
         The tally's figure where the projection carries one, because only it
         knows which concerns have been stamped and so only it stays put when
@@ -202,9 +209,7 @@ class RunStatus(BaseModel, frozen=True):
         """
         if self.settled_concerns is not None:
             return self.settled_concerns
-        return sum(
-            count.concerns for count in self.counts if count.status in SETTLED_STATUSES
-        )
+        return sum(count.concerns for count in self.counts if count.status in settled)
 
     def verdict(self) -> str:
         """Whether anything is driving this run, in the words to say it in.
