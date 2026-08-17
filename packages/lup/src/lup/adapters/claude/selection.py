@@ -1,17 +1,25 @@
 """Claude Code as one selectable runtime.
 
 Every field of a :class:`~lup.runtime.selection.SessionRequest` has a Claude
-spelling, so nothing a caller asks for is dropped here.
+spelling, so nothing a caller asks for is dropped here. One is narrowed rather
+than dropped: Claude's effort ladder starts at ``low``, so a request for
+``minimal`` opens at that floor.
 """
 
 from lup.adapters.claude.login import CLAUDE_LOGIN
 from lup.adapters.claude.runtime import (
+    ClaudeEffort,
     ClaudePermissionMode,
     ClaudeSessionConfig,
     create_claude_session_factory,
 )
 from lup.runtime.factory import SessionFactory
-from lup.runtime.selection import Runtime, SessionAutonomy, SessionRequest
+from lup.runtime.selection import (
+    Runtime,
+    SessionAutonomy,
+    SessionEffort,
+    SessionRequest,
+)
 
 # lup: ignore[constant-declaration] — each value is Claude Code's own permission
 # mode for the autonomy beside it, over a vocabulary this library closes
@@ -22,6 +30,20 @@ CLAUDE_AUTONOMY: dict[SessionAutonomy, ClaudePermissionMode] = {
     "unattended": "bypassPermissions",
 }
 """What Claude Code calls each degree of autonomy a caller can ask for."""
+
+# lup: ignore[constant-declaration] — each value is Claude Code's own effort for
+# the degree beside it, over a vocabulary this library closes
+CLAUDE_EFFORT: dict[SessionEffort, ClaudeEffort] = {
+    "minimal": "low",
+    "low": "low",
+    "medium": "medium",
+    "high": "high",
+    "xhigh": "xhigh",
+    "max": "max",
+}
+"""What Claude Code calls each degree of effort a caller can ask for.
+
+``minimal`` meets ``low`` because Claude's ladder has no rung beneath it."""
 
 
 def claude_config(request: SessionRequest) -> ClaudeSessionConfig:
@@ -40,6 +62,7 @@ def claude_config(request: SessionRequest) -> ClaudeSessionConfig:
         permission_mode=(
             None if request.autonomy is None else CLAUDE_AUTONOMY[request.autonomy]
         ),
+        effort=(None if request.effort is None else CLAUDE_EFFORT[request.effort]),
         max_turns=request.max_turns,
         max_thinking_tokens=request.max_thinking_tokens,
         cwd=request.cwd,
