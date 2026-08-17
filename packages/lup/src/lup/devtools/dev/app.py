@@ -38,6 +38,7 @@ from lup.devtools.harness.drift import RepositoryWriter
 from lup.devtools.harness.launch import relocation_hint
 from lup.devtools.project import DevProject
 from lup.harness.models import HookSet, Plugin, PromptDocument
+from lup.harness.process import LocalProcessLauncher
 from lup.policy.kernel.edit import SUPPRESSION_COLUMN_LIMIT
 from lup.policy.vocabulary import default_vocabulary
 from lup.workspace.paths import project_root
@@ -171,6 +172,31 @@ def create_dev_app(
     ) -> None:
         """Detect the base branch for the current (or specified) branch."""
         branches.base_branch(branch, as_json)
+
+    @app.command("freshness")
+    def freshness_cmd(
+        settle: Annotated[
+            bool,
+            typer.Option(
+                "--settle",
+                help="Do what opening a session does: pull and push a clean checkout",
+            ),
+        ] = False,
+    ) -> None:
+        """Report how far this checkout sits behind its own remote and its base.
+
+        The reading a session is opened on, asked on its own — a checkout
+        cannot tell from its own contents that either has moved, and the
+        answer otherwise only appears in front of a session nobody asked for.
+        """
+        if settle:
+            branches.settle_base_freshness(LocalProcessLauncher(), project_root())
+            return
+        typer.echo(
+            branches.probe_base_freshness(
+                LocalProcessLauncher(), project_root()
+            ).report()
+        )
 
     # -- pr-body command --
 
