@@ -71,8 +71,5 @@ class BlockInfo(BaseModel):
 
 def extract_block_info(block: LupContentBlock) -> BlockInfo:
     """Extract display information from a content block."""
-    return BlockInfo(
-        emoji=block.display_emoji,
-        label=block.display_label,
-        content=block.display_body,
-    )
+    shown = block.display()
+    return BlockInfo(emoji=shown.emoji, label=shown.label, content=block.body())

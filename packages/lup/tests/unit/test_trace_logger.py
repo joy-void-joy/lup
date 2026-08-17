@@ -344,9 +344,9 @@ def test_trace_argument_accumulates_what_it_printed(
     for block, entry in zip(
         message.content_blocks, trace.entries[header:], strict=True
     ):
-        assert block.display_emoji in shown
-        assert block.display_label in entry.content
-        assert block.display_body in entry.content
+        assert block.display().emoji in shown
+        assert block.display().label in entry.content
+        assert block.body() in entry.content
     # The sinks part only where their jobs do: a reader gets the payload cut
     # to a signal, the archive keeps it whole. A payload short enough to
     # survive truncation would let the two agree by accident.
