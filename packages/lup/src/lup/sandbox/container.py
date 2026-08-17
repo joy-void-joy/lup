@@ -674,7 +674,7 @@ class Sandbox:
 
     def run_pre_install(self) -> None:
         """Pre-install packages for faster agent execution."""
-        if self.pre_install is None:
+        if not self.pre_install:
             return
         logger.info("Pre-installing packages: %s", self.pre_install)
         cmd = ["uv", "pip", "install", "--system", *self.pre_install]

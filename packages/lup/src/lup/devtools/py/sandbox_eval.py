@@ -11,6 +11,8 @@ from pathlib import Path
 import tomlkit
 from pydantic import BaseModel
 
+import lup
+
 from lup.devtools.py.evaluate import sandbox_program
 from lup.sandbox.container import Sandbox
 from lup.workspace.paths import project_root
@@ -19,6 +21,18 @@ from lup.workspace.paths import project_root
 # later invocation must spell alike to reuse the warm one
 EVAL_SESSION = "py-eval"
 """One session name, so repeated expressions reuse a warm container."""
+
+
+def library_root() -> Path:
+    """The directory `lup` imports from, however this checkout obtained it.
+
+    A sibling source tree in this monorepo and an installed dependency in a
+    downstream project are the same fact — where the package sits — so it is
+    read off the package rather than assumed to be a path inside the checkout.
+    A project that consumes lup as a dependency has no `packages/lup/`, and
+    assuming one is what left `lup` unimportable in every such sandbox.
+    """
+    return Path(lup.__file__).resolve().parent.parent
 
 
 def import_roots(root: Path) -> dict[str, Path]:
@@ -31,7 +45,7 @@ def import_roots(root: Path) -> dict[str, Path]:
     Named here rather than derived from the directory: both roots are called
     `src`, so the leaf name would have collided them onto one mount point.
     """
-    candidates = {"library": root / "packages" / "lup" / "src", "project": root / "src"}
+    candidates = {"library": library_root(), "project": root / "src"}
     return {name: path for name, path in candidates.items() if path.is_dir()}
 
 
