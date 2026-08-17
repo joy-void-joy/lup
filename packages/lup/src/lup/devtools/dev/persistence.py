@@ -58,6 +58,15 @@ ADAPTER_CALLS = ("TypeAdapter",)
 VALIDATE_METHODS = ("model_validate", "model_validate_json")
 """Class methods that rebuild a model, called on the class itself."""
 
+DUMP_METHODS = ("model_dump", "model_dump_json")
+"""Methods that write a model out, called on an instance rather than a class.
+
+An instance names no class, so these can only ever be reported unresolved —
+which is the point. `source_digest` hashes a whole harness through one of
+these, and a walk that watched only for the class-side spellings called that
+tree unpersisted.
+"""
+
 
 class UnresolvedSink(BaseModel, frozen=True):
     """One persistence call whose model this walk could not name.
@@ -164,17 +173,23 @@ def persistence_sites(
             continue
         aliases = imported_names(tree, source.module)
         for node in ast.walk(tree):
-            if not isinstance(node, ast.Call) or not node.args:
+            if not isinstance(node, ast.Call):
                 continue
             match node.func:
-                case ast.Name(id=call) if call in adapter_calls:
+                case ast.Name(id=call) if call in adapter_calls and node.args:
                     subject = named_model(node.args[0], source.module, aliases)
-                case ast.Name(id=call) if call in sink_calls:
+                    written = ast.unparse(node.args[0])
+                case ast.Name(id=call) if call in sink_calls and node.args:
                     subject = named_model(node.args[-1], source.module, aliases)
+                    written = ast.unparse(node.args[-1])
                 case ast.Attribute(value=ast.Name(id=holder), attr=call) if (
                     call in VALIDATE_METHODS
                 ):
                     subject = resolve_name(holder, source.module, aliases)
+                    written = holder
+                case ast.Attribute(value=receiver, attr=call) if call in DUMP_METHODS:
+                    written = ast.unparse(receiver)
+                    subject = resolve_name(written, source.module, aliases)
                 case _:
                     continue
             if subject in models:
@@ -185,7 +200,7 @@ def persistence_sites(
                         path=source.path,
                         line=node.lineno,
                         call=call,
-                        argument=ast.unparse(node.args[-1]),
+                        argument=written,
                     )
                 )
     return PersistenceSites(named=sorted(named), unresolved=unresolved)
