@@ -64,6 +64,14 @@ off is not the same answer: an undeclared target reaches no judgment, which
 denies unsandboxed and defers under the boundary, where the policy has
 stated nothing and the runtime's own permissions decide.
 
+A target may also carry subcommands, because a toolchain reached through
+`uv run` is one target and many commands — a devtools CLI that mostly reads
+a repository may have one verb beneath it that opens a paid agent session,
+and without this the choice is blessing that verb or refusing the toolchain.
+The shape and the walk are the command table's own, so a target with verbs
+is judged exactly as the command spelled directly would be, with the
+target's own effect as the default beneath them.
+
 Both axes cascade down a table's nesting, and absence means one thing
 everywhere: a subcommand or operation omitting `effect` or `sandbox` inherits
 the level above it, and one stating either overrides what it inherited in

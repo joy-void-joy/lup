@@ -49,6 +49,7 @@ from policy_data import (
     PATH_RULES,
     RECOVERABLE_TARGET_LIMIT,
     REFUSED_TOOLS,
+    RUNNER_TARGET_TABLES,
     RUNNER_TARGETS,
     SANDBOX_EXCLUDED_COMMANDS,
     SHELL_RULES,
@@ -101,6 +102,7 @@ def bash_decision(
         directory_targets=directory_write_targets(acted_on),
         recoverable_target_limit=RECOVERABLE_TARGET_LIMIT,
         runner_targets=RUNNER_TARGETS,
+        target_tables=RUNNER_TARGET_TABLES,
         interactive=interactive,
         escapable=escapable,
     )

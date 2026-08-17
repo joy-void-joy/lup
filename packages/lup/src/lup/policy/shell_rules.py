@@ -172,6 +172,21 @@ class RunnerTargetRule(BaseModel, frozen=True):
     review step — and the reason is the only channel that carries it.
     """
 
+    subcommands: list["ShellSubcommandRule"] = []
+    """Verbs beneath the target that answer differently from the target itself.
+
+    A toolchain reached through ``uv run`` is one target and many commands,
+    and a project that blesses the toolchain rarely means to bless every verb
+    in it — a devtools CLI that mostly reads a repository may also have one
+    subcommand that opens a paid agent session. Without this the choice is
+    between blessing that verb and refusing the whole toolchain.
+
+    The shape is the shell table's own, and so is the matching: a target with
+    subcommands is judged by the same rows and the same walk as a command
+    named directly, with the target's own effect as the default beneath them.
+    Empty leaves the target a single verdict, which is what most are.
+    """
+
 
 class ShellOperationRule(BaseModel, frozen=True):
     """One operation word under a subcommand — e.g. ``worktree remove``."""
@@ -269,6 +284,29 @@ def erase_runner_targets(targets: list[RunnerTargetRule]) -> list[RunnerTargetRo
         )
         for target in targets
     ]
+
+
+def runner_target_tables(targets: list[RunnerTargetRule]) -> list[ShellRuleRow]:
+    """The verb tables of every target that declares one, as command rows.
+
+    A target with subcommands is a command table wearing a runner target's
+    name, so it is erased as one and matched by the walk that already reads
+    those rows. Targets without subcommands contribute nothing here and keep
+    their single verdict on the runner row.
+    """
+    return erase_shell_rules(
+        [
+            ShellCommandRule(
+                name=target.name,
+                default_effect=target.effect,
+                subcommands=target.subcommands,
+                sandbox=target.sandbox,
+                reason=target.reason,
+            )
+            for target in targets
+            if target.subcommands
+        ]
+    )
 
 
 def erase_shell_rules(rules: list[ShellCommandRule]) -> list[ShellRuleRow]:

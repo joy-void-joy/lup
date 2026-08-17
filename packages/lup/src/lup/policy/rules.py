@@ -45,6 +45,7 @@ from lup.policy.shell_rules import (
     RunnerTargetRule,
     ShellCommandRule,
     erase_runner_targets,
+    runner_target_tables,
     erase_shell_rules,
 )
 from lup.policy.models import (
@@ -158,6 +159,7 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
         self.path_roles = path_roles or []
         self.recoverable_target_limit = recoverable_target_limit
         self.runner_targets = erase_runner_targets(runner_targets or [])
+        self.target_tables = runner_target_tables(runner_targets or [])
         self.escapable = escapable
         self.rules = erase_shell_rules(rules)
         self.allowed_scopes = [url_scope_row(scope) for scope in allowed_urls or []]
@@ -193,6 +195,7 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
                 directory_targets=directory_write_targets(acted_on, root),
                 recoverable_target_limit=self.recoverable_target_limit,
                 runner_targets=self.runner_targets,
+                target_tables=self.target_tables,
                 escapable=self.escapable,
             )
         )

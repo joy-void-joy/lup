@@ -7099,6 +7099,8 @@ RUNNER_TARGETS: list[RunnerTargetRow] = [
     },
 ]
 
+RUNNER_TARGET_TABLES: list[ShellRuleRow] = []
+
 SANDBOX_EXCLUDED_COMMANDS: list[str] = [
     "uv run lup-devtools py eval *",
     "ssh *",

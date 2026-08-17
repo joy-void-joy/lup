@@ -60,7 +60,11 @@ from lup.policy.kernel.decision import (
 from lup.policy.kernel.edit import decide_edit
 from lup.policy.kernel.rows import PathRoleRow
 from lup.policy.refused_tools import RefusedTool, erase_refused_tools
-from lup.policy.shell_rules import RunnerTargetRule
+from lup.policy.shell_rules import (
+    RunnerTargetRule,
+    ShellOperationRule,
+    ShellSubcommandRule,
+)
 from lup.policy.kernel.lex import shell_write_targets
 from lup.policy.models import (
     Decision,
@@ -1817,6 +1821,50 @@ def test_a_runner_target_a_project_refuses_is_refused_with_its_own_reason(
 
     assert confined_effect("uv run something-else") == "defer"
     assert confined_effect("uv run forecast 'will it rain'") == "deny"
+
+
+def test_a_blessed_target_can_still_refuse_one_verb_beneath_it(
+    tmp_path: Path,
+) -> None:
+    """A toolchain is one target and many commands, judged by the same table.
+
+    A devtools CLI mostly reads the repository, and one subcommand of it may
+    open the same paid agent session the refused target does. Without verbs
+    on the runner table the only choices are blessing that subcommand or
+    refusing the whole toolchain, and a project takes the first every time.
+
+    The rows and the walk are the shell table's own, so a target with verbs
+    is judged exactly as the command spelled directly would be — there is
+    not a second matcher here that could answer differently.
+    """
+    targets = [
+        RunnerTargetRule(
+            name="devtools",
+            subcommands=[
+                ShellSubcommandRule(
+                    name="worldview",
+                    effect="allow",
+                    operations=[
+                        ShellOperationRule(
+                            name="loop", effect="deny", reason="this opens an agent"
+                        )
+                    ],
+                ),
+            ],
+        ),
+    ]
+    policy = ShellPolicy(SHELL_RULES, runner_targets=targets)
+
+    def decide(command: str) -> Decision:
+        return policy.decide(ShellCommand(command=command, cwd=tmp_path))
+
+    assert decide("uv run devtools worldview show").effect == "allow"
+    refused = decide("uv run devtools worldview loop")
+    assert refused.effect == "deny"
+    assert refused.reason.startswith("this opens an agent")
+    # The target's own effect is the default beneath its verbs, so a verb it
+    # never named inherits the blessing rather than falling off the table.
+    assert decide("uv run devtools status").effect == "allow"
 
 
 def test_moving_a_recoverable_file_costs_what_deleting_it_costs(

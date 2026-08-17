@@ -635,7 +635,9 @@ def decide_gh_api_words(words: list[str]) -> KernelDecision:
 
 
 def decide_uv(
-    words: list[str], runner_targets: list[RunnerTargetRow]
+    words: list[str],
+    runner_targets: list[RunnerTargetRow],
+    target_tables: list[ShellRuleRow] | None = None,
 ) -> KernelDecision:
     """Classify a uv invocation, gating dependency and inline-code forms.
 
@@ -673,6 +675,11 @@ def decide_uv(
             (row for row in runner_targets if row["name"] == run_command), None
         )
         if bare_target and declared is not None:
+            tabled = [
+                row for row in (target_tables or []) if row["command"] == run_command
+            ]
+            if tabled:
+                return decide_command_rows(run_words, tabled)
             return KernelDecision(
                 declared["effect"], declared["reason"], declared["sandbox"]
             )

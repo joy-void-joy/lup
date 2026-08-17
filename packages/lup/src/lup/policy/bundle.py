@@ -37,6 +37,7 @@ from lup.policy.shell_rules import (
     ShellCommandRule,
     erase_runner_targets,
     erase_shell_rules,
+    runner_target_tables,
 )
 from lup.policy.rules import antipattern_row, human_owned_path_rule, path_rule_row
 
@@ -367,6 +368,8 @@ def render_policy_data(
             "RECOVERABLE_TARGET_LIMIT = " + json.dumps(recoverable_target_limit),
             "RUNNER_TARGETS: list[RunnerTargetRow] = "
             + runner_target_rows_literal(erase_runner_targets(runner_targets)),
+            "RUNNER_TARGET_TABLES: list[ShellRuleRow] = "
+            + shell_rule_rows_literal(runner_target_tables(runner_targets)),
             "SANDBOX_EXCLUDED_COMMANDS: list[str] = "
             + string_rows_literal(sandbox_excluded_commands),
             "AUTO_ESCAPE_PREFIXES: list[list[str]] = "
