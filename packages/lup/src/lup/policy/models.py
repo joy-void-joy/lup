@@ -6,14 +6,13 @@ tool); the policies in :mod:`lup.policy.rules` and :mod:`lup.policy.chain`
 consume them and return a :class:`Decision`.
 """
 
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Literal, Self
 
 from pydantic import (
     AnyHttpUrl,
     BaseModel,
-    Field,
     StringConstraints,
     ValidationInfo,
     field_validator,
@@ -89,34 +88,42 @@ def undeclared(family: str) -> "Decision":
     )
 
 
-class SemanticToolBase(BaseModel, frozen=True):
+class SemanticToolBase(ABC):
     """One native call as policy understands it, judging itself.
 
     Each kind knows which declared family judges it, so routing is the tool
-    answering rather than a walk naming the kinds. Pydantic's metaclass is an
-    ``ABCMeta``, so a kind that does not answer :meth:`decide_under` cannot be
-    built at all — a new tool cannot slip past the router by omission.
+    answering rather than a walk naming the kinds, and a kind that does not
+    answer :meth:`decide_under` cannot be built — a new tool cannot slip past
+    the router by omission.
+
+    A kind that constrains what it may hold enforces that in its own
+    constructor. Pydantic declared those constraints while these were models;
+    the guarantee is the same and the place it is written is not, which is why
+    each one says so where it is checked.
     """
 
     @abstractmethod
     def decide_under(self, policies: "DeclaredPolicies") -> "Decision":
         """The verdict this call's own family policy reaches."""
 
+    @abstractmethod
     def as_documents(self) -> Self:
         """This call with fragment evidence resolved into whole documents.
 
-        Most tools already carry everything a policy reads. An edit stated
-        as a preimage and its replacement is the exception, and answers for
-        itself — a judge fed the fragment loses the source context the
+        Most tools already carry everything a policy reads and answer with
+        themselves. An edit stated as a preimage and its replacement is the
+        exception — a judge fed the fragment loses the source context the
         kernel's reading depends on.
         """
-        return self
 
 
-class EditBatch(SemanticToolBase, frozen=True):
+class EditBatch(SemanticToolBase):
     """The complete set of file changes in one native edit operation."""
 
-    changes: list[EditChange] = Field(min_length=1)
+    def __init__(self, changes: list[EditChange]) -> None:
+        if not changes:
+            raise ValueError("an edit batch states at least one change")
+        self.changes = changes
 
     def decide_under(self, policies: "DeclaredPolicies") -> "Decision":
         if policies.edit is None:
@@ -124,39 +131,49 @@ class EditBatch(SemanticToolBase, frozen=True):
         return policies.edit.decide(self)
 
     def as_documents(self) -> Self:
-        return self.model_copy(
-            update={"changes": [change.as_documents() for change in self.changes]}
-        )
+        return type(self)([change.as_documents() for change in self.changes])
 
 
-class ShellCommand(SemanticToolBase, frozen=True):
+class ShellCommand(SemanticToolBase):
     """A semantic command execution request."""
 
-    command: str
-    cwd: Path | None = None
-    unsandboxed: bool = False
+    def __init__(
+        self, command: str, cwd: Path | None = None, unsandboxed: bool = False
+    ) -> None:
+        self.command = command
+        self.cwd = cwd
+        self.unsandboxed = unsandboxed
 
     def decide_under(self, policies: "DeclaredPolicies") -> "Decision":
         if policies.shell is None:
             return undeclared("shell")
         return policies.shell.decide(self)
 
+    def as_documents(self) -> Self:
+        return self
 
-class FetchUrl(SemanticToolBase, frozen=True):
+
+class FetchUrl(SemanticToolBase):
     """Retrieval of one known URL."""
 
-    url: AnyHttpUrl
+    def __init__(self, url: AnyHttpUrl | str) -> None:
+        self.url = AnyHttpUrl(str(url))
+        """Parsed here, so a malformed URL cannot reach a policy decision."""
 
     def decide_under(self, policies: "DeclaredPolicies") -> "Decision":
         if policies.fetch is None:
             return undeclared("fetch")
         return policies.fetch.decide(self)
 
+    def as_documents(self) -> Self:
+        return self
 
-class SearchWeb(SemanticToolBase, frozen=True):
+
+class SearchWeb(SemanticToolBase):
     """A web search query, distinct from fetching a known URL."""
 
-    query: str
+    def __init__(self, query: str) -> None:
+        self.query = query
 
     def decide_under(self, policies: "DeclaredPolicies") -> "Decision":
         """Search has no rule surface at all, so it always asks."""
@@ -165,15 +182,22 @@ class SearchWeb(SemanticToolBase, frozen=True):
             reason=f"web search {self.query!r} is not covered by policy",
         )
 
+    def as_documents(self) -> Self:
+        return self
 
-class UnknownTool(SemanticToolBase, frozen=True):
+
+class UnknownTool(SemanticToolBase):
     """An unclassified native tool invocation retained for audit."""
 
-    identity: ToolIdentity
-    input: JsonObject = {}
+    def __init__(self, identity: ToolIdentity, input: JsonObject | None = None) -> None:
+        self.identity = identity
+        self.input: JsonObject = input or {}
 
     def decide_under(self, policies: "DeclaredPolicies") -> "Decision":
         return policies.unknown.decide(self)
+
+    def as_documents(self) -> Self:
+        return self
 
 
 type SemanticTool = EditBatch | ShellCommand | FetchUrl | SearchWeb | UnknownTool
@@ -187,12 +211,12 @@ class InputSubmitted(BaseModel, frozen=True):
     text: str
 
 
-class BeforeTool(BaseModel, frozen=True):
+class BeforeTool(BaseModel, frozen=True, arbitrary_types_allowed=True):
     tool: SemanticTool
     identity: ToolIdentity
 
 
-class ApprovalRequested(BaseModel, frozen=True):
+class ApprovalRequested(BaseModel, frozen=True, arbitrary_types_allowed=True):
     tool: SemanticTool
     reason: str
 
