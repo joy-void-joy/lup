@@ -263,6 +263,13 @@ def test_catalog_has_one_portable_skill_per_baseline_command() -> None:
     assert "$lup:" not in encoded
 
 
+def test_project_tests_follow_the_ordinary_edit_policy() -> None:
+    hooks = portable_harness().plugins[0].hooks
+
+    assert hooks is not None
+    assert hooks.acceptance_guard is None
+
+
 def test_claude_tree_renders_every_typed_support_document() -> None:
     paths = {
         artifact.path for artifact in claude_target(Path.cwd()).recipe.desired.artifacts

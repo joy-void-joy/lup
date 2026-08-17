@@ -19,7 +19,6 @@ from pathlib import Path
 from pydantic import AnyHttpUrl
 
 from lup.harness.models import (
-    AcceptanceGuard,
     Harness,
     HookPathRole,
     HookSandbox,
@@ -342,11 +341,6 @@ def portable_harness(version: str = "0.2.0", root: Path | None = None) -> Harnes
                 # a role is the place that claim gets made explicitly.
             ],
             human_owned_files=[Path("README.md")],
-            # This repository runs the resolver, so its test roots are what
-            # a leased worker implements against. The default wording says
-            # what to do instead of editing one, which is the whole of what
-            # this project has to say about it.
-            acceptance_guard=AcceptanceGuard(),
             refused_tools=REFUSED_TOOLS,
             # Which checker answers for an edit is this project's toolchain,
             # not the library's: the path is relative to the checkout that
