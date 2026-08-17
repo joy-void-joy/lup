@@ -314,10 +314,12 @@ class ConsoleResolverObserver(ResolverObserver):
         # concern_id, status, and reason, so there is no sample to take a rate
         # from. Record the landing time there the way `JoinProgress.completions`
         # does, and `PhaseProgress.render` plus `elapsed_per_item` draw it
-        # unchanged. Not a tqdm or rich bar: `elapsed_per_item` drops intervals
-        # longer than an hour so a resumed run's idle stretch cannot poison the
-        # rate, and neither library does that. Keep a non-TTY spelling — these
-        # lines are read from logs as well as watched.
+        # unchanged. Draw it with tqdm, which the `rich-progress` rule already
+        # asks for: it takes a manual `rate`, so `elapsed_per_item`'s
+        # resume-aware figure feeds in instead of tqdm's own n/elapsed, and
+        # `disable=None` with `tqdm.write` gives the non-TTY fallback these
+        # log-read lines need and stops the interleaved `[resolve]` lines from
+        # scrolling the bar away — which is half of what is wrong here.
         typer.echo(f"[resolve] progress: {tally.concerns_line()}")
 
 

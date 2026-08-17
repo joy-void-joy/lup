@@ -449,16 +449,15 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         message="Use `typer` instead of argparse",
     ),
     AntiPattern(
-        # lup: This diagnostic names a library nobody here uses — tqdm is
-        # declared in neither pyproject and nothing in the tree imports it —
-        # so the one instruction it gives leads out of the repository. What
-        # this repo actually draws is `PhaseProgress.render` in
-        # lup/resolver/status.py, taking its rate from `elapsed_per_item`,
-        # which discards intervals longer than an hour so a resumed run's idle
-        # stretch cannot poison the estimate. tqdm would average that stretch
-        # straight in, so the replacement named here is worse than the house
-        # renderer, not merely absent. Point the message at `PhaseProgress`, or
-        # declare tqdm and say which bars are meant to be built from it.
+        # lup: This rule stands unexercised, and the gap is the dependency
+        # rather than the rule: tqdm is declared in neither pyproject and
+        # nothing imports it, while `PhaseProgress.render` in
+        # lup/resolver/status.py hand-draws its own block-and-shade bar beside
+        # a hand-formatted rate and ETA. tqdm's `format_meter` returns that
+        # string and takes a manual `rate`, so `elapsed_per_item`'s
+        # resume-aware figure survives the move — what tqdm replaces is the
+        # rendering, never the rate. Declare it and route the bar through it,
+        # so the rule names something this tree actually does.
         id="rich-progress",
         pattern=re.compile(r"\brich\.progress\b|\bfrom\s+rich\.progress\s+import\b"),
         message="Use `tqdm` instead of rich progress bars",
