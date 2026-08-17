@@ -9,6 +9,11 @@ app-server equivalent, and ``hooks``, which Codex governs through the policy
 dispatcher its harness tree installs rather than per session. A caller that
 set one asked for something this runtime cannot do, and silence there would
 be a session running with less governance than it requested.
+
+``effort`` is narrowed rather than refused: Codex's ladder ends at ``xhigh``,
+so a request for ``max`` opens at that ceiling. Asking to think as hard as
+possible is answered by the hardest this runtime thinks, which is what was
+wanted; asking for governance it has no way to apply is not.
 """
 
 from typing import Literal
@@ -21,9 +26,15 @@ from lup.adapters.codex.runtime import (
 )
 from lup.mcp import McpServerEntry, RawStdioServerConfig
 from lup.runtime.factory import SessionFactory
-from lup.runtime.selection import Runtime, SessionAutonomy, SessionRequest
+from lup.runtime.selection import (
+    Runtime,
+    SessionAutonomy,
+    SessionEffort,
+    SessionRequest,
+)
 
 type CodexSandbox = Literal["read-only", "workspace-write", "danger-full-access"]
+type CodexEffort = Literal["none", "minimal", "low", "medium", "high", "xhigh"]
 
 # lup: ignore[constant-declaration] — each value is Codex's own sandbox name for
 # the autonomy beside it, over a vocabulary this library closes
@@ -34,6 +45,20 @@ CODEX_AUTONOMY: dict[SessionAutonomy, CodexSandbox] = {
     "unattended": "danger-full-access",
 }
 """What a session may reach, standing in for an approval it cannot raise."""
+
+# lup: ignore[constant-declaration] — each value is Codex's own effort for the
+# degree beside it, over a vocabulary this library closes
+CODEX_EFFORT: dict[SessionEffort, CodexEffort] = {
+    "minimal": "minimal",
+    "low": "low",
+    "medium": "medium",
+    "high": "high",
+    "xhigh": "xhigh",
+    "max": "xhigh",
+}
+"""What Codex calls each degree of effort a caller can ask for.
+
+``max`` meets ``xhigh`` because Codex's ladder has no rung above it."""
 
 
 def codex_mcp_server(name: str, server: McpServerEntry) -> CodexMcpServerConfig:
@@ -88,6 +113,7 @@ def codex_config(request: SessionRequest) -> CodexSessionConfig:
             None if request.autonomy is None else CODEX_AUTONOMY[request.autonomy]
         ),
         approval_policy="never",
+        effort=(None if request.effort is None else CODEX_EFFORT[request.effort]),
         environment=request.environment,
         mcp_servers={
             name: codex_mcp_server(name, server)

@@ -33,6 +33,16 @@ approvals are decided against, and a caller wanting an unattended session
 should not have to know which.
 """
 
+type SessionEffort = Literal["minimal", "low", "medium", "high", "xhigh", "max"]
+"""How hard a session is asked to think before it answers.
+
+The four middle rungs are the words both runtimes already share; the two ends
+are each runtime's own limit, and the runtime without one renders it as the
+nearest it has. Codex's ``none`` is deliberately absent: Claude has no rung
+below ``low``, so admitting it here would turn "do not reason" into "reason a
+little" on one runtime without saying so.
+"""
+
 
 class SessionRequest(BaseModel, frozen=True, arbitrary_types_allowed=True):
     """What an application asks of a session, before a runtime renders it."""
@@ -43,6 +53,7 @@ class SessionRequest(BaseModel, frozen=True, arbitrary_types_allowed=True):
 
     cwd: Path | None = None
     autonomy: SessionAutonomy | None = None
+    effort: SessionEffort | None = None
     tools: list[str] | None = None
     allowed_tools: list[str] = []
     tool_servers: dict[str, McpServerEntry] = {}

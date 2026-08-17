@@ -32,6 +32,14 @@ compatibility facade exists.
 - Added strict typed turn-bound `submit_output`, whole-logical-turn wrappers,
   debounced background scheduling, immutable routing, profile transforms, and
   Claude/Codex concrete factories.
+- Added `SessionRequest.effort`, so reasoning effort is asked for in portable
+  words and rendered by `CLAUDE_EFFORT`/`CODEX_EFFORT` the way autonomy already
+  was. Both adapters already carried an effort field and passed it to their
+  provider, but no request could reach either, so an application that set one
+  silently ran at whatever the runtime's own configuration file said. The two
+  ladders meet on `low`–`xhigh`; `minimal` opens at Claude's floor and `max` at
+  Codex's ceiling, and Codex's `none` is withheld because Claude would render
+  it as `low`.
 - Moved Codex execution to typed live app-server JSON-RPC and records the
   current dynamic-tool rebinding limitation explicitly.
 - Added a single Pydantic harness catalog, deterministic Claude/Codex artifact

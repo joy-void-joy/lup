@@ -122,6 +122,10 @@ type ClaudePermissionMode = Literal[
 """Claude Code's own words for how much a session may do without asking."""
 
 
+type ClaudeEffort = Literal["low", "medium", "high", "xhigh", "max"]
+"""Claude Code's own reasoning-effort ladder, which starts at ``low``."""
+
+
 class ClaudeSessionConfig(BaseModel, frozen=True, arbitrary_types_allowed=True):
     """Immutable Claude-only provider configuration."""
 
@@ -137,7 +141,7 @@ class ClaudeSessionConfig(BaseModel, frozen=True, arbitrary_types_allowed=True):
     """Whether partial-message deltas are streamed, which gates `live()`."""
 
     max_thinking_tokens: int | None = SESSION_THINKING_TOKENS
-    effort: Literal["low", "medium", "high", "xhigh", "max"] | None = None
+    effort: ClaudeEffort | None = None
     cwd: Path | None = None
     add_dirs: list[Path] = []
     plugin_dirs: list[Path] = []
