@@ -449,7 +449,7 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         message="Use `typer` instead of argparse",
     ),
     AntiPattern(
-        # lup: This rule stands unexercised, and the gap is the dependency
+        # lup: solved: This rule stands unexercised, and the gap is the dependency
         # rather than the rule: tqdm is declared in neither pyproject and
         # nothing imports it, while `PhaseProgress.render` in
         # lup/resolver/status.py hand-draws its own block-and-shade bar beside

@@ -19,6 +19,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from pydantic import BaseModel
+from tqdm import tqdm
 
 from lup.channels.models import utc_now
 from lup.resolver.join_desk import JoinDesk
@@ -28,9 +29,21 @@ from lup.resolver.models import (
     JoinProgress,
     ResolvePhase,
     ResolveState,
+    RunTally,
 )
 from lup.resolver.recheck_desk import RecheckDesk
 from lup.resolver.state import ResolverStateRepository
+
+
+BAR_SHADES = "░▏▎▍▌▋▊▉█"
+"""The cells a bar is drawn from, emptiest first, as tqdm reads a gradient.
+
+tqdm's own gradient leaves an empty cell blank, which suits a bar that owns
+its line and not one joined into a ` · ` status line beside other figures:
+an empty bar there reads as stray whitespace rather than as no progress.
+Shading the empty cell keeps the bar's extent visible at zero, which is the
+one moment a reader most wants to see it.
+"""
 
 
 class StatusCount(BaseModel, frozen=True):
@@ -93,29 +106,50 @@ class PhaseProgress(BaseModel, frozen=True):
 
     def remaining(self) -> timedelta | None:
         """How long the rest of this phase should take at the observed rate."""
-        if self.per_item is None or self.done >= self.total:
+        if not self.per_item or self.done >= self.total:
             return None
         return self.per_item * (self.total - self.done)
 
-    def render(self, width: int = 16) -> str:
-        """The bar, its count, and the two figures a reader plans around."""
-        filled = round(width * self.done / self.total) if self.total else 0
+    def render(self, width: int = 16, shades: str = BAR_SHADES) -> str:
+        """The bar, its count, and the two figures a reader plans around.
+
+        The cells are tqdm's and the durations are ours, which is the split
+        that survives asking what each is good at. Placing a bar's fill is
+        fiddly — a gradient, and a partial cell where a count falls between
+        two — and rounding it to whole cells, as this did, loses the only
+        movement a reader sees between two settlements. Saying how long is
+        not fiddly, and tqdm says `131.00s/it` where a reader says `2m11s`.
+
+        Nothing is asked of tqdm that needs a rate, so it is handed none: its
+        own figure is items over wall-clock elapsed, which for a run that
+        parks and resumes is exactly the number :func:`elapsed_per_item`
+        exists to avoid. `elapsed` is zero for the same reason — no segment
+        drawn here reads it.
+        """
         eta = self.remaining()
+        cells = tqdm.format_meter(
+            n=self.done,
+            total=self.total,
+            elapsed=0,
+            ascii=shades,
+            bar_format=f"{{bar:{width}}}",
+        )
         return " · ".join(
             [
-                f"{'█' * filled}{'░' * (width - filled)} {self.done}/{self.total}",
-                *(
-                    [f"{compact_interval(self.per_item)}/it"]
-                    if self.per_item is not None
-                    else []
-                ),
+                f"{cells} {self.done}/{self.total}",
+                *([f"{compact_interval(self.per_item)}/it"] if self.per_item else []),
                 *([f"ETA {compact_interval(eta)}"] if eta is not None else []),
             ]
         )
 
 
 def compact_interval(span: timedelta) -> str:
-    """A duration as a reader says it out loud, to two units at most."""
+    """A duration as a reader says it out loud, to two units at most.
+
+    Kept rather than surrendered to tqdm's `MM:SS`, which is ambiguous at a
+    glance about which unit it stopped at and reads a pace as `131.00s/it`
+    where a person says two minutes eleven.
+    """
     seconds = int(span.total_seconds())
     if seconds < 60:
         return f"{seconds}s"
@@ -272,16 +306,49 @@ def phase_progress(state: ResolveState, run_dir: Path) -> PhaseProgress | None:
     """The iterator the current phase is working through, where it has one.
 
     A phase earns a bar by knowing both how many items it faces and when each
-    one landed; the worker phase knows the first and not the second, and
-    drawing a bar that cannot say a rate would promise an estimate the run has
-    no way to make. Two phases know both, and for the same reason: each drives
-    one item at a time and writes a checkpoint as that item finishes.
+    one landed. Each of these drives one item at a time and records the moment
+    it finished: the joins and the re-checks against their own desks, the
+    workers against the stamp a settling concern now carries.
+
+    The worker phases are the long ones and the reason the bar exists, but
+    they are also the loosest — several concerns are in flight at once, so a
+    rate here is the mean interval between settlements rather than the cost of
+    one concern, and it speeds up as leases free rather than holding steady.
+    That is the figure a reader planning around "how long until this run is
+    done" actually wants, which is why it is the one drawn.
     """
     match state.phase:
         case ResolvePhase.VERIFICATION:
             return recheck_bar(state, run_dir)
+        case phase if phase.settling():
+            return worker_bar(state.tally())
         case _:
             return join_bar(state.join_progress, run_dir)
+
+
+def worker_bar(tally: RunTally) -> PhaseProgress | None:
+    """How far the run has got through settling its concerns.
+
+    Counted from the tally rather than recomputed here, so this bar and the
+    supervisor's own header answer "how far along" with one number. Every
+    concern that reached a terminal state counts, however it ended: measured
+    against only the ones that produced work the fraction would stop short by
+    each concern retired or found ineligible, and a figure that can never
+    complete teaches a reader to stop believing it.
+
+    The samples are shorter than the count whenever a concern settled without
+    a stamp — an older run, or a path that moved a status without going
+    through the transition that stamps one. That costs the ETA its precision
+    and the fraction nothing, which is the safe direction to degrade in.
+    """
+    if not tally.total:
+        return None
+    return PhaseProgress(
+        label="settled",
+        done=tally.settled,
+        total=tally.total,
+        per_item=elapsed_per_item(tally.settled_at),
+    )
 
 
 def join_bar(progress: JoinProgress | None, run_dir: Path) -> PhaseProgress | None:
