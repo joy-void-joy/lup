@@ -64,11 +64,6 @@ from lup.devtools.project import DevProject
 from lup.devtools.utils import git, output_json
 
 
-# lup: solved: these commands are workflow, not domain, and belong beside the
-# rest of the CLI in `lup.devtools` — which they cannot join while they reach
-# into this application's harness declaration by name. The import is deferred
-# to the call so the roster can carry its own Typer apps without a cycle; the
-# fix is a typed project seam the application supplies, not a later import.
 def scanned_roots(project: DevProject) -> AbstractSet[str]:
     """The import roots a repository's scans resolve module names against.
 
