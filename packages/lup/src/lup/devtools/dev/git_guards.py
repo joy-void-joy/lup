@@ -223,6 +223,47 @@ def read_guard(guard: GitGuard, root: Path) -> GuardState:
     return guard_state(guard, hooks_directory(root))
 
 
+class HooksReading(BaseModel, frozen=True):
+    """Where a checkout looks for hooks, and what it has armed there."""
+
+    directory: Path
+    reachable: bool
+    """Whether that directory is there to hold a hook at all.
+
+    The one breakage no environment makes ambiguous, and the quiet one. Git
+    runs no hook and reports nothing, so every guard the repository declares
+    is off while the gate that would have said so keeps passing — a checkout
+    running no hooks reads exactly like one whose hooks are green. A
+    ``core.hooksPath`` still naming a directory that has since been removed
+    is how a repository arrives here.
+
+    Absence is the signal rather than the count of hooks inside, because an
+    empty hooks directory is the normal state of a fresh clone and says
+    nothing about whether this repository's own guards belong in it.
+    """
+
+    guards: list[GuardState]
+
+    def unarmed(self) -> list[GuardState]:
+        """Each declared guard this checkout would not currently run.
+
+        Reported rather than refused: a clone that never ran the install
+        command is a working clone, and the pipeline refuses the same drift
+        and the same gate on the way in.
+        """
+        return [state for state in self.guards if not state.armed]
+
+
+def read_hooks(guards: list[GitGuard], root: Path) -> HooksReading:
+    """Where `root` resolves its hooks, and the state of each guard declared for it."""
+    directory = hooks_directory(root)
+    return HooksReading(
+        directory=directory,
+        reachable=directory.is_dir(),
+        guards=[guard_state(guard, directory) for guard in guards],
+    )
+
+
 # lup: ignore[model-free-function] — driver: it writes the hook file
 def install_guard(guard: GitGuard, root: Path, *, force: bool = False) -> GuardState:
     """Write the hook, refusing to displace one this command did not write."""

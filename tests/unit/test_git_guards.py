@@ -28,6 +28,7 @@ from lup.devtools.dev.git_guards import (
     arm,
     install_guard,
     read_guard,
+    read_hooks,
     uninstall_guard,
 )
 from lup.devtools.dev.workflow import WorkflowSpec
@@ -195,6 +196,44 @@ def test_reinstalling_refreshes_a_body_left_by_an_older_library(
 
     assert read_guard(guard, work).status == "stale"
     assert install_guard(guard, work).armed
+
+
+def test_a_hooks_directory_that_is_gone_reads_as_unreachable(tmp_path: Path) -> None:
+    """The condition that silences every guard at once and reports nothing itself.
+
+    A ``core.hooksPath`` outliving the directory it names leaves git running
+    no hook and raising no error, so both guards stop firing while every
+    other row on the gate goes on passing. It reached this repository: the
+    shared config had been left pointing at a fixture's own directory, and
+    the guards were off for as long as it took somebody to notice a `/tmp`
+    path in the output of an unrelated command.
+    """
+    work = tmp_path / "repo"
+    git = initialized_repo(work, tmp_path / "hooks")
+    git("config", "core.hooksPath", str(tmp_path / "gone"))
+
+    reading = read_hooks(DECLARED_GUARDS, work)
+
+    assert reading.directory == tmp_path / "gone"
+    assert not reading.reachable
+    assert len(reading.unarmed()) == len(DECLARED_GUARDS)
+
+
+def test_an_armed_checkout_reads_as_reachable_with_nothing_unarmed(
+    tmp_path: Path,
+) -> None:
+    """The healthy reading, so the row cannot pass by being unable to fail."""
+    work = tmp_path / "repo"
+    hooks = tmp_path / "hooks"
+    git = initialized_repo(work, hooks)
+    git("config", "core.hooksPath", str(hooks))
+    for guard in DECLARED_GUARDS:
+        install_guard(guard, work)
+
+    reading = read_hooks(DECLARED_GUARDS, work)
+
+    assert reading.reachable
+    assert reading.unarmed() == []
 
 
 def test_the_installed_hook_runs_the_drift_check(tmp_path: Path) -> None:
