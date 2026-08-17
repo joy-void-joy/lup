@@ -85,7 +85,15 @@ class JoinProgressRecord(BaseModel, frozen=True):
     """How far the merger has got, durable across its own session dying."""
 
     landings: list[JoinLanding] = []
-    planned: int = 0
+    planned: list[str] = []
+    """Every parent this join set out to land, by commit.
+
+    The identities rather than how many of them there are, so the fraction a
+    reader is shown has one source: :attr:`joined` names the parents in the
+    tree, and both figures are counted off the same set. A total kept as a
+    bare number is free to disagree with a numerator counted from landings,
+    which is how a bar comes to report six of five.
+    """
 
     @property
     def joined(self) -> list[str]:
@@ -126,7 +134,7 @@ class JoinDesk:
             return JoinProgressRecord()
         return JoinProgressRecord.model_validate_json(path.read_text(encoding="utf-8"))
 
-    def record(self, landing: JoinLanding, planned: int) -> None:
+    def record(self, landing: JoinLanding, planned: list[str]) -> None:
         """Say where the sequence got to, after the tree it names exists.
 
         Written by whoever landed the parent rather than by the orchestrator

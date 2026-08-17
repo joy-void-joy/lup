@@ -906,8 +906,8 @@ class JoinProgress(BaseModel, frozen=True):
     beside the progress rather than scanned out of the journal, which
     reaches tens of megabytes and is read by a status view that runs often.
     """
-    planned: int = 0
-    """How many parents this join set out to merge.
+    planned: list[str] = []
+    """Every parent this join set out to merge, by commit.
 
     Recorded by the joiner rather than counted from the outcomes, because
     only the joiner knows which parents another parent already contains and
@@ -915,7 +915,24 @@ class JoinProgress(BaseModel, frozen=True):
     every concern holding a commit — over-reading by each one that failed or
     retired still holding work, and again by each that rides inside a
     sibling, so a bar drawn from it could not reach its own end.
+
+    The identities rather than their number, so every figure a reader is
+    shown comes off one set: the total is how many there are, and the count
+    is how many of them ``joined`` names. Two records each keeping their own
+    tally of the same sequence is what let a status line say six of five
+    while the log said six of nine.
     """
+
+    def landed(self) -> int:
+        """How many planned parents are in the tree.
+
+        The planned set's own members rather than every landing, because a
+        parent already contained in the tree is swept and recorded without
+        having been planned on its own. That is real work and not progress
+        through this plan, and counted into the numerator it takes the
+        fraction past its denominator.
+        """
+        return len({*self.joined} & {*self.planned})
 
 
 class VerificationRecord(BaseModel, frozen=True):
@@ -1283,28 +1300,32 @@ class ResolveState(BaseModel, frozen=True):
             by_status={
                 status: statuses.count(status) for status in dict.fromkeys(statuses)
             },
-            settled=len([status for status in statuses if status in SETTLED_STATUSES]),
+            settled=len(
+                [
+                    item
+                    for item in self.progress
+                    if item.settled_at is not None or item.status in SETTLED_STATUSES
+                ]
+            ),
             settled_at=sorted(
                 item.settled_at for item in self.progress if item.settled_at is not None
             ),
-            joined=len(self.join_progress.joined) if self.join_progress else 0,
-            # lup: This counts every concern holding a commit, but `integrate` joins
-            # only the verified ones, so the total over-reads by each concern that
-            # failed or retired still holding work — and the bar can never reach it.
-            # Measured on resolve-9e060ad9bb53: 22 against 20 real parents, the two
+            joined=self.join_progress.landed() if self.join_progress else 0,
+            # lup: solved: This counts every concern holding a commit, but `integrate`
+            # joins only the verified ones, so the total over-reads by each concern
+            # that failed or retired still holding work — and the bar can never reach
+            # it. Measured on resolve-9e060ad9bb53: 22 against 20 real parents, the two
             # extras being composition-seam-abc (failed) and git-sandbox-lock-diagnosis
             # (retired), both of which the assembly gate lists as exclusions rather
             # than merging. Count what that gate will actually join. If the wider
             # number is worth showing, it is a second figure — "20 of 22 on the
             # table" says something true, where one number pretending to be both
             # cannot.
-            join_total=(
-                len(
-                    [outcome for outcome in self.outcomes if outcome.commit is not None]
-                )
-                if self.join_progress
-                else 0
-            ),
+            # Settled: the joiner records which parents it set out to merge, so the
+            # total is that set's size — what the assembly gate will actually join,
+            # counted by the one who knows which parents ride inside a sibling. The
+            # wider figure is not shown here rather than shown wrongly.
+            join_total=len(self.join_progress.planned) if self.join_progress else 0,
         )
 
     @model_validator(mode="after")
@@ -1332,9 +1353,18 @@ class RunTally(BaseModel, frozen=True):
     settled: int = 0
     """How many concerns are done being decided, however each one ended.
 
-    Derived from ``by_status`` against ``SETTLED_STATUSES`` rather than left
-    to each reader to sum, so the bar a run prints and the supervisor's own
-    header cannot answer "how far along" differently.
+    Counted from the stamp a settling concern carries, falling back to its
+    current status, so the figure only ever rises. Membership alone cannot
+    do that: the lifecycle legitimately moves work back out of a settled
+    status — ``verified`` to ``integrating`` as assembly opens, and
+    ``verified`` or ``failed`` to ``eligible`` on rework — and a reader
+    watching the count fall reads a healthy run as a broken one. The stamp
+    is written once and never cleared, which is what makes this monotonic
+    by construction rather than by a rule about which statuses to list.
+
+    Derived here rather than left to each reader to sum, so the bar a run
+    prints and the supervisor's own header cannot answer "how far along"
+    differently.
     """
     settled_at: list[datetime] = []
     """When each settled concern landed, in order, as far as it is recorded.
@@ -1371,7 +1401,7 @@ def run_tally(state: ResolveState) -> RunTally:
         by_status={
             status: statuses.count(status) for status in dict.fromkeys(statuses)
         },
-        joined=len(state.join_progress.joined) if state.join_progress else 0,
+        joined=state.join_progress.landed() if state.join_progress else 0,
         # lup: solved: This counts every concern holding a commit, but `integrate`
         # joins only the verified ones, so the total over-reads by each concern
         # that failed or retired still holding work — and the bar can never reach
@@ -1382,7 +1412,7 @@ def run_tally(state: ResolveState) -> RunTally:
         # number is worth showing, it is a second figure — "20 of 22 on the
         # table" says something true, where one number pretending to be both
         # cannot.
-        join_total=state.join_progress.planned if state.join_progress else 0,
+        join_total=len(state.join_progress.planned) if state.join_progress else 0,
     )
 
 

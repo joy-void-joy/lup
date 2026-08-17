@@ -18,7 +18,6 @@ import typer
 from lup.channels.models import local_stamp, utc_now
 from lup.resolver.journal import Journal
 from lup.resolver.models import (
-    SETTLED_STATUSES,
     ConcernRetirement,
     ConcernStatus,
     VerificationAcceptance,
@@ -386,9 +385,7 @@ def show_status(
     watch_status(repository, run_id, heartbeat, poll, startup, status, line)
 
 
-def status_header(
-    status: RunStatus, settled: tuple[ConcernStatus, ...] = SETTLED_STATUSES
-) -> str:
+def status_header(status: RunStatus) -> str:
     """The report's first line, and on its own what ``--line`` prints.
 
     One composition rather than two, so the compact form cannot drift from
@@ -411,9 +408,15 @@ def status_header(
     own total. Measured against the plan it would stop short by every
     concern retired or found ineligible, and a progress figure that can
     never complete teaches a reader to stop believing it.
+
+    Its numerator is the run's own tally, read rather than re-summed from
+    the breakdown below it. Summing the settled statuses out of ``counts``
+    is the same arithmetic on a projection that has dropped the stamp the
+    tally counts by, and it reports a fall of nine the moment assembly
+    moves verified concerns to ``integrating``.
     """
     counts = {count.status: count.concerns for count in status.counts}
-    done = sum(counts[status_] for status_ in settled if status_ in counts)
+    done = status.settled_count()
     total = sum(counts.values())
     failed = counts[ConcernStatus.FAILED] if ConcernStatus.FAILED in counts else 0
     waiting = status.unanswered

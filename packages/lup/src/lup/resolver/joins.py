@@ -175,7 +175,7 @@ class Joiner:
         blocked = await self.drive_join(lease, desk, purpose)
         progress = desk.progress()
         current = progress.commit or self.worktrees.head(lease)
-        self.record_join_progress(progress.joined, current, len(tips))
+        self.record_join_progress(progress.joined, current, tips)
         outstanding = [tip for tip in tips if tip not in progress.joined]
         if outstanding:
             # A drain is the one way to leave parents on the table, and it is
@@ -395,7 +395,7 @@ class Joiner:
         return self.worktrees.authored_between(lease, fork, commit)
 
     def record_join_progress(
-        self, joined: list[str], commit: str, planned: int = 0
+        self, joined: list[str], commit: str, planned: list[str]
     ) -> None:
         """Say where the join sequence got to, as each parent lands.
 

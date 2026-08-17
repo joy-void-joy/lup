@@ -25,6 +25,7 @@ from lup.channels.models import utc_now
 from lup.resolver.join_desk import JoinDesk
 from lup.resolver.journal import journal_tail
 from lup.resolver.models import (
+    SETTLED_STATUSES,
     ConcernStatus,
     JoinProgress,
     ResolvePhase,
@@ -168,10 +169,42 @@ class RunStatus(BaseModel, frozen=True):
 
     phase: ResolvePhase | None = None
     counts: list[StatusCount] = []
+    settled_concerns: int | None = None
+    """How many concerns are done being decided, as the run's tally counts it.
+
+    None where the projection was assembled without one, which is what
+    :meth:`settled_count` falls back for. Carried rather than summed out of
+    ``counts`` by each reporter, because the tally counts a concern settled
+    once it has been stamped and a per-status breakdown has no stamp in it.
+
+    Named for the concerns rather than sharing :meth:`settled`'s word, which
+    asks whether the run itself has come to rest.
+    """
     unanswered: int = 0
     last: LastRecorded | None = None
     progress: PhaseProgress | None = None
     """The current phase's iterator, where the phase has one worth drawing."""
+
+    def settled_count(self) -> int:
+        """How many concerns are done being decided, however the caller has it.
+
+        The tally's figure where the projection carries one, because only it
+        knows which concerns have been stamped and so only it stays put when
+        assembly moves verified work to ``integrating``. Where it does not,
+        the statuses are all there is, and summing them is the same figure
+        the tally would give for every concern that has not moved back out
+        of a settled status — right for a finished run, and low by the
+        concerns in flight for a live one.
+
+        Degrading to the weaker answer rather than to nothing, because a
+        projection built by hand reports on a run either way, and a zero
+        beside a total of four reads as a run that has achieved nothing.
+        """
+        if self.settled_concerns is not None:
+            return self.settled_concerns
+        return sum(
+            count.concerns for count in self.counts if count.status in SETTLED_STATUSES
+        )
 
     def verdict(self) -> str:
         """Whether anything is driving this run, in the words to say it in.
@@ -361,25 +394,36 @@ def join_bar(progress: JoinProgress | None, run_dir: Path) -> PhaseProgress | No
     ``land_parent`` writes is current between two parents but starts empty
     for a run whose earlier joins a previous sequence recorded. Their union
     is what has landed, so the count can never go backwards.
+
+    Both figures come off the planned set, so the bar cannot pass its own
+    end: the total is how many parents were planned, and the count is how
+    many of *those* have landed. A landing outside the plan is real work —
+    a parent already in the tree from an earlier run is recorded as it is
+    swept — but it is not progress through this plan, and counting it
+    against a total kept separately is how a bar comes to read six of five.
+
+    The rate is the checkpoint's own landings and nothing else. The
+    orchestrator's completions accumulate across every join a run performs,
+    so a worker-phase dependency join was estimating the integration joins
+    that followed it — 24m19s an item against the five minutes they actually
+    took. A phase that has not yet timed two of its own parents reports no
+    rate, which is the same bargain :func:`recheck_bar` makes and the reason
+    verification was the one phase estimating accurately.
     """
     checkpoint = JoinDesk(run_dir).progress()
-    planned = max(progress.planned if progress else 0, checkpoint.planned)
+    planned = {*(progress.planned if progress else []), *checkpoint.planned}
+    landed = {*(progress.joined if progress else []), *checkpoint.joined}
     if not planned:
         return None
     return PhaseProgress(
         label="joins",
-        done=len({*(progress.joined if progress else []), *checkpoint.joined}),
-        total=planned,
+        done=len(planned & landed),
+        total=len(planned),
         per_item=elapsed_per_item(
             sorted(
-                [
-                    *(progress.completions if progress else []),
-                    *(
-                        datetime.fromisoformat(landing.at)
-                        for landing in checkpoint.landings
-                        if landing.merged and landing.at
-                    ),
-                ]
+                datetime.fromisoformat(landing.at)
+                for landing in checkpoint.landings
+                if landing.merged and landing.at
             )
         ),
     )
@@ -447,6 +491,7 @@ def run_status(repository: ResolverStateRepository, run_id: str) -> RunStatus:
                 tally.items(), key=lambda pair: (-pair[1], pair[0])
             )
         ],
+        settled_concerns=state.tally().settled,
         unanswered=sum(
             1
             for question in (state.questions.questions if state.questions else [])
