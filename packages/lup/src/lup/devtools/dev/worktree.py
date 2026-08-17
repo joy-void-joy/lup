@@ -18,7 +18,6 @@ from lup.devtools.utils import (
     git,
     refuse_blocked_config_writes,
     short_sha,
-    uv,
 )
 
 
@@ -69,17 +68,10 @@ def copy_gitignored_extras(
 
 def sync_dependencies(worktree_path: Path) -> None:
     """Sync one worktree's environment; warn instead of failing the caller."""
-    # lup: A fresh worktree is not usable on creation, in two ways reported from
-    # downstream. This sync takes no extras, so the environment lacks what the
-    # source tree has and pyright reports errors in files nobody touched — an
-    # agent then cannot tell an environmental failure from its own, and reasons
-    # about a bug that is not there. Sync the extras the source tree declares,
-    # or have `dev check` label environment-caused failures distinctly from code
-    # ones. Second, every `uv run` from a worktree prints `VIRTUAL_ENV=... does
-    # not match the project environment path`, dozens of times per session, in
-    # front of the output that was actually wanted.
     try:
-        uv("sync", _cwd=str(worktree_path))
+        sh.Command("env")(
+            "-u", "VIRTUAL_ENV", "uv", "sync", "--all-extras", _cwd=str(worktree_path)
+        )
     except sh.ErrorReturnCode as e:
         typer.echo(f"Warning: uv sync failed: {decode_stderr(e)}")
 
