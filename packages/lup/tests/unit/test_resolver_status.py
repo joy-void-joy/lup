@@ -32,9 +32,11 @@ from lup.resolver.status import (
     StatusCount,
     elapsed_per_item,
     join_bar,
+    join_tally_bar,
     phase_progress,
     recheck_bar,
     run_status,
+    tally_bar,
     worker_bar,
 )
 from lup.devtools.harness.resolve import ConsoleResolverObserver
@@ -100,6 +102,53 @@ def test_a_finished_bar_estimates_nothing_further() -> None:
 
     assert done.remaining() is None
     assert "ETA" not in done.render()
+
+
+def test_an_estimate_counts_down_through_the_item_in_flight() -> None:
+    """Otherwise the figure holds still between two landings.
+
+    A whole number of items however long the current one has already run
+    reads as a countdown that does not count down, which is the shape a
+    wedged run has.
+    """
+    landed = utc_now()
+    minutes = timedelta(minutes=2)
+    bar = PhaseProgress(
+        label="joins", done=11, total=13, per_item=minutes, last_completed_at=landed
+    )
+
+    assert bar.remaining(at=landed) == minutes * 2
+    assert bar.remaining(at=landed + timedelta(minutes=1)) == timedelta(minutes=3)
+
+
+def test_an_overrunning_item_does_not_estimate_less_than_the_work_left() -> None:
+    """The mean was optimistic; the work remaining is still whole items.
+
+    Discounting the full overrun would walk the estimate to zero and then
+    below it, saying a phase with two parents left to merge is done.
+    """
+    landed = utc_now()
+    minutes = timedelta(minutes=2)
+    bar = PhaseProgress(
+        label="joins", done=11, total=13, per_item=minutes, last_completed_at=landed
+    )
+
+    assert bar.remaining(at=landed + timedelta(hours=3)) == minutes
+
+
+def test_a_parked_run_is_not_working_through_the_item_in_flight() -> None:
+    """Wall-clock while nobody drives the run is not progress through it.
+
+    Discounted anyway, a weekend parked reads as a weekend of work done and
+    the run reports itself nearly finished the moment it is resumed.
+    """
+    landed = utc_now()
+    minutes = timedelta(minutes=2)
+    bar = PhaseProgress(
+        label="joins", done=11, total=13, per_item=minutes, last_completed_at=landed
+    )
+
+    assert bar.remaining(active=False, at=landed + timedelta(days=2)) == minutes * 2
 
 
 PLANNED = [f"{index:040d}" for index in range(13)]
@@ -495,6 +544,75 @@ def test_the_console_outside_a_settling_phase_prints_what_it_always_did(
     ConsoleResolverObserver().tally_changed(integrating)
 
     assert capsys.readouterr().out.strip() == ("[resolve] progress: integrating 1 of 1")
+
+
+def join_tally(joined: int, total: int, stamps: list[datetime]) -> RunTally:
+    """An integration phase partway through the parents it plans to merge."""
+    return RunTally(
+        phase=ResolvePhase.INTEGRATION,
+        total=1,
+        by_status={ConcernStatus.INTEGRATING: 1},
+        joined=joined,
+        join_total=total,
+        settled=0,
+        join_completions=stamps,
+    )
+
+
+def test_the_integration_phase_draws_its_joins_as_a_bar() -> None:
+    """The phase's unit of work is a parent, and it has both figures for one.
+
+    Read from the tally alone because that is all the console observer is
+    handed — :func:`join_bar` answers the same question for a reader that
+    also holds the run directory.
+    """
+    start = utc_now()
+    minutes = timedelta(minutes=2)
+    bar = tally_bar(join_tally(5, 13, [start, start + minutes]))
+
+    assert bar is not None
+    assert (bar.label, bar.done, bar.total) == ("joins", 5, 13)
+    assert bar.per_item == minutes
+
+
+def test_a_phase_the_tally_cannot_account_for_draws_nothing() -> None:
+    """The re-check counts records under a desk, which a tally does not hold.
+
+    A bar measured on the concerns instead would be counting a unit this
+    phase does not work in, which is worse than showing none.
+    """
+    verifying = join_tally(5, 13, []).model_copy(
+        update={"phase": ResolvePhase.VERIFICATION}
+    )
+
+    assert tally_bar(verifying) is None
+
+
+def test_joins_the_state_has_not_recorded_yet_earn_no_bar() -> None:
+    """Nothing planned is nothing to draw a fraction against."""
+    assert join_tally_bar(join_tally(0, 0, [])) is None
+
+
+def test_the_console_shows_the_joins_once_it_draws_them_as_a_bar(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The same fraction twice on one line is the line reading as two runs.
+
+    The breakdown carries the joins inline wherever no bar covers them, so
+    the one that draws a bar drops the fragment rather than repeating it.
+    """
+    start = utc_now()
+    ConsoleResolverObserver().tally_changed(
+        join_tally(5, 13, [start, start + timedelta(minutes=2)])
+    )
+
+    printed = capsys.readouterr().out.strip()
+
+    assert printed == (
+        "[resolve] progress: joins ██████▏░░░░░░░░░ 5/13 · 2m00s/it · ETA 16m00s"
+        " · integrating 1 of 1"
+    )
+    assert "· joins 5/13" not in printed
 
 
 def test_only_a_settling_phase_draws_a_settled_bar(tmp_path: Path) -> None:

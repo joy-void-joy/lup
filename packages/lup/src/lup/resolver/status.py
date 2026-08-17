@@ -104,14 +104,43 @@ class PhaseProgress(BaseModel, frozen=True):
     done: int
     total: int
     per_item: timedelta | None = None
+    last_completed_at: datetime | None = None
+    """When the most recent item landed, where the phase samples one.
 
-    def remaining(self) -> timedelta | None:
-        """How long the rest of this phase should take at the observed rate."""
+    Carried so an estimate can account for the item in flight. Without it
+    the figure is a whole number of items however long the current one has
+    already run, and a reader watching it between two landings sees a
+    countdown that does not count down.
+    """
+
+    def remaining(
+        self, active: bool = True, at: datetime | None = None
+    ) -> timedelta | None:
+        """How long the rest of this phase should take at the observed rate.
+
+        The item in flight is discounted by however long it has already run,
+        so the estimate falls between landings rather than holding still and
+        then dropping by a whole item. Never below zero of it: an item
+        overrunning the mean says the mean is optimistic, not that the work
+        left is negative, so the discount stops at one item's worth.
+
+        Only while the run is ``active``. A parked run is not working on the
+        item, so the wall-clock since its last landing is not progress
+        through it, and discounting that would count a weekend as work done.
+        """
         if not self.per_item or self.done >= self.total:
             return None
-        return self.per_item * (self.total - self.done)
+        estimate = self.per_item * (self.total - self.done)
+        if not active or self.last_completed_at is None:
+            return estimate
+        in_flight = max(
+            (at if at is not None else utc_now()) - self.last_completed_at, timedelta()
+        )
+        return estimate - min(in_flight, self.per_item)
 
-    def render(self, width: int = 16, shades: str = BAR_SHADES) -> str:
+    def render(
+        self, width: int = 16, shades: str = BAR_SHADES, active: bool = True
+    ) -> str:
         """The bar, its count, and the two figures a reader plans around.
 
         The cells are tqdm's and the durations are ours, which is the split
@@ -127,7 +156,7 @@ class PhaseProgress(BaseModel, frozen=True):
         exists to avoid. `elapsed` is zero for the same reason — no segment
         drawn here reads it.
         """
-        eta = self.remaining()
+        eta = self.remaining(active=active)
         cells = tqdm.format_meter(
             n=self.done,
             total=self.total,
@@ -386,6 +415,51 @@ def worker_bar(tally: RunTally) -> PhaseProgress | None:
         done=tally.settled,
         total=tally.total,
         per_item=elapsed_per_item(tally.settled_at),
+        last_completed_at=max(tally.settled_at, default=None),
+    )
+
+
+def tally_bar(tally: RunTally) -> PhaseProgress | None:
+    """The iterator one persisted aggregate can account for on its own.
+
+    The same choice :func:`phase_progress` makes, for a reader that holds a
+    tally and no run directory. Every phase it cannot answer from the tally
+    alone returns nothing rather than a bar measured on the wrong thing: the
+    re-check counts records under a desk, which is not in here.
+    """
+    match tally.phase:
+        case phase if phase.settling():
+            return worker_bar(tally)
+        case ResolvePhase.INTEGRATION:
+            return join_tally_bar(tally)
+        case _:
+            return None
+
+
+def join_tally_bar(tally: RunTally) -> PhaseProgress | None:
+    """The join sequence as far as resolver state alone records it.
+
+    The counterpart to :func:`join_bar` for a reader without the run
+    directory — the console observer, which is handed a tally per change and
+    nothing else. Both figures come off the planned set for the reason that
+    one gives, the tally having already reduced it to two counts.
+
+    The rate is sound here only because the sequence clears its progress
+    when the phase opens: ``completions`` accumulate across every join a run
+    performs, so before that clear this would have been timing the
+    worker-phase dependency joins against the integration ones. What it
+    cannot do is fall back to the checkpoint the way :func:`join_bar` does,
+    so a resumed run reports no rate until it has timed two of its own
+    parents.
+    """
+    if not tally.join_total:
+        return None
+    return PhaseProgress(
+        label="joins",
+        done=tally.joined,
+        total=tally.join_total,
+        per_item=elapsed_per_item(tally.join_completions),
+        last_completed_at=max(tally.join_completions, default=None),
     )
 
 
@@ -420,17 +494,17 @@ def join_bar(progress: JoinProgress | None, run_dir: Path) -> PhaseProgress | No
     landed = {*(progress.joined if progress else []), *checkpoint.joined}
     if not planned:
         return None
+    completions = sorted(
+        datetime.fromisoformat(landing.at)
+        for landing in checkpoint.landings
+        if landing.merged and landing.at
+    )
     return PhaseProgress(
         label="joins",
         done=len(planned & landed),
         total=len(planned),
-        per_item=elapsed_per_item(
-            sorted(
-                datetime.fromisoformat(landing.at)
-                for landing in checkpoint.landings
-                if landing.merged and landing.at
-            )
-        ),
+        per_item=elapsed_per_item(completions),
+        last_completed_at=max(completions, default=None),
     )
 
 

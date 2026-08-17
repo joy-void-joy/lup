@@ -426,7 +426,11 @@ def status_header(status: RunStatus) -> str:
             local_stamp(),
             str(status.phase or "initializing"),
             f"{done}/{total} settled",
-            *([f"{iterator.label} {iterator.render()}"] if iterator else []),
+            *(
+                [f"{iterator.label} {iterator.render(active=status.held)}"]
+                if iterator
+                else []
+            ),
             *([f"{failed} failed"] if failed else []),
             *(
                 [f"{waiting} question{'' if waiting == 1 else 's'} waiting"]

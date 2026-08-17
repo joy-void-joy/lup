@@ -48,7 +48,7 @@ from lup.resolver.orchestrator import WorktreeOrchestrator
 from lup.resolver.rebase import BaseRefresher
 from lup.resolver.run import ResolveRun
 from lup.resolver.state import ResolverStateRepository
-from lup.resolver.status import unfinished_runs, worker_bar
+from lup.resolver.status import tally_bar, unfinished_runs
 from lup.resolver.models import (
     AdmissionRequest,
     Concern,
@@ -305,10 +305,10 @@ class ConsoleResolverObserver(ResolverObserver):
         typer.echo(line)
 
     def tally_changed(self, tally: RunTally) -> None:
-        bar = worker_bar(tally) if tally.phase.settling() else None
+        bar = tally_bar(tally)
         reported = [
             *([f"{bar.label} {bar.render()}"] if bar is not None else []),
-            tally.concerns_line(),
+            tally.concerns_line(include_joins=bar is None),
         ]
         typer.echo(f"[resolve] progress: {' · '.join(reported)}")
 

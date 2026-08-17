@@ -1332,6 +1332,9 @@ class ResolveState(BaseModel, frozen=True):
                 item.settled_at for item in self.progress if item.settled_at is not None
             ),
             joined=self.join_progress.landed() if self.join_progress else 0,
+            join_completions=(
+                self.join_progress.completions if self.join_progress else []
+            ),
             # lup: solved: This counts every concern holding a commit, but `integrate`
             # joins only the verified ones, so the total over-reads by each concern
             # that failed or retired still holding work — and the bar can never reach
@@ -1396,14 +1399,28 @@ class RunTally(BaseModel, frozen=True):
     often. Shorter than ``settled`` whenever a concern settled without a
     stamp, which costs an ETA its precision and no count its accuracy.
     """
+    join_completions: list[datetime] = []
+    """When merges in the active join sequence landed, in order.
 
-    def concerns_line(self) -> str:
-        """The tally as one compact human line."""
+    What ``settled_at`` is to the concerns, for the phase that does not
+    settle any: carried so a reader holding only this can time the joins.
+    Confined to the active sequence by the phase clearing its progress as
+    integration opens — these accumulate across every join a run performs,
+    so without that they would be the worker phase's samples estimating the
+    integration ones.
+    """
+
+    def concerns_line(self, include_joins: bool = True) -> str:
+        """The tally as one compact human line.
+
+        The joins are dropped where a caller draws them as their own bar, so
+        the same fraction is not printed twice on one line.
+        """
         counted = " · ".join(
             f"{status} {count}" for status, count in self.by_status.items() if count
         )
         line = f"{counted or 'no concerns'} of {self.total}"
-        if self.join_total:
+        if include_joins and self.join_total:
             line += f" · joins {self.joined}/{self.join_total}"
         return line
 
