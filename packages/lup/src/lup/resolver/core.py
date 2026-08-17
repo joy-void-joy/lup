@@ -1318,8 +1318,18 @@ class ResolverCore:
                 leases = [*state.leases, integration_lease]
             else:
                 leases = state.leases
+            # Cleared as the phase opens, because what it holds belongs to the
+            # joins the worker phase drove: its commit names another lease's
+            # tree, which a resume here would restore the integration lease
+            # to, and its completions would have the dependency joins timing
+            # the integration ones. This sequence has not started, which is
+            # the state the restore already knows how to re-enter.
             state = state.model_copy(
-                update={"phase": ResolvePhase.INTEGRATION, "leases": leases}
+                update={
+                    "phase": ResolvePhase.INTEGRATION,
+                    "leases": leases,
+                    "join_progress": None,
+                }
             )
             state = self.run_state.progress_state(
                 state,
