@@ -32,6 +32,7 @@ from lup.runtime.models import (
     SessionHandle,
     SessionId,
     TurnBlock,
+    survives,
     turn_record,
     TurnHandle,
     TurnIdentifiers,
@@ -194,7 +195,7 @@ class SwitchingEventStream(EventStream):
 
     async def durable(self) -> AsyncIterator[TurnEvent]:
         async for event in self.iterate(deltas=False):
-            if event.type != "block_delta":
+            if survives(event):
                 yield event
 
     def events(self) -> AsyncIterator[TurnEvent]:

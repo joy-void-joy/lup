@@ -45,6 +45,7 @@ from lup.runtime.models import (
     SessionId,
     SubmissionGateResolver,
     TurnBlock,
+    survives,
     TurnIdentifiers,
     TurnId,
     TurnCompletedEvent,
@@ -679,7 +680,7 @@ class ClaudeLiveEventStream(EventStream):
 
     async def durable(self) -> AsyncIterator[TurnEvent]:
         async for event in self.iterate():
-            if event.type != "block_delta":
+            if survives(event):
                 yield event
 
     def events(self) -> AsyncIterator[TurnEvent]:
