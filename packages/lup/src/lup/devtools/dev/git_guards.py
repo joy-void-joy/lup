@@ -70,6 +70,33 @@ line rather than a migration note nobody reads.
 """
 
 
+# lup: ignore[constant-declaration] — git's own pre-push stdin protocol written
+# in shell, not a judgement a project could hold differently; and as a field
+# default it would arm the commit moment too, silently disarming that guard
+DELETION_STANDDOWN = """\
+# A push that only deletes refs uploads nothing for the check below to judge.
+# Git names each update on stdin as `<local ref> <local oid> <remote ref>
+# <remote oid>` and writes an all-zero local oid where a ref is being deleted;
+# anything else is content this push answers for, and a line that does not
+# parse counts as content rather than being trusted into a standdown.
+carries_content=''
+while read -r _ local_oid _; do
+  case "$local_oid" in
+    '' | *[!0]*) carries_content=yes ;;
+  esac
+done
+[ -n "$carries_content" ] || exit 0
+"""
+"""What the push guard reads before deciding it has anything to judge.
+
+Deleting a branch is the case that made this worth writing: it uploads no
+tree at all, so the gate could only re-judge what the remote already had,
+and it charged the whole suite for the privilege — long enough that a
+delete would time out having removed the local branch and left the remote
+copy standing.
+"""
+
+
 class GitGuard(BaseModel, frozen=True):
     """One check a repository installs as a git hook, and what it refuses.
 
@@ -91,6 +118,16 @@ class GitGuard(BaseModel, frozen=True):
     A project whose check wants one of these kept names a shorter tuple, and
     one that wants none of them dropped names an empty one, which writes no
     line at all.
+    """
+
+    standdown: str = ""
+    """Shell run before the check, free to ``exit 0`` and stand the guard down.
+
+    A moment that describes itself is answered here rather than inside the
+    check, which would otherwise have to be taught a second job and read a
+    stdin it never asked for. Empty by default: most moments say nothing a
+    hook could stand down on, and a guard that stands down silently is worse
+    than one that runs.
     """
 
     refusal: str = (
@@ -124,6 +161,7 @@ class GitGuard(BaseModel, frozen=True):
             f"# {GUARD_MARKER}: written by `{INSTALL_COMMAND}`.\n"
             f"# {self.refusal}\n"
             f"{scrub if self.environment else ''}"
+            f"{self.standdown}"
             f"exec {self.command}\n"
         )
 
@@ -133,6 +171,7 @@ DECLARED_GUARDS = [
     GitGuard(
         command=CHECK_COMMAND,
         hook="pre-push",
+        standdown=DELETION_STANDDOWN,
         refusal=(
             "Refuses this push while the project's own gate fails. A commit is\n"
             f"# local and rewritable; a push is neither. Run `{CHECK_COMMAND}`."
