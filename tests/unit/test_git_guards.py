@@ -18,9 +18,12 @@ from pathlib import Path
 import pytest
 import sh
 
-from lup.devtools.dev.commit_guard import (
+from lup.devtools.dev.git_guards import (
+    CHECK_COMMAND,
+    DECLARED_GUARDS,
     DRIFT_COMMAND,
-    CommitGuard,
+    LEGACY_GUARD_MARKER,
+    GitGuard,
     GuardConflict,
     arm,
     install_guard,
@@ -112,7 +115,7 @@ def repository(tmp_path: Path) -> Repository:
     (work / "canon.py").write_text(canon("the first wording"), encoding="utf-8")
     repository = Repository(work, git, script)
     install_guard(
-        CommitGuard(command=f"{sys.executable} {script}"),
+        GitGuard(command=f"{sys.executable} {script}"),
         work,
     )
     repository.regenerate()
@@ -172,10 +175,10 @@ def test_the_guard_leaves_a_hook_it_did_not_write_alone(tmp_path: Path) -> None:
     foreign.write_text("#!/bin/sh\nexec ./scripts/mine.sh\n", encoding="utf-8")
 
     with pytest.raises(GuardConflict):
-        install_guard(CommitGuard(), work)
+        install_guard(GitGuard(), work)
 
-    assert read_guard(CommitGuard(), work).status == "foreign"
-    assert uninstall_guard(CommitGuard(), work).status == "foreign"
+    assert read_guard(GitGuard(), work).status == "foreign"
+    assert uninstall_guard(GitGuard(), work).status == "foreign"
     assert foreign.is_file()
 
 
@@ -187,8 +190,8 @@ def test_reinstalling_refreshes_a_body_left_by_an_older_library(
     hooks = tmp_path / "hooks"
     git = initialized_repo(work, hooks)
     git("config", "core.hooksPath", str(hooks))
-    guard = CommitGuard()
-    install_guard(CommitGuard(command="an older check"), work)
+    guard = GitGuard()
+    install_guard(GitGuard(command="an older check"), work)
 
     assert read_guard(guard, work).status == "stale"
     assert install_guard(guard, work).armed
@@ -199,11 +202,56 @@ def test_the_installed_hook_runs_the_drift_check(tmp_path: Path) -> None:
     work = tmp_path / "repo"
     initialized_repo(work, tmp_path / "hooks")
 
-    state = install_guard(CommitGuard(), work)
+    state = install_guard(GitGuard(), work)
 
     assert state.path == work / ".git" / "hooks" / "pre-commit"
     assert state.path.read_text(encoding="utf-8").endswith(f"exec {DRIFT_COMMAND}\n")
     assert state.path.stat().st_mode & 0o111
+
+
+def test_the_declared_pair_guards_a_commit_and_a_push_at_their_own_paths(
+    tmp_path: Path,
+) -> None:
+    """Two moments, two hooks, each running the command the pipeline runs.
+
+    A commit is local and rewritable and a push is neither, so the cheap
+    drift check sits at the first and the whole gate at the second. Arming
+    one is not arming the other, which is what the separate paths prove.
+    """
+    work = tmp_path / "repo"
+    initialized_repo(work, tmp_path / "hooks")
+
+    installed = {
+        state.path.name: state.path.read_text(encoding="utf-8")
+        for state in (install_guard(guard, work) for guard in DECLARED_GUARDS)
+    }
+
+    assert installed["pre-commit"].endswith(f"exec {DRIFT_COMMAND}\n")
+    assert installed["pre-push"].endswith(f"exec {CHECK_COMMAND}\n")
+
+
+def test_a_hook_armed_under_the_previous_marker_is_still_recognized(
+    tmp_path: Path,
+) -> None:
+    """An upgraded checkout is re-armed, not reported as somebody else's.
+
+    The marker is how an installed hook says it is this command's to
+    rewrite, and it was renamed when the second hook arrived. Reading only
+    the current spelling would turn every clone armed by an earlier version
+    into one needing `--force` to touch.
+    """
+    work = tmp_path / "repo"
+    hooks = tmp_path / "hooks"
+    git = initialized_repo(work, hooks)
+    git("config", "core.hooksPath", str(hooks))
+    hooks.mkdir(parents=True, exist_ok=True)
+    (hooks / "pre-commit").write_text(
+        f"#!/bin/sh\n# {LEGACY_GUARD_MARKER}: written earlier.\nexec old\n",
+        encoding="utf-8",
+    )
+
+    assert read_guard(GitGuard(), work).status == "stale"
+    assert install_guard(GitGuard(), work).armed
 
 
 def test_arming_a_checkout_it_cannot_write_reports_instead_of_failing(
@@ -218,7 +266,10 @@ def test_arming_a_checkout_it_cannot_write_reports_instead_of_failing(
     outside = tmp_path / "not-a-repository"
     outside.mkdir()
 
-    assert arm(CommitGuard(), outside).startswith("commit guard not installed")
+    reported = arm(DECLARED_GUARDS, outside)
+
+    assert len(reported) == len(DECLARED_GUARDS)
+    assert all("not installed" in line for line in reported)
 
 
 def test_the_pipeline_runs_the_command_the_hook_installs() -> None:

@@ -694,6 +694,9 @@ class CodexHookRenderer(ArtifactRenderer[HookSet]):
                             PathRoleRow(root=role.root.as_posix(), role=role.role)
                             for role in source.path_roles
                         ],
+                        acceptance_guard=guard.erased()
+                        if (guard := source.acceptance_guard)
+                        else None,
                         shell_rules=list(source.shell_rules),
                         refused_tools=list(source.refused_tools),
                         recoverable_target_limit=source.recoverable_target_limit,

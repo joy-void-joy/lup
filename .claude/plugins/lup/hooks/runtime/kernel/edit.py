@@ -12,7 +12,7 @@ from typing import TypedDict
 
 from .decision import KernelDecision
 from .roles import path_role
-from .rows import AntiPatternRow, PathRoleRow, PathRuleRow
+from .rows import AcceptanceGuardRow, AntiPatternRow, PathRoleRow, PathRuleRow
 
 MARKER_RE = re.compile(r"(#|//)\s*lup\s*:", re.IGNORECASE)
 # A review note is any marker whose keyword is not `ignore`, which is the
@@ -1310,6 +1310,25 @@ def path_rule_matches(path: str, path_exists: bool, row: PathRuleRow) -> bool:
             raise ValueError(f"invalid path rule kind {kind!r}")
 
 
+def acceptance_guard_decision(
+    guard: AcceptanceGuardRow, autonomous: bool
+) -> KernelDecision:
+    """Judge one edit to a test-role path against the declared guard.
+
+    This is the one gate where an autonomous identity is held to *more* than
+    an ordinary session rather than less, and the inversion is the point
+    rather than an oversight. Everywhere else, autonomy means the caller
+    reviews its own edits, so a question it would only answer itself is
+    dropped. Here the caller's whole contract is to satisfy these tests, so
+    it is the one caller for whom editing them is never the right move —
+    a human weighing whether a test encodes the wrong behaviour is exactly
+    who the ordinary ask reaches, and exactly who an implementer is not.
+    """
+    if autonomous:
+        return KernelDecision("deny", guard["autonomous_reason"])
+    return KernelDecision("ask", guard["ask_reason"])
+
+
 # lup: Editing `.claude/` or `.codex/` should be auto-deny here, carrying the
 # redirecting guidance that the `.py` generating it is what to modify instead.
 # `GENERATED_PLUGIN_REFUSAL` in the kernel's words module already says exactly
@@ -1336,6 +1355,7 @@ def decide_edit(
     autonomous: bool = False,
     allowances: list[str] | None = None,
     python_source: bool = False,
+    acceptance_guard: AcceptanceGuardRow | None = None,
 ) -> KernelDecision:
     """Apply anti-pattern, path, marker, full-write, deletion, and size gates.
 
@@ -1354,6 +1374,12 @@ def decide_edit(
     :func:`refined_exempt_lines`, without which a rule broader than the defect
     it names holds its own suppression in place forever.
 
+    ``acceptance_guard`` is the one gate that answers before the relaxations
+    below rather than through them, because it asks whether the file may be
+    edited at all. Undeclared, a project judges its tests by the same
+    lattice as anything else, which is what every project did before the
+    guard existed.
+
     Each gate reaches as far as its own reason. Anti-patterns, the size gate
     and the full-write gate are all about how production code reads and how
     much of it a reviewer can hold at once, so all three stop at production;
@@ -1367,6 +1393,13 @@ def decide_edit(
     previous = before or ""
     updated = after or ""
     role = path_role(path, path_roles or [])
+    # Whether this file may be edited at all is prior to how the edit reads,
+    # so the guard answers ahead of every gate below — including pure
+    # deletion, which would otherwise allow removing the test outright, and
+    # the protected-path rules, whose autonomous release must not survive a
+    # refusal aimed at exactly that caller.
+    if role == "test" and acceptance_guard is not None:
+        return acceptance_guard_decision(acceptance_guard, autonomous)
     # The conventions describe how production code should read. A test's
     # subject is production's behaviour, and scratch is disposable, so
     # neither is judged against them.

@@ -22,6 +22,7 @@ from lup.policy.grants import ALLOWANCE_GRANTS_ENV, known_allowances
 from lup.policy.identity import AGENT_IDENTITY_ENV
 import lup.policy.kernel as kernel
 from lup.policy.kernel.rows import (
+    AcceptanceGuardRow,
     AntiPatternRow,
     PathRoleRow,
     PathRuleRow,
@@ -36,6 +37,7 @@ from lup.policy.shell_rules import (
     ShellCommandRule,
     erase_runner_targets,
     erase_shell_rules,
+    runner_target_tables,
 )
 from lup.policy.rules import antipattern_row, human_owned_path_rule, path_rule_row
 
@@ -218,6 +220,23 @@ def path_role_rows_literal(rows: list[PathRoleRow]) -> str:
     )
 
 
+def acceptance_guard_literal(guard: AcceptanceGuardRow | None) -> str:
+    """Render the declared acceptance guard, or the absence of one.
+
+    Spelled here rather than through ``json.dumps`` because the absent case
+    is the whole reason this exists: JSON's ``null`` is not a Python name,
+    and a data file carrying it fails at import — which in a generated
+    dispatcher means every permission decision stops happening at once.
+    """
+    if guard is None:
+        return "None"
+    entries = [
+        f'"ask_reason": {json.dumps(guard["ask_reason"])}',
+        f'"autonomous_reason": {json.dumps(guard["autonomous_reason"])}',
+    ]
+    return "{\n" + "".join(f"    {entry},\n" for entry in entries) + "}"
+
+
 def refused_tool_rows_literal(rows: list[RefusedToolRow]) -> str:
     """Render declared tool refusals as primitive runtime rows."""
     return dict_rows_literal(
@@ -233,12 +252,14 @@ def refused_tool_rows_literal(rows: list[RefusedToolRow]) -> str:
 
 
 def runner_target_rows_literal(rows: list[RunnerTargetRow]) -> str:
-    """Render the blessed runner targets as primitive runtime rows."""
+    """Render the declared runner targets as primitive runtime rows."""
     return dict_rows_literal(
         [
             [
                 f'"name": {json.dumps(row["name"])}',
                 f'"sandbox": {json.dumps(row["sandbox"])}',
+                f'"effect": {json.dumps(row["effect"])}',
+                f'"reason": {json.dumps(row["reason"])}',
             ]
             for row in rows
         ]
@@ -303,6 +324,7 @@ def render_policy_data(
     human_owned_files: list[str],
     autonomous_agent_identities: list[str],
     path_roles: list[PathRoleRow],
+    acceptance_guard: AcceptanceGuardRow | None,
     shell_rules: list[ShellCommandRule],
     refused_tools: list[RefusedTool],
     recoverable_target_limit: int,
@@ -331,6 +353,8 @@ def render_policy_data(
             "ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = "
             + antipattern_rows_literal(bundled_antipattern_rows(rules)),
             "PATH_ROLES: list[PathRoleRow] = " + path_role_rows_literal(path_roles),
+            "ACCEPTANCE_GUARD: AcceptanceGuardRow | None = "
+            + acceptance_guard_literal(acceptance_guard),
             "SHELL_RULES: list[ShellRuleRow] = "
             + shell_rule_rows_literal(erase_shell_rules(shell_rules)),
             "REFUSED_TOOLS: list[RefusedToolRow] = "
@@ -344,6 +368,8 @@ def render_policy_data(
             "RECOVERABLE_TARGET_LIMIT = " + json.dumps(recoverable_target_limit),
             "RUNNER_TARGETS: list[RunnerTargetRow] = "
             + runner_target_rows_literal(erase_runner_targets(runner_targets)),
+            "RUNNER_TARGET_TABLES: list[ShellRuleRow] = "
+            + shell_rule_rows_literal(runner_target_tables(runner_targets)),
             "SANDBOX_EXCLUDED_COMMANDS: list[str] = "
             + string_rows_literal(sandbox_excluded_commands),
             "AUTO_ESCAPE_PREFIXES: list[list[str]] = "
@@ -355,6 +381,7 @@ def render_policy_data(
     return (
         '"""Generated application-owned policy data."""\n\n'
         "from kernel.rows import (\n"
+        "    AcceptanceGuardRow,\n"
         "    AntiPatternRow,\n"
         "    PathRoleRow,\n"
         "    PathRuleRow,\n"

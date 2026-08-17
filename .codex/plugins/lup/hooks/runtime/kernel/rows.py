@@ -72,6 +72,24 @@ class PathRoleRow(TypedDict):
     role: PathRoleName
 
 
+class AcceptanceGuardRow(TypedDict):
+    """One erased decision to hold a project's acceptance tests still.
+
+    A test states the behaviour production owes; editing one moves the target
+    the implementation is aimed at, which is a judgement about what the work
+    is rather than about how it was done. The two reasons are separate
+    because the two callers are: an ordinary session is asked, since a test
+    that genuinely encodes the wrong behaviour has to be changeable by
+    someone who can weigh that, while a session implementing *against* these
+    tests is refused, because for it the tests are the specification and
+    rewriting a specification to match the implementation is the failure the
+    guard exists to catch.
+    """
+
+    ask_reason: str
+    autonomous_reason: str
+
+
 class AntiPatternRow(TypedDict):
     """One erased anti-pattern rule and the syntactic context it inspects."""
 
@@ -111,15 +129,23 @@ class RefusedToolRow(TypedDict):
 
 
 class RunnerTargetRow(TypedDict):
-    """One erased ``uv run <target>`` a project blesses, and where it runs.
+    """One erased ``uv run <target>`` a project judges, and how.
 
     ``sandbox`` is the same axis :class:`ShellRuleRow` carries, on the one
     surface a command row cannot reach: ``uv`` is parsed rather than matched,
-    so a target's placement has nowhere else to be declared.
+    so a target's placement has nowhere else to be declared. ``effect`` and
+    ``reason`` are there for the same reason — a target a project means to
+    refuse has nowhere else to say so, and leaving it off the table is not a
+    refusal but an absence of one: the verdict becomes no judgment, which a
+    confined session leaves to the runtime's own permissions. For a target
+    that spends money or runs for an hour, not refusing is precisely what
+    the declaration existed to prevent.
     """
 
     name: str
     sandbox: SandboxPlacement
+    effect: DecisionEffect
+    reason: str
 
 
 class ShellRuleRow(TypedDict):

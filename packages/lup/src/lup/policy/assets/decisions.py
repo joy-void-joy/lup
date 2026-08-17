@@ -38,6 +38,7 @@ from kernel.lex import shell_path_verb_targets, shell_write_targets
 from kernel.shell import decide_shell
 from kernel.tools import decide_tool
 from policy_data import (
+    ACCEPTANCE_GUARD,
     ALLOWANCE_GRANTS_ENV,
     ALLOWED_FETCH_SCOPES,
     ANTI_PATTERN_ROWS,
@@ -48,6 +49,7 @@ from policy_data import (
     PATH_RULES,
     RECOVERABLE_TARGET_LIMIT,
     REFUSED_TOOLS,
+    RUNNER_TARGET_TABLES,
     RUNNER_TARGETS,
     SANDBOX_EXCLUDED_COMMANDS,
     SHELL_RULES,
@@ -100,6 +102,7 @@ def bash_decision(
         directory_targets=directory_write_targets(acted_on),
         recoverable_target_limit=RECOVERABLE_TARGET_LIMIT,
         runner_targets=RUNNER_TARGETS,
+        target_tables=RUNNER_TARGET_TABLES,
         interactive=interactive,
         escapable=escapable,
     )
@@ -172,4 +175,5 @@ def edit_decision(
         autonomous=autonomous,
         allowances=granted_allowances(ALLOWANCE_GRANTS_ENV, KNOWN_ALLOWANCES),
         python_source=suffix in (".py", ".pyi"),
+        acceptance_guard=ACCEPTANCE_GUARD,
     )

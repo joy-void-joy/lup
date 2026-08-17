@@ -32,6 +32,7 @@ from lup.policy.kernel.lex import (
     shell_write_targets,
 )
 from lup.policy.kernel.rows import (
+    AcceptanceGuardRow,
     AntiPatternRow,
     PathRoleRow,
     PathRuleKind,
@@ -44,6 +45,7 @@ from lup.policy.shell_rules import (
     RunnerTargetRule,
     ShellCommandRule,
     erase_runner_targets,
+    runner_target_tables,
     erase_shell_rules,
 )
 from lup.policy.models import (
@@ -157,6 +159,7 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
         self.path_roles = path_roles or []
         self.recoverable_target_limit = recoverable_target_limit
         self.runner_targets = erase_runner_targets(runner_targets or [])
+        self.target_tables = runner_target_tables(runner_targets or [])
         self.escapable = escapable
         self.rules = erase_shell_rules(rules)
         self.allowed_scopes = [url_scope_row(scope) for scope in allowed_urls or []]
@@ -192,6 +195,7 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
                 directory_targets=directory_write_targets(acted_on, root),
                 recoverable_target_limit=self.recoverable_target_limit,
                 runner_targets=self.runner_targets,
+                target_tables=self.target_tables,
                 escapable=self.escapable,
             )
         )
@@ -298,7 +302,9 @@ class EditPolicy(DecisionPolicy[EditBatch]):
         autonomous: bool = False,
         path_roles: list[PathRoleRow] | None = None,
         grants: LeaseGrants | None = None,
+        acceptance_guard: AcceptanceGuardRow | None = None,
     ) -> None:
+        self.acceptance_guard = acceptance_guard
         self.path_roles = path_roles or []
         self.grants = LeaseGrants() if grants is None else grants
         self.protected = list(protected)
@@ -333,5 +339,6 @@ class EditPolicy(DecisionPolicy[EditBatch]):
                 autonomous=self.autonomous,
                 allowances=self.grants.granted(),
                 python_source=suffix in (".py", ".pyi"),
+                acceptance_guard=self.acceptance_guard,
             )
         )

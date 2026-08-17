@@ -32,6 +32,13 @@ def decide(payload: object) -> dict[str, object]:  # lup: ignore[dict-str-payloa
     return json.loads(output)
 
 
+MULTI_SITE = "packages/lup/src/lup/harness/enforcement.py"
+"""A production file carrying one preimage at several sites.
+
+Production because the edit gates below are what these tests are about, and
+a test root answers to the test-edit guard before any of them is reached."""
+
+
 def edit_payload(path: str, old: str, new: str, replace_all: bool) -> object:
     return {
         "tool_name": "Edit",
@@ -51,11 +58,7 @@ def test_a_replace_all_edit_is_judged_rather_than_refused() -> None:
     semantics, and the rejection surfaced as an approval prompt no rule
     produced — leaving the whole class of multi-site edit ungoverned.
     """
-    decision = decide(
-        edit_payload(
-            "packages/lup/tests/unit/test_path_roles.py", "PathRoleRow", "RoleRow", True
-        )
-    )
+    decision = decide(edit_payload(MULTI_SITE, "PathRoleRow", "RoleRow", True))
     specific = decision["hookSpecificOutput"]
     assert isinstance(specific, dict)
     assert specific["permissionDecision"] == "allow"
@@ -63,11 +66,7 @@ def test_a_replace_all_edit_is_judged_rather_than_refused() -> None:
 
 
 def test_a_preimage_that_is_absent_is_still_a_malformed_edit() -> None:
-    decision = decide(
-        edit_payload(
-            "packages/lup/tests/unit/test_path_roles.py", "no-such-text", "x", True
-        )
-    )
+    decision = decide(edit_payload(MULTI_SITE, "no-such-text", "x", True))
     specific = decision["hookSpecificOutput"]
     assert isinstance(specific, dict)
     assert specific["permissionDecision"] == "ask"
@@ -76,14 +75,7 @@ def test_a_preimage_that_is_absent_is_still_a_malformed_edit() -> None:
 
 def test_an_ambiguous_single_edit_still_requires_an_unambiguous_preimage() -> None:
     """Without `replace_all` the exactly-once requirement is the tool's own."""
-    decision = decide(
-        edit_payload(
-            "packages/lup/tests/unit/test_path_roles.py",
-            "PathRoleRow",
-            "RoleRow",
-            False,
-        )
-    )
+    decision = decide(edit_payload(MULTI_SITE, "PathRoleRow", "RoleRow", False))
     specific = decision["hookSpecificOutput"]
     assert isinstance(specific, dict)
     assert specific["permissionDecision"] == "ask"
@@ -93,9 +85,14 @@ def test_an_ambiguous_single_edit_still_requires_an_unambiguous_preimage() -> No
 def test_a_declared_test_root_is_not_judged_against_production_conventions() -> None:
     """The role reaches the deployed dispatcher, not just the kernel.
 
-    One identical edit, two roots: the conventions describe how production
-    reads, and a test's subject is production's behaviour rather than its
-    own shape.
+    One identical edit, two roots. In production the conventions decide and
+    refuse it. Under a test root they never run — a test's subject is
+    production's behaviour rather than its own shape — and what answers
+    instead is the test-edit guard this repository declares, which is a
+    question about the target of the work rather than about the code's
+    shape. Two different gates, which is why the reason is asserted and not
+    only the effect: identical verdicts from different rules would read the
+    same here.
     """
     shared = "from lup.policy.kernel.roles import path_role"
     production = decide(
@@ -115,11 +112,12 @@ def test_a_declared_test_root_is_not_judged_against_production_conventions() -> 
         )
     )
     denied = production["hookSpecificOutput"]
-    allowed = under_test["hookSpecificOutput"]
+    guarded = under_test["hookSpecificOutput"]
     assert isinstance(denied, dict)
-    assert isinstance(allowed, dict)
+    assert isinstance(guarded, dict)
     assert denied["permissionDecision"] == "deny"
-    assert allowed["permissionDecision"] == "allow"
+    assert guarded["permissionDecision"] == "ask"
+    assert "measured against" in str(guarded["permissionDecisionReason"])
 
 
 def test_an_overwide_suppression_is_placed_rather_than_left_to_the_author() -> None:
@@ -194,6 +192,12 @@ def test_absolute_paths_resolve_against_their_worktree_not_the_launch_directory(
     on the working directory decides policy by where the runtime happened to
     start: from a sibling directory nothing matched, which left the role
     relaxations off and — far worse — let a protected path through.
+
+    The reason is what carries the proof on the second path. `x = {}` trips
+    the empty-collection rule in production and is refused; under a test
+    root the conventions never run and the test-edit guard answers instead,
+    so the guard's own words are evidence the role resolved rather than the
+    rules having quietly gone missing.
     """
     root = Path(".").resolve()
     outside = root.parent
@@ -204,11 +208,12 @@ def test_absolute_paths_resolve_against_their_worktree_not_the_launch_directory(
         write_payload(str(root / "tests" / "unit" / "probe.py"), "x = {}\n"), outside
     )
     asked = protected["hookSpecificOutput"]
-    allowed = under_test["hookSpecificOutput"]
+    guarded = under_test["hookSpecificOutput"]
     assert isinstance(asked, dict)
-    assert isinstance(allowed, dict)
+    assert isinstance(guarded, dict)
     assert asked["permissionDecision"] == "ask"
-    assert allowed["permissionDecision"] == "allow"
+    assert guarded["permissionDecision"] == "ask"
+    assert "measured against" in str(guarded["permissionDecisionReason"])
 
 
 def bash_payload(command: str) -> JsonObject:

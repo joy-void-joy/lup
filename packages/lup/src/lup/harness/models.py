@@ -25,7 +25,7 @@ from pydantic import (
 from lup.codescan.common import RuleSelection
 from lup.harness.banner import ArtifactBanner, GeneratedBanner
 from lup.markdown import TableCell, escaped
-from lup.policy.kernel.rows import PathRoleName
+from lup.policy.kernel.rows import AcceptanceGuardRow, PathRoleName
 from lup.policy.models import PolicyId, UrlPathPrefix
 from lup.policy.refused_tools import RefusedTool
 from lup.policy.shell_rules import RunnerTargetRule, ShellCommandRule
@@ -660,6 +660,45 @@ class HookPathRole(BaseModel, frozen=True):
     role: PathRoleName
 
 
+class AcceptanceGuard(BaseModel, frozen=True):
+    """A project's decision to hold the tests its work is measured against.
+
+    Declaring one turns every ``test``-role root into a gate: an ordinary
+    session is asked before it edits a test, and a session declared
+    autonomous — the resolver worker, the implementer — is refused outright.
+    Undeclared, tests are judged by the ordinary lattice, which is what a
+    project that does not work against fixed acceptance tests wants.
+
+    Both reasons default to wording that says what to do instead, because a
+    refusal an agent cannot act on becomes a retry. A project with its own
+    workflow to name replaces them; a project without one should not have to
+    invent them to turn the gate on.
+    """
+
+    ask_reason: str = (
+        "editing a test changes what the implementation is measured against —"
+        " approve this only if the test encodes the wrong behaviour, and fix"
+        " the implementation otherwise"
+    )
+    autonomous_reason: str = (
+        "this session implements against these tests, so they are its"
+        " specification rather than its material — report what the test"
+        " demands and why it cannot be met, and leave the change to whoever"
+        " can weigh it"
+    )
+
+    def erased(self) -> AcceptanceGuardRow:
+        """This guard as the kernel reads it, primitive and dependency-free.
+
+        The single projection to the runtime shape, so the live policy and
+        the hermetic runtime compiled into each plugin cannot come to hold
+        different wording of the same refusal.
+        """
+        return AcceptanceGuardRow(
+            ask_reason=self.ask_reason, autonomous_reason=self.autonomous_reason
+        )
+
+
 class HookSandbox(BaseModel, frozen=True):
     """OS sandbox declaration compiled into native settings and launchers.
 
@@ -733,6 +772,16 @@ class HookSet(BaseModel, frozen=True):
         description=(
             "Files whose content the human author owns; every edit is surfaced "
             "as Ask so agents propose changes instead of applying them"
+        ),
+    )
+    acceptance_guard: AcceptanceGuard | None = Field(
+        default=None,
+        description=(
+            "Whether every test-role root is held still: an ordinary session "
+            "is asked before editing a test and an autonomous one is refused. "
+            "None declares no guard, which judges tests by the ordinary "
+            "lattice — right for a project that does not implement against "
+            "fixed acceptance tests, and wrong for one that runs the resolver"
         ),
     )
     shell_rules: list[ShellCommandRule] = Field(

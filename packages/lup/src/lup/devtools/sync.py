@@ -48,6 +48,7 @@ Examples::
     $ uv run lup-devtools sync log my-project --no-stat
     $ uv run lup-devtools sync diff my-project abc1234
     $ uv run lup-devtools sync mark-synced my-project
+    $ uv run lup-devtools sync mark-synced my-project --at 4c6293a6
     $ uv run lup-devtools sync setup my-project /path/to/repo --synced
     $ uv run lup-devtools sync setup my-project /path/to/repo --branch main
 """
@@ -300,6 +301,22 @@ def current_head(path: str) -> str:
     return git_in(path, "rev-parse", "HEAD")
 
 
+def resolved_checkpoint(path: str, ref: str) -> str:
+    """The commit a checkpoint should record, from a ref or from HEAD.
+
+    Resolution happens in the upstream checkout rather than being taken on
+    trust, so a tag or branch name works and a commit that checkout does not
+    have is refused here — where the caller can still fix it — instead of
+    landing in the record as a checkpoint nothing can compute a range from.
+    """
+    if not ref:
+        return current_head(path)
+    try:
+        return git_in(path, "rev-parse", "--verify", f"{ref}^{{commit}}")
+    except sh.ErrorReturnCode as error:
+        raise typer.BadParameter(f"{ref!r} does not name a commit in {path}") from error
+
+
 @app.command("status")
 def status_cmd() -> None:
     """Show tracked projects and their sync status (read-only).
@@ -409,6 +426,12 @@ def show_diff(
 @app.command("mark-synced")
 def mark_synced(
     project: Annotated[str, typer.Argument(help="Project name")],
+    at: Annotated[
+        str,
+        typer.Option(
+            "--at", help="Record this commit as the checkpoint instead of HEAD"
+        ),
+    ] = "",
 ) -> None:
     """Advance the sync checkpoint to the upstream's current HEAD.
 
@@ -416,11 +439,19 @@ def mark_synced(
     upstream's HEAD has been considered, so the next ``sync log`` / ``status``
     only surfaces commits that land afterward. Marking synced even when nothing
     was ported is correct — it means "reviewed, decided to port none."
+
+    ``--at`` records a commit the project already consumed rather than the
+    one the upstream is on now. A project adopting a library mid-stream knows
+    which commit it took and has, without this, no way to say so: marking
+    synced would silently claim every commit that landed afterward as
+    reviewed, which is the opposite of what the checkpoint is for. The ref is
+    resolved in the upstream checkout, so a tag or a branch name works and a
+    commit that is not there is refused rather than written.
     """
     proj = find_project(project)
     path = ensure_local(proj)
 
-    head = current_head(path)
+    head = resolved_checkpoint(path, at)
 
     local_data = load_json(local_file())
     local_projects = local_data.get("projects", [])

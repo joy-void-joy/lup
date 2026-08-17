@@ -133,6 +133,9 @@ def semantic_policy_for(
             autonomous=autonomous,
             path_roles=roles,
             grants=grants,
+            acceptance_guard=guard.erased()
+            if (guard := hooks.acceptance_guard)
+            else None,
         ),
         refused_tools=list(hooks.refused_tools),
     )

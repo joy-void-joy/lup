@@ -6,16 +6,16 @@ CI owes the project is to run it — one job, not a second list of gates that
 drifts from the first. Generated rather than scaffolded for the same reason:
 a copy handed over once is a list nobody updates.
 
-The drift check runs as its own step ahead of the gate, spelled with the same
-constant the commit hook installs, so a contributor who never armed the hook is
-refused here by the identical command rather than by a second rule about it.
+Both steps are spelled with the same constants the git guards install, so a
+contributor who never armed the hooks is refused here by the identical
+commands rather than by a second rule about them.
 """
 
 from pathlib import Path
 
 from pydantic import BaseModel
 
-from lup.devtools.dev.commit_guard import DRIFT_COMMAND
+from lup.devtools.dev.git_guards import CHECK_COMMAND, DRIFT_COMMAND
 from lup.harness.banner import GeneratedBanner
 from lup.harness.materialization import write_generated_file
 from lup.harness.banner import REGENERATE_COMMAND
@@ -27,10 +27,6 @@ WORKFLOW_PATH = Path(".github/workflows/quality.yml")
 WORKFLOW_COMMAND = REGENERATE_COMMAND
 """What the gate runs to rebuild every tree, taken from the command the banners
 already tell a reader to type so the two cannot name different things."""
-
-# lup: ignore[constant-declaration] — the command a reader types, whose words
-# are the CLI's own rather than a preference this module holds
-CHECK_COMMAND = "uv run lup-devtools dev check"
 
 
 class WorkflowSpec(BaseModel, frozen=True):

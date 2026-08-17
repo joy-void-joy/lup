@@ -4,6 +4,7 @@
 """Generated application-owned policy data."""
 
 from kernel.rows import (
+    AcceptanceGuardRow,
     AntiPatternRow,
     PathRoleRow,
     PathRuleRow,
@@ -1697,6 +1698,11 @@ PATH_ROLES: list[PathRoleRow] = [
         "role": "scratch",
     },
 ]
+
+ACCEPTANCE_GUARD: AcceptanceGuardRow | None = {
+    "ask_reason": "editing a test changes what the implementation is measured against \u2014 approve this only if the test encodes the wrong behaviour, and fix the implementation otherwise",
+    "autonomous_reason": "this session implements against these tests, so they are its specification rather than its material \u2014 report what the test demands and why it cannot be met, and leave the change to whoever can weigh it",
+}
 
 SHELL_RULES: list[ShellRuleRow] = [
     {
@@ -7071,20 +7077,30 @@ RUNNER_TARGETS: list[RunnerTargetRow] = [
     {
         "name": "pyright",
         "sandbox": "ambient",
+        "effect": "allow",
+        "reason": "",
     },
     {
         "name": "pytest",
         "sandbox": "ambient",
+        "effect": "allow",
+        "reason": "",
     },
     {
         "name": "ruff",
         "sandbox": "ambient",
+        "effect": "allow",
+        "reason": "",
     },
     {
         "name": "lup-devtools",
         "sandbox": "outside",
+        "effect": "allow",
+        "reason": "",
     },
 ]
+
+RUNNER_TARGET_TABLES: list[ShellRuleRow] = []
 
 SANDBOX_EXCLUDED_COMMANDS: list[str] = [
     "uv run lup-devtools py eval *",
