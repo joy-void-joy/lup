@@ -55,6 +55,67 @@ type RuleContext = Literal["code", "comment"]
 """The syntactic surface a scan rule inspects: masked code, or comment text."""
 
 
+class Refiner(BaseModel, arbitrary_types_allowed=True):
+    """An AST context that narrows one rule, and what a cleared match really is.
+
+    ``exempt`` returns the lines the context clears, and ``evidence`` says why
+    in the words a refuted finding carries. The kernel owns these functions
+    because the hook must apply them with no types and no dependencies to
+    hand; the rule holds the same object so the narrowing is visible where
+    the rule is declared.
+    """
+
+    exempt: Callable[[str], set[int]]
+    evidence: str
+
+
+class AntiPattern(BaseModel, arbitrary_types_allowed=True):
+    """One forbidden code shape: a stable id, the regex that detects it, and why.
+
+    Declared here rather than beside the tables that use it, because a project
+    composing its own rules holds this and the harness declaration that carries
+    them, and the tables sit above both.
+
+    ``id`` is a stable kebab-case name a typed `# lup: ignore[id]` directive
+    targets, so a single site can silence exactly one rule without opting out
+    of the rest. Ids are pinned alongside the pattern and message by
+    ``tests/unit/test_antipatterns.py`` and must stay in step with the hook.
+
+    ``context`` declares the syntactic surface the pattern inspects. A "code"
+    rule is matched against token-masked source — string literals and comments
+    both blanked — so an identifier quoted in prose never trips it; a
+    "comment" rule targets comment directives (`# type: ignore`, `# noqa`) and
+    is matched with comments intact. Where no tokenizer applies (the
+    TypeScript-family table, text that fails to tokenize) every rule scans the
+    raw line — those rules are genuinely text-shaped.
+
+    ``refiner`` is present when the regex is wider than the defect the rule
+    names and an AST context settles the difference. It carries the function
+    itself, so reading the rule tells you what narrows it rather than only
+    that something does. The row carries its name, which
+    :func:`lup.policy.kernel.edit.refiner_named` resolves back to the function,
+    because a row projected into the hermetic runtime is primitive and cannot
+    carry a callable; ``test_declared_refiners_are_the_kernel_refiners`` pins
+    the two to the same objects, since a rule refined on one side only is
+    exactly the split that makes a marker unremovable.
+    """
+
+    id: str
+    pattern: re.Pattern[str]
+    message: str
+    context: RuleContext = "code"
+    refiner: Refiner | None = None
+    strength: RuleStrength = "soft"
+    """Whether a `# lup: ignore` may silence this rule at all.
+
+    Soft by default, because most of these name a shape that is usually wrong
+    and occasionally the only thing that works, and the audit exists to grade
+    those exceptions. A rule is ``strong`` only when its replacement is right
+    every time — then a suppression is not a reasoned exception but the defect
+    with a comment on it, and this refuses to be silenced.
+    """
+
+
 class RuleSelection(BaseModel, frozen=True):
     """Which of the rules this library ships a project holds itself to.
 

@@ -13,10 +13,10 @@ import pytest
 from lup.codescan.antipatterns import (
     PYTHON_ANTI_PATTERNS,
     TS_ANTI_PATTERNS,
-    AntiPattern,
     audit_text,
     python_anti_patterns,
 )
+from lup.codescan.common import AntiPattern
 from lup.harness.contracts import Spelled, Unsupported
 from lup.policy.bundle import bundled_antipattern_rows
 from lup.policy.kernel.edit import (
@@ -25,6 +25,7 @@ from lup.policy.kernel.edit import (
     dict_get_exempt_lines,
     empty_collection_exempt_lines,
     refiner_named,
+    slice_exempt_lines,
 )
 from lup.policy.kernel.rows import AntiPatternRow
 from lup.policy.rules import antipattern_row
@@ -608,6 +609,75 @@ def test_refiner_keeps_flagging_seeds() -> None:
 
 def test_refiner_unparseable_source_exempts_nothing() -> None:
     assert empty_collection_exempt_lines("def broken(:\n") == set()
+
+
+SLICED = """\
+tweet = text[:260]
+label = name[:TWEET_CHARS]
+big = blob[:64_000]
+first = rest[:1]
+page = results[:limit]
+"""
+
+
+def test_silent_truncation_reads_a_chosen_width_and_not_a_given_one() -> None:
+    """A literal or a module constant is a bound decided in the code.
+
+    A lowercase name is one the caller passed, which makes the slice a request
+    rather than a truncation; a single digit is a parser bound. Neither is
+    someone deciding how much of a text to keep, so neither is the rule's
+    subject.
+    """
+    pattern = rule_named(PYTHON_ANTI_PATTERNS, "silent-truncation").pattern
+    matched = [line for line in SLICED.splitlines() if pattern.search(line)]
+    assert matched == [
+        "tweet = text[:260]",
+        "label = name[:TWEET_CHARS]",
+        "big = blob[:64_000]",
+    ]
+
+
+DIGEST_SLICE = "key = hashlib.sha256(raw.encode()).hexdigest()[:32]\n"
+
+MULTILINE_DIGEST = """\
+key = hashlib.sha256(
+    raw.encode()
+).hexdigest()[:32]
+"""
+
+SPLIT_SLICE = "head, tail = body[:cut], body[cut:]\n"
+
+SNIFFED_SLICE = "is_html = raw.lstrip()[:100].lower().startswith('<!doctype')\n"
+
+ABBREVIATED_SLICE = "short = commit[:12]\n"
+
+KEPT_SLICE = "preview = summary[:200]\n"
+
+
+def test_slice_refiner_clears_what_is_not_a_cut() -> None:
+    assert slice_exempt_lines(DIGEST_SLICE) == {1}
+    assert slice_exempt_lines(SPLIT_SLICE) == {1}
+    assert slice_exempt_lines(SNIFFED_SLICE) == {1}
+    # A git SHA carries no type saying so; the width is what settles it.
+    assert slice_exempt_lines(ABBREVIATED_SLICE) == {1}
+
+
+def test_slice_refiner_clears_the_line_the_bracket_sits_on() -> None:
+    """A chain opening on one line and closing on another clears both.
+
+    The pattern matches where `[:n]` is written and the node starts at the
+    receiver, so clearing only the node's own line would clear a line that
+    never matched and leave the one that did.
+    """
+    assert slice_exempt_lines(MULTILINE_DIGEST) == {1, 2, 3}
+
+
+def test_slice_refiner_keeps_flagging_a_kept_prefix() -> None:
+    assert slice_exempt_lines(KEPT_SLICE) == set()
+
+
+def test_slice_refiner_unparseable_source_exempts_nothing() -> None:
+    assert slice_exempt_lines("def broken(:\n") == set()
 
 
 def test_audit_exempt_line_needs_no_marker() -> None:

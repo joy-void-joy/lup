@@ -50,6 +50,16 @@ from lup.workspace.paths import parse_timestamp, project_root, traces_path
 
 from lup.devtools.utils import output_json
 
+# lup: ignore[constant-declaration] — how much of a trace the default view
+# opens with is this command's own presentation, and `--full` is the whole
+HEAD_LINES = 100
+"""How much of a trace the default view shows before pointing at `--full`.
+
+A trace runs to whatever length the session did, and the common reading is the
+opening. The view says how many lines it stood in for and how to get all of
+them, which is what separates a head from a trace that appears to end here.
+"""
+
 
 class TraceRef(BaseModel):
     """One discovered trace: which store it came from, its session id, its dir."""
@@ -392,8 +402,14 @@ def show(session_id: str, full: bool, tool_calls: bool, as_json: bool) -> None:
         content = render_tool_calls(trace_path)
     elif not full:
         lines = content.split("\n")
-        if len(lines) > 100:
-            content = "\n".join(lines[:100])
+        if len(lines) > HEAD_LINES:
+            # lup: ignore[silent-truncation] — `--full` is the whole trace, and
+            # the line below says how much this view is standing in for
+            head = "\n".join(lines[:HEAD_LINES])
+            content = (
+                f"{head}\n\n… {len(lines) - HEAD_LINES} more line(s) — "
+                f"re-run with --full for the whole trace"
+            )
 
     if as_json:
         output_json(

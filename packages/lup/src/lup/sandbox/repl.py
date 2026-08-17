@@ -207,7 +207,7 @@ class ReplSession:
                             return ExecuteCodeResult.model_validate_json(text)
                         except ValidationError as e:
                             raise ReplCrashedError(
-                                f"REPL returned non-JSON: {text[:200]}"
+                                f"REPL returned non-JSON: {text}"
                             ) from e
                 case 2:  # stderr
                     logger.debug(

@@ -30,7 +30,7 @@ import typer
 from pydantic import BaseModel
 
 from lup.codescan.antipatterns import (
-    AntiPattern,
+    PYTHON_ANTI_PATTERNS,
     AntiPatternFinding,
     AntiPatternSet,
     audit_text,
@@ -41,6 +41,7 @@ from lup.codescan.boundaries import audit_constant_declarations, audit_path_boun
 from lup.codescan.capabilities import audit_capabilities
 from lup.codescan.common import (
     PACKAGE_ROOTS,
+    AntiPattern,
     PythonContext,
     PythonSource,
     Refutation,
@@ -114,7 +115,9 @@ def scanned_files(
     never enforces in a test or scratch tree is not read there either.
     """
     roles = project.path_roles
-    declared = AntiPatternSet().selected(project.rules)
+    declared = AntiPatternSet(
+        python=[*PYTHON_ANTI_PATTERNS, *project.anti_patterns]
+    ).selected(project.rules)
 
     def found() -> Iterator[ScannedFile]:
         for rel in git.lines("ls-files", "--cached", "--others", "--exclude-standard"):

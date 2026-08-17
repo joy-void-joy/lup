@@ -12,7 +12,7 @@ them as a declaration is what lets any adopter supply its own.
 from pydantic import BaseModel
 
 from lup.codescan.boundaries import ApplicationRoots
-from lup.codescan.common import RuleSelection
+from lup.codescan.common import AntiPattern, RuleSelection
 from lup.devtools.subapps import SubAppSelection
 from lup.harness.models import ContentSelection
 from lup.policy.kernel.rows import PathRoleRow
@@ -43,6 +43,15 @@ class DevProject(BaseModel, frozen=True):
     Carried here so the sweep reads the selection the edit hook was compiled
     with: an application declares it once on its ``HookSet`` and hands it
     over, the way it already hands over its path roles.
+    """
+
+    anti_patterns: list[AntiPattern] = []
+    """Code shapes only this repository refuses, beside the library's own.
+
+    Carried here for the reason the selection is: the sweep and the edit hook
+    have to read one table. A rule declared on the ``HookSet`` and not handed
+    over would be enforced on every edit and invisible to ``dev check``, which
+    is the disagreement the selection already exists to prevent.
     """
 
     subapps: SubAppSelection = SubAppSelection()

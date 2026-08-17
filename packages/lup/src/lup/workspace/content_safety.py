@@ -26,6 +26,16 @@ from lup.workspace.paths import outputs_dir
 
 logger = logging.getLogger(__name__)
 
+# lup: ignore[constant-declaration] — the filesystem imposes the bound; the
+# room left under 255 bytes is for the digest and extension appended after
+SLUG_CHARS = 60
+"""How much of a label the filename derived from it carries.
+
+A filesystem bounds a name at 255 bytes and a path around it, so a slug is one
+of the few places a bound is imposed rather than chosen. It names the content
+rather than holding it: whatever the label said is inside the file.
+"""
+
 parser = MarkdownIt()
 
 
@@ -167,7 +177,9 @@ def slugify_label(label: str) -> str:
         for is_separator, group in groupby(separated, key=lambda char: char == "-")
         if not is_separator
     ]
-    return "-".join(words)[:60]
+    # lup: ignore[silent-truncation] — a slug names a file the filesystem
+    # bounds, and the content it names carries the label whole
+    return "-".join(words)[:SLUG_CHARS]
 
 
 def save_content(
@@ -245,7 +257,7 @@ def spill_oversized_result[T: BaseModel](
         "Spilling %d field(s) from %s (label=%s)",
         len(pointers),
         tool_name,
-        label[:80],
+        label,
     )
     return result.model_copy(update=pointers)
 

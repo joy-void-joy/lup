@@ -122,9 +122,7 @@ class ToolRoutes(BaseModel):
         for entry in self.routes:
             arguments = entry.arguments(url)
             if arguments is not None:
-                logger.info(
-                    "Tool route: %s → %s(%s)", url[:60], entry.tool.name, arguments
-                )
+                logger.info("Tool route: %s → %s(%s)", url, entry.tool.name, arguments)
                 return await entry.tool.handler(arguments)
         return None
 

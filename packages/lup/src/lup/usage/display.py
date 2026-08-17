@@ -82,7 +82,7 @@ class UsageDisplay:
             try:
                 return self.panel(detail, bar_width)
             except UsageUnavailable as error:
-                return build_error_panel(self.runtime_name, str(error)[:120])
+                return build_error_panel(self.runtime_name, str(error))
 
         panel = rendered()
         with Live(

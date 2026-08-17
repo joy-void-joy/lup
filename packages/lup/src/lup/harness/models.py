@@ -22,7 +22,7 @@ from pydantic import (
     model_validator,
 )
 
-from lup.codescan.common import RuleSelection
+from lup.codescan.common import AntiPattern, RuleSelection
 from lup.harness.banner import ArtifactBanner, GeneratedBanner
 from lup.markdown import CodeCell, PlainCell, TableCell, escaped
 from lup.mcp import ToolDeclaration
@@ -915,6 +915,18 @@ class HookSet(BaseModel, frozen=True):
             "reaches the edit hook compiled from this set, the repository "
             "sweep, and the generated rule reference, so none of the three "
             "can enforce a rule the others stopped enforcing"
+        ),
+    )
+    anti_patterns: list[AntiPattern] = Field(
+        default=[],
+        description=(
+            "Code shapes only this project refuses, added to the tables the "
+            "library ships. Declare one here the way shell_rules declares a "
+            "downstream toolchain: the library settles what every project "
+            "wants and holds no opinion on the rest, so a repository that "
+            "named a defect of its own enforces it instead of waiting to be "
+            "adopted. Additive, because `rules` already says what a project "
+            "drops — between them a project states only where it differs"
         ),
     )
     recoverable_target_limit: int = Field(
