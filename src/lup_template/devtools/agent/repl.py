@@ -169,7 +169,7 @@ def print_response_stats(response: "TurnResult[None]", console: "Console") -> fl
     parts: list[str] = []
     cost = 0.0
     text = "\n\n".join(
-        text for block in response.blocks if (text := block.text_payload) is not None
+        text for block in response.blocks if (text := block.payload().text) is not None
     )
     if text:
         console.print(text)

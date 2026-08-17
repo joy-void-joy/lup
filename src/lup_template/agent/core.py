@@ -633,7 +633,7 @@ def resolve_resume_token(reference: str) -> SessionId:
 def result_text[T: BaseModel | None](result: TurnResult[T]) -> str:
     """Concatenate completed portable text blocks."""
     return "\n\n".join(
-        text for block in result.blocks if (text := block.text_payload) is not None
+        text for block in result.blocks if (text := block.payload().text) is not None
     )
 
 
@@ -641,12 +641,13 @@ def result_sources[T: BaseModel | None](result: TurnResult[T]) -> list[str]:
     """Extract source URLs and search queries from semantic tool calls."""
     sources: list[str] = []  # lup: ignore[empty-collection]
     for block in result.blocks:
-        arguments = block.tool_arguments
+        payload = block.payload()
+        arguments = payload.tool_arguments
         if arguments is None:
             continue
-        if block.tool_call_name in ("FetchUrl", "WebFetch"):
+        if payload.tool_call_name in ("FetchUrl", "WebFetch"):
             value = arguments.get("url")  # lup: ignore[dict-get]
-        elif block.tool_call_name in ("SearchWeb", "WebSearch"):
+        elif payload.tool_call_name in ("SearchWeb", "WebSearch"):
             value = arguments.get("query")  # lup: ignore[dict-get]
         else:
             continue

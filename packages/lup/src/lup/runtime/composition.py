@@ -96,12 +96,13 @@ def refusal_of(blocks: list[TurnBlock], tool: str) -> str | None:
     prompt. The refusal's own text is the reason to report, because the
     generic message sends whoever reads it looking for a model mistake.
     """
+    payloads = [block.payload() for block in blocks]
     calls = {
-        block.invoked_call_id
-        for block in blocks
-        if block.tool_call_name == tool and block.invoked_call_id is not None
+        payload.invoked_call_id
+        for payload in payloads
+        if payload.tool_call_name == tool and payload.invoked_call_id is not None
     }
-    refusals = (block.refusal for block in blocks)
+    refusals = (payload.refusal for payload in payloads)
     return next(
         (
             refusal.detail
