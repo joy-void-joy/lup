@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 
 from lup.harness.environment import non_interactive_environment
 from lup.harness.process import LaunchRequest, ProcessLauncher
+import lup.devtools.dev.traces as traces
 from lup.devtools.dev.remote_auth import check_remote_auth
 from lup.resolver.models import HeldLease
 from lup.resolver.state import live_lease_branches
@@ -1309,6 +1310,7 @@ def delete_branch(
         typer.echo(f"Would perform {len(plan.actions)} action(s):")
         for action in plan.actions:
             typer.echo(f"  {action.render()}")
+        typer.echo(f"  {traces.archive(name, dry_run=True).summary()}")
         return
 
     blocked = plan.blocked()
@@ -1326,6 +1328,9 @@ def delete_branch(
             err=True,
         )
 
+    # Before the worktree goes, not after: its trace store is usually the only
+    # copy, and every later reader would see absence rather than loss.
+    traces.keep_before_deleting(name)
     run_deletion(plan, force)
 
 

@@ -23,6 +23,7 @@ import lup.devtools.dev.comments as comments
 import lup.devtools.dev.git_guards as git_guards_mod
 import lup.devtools.dev.conflicts as conflicts
 import lup.devtools.dev.issues as issues_mod
+import lup.devtools.dev.traces as traces
 import lup.devtools.dev.model_config as model_config_mod
 import lup.devtools.dev.plugin as plugin_mod
 import lup.devtools.dev.policy_explain as policy_explain
@@ -225,8 +226,34 @@ def create_dev_app(
             ),
         ] = None,
     ) -> None:
-        """Delete a branch and its worktree, and origin's copy if it is spent."""
+        """Delete a branch and its worktree, and origin's copy if it is spent.
+
+        Its session traces are archived first, since the worktree usually holds
+        the only copy; a deletion whose archive fails is refused.
+        """
         branches.delete_branch(name, dry_run, force, remote)
+
+    @app.command("archive-traces")
+    def archive_traces_cmd(
+        name: Annotated[
+            str,
+            typer.Argument(help="Branch whose worktree traces should be kept"),
+        ],
+        dry_run: Annotated[
+            bool,
+            typer.Option("--dry-run", "-n", help="Report what would be copied"),
+        ] = False,
+        as_json: Annotated[
+            bool,
+            typer.Option("--json", help="Output as JSON"),
+        ] = False,
+    ) -> None:
+        """Copy a worktree's session traces into the archive beside the repository.
+
+        `delete` already does this, so reach for it to read what a deletion
+        would keep before deciding one, or to archive a worktree that is staying.
+        """
+        traces.report(name, dry_run, as_json)
 
     @app.command("resolve-branch")
     def resolve_branch_cmd(
