@@ -26,6 +26,7 @@ gets an empty snapshot both times and never fails.
 from pathlib import Path
 
 import sh
+from pydantic import BaseModel
 
 REF_FORMAT = "%(refname) %(objectname)"
 """One ref per line, as `repository_refs` reads it."""
@@ -39,6 +40,39 @@ branch; a committer identity written into the shared config is inherited by
 every worktree cut from the repository and shows up only as authorship on work
 done hours later, by someone who never ran the suite.
 """
+
+
+class CommitterIdentity(BaseModel):
+    """Somebody for a suite's throwaway repositories to commit as."""
+
+    name: str
+    email: str
+
+    def environment(self) -> dict[str, str]:
+        """This identity as environment, which cannot persist anywhere.
+
+        A suite building throwaway repositories has to give git somebody to
+        commit as, and the obvious `git config` writes a file — the shared one
+        when the command misbinds, which is the accident this module exists
+        for. Passing the identity per invocation with `-c` closes that only for
+        the commands the suite runs itself: code under test runs git of its own
+        and inherits none of them, so it commits as nobody and fails wherever
+        the developer's global config is not there to cover for it.
+
+        The environment reaches both and outlives neither. There is no file for
+        a misbound command to land in, so the identity half of the accident is
+        impossible here rather than merely watched for.
+        """
+        return {
+            "GIT_AUTHOR_NAME": self.name,
+            "GIT_AUTHOR_EMAIL": self.email,
+            "GIT_COMMITTER_NAME": self.name,
+            "GIT_COMMITTER_EMAIL": self.email,
+        }
+
+
+TEST_IDENTITY = CommitterIdentity(name="Lup Test Suite", email="tests@lup.invalid")
+"""The identity a suite arms its session with, overridable by a caller with cause."""
 
 
 def repository_refs(root: Path, ref_format: str = REF_FORMAT) -> dict[str, str]:

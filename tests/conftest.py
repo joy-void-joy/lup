@@ -8,7 +8,21 @@ from pathlib import Path
 
 import pytest
 
-from lup.gitguard import guard_report, repository_state
+from lup.gitguard import TEST_IDENTITY, guard_report, repository_state
+
+
+@pytest.fixture(scope="session", autouse=True)
+def committer_identity_armed() -> Iterator[None]:
+    """Give every throwaway repository somebody to commit as, writing no file.
+
+    Session-scoped and autouse because the git commands that need it are not
+    all the suite's own: a resolver under test runs its own `git commit`, and
+    reaches whatever the environment holds. See :mod:`lup.gitguard`.
+    """
+    with pytest.MonkeyPatch.context() as environment:
+        for name, value in TEST_IDENTITY.environment().items():
+            environment.setenv(name, value)
+        yield
 
 
 @pytest.fixture(scope="session", autouse=True)
