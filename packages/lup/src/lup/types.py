@@ -8,12 +8,12 @@ never imports from SDK packages directly. The hook vocabulary lives in
 """
 
 import json
+from abc import ABC, abstractmethod
 from collections.abc import Callable, Sequence
 from typing import Annotated, Literal
 
 from pydantic import (
     BaseModel,
-    Discriminator,
     Field,
     StringConstraints,
     model_validator,
@@ -141,141 +141,115 @@ def normalize_content(content: str | Sequence[object] | None) -> str:
     return str(content)
 
 
-class LupContentBlock(BaseModel):
-    """One block of a message, answering every question about itself.
+class BlockDisplay(BaseModel, frozen=True):
+    """What a console, a trace, or a transcript needs to know about a block.
 
-    Whatever a transcript, a console, or a trace needs to know about a block is
-    declared here and answered — or declined — by the block, so a new kind of
-    block is one class rather than an edit to every walk that would have to
-    notice it. The declining answers are what make omission safe: a caller
-    asking ``spoken_text`` reaches every kind that voices prose, including
-    kinds written long after the caller was.
+    One shape rather than a question per kind, because these are asked of a
+    block whose kind the caller does not know: a walk collecting spoken prose
+    reaches every kind that voices any, including kinds written long after it
+    was. A kind that carries none of something leaves the default, which is
+    what makes omission safe.
     """
 
-    @property
-    def display_emoji(self) -> str:
-        """The glyph a console leads this block with."""
-        return "❓"
+    emoji: str = "❓"
+    """The glyph a console leads this block with."""
 
-    @property
-    def display_label(self) -> str:
-        """The short name a console and a trace heading give this block."""
-        return "Unknown"
+    label: str = "Unknown"
+    """The short name a console and a trace heading give this block."""
 
-    @property
-    def display_body(self) -> str:
+    markdown_fence: str | None = None
+    """The code-fence language a markdown trace wraps the body in, if any."""
+
+    spoken_text: str | None = None
+    """Prose the assistant voiced, if this block voices any."""
+
+    opens_pairing: str | None = None
+    """The id this block opens, which a later block closes."""
+
+    closes_pairing: str | None = None
+    """The id this block closes, opened by an earlier block."""
+
+    tool_call_name: str | None = None
+    """The tool this block invokes, if it invokes one."""
+
+    result_payload: str | Sequence[object] | None = None
+    """Raw tool output this block carries, for a caller that reformats it."""
+
+
+class LupContentBlock(ABC):
+    """One block of a message, answering every question about itself.
+
+    Three projections and no state: how a surface should show it, its content
+    as one readable string, and the one line a stream log gives it. A new kind
+    of block is one class rather than an edit to every walk that would have to
+    notice it.
+    """
+
+    @abstractmethod
+    def display(self) -> BlockDisplay:
+        """How a surface shows this block, for a caller not knowing its kind."""
+
+    @abstractmethod
+    def body(self) -> str:
         """This block's content as one readable string."""
-        return str(self)
 
-    @property
-    def markdown_fence(self) -> str | None:
-        """The code-fence language a markdown trace wraps the body in, if any."""
-        return None
-
-    @property
-    def spoken_text(self) -> str | None:
-        """Prose the assistant voiced, if this block voices any."""
-        return None
-
-    @property
-    def opens_pairing(self) -> str | None:
-        """The id this block opens, which a later block closes."""
-        return None
-
-    @property
-    def closes_pairing(self) -> str | None:
-        """The id this block closes, opened by an earlier block."""
-        return None
-
-    @property
-    def tool_call_name(self) -> str | None:
-        """The tool this block invokes, if it invokes one."""
-        return None
-
-    @property
-    def result_payload(self) -> str | Sequence[object] | None:
-        """Raw tool output this block carries, for a caller that reformats it."""
-        return None
-
+    @abstractmethod
     def log_summary(self, body: str) -> str:
         """One stream-log line for this block, given its rendered `body`."""
-        return f"{self.display_label.upper()}: {body}"
 
 
 class LupTextBlock(LupContentBlock):
     """Text content from the assistant."""
 
-    type: Literal["text"] = "text"
-    text: str
+    def __init__(self, text: str) -> None:
+        self.text = text
 
-    @property
-    def display_emoji(self) -> str:
-        return "💬"
+    def display(self) -> BlockDisplay:
+        return BlockDisplay(emoji="💬", label="Response", spoken_text=self.text)
 
-    @property
-    def display_label(self) -> str:
-        return "Response"
-
-    @property
-    def display_body(self) -> str:
+    def body(self) -> str:
         return self.text
 
-    @property
-    def spoken_text(self) -> str | None:
-        return self.text
+    def log_summary(self, body: str) -> str:
+        return f"RESPONSE: {body}"
 
 
 class LupThinkingBlock(LupContentBlock):
     """Extended thinking / reasoning content."""
 
-    type: Literal["thinking"] = "thinking"
-    thinking: str = ""
-    redacted: bool = False
+    def __init__(self, thinking: str = "", redacted: bool = False) -> None:
+        self.thinking = thinking
+        self.redacted = redacted
 
-    @property
-    def display_emoji(self) -> str:
-        return "💭"
+    def display(self) -> BlockDisplay:
+        return BlockDisplay(emoji="💭", label="Thinking")
 
-    @property
-    def display_label(self) -> str:
-        return "Thinking"
-
-    @property
-    def display_body(self) -> str:
+    def body(self) -> str:
         return "[redacted]" if self.redacted else self.thinking
+
+    def log_summary(self, body: str) -> str:
+        return f"THINKING: {body}"
 
 
 class LupToolUseBlock(LupContentBlock):
     """A tool invocation by the agent."""
 
-    type: Literal["tool_use"] = "tool_use"
-    id: str
-    name: str
-    input: JsonObject | None = None
+    def __init__(self, id: str, name: str, input: JsonObject | None = None) -> None:
+        self.id = id
+        self.name = name
+        self.input = input
 
-    @property
-    def display_emoji(self) -> str:
-        return "🔧"
+    def display(self) -> BlockDisplay:
+        return BlockDisplay(
+            emoji="🔧",
+            label=f"Tool: {self.name}",
+            markdown_fence="json",
+            opens_pairing=self.id,
+            tool_call_name=self.name,
+        )
 
-    @property
-    def display_label(self) -> str:
-        return f"Tool: {self.name}"
-
-    @property
-    def display_body(self) -> str:
+    def body(self) -> str:
         return json.dumps(self.input, indent=2) if self.input else ""
-
-    @property
-    def markdown_fence(self) -> str | None:
-        return "json"
-
-    @property
-    def opens_pairing(self) -> str | None:
-        return self.id
-
-    @property
-    def tool_call_name(self) -> str | None:
-        return self.name
 
     def log_summary(self, body: str) -> str:
         arguments = json.dumps(self.input) if self.input else ""
@@ -285,48 +259,26 @@ class LupToolUseBlock(LupContentBlock):
 class LupToolResultBlock(LupContentBlock):
     """Result returned from a tool invocation."""
 
-    type: Literal["tool_result"] = "tool_result"
-    tool_use_id: str
-    content: str | Sequence[object] | None = None
+    def __init__(
+        self, tool_use_id: str, content: str | Sequence[object] | None = None
+    ) -> None:
+        self.tool_use_id = tool_use_id
+        self.content = content
 
-    @property
-    def display_emoji(self) -> str:
-        return "📋"
+    def display(self) -> BlockDisplay:
+        return BlockDisplay(
+            emoji="📋",
+            label="Result",
+            markdown_fence="",
+            closes_pairing=self.tool_use_id,
+            result_payload=self.content,
+        )
 
-    @property
-    def display_label(self) -> str:
-        return "Result"
-
-    @property
-    def display_body(self) -> str:
+    def body(self) -> str:
         return normalize_content(self.content)
-
-    @property
-    def markdown_fence(self) -> str | None:
-        return ""
-
-    @property
-    def closes_pairing(self) -> str | None:
-        return self.tool_use_id
-
-    @property
-    def result_payload(self) -> str | Sequence[object] | None:
-        return self.content
 
     def log_summary(self, body: str) -> str:
         return f"TOOL_RESULT [{self.tool_use_id}]: {body}"
-
-
-type MessageContentBlock = Annotated[
-    LupTextBlock | LupThinkingBlock | LupToolUseBlock | LupToolResultBlock,
-    Discriminator("type"),
-]
-"""One block as a message *field* validates it: the closed set, discriminated.
-
-Annotations that only read a block name :class:`LupContentBlock`, the base. A
-pydantic field must name this alias instead — validating against the base
-alone would rebuild every block as a base instance and drop its payload.
-"""
 
 
 # ---------------------------------------------------------------------------
@@ -357,7 +309,7 @@ class SubagentSpec(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-class LupMessage(BaseModel):
+class LupMessage(BaseModel, arbitrary_types_allowed=True):
     """One transcript message, answering every question about itself.
 
     A walk that wants the blocks of a message asks :attr:`content_blocks`
@@ -378,7 +330,7 @@ class LupAssistantMessage(LupMessage):
     """Message from the assistant containing content blocks."""
 
     role: Literal["assistant"] = "assistant"
-    content: list[MessageContentBlock]
+    content: list[LupContentBlock]
 
     @model_validator(mode="after")
     def blocks_are_its_content(self) -> "LupAssistantMessage":
@@ -391,7 +343,7 @@ class LupUserMessage(LupMessage):
     """Message from the user or tool results."""
 
     role: Literal["user"] = "user"
-    content: list[MessageContentBlock] | str
+    content: list[LupContentBlock] | str
 
     @model_validator(mode="after")
     def blocks_are_its_content(self) -> "LupUserMessage":

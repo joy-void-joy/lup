@@ -101,11 +101,12 @@ def resolve_color_tag(
     palette, stored by the id it opened; the block that closes that pairing
     pops the same color back. A block that does neither has no colored tag.
     """
-    if (opened := block.opens_pairing) is not None:
+    shown = block.display()
+    if (opened := shown.opens_pairing) is not None:
         color = next(colors.cycle)
         colors.by_id[opened] = color
         return ColorTag(id=opened, color=color)
-    if (closed := block.closes_pairing) is not None:
+    if (closed := shown.closes_pairing) is not None:
         return ColorTag(id=closed, color=colors.by_id.pop(closed, "default"))
     return None
 
@@ -129,7 +130,7 @@ def print_block(
     info = extract_block_info(block)
     tag = resolve_color_tag(block, colors or DEFAULT_COLORS)
 
-    payload = block.result_payload
+    payload = block.display().result_payload
     display_content = info.content if payload is None else format_tool_result(payload)
 
     if tag:
