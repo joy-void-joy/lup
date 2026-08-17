@@ -85,7 +85,7 @@ def create_run_subagent_tool(
         text = "\n\n".join(
             text
             for block in response.blocks
-            if (text := block.text_payload) is not None
+            if (text := block.payload().text) is not None
         )
         return RunSubagentOutput(subagent=spec.name, result=text)
 

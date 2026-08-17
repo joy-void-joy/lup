@@ -71,7 +71,7 @@ async def critique(params: CritiqueInput) -> CritiqueOutput:
         ),
     )
     text = "\n\n".join(
-        text for block in result.blocks if (text := block.text_payload) is not None
+        text for block in result.blocks if (text := block.payload().text) is not None
     )
     limit = 2000
     # Augment: the tool, not the nested agent, bounds and shapes the output.

@@ -219,7 +219,7 @@ async def extract_answer(content: str, question: str) -> str:
     )
     result = await query(factory, f"Question: {question}\n\nDocument:\n{content}")
     text = "\n\n".join(
-        text for block in result.blocks if (text := block.text_payload) is not None
+        text for block in result.blocks if (text := block.payload().text) is not None
     )
     return text or "(no answer extracted)"
 

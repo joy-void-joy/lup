@@ -107,26 +107,24 @@ so in memory they are objects that answer for themselves.
 """
 
 
-class TurnBlock(ABC):
-    """One completed block of a turn, answering every question about itself.
+class ToolRefusal(BaseModel, frozen=True):
+    """One tool call that returned an error instead of a result."""
 
-    Whatever a caller needs to know about a block is declared here and
-    answered — or declined — by the block, so a new kind of block is one class
-    rather than an edit to every walk that would have to notice it. The
-    declining answers are what make omission safe: a caller joining
-    ``text_payload`` reaches every kind that carries prose, including kinds
-    written long after the caller was.
+    call_id: str
+    detail: str
 
-    What a block *carries* is data, and stands here as an attribute a kind
-    overrides by assigning it; only what has to be computed from that data is
-    a member. That split is what keeps the seam at a single abstract method,
-    and it is why no kind carries a discriminator any more: nothing validates
-    a block into existence, so there was never anything to discriminate — the
-    alias existed because a pydantic model held these, not because a wire
-    format did.
+
+class BlockPayload(BaseModel, frozen=True):
+    """What a block carries, as every walk across blocks asks for it.
+
+    One shape rather than a field per kind, because these are the questions
+    asked of a block whose kind the caller does not know: a walk joining prose
+    reaches every kind that carries any, including kinds written long after it
+    was. A kind that carries none of something leaves the default, which is
+    what makes omission safe.
     """
 
-    text_payload: str | None = None
+    text: str | None = None
     """Prose this block carries verbatim, if it carries any."""
 
     tool_call_name: str | None = None
@@ -138,8 +136,28 @@ class TurnBlock(ABC):
     invoked_call_id: str | None = None
     """The id of the call this block makes, if it makes one."""
 
-    refusal: "ToolRefusal | None" = None
+    refusal: ToolRefusal | None = None
     """The refused call this block reports, if it reports one."""
+
+
+class TurnBlock(ABC):
+    """One completed block of a turn, answering every question about itself.
+
+    Three projections, and no state: what the block carries, how the telemetry
+    vocabulary spells it, and how a turn document writes it. A kind holds its
+    own fields and answers with one of these, so a new kind is one class rather
+    than an edit to every walk that would have to notice it.
+
+    Nothing here carries a discriminator, because nothing validates a block
+    into existence — the alias that used to sit beside these existed so a
+    pydantic field would not flatten every block to its base, not because a
+    wire format needed one. Where a wire format does, :data:`BlockRecord` says
+    so in its own right.
+    """
+
+    @abstractmethod
+    def payload(self) -> BlockPayload:
+        """What this block carries, for a caller that does not know its kind."""
 
     @abstractmethod
     def telemetry_block(self) -> LupContentBlock:
@@ -174,7 +192,9 @@ class TurnTextBlock(TurnBlock):
 
     def __init__(self, text: str) -> None:
         self.text = text
-        self.text_payload = text
+
+    def payload(self) -> BlockPayload:
+        return BlockPayload(text=self.text)
 
     def telemetry_block(self) -> LupContentBlock:
         return LupTextBlock(text=self.text)
@@ -190,6 +210,9 @@ class TurnThinkingBlock(TurnBlock):
         self.thinking = thinking
         self.redacted = redacted
 
+    def payload(self) -> BlockPayload:
+        return BlockPayload()
+
     def telemetry_block(self) -> LupContentBlock:
         return LupThinkingBlock(thinking=self.thinking, redacted=self.redacted)
 
@@ -204,9 +227,13 @@ class TurnToolCallBlock(TurnBlock):
         self.id = id
         self.name = name
         self.arguments: JsonObject = arguments or {}
-        self.tool_call_name = name
-        self.tool_arguments = self.arguments
-        self.invoked_call_id = id
+
+    def payload(self) -> BlockPayload:
+        return BlockPayload(
+            tool_call_name=self.name,
+            tool_arguments=self.arguments,
+            invoked_call_id=self.id,
+        )
 
     def telemetry_block(self) -> LupContentBlock:
         return LupToolUseBlock(id=self.id, name=self.name, input=self.arguments)
@@ -227,13 +254,6 @@ class TurnToolCallBlock(TurnBlock):
         return requested if isinstance(requested, str) else unnamed
 
 
-class ToolRefusal(BaseModel, frozen=True):
-    """One tool call that returned an error instead of a result."""
-
-    call_id: str
-    detail: str
-
-
 class TurnToolResultBlock(TurnBlock):
     """One completed tool result."""
 
@@ -241,8 +261,12 @@ class TurnToolResultBlock(TurnBlock):
         self.tool_call_id = tool_call_id
         self.content = content
         self.is_error = is_error
-        self.refusal = (
-            ToolRefusal(call_id=tool_call_id, detail=content) if is_error else None
+
+    def payload(self) -> BlockPayload:
+        return BlockPayload(
+            refusal=ToolRefusal(call_id=self.tool_call_id, detail=self.content)
+            if self.is_error
+            else None
         )
 
     def telemetry_block(self) -> LupContentBlock:
