@@ -5,6 +5,7 @@
 import lup.harness.models as models
 from lup_template.devtools.harness.content.template_sections import (
     CLAUDE_POLICY_SCOPE,
+    CODEINTEL_TOOL_ROSTER,
     DIRECTORY_STRUCTURE_THROUGH_TOOLS,
     INNER_AGENT_BULLET,
     PATTERN_MENU_TAIL_THROUGH_WORKTREE_STEP,
@@ -80,30 +81,12 @@ That rooting is the point. A language server the runtime starts is rooted once, 
 
 The `codeintel` tools answer navigation questions the same way, per question rather than per session. **Use them actively** -- they resolve imports and aliases, which grep cannot.
 
-**Navigation (use before editing unfamiliar code):**
-
-- **find_definition** -- Where a symbol is defined. Use instead of grepping for `def foo` or `class Foo`.
-- **find_references** -- Every use of a symbol. Use instead of grepping for a name.
-- **hover** -- The inferred type and documentation at a position.
-- **list_symbols** -- Every symbol a file declares. Use instead of grepping for `def ` or `class `.
-
-**Refactoring:**
-
-- **rename_symbol** -- Plan a workspace-wide rename. **Always prefer this over `Edit` with `replace_all`** for identifier renames -- it understands scope and won't rename unrelated identifiers. It reports the edits; you apply them.
-
-A relative path resolves against the checkout being edited, which the same hook publishes. Pass an absolute path when you mean a file somewhere else.
-
-**When to use LSP vs grep/Edit:**
-
-| Task                             | Use LSP            | Use grep/Edit    |
-| -------------------------------- | ------------------ | ---------------- |
-| Find where a function is defined | `go-to-definition` |                  |
-| Find all callers of a function   | `find-references`  |                  |
-| Rename a variable/function/class | `rename-symbol`    |                  |
-| Search for a string literal      |                    | `Bash` + `grep`  |
-| Search across non-Python files   |                    | `Bash` + `grep`  |
-| Change logic within a function   |                    | `Edit`           |
-| Add new code                     |                    | `Edit` / `Write` |
+"""
+        ),
+        *CODEINTEL_TOOL_ROSTER,
+        models.TextPart(
+            text=r"""
+A relative path resolves against the checkout being edited, which the same hook publishes. Pass an absolute path when you mean a file somewhere else. Use grep for literal text and non-Python files; use the edit tools for changes after resolving the relevant symbols.
 
 """
         ),

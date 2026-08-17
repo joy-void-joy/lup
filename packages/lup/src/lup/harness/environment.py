@@ -7,7 +7,8 @@ such command fail fast with a readable error: ssh refuses to prompt (keys
 already loaded in ssh-agent keep working), git never opens an editor or pager,
 and gh and keyring lookups stay non-interactive. The devtools launch and
 resolver flows merge these defaults beneath the inherited environment at
-every agent spawn point, so explicit caller values always win.
+every agent spawn point. Explicit caller values win except ``VIRTUAL_ENV``:
+the child project must select its own environment from its working directory.
 """
 
 from collections.abc import Mapping
@@ -32,5 +33,6 @@ NON_INTERACTIVE_SHELL_ENV: EnvVars = {
 def non_interactive_environment(
     base: Mapping[str, str],  # lup: ignore[dict-str-payload] — open env-var map
 ) -> EnvVars:
-    """Merge the non-interactive defaults beneath an existing environment."""
-    return {**NON_INTERACTIVE_SHELL_ENV, **base}
+    """Merge shell defaults without binding a session to its caller's venv."""
+    merged = {**NON_INTERACTIVE_SHELL_ENV, **base}
+    return {name: value for name, value in merged.items() if name != "VIRTUAL_ENV"}

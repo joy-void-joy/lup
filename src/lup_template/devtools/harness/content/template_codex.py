@@ -5,6 +5,7 @@
 import lup.harness.models as models
 from lup_template.devtools.harness.content.template_sections import (
     CODEX_POLICY_SCOPE,
+    CODEINTEL_TOOL_ROSTER,
     DIRECTORY_STRUCTURE_THROUGH_TOOLS,
     INNER_AGENT_BULLET,
     PATTERN_MENU_TAIL_THROUGH_WORKTREE_STEP,
@@ -79,6 +80,8 @@ The `codeintel` tools do answer definitions, usages, and types, resolving import
 
 """
         ),
+        *CODEINTEL_TOOL_ROSTER,
+        models.TextPart(text="\n"),
         *TOOLING_INTRO,
         models.TextPart(
             text=r"""`lup-devtools harness codex` regenerates and verifies the Codex artifacts,

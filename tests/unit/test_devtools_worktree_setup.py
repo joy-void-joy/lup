@@ -9,6 +9,7 @@ that sends an agent off diagnosing phantom errors in correct code.
 """
 
 from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
 import sh
@@ -69,6 +70,27 @@ def interrupted_creation(repo: Path, tree_dir: Path, name: str) -> Path:
     """
     repo_git(repo)("worktree", "add", str(tree_dir / name), "-b", name)
     return tree_dir / name
+
+
+def test_dependency_sync_matches_ci_without_inheriting_the_source_venv(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    command = Mock()
+    invocation = Mock()
+    command.return_value = invocation
+    monkeypatch.setattr(sh, "Command", command)
+
+    worktree.sync_dependencies(tmp_path)
+
+    command.assert_called_once_with("env")
+    invocation.assert_called_once_with(
+        "-u",
+        "VIRTUAL_ENV",
+        "uv",
+        "sync",
+        "--all-extras",
+        _cwd=str(tmp_path),
+    )
 
 
 @pytest.mark.usefixtures("tree_dir")

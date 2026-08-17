@@ -697,30 +697,15 @@ That rooting is the point. A language server the runtime starts is rooted once, 
 
 The `codeintel` tools answer navigation questions the same way, per question rather than per session. **Use them actively** -- they resolve imports and aliases, which grep cannot.
 
-**Navigation (use before editing unfamiliar code):**
+| Tool | Contract |
+| --- | --- |
+| `find_definition` | Find where a symbol is defined. Use instead of grepping for `def name` or `class name`: this resolves imports and aliases, so it finds the real declaration rather than a line that looks like one. |
+| `find_references` | Find every use of a symbol across the workspace. Use instead of grepping for a name: this excludes look-alikes in other scopes and includes uses reached through an alias or a re-export. |
+| `hover` | Read a symbol&#x27;s inferred type and documentation. Use before assuming what a value is: the checker knows the type that was resolved. |
+| `list_symbols` | List every symbol a file declares, with its line. Use instead of grepping for `def ` or `class ` to learn a file&#x27;s shape. |
+| `rename_symbol` | Plan a workspace-wide rename of the symbol at a position. Reports the files and edit counts without writing anything. Always prefer this over a find-and-replace, which cannot tell one scope from another. |
 
-- **find_definition** -- Where a symbol is defined. Use instead of grepping for `def foo` or `class Foo`.
-- **find_references** -- Every use of a symbol. Use instead of grepping for a name.
-- **hover** -- The inferred type and documentation at a position.
-- **list_symbols** -- Every symbol a file declares. Use instead of grepping for `def ` or `class `.
-
-**Refactoring:**
-
-- **rename_symbol** -- Plan a workspace-wide rename. **Always prefer this over `Edit` with `replace_all`** for identifier renames -- it understands scope and won't rename unrelated identifiers. It reports the edits; you apply them.
-
-A relative path resolves against the checkout being edited, which the same hook publishes. Pass an absolute path when you mean a file somewhere else.
-
-**When to use LSP vs grep/Edit:**
-
-| Task                             | Use LSP            | Use grep/Edit    |
-| -------------------------------- | ------------------ | ---------------- |
-| Find where a function is defined | `go-to-definition` |                  |
-| Find all callers of a function   | `find-references`  |                  |
-| Rename a variable/function/class | `rename-symbol`    |                  |
-| Search for a string literal      |                    | `Bash` + `grep`  |
-| Search across non-Python files   |                    | `Bash` + `grep`  |
-| Change logic within a function   |                    | `Edit`           |
-| Add new code                     |                    | `Edit` / `Write` |
+A relative path resolves against the checkout being edited, which the same hook publishes. Pass an absolute path when you mean a file somewhere else. Use grep for literal text and non-Python files; use the edit tools for changes after resolving the relevant symbols.
 
 ---
 

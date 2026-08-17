@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "63bfeccc67da9f1c2f4c33f8976588f1c2321a9e04eb3b7c22fae2183992593d",
+  "source_digest": "caeffa1cfad4268d48d109f95dcd56e42d5e5f356d2424e0dd21ad7f3448a1b2",
   "target_requirements": [
     "codex-cli>=0.144"
   ],
@@ -58,7 +58,7 @@
     {
       "path": ".codex/plugins/lup/TEMPLATE_AGENTS.md",
       "category": "generated",
-      "sha256": "04c41dcae7e6f64ed4a11f80e666f8b7cf053acdec26b3a1e70596312d41c3f2",
+      "sha256": "dca88c9bcbb33e5c0015fcf96f2a1db48b15104ce5991f5013385bf5ac9ce2cb",
       "semantic_id": "harness.template-guidance",
       "executable": false
     },
@@ -170,14 +170,14 @@
     {
       "path": ".codex/plugins/lup/hooks/runtime/policy_data.py",
       "category": "generated",
-      "sha256": "42b6eeb2133ef36053a6e0e536878cf5b4366eae4590f9d1ec5a8e7effdafd7c",
+      "sha256": "4be5eed1da84a27c72d5e6fc5f8d35b5d323160aca907b06c09346973e77cb5f",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
     {
       "path": ".codex/plugins/lup/hooks/scripts/policy.py",
       "category": "generated",
-      "sha256": "ed0ea927da587461ec63afa0034fefe983ca88c19088b4130d38ad8a135bfab0",
+      "sha256": "8802c7d491e06df7d1b00f19a62db368491132667746fa5c8f08888a648e599a",
       "semantic_id": "hooks.lup-policy",
       "executable": true
     },

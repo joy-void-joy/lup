@@ -27,6 +27,15 @@ def test_base_overrides_defaults() -> None:
     assert merged["GIT_EDITOR"] == "true"
 
 
+def test_an_inherited_virtual_environment_does_not_bind_the_child_project() -> None:
+    merged = non_interactive_environment(
+        {"HOME": "/home/user", "VIRTUAL_ENV": "/source/.venv"}
+    )
+
+    assert merged["HOME"] == "/home/user"
+    assert "VIRTUAL_ENV" not in merged
+
+
 def test_merge_does_not_mutate_base() -> None:
     base = {"HOME": "/home/user"}
     merged = non_interactive_environment(base)

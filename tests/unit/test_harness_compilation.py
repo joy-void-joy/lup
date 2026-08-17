@@ -16,6 +16,7 @@ import typer
 from claude_agent_sdk.types import SandboxNetworkConfig, SandboxSettings
 from pydantic import BaseModel, Field
 
+from lup.codeintel.tools import CODEINTEL_TOOL_DECLARATIONS
 from lup.policy.identity import AGENT_IDENTITY_ENV
 from lup.types import JsonObject
 from lup.adapters.claude.harness import CLAUDE_DISPATCHER, ClaudeSpellings
@@ -74,6 +75,7 @@ from lup.harness.models import (
     SkillPattern,
     SpellingExample,
     TextPart,
+    ToolRoster,
     document_byte_size,
 )
 from lup.harness.contracts import PromptRenderer
@@ -261,6 +263,13 @@ def test_catalog_has_one_portable_skill_per_baseline_command() -> None:
     assert "$lup:" not in encoded
 
 
+def test_project_tests_follow_the_ordinary_edit_policy() -> None:
+    hooks = portable_harness().plugins[0].hooks
+
+    assert hooks is not None
+    assert hooks.acceptance_guard is None
+
+
 def test_claude_tree_renders_every_typed_support_document() -> None:
     paths = {
         artifact.path for artifact in claude_target(Path.cwd()).recipe.desired.artifacts
@@ -372,6 +381,13 @@ def test_template_flavors_share_sections_and_differ_natively() -> None:
     assert "EnterWorktree" in claude_render and "ExitWorktree" in claude_render
     assert "EnterWorktree" not in codex_render
     assert "ExitWorktree" not in codex_render
+
+
+def test_template_flavors_render_the_declared_codeintel_tools() -> None:
+    expected = ToolRoster(tools=list(CODEINTEL_TOOL_DECLARATIONS)).text_payload
+
+    assert expected in claude_prompt_renderer().render(TEMPLATE_CLAUDE)
+    assert expected in codex_prompt_renderer().render(TEMPLATE_CODEX)
 
 
 def test_claude_recipe_overrides_legacy_hook_entry_with_hermetic_dispatcher() -> None:
@@ -505,6 +521,10 @@ PART_CONTRACT: dict[str, PartExpectation] = {
         ),
         diverges=False,
     ),
+    "ToolRoster": PartExpectation(
+        part=ToolRoster(tools=list(CODEINTEL_TOOL_DECLARATIONS)),
+        diverges=False,
+    ),
     "SkillInvocation": PartExpectation(
         part=SkillInvocation(plugin="lup", skill="merge"), diverges=True
     ),
@@ -577,7 +597,7 @@ class PartQuestion(BaseModel, frozen=True):
 PART_QUESTIONS: dict[str, PartQuestion] = {
     "text_payload": PartQuestion(
         ask=lambda part: part.text_payload is not None,
-        answered_by=["TextPart", "SpellingExample", "MarkdownTable"],
+        answered_by=["TextPart", "SpellingExample", "MarkdownTable", "ToolRoster"],
     ),
     "invocation": PartQuestion(
         ask=lambda part: part.invocation is not None, answered_by=["SkillInvocation"]
@@ -1422,8 +1442,12 @@ def test_executable_mode_drift_is_not_treated_as_generated(tmp_path: Path) -> No
     assert proposal.writes[0].artifact.executable
 
 
-def codex_hook_result(body: JsonObject, sandboxed: bool) -> sh.RunningCommand:
+def codex_hook_result(
+    body: JsonObject, sandboxed: bool, plugin_data: Path | None = None
+) -> sh.RunningCommand:
     environment = {**os.environ, "LUP_SANDBOX_ACTIVE": "1" if sandboxed else "0"}
+    if plugin_data is not None:
+        environment["PLUGIN_DATA"] = str(plugin_data)
     return sh.Command(
         str(Path(".codex/plugins/lup/hooks/scripts/policy.py").resolve())
     )(_in=json.dumps(body), _env=environment, _ok_code=[0, 2], _return_cmd=True)
@@ -1521,6 +1545,46 @@ def test_generated_codex_permission_request_preserves_human_approval() -> None:
     assert isinstance(result, sh.RunningCommand)
     assert result.exit_code == 0
     assert result.stdout == b""
+
+
+def test_generated_codex_pretool_consumes_only_its_correlated_approval(
+    tmp_path: Path,
+) -> None:
+    command = "gh issue close 180"
+    common: JsonObject = {
+        "session_id": "session-one",
+        "turn_id": "turn-one",
+        "cwd": str(tmp_path),
+        "tool_name": "Bash",
+    }
+    permission: JsonObject = {
+        **common,
+        "hook_event_name": "PermissionRequest",
+        "tool_input": {
+            "command": command,
+            "sandbox_permissions": "require_escalated",
+        },
+    }
+    requested = codex_hook_result(permission, sandboxed=True, plugin_data=tmp_path)
+    assert requested.exit_code == 0
+    assert requested.stdout == b""
+    requested_again = codex_hook_result(permission, True, tmp_path)
+    assert requested_again.exit_code == 0
+
+    pretool: JsonObject = {
+        **common,
+        "hook_event_name": "PreToolUse",
+        "tool_use_id": "tool-one",
+        "tool_input": {"command": command},
+    }
+    mismatched: JsonObject = {
+        **pretool,
+        "tool_input": {"command": command.replace("180", "181")},
+    }
+    assert codex_hook_result(mismatched, True, tmp_path).exit_code == 2
+    assert codex_hook_result(pretool, True, tmp_path).exit_code == 0
+    assert codex_hook_result(pretool, True, tmp_path).exit_code == 0
+    assert codex_hook_result(pretool, True, tmp_path).exit_code == 2
 
 
 def test_generated_codex_permission_request_denies_unapproved_code() -> None:

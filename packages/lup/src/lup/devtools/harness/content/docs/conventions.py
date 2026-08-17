@@ -9,6 +9,7 @@ every turn.
 """
 
 import lup.harness.models as models
+from lup.codeintel.tools import rendered_tool_declarations
 
 DOCUMENT = models.PromptDocument(
     source=__name__,
@@ -103,14 +104,8 @@ a linting convention, not a privacy one.
 A name has a definition, a scope, and a set of references, and only a resolver
 knows them:
 
-| Tool | Answers |
-| --- | --- |
-| `find_definition` | Where a symbol is declared, through the import or alias that names it |
-| `find_references` | Every use across the workspace, excluding look-alikes in other scopes |
-| `hover` | The type the checker actually resolved, before you assume one |
-| `list_symbols` | Every symbol a file declares, instead of grepping for `def ` or `class ` |
-| `rename_symbol` | The files a workspace-wide rename would touch, reported without writing any of them |
 """
         ),
+        models.ToolRoster(tools=rendered_tool_declarations()),
     ],
 )

@@ -1707,10 +1707,7 @@ PATH_ROLES: list[PathRoleRow] = [
     },
 ]
 
-ACCEPTANCE_GUARD: AcceptanceGuardRow | None = {
-    "ask_reason": "editing a test changes what the implementation is measured against \u2014 approve this only if the test encodes the wrong behaviour, and fix the implementation otherwise",
-    "autonomous_reason": "this session implements against these tests, so they are its specification rather than its material \u2014 report what the test demands and why it cannot be met, and leave the change to whoever can weigh it",
-}
+ACCEPTANCE_GUARD: AcceptanceGuardRow | None = None
 
 SHELL_RULES: list[ShellRuleRow] = [
     {

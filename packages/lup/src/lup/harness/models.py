@@ -24,7 +24,8 @@ from pydantic import (
 
 from lup.codescan.common import RuleSelection
 from lup.harness.banner import ArtifactBanner, GeneratedBanner
-from lup.markdown import TableCell, escaped
+from lup.markdown import CodeCell, PlainCell, TableCell, escaped
+from lup.mcp import ToolDeclaration
 from lup.policy.kernel.rows import AcceptanceGuardRow, PathRoleName
 from lup.policy.models import PolicyId, UrlPathPrefix
 from lup.policy.refused_tools import RefusedTool
@@ -207,6 +208,26 @@ class MarkdownTable(SemanticPart, frozen=True):
             *[[cell.render() for cell in row] for row in self.rows],
         ]
         return "".join(f"| {' | '.join(line)} |\n" for line in lines)
+
+
+class ToolRoster(SemanticPart, frozen=True):
+    """Agent-facing tool metadata rendered from registration declarations."""
+
+    type: Literal["tool_roster"] = "tool_roster"
+    tools: list[ToolDeclaration]
+
+    def spell(self, renderer: "PromptRenderer") -> str:
+        return self.text_payload
+
+    @property
+    def text_payload(self) -> str:
+        return MarkdownTable(
+            headers=["Tool", "Contract"],
+            rows=[
+                [CodeCell(text=tool.name), PlainCell(text=tool.description)]
+                for tool in self.tools
+            ],
+        ).text_payload
 
 
 class InvocationArgument(BaseModel, frozen=True):
@@ -427,6 +448,7 @@ type PromptPart = Annotated[
     TextPart
     | SpellingExample
     | MarkdownTable
+    | ToolRoster
     | SkillInvocation
     | NativePath
     | PluginPath
