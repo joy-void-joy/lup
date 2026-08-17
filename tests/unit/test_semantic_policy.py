@@ -131,11 +131,11 @@ class EditDecisionCase(BaseModel, frozen=True):
 # The roles this repository declares, mirrored so the fixtures judge the same
 # vocabulary the generated runtime is rendered with.
 FIXTURE_PATH_ROLES = [
-    PathRoleRow(root="tests", role="test"),
-    PathRoleRow(root="tmp", role="scratch"),
-    PathRoleRow(root=".venv", role="scratch"),
-    PathRoleRow(root="build", role="scratch"),
-    PathRoleRow(root="node_modules", role="scratch"),
+    PathRoleRow(root="tests", role="test", kind="subtree"),
+    PathRoleRow(root="tmp", role="scratch", kind="contains_part"),
+    PathRoleRow(root=".venv", role="scratch", kind="subtree"),
+    PathRoleRow(root="build", role="scratch", kind="subtree"),
+    PathRoleRow(root="node_modules", role="scratch", kind="subtree"),
 ]
 
 FIXTURE_PATH_RULES = declared_path_rules(declared_hook_set())
@@ -313,6 +313,11 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="rm -rf tmp/scratch", effect="allow"),
     DecisionCase(input="rm -f $TMPDIR/out.txt", effect="allow"),
     DecisionCase(input="rm /tmp/claude-1000/scratch/f", effect="allow"),
+    # The same holds for a package's own scratch directory: what makes one
+    # disposable is what it is, not which package opened it.
+    DecisionCase(input="rm -rf packages/lup/tmp/run", effect="allow"),
+    DecisionCase(input="mv src/app/tmp/a.md src/app/tmp/b.md", effect="allow"),
+    DecisionCase(input="rm packages/lup/tmpfile.py", effect="ask"),
     DecisionCase(input="rm tmp/x src/y", effect="ask"),
     DecisionCase(input="rm tmp/../src/x.py", effect="ask"),
     DecisionCase(input="rm --no-preserve-root -rf tmp", effect="ask"),
@@ -1007,6 +1012,47 @@ EDIT_POLICY_CASES = [
         before="value: str",
         after="value: Any",
         effect="allow",
+    ),
+    # A scratch directory is what it is wherever it sits, so a package's own
+    # `tmp/` carries the same verdicts the one at the top does.
+    EditDecisionCase(
+        path="packages/lup/tmp/probe.py",
+        before="value: str",
+        after="value: Any",
+        effect="allow",
+    ),
+    EditDecisionCase(
+        path="src/lup_template/tmp/briefing.md",
+        before=None,
+        after="# what is left",
+        effect="allow",
+        path_exists=False,
+    ),
+    # It matches the segment and not the characters, so a sibling that merely
+    # opens with the name is production and judged as production.
+    EditDecisionCase(
+        path="packages/lup/tmpfile.py",
+        before="value: str",
+        after="value: Any",
+        effect="deny",
+    ),
+    # A package marker declares a package by existing, so creating one asks
+    # nothing: the docstring is the whole content the conventions allow it.
+    EditDecisionCase(
+        path="src/lup_template/agent/thing/__init__.py",
+        before=None,
+        after='"""The thing package."""\n',
+        effect="allow",
+        path_exists=False,
+    ),
+    # The allowance is the empty content rather than the name. A package root
+    # declares its public API in the same file, and that is one to read.
+    EditDecisionCase(
+        path="packages/lup/src/lup/thing/__init__.py",
+        before=None,
+        after='"""Thing."""\n\nfrom lup.thing.core import Thing\n',
+        effect="ask",
+        path_exists=False,
     ),
     EditDecisionCase(
         path="tests/unit/test_thing.py",

@@ -1660,42 +1660,52 @@ PATH_ROLES: list[PathRoleRow] = [
     {
         "root": "tests",
         "role": "test",
+        "kind": "subtree",
     },
     {
         "root": "packages/lup/tests",
         "role": "test",
+        "kind": "subtree",
     },
     {
         "root": "tmp",
         "role": "scratch",
+        "kind": "contains_part",
     },
     {
         "root": ".venv",
         "role": "scratch",
+        "kind": "subtree",
     },
     {
         "root": ".ruff_cache",
         "role": "scratch",
+        "kind": "subtree",
     },
     {
         "root": ".pytest_cache",
         "role": "scratch",
+        "kind": "subtree",
     },
     {
         "root": "build",
         "role": "scratch",
+        "kind": "subtree",
     },
     {
         "root": "dist",
         "role": "scratch",
+        "kind": "subtree",
     },
     {
         "root": "htmlcov",
         "role": "scratch",
+        "kind": "subtree",
     },
     {
         "root": "node_modules",
         "role": "scratch",
+        "kind": "subtree",
     },
 ]
 

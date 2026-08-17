@@ -82,7 +82,8 @@ silent allow, and the fallback beneath every table denies.
 `$(...)` classifies recursively — the inner command joins the batch and its
 opaque result rides only argument-safe commands; command position, deep
 nesting, and backticks stay conservative. File writes (redirection, `rm`)
-auto-allow only into repo `tmp/` and the scratchpad (`$TMPDIR`,
+auto-allow only into a repo `tmp/` — the one at the top or any a package
+opened beside itself — and the scratchpad (`$TMPDIR`,
 `/tmp/claude-*`; reassigning `TMPDIR` asks); discards and fd dups strip;
 heredoc-fed writes deny toward Edit/tmp scripts. Loops, conditionals, case
 arms, subshells, and brace groups classify recursively over frozen bindings —
@@ -114,7 +115,10 @@ three or fewer auto-allows. Imports, comments, whitespace, blank lines,
 docstrings, string literals, type annotations, and TypedDict/BaseModel bodies
 are not real lines. Pure deletions and single-line `replace_all` renames
 auto-allow outright; a multi-line `replace_all` falls through to the size
-gate, and a full-file write never auto-allows. The anti-pattern audit runs
+gate, and a full-file write asks for everything but a package marker — an
+`__init__.py` arriving empty or holding nothing but its docstring, where the
+question the gate exists to raise has no content to answer it. One carrying
+anything else is the module it became, and asks. The anti-pattern audit runs
 before any auto-allow, so keeping an edit small cannot outrun it.
 
 A project that declares an **acceptance guard** adds one gate ahead of all

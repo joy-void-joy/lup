@@ -691,7 +691,11 @@ class CodexHookRenderer(ArtifactRenderer[HookSet]):
                         ],
                         autonomous_agent_identities=[self.worker_identity],
                         path_roles=[
-                            PathRoleRow(root=role.root.as_posix(), role=role.role)
+                            PathRoleRow(
+                                root=role.root.as_posix(),
+                                role=role.role,
+                                kind=role.kind,
+                            )
                             for role in source.path_roles
                         ],
                         acceptance_guard=guard.erased()
