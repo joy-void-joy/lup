@@ -1324,7 +1324,9 @@ def test_equivalent_multi_file_native_edits_decode_identically() -> None:
         )
     )
 
-    assert claude.tool == codex.tool == EditBatch(changes=changes)
+    assert isinstance(claude.tool, EditBatch)
+    assert isinstance(codex.tool, EditBatch)
+    assert claude.tool.changes == codex.tool.changes == changes
 
 
 def test_unknown_tools_remain_auditable_and_ask() -> None:
