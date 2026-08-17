@@ -53,6 +53,17 @@ from lup.codescan.project import (
     imported_names,
 )
 
+# lup: defer[when the tree answers this rule, or the branch retires it]: this
+# branch is NOT MERGEABLE while this rule ships unanswered. It judges the whole
+# tree and the tree has not been converted: 277 findings across 71 files, of
+# which 271 sit in files the integration branch has never touched — so they are
+# this rule's own backlog rather than drift. Worst first: model_config.py 22,
+# dev/worktree.py 18, resolver/models.py 15, gitlocks.py 14, realtime/relay.py
+# 11. Answering one is a design change per site (declare the operation on an
+# ABC, implement it on a concrete class holding the model), so a suppression
+# sweep would ship the rule green and inert, which is the one outcome worth
+# refusing. Either finish the conversion, or land the rule retired in this
+# repository's own RuleSelection with this note moved to that retirement.
 # lup: ignore[constant-declaration] — the rule's own identity, what a typed
 # directive and every deny message name it by
 RULE_ID = "model-method"

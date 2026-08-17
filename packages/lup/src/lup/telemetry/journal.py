@@ -591,6 +591,18 @@ class TurnRecorder:
                     session_id=session_id,
                     turn_id=turn_id,
                 )
+            # lup: defer[when this branch is adapted to its own block seam]:
+            # these reads are against the pre-refactor block API and are why
+            # this branch does not type-check — 21 pyright errors, all from
+            # this file, claude/runtime.py:259 naming the removed AnyTurnBlock,
+            # and test_trace_journal.py building events the old way. The
+            # hash-chained transcript landed on the integration branch while
+            # this branch was turning TurnBlock into an ABC, so nothing here is
+            # wrong on either side: `delegated_role` and `invoked_call_id` now
+            # answer off the block rather than off the record it emits, `type`
+            # is gone with the discriminated alias, and `model_dump` belongs to
+            # `record()`. Adapting is mechanical once the seam is settled, and
+            # settling it is what the note in codescan/behaviour.py gates.
             case BlockCompletedEvent(block=block):
                 role = block.delegated_role()
                 call_id = block.invoked_call_id
