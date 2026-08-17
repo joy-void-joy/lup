@@ -7077,18 +7077,26 @@ RUNNER_TARGETS: list[RunnerTargetRow] = [
     {
         "name": "pyright",
         "sandbox": "ambient",
+        "effect": "allow",
+        "reason": "",
     },
     {
         "name": "pytest",
         "sandbox": "ambient",
+        "effect": "allow",
+        "reason": "",
     },
     {
         "name": "ruff",
         "sandbox": "ambient",
+        "effect": "allow",
+        "reason": "",
     },
     {
         "name": "lup-devtools",
         "sandbox": "outside",
+        "effect": "allow",
+        "reason": "",
     },
 ]
 

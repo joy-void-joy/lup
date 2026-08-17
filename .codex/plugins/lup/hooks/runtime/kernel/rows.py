@@ -129,15 +129,23 @@ class RefusedToolRow(TypedDict):
 
 
 class RunnerTargetRow(TypedDict):
-    """One erased ``uv run <target>`` a project blesses, and where it runs.
+    """One erased ``uv run <target>`` a project judges, and how.
 
     ``sandbox`` is the same axis :class:`ShellRuleRow` carries, on the one
     surface a command row cannot reach: ``uv`` is parsed rather than matched,
-    so a target's placement has nowhere else to be declared.
+    so a target's placement has nowhere else to be declared. ``effect`` and
+    ``reason`` are there for the same reason — a target a project means to
+    refuse has nowhere else to say so, and leaving it off the table is not a
+    refusal but an absence of one: the verdict becomes no judgment, which a
+    confined session leaves to the runtime's own permissions. For a target
+    that spends money or runs for an hour, not refusing is precisely what
+    the declaration existed to prevent.
     """
 
     name: str
     sandbox: SandboxPlacement
+    effect: DecisionEffect
+    reason: str
 
 
 class ShellRuleRow(TypedDict):

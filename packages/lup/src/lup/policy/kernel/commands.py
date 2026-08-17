@@ -639,8 +639,11 @@ def decide_uv(
 ) -> KernelDecision:
     """Classify a uv invocation, gating dependency and inline-code forms.
 
-    A blessed target carries its own placement, so a toolchain that has to run
-    outside the sandbox says so once here rather than at each call site.
+    A declared target carries its own verdict, placement and reason, so a
+    toolchain that has to run outside the sandbox says so once here rather
+    than at each call site — and a target a project refuses is refused here
+    rather than falling through to no judgment, which is a different answer:
+    it leaves the verdict to the runtime rather than stating one.
     """
     subcommand = words[1]
     if subcommand in ("add", "sync"):
@@ -666,11 +669,13 @@ def decide_uv(
             return KernelDecision(
                 "ask", "uv run --with fetches and executes external code"
             )
-        blessed = next(
+        declared = next(
             (row for row in runner_targets if row["name"] == run_command), None
         )
-        if bare_target and blessed is not None:
-            return KernelDecision("allow", "", blessed["sandbox"])
+        if bare_target and declared is not None:
+            return KernelDecision(
+                declared["effect"], declared["reason"], declared["sandbox"]
+            )
         if bare_target and len(run_words) == 2 and run_words[1] == "--help":
             return KernelDecision("allow", "command help is read-only")
     return unjudged(f"uv {words[1]} is not classified")

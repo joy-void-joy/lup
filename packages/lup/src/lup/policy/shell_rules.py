@@ -153,6 +153,25 @@ class RunnerTargetRule(BaseModel, frozen=True):
     name: str
     sandbox: SandboxPlacement = "ambient"
 
+    effect: CommandEffect = "allow"
+    """What running this target costs, on the same vocabulary a command row uses.
+
+    Blessing is the common case and stays the default. The other effects are
+    here because a target a project means to refuse has nowhere else to say
+    so: leaving it undeclared is not a refusal but an absence of judgment,
+    which a confined session hands to the runtime's own permissions. For a
+    target that spends money, runs for an hour, or publishes something, not
+    refusing is precisely the outcome the declaration existed to prevent.
+    """
+
+    reason: str = ""
+    """What the agent is told, which for a refusal is the whole of its value.
+
+    A refused target usually has a right way to reach the same end — print
+    the command for a human to run, use the dry-run flag, go through the
+    review step — and the reason is the only channel that carries it.
+    """
+
 
 class ShellOperationRule(BaseModel, frozen=True):
     """One operation word under a subcommand — e.g. ``worktree remove``."""
@@ -240,9 +259,15 @@ class ShellCommandRule(BaseModel, frozen=True):
 
 
 def erase_runner_targets(targets: list[RunnerTargetRule]) -> list[RunnerTargetRow]:
-    """Flatten the blessed runner targets into the kernel's primitive rows."""
+    """Flatten the declared runner targets into the kernel's primitive rows."""
     return [
-        RunnerTargetRow(name=target.name, sandbox=target.sandbox) for target in targets
+        RunnerTargetRow(
+            name=target.name,
+            sandbox=target.sandbox,
+            effect=target.effect,
+            reason=target.reason,
+        )
+        for target in targets
     ]
 
 

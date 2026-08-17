@@ -55,6 +55,15 @@ defer, which hands the sandbox status over with the rest of the decision.
 Confinement wins a join, so one segment that must stay inside keeps the whole
 line inside. A runtime with no per-call sandbox renders the plain effect.
 
+`uv run <target>` is parsed rather than matched against that table, so its
+targets carry the same three answers on a table of their own: each declares
+its effect, its placement, and its reason. Blessing is the default and the
+common case, and a project that means to stop a target — one that spends
+money, runs for an hour, or publishes something — says so there. Leaving it
+off is not the same answer: an undeclared target reaches no judgment, which
+denies unsandboxed and defers under the boundary, where the policy has
+stated nothing and the runtime's own permissions decide.
+
 Both axes cascade down a table's nesting, and absence means one thing
 everywhere: a subcommand or operation omitting `effect` or `sandbox` inherits
 the level above it, and one stating either overrides what it inherited in

@@ -251,12 +251,14 @@ def refused_tool_rows_literal(rows: list[RefusedToolRow]) -> str:
 
 
 def runner_target_rows_literal(rows: list[RunnerTargetRow]) -> str:
-    """Render the blessed runner targets as primitive runtime rows."""
+    """Render the declared runner targets as primitive runtime rows."""
     return dict_rows_literal(
         [
             [
                 f'"name": {json.dumps(row["name"])}',
                 f'"sandbox": {json.dumps(row["sandbox"])}',
+                f'"effect": {json.dumps(row["effect"])}',
+                f'"reason": {json.dumps(row["reason"])}',
             ]
             for row in rows
         ]
