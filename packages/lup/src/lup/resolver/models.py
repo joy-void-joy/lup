@@ -171,9 +171,17 @@ read as still in flight, which is the safer way to be wrong — a new state
 counted as finished would inflate the fraction silently.
 
 Beside the lifecycle it partitions rather than beside its first reader,
-because the aggregate a watcher reads and the supervisor's own header now
-both count against it, and the two must not drift into separate answers to
-"how far along is this run".
+because the aggregate a watcher reads and the supervisor's own header both
+count against it, and the two must not drift into separate answers to "how
+far along is this run".
+
+Which is also why :meth:`ResolveState.tally` is the one place that takes it
+as an argument, rather than each reader taking its own: both of those
+readers get their figure from that fold, so a line redrawn there is a line
+redrawn for both, and there is no second copy to disagree with. The stamp
+:meth:`ResolveRun.progress_state` writes keeps this table because it records
+that a concern landed rather than interpreting how far along the run is —
+a ratchet a reader's preference has no business writing into.
 """
 
 
@@ -1291,8 +1299,21 @@ class ResolveState(BaseModel, frozen=True):
         """What a concern with no dependency in this run is cut from."""
         return self.base if self.base is not None else self.source
 
-    def tally(self) -> "RunTally":
-        """Fold this persisted state into the aggregate a watcher wants."""
+    def tally(
+        self, settled_statuses: tuple[ConcernStatus, ...] = SETTLED_STATUSES
+    ) -> "RunTally":
+        """Fold this persisted state into the aggregate a watcher wants.
+
+        Where the settled line is drawn, because this is the one fold both
+        readers of it pass through: the bar a run prints and the supervisor's
+        header each take their numerator from here, so a caller who counts
+        ``integrating`` as finished redraws the line once and both agree.
+
+        Only the fallback half moves. A concern already stamped stays counted
+        whatever is passed, which is the monotonicity ``settled_at`` exists
+        for — so the line widens freely and narrows only over work that has
+        not landed yet.
+        """
         statuses = [item.status for item in self.progress]
         return RunTally(
             phase=self.phase,
@@ -1304,7 +1325,7 @@ class ResolveState(BaseModel, frozen=True):
                 [
                     item
                     for item in self.progress
-                    if item.settled_at is not None or item.status in SETTLED_STATUSES
+                    if item.settled_at is not None or item.status in settled_statuses
                 ]
             ),
             settled_at=sorted(

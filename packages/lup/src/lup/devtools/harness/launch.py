@@ -6,24 +6,36 @@ native CLI with the non-interactive environment applied.
 """
 
 import json
+import logging
 import os
 import shutil
 from datetime import UTC, datetime
 from pathlib import Path
+from uuid import uuid4
 
 import sh
 import typer
+from pydantic import BaseModel
 
 from lup.runtime.profiles import ProfileDirectory
+from lup.adapters.claude.transcripts import ClaudeTranscripts
 from lup.adapters.codex.harness_runtime import (
     CodexPluginInstaller,
     PluginCacheConfig,
 )
+from lup.adapters.codex.transcripts import CodexTranscripts
 from lup.harness.environment import non_interactive_environment
 from lup.harness.models import Plugin
 from lup.harness.process import LocalProcessLauncher
-from lup.types import EnvVars
-from lup.workspace.paths import project_root
+from lup.telemetry.journal import (
+    ArgvRedaction,
+    TraceActor,
+    TraceContext,
+    TraceJournal,
+)
+from lup.telemetry.native import NativeTranscripts, NativeTranscriptWatcher
+from lup.types import EnvVars, JsonObject, JsonValue
+from lup.workspace.paths import notes_path, project_root
 from lup.adapters.codex.home import (
     CodexWorktreeHomeStore,
     login_state,
@@ -84,6 +96,113 @@ def ready_to_open(composition: NativeHarnessComposition, generate_only: bool) ->
     runtime_preflight(composition)
     settle_base_freshness(LocalProcessLauncher(), project_root())
     return True
+
+
+class HarnessTranscript(BaseModel, arbitrary_types_allowed=True):
+    """Canonical journal and native watcher owned by one CLI launch.
+
+    An interactive CLI owns its terminal, so a launch cannot be wrapped the way
+    an SDK session is. Mirroring what the CLI persists into a journal of our own
+    is what makes a hand-driven session produce the same observable trace a
+    programmatic run does -- and what a launch path that starts nothing quietly
+    takes away, since a trace nobody wrote is indistinguishable from a session
+    nobody ran.
+    """
+
+    journal: TraceJournal
+    watcher: NativeTranscriptWatcher
+    diagnostics: logging.Handler
+
+    def close(self, *, succeeded: bool) -> None:
+        """Stop ingestion, record the outcome, and release the diagnostics log."""
+        self.watcher.stop()
+        self.journal.emit("run_end", {"succeeded": succeeded})
+        watcher_logger().removeHandler(self.diagnostics)
+        self.diagnostics.close()
+
+
+def watcher_logger() -> logging.Logger:
+    """The logger the native transcript watcher reports its own failures on."""
+    return logging.getLogger(NativeTranscriptWatcher.__module__)
+
+
+def capture_watcher_diagnostics(run_directory: Path) -> logging.Handler:
+    """Send watcher diagnostics to a file for the life of one launch.
+
+    The launcher hands its terminal to an interactive CLI that draws over the
+    whole screen. Nothing configures logging on this path, so a watcher failure
+    would reach Python's last-resort handler and print a traceback into that UI
+    -- which is how a recovered polling error came to look like a crash. The
+    durable record is the journal's own error event; this file is for the detail
+    that does not belong in it.
+    """
+    run_directory.mkdir(parents=True, exist_ok=True)
+    handler = logging.FileHandler(run_directory / "watcher.log", encoding="utf-8")
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+    logger = watcher_logger()
+    logger.addHandler(handler)
+    logger.setLevel(logging.DEBUG)
+    logger.propagate = False
+    return handler
+
+
+def start_harness_transcript(
+    provider: str,
+    transcripts: NativeTranscripts,
+    *,
+    model: str | None,
+    profile: str | None,
+    arguments: list[str],
+) -> HarnessTranscript:
+    """Start one canonical transcript around a native interactive CLI.
+
+    The runtime arrives as its own transcript reader rather than as a directory
+    to scan, because where a runtime keeps its sessions and how one of its
+    records names itself are the runtime's business, not this launcher's.
+    """
+    run_id = (
+        f"{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}_{provider}_{uuid4().hex[:8]}"
+    )
+    trace_path = notes_path() / "harness" / provider / run_id / "observable.jsonl"
+    journal = TraceJournal(
+        trace_path,
+        TraceContext.root(
+            run_id,
+            TraceActor(
+                kind="harness",
+                name=f"lup-devtools harness {provider}",
+                provider=provider,
+                model=model,
+            ),
+        ),
+    )
+    # An argv vector reaches the journal only redacted: these are the words a
+    # caller typed, and a credential passed as an option value is a value the
+    # key-name redaction cannot see.
+    safe_arguments: list[JsonValue] = list(ArgvRedaction().arguments(arguments))
+    payload: JsonObject = {
+        "provider": provider,
+        "model": model,
+        "profile": profile,
+        "arguments": safe_arguments,
+    }
+    journal.emit("run_start", payload)
+    watcher = NativeTranscriptWatcher(
+        transcripts,
+        journal.child(
+            TraceActor(
+                kind="native_agent",
+                name=provider,
+                provider=provider,
+                model=model,
+            )
+        ),
+        scope=project_root(),
+    )
+    diagnostics = capture_watcher_diagnostics(trace_path.parent)
+    watcher.start()
+    typer.echo(f"{provider} observable transcript: {trace_path}")
+    return HarnessTranscript(journal=journal, watcher=watcher, diagnostics=diagnostics)
 
 
 def runtime_preflight(composition: NativeHarnessComposition) -> None:
@@ -286,12 +405,23 @@ def launch_claude(
         raise typer.BadParameter(str(error)) from error
     if home is not None:
         environment.update(profiles.login.environment(home))
+    transcript = start_harness_transcript(
+        "claude",
+        ClaudeTranscripts(home),
+        model=model,
+        profile=profile,
+        arguments=arguments,
+    )
+    succeeded = False
     try:
         sh.Command("claude")(*arguments, _fg=True, _env=environment)
+        succeeded = True
     except sh.CommandNotFound as error:
         raise typer.BadParameter("Claude Code CLI is not installed") from error
     except sh.ErrorReturnCode as error:
         raise typer.Exit(error.exit_code) from error
+    finally:
+        transcript.close(succeeded=succeeded)
 
 
 def launch_codex(
@@ -325,6 +455,14 @@ def launch_codex(
         arguments.extend(["--model", model])
     arguments.extend(extra_args)
     environment["CODEX_HOME"] = str(selected_home)
+    transcript = start_harness_transcript(
+        "codex",
+        CodexTranscripts(selected_home),
+        model=model,
+        profile=profile,
+        arguments=arguments,
+    )
+    succeeded = False
     try:
         with installer.temporary(
             project_root() / ".codex" / "plugins" / plugin.name,
@@ -333,10 +471,12 @@ def launch_codex(
         ) as cache:
             typer.echo(f"Verified installed Codex plugin: {cache.installed_root}")
             sh.Command("codex")(*arguments, _fg=True, _env=environment)
+        succeeded = True
     except sh.CommandNotFound as error:
         raise typer.BadParameter("Codex CLI is not installed") from error
     except sh.ErrorReturnCode as error:
         raise typer.Exit(error.exit_code) from error
     finally:
+        transcript.close(succeeded=succeeded)
         if home.isolated and store.publish(project_root()):
             typer.echo("Returned the refreshed Codex login to the account home")

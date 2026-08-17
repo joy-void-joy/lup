@@ -68,7 +68,7 @@ Resolve open feedback by fixing what it points at, or, for a question, by answer
 **Never create tracking files.** A `TODO.md`, backlog, or roadmap file parks a decision where no workflow will surface it again — deferral by tracking file is delegation to nobody. Work that is not being done now lives in one of three places, chosen by what it is attached to:
 
 - **A `# lup: defer: <text>` note**, when the work belongs to a site in this code, where `dev check` keeps it visible until somebody wakes it. Default to the bare `defer:`; a bracketed `defer[<gate>]: <text>` states a real, externally-checkable gate, never that this code might change again.
-- **A GitHub issue**, when the subject is the tooling misbehaving rather than the code — friction, a command that half-completes, a classifier reporting a failed probe as fact, output that makes no sense. Nothing in the tree owns that, so a note would have nowhere to sit; Reporting Friction below says what to record.
+- **A GitHub issue**, when the subject is the tooling misbehaving rather than the code — friction, a command that half-completes, a classifier reporting a failed probe as fact, output that makes no sense — and the repair is not one this session can make. Nothing in the tree owns that, so a note would have nowhere to sit. Where the repair *is* within reach, this is not deferred work at all: Reporting Friction below says to fix it instead, and what to record either way.
 - **A question to the user**, when whether to defer at all is itself the open question.
 
 `docs/contributing.md` carries the first and the last, and the one exception to all three — a `tmp/` briefing, which starts a fresh session on a situation this one cannot finish, and is rewritten whole rather than appended to.
@@ -159,11 +159,11 @@ This is what makes a claim checkable rather than plausible. Verify each one agai
 
 ### Reporting Friction
 
-When the tooling fights you, **open a GitHub issue against this repository** rather than only working around it and moving on. A workaround that lives in one session's narration teaches nobody; the issue is what survives the session.
+When the tooling fights you, **fix it** rather than working around it and moving on. This repository owns the tooling that just obstructed you, so the cause is usually a file you can edit — the hook that refused, the command that half-completed, the classifier that guessed. Fix it on its own branch, so the repair does not ride along inside whatever the session was already doing, and so the diff that lands is about the friction rather than about two things at once.
 
-File one whenever a command half-completes and leaves inconsistent state, a classifier reports a failed probe as though it were a fact, a sandbox or permission boundary blocks an operation the documented workflow prescribes, or a recovery needed steps the workflow never named.
+**Open a GitHub issue when the repair is not one this session can make** — the cause sits outside this repository, the fix is a design change resting on a decision you do not have, or the friction is longstanding and reproducing it is itself the work. Filing is what a fix cannot reach rather than the first move: an issue spends somebody else's reading, where a fix spends nobody's. A workaround that lives in one session's narration teaches nobody, so what cannot be fixed still has to be written down.
 
-Record what you observed rather than what you concluded: the exact command, the exact error, the state it left behind, and what the recovery cost. Name the component that owns the fix. A friction report is evidence, which is worth more than a guess at the cause — and evidence is what the self-improvement loop below consumes.
+Either way, record what you observed rather than what you concluded: the exact command, the exact error, the state it left behind, and what the recovery cost. Name the component that owns the fix — a commit message where you fixed it, the issue where you could not. Evidence is worth more than a guess at the cause, and evidence is what the self-improvement loop below consumes.
 
 File that evidence with `uv run lup-devtools dev report-friction`; its required fields preserve the report shape and its repository target comes from this checkout. Pass `--issue NUMBER` to correct a report in place instead of duplicating it. Read `--help` for the exact options.
 

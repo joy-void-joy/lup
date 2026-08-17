@@ -21,6 +21,7 @@ import sh
 from lup.devtools.dev.git_guards import (
     CHECK_COMMAND,
     DECLARED_GUARDS,
+    DELETION_STANDDOWN,
     DRIFT_COMMAND,
     LEGACY_GUARD_MARKER,
     GitGuard,
@@ -28,11 +29,12 @@ from lup.devtools.dev.git_guards import (
     arm,
     install_guard,
     read_guard,
+    read_hooks,
     uninstall_guard,
 )
 from lup.devtools.dev.workflow import WorkflowSpec
 from lup.harness.banner import REGENERATE_COMMAND
-from tests.unit.repos import initialized_repo
+from tests.unit.repos import commit_file, initialized_repo
 
 GUARD_SCRIPT = '''"""Refuse a commit while this repository's one generated file is behind."""
 
@@ -197,6 +199,44 @@ def test_reinstalling_refreshes_a_body_left_by_an_older_library(
     assert install_guard(guard, work).armed
 
 
+def test_a_hooks_directory_that_is_gone_reads_as_unreachable(tmp_path: Path) -> None:
+    """The condition that silences every guard at once and reports nothing itself.
+
+    A ``core.hooksPath`` outliving the directory it names leaves git running
+    no hook and raising no error, so both guards stop firing while every
+    other row on the gate goes on passing. It reached this repository: the
+    shared config had been left pointing at a fixture's own directory, and
+    the guards were off for as long as it took somebody to notice a `/tmp`
+    path in the output of an unrelated command.
+    """
+    work = tmp_path / "repo"
+    git = initialized_repo(work, tmp_path / "hooks")
+    git("config", "core.hooksPath", str(tmp_path / "gone"))
+
+    reading = read_hooks(DECLARED_GUARDS, work)
+
+    assert reading.directory == tmp_path / "gone"
+    assert not reading.reachable
+    assert len(reading.unarmed()) == len(DECLARED_GUARDS)
+
+
+def test_an_armed_checkout_reads_as_reachable_with_nothing_unarmed(
+    tmp_path: Path,
+) -> None:
+    """The healthy reading, so the row cannot pass by being unable to fail."""
+    work = tmp_path / "repo"
+    hooks = tmp_path / "hooks"
+    git = initialized_repo(work, hooks)
+    git("config", "core.hooksPath", str(hooks))
+    for guard in DECLARED_GUARDS:
+        install_guard(guard, work)
+
+    reading = read_hooks(DECLARED_GUARDS, work)
+
+    assert reading.reachable
+    assert reading.unarmed() == []
+
+
 def test_the_installed_hook_runs_the_drift_check(tmp_path: Path) -> None:
     """The body these tests arm a miniature with is the drift check by default."""
     work = tmp_path / "repo"
@@ -275,3 +315,57 @@ def test_arming_a_checkout_it_cannot_write_reports_instead_of_failing(
 def test_the_pipeline_runs_the_command_the_hook_installs() -> None:
     """A contributor who never armed the hook meets the same command in CI."""
     assert DRIFT_COMMAND in WorkflowSpec().body()
+
+
+def test_a_push_that_only_deletes_refs_stands_the_gate_down(tmp_path: Path) -> None:
+    """The gate judges a tree, and a deletion uploads none.
+
+    Deleting a merged branch ran the whole suite to decide whether a tree the
+    push does not touch is sound. The cost was not only wasted: it was long
+    enough to time the delete out midway, leaving the local branch gone and
+    origin's copy standing, which is the half-completed state somebody then
+    has to recognize and finish by hand.
+
+    Pushed content is still refused, in the same repository and the same
+    arming, because that is the half a blanket skip would have thrown away.
+    """
+    origin = tmp_path / "origin.git"
+    sh.Command("git")("init", "--bare", "-b", "main", str(origin))
+    work = tmp_path / "repo"
+    hooks = tmp_path / "hooks"
+    git = initialized_repo(work, hooks)
+    git("config", "core.hooksPath", str(hooks))
+    git("remote", "add", "origin", str(origin))
+    commit_file(git, work, "file.txt", "one\n", "chore: base")
+    git("push", "origin", "main", "main:spent")
+    install_guard(
+        GitGuard(command="false", hook="pre-push", standdown=DELETION_STANDDOWN),
+        work,
+    )
+
+    with pytest.raises(sh.ErrorReturnCode):
+        git("push", "origin", "main:carries-content")
+
+    git("push", "origin", "--delete", "spent")
+
+    remaining = str(git("ls-remote", "--heads", "origin"))
+    assert "spent" not in remaining
+    assert "carries-content" not in remaining
+
+
+def test_the_commit_guard_carries_no_standdown(tmp_path: Path) -> None:
+    """Only the push moment describes itself on stdin, so only it stands down.
+
+    A standdown on the commit hook would read a stdin git never fills, find
+    nothing that looks like uploaded content, and exit clean — disarming the
+    drift guard while still reporting as armed, which is the one failure this
+    whole module is built to make impossible.
+    """
+    work = tmp_path / "repo"
+    initialized_repo(work, tmp_path / "hooks")
+
+    installed = install_guard(GitGuard(), work).path.read_text(encoding="utf-8")
+
+    assert GitGuard().standdown == ""
+    assert "read -r" not in installed
+    assert installed.endswith(f"exec {DRIFT_COMMAND}\n")

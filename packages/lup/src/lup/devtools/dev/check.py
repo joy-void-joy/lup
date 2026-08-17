@@ -19,6 +19,7 @@ from lup.devtools.dev.boundaries import (
     scan_library_placement,
 )
 from lup.devtools.dev.branches import unlanded_siblings
+from lup.devtools.dev.git_guards import GitGuard, read_hooks
 from lup.devtools.dev.comments import FoundComment, scan_tracked
 from lup.devtools.harness.drift import (
     RepositoryWriter,
@@ -166,6 +167,7 @@ def run_checks(
     compositions: list[NativeHarnessComposition],
     repository_writers: list[RepositoryWriter],
     guidance: PromptDocument,
+    git_guards: list[GitGuard],
     scope: list[str] | None = None,
     test_workers: int = TEST_WORKERS,
 ) -> None:
@@ -317,6 +319,22 @@ def run_checks(
         typer.echo(f"retired from lup: {len(retired)} (advisory)")
         for entry in retired:
             typer.echo(f"  {entry}")
+
+    # Asked here because the guards cannot report their own absence: a hooks
+    # directory git no longer finds silences every one of them at once, and
+    # every other row on this gate goes on passing exactly as before.
+    hooks = read_hooks(git_guards, project_root())
+    if not hooks.reachable:
+        typer.echo(f"git guards: FAIL (no hooks directory at {hooks.directory})")
+        typer.echo("  git runs no hook from this checkout — every guard is off")
+        typer.echo("  check `git config --show-origin --get core.hooksPath`")
+    else:
+        unarmed = hooks.unarmed()
+        armed = len(hooks.guards) - len(unarmed)
+        typer.echo(f"git guards: ok ({armed}/{len(hooks.guards)} armed)")
+        for state in unarmed:
+            typer.echo(f"  {state.describe()}")
+    results.append(CheckOutcome(name="git guards", passed=hooks.reachable))
 
     # The same reading the commit hook and the pipeline refuse on, asked here
     # rather than recomposed, so a tree cannot be stale at one gate and current

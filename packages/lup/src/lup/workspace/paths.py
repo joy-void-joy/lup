@@ -328,6 +328,19 @@ def feedback_path() -> Path:
     return notes_path() / "feedback_loop"
 
 
+def fetch_cache_path() -> Path:
+    """Return ``<root>/.cache/fetch/``, where fetched payloads are kept.
+
+    Under the root rather than under ``notes`` because what a cache holds is
+    disposable and reconstructible, which is the same thing ``.cache`` says
+    everywhere else it appears — and is already ignored by the manifest that
+    ships with this template, so a downloaded payload cannot reach a diff.
+    Deliberately not version-scoped: a page does not become a different page
+    when the agent's version changes.
+    """
+    return project_root() / ".cache" / "fetch"
+
+
 # -- Timestamp helpers --------------------------------------------------------
 
 # lup: ignore[constant-declaration] — the stamp already written into every

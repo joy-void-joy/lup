@@ -30,6 +30,7 @@ from typing import Literal
 import sh
 from pydantic import BaseModel
 
+from lup.gitguard import GIT_ENVIRONMENT
 from lup.harness.banner import REGENERATE_COMMAND
 from lup.devtools.utils import git
 
@@ -69,6 +70,33 @@ line rather than a migration note nobody reads.
 """
 
 
+# lup: ignore[constant-declaration] — git's own pre-push stdin protocol written
+# in shell, not a judgement a project could hold differently; and as a field
+# default it would arm the commit moment too, silently disarming that guard
+DELETION_STANDDOWN = """\
+# A push that only deletes refs uploads nothing for the check below to judge.
+# Git names each update on stdin as `<local ref> <local oid> <remote ref>
+# <remote oid>` and writes an all-zero local oid where a ref is being deleted;
+# anything else is content this push answers for, and a line that does not
+# parse counts as content rather than being trusted into a standdown.
+carries_content=''
+while read -r _ local_oid _; do
+  case "$local_oid" in
+    '' | *[!0]*) carries_content=yes ;;
+  esac
+done
+[ -n "$carries_content" ] || exit 0
+"""
+"""What the push guard reads before deciding it has anything to judge.
+
+Deleting a branch is the case that made this worth writing: it uploads no
+tree at all, so the gate could only re-judge what the remote already had,
+and it charged the whole suite for the privilege — long enough that a
+delete would time out having removed the local branch and left the remote
+copy standing.
+"""
+
+
 class GitGuard(BaseModel, frozen=True):
     """One check a repository installs as a git hook, and what it refuses.
 
@@ -84,6 +112,24 @@ class GitGuard(BaseModel, frozen=True):
     hook: str = "pre-commit"
     """Which git hook the check is installed as."""
 
+    environment: tuple[str, ...] = GIT_ENVIRONMENT
+    """What the hook drops before running its check.
+
+    A project whose check wants one of these kept names a shorter tuple, and
+    one that wants none of them dropped names an empty one, which writes no
+    line at all.
+    """
+
+    standdown: str = ""
+    """Shell run before the check, free to ``exit 0`` and stand the guard down.
+
+    A moment that describes itself is answered here rather than inside the
+    check, which would otherwise have to be taught a second job and read a
+    stdin it never asked for. Empty by default: most moments say nothing a
+    hook could stand down on, and a guard that stands down silently is worse
+    than one that runs.
+    """
+
     refusal: str = (
         "Refuses this commit while a generated artifact differs from what\n"
         f"# its source renders. Settle it with `{REGENERATE_COMMAND}`."
@@ -96,11 +142,26 @@ class GitGuard(BaseModel, frozen=True):
     """
 
     def body(self) -> str:
-        """The hook script: the marker that claims it, then the check itself."""
+        """The hook script: the marker that claims it, the scrub, then the check.
+
+        Git names this repository to a hook through the environment, which
+        outranks the `-C` any command the check runs binds itself with. A
+        check whose suite builds throwaway repositories would resolve this one
+        instead and commit into the branch being pushed, so the names go
+        before the check rather than travelling into it.
+        """
+        scrub = (
+            "# Dropped so the check below resolves this repository from the\n"
+            "# directory it runs in. Git names it here too, and that name would\n"
+            "# outrank the `-C` a test's throwaway repository binds git with.\n"
+            f"unset {' '.join(self.environment)}\n"
+        )
         return (
             "#!/bin/sh\n"
             f"# {GUARD_MARKER}: written by `{INSTALL_COMMAND}`.\n"
             f"# {self.refusal}\n"
+            f"{scrub if self.environment else ''}"
+            f"{self.standdown}"
             f"exec {self.command}\n"
         )
 
@@ -110,6 +171,7 @@ DECLARED_GUARDS = [
     GitGuard(
         command=CHECK_COMMAND,
         hook="pre-push",
+        standdown=DELETION_STANDDOWN,
         refusal=(
             "Refuses this push while the project's own gate fails. A commit is\n"
             f"# local and rewritable; a push is neither. Run `{CHECK_COMMAND}`."
@@ -198,6 +260,47 @@ def guard_state(guard: GitGuard, directory: Path) -> GuardState:
 def read_guard(guard: GitGuard, root: Path) -> GuardState:
     """What one checkout would run, or fail to run, at this guard's moment."""
     return guard_state(guard, hooks_directory(root))
+
+
+class HooksReading(BaseModel, frozen=True):
+    """Where a checkout looks for hooks, and what it has armed there."""
+
+    directory: Path
+    reachable: bool
+    """Whether that directory is there to hold a hook at all.
+
+    The one breakage no environment makes ambiguous, and the quiet one. Git
+    runs no hook and reports nothing, so every guard the repository declares
+    is off while the gate that would have said so keeps passing — a checkout
+    running no hooks reads exactly like one whose hooks are green. A
+    ``core.hooksPath`` still naming a directory that has since been removed
+    is how a repository arrives here.
+
+    Absence is the signal rather than the count of hooks inside, because an
+    empty hooks directory is the normal state of a fresh clone and says
+    nothing about whether this repository's own guards belong in it.
+    """
+
+    guards: list[GuardState]
+
+    def unarmed(self) -> list[GuardState]:
+        """Each declared guard this checkout would not currently run.
+
+        Reported rather than refused: a clone that never ran the install
+        command is a working clone, and the pipeline refuses the same drift
+        and the same gate on the way in.
+        """
+        return [state for state in self.guards if not state.armed]
+
+
+def read_hooks(guards: list[GitGuard], root: Path) -> HooksReading:
+    """Where `root` resolves its hooks, and the state of each guard declared for it."""
+    directory = hooks_directory(root)
+    return HooksReading(
+        directory=directory,
+        reachable=directory.is_dir(),
+        guards=[guard_state(guard, directory) for guard in guards],
+    )
 
 
 # lup: ignore[model-free-function] — driver: it writes the hook file

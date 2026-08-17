@@ -5,6 +5,7 @@ from pathlib import Path
 from lup.adapters.claude.config_home import default_config_home
 from lup.telemetry.journal import ObservableEventKind
 from lup.telemetry.native import (
+    NativeRecordOrigin,
     NativeSemanticBlock,
     NativeTranscripts,
     blocks_by_type,
@@ -35,9 +36,15 @@ class ClaudeTranscripts(NativeTranscripts):
     def roots(self) -> list[Path]:
         return [self.config_home / CLAUDE_SESSIONS_DIR]
 
-    def origin(self, record: JsonObject) -> Path | None:
-        found = first_string(record, "cwd")
-        return Path(found) if found is not None else None
+    def belongs_to(self, record: JsonObject) -> NativeRecordOrigin:
+        # Claude Code stamps `cwd` per record and spells the session camelCase,
+        # carrying the same identifier into the fresh transcript a directory
+        # change opens.
+        directory = first_string(record, "cwd")
+        return NativeRecordOrigin(
+            directory=Path(directory) if directory is not None else None,
+            session=first_string(record, "sessionId"),
+        )
 
     def semantic_blocks(self, record: JsonObject) -> list[NativeSemanticBlock]:
         return blocks_by_type(record, CLAUDE_BLOCK_SPELLINGS)

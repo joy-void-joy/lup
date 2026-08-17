@@ -23,6 +23,7 @@ import threading
 from abc import ABC, abstractmethod
 from collections.abc import Iterator, Mapping
 from pathlib import Path
+from typing import Literal
 
 from pydantic import BaseModel, TypeAdapter, ValidationError
 
@@ -33,12 +34,36 @@ logger = logging.getLogger(__name__)
 
 JSON_OBJECT = TypeAdapter(JsonObject)
 
+type SessionScope = Literal["claimed", "foreign"]
+"""Which launch a session was decided to belong to, once it has been decided.
+
+One mapping rather than a set per verdict, because the verdicts are exclusive:
+two sets can hold the same session at once and nothing in the type says which
+reading wins, while a session that is absent here has simply not identified
+itself yet."""
+
 
 class NativeSemanticBlock(BaseModel, frozen=True):
     """One semantic index projected from an exact vendor event."""
 
     kind: ObservableEventKind
     block: JsonObject
+
+
+class NativeRecordOrigin(BaseModel, frozen=True):
+    """What one record says about the run it belongs to.
+
+    The directory and the session are one question with two facets, asked and
+    answered together: a record's directory describes that record, a session
+    outlives both the file holding it and the directory it started in, and
+    deciding scope needs them at the same moment. Either may be absent, which
+    keeps a transcript out of a scoped run until some record identifies it --
+    the safe direction, since guessing is how another project's session lands
+    in this project's record.
+    """
+
+    directory: Path | None = None
+    session: str | None = None
 
 
 def blocks_by_type(
@@ -109,12 +134,12 @@ class NativeTranscripts(ABC):
         """Directories under which this runtime persists session transcripts."""
 
     @abstractmethod
-    def origin(self, record: JsonObject) -> Path | None:
-        """The working directory this record belongs to, if it says.
+    def belongs_to(self, record: JsonObject) -> NativeRecordOrigin:
+        """Which run this record says it came from, in whatever it stamps.
 
-        Returning ``None`` keeps the transcript out of a scoped run until a
-        later record identifies it, which is the safe direction: guessing is
-        how another project's session lands in this project's record.
+        One question rather than two, because both runtimes stamp a directory
+        and a session identifier, each spells them its own way, and the scope
+        decision needs whichever of them a given record happens to carry.
         """
 
     @abstractmethod
@@ -139,6 +164,8 @@ class NativeTranscriptWatcher:
         self.poll_seconds = poll_seconds
         self.cursors: dict[Path, int] = {}
         self.origins: dict[Path, Path] = {}
+        self.sessions: dict[str, SessionScope] = {}
+        self.claimed_directories: set[Path] = set()  # lup: ignore[set-shape]
         self.stop_signal = threading.Event()
         self.thread: threading.Thread | None = None
 
@@ -184,34 +211,115 @@ class NativeTranscriptWatcher:
     def scan(self, *, final: bool = False) -> None:
         """Ingest all currently available complete records.
 
+        One transcript's failure stays that transcript's. These roots carry
+        every project's sessions and a CLI rotates its own files freely, so a
+        transcript routinely disappears between being listed and being read;
+        letting that end the pass would let an unrelated project's churn stop
+        this one's recording.
+        """
+        for path in self.discover():
+            try:
+                self.follow(path, final=final)
+            except OSError:
+                logger.debug("Unreadable native transcript: %s", path, exc_info=True)
+                self.cursors.pop(path, None)
+
+    def follow(self, path: Path, *, final: bool = False) -> None:
+        """Ingest the complete records one transcript appended since last seen.
+
         A partial trailing line is left for the next pass, since the CLI is
         still writing it — except on the final scan, where nothing more is
         coming and a truncated record is better evidence than none.
         """
-        for path in self.discover():
-            cursor = self.cursors.get(path, 0)  # lup: ignore[dict-get]
-            size = path.stat().st_size
-            if size < cursor:
-                cursor = 0
-            if size == cursor:
-                continue
-            with path.open("rb") as stream:
-                stream.seek(cursor)
-                appended = stream.read()
-            offset = 0
-            for line in appended.splitlines(keepends=True):
-                if not line.endswith((b"\n", b"\r")) and not final:
-                    break
-                offset += len(line)
-                self.record_line(path, line.removesuffix(b"\n").removesuffix(b"\r"))
-            self.cursors[path] = cursor + offset
+        cursor = self.cursors.get(path, 0)  # lup: ignore[dict-get]
+        size = path.stat().st_size
+        if size < cursor:
+            cursor = 0
+        if size == cursor:
+            return
+        with path.open("rb") as stream:
+            stream.seek(cursor)
+            appended = stream.read()
+        offset = 0
+        for line in appended.splitlines(keepends=True):
+            if not line.endswith((b"\n", b"\r")) and not final:
+                break
+            offset += len(line)
+            self.record_line(path, line.removesuffix(b"\n").removesuffix(b"\r"))
+        self.cursors[path] = cursor + offset
 
-    def in_scope(self, path: Path) -> bool:
-        """Report whether a transcript belongs to the scoped project."""
+    def directory_in_scope(self, directory: Path) -> bool:
+        """Report whether work done in one directory belongs to this launch.
+
+        Containment covers the project tree. The claimed set additionally covers
+        directories this launch has already been seen working in — sibling
+        worktrees among them, which no containment test reaches because they are
+        siblings of the project root rather than children of it.
+        """
+        if self.scope is None:
+            return True
+        return (
+            directory.is_relative_to(self.scope)
+            or directory in self.claimed_directories
+        )
+
+    def path_in_scope(self, path: Path) -> bool:
+        """Report whether a transcript naming no directory yet is this launch's.
+
+        Such a record inherits the decision already made for its file; a
+        transcript that has never identified itself stays out until it does.
+        """
         if self.scope is None:
             return True
         origin = self.origins.get(path)  # lup: ignore[dict-get]
-        return origin is not None and origin.is_relative_to(self.scope)
+        return origin is not None and self.directory_in_scope(origin)
+
+    def admit(self, path: Path, origin: NativeRecordOrigin) -> bool:
+        """Decide whether one record belongs to this launch, and remember why.
+
+        Scope is decided per session, not per record. A native CLI keys a
+        transcript to the directory a session started in while stamping the
+        directory on every record, so the two diverge the moment the session
+        changes directory: entering a worktree opens a fresh transcript under a
+        different project root, and every record in it fails a containment test
+        against the launching project. Recording stopped there, silently.
+
+        A session claimed while working in scope therefore stays claimed
+        wherever it goes next, and the directories a claim has been seen in are
+        themselves claimed, so a session opened in a worktree this launch had
+        already moved into is recognised too.
+
+        The rule runs the other way with equal force: a session first seen in a
+        directory this launch never visited is another launch's, and is never
+        adopted however close it later comes. Without that, one concurrent
+        session stepping into this project would hand over its whole remaining
+        transcript -- which is the failure scoping exists to prevent, arriving
+        by the door that following a session opens.
+        """
+        if self.scope is None:
+            return True
+        directory, session = origin.directory, origin.session
+        if directory is not None:
+            self.origins[path] = directory
+        if session is not None and session in self.sessions:
+            match self.sessions[session]:
+                case "foreign":
+                    return False
+                case "claimed":
+                    if directory is not None:
+                        self.claimed_directories.add(directory)
+                    return True
+        if directory is None:
+            return self.path_in_scope(path)
+        decided: SessionScope = (
+            "claimed" if self.directory_in_scope(directory) else "foreign"
+        )
+        if session is not None:
+            self.sessions[session] = decided
+        if decided == "foreign":
+            return False
+        self.claimed_directories.add(directory)
+        return True
 
     def record_line(self, path: Path, encoded: bytes) -> None:
         """Persist one vendor event and semantic indexes for exposed blocks."""
@@ -221,7 +329,7 @@ class NativeTranscriptWatcher:
         try:
             record = JSON_OBJECT.validate_json(encoded)
         except ValidationError:
-            if self.in_scope(path):
+            if self.path_in_scope(path):
                 self.journal.emit(
                     "message",
                     {
@@ -230,15 +338,19 @@ class NativeTranscriptWatcher:
                     },
                 )
             return
-        if (origin := self.transcripts.origin(record)) is not None:
-            self.origins[path] = origin
-        if not self.in_scope(path):
+        origin = self.transcripts.belongs_to(record)
+        if not self.admit(path, origin):
             return
-        self.journal.emit("message", {"native_source": source, "native_event": record})
+        self.journal.emit(
+            "message",
+            {"native_source": source, "native_event": record},
+            session_id=origin.session,
+        )
         for semantic in self.transcripts.semantic_blocks(record):
             self.journal.emit(
                 semantic.kind,
                 {"native_source": source, "block": semantic.block},
+                session_id=origin.session,
             )
 
     def stop(self) -> None:
