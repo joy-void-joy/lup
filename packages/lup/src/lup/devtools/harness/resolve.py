@@ -305,6 +305,19 @@ class ConsoleResolverObserver(ResolverObserver):
         typer.echo(line)
 
     def tally_changed(self, tally: RunTally) -> None:
+        # lup: The worker phase should get the same bar the join and re-check
+        # phases already have — settled/total with a rate and an ETA — rather
+        # than this flat line repeated per tally change, which never says how
+        # much is left. `phase_progress` in lup/resolver/status.py declines it
+        # deliberately: a phase earns a bar by knowing both how many items it
+        # faces and when each one landed, and `ConcernProgress` records only
+        # concern_id, status, and reason, so there is no sample to take a rate
+        # from. Record the landing time there the way `JoinProgress.completions`
+        # does, and `PhaseProgress.render` plus `elapsed_per_item` draw it
+        # unchanged. Not a tqdm or rich bar: `elapsed_per_item` drops intervals
+        # longer than an hour so a resumed run's idle stretch cannot poison the
+        # rate, and neither library does that. Keep a non-TTY spelling — these
+        # lines are read from logs as well as watched.
         typer.echo(f"[resolve] progress: {tally.concerns_line()}")
 
 
