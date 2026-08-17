@@ -5,6 +5,7 @@ from pathlib import Path
 from lup.adapters.codex.home import DEFAULT_ACCOUNT_HOME
 from lup.telemetry.journal import ObservableEventKind
 from lup.telemetry.native import (
+    NativeRecordOrigin,
     NativeSemanticBlock,
     NativeTranscripts,
     blocks_by_type,
@@ -37,11 +38,16 @@ class CodexTranscripts(NativeTranscripts):
     def roots(self) -> list[Path]:
         return [self.codex_home / CODEX_SESSIONS_DIR]
 
-    def origin(self, record: JsonObject) -> Path | None:
-        # Carried inside the opening `session_meta` payload rather than at the
-        # top level, which the descent reaches without naming the envelope.
-        found = first_string(record, "cwd")
-        return Path(found) if found is not None else None
+    def belongs_to(self, record: JsonObject) -> NativeRecordOrigin:
+        # Both arrive inside the opening `session_meta` payload rather than at
+        # the top level, which the descent reaches without naming the envelope.
+        # Snake case here, and deliberately not the sibling `id`: that repeats
+        # the value on the opening record and means something else on later ones.
+        directory = first_string(record, "cwd")
+        return NativeRecordOrigin(
+            directory=Path(directory) if directory is not None else None,
+            session=first_string(record, "session_id"),
+        )
 
     def semantic_blocks(self, record: JsonObject) -> list[NativeSemanticBlock]:
         return blocks_by_type(record, CODEX_BLOCK_SPELLINGS)
