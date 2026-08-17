@@ -1223,7 +1223,12 @@ def test_the_join_tally_counts_the_parents_that_will_be_merged() -> None:
     state = integration_state(
         "tallied",
         Path("/tmp/tallied"),
-        JoinProgress(joined=["one", "two", "three"], commit="j3", planned=13),
+        JoinProgress(
+            joined=["one", "two", "three"],
+            commit="j3",
+            planned=[f"parent-{index}" for index in range(10)]
+            + ["one", "two", "three"],
+        ),
     )
 
     tally = run_tally(state)

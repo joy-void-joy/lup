@@ -394,25 +394,36 @@ def join_bar(progress: JoinProgress | None, run_dir: Path) -> PhaseProgress | No
     ``land_parent`` writes is current between two parents but starts empty
     for a run whose earlier joins a previous sequence recorded. Their union
     is what has landed, so the count can never go backwards.
+
+    Both figures come off the planned set, so the bar cannot pass its own
+    end: the total is how many parents were planned, and the count is how
+    many of *those* have landed. A landing outside the plan is real work —
+    a parent already in the tree from an earlier run is recorded as it is
+    swept — but it is not progress through this plan, and counting it
+    against a total kept separately is how a bar comes to read six of five.
+
+    The rate is the checkpoint's own landings and nothing else. The
+    orchestrator's completions accumulate across every join a run performs,
+    so a worker-phase dependency join was estimating the integration joins
+    that followed it — 24m19s an item against the five minutes they actually
+    took. A phase that has not yet timed two of its own parents reports no
+    rate, which is the same bargain :func:`recheck_bar` makes and the reason
+    verification was the one phase estimating accurately.
     """
     checkpoint = JoinDesk(run_dir).progress()
-    planned = max(progress.planned if progress else 0, checkpoint.planned)
+    planned = {*(progress.planned if progress else []), *checkpoint.planned}
+    landed = {*(progress.joined if progress else []), *checkpoint.joined}
     if not planned:
         return None
     return PhaseProgress(
         label="joins",
-        done=len({*(progress.joined if progress else []), *checkpoint.joined}),
-        total=planned,
+        done=len(planned & landed),
+        total=len(planned),
         per_item=elapsed_per_item(
             sorted(
-                [
-                    *(progress.completions if progress else []),
-                    *(
-                        datetime.fromisoformat(landing.at)
-                        for landing in checkpoint.landings
-                        if landing.merged and landing.at
-                    ),
-                ]
+                datetime.fromisoformat(landing.at)
+                for landing in checkpoint.landings
+                if landing.merged and landing.at
             )
         ),
     )

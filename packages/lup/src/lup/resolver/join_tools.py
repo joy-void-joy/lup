@@ -358,7 +358,7 @@ def create_join_tools(
             # against a tree that has since moved past them.
             desk.record(
                 JoinLanding(commit=tip.commit, head=before, merged=False),
-                len(plan.tips),
+                [planned.commit for planned in plan.tips],
             )
             return LandParentOutput(
                 commit=tip.commit,
@@ -433,7 +433,7 @@ def create_join_tools(
                 rendered=found.rendered,
                 broke=broke,
             ),
-            len(plan.tips),
+            [planned.commit for planned in plan.tips],
         )
         drain = mailbox.draining() is not None
         return LandParentOutput(

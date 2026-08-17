@@ -102,7 +102,16 @@ def test_a_finished_bar_estimates_nothing_further() -> None:
     assert "ETA" not in done.render()
 
 
-def absorbed(joined: list[str], planned: int) -> JoinProgress:
+PLANNED = [f"{index:040d}" for index in range(13)]
+"""The thirteen parents these joins are planned against, by commit.
+
+Shared so a landing and the plan it belongs to name the same parent: the
+count of joins done is the planned set's own members, so a test whose
+landings fell outside it would be measuring nothing.
+"""
+
+
+def absorbed(joined: list[str], planned: list[str]) -> JoinProgress:
     """What the orchestrator has written back, as of its last turn."""
     return JoinProgress(joined=joined, commit="b" * 40, planned=planned)
 
@@ -117,9 +126,9 @@ def test_the_bar_moves_while_the_join_turn_is_still_running(tmp_path: Path) -> N
     """
     desk = JoinDesk(tmp_path)
     for index in range(10):
-        desk.record(JoinLanding(commit=f"{index:040d}", head="c" * 40), planned=13)
+        desk.record(JoinLanding(commit=f"{index:040d}", head="c" * 40), planned=PLANNED)
 
-    progress = join_bar(absorbed(["0" * 40], planned=13), tmp_path)
+    progress = join_bar(absorbed(["0" * 40], planned=PLANNED), tmp_path)
 
     assert progress is not None
     assert progress.done == 10
@@ -134,7 +143,7 @@ def test_the_bar_never_goes_backwards_when_a_turn_starts(tmp_path: Path) -> None
     """
     earlier = [f"{index:040d}" for index in range(8)]
 
-    progress = join_bar(absorbed(earlier, planned=13), tmp_path)
+    progress = join_bar(absorbed(earlier, planned=PLANNED), tmp_path)
 
     assert progress is not None
     assert progress.done == 8
@@ -153,13 +162,71 @@ def test_a_parent_recorded_without_a_merge_does_not_set_the_rate(
     for index in range(4):
         desk.record(
             JoinLanding(commit=f"{index:040d}", head="c" * 40, merged=False),
-            planned=13,
+            planned=PLANNED,
         )
 
-    progress = join_bar(absorbed([], planned=13), tmp_path)
+    progress = join_bar(absorbed([], planned=PLANNED), tmp_path)
 
     assert progress is not None
     assert progress.done == 4
+    assert progress.per_item is None
+
+
+def test_a_landing_outside_the_plan_cannot_take_the_bar_past_its_end(
+    tmp_path: Path,
+) -> None:
+    """Reported from resolve-4997351bbef0 as ``joins 6/5``, bar drawn past it.
+
+    A parent already in the tree is swept and recorded without having been
+    planned on its own, so landings outnumber the plan. Counted against a
+    total kept as its own figure, the sixth landing of five planned parents
+    put the count past the end of the bar — and a bar past its end reads as
+    something having gone wrong in a run that is entirely healthy.
+    """
+    plan = PLANNED[:5]
+    desk = JoinDesk(tmp_path)
+    for commit in [*plan, "f" * 40]:
+        desk.record(JoinLanding(commit=commit, head="c" * 40), planned=plan)
+
+    progress = join_bar(absorbed(["f" * 40], planned=plan), tmp_path)
+
+    assert progress is not None
+    assert (progress.done, progress.total) == (5, 5)
+    assert progress.done <= progress.total
+
+
+def test_the_join_rate_ignores_the_completions_carried_from_another_phase(
+    tmp_path: Path,
+) -> None:
+    """An ETA is only worth reading where the phase measured it itself.
+
+    Integration opened reporting ``24m19s/it · ETA 1h12m`` on
+    resolve-4997351bbef0, a rate inherited from a worker-phase dependency
+    join. Its own joins took about five minutes each and the phase finished
+    in twenty-five, so the estimate was out by roughly three times — and an
+    ETA that wrong invites abandoning a run that is nearly done.
+
+    One landing of its own is not a duration, so this reports no rate rather
+    than the wrong one, which is the bargain the re-check bar already makes.
+    """
+    stale = utc_now()
+    carried = JoinProgress(
+        joined=[],
+        commit="b" * 40,
+        planned=PLANNED,
+        completions=[
+            stale,
+            stale + timedelta(minutes=24),
+            stale + timedelta(minutes=48),
+        ],
+    )
+    desk = JoinDesk(tmp_path)
+    desk.record(JoinLanding(commit=PLANNED[0], head="c" * 40), planned=PLANNED)
+
+    progress = join_bar(carried, tmp_path)
+
+    assert progress is not None
+    assert progress.done == 1
     assert progress.per_item is None
 
 
