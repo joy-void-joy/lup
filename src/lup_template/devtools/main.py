@@ -3,6 +3,12 @@
 All development tooling is exposed as the ``lup-devtools`` entry point.
 Each sub-app groups related commands.
 
+What this module holds is the declaration the library's roster is wired over,
+plus this project's own delta: the sub-apps only it has, and — through
+``subapps.SELECTION`` — any of lup's it declines. The inherited half is not
+named here, so a sub-app lup grows arrives with the next lock refresh instead
+of waiting for somebody to notice it and add a line.
+
 The module is ``main.py`` rather than ``__main__.py`` or ``app.py`` because
 ``lup-devtools`` is launched through the ``[project.scripts]`` console entry
 point (``lup_template.devtools.main:app``), never as ``python -m
@@ -32,27 +38,26 @@ from pathlib import Path
 import typer
 
 import lup_template.agent.prompts as prompts
+from lup.adapters.claude.usage.reader import claude_usage_entry
+from lup.adapters.codex.usage.reader import codex_usage_entry
+from lup.devtools.dev import conflicts
+from lup.devtools.feedback.models import AgentPrompt
+from lup.devtools.harness.resolve import ConfiguredModel
+from lup.devtools.roster import DevtoolsDeclarations, default_subapps
 from lup.devtools.subapps import SubApp, compose
 from lup.workspace.paths import find_nearest_pyproject
-from lup_template.devtools.agent import app as agent_app
-from lup.devtools.dashboard.app import create_dashboard_app
-from lup.devtools.dev import conflicts
-from lup_template.devtools.dev.app import app as dev_app
-from lup.devtools.feedback.app import create_feedback_app
-from lup.devtools.feedback.models import AgentPrompt
-from lup.devtools.harness.app import create_harness_app
-from lup.devtools.harness.resolve import ConfiguredModel
 from lup_template.agent.config import engine_for_model, settings
+from lup_template.devtools.agent import app as agent_app
+import lup_template.devtools.dev.app as dev
 from lup_template.devtools.harness.composition import (
     REPOSITORY_WIDE,
     TARGETS,
     profile_directory,
 )
+from lup_template.devtools.harness.catalog import declared_hook_set
+from lup_template.devtools.harness.content.guidance import document as guidance_document
 from lup_template.devtools.setup import INTEGRATIONS
-from lup_template.devtools.hooks.app import app as hooks_app
-from lup.devtools.report.app import create_report_app
-from lup_template.devtools.setup import app as setup_app
-from lup_template.devtools.subapps import APPLICATION_SPECS, INHERITED
+from lup_template.devtools.subapps import APPLICATION_SPECS, SELECTION
 
 
 def assembled_prompt() -> AgentPrompt:
@@ -68,22 +73,37 @@ def assembled_prompt() -> AgentPrompt:
     )
 
 
+DECLARATIONS = DevtoolsDeclarations(
+    dev=dev.declared,
+    targets=TARGETS,
+    repository_writers=REPOSITORY_WIDE,
+    guidance=guidance_document(declared_hook_set().rules),
+    prompt=assembled_prompt,
+    relocate_roots=[
+        Path("src"),
+        Path("packages"),
+        Path("tests"),
+        Path("examples"),
+    ],
+    integrations=INTEGRATIONS,
+    usage_entries=[claude_usage_entry(), codex_usage_entry()],
+    model=ConfiguredModel(
+        name=settings.model, adapter=engine_for_model(settings.model)
+    ),
+    profiles=profile_directory(),
+)
+"""What this repository tells the library's roster about itself.
+
+One value reaches every sub-app the library ships, so a factory that grows an
+argument grows a field here with a default rather than breaking a call site.
+``relocate_roots`` names four because this repository vendors the library it
+publishes; ``usage_entries`` names both backends because it runs on both.
+"""
+
 # lup: ignore[constant-declaration] — this CLI's own composition: which sub-apps
-# it takes and under what name, decided here because nothing sits above it
+# only it has and under what name, decided here because nothing sits above it
 APPLICATION_APPS = {
     "agent": agent_app,
-    "dashboard": create_dashboard_app(INTEGRATIONS),
-    "dev": dev_app,
-    "feedback": create_feedback_app(assembled_prompt),
-    "harness": create_harness_app(
-        TARGETS,
-        REPOSITORY_WIDE,
-        ConfiguredModel(name=settings.model, adapter=engine_for_model(settings.model)),
-        profile_directory(),
-    ),
-    "hooks": hooks_app,
-    "report": create_report_app(TARGETS, REPOSITORY_WIDE),
-    "setup": setup_app,
 }
 """Where each application spec meets the Typer app answering to its name.
 
@@ -99,19 +119,27 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 
-compose(
-    app,
-    sorted(
+ROSTER = {
+    entry.spec.name: entry
+    for entry in SELECTION.over(
+        default_subapps(DECLARATIONS),
         [
-            *INHERITED,
-            *[
-                SubApp(spec=spec, app=APPLICATION_APPS[spec.name])
-                for spec in APPLICATION_SPECS
-            ],
+            SubApp(spec=spec, app=APPLICATION_APPS[spec.name])
+            for spec in APPLICATION_SPECS
         ],
-        key=lambda entry: entry.spec.name,
-    ),
-)
+    )
+}
+"""Every sub-app this CLI serves, by name, before anything is mounted onto one.
+
+Mounted from here because the trees below belong to a sub-app the library
+built: the module that owns them cannot reach back for an app composed after
+it, and replacing the whole entry to add two commands would restate every
+argument the inherited one takes.
+"""
+
+dev.extend(ROSTER["dev"].app)
+
+compose(app, list(ROSTER.values()))
 
 
 @app.callback()

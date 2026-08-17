@@ -192,10 +192,10 @@ def application_roots() -> ApplicationRoots:
             "packages/lup/tests/",
             "examples/",
             f"{package}/agent/core.py",
-            # Which backend's sub-apps this project takes is a composition
-            # decision like any other: `usage` reads each backend's own
-            # account, and a project runs on the backends it names here.
-            f"{package}/devtools/subapps.py",
+            # Which backends this project runs on is a composition decision
+            # like any other: `usage` reads each backend's own account, and
+            # the declaration the inherited roster is wired over names them.
+            f"{package}/devtools/main.py",
             harness,
             f"{package}/devtools/setup.py",
         ],

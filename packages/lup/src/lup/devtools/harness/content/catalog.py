@@ -119,6 +119,14 @@ LIBRARY_AGENTS = [
 ]
 """Every agent lup ships, each a generic role over library machinery."""
 
+LIBRARY_CONTENT = models.ContentRoster(skills=LIBRARY_SKILLS, agents=LIBRARY_AGENTS)
+"""What a project starts from: everything lup ships, as one roster to narrow.
+
+Paired here rather than composed by each adopter so a project takes the two
+halves the same way it takes the sub-app roster — retire what it settled
+differently, add what only it has, and receive the rest of what lup grows
+without a copied list standing between."""
+
 
 def skill_roster_parts(
     skills: list[models.Skill], plugin: models.NativeName

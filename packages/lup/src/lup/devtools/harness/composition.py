@@ -52,6 +52,7 @@ lives — reconciliation proposals, resolver runs — and is already ignored, so
 a login cannot be committed by a rule nobody remembered to write.
 """
 
+
 def claude_profile_directory() -> ProfileDirectory:
     """The personal Claude account registry, as a directory to curate.
 

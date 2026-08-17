@@ -12,7 +12,7 @@ commit hook, continuous integration, and ``dev check`` all ask
 so no tree can be stale to one of them and current to another.
 """
 
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 from pathlib import Path
 
 import typer
@@ -28,8 +28,15 @@ from lup.devtools.harness.generate import (
 )
 
 
+@runtime_checkable
 class RepositoryWriter(Protocol):
-    """One project-owned generated artifact outside a native tree."""
+    """One project-owned generated artifact outside a native tree.
+
+    Runtime-checkable so a declaration can carry a list of these: the roster's
+    bundle is a model, and pydantic validates a named type by asking whether a
+    value is one. For a callback protocol that question is whether the value is
+    callable, which is as much as any caller here ever needed to know.
+    """
 
     def __call__(self, root: Path | None = None, *, check: bool = False) -> Path: ...
 
