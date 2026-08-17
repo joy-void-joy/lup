@@ -107,6 +107,20 @@ def test_a_sink_argument_the_walk_cannot_name_is_reported() -> None:
     ) == ["built_from(built)"]
 
 
+def test_a_dump_on_an_instance_is_reported_rather_than_missed() -> None:
+    """The shape that slipped past the first version of this walk.
+
+    An instance names no class, so the subject cannot be resolved — but that
+    is a reason to report the call, not to pass over it. `source_digest` hashes
+    a whole harness exactly this way, and watching only the class-side
+    spellings called that tree unpersisted.
+    """
+    assert unresolved(
+        "class Record(BaseModel):\n    value: str\n\n"
+        "def digest(record):\n    return record.model_dump_json(exclude_none=True)\n"
+    ) == ["record"]
+
+
 def test_an_unresolved_sink_does_not_silently_widen_the_reach() -> None:
     assert (
         reached(
