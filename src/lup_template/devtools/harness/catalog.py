@@ -42,7 +42,8 @@ from lup.policy.kernel.rows import PathRoleRow
 from lup.policy.refused_tools import RefusedTool
 from lup.workspace.paths import project_root, read_project_name
 from lup_template.agent.toolsets import tool_group_names
-from lup_template.devtools.harness.content.catalog import AGENTS, SKILLS
+from lup_template.devtools.harness.content.catalog import AGENTS, RETIRED, SKILLS
+from lup_template.devtools.subapps import SELECTION
 from lup_template.devtools.harness.content.guidance import document as guidance_document
 from lup_template.devtools.harness.content.shell_vocabulary import (
     RUNNER_TARGETS,
@@ -192,10 +193,10 @@ def application_roots() -> ApplicationRoots:
             "packages/lup/tests/",
             "examples/",
             f"{package}/agent/core.py",
-            # Which backend's sub-apps this project takes is a composition
-            # decision like any other: `usage` reads each backend's own
-            # account, and a project runs on the backends it names here.
-            f"{package}/devtools/subapps.py",
+            # Which backends this project runs on is a composition decision
+            # like any other: `usage` reads each backend's own account, and
+            # the declaration the inherited roster is wired over names them.
+            f"{package}/devtools/main.py",
             harness,
             f"{package}/devtools/setup.py",
         ],
@@ -212,12 +213,18 @@ def dev_project() -> DevProject:
     gone. The roles and the rule selection come from the same hook set the
     generated trees enforce, so a scan and a hook cannot disagree about what
     a path is for, nor about which rules are live here.
+
+    The other two selections come from the modules that apply them rather than
+    being restated, so what the gate reports as retired is what the CLI and the
+    plugin actually decline.
     """
     hooks = declared_hook_set()
     return DevProject(
         package=Path(__file__).resolve().parents[2].name,
         roots=application_roots(),
         rules=hooks.rules,
+        subapps=SELECTION,
+        content=RETIRED,
         path_roles=[
             PathRoleRow(root=role.root.as_posix(), role=role.role)
             for role in hooks.path_roles

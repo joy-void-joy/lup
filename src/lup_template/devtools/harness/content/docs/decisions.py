@@ -240,6 +240,36 @@ moving a module is a change with its own review. It is the mirror of
 an adopter cannot replace; together they bound the boundary from both sides
 instead of only the one a library author notices.
 
+## ADR-015: Inherit every roster by default, and declare only the delta
+
+Context: ADR-014 settled where a devtools module lives; it left open how a
+project says which ones it runs. Each roster — sub-apps, skills and agents —
+was enumerated in the copied half, so the two routes of ADR-014 pulled apart:
+a sub-app added to the library reached a project's dependencies on the next
+lock refresh and its `--help` never, because the name was written in a file
+nobody had reason to revisit. The failure is silent by construction, since an
+absent entry is indistinguishable from a declined one. Downstream evidence:
+one project serves neither `dashboard` nor `report`, another hand-wrote a
+`dev` tree carrying none of the quality gate, and no one decided either.
+
+Decision: A roster the library ships reaches a project whole, and the project
+declares only its difference — the subtractive shape `RuleSelection` already
+used for scan rules, now also `SubAppSelection` and `ContentSelection`. The
+sub-app roster is one table with two projections, `LIBRARY_SPECS` for the
+documents that describe the CLI and `DevtoolsDeclarations.roster` for the CLI
+itself, so a document and a command tree cannot name different sub-apps. What
+each factory needs arrives as one declaration of facts the project already
+holds, which is what makes inheriting the whole roster possible at all.
+
+Consequences: A sub-app added to the library appears in every project on its
+next lock refresh, and a factory that grows an argument grows a field with a
+default rather than breaking a call site in each downstream at once. Declining
+stays available and becomes visible: the `retired from lup` row in `dev check`
+names every retirement, advisory like `application placement`, because
+declining is allowed and only its invisibility was the defect. A project
+keeping its own version of a sub-app declares one under that name, since the
+roster resolves last-declaration-wins.
+
 [README.md](README.md) indexes every guide these decisions govern.
 """
         )

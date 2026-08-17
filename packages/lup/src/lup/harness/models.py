@@ -560,6 +560,57 @@ class Agent(BaseModel, frozen=True):
     color: AgentColor | None = None
 
 
+class ContentSelection(BaseModel, frozen=True):
+    """Which of the skills and agents a library ships a project's plugin carries.
+
+    Subtractive for the reason ``RuleSelection`` and ``SubAppSelection`` are: a
+    project declining two should name those two, because a restated roster is
+    re-copied on every addition and the copy that fell behind looks like a
+    decision. Skills and agents share one selection because they share one
+    namespace of stable ids, and a project retiring a skill that a retired
+    agent existed to serve should not have to say so in two places.
+    """
+
+    retired: list[str] = []
+    """Declaration ids this project's plugin does not ship."""
+
+    def keeps(self, declaration_id: str) -> bool:
+        """Whether a declaration is live here, for a roster composing itself."""
+        return declaration_id not in self.retired
+
+
+class ContentRoster(BaseModel, frozen=True):
+    """The skills and agents one plugin ships, as the pair every reader wants.
+
+    A pair rather than two lists because every consumer takes both — the
+    compiled plugin, the roster documents, the drift check — and a project
+    composing them separately is two places for the same decision to be made
+    differently.
+    """
+
+    skills: list[Skill] = []
+    agents: list[Agent] = []
+
+    def selected(self, selection: ContentSelection) -> "ContentRoster":
+        """This roster with what a project retired taken out of both lists.
+
+        Narrowing the roster rather than filtering at each surface is what
+        keeps a retired declaration from reaching any of them: it is not
+        compiled, not rendered into the documents that say what the plugin
+        ships, and not named by prose describing a skill nobody can invoke.
+        """
+        return ContentRoster(
+            skills=[skill for skill in self.skills if selection.keeps(skill.id)],
+            agents=[agent for agent in self.agents if selection.keeps(agent.id)],
+        )
+
+    def extended(self, skills: list[Skill], agents: list[Agent]) -> "ContentRoster":
+        """This roster followed by what only one project has."""
+        return ContentRoster(
+            skills=[*self.skills, *skills], agents=[*self.agents, *agents]
+        )
+
+
 class McpWord(BaseModel, frozen=True):
     """One word of the command line that starts an MCP server.
 

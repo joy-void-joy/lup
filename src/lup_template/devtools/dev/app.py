@@ -1,10 +1,13 @@
-"""This project's `dev` tree: the library's, plus what only a template has.
+"""What only a template adds to the `dev` tree the library already builds.
 
 The workflow commands — worktrees, branches, PRs, the quality gate — are the
-library's, composed here over what this repository declares about itself.
-The two added below have template-ness as their subject: renaming the package
-an adopter inherits, and choosing where lup itself is resolved from. Neither
-means anything inside a project that has already been initialized once.
+library's, wired over :func:`declared` by the roster every project inherits.
+The two trees added here have template-ness as their subject: renaming the
+package an adopter inherits, and choosing where lup itself is resolved from.
+Neither means anything inside a project that has already been initialized once,
+which is why they are mounted onto the inherited tree rather than replacing it
+— a project that replaced `dev` to add two commands would be restating every
+argument the library's own tree takes, which is the drift the roster removes.
 """
 
 from pathlib import Path
@@ -16,9 +19,7 @@ import lup.devtools.dev.check as check
 import lup_template.devtools.dev.init as init
 import lup_template.devtools.dev.library as library
 import lup_template.devtools.harness.catalog as catalog
-from lup.devtools.dev.app import DevDeclarations, create_dev_app
-from lup_template.devtools.harness.composition import REPOSITORY_WIDE, TARGETS
-from lup_template.devtools.harness.content.guidance import document as guidance_document
+from lup.devtools.dev.app import DevDeclarations
 
 
 def declared() -> DevDeclarations:
@@ -39,23 +40,14 @@ def declared() -> DevDeclarations:
     )
 
 
-app = create_dev_app(
-    declared=declared,
-    native_targets=TARGETS,
-    repository_writers=REPOSITORY_WIDE,
-    guidance=guidance_document(catalog.declared_hook_set().rules),
-    relocate_roots=[
-        Path("src"),
-        Path("packages"),
-        Path("tests"),
-        Path("examples"),
-    ],
-)
-
 init_app = typer.Typer(no_args_is_help=True)
 library_app = typer.Typer(no_args_is_help=True)
-app.add_typer(init_app, name="init", help="Project initialization")
-app.add_typer(library_app, name="library", help="How this project obtains lup")
+
+
+def extend(app: typer.Typer) -> None:
+    """Mount this template's own trees onto the inherited `dev` app."""
+    app.add_typer(init_app, name="init", help="Project initialization")
+    app.add_typer(library_app, name="library", help="How this project obtains lup")
 
 
 # -- init commands --

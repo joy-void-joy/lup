@@ -13,7 +13,7 @@ rosters every document and the compiled plugin read.
 """
 
 import lup.harness.models as models
-from lup.devtools.harness.content.catalog import LIBRARY_AGENTS, LIBRARY_SKILLS
+from lup.devtools.harness.content.catalog import LIBRARY_CONTENT
 from lup_template.devtools.harness.content.skills.brainstorm import (
     SKILL as SKILL_BRAINSTORM,
 )
@@ -43,10 +43,22 @@ of the roster becomes the library's.
 PROJECT_AGENTS: list[models.Agent] = []
 """No agent here is about being a template; the whole roster is the library's."""
 
-SKILLS = [*LIBRARY_SKILLS, *PROJECT_SKILLS]
-"""Every skill this repository's plugin ships, inherited half first."""
+RETIRED = models.ContentSelection()
+"""Which of lup's own skills and agents this repository does not ship.
 
-AGENTS = [*LIBRARY_AGENTS, *PROJECT_AGENTS]
+Empty, because lup authors them: a template retiring its own declaration
+should delete it rather than carry one it declines to ship. The seat is here
+so a project adopting this scaffold states its delta in one line instead of
+restating the roster it inherits — and so `dev check` can name what it
+declined, which a rewritten list could never surface."""
+
+CONTENT = LIBRARY_CONTENT.selected(RETIRED).extended(PROJECT_SKILLS, PROJECT_AGENTS)
+"""Everything this repository's plugin ships, inherited half first."""
+
+SKILLS = CONTENT.skills
+"""Every skill this repository's plugin ships."""
+
+AGENTS = CONTENT.agents
 """Every agent this repository's plugin ships."""
 
 PLUGIN_NAME: models.NativeName = "lup"
