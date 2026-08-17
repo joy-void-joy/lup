@@ -516,6 +516,7 @@ def edit_decision(
 
 def hook_environment():
     """The native environment passed to this bare hook process."""
+    # lup: ignore[os-environ] — bare hooks have no settings package
     return os.environ
 
 
