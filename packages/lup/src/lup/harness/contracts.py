@@ -235,6 +235,22 @@ class NativeSpellings(SkillInvocationRenderer):  # lup: ignore[abc-capability]
         """
 
     @abstractmethod
+    def watch_output(self, command: str) -> Instruction:
+        """Spell how to wait on a command that reports before it exits.
+
+        Neutral prose cannot carry this advice, because the runtimes differ in
+        what waiting *is*. One pushes each line to the agent as it arrives, so
+        the right instruction is to open one waiter and yield; the other hands
+        the agent a live session it reads, so the same instruction is
+        impossible and reading is the mechanism rather than the mistake.
+        Wording that told every reader not to poll would be correct on the
+        first and unfollowable on the second, which is how prose naming only
+        "the runtime's event-driven waiter" leaves a reader to guess — and a
+        reader who guesses reaches for an ordinary command with a long
+        timeout, which is the polling loop the advice existed to prevent.
+        """
+
+    @abstractmethod
     def read_document(self, path: str) -> Spelling:
         """Name the tool this runtime hands a whole document to, path and all.
 

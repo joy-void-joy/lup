@@ -24,6 +24,7 @@ from lup.policy.kernel.edit import (
 from lup.policy.kernel.fetch import decide_fetch
 from lup.policy.assets.host import (
     directory_write_targets,
+    empty_directory_targets,
     recoverable_write_targets,
 )
 from lup.policy.kernel.lex import (
@@ -193,6 +194,7 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
                     [*shell_write_targets(event.command), *acted_on], root
                 ),
                 directory_targets=directory_write_targets(acted_on, root),
+                empty_directories=empty_directory_targets(acted_on, root),
                 recoverable_target_limit=self.recoverable_target_limit,
                 runner_targets=self.runner_targets,
                 target_tables=self.target_tables,

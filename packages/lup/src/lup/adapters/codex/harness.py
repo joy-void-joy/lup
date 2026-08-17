@@ -92,7 +92,12 @@ class CodexSpellings(NativeSpellings):
 
     @property
     def native_identifiers(self) -> list[Atom]:
-        return [Atom("developers.openai.com"), Atom("learn.chatgpt.com")]
+        return [
+            Atom("developers.openai.com"),
+            Atom("learn.chatgpt.com"),
+            Atom("exec_command"),
+            Atom("write_stdin"),
+        ]
 
     def render(self, invocation: SkillInvocation) -> str:
         mention = f"${invocation.plugin}:{invocation.skill}"
@@ -157,6 +162,32 @@ class CodexSpellings(NativeSpellings):
                 "semantically allowed command is auto-approved; do not add a "
                 f"shell `# lup: escalate` marker. {reason}"
             )
+        )
+
+    def watch_output(self, command: str) -> Instruction:
+        """Spell the live session Codex gives the model, which is read rather
+        than pushed.
+
+        `exec_command` opens a long-lived PTY for streaming output, REPLs, and
+        interactive sessions, and `write_stdin` feeds it keystrokes or, given
+        none, polls what it has emitted — the prompting guide describes that
+        second use as polling in so many words. The push form exists but not
+        here: `command/exec` with `streamStdoutStderr` delivers
+        `command/exec/outputDelta` notifications to an app-server client,
+        behind `capabilities.experimentalApi`, and is not among the tools the
+        model itself may call.
+
+        So the advice inverts against Claude's. Reading the session is the
+        mechanism rather than the mistake, and what is worth saying instead is
+        to keep one session rather than re-running the command, which is what
+        loses the output already emitted.
+        """
+        return Instruction(
+            f"Open `{command}` with `exec_command`, which holds a live PTY, "
+            "and read what it has emitted with `write_stdin` carrying no "
+            "keystrokes. Keep the one session for as long as the command "
+            "runs: re-running it starts over and loses everything it already "
+            "reported"
         )
 
     def read_document(self, path: str) -> Spelling:
@@ -691,11 +722,7 @@ class CodexHookRenderer(ArtifactRenderer[HookSet]):
                         ],
                         autonomous_agent_identities=[self.worker_identity],
                         path_roles=[
-                            PathRoleRow(
-                                root=role.root.as_posix(),
-                                role=role.role,
-                                kind=role.kind,
-                            )
+                            PathRoleRow(root=role.root.as_posix(), role=role.role)
                             for role in source.path_roles
                         ],
                         acceptance_guard=guard.erased()

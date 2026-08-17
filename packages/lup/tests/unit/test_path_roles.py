@@ -1,20 +1,18 @@
 """Path-role resolution: what a repository path is for, decided lexically."""
 
-from typing import cast
-
 from lup.policy.kernel.decision import KernelDecision
 from lup.policy.kernel.edit import decide_edit
 from lup.policy.kernel.roles import path_role
 from lup.policy.kernel.rows import AcceptanceGuardRow, PathRoleRow
 
 ROLES = [
-    PathRoleRow(root="tests", role="test", kind="subtree"),
-    PathRoleRow(root="tmp", role="scratch", kind="subtree"),
+    PathRoleRow(root="tests", role="test"),
+    PathRoleRow(root="tmp", role="scratch"),
 ]
 
 NESTED = [
-    PathRoleRow(root="tests", role="test", kind="subtree"),
-    PathRoleRow(root="tmp", role="scratch", kind="contains_part"),
+    PathRoleRow(root="tests", role="test"),
+    PathRoleRow(root="**/tmp", role="scratch"),
 ]
 
 
@@ -65,16 +63,16 @@ def test_part_matching_widens_no_root_that_did_not_ask_for_it() -> None:
     assert path_role("src/app/tests/helper.py", NESTED) == "production"
 
 
-def test_a_table_generated_before_the_axis_existed_reads_as_anchored() -> None:
-    """A row is primitive data, and an older branch renders one without `kind`.
+def test_a_bare_root_is_anchored_at_the_repository_top() -> None:
+    """Reach is the pattern's own, so a root without `**/` claims one place.
 
-    The gate that decides every edit is also the gate whose recovery is
-    regenerating the table, so a missing field reads as the behaviour that
-    predates it rather than failing the decision.
+    The counterpart to part matching: the same directory name declared bare
+    reaches the top-level tree and no sibling of it, which is what keeps a
+    role from widening to every package merely by being declared.
     """
-    older = cast(PathRoleRow, {"root": "tmp", "role": "scratch"})  # lup: ignore[cast]
-    assert path_role("tmp/briefing.md", [older]) == "scratch"
-    assert path_role("packages/lup/tmp/briefing.md", [older]) == "production"
+    anchored = [PathRoleRow(root="tmp", role="scratch")]
+    assert path_role("tmp/briefing.md", anchored) == "scratch"
+    assert path_role("packages/lup/tmp/briefing.md", anchored) == "production"
 
 
 def test_traversal_cannot_carry_a_role_out_of_its_root() -> None:
@@ -116,6 +114,66 @@ def test_the_scratchpad_role_survives_no_traversal_out_of_it() -> None:
 def test_a_scratchpad_lookalike_is_not_the_scratchpad() -> None:
     assert path_role("/tmp/claudex/x", ROLES) == "production"
     assert path_role("/tmp/x", ROLES) == "production"
+
+
+PATTERN_ROLES = [
+    PathRoleRow(root="**/__pycache__", role="scratch"),
+    PathRoleRow(root="**/*.egg-info", role="scratch"),
+    PathRoleRow(root="src/*/generated", role="scratch"),
+]
+"""Roles for trees scattered through the repository rather than gathered.
+
+A build artifact appears wherever the package it belongs to does, so a
+prefix could never have named the class — which is the whole reason a root
+is a pattern.
+"""
+
+
+def test_a_pattern_reaches_the_tree_it_names_at_any_depth() -> None:
+    assert path_role("__pycache__", PATTERN_ROLES) == "scratch"
+    assert path_role("__pycache__/module.pyc", PATTERN_ROLES) == "scratch"
+    assert path_role("src/a/b/__pycache__/module.pyc", PATTERN_ROLES) == "scratch"
+    assert path_role("packages/lup/lup.egg-info/PKG-INFO", PATTERN_ROLES) == "scratch"
+
+
+def test_a_wildcard_never_crosses_a_separator() -> None:
+    """`*` stands for one segment, so a pattern cannot widen past its directory.
+
+    `src/*/generated` names a generated tree one level down and nothing
+    else; were `*` to span separators it would also claim every `generated`
+    however deep, which is a different and much larger declaration.
+    """
+    assert path_role("src/pkg/generated/api.py", PATTERN_ROLES) == "scratch"
+    assert path_role("src/pkg/inner/generated/api.py", PATTERN_ROLES) == "production"
+
+
+def test_a_pattern_matches_whole_segments_rather_than_substrings() -> None:
+    """The trap a substring test would fall into, and the reason for segments.
+
+    A file merely *named* after a disposable tree is not in one: losing
+    `notes/__pycache__.bak` costs whatever somebody saved there.
+    """
+    assert path_role("notes/__pycache__.bak", PATTERN_ROLES) == "production"
+    assert path_role("src/__pycache__extra/x.py", PATTERN_ROLES) == "production"
+    assert path_role("my.egg-info.txt", PATTERN_ROLES) == "production"
+
+
+def test_being_untracked_is_not_what_makes_a_path_disposable() -> None:
+    """Disposability is declared, never inferred from what Git ignores.
+
+    Every path here is gitignored in this repository, and each holds the
+    only copy of something: secrets, the trace corpus the feedback loop
+    reads, resolver run state. A grant keyed on `.gitignore` would have
+    destroyed all three.
+    """
+    assert path_role(".env.local", PATTERN_ROLES) == "production"
+    assert path_role("notes/traces/0.2.0/session.jsonl", PATTERN_ROLES) == "production"
+    assert path_role(".lup/resolve/run/state.json", PATTERN_ROLES) == "production"
+    assert path_role(".claude/settings.local.json", PATTERN_ROLES) == "production"
+
+
+def test_traversal_cannot_carry_a_pattern_role_out_of_its_tree() -> None:
+    assert path_role("src/a/__pycache__/../../main.py", PATTERN_ROLES) == "production"
 
 
 def authoring(path: str) -> str:

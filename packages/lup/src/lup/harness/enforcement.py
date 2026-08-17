@@ -86,10 +86,7 @@ def declared_path_rules(hooks: HookSet) -> list[PathRule]:
 
 def declared_role_rows(roles: list[HookPathRole]) -> list[PathRoleRow]:
     """What each declared root is for, as the kernel reads it."""
-    return [
-        PathRoleRow(root=role.root.as_posix(), role=role.role, kind=role.kind)
-        for role in roles
-    ]
+    return [PathRoleRow(root=role.root.as_posix(), role=role.role) for role in roles]
 
 
 def semantic_policy_for(

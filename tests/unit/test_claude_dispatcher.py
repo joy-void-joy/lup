@@ -19,9 +19,19 @@ from lup.policy.grants import allowance_grants_environment, write_allowance_gran
 from lup.policy.identity import AGENT_IDENTITY_ENV, ConcernAllowance
 from lup.policy.kernel.decision import SandboxPlacement
 from lup.types import EnvVars, JsonObject
+from lup_template.devtools.harness.catalog import declared_hook_set
 from tests.unit.repos import initialized_repo
 
 DISPATCHER = Path(".claude/plugins/lup/hooks/scripts/policy.py")
+
+SWEEP_SIZE = declared_hook_set().recoverable_target_limit + 3
+"""Enough restorable files to read as a sweep, taken from the declared cap.
+
+Written against the same declaration the dispatcher is compiled from rather
+than as a number of its own: what these cases pin is that a sweep still asks
+however the cap is set, and a literal would instead pin the cap and go quiet
+the moment somebody moved it.
+"""
 
 
 def decide(payload: object) -> dict[str, object]:  # lup: ignore[dict-str-payload]
@@ -236,7 +246,7 @@ def delete_repo(tmp_path: Path) -> Path:
     work = tmp_path / "repo"
     (work / "src").mkdir(parents=True)
     git = initialized_repo(work, tmp_path / "no-hooks")
-    for index in range(8):
+    for index in range(SWEEP_SIZE):
         (work / "src" / f"file{index}.py").write_text("value = 1\n", encoding="utf-8")
     git("add", "src")
     git("commit", "-m", "chore: base")
@@ -276,6 +286,46 @@ def test_removing_a_directory_asks_and_names_the_way_through(
     assert "name the files instead" in reason
 
 
+def test_a_build_product_is_disposable_wherever_it_sits(delete_repo: Path) -> None:
+    """The declared pattern reaches the caches scattered through the tree.
+
+    A prefix root could only ever have named the top-level one, so every
+    `__pycache__` beside a package stayed production and asked.
+    """
+    effect, _reason = effect_from(
+        "rm packages/lup/src/lup/__pycache__/roles.cpython-314.pyc", delete_repo
+    )
+
+    assert effect == "allow"
+
+
+def test_an_ignored_file_holding_the_only_copy_still_asks(delete_repo: Path) -> None:
+    """Untracked is not disposable, and no pattern declares these.
+
+    Git ignores every path here, and each is the only copy of what it
+    holds — secrets, the trace corpus, resolver state. A grant keyed on
+    `.gitignore` rather than on a declared role would take all three.
+    """
+    for path in (".env.local", "notes/traces/session.jsonl", ".lup/run/state.json"):
+        effect, _reason = effect_from(f"rm {path}", delete_repo)
+
+        assert effect == "ask", path
+
+
+def test_a_delete_at_the_cap_is_granted(delete_repo: Path) -> None:
+    """The cap is a line between a refactor and a sweep, so both sides are pinned.
+
+    Its companion below fixes where the grant stops; without this one, a cap
+    of zero would satisfy that test and refuse everything.
+    """
+    limit = declared_hook_set().recoverable_target_limit
+    named = " ".join(f"src/file{index}.py" for index in range(limit))
+
+    effect, _reason = effect_from(f"rm {named}", delete_repo)
+
+    assert effect == "allow"
+
+
 def test_a_sweep_of_restorable_files_asks_even_though_each_is_restorable(
     delete_repo: Path,
 ) -> None:
@@ -284,7 +334,7 @@ def test_a_sweep_of_restorable_files_asks_even_though_each_is_restorable(
     Every file here is committed and clean, so the per-file grant would take
     all of them; past the declared limit the delete reads as a sweep instead.
     """
-    named = " ".join(f"src/file{index}.py" for index in range(8))
+    named = " ".join(f"src/file{index}.py" for index in range(SWEEP_SIZE))
 
     effect, _reason = effect_from(f"rm {named}", delete_repo)
 

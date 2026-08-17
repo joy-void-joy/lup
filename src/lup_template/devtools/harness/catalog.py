@@ -313,20 +313,33 @@ def portable_harness(version: str = "0.2.0", root: Path | None = None) -> Harnes
                 # production made `rm` and `cp` ask about caches and virtual
                 # environments, which is an approval that teaches nobody
                 # anything.
-                # Scratch by name rather than by place: a package opens its own
-                # `tmp/` beside itself, and a briefing written there is as
-                # disposable as one at the top. The protected-path table
-                # already reads `tmp` this way, so anchoring the role at the
-                # repository top left the two halves disagreeing about which
-                # directories the word covers.
-                HookPathRole(root=Path("tmp"), role="scratch", kind="contains_part"),
                 HookPathRole(root=Path(".venv"), role="scratch"),
-                HookPathRole(root=Path(".ruff_cache"), role="scratch"),
-                HookPathRole(root=Path(".pytest_cache"), role="scratch"),
                 HookPathRole(root=Path("build"), role="scratch"),
                 HookPathRole(root=Path("dist"), role="scratch"),
                 HookPathRole(root=Path("htmlcov"), role="scratch"),
-                HookPathRole(root=Path("node_modules"), role="scratch"),
+                # A build product appears beside whatever produced it, so
+                # these name a shape rather than a place: `__pycache__` alone
+                # stands in thirty-odd directories here, and a declared
+                # `.pytest_cache` matched the top-level one while the sibling
+                # under `packages/lup/` stayed production. `tmp` is the same
+                # claim — a package opens its own beside itself, and the
+                # protected-path table already reads the name that way, so
+                # anchoring the role at the top left the two halves
+                # disagreeing about which directories the word covers.
+                # `build`, `dist`, and `htmlcov` keep their single roots — a
+                # nested directory by those names is plausibly somebody's
+                # source.
+                HookPathRole(root=Path("**/tmp"), role="scratch"),
+                HookPathRole(root=Path("**/__pycache__"), role="scratch"),
+                HookPathRole(root=Path("**/*.egg-info"), role="scratch"),
+                HookPathRole(root=Path("**/.ruff_cache"), role="scratch"),
+                HookPathRole(root=Path("**/.pytest_cache"), role="scratch"),
+                HookPathRole(root=Path("**/node_modules"), role="scratch"),
+                # Deliberately absent, though Git ignores every one of them:
+                # `.env.local`, `notes/`, `.lup/`, and the `*.local` configs
+                # each hold the only copy of what is in them. Ignored means
+                # untracked, which is not the same claim as disposable, and
+                # a role is the place that claim gets made explicitly.
             ],
             human_owned_files=[Path("README.md")],
             # This repository runs the resolver, so its test roots are what
