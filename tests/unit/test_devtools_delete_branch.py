@@ -210,6 +210,101 @@ def test_a_merged_branch_can_still_keep_its_remote(
     assert "spent" in remote_branch_names(pushed)
 
 
+@pytest.fixture
+def outgrown(tmp_path: Path) -> Path:
+    """A tracking branch whose work reached main by a merge, not by a push.
+
+    What a worktree looks like at the end of its life: created with an
+    upstream, committed to, and landed by merging into the integration
+    branch. The branch is then ahead of the remote copy it tracks, which is
+    the state `git branch -d` refuses however thoroughly HEAD contains it.
+    """
+    work = tmp_path / "repo"
+    git = initialized_repo(work, tmp_path / "no-hooks")
+    commit_file(git, work, "file.txt", "base\n", "chore: base")
+    sh.Command("git")("init", "--bare", "-q", str(work.parent / "origin.git"))
+    git("remote", "add", "origin", str(work.parent / "origin.git"))
+    git("push", "-q", "origin", "main")
+
+    git("checkout", "-q", "-b", "topic")
+    git("push", "-q", "-u", "origin", "topic")
+    commit_file(git, work, "extra.txt", "extra\n", "feat: extra")
+    git("checkout", "-q", "main")
+    git("merge", "--no-edit", "-q", "topic")
+    return work
+
+
+def test_the_plain_delete_refuses_a_branch_ahead_of_its_upstream(
+    outgrown: Path,
+) -> None:
+    """The precondition the preflight has to model, pinned so it stays true."""
+    with pytest.raises(sh.ErrorReturnCode):
+        sh.Command("git")("-C", str(outgrown), "branch", "-d", "topic", _tty_out=False)
+
+
+def test_a_branch_ahead_of_its_upstream_is_deleted_anyway(
+    outgrown: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Nothing is discarded: the branch step got here because HEAD holds it all."""
+    monkeypatch.chdir(outgrown)
+
+    branches.delete_branch("topic", dry_run=False, force=False)
+
+    assert "topic" not in branch_names(outgrown)
+    assert "topic" not in remote_branch_names(outgrown)
+
+
+def test_the_dry_run_names_the_upstream_as_what_forces_it(
+    outgrown: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A probe result, not a restatement of a flag the caller never passed."""
+    monkeypatch.chdir(outgrown)
+
+    branches.delete_branch("topic", dry_run=True, force=False)
+
+    assert "force: ahead of origin/topic" in capsys.readouterr().out
+
+
+def test_a_tracking_branch_head_lacks_is_blocked_like_any_other(
+    outgrown: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The combination the force must never reach: upstream set, work not in.
+
+    Being ahead of an upstream only excuses the plain delete once HEAD holds
+    every commit. Read without that guard it would describe this branch too,
+    and deleting it would take the only copy of `later` with it.
+    """
+    git = initialized_repo(outgrown, outgrown.parent / "no-hooks")
+    git("checkout", "-q", "-b", "later")
+    git("push", "-q", "-u", "origin", "later")
+    commit_file(git, outgrown, "later.txt", "later\n", "feat: later")
+    git("checkout", "-q", "main")
+    monkeypatch.chdir(outgrown)
+
+    with pytest.raises(typer.Exit):
+        branches.delete_branch("later", dry_run=False, force=False)
+
+    assert "later" in branch_names(outgrown)
+    assert "branch is unmerged" in capsys.readouterr().err
+
+
+def test_a_branch_head_lacks_is_blocked_upstream_or_not(
+    pushed: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The safety the upstream case must not spend: unmerged still means blocked.
+
+    `solo` holds a commit main does not, so no reading of its upstream may
+    promote it into a deletion — that is the one case the force is for.
+    """
+    monkeypatch.chdir(pushed)
+
+    with pytest.raises(typer.Exit):
+        branches.delete_branch("solo", dry_run=False, force=False)
+
+    assert "solo" in branch_names(pushed)
+    assert "branch is unmerged" in capsys.readouterr().err
+
+
 def test_a_stranded_worktree_is_pruned_and_the_branch_deleted(
     repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:

@@ -1221,6 +1221,17 @@ class DeletionPlan(BaseModel):
     for existing — and a copy that exists is the thing that made deleting
     the local branch survivable in the first place.
     """
+    left_upstream_behind: bool = False
+    """Whether ``-d`` will refuse over an upstream the branch has outgrown.
+
+    Deleting it is still safe: the branch step reached this only because HEAD
+    contains every commit. But git judges a tracking branch against its
+    upstream rather than against HEAD, so the plain delete refuses — and it
+    refuses at run time, after the worktree removal ahead of it has already
+    happened, which is how a preflight promising that a refusal changes
+    nothing came to leave a checkout gone and a remote branch orphaned.
+    Recorded so the plan predicts what the run will meet.
+    """
     actions: list[PlannedAction] = []
 
     def blocked(self) -> list[PlannedAction]:
@@ -1246,6 +1257,31 @@ def remote_branch_exists(name: str) -> bool:
         return True
     except sh.ErrorReturnCode:
         return False
+
+
+def upstream_ref(name: str) -> str | None:
+    """The remote-tracking ref this branch is set to follow, if it has one."""
+    try:
+        return (
+            git.out("rev-parse", "--symbolic-full-name", f"{name}@{{upstream}}").strip()
+            or None
+        )
+    except sh.ErrorReturnCode:
+        return None
+
+
+def outgrew_upstream(name: str) -> bool:
+    """Whether the branch holds commits the upstream it tracks does not.
+
+    The question ``git branch -d`` actually asks of a tracking branch, and
+    the reason it refuses one every commit of which is already in HEAD. A
+    worktree is given an upstream the moment it is created, so this is the
+    ordinary shape of a branch that landed by a merge into the integration
+    branch rather than by a push of its own: the work is in, and the remote
+    copy is simply behind.
+    """
+    upstream = upstream_ref(name)
+    return upstream is not None and not is_ancestor(name, upstream)
 
 
 def plan_worktree_step(path: str, stranded: bool, force: bool) -> PlannedAction:
@@ -1275,9 +1311,22 @@ def plan_worktree_step(path: str, stranded: bool, force: bool) -> PlannedAction:
 
 
 def plan_branch_step(name: str, force: bool) -> PlannedAction:
-    """Judge the branch deletion the way ``git branch -d`` would."""
+    """Judge the branch deletion the way ``git branch -d`` would.
+
+    Which is not merely whether HEAD contains it. A branch that tracks an
+    upstream is judged against that upstream, so one whose every commit is
+    already in the integration branch is still refused while its remote copy
+    sits behind. Reporting that as forced rather than blocked is the honest
+    reading: nothing is discarded, because HEAD holds all of it.
+    """
     description = f"Delete local branch: {name}"
     if is_ancestor(name, "HEAD"):
+        if outgrew_upstream(name):
+            return PlannedAction(
+                description=description,
+                verdict="forced",
+                detail=f"ahead of origin/{name}, which HEAD already contains",
+            )
         return PlannedAction(description=description)
     if force:
         return PlannedAction(
@@ -1373,6 +1422,7 @@ def plan_deletion(name: str, force: bool, remote: bool | None = None) -> Deletio
     actions.append(plan_branch_step(name, force=force))
 
     merged = is_ancestor(name, "HEAD")
+    left_upstream_behind = merged and outgrew_upstream(name)
     has_remote = remote_branch_exists(name)
     delete_remote = has_remote and (merged if remote is None else remote)
     if delete_remote:
@@ -1384,6 +1434,7 @@ def plan_deletion(name: str, force: bool, remote: bool | None = None) -> Deletio
         stranded=stranded,
         has_remote=has_remote,
         delete_remote=delete_remote,
+        left_upstream_behind=left_upstream_behind,
         actions=actions,
     )
 
@@ -1446,7 +1497,7 @@ def run_deletion(plan: DeletionPlan, force: bool) -> None:
             )
 
     try:
-        git("branch", "-D" if force else "-d", plan.branch)
+        git("branch", "-D" if force or plan.left_upstream_behind else "-d", plan.branch)
         typer.echo(f"Deleted branch: {plan.branch}")
         completed.append("deleted branch")
     except sh.ErrorReturnCode as error:
