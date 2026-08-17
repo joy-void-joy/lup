@@ -31,14 +31,21 @@ from pydantic import BaseModel
 REF_FORMAT = "%(refname) %(objectname)"
 """One ref per line, as `repository_refs` reads it."""
 
-IDENTITY_SETTINGS = ("user.name", "user.email")
-"""The config a fixture overwrites to commit as somebody, and never puts back.
+WATCHED_SETTINGS = ("user.name", "user.email", "core.hooksPath")
+"""The config a fixture overwrites and never puts back.
 
-Watched beside the refs because it is the quieter half of the same accident and
-the more expensive one. A moved ref is visible the moment anybody looks at the
-branch; a committer identity written into the shared config is inherited by
+Watched beside the refs because this is the quieter half of the same accident
+and the more expensive one. A moved ref is visible the moment anybody looks at
+the branch; a committer identity written into the shared config is inherited by
 every worktree cut from the repository and shows up only as authorship on work
 done hours later, by someone who never ran the suite.
+
+`core.hooksPath` is quieter still, and it is the half that takes the alarm out
+with it. Pointed at a directory a fixture built, it disables every hook the
+repository declares — the drift guard and the gate guard both stop running,
+and a checkout that runs no hooks looks exactly like one whose hooks pass. An
+identity leak at least signs the work it spoils; this one leaves no trace at
+all until something it should have refused gets through.
 """
 
 GIT_ENVIRONMENT = (
@@ -122,10 +129,10 @@ def repository_refs(root: Path, ref_format: str = REF_FORMAT) -> dict[str, str]:
     return {pair[0]: pair[1] for pair in pairs if len(pair) == 2}
 
 
-def committer_identity(
-    root: Path, settings: tuple[str, ...] = IDENTITY_SETTINGS
+def watched_config(
+    root: Path, settings: tuple[str, ...] = WATCHED_SETTINGS
 ) -> dict[str, str]:
-    """Who the repository enclosing `root` would commit as, setting by setting.
+    """What the repository enclosing `root` holds for each watched setting.
 
     Absent settings are simply absent, so a repository that leaves identity to
     the user's global config reads as empty here and a fixture writing one in
@@ -144,8 +151,8 @@ def committer_identity(
 
 
 def repository_state(root: Path) -> dict[str, str]:
-    """Everything the guard watches: every ref, and who the repository commits as."""
-    return {**repository_refs(root), **committer_identity(root)}
+    """Everything the guard watches: every ref, and the config a fixture can leak."""
+    return {**repository_refs(root), **watched_config(root)}
 
 
 def moved_refs(before: dict[str, str], after: dict[str, str]) -> list[str]:
@@ -185,9 +192,14 @@ def guard_report(before: dict[str, str], after: dict[str, str]) -> str:
             "",
             "A ref is recovered from `git reflog show <ref>`. A `config` line",
             "is worse than it looks: the shared config is inherited by every",
-            "worktree cut from this repository, so commits made afterwards —",
-            "including in other sessions — carry that author until it is",
-            "unset. Check `git log --format='%an <%ae>'` on recent work.",
+            "worktree cut from this repository, so it outlives this run in",
+            "every session opened against it.",
+            "",
+            "A `user.*` line means commits made afterwards carry that author",
+            "until it is unset — check `git log --format='%an <%ae>'` on",
+            "recent work. A `core.hooksPath` line means this repository now",
+            "runs no hooks at all: unset it, then re-arm the guards, and read",
+            "what landed while they were off.",
             "",
             "Then find the fixture: it is one that runs git without",
             "`-C <tmp_path>` or without `monkeypatch.chdir` into the",
