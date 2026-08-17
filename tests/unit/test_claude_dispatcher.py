@@ -97,12 +97,11 @@ def test_a_declared_test_root_is_not_judged_against_production_conventions() -> 
 
     One identical edit, two roots. In production the conventions decide and
     refuse it. Under a test root they never run — a test's subject is
-    production's behaviour rather than its own shape — and what answers
-    instead is the test-edit guard this repository declares, which is a
-    question about the target of the work rather than about the code's
-    shape. Two different gates, which is why the reason is asserted and not
-    only the effect: identical verdicts from different rules would read the
-    same here.
+    production's behaviour rather than its own shape — so the same edit is an
+    ordinary small change. The reason is asserted and not only the effect
+    because an allow arrived at by some other route would read the same here,
+    and the contrast with production is the whole evidence that the role
+    resolved rather than the rules having quietly gone missing.
     """
     shared = "from lup.policy.kernel.roles import path_role"
     production = decide(
@@ -126,8 +125,8 @@ def test_a_declared_test_root_is_not_judged_against_production_conventions() -> 
     assert isinstance(denied, dict)
     assert isinstance(guarded, dict)
     assert denied["permissionDecision"] == "deny"
-    assert guarded["permissionDecision"] == "ask"
-    assert "measured against" in str(guarded["permissionDecisionReason"])
+    assert guarded["permissionDecision"] == "allow"
+    assert "small safe edit" in str(guarded["permissionDecisionReason"])
 
 
 def test_an_overwide_suppression_is_placed_rather_than_left_to_the_author() -> None:
@@ -205,8 +204,8 @@ def test_absolute_paths_resolve_against_their_worktree_not_the_launch_directory(
 
     The reason is what carries the proof on the second path. `x = {}` trips
     the empty-collection rule in production and is refused; under a test
-    root the conventions never run and the test-edit guard answers instead,
-    so the guard's own words are evidence the role resolved rather than the
+    root the conventions never run, so the same line is an ordinary small
+    change. That contrast is the evidence the role resolved rather than the
     rules having quietly gone missing.
     """
     root = Path(".").resolve()
@@ -222,8 +221,8 @@ def test_absolute_paths_resolve_against_their_worktree_not_the_launch_directory(
     assert isinstance(asked, dict)
     assert isinstance(guarded, dict)
     assert asked["permissionDecision"] == "ask"
-    assert guarded["permissionDecision"] == "ask"
-    assert "measured against" in str(guarded["permissionDecisionReason"])
+    assert guarded["permissionDecision"] == "allow"
+    assert "small safe edit" in str(guarded["permissionDecisionReason"])
 
 
 def bash_payload(command: str) -> JsonObject:
