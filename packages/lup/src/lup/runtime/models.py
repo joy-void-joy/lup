@@ -4,7 +4,7 @@ import json
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
 from datetime import timedelta
-from typing import Annotated, Literal, overload
+from typing import Annotated, Literal, TypeIs, overload
 
 from pydantic import BaseModel, Discriminator
 
@@ -373,6 +373,20 @@ Deltas are deliberately absent: :func:`lup.runtime.transcript.fold_transcript`
 takes this union, so a partial fragment cannot reach the fold at all rather
 than being filtered out inside it.
 """
+
+
+def survives(event: "LiveTurnEvent") -> TypeIs["TurnEvent"]:
+    """Whether this event reaches the transcript, as the type system sees it.
+
+    The judgement is the kind's own ``durable`` field and is read here rather
+    than restated: a filter that names the kinds it drops goes stale the moment
+    one is added, and the new kind would reach the transcript with its own
+    declaration saying it should not. What this adds is the narrowing, which a
+    plain field cannot give a caller — pyright narrows on a comparison, not on
+    the truth of a ``bool``.
+    """
+    return event.durable
+
 
 type LiveTurnEvent = TurnEvent | BlockDeltaEvent
 """Everything durable, plus in-flight deltas, in order.

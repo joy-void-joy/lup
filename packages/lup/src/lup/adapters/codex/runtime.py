@@ -44,6 +44,7 @@ from lup.runtime.models import (
     TurnInput,
     TurnMessage,
     TurnToolBinding,
+    survives,
 )
 from lup.runtime.output import TurnSubmission, bound_submission
 from lup.runtime.transcript import fold_transcript
@@ -346,7 +347,7 @@ class CodexLiveEventStream(EventStream):
 
     async def durable(self) -> AsyncIterator[TurnEvent]:
         async for event in self.iterate():
-            if event.type != "block_delta":
+            if survives(event):
                 yield event
 
     def events(self) -> AsyncIterator[TurnEvent]:
