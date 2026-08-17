@@ -78,6 +78,7 @@ class ClaudeSpellings(NativeSpellings):
             Atom("ExitWorktree"),
             Atom("docs.claude.com"),
             Atom("code.claude.com"),
+            Atom("Monitor"),
         ]
 
     def render(self, invocation: SkillInvocation) -> str:
@@ -119,6 +120,24 @@ class ClaudeSpellings(NativeSpellings):
             words=Instruction(
                 f"Launch it with `dangerouslyDisableSandbox: true`. {reason}"
             )
+        )
+
+    def watch_output(self, command: str) -> Instruction:
+        """Spell the push-based waiter, which is a tool rather than a call.
+
+        `Monitor` treats each stdout line as an event and ends the watch when
+        the command exits, so one invocation covers both "tell me when
+        something moves" and "tell me when it is over" without the agent
+        asking again. Running the same command through `Bash` with a long
+        timeout returns once, at the end, and reading a background session
+        repeatedly is the polling loop this exists to avoid.
+        """
+        return Instruction(
+            f"Start a `Monitor` over `{command}` and leave it live. Each line "
+            "it emits arrives as an event, and the watch ends when the command "
+            "does. Do not run it through `Bash`, whose long timeout returns "
+            "once at the end, and do not read a backgrounded session on a "
+            "loop — both are polling, however patient"
         )
 
     def read_document(self, path: str) -> Spelling:
@@ -533,11 +552,7 @@ class ClaudeHookRenderer(ArtifactRenderer[HookSet]):
                             f"{self.plugin_name}:{self.worker_identity}",
                         ],
                         path_roles=[
-                            PathRoleRow(
-                                root=role.root.as_posix(),
-                                role=role.role,
-                                kind=role.kind,
-                            )
+                            PathRoleRow(root=role.root.as_posix(), role=role.role)
                             for role in source.path_roles
                         ],
                         acceptance_guard=guard.erased()

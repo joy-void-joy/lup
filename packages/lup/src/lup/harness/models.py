@@ -25,7 +25,7 @@ from pydantic import (
 from lup.codescan.common import RuleSelection
 from lup.harness.banner import ArtifactBanner, GeneratedBanner
 from lup.markdown import TableCell, escaped
-from lup.policy.kernel.rows import AcceptanceGuardRow, PathRoleKind, PathRoleName
+from lup.policy.kernel.rows import AcceptanceGuardRow, PathRoleName
 from lup.policy.models import PolicyId, UrlPathPrefix
 from lup.policy.refused_tools import RefusedTool
 from lup.policy.shell_rules import RunnerTargetRule, ShellCommandRule
@@ -388,6 +388,23 @@ class RelocateSession(SemanticPart, frozen=True):
         return renderer.own.relocate_session(self.path)
 
 
+class WatchOutput(SemanticPart, frozen=True):
+    """Wait on a command that reports progress before it exits.
+
+    Runtimes differ in what waiting *is*: one pushes each line to the agent,
+    another hands it a live session to read. Prose that named the idea
+    without naming the mechanism left a reader to guess, and the guess is an
+    ordinary command with a long timeout — which reports once, at the end.
+    """
+
+    type: Literal["watch_output"] = "watch_output"
+    command: PortableText
+    """The command to watch, as the reader will run it."""
+
+    def spell(self, renderer: "PromptRenderer") -> str:
+        return renderer.own.watch_output(self.command)
+
+
 class ResolverEntry(SemanticPart, frozen=True):
     type: Literal["resolver_entry"] = "resolver_entry"
 
@@ -419,6 +436,7 @@ type PromptPart = Annotated[
     | Delegate
     | RequestApproval
     | RelocateSession
+    | WatchOutput
     | ResolverEntry
     | ArgumentsRef,
     Discriminator("type"),
@@ -706,15 +724,14 @@ class HookPathRole(BaseModel, frozen=True):
     ``scratch`` root holds files that are disposable by construction, so the
     verbs that ask before destroying something have nothing to protect there.
 
-    ``kind`` says how far the declaration reaches. A root is anchored at the
-    repository top by default, which is what a laid-out tree means; a
-    directory that is what it is wherever it sits — a scratch directory beside
-    whichever package opened it — declares ``contains_part`` instead.
+    ``root`` is a pattern, which says how far the declaration reaches. A bare
+    root is anchored at the repository top, which is what a laid-out tree
+    means; a directory that is what it is wherever it sits — a scratch
+    directory beside whichever package opened it — is named ``**/<name>``.
     """
 
     root: Path
     role: PathRoleName
-    kind: PathRoleKind = "subtree"
 
 
 class AcceptanceGuard(BaseModel, frozen=True):
@@ -887,13 +904,17 @@ class HookSet(BaseModel, frozen=True):
         ),
     )
     recoverable_target_limit: int = Field(
-        default=5,
+        default=20,
         ge=0,
         description=(
             "How many committed, unmodified files one command may destroy "
             "without asking. Git restores each of them, but restoring is a "
             "repair somebody has to know to perform, so past this count a "
-            "delete reads as a sweep and is worth a question"
+            "delete reads as a sweep and is worth a question. The line sits "
+            "where an ordinary refactor stops and a sweep starts: deleting a "
+            "package's worth of tracked, unmodified files is a normal edit "
+            "whose worst case is one checkout, and pricing it at an approval "
+            "buys a prompt that teaches nobody anything"
         ),
     )
     sandbox: HookSandbox | None = None

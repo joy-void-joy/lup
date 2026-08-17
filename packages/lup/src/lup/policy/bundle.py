@@ -214,7 +214,6 @@ def path_role_rows_literal(rows: list[PathRoleRow]) -> str:
             [
                 f'"root": {json.dumps(row["root"])}',
                 f'"role": {json.dumps(row["role"])}',
-                f'"kind": {json.dumps(row["kind"])}',
             ]
             for row in rows
         ]
