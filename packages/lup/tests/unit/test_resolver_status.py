@@ -381,6 +381,53 @@ def test_a_concern_assembly_moved_to_integrating_stays_settled() -> None:
     assert assembled.tally().settled == 2
 
 
+def test_a_caller_may_count_integrating_as_finished() -> None:
+    """The settled line is the caller's to redraw, and one redraw reaches both.
+
+    The table's own note offers ``integrating`` as the line a reader could
+    reasonably draw elsewhere, and passing it here is the whole of that
+    redraw. The bar a run prints and the supervisor's header both take their
+    numerator from this fold, so neither is left counting by the default
+    while the other counts by the argument.
+    """
+    state = verifying(["a", "b", "c"], "integration-sha")
+
+    assert state.tally().settled == 0
+    assert state.tally((*SETTLED_STATUSES, ConcernStatus.INTEGRATING)).settled == 3
+
+
+def test_a_redrawn_line_cannot_take_back_a_concern_that_already_landed() -> None:
+    """Narrowing reaches work still in flight, never work already stamped.
+
+    The stamp is written once and never cleared, which is what keeps the
+    count from falling when the lifecycle moves settled work backwards. A
+    caller who drops a status from the line inherits that: the concerns that
+    landed under it stay counted, and only the ones that have not landed yet
+    follow the narrower line.
+    """
+    landed = utc_now()
+    state = verifying(["a", "b"], "integration-sha")
+    mixed = state.model_copy(
+        update={
+            "progress": [
+                item.model_copy(
+                    update={
+                        "status": ConcernStatus.VERIFIED,
+                        "settled_at": landed if stamped else None,
+                    }
+                )
+                for item, stamped in zip(state.progress, [True, False])
+            ]
+        }
+    )
+    working = tuple(
+        status for status in SETTLED_STATUSES if status is not ConcernStatus.VERIFIED
+    )
+
+    assert mixed.tally().settled == 2
+    assert mixed.tally(working).settled == 1
+
+
 def test_the_settled_bar_takes_its_rate_from_the_stamps() -> None:
     """The samples are the moments concerns landed, not the count of them."""
     start = utc_now()
