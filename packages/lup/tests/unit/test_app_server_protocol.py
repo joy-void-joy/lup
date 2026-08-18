@@ -17,11 +17,15 @@ same framing without an installed `codex` and can be told to fail on purpose.
 
 import asyncio
 import json
+import os
+import threading
 
 from pathlib import Path
 
 import pytest
 import sh
+
+from pydantic import ValidationError
 
 from lup.adapters.codex.app_server import (
     AppServerError,
@@ -32,7 +36,9 @@ from lup.adapters.codex.app_server import (
 )
 from lup.types import JsonObject
 from tests.unit.doubles import (
+    AppServerRecord,
     AppServerTranscript,
+    ChildEnvironment,
     ChildExit,
     FakeAppServer,
     ScriptedReply,
@@ -452,3 +458,47 @@ async def test_the_attached_lifecycle_needs_no_codex_on_path(
         "initialized",
     ]
     await asyncio.wait_for(server.close(), timeout=SPAWN_TIMEOUT)
+
+
+def test_a_record_stays_readable_while_the_child_rewrites_it(tmp_path: Path) -> None:
+    """A read racing a rewrite gets a whole record, never half of one.
+
+    The child rewrites its record on every message it receives, and the
+    assertions about a terminated child read that file the moment the child is
+    killed — so reads land mid-rewrite by construction. A rewrite that
+    truncated in place would hand those reads an empty file, surfacing as a
+    JSON error naming this record rather than the leg the test was driving.
+    Renaming onto the target instead removes the window, so every read here
+    parses whichever rewrite it raced.
+    """
+    record = tmp_path / "record.json"
+    start = AppServerRecord(
+        pid=os.getpid(), arguments=["fake"], environment=ChildEnvironment()
+    )
+    start.report_to(record)
+    rewrites = 400
+    unreadable: list[str] = []  # lup: ignore[empty-collection] — reader's findings
+
+    def rewrite_repeatedly() -> None:
+        growing = start
+        for turn in range(rewrites):
+            growing = growing.model_copy(
+                update={
+                    "received": [
+                        *growing.received,
+                        RpcMessage(id=turn, method="turn/start"),
+                    ]
+                }
+            )
+            growing.report_to(record)
+
+    writer = threading.Thread(target=rewrite_repeatedly)
+    writer.start()
+    for _read in range(rewrites * 25):
+        try:
+            AppServerRecord.model_validate_json(record.read_text(encoding="utf-8"))
+        except ValidationError as torn:
+            unreadable.append(str(torn))
+    writer.join()
+
+    assert unreadable == []
