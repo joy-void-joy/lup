@@ -71,7 +71,8 @@ def test_claude_renders_the_whole_request(
     assert config.permission_mode == "bypassPermissions"
     assert config.allowed_tools == ["Read"]
     assert config.max_turns == 3
-    assert config.environment == {"KEEP": "1"}
+    assert config.environment["KEEP"] == "1"
+    assert CLAUDE_RUNTIME.login.config_home_env in config.environment
     assert config.hooks is not None
 
 
@@ -151,3 +152,28 @@ def test_a_workspace_home_is_named_in_the_runtime_that_opens_it(
     )
 
     assert runtime.login.config_home_env in environment
+
+
+@pytest.mark.parametrize("runtime", [CLAUDE_RUNTIME, CODEX_RUNTIME])
+def test_a_request_costs_nothing_to_state_and_is_contained_when_opened(
+    runtime: Runtime, tmp_path: Path
+) -> None:
+    """Stating a request touches no filesystem, so building one cannot fail on
+    a home it has no reason to need yet. The home appears when the runtime
+    opens the session, which is the only moment both the workspace and the
+    runtime are known."""
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    request = SessionRequest(cwd=workspace)
+
+    assert runtime.login.config_home_env not in request.environment
+    assert runtime.login.config_home_env in runtime.contained(request).environment
+
+
+@pytest.mark.parametrize("runtime", [CLAUDE_RUNTIME, CODEX_RUNTIME])
+def test_a_request_naming_no_workspace_has_nothing_to_be_contained_against(
+    runtime: Runtime,
+) -> None:
+    request = SessionRequest()
+
+    assert runtime.contained(request) == request
