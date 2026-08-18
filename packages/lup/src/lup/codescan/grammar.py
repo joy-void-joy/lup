@@ -42,7 +42,12 @@ from pathlib import Path
 from pydantic import BaseModel
 
 from lup.codescan.common import PythonSource, Refutation
-from lup.codescan.oracle import DefinitionOracle, DefinitionSite, SourcePosition
+from lup.codescan.oracle import (
+    DefinitionOracle,
+    DefinitionSite,
+    SourceBuffer,
+    SourcePosition,
+)
 
 
 class MatchSite(BaseModel, frozen=True):
@@ -337,6 +342,12 @@ def refute(
     A line carrying several sites of one rule is refuted only when every one
     of them is: one mapping access among three client calls still hides a
     schema, and the directive guarding that line still guards something.
+
+    Every source's own text goes to the oracle, so what is resolved is what
+    is audited. Letting the checker re-read the path instead would answer
+    about whatever disk holds — the same file for a sweep that read it from
+    there, and a different one entirely for a caller judging an edit before
+    it is written, which is the caller that most needs the answer.
     """
     active = GRAMMAR_RULES if rules is None else rules
     if oracle is None or not active:
@@ -351,7 +362,8 @@ def refute(
                 column=chosen.site.query_column,
             )
             for chosen in selected
-        ]
+        ],
+        [SourceBuffer(path=source.path, text=source.text) for source in sources],
     )
 
     trees: dict[str, ast.Module | None] = {}

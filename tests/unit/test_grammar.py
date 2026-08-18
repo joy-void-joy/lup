@@ -18,7 +18,12 @@ from lup.codescan.grammar import (
     attribute_call_sites,
     refute,
 )
-from lup.codescan.oracle import DefinitionOracle, DefinitionSite, SourcePosition
+from lup.codescan.oracle import (
+    DefinitionOracle,
+    DefinitionSite,
+    SourceBuffer,
+    SourcePosition,
+)
 from lup.policy.bundle import bundled_antipattern_rows
 from lup.policy.kernel.edit import antipattern_decision
 from lup.policy.kernel.rows import AntiPatternRow
@@ -60,11 +65,15 @@ class TableOracle(DefinitionOracle):
     def __init__(self, answers: dict[int, list[DefinitionSite]]) -> None:
         self.answers = answers
         self.asked: list[SourcePosition] = []
+        self.held: list[SourceBuffer] = []
 
     def definitions(
-        self, positions: list[SourcePosition]
+        self,
+        positions: list[SourcePosition],
+        buffers: list[SourceBuffer] | None = None,
     ) -> list[list[DefinitionSite]]:
         self.asked.extend(positions)
+        self.held.extend(buffers or [])
         return [
             self.answers[position.line] if position.line in self.answers else []
             for position in positions
@@ -162,6 +171,25 @@ def test_unresolved_receiver_keeps_the_broad_verdict(tmp_path: Path) -> None:
     stubs(tmp_path)
     text = "value = whatever.get('name')\n"
     assert refute([source(text)], TableOracle({}), GRAMMAR_RULES) == {}
+
+
+def test_the_oracle_is_told_the_text_being_audited(tmp_path: Path) -> None:
+    """What is resolved has to be what is audited, or the answer is about
+    another file that happens to share the path.
+
+    The gap only opens where a caller holds text disk does not — an edit
+    judged before it is written — which is the caller whose verdict most
+    depends on the resolution being about its own content.
+    """
+    declaring = stubs(tmp_path)
+    text = "response = client.get('https://example.com')\n"
+    oracle = TableOracle({1: [declaring["client"]]})
+
+    refute([source(text)], oracle, GRAMMAR_RULES)
+
+    assert [(held.path.as_posix(), held.text) for held in oracle.held] == [
+        ("sample.py", text)
+    ]
 
 
 def test_absent_oracle_degrades_to_the_broad_rule() -> None:

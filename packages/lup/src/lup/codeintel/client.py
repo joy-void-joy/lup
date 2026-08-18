@@ -83,17 +83,25 @@ class LspSession:
             if "id" in message and message["id"] == asked:
                 return message["result"] if "result" in message else None
 
-    async def open(self, path: Path) -> list[str]:
+    async def open(self, path: Path, text: str | None = None) -> list[str]:
         """Open a document once per session and return its lines.
 
         The lines come back because an LSP position is a UTF-16 offset into
         one of them, so a caller holding a byte offset needs the text that
         offset is into.
+
+        *text* is the document's content where the caller holds it and disk
+        does not — an edit judged before it is written. The notification
+        already carries the whole document, so serving one costs nothing but
+        not reading the file, and the URI stays the file's own: the server
+        resolves imports and the module's own name exactly as it would for
+        the saved copy. This is what an editor sends for an unsaved buffer.
         """
         key = path.as_posix()
         if key in self.opened:
             return self.opened[key]
-        text = path.read_text(encoding="utf-8")
+        if text is None:
+            text = path.read_text(encoding="utf-8")
         self.opened[key] = text.splitlines()
         await self.notify(
             "textDocument/didOpen",
@@ -108,9 +116,11 @@ class LspSession:
         )
         return self.opened[key]
 
-    async def position_in(self, path: Path, line: int, column: int) -> JsonObject:
+    async def position_in(
+        self, path: Path, line: int, column: int, text: str | None = None
+    ) -> JsonObject:
         """The `TextDocumentPositionParams` for a one-based line and byte column."""
-        lines = await self.open(path)
+        lines = await self.open(path, text)
         row = lines[line - 1] if line <= len(lines) else ""
         return {
             "textDocument": {"uri": path.absolute().as_uri()},

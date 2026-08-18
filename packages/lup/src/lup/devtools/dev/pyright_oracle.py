@@ -28,7 +28,12 @@ from pydantic import ValidationError
 
 from lup.codeintel.client import lsp_session
 from lup.codeintel.replies import LOCATIONS
-from lup.codescan.oracle import DefinitionOracle, DefinitionSite, SourcePosition
+from lup.codescan.oracle import (
+    DefinitionOracle,
+    DefinitionSite,
+    SourceBuffer,
+    SourcePosition,
+)
 from lup.types import JsonValue
 from lup.workspace.paths import project_root
 
@@ -67,16 +72,25 @@ def locations_of(result: JsonValue) -> list[DefinitionSite]:
 
 
 async def resolve(
-    server: Path, root: Path, positions: list[SourcePosition]
+    server: Path,
+    root: Path,
+    positions: list[SourcePosition],
+    buffers: list[SourceBuffer] | None = None,
 ) -> list[list[DefinitionSite]]:
     """Run one language-server session and answer every queried position."""
+    held = {buffer.path.as_posix(): buffer.text for buffer in buffers or []}
     async with lsp_session(server, root, name=SERVER_NAME) as session:
         return [
             locations_of(
                 await session.request(
                     "textDocument/definition",
                     await session.position_in(
-                        position.path, position.line, position.column
+                        position.path,
+                        position.line,
+                        position.column,
+                        held[position.path.as_posix()]
+                        if position.path.as_posix() in held
+                        else None,
                     ),
                 )
             )
@@ -95,7 +109,9 @@ class PyrightOracle(DefinitionOracle):
         self.timeout = timeout
 
     def definitions(
-        self, positions: list[SourcePosition]
+        self,
+        positions: list[SourcePosition],
+        buffers: list[SourceBuffer] | None = None,
     ) -> list[list[DefinitionSite]]:
         """Resolve a whole sweep in one server session, degrading on failure."""
         if not positions:
@@ -103,7 +119,7 @@ class PyrightOracle(DefinitionOracle):
         try:
             return asyncio.run(
                 asyncio.wait_for(
-                    resolve(self.server, self.root, positions),
+                    resolve(self.server, self.root, positions, buffers),
                     timeout=self.timeout,
                 )
             )

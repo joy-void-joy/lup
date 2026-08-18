@@ -18,9 +18,11 @@ from lup.codeintel.tools import (
     RenameInput,
     create_codeintel_tools,
 )
+from lup.codescan.common import PythonSource
+from lup.codescan.grammar import refute
 from lup.workspace.edition import publish_edition
 from lup.workspace.paths import project_root
-from lup.devtools.dev.pyright_oracle import langserver_path
+from lup.devtools.dev.pyright_oracle import PyrightOracle, langserver_path
 
 pytestmark = pytest.mark.skipif(
     langserver_path() is None, reason="pyright-langserver is not installed"
@@ -192,6 +194,36 @@ async def test_a_relative_path_follows_where_editing_is_happening(
 
     assert result["sites"], "the relative path resolved against the launch checkout"
     assert result["sites"][0]["path"].endswith("helpers.py")
+
+
+def test_the_oracle_resolves_a_buffer_that_disk_does_not_hold(tmp_path: Path) -> None:
+    """An edit is judged before it is written, so disk is the wrong source.
+
+    The file on disk here holds none of the code being asked about — a
+    checker that read it would find nothing at the queried position and
+    answer with silence, which the grammar reads as "cannot resolve" and
+    leaves the broad verdict standing. The refutation only happens if the
+    server was told the text the audit is actually reading.
+    """
+    server = langserver_path()
+    assert server is not None
+    (tmp_path / "pyproject.toml").write_text("[project]\nname = 'other'\n")
+    (tmp_path / "vendor.py").write_text(
+        "class Client:\n    def get(self, url): ...\n\n\ndef get(url): ...\n",
+        encoding="utf-8",
+    )
+    edited = tmp_path / "caller.py"
+    edited.write_text("x = 1\n", encoding="utf-8")
+    proposed = 'import vendor\n\nresponse = vendor.get("https://example.com")\n'
+
+    refutations = refute(
+        [PythonSource(path=edited, module="caller", text=proposed)],
+        PyrightOracle(server, tmp_path),
+    )
+
+    refuted = refutations[edited.as_posix()]
+    assert [row.rule_id for row in refuted] == ["dict-get"]
+    assert "the module-level `get`" in refuted[0].evidence
 
 
 @pytest.mark.asyncio

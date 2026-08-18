@@ -46,12 +46,32 @@ class DefinitionSite(BaseModel, frozen=True):
     """1-based line the declaration starts on."""
 
 
+class SourceBuffer(BaseModel, frozen=True):
+    """The text a position's file holds, which need not be the text on disk.
+
+    An audit reads its own copy of a file, and a checker asked about a path
+    would read that path again. Where the two differ the answer is about
+    something nobody audited — and they differ exactly when it matters most,
+    because an edit is judged before it is written.
+
+    Carrying the text keeps them the same by construction. The path stays the
+    file's own, so imports, the module's name, and everything resolved through
+    either are unchanged: this is the buffer an editor holds for a file with
+    unsaved changes, and a checker is built to be told about one.
+    """
+
+    path: Path
+    text: str
+
+
 class DefinitionOracle(ABC):
     """Resolves the declarations of the symbols named at source positions."""
 
     @abstractmethod
     def definitions(
-        self, positions: list[SourcePosition]
+        self,
+        positions: list[SourcePosition],
+        buffers: list[SourceBuffer] | None = None,
     ) -> list[list[DefinitionSite]]:
         """Each position's declarations, in order; empty where none resolve.
 
@@ -59,4 +79,9 @@ class DefinitionOracle(ABC):
         call answers a whole repository sweep. An unresolvable position yields
         an empty list rather than an error, which the grammar reads as "no
         evidence" and treats as a site it cannot refute.
+
+        *buffers* is what the caller holds for the files it asks about. A path
+        it names nothing for is read from disk, which is every path the caller
+        did not itself supply — an installed package, a typeshed stub, a
+        module the edited one imports.
         """
