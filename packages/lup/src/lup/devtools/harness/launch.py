@@ -221,6 +221,27 @@ class LaunchMode(BaseModel, frozen=True, arbitrary_types_allowed=True):
     session: LaunchSession | None = None
     """What must be open while a session of this kind runs."""
 
+    def command_words(self, provider: str) -> list[str]:
+        """Words this mode contributes to one runtime's command line, if any."""
+        return self.arguments(provider) if self.arguments is not None else []
+
+    def transcript_root(self) -> Path | None:
+        """Where this launch keeps its record, resolved now, not at import."""
+        return self.record_root() if self.record_root is not None else None
+
+    def opened(
+        self, provider: str, journal: TraceJournal
+    ) -> AbstractContextManager[EnvVars]:
+        """Whatever this mode needs open around the run, or nothing to open.
+
+        An empty environment from :func:`contextlib.nullcontext` rather than a
+        branch at the call site, so a launcher holds one shape and a mode
+        declaring no session costs it no conditional.
+        """
+        if self.session is None:
+            return nullcontext({})
+        return self.session(provider=provider, journal=journal)
+
 
 class LaunchSelection(BaseModel, frozen=True, arbitrary_types_allowed=True):
     """Which mode a caller's words selected, and what is left for the CLI."""
@@ -250,34 +271,6 @@ def extract_launch_mode(
         mode=chosen[0] if chosen else None,
         arguments=[word for word in arguments if word not in selected],
     )
-
-
-def mode_arguments(mode: LaunchMode | None, provider: str) -> list[str]:
-    """Words this mode contributes to one runtime's command line, if any."""
-    if mode is None or mode.arguments is None:
-        return []
-    return mode.arguments(provider)
-
-
-def mode_record_root(mode: LaunchMode | None) -> Path | None:
-    """Where this launch keeps its transcript, resolved now rather than at import."""
-    if mode is None or mode.record_root is None:
-        return None
-    return mode.record_root()
-
-
-def mode_session(
-    mode: LaunchMode | None, provider: str, journal: TraceJournal
-) -> AbstractContextManager[EnvVars]:
-    """Whatever this mode needs open around the run, or nothing to open.
-
-    An empty environment from :func:`contextlib.nullcontext` rather than a
-    branch at the call site, so the launchers hold one shape and a mode that
-    declares no session costs them no conditional.
-    """
-    if mode is None or mode.session is None:
-        return nullcontext({})
-    return mode.session(provider=provider, journal=journal)
 
 
 def portable_roots() -> list[PortableRoot]:
@@ -526,6 +519,11 @@ def claude_sandbox_arguments(plugin: Plugin) -> list[str]:
     return ["--settings", json.dumps(widened)]
 
 
+# lup: ignore[model-free-function] — a launcher is not an operation on a mode.
+# It takes a composition, an account, a profile, a model and a passthrough
+# vector, and a mode is one optional argument among them; moving it onto
+# LaunchMode would make the model answerable for starting a runtime it knows
+# nothing about, and leave a project declaring no mode with no launcher at all.
 def launch_claude(
     composition: NativeHarnessComposition,
     extra_args: list[str],
@@ -551,7 +549,7 @@ def launch_claude(
             "--plugin-dir",
             str(project_root() / ".claude" / "plugins" / plugin.name),
             *claude_sandbox_arguments(plugin),
-            *mode_arguments(mode, "claude"),
+            *(mode.command_words("claude") if mode is not None else []),
             *extra_args,
         ]
     )
@@ -572,12 +570,17 @@ def launch_claude(
         model=selected_model,
         profile=profile,
         arguments=arguments,
-        record_root=mode_record_root(mode),
+        record_root=mode.transcript_root() if mode is not None else None,
         mode=mode.name if mode is not None else None,
     )
     succeeded = False
     try:
-        with mode_session(mode, "claude", transcript.journal) as session:
+        opening = (
+            nullcontext({})
+            if mode is None
+            else mode.opened("claude", transcript.journal)
+        )
+        with opening as session:
             environment.update(session)
             sh.Command("claude")(*arguments, _fg=True, _env=environment)
         succeeded = True
@@ -589,6 +592,9 @@ def launch_claude(
         transcript.close(succeeded=succeeded)
 
 
+# lup: ignore[model-free-function] — a launcher is not an operation on a mode,
+# for the reason spelled at `launch_claude`: the mode is one optional argument
+# among the ones that actually decide how a runtime starts.
 def launch_codex(
     composition: NativeHarnessComposition,
     extra_args: list[str],
@@ -620,7 +626,7 @@ def launch_codex(
     selected_model = model or (mode.model if mode is not None else None)
     if selected_model is not None:
         arguments.extend(["--model", selected_model])
-    arguments.extend(mode_arguments(mode, "codex"))
+    arguments.extend(mode.command_words("codex") if mode is not None else [])
     arguments.extend(extra_args)
     environment["CODEX_HOME"] = str(selected_home)
     transcript = start_harness_transcript(
@@ -629,10 +635,13 @@ def launch_codex(
         model=selected_model,
         profile=profile,
         arguments=arguments,
-        record_root=mode_record_root(mode),
+        record_root=mode.transcript_root() if mode is not None else None,
         mode=mode.name if mode is not None else None,
     )
     succeeded = False
+    opening = (
+        nullcontext({}) if mode is None else mode.opened("codex", transcript.journal)
+    )
     try:
         with (
             installer.temporary(
@@ -640,7 +649,7 @@ def launch_codex(
                 project_root(),
                 force=force_install,
             ) as cache,
-            mode_session(mode, "codex", transcript.journal) as session,
+            opening as session,
         ):
             typer.echo(f"Verified installed Codex plugin: {cache.installed_root}")
             environment.update(session)
