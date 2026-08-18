@@ -91,6 +91,10 @@ compatibility facade exists.
   plain regardless of the host pager configuration, and made resolver resume
   treat the persisted phase as a monotonic high-water mark so hard-killed runs
   recover from every mid-phase kill window.
+- Fixed a Claude launch to name every plugin directory the checkout carries
+  rather than only the compiled one, so a project's hand-written plugin loads
+  from its own tree instead of through a marketplace name — one global
+  namespace whose winner is whichever checkout registered it last.
 
 This was a clean breaking release with no compatibility facade: every removed
 surface above has a replacement in the current API, which
