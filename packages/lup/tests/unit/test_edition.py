@@ -8,6 +8,7 @@ spans that boundary.
 """
 
 import json
+import os
 from pathlib import Path
 
 from lup.policy.assets.host import (
@@ -245,6 +246,31 @@ def test_a_diagnostic_for_the_edited_file_is_reported(tmp_path: Path) -> None:
     assert file_diagnostics(str(file), command) == [
         "error 1: something is wrong",
     ]
+
+
+def test_the_checker_leads_the_path_with_its_own_environment(tmp_path: Path) -> None:
+    """A checker resolves what it reads against the interpreter on its `PATH`.
+
+    Inheriting the session's leaves a check running in one checkout reading
+    another one's installed packages, and reporting every third-party import
+    of the edited file unresolvable. Those arrive looking exactly like the
+    edit having broken something, and no edit in the checked tree clears one.
+    """
+    work = checkout(tmp_path / "repo")
+    file = edited(work)
+    binaries = work / ".venv" / "bin"
+    binaries.mkdir(parents=True)
+    recorded = work / "seen-path"
+    script = binaries / "fake-checker"
+    script.write_text(
+        f'#!/bin/sh\nprintf "%s" "$PATH" > {recorded}\n'
+        "printf '{\"generalDiagnostics\": []}'\n",
+        encoding="utf-8",
+    )
+    script.chmod(0o755)
+
+    assert file_diagnostics(str(file), [".venv/bin/fake-checker"]) == []
+    assert recorded.read_text(encoding="utf-8").startswith(f"{binaries}{os.pathsep}")
 
 
 def test_a_file_the_checker_cannot_read_is_not_checked(tmp_path: Path) -> None:
