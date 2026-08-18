@@ -697,25 +697,44 @@ def default_factory_exempt_lines(source: str) -> set[int]:
 
 
 def dict_get_exempt_lines(source: str) -> set[int]:
-    """Return `.get(` lines whose AST context makes the call a decorator.
+    """Return `.get(` lines the tree alone shows are not payload access.
 
-    A decorator is not payload access. ``@app.get("/path")`` names a route on
-    a framework object, and no schema is being read out of a dict. Which
-    lines are decorators is decidable from the tree alone, so this holds for
-    a fragment that carries no types — and that is what lets a suppression
-    here be retired instead of being demanded by the audit and refused by
-    the kernel.
+    Two shapes qualify, and both are decidable without types — which is what
+    lets a suppression here be retired instead of being demanded by the
+    kernel and reported spurious by the audit that resolves the receiver.
+
+    A decorator is not payload access: ``@app.get("/path")`` names a route on
+    a framework object, and no schema is read out of a dict.
+
+    Neither is a call on a module. ``httpx.get(url)`` reaches a function the
+    module declares, and a module is not a mapping whatever it contains. The
+    receiver has to be the bare imported name for this: ``os.environ.get`` is
+    a genuine keyed lookup reached *through* a module, so only a name bound
+    directly by ``import`` counts, never an attribute of one.
     """
     try:
         tree = ast.parse(source)
     except (SyntaxError, ValueError):
         return set()
+    modules = {
+        alias.asname or alias.name.partition(".")[0]
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Import)
+        for alias in node.names
+    }
     exempt: set[int] = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
             for decorator in node.decorator_list:
                 last = decorator.end_lineno or decorator.lineno
                 exempt.update(range(decorator.lineno, last + 1))
+        if (
+            isinstance(node, ast.Attribute)
+            and node.attr == "get"
+            and isinstance(node.value, ast.Name)
+            and node.value.id in modules
+        ):
+            exempt.add(node.end_lineno or node.lineno)
     return exempt
 
 

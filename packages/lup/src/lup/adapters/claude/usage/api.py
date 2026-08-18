@@ -198,7 +198,7 @@ def fetch_usage(config_dir: Path) -> UsageResponse:
         msg = f"Bad credentials file at {creds_file}: {e}"
         raise RuntimeError(msg) from e
 
-    resp = httpx.get(  # lup: ignore[dict-get] — httpx's GET verb, not a dict read
+    resp = httpx.get(
         USAGE_API_URL,
         headers={
             "Authorization": f"Bearer {token}",
