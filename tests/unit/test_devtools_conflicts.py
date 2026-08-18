@@ -135,7 +135,7 @@ def documented_launcher(conflicted_manifest_repo: Path) -> sh.Command:
     at the console script this suite is running under — the same artifact a
     real worktree holds from before the merge that broke its manifest.
     """
-    launcher = conflicted_manifest_repo / conflicts.LAUNCHER
+    launcher = conflicted_manifest_repo / conflicts.DOCUMENTED_LAUNCHER
     launcher.parent.mkdir(parents=True)
     launcher.symlink_to(Path(sys.executable).parent / "lup-devtools")
     return sh.Command(str(launcher)).bake(
@@ -273,7 +273,12 @@ def test_a_started_command_names_the_launcher_to_reach_it_by(
 
     notice = diagnostics.getvalue()
     assert conflicts.MANIFEST in notice
-    assert conflicts.invocation("dev", "conflict", "status", "--json") in notice
+    assert (
+        conflicts.invocation(
+            conflicts.DOCUMENTED_LAUNCHER, "dev", "conflict", "status", "--json"
+        )
+        in notice
+    )
 
 
 @pytest.mark.parametrize(
@@ -297,4 +302,4 @@ def test_merge_skill_documents_the_launcher_the_commands_declare(
     """
     prompt = claude_prompt_renderer().render(MERGE_SKILL.prompt)
 
-    assert conflicts.invocation(*command) in prompt
+    assert conflicts.invocation(conflicts.DOCUMENTED_LAUNCHER, *command) in prompt

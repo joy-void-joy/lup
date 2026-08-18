@@ -154,4 +154,4 @@ def report_a_conflicted_manifest() -> None:
     """
     root = find_nearest_pyproject()
     if root is not None and conflicts.manifest_conflicted(root):
-        typer.echo(conflicts.conflicted_manifest_notice(), err=True)
+        typer.echo(conflicts.conflicted_manifest_notice(root), err=True)

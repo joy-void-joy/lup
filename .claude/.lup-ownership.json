@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "206eb786fb07e3698bdd92a31b394b352d5207996ed7eec750c7df3c5f4c9bd7",
+  "source_digest": "2bf5821186adde9edc7dfd7bea294fbcbcec139562af73d7c4d69839435d1c07",
   "target_requirements": [
     "claude-code"
   ],
@@ -205,7 +205,7 @@
     {
       "path": ".claude/plugins/lup/commands/merge.md",
       "category": "generated",
-      "sha256": "a32f0db1683399fa69af141a2abebf678337131831698944d0ea4ed70dce12ac",
+      "sha256": "4abad98387959b1e61167e1d494a30c1735c511f4cb19a495821cbf4831c596a",
       "semantic_id": "skill.merge",
       "executable": false
     },
@@ -401,7 +401,7 @@
     {
       "path": ".claude/plugins/lup/hooks/scripts/policy.py",
       "category": "generated",
-      "sha256": "c0c78db452c00b12498d9f77fd429b06b688869a50b8ae498c30dbf65c2e836f",
+      "sha256": "6bcad805d1900450acb66263e75f31a727fe7f05c99c2914a5e3a6b908ff6b85",
       "semantic_id": "hooks.lup-policy",
       "executable": true
     },
