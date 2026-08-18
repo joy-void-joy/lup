@@ -30,10 +30,16 @@ from host import (
     granted_allowances,
     managed_script_roots,
     recoverable_write_targets,
+    resolved_refutations,
     worktree_path,
 )
 from kernel.decision import KernelDecision
-from kernel.edit import decide_edit, relocated_edit_text, relocated_suppressions
+from kernel.edit import (
+    awaits_resolution,
+    decide_edit,
+    relocated_edit_text,
+    relocated_suppressions,
+)
 from kernel.fetch import decide_fetch
 from kernel.lex import shell_path_verb_targets, shell_write_targets
 from kernel.shell import decide_shell
@@ -43,6 +49,7 @@ from policy_data import (
     ALLOWANCE_GRANTS_ENV,
     ALLOWED_FETCH_SCOPES,
     ANTI_PATTERN_ROWS,
+    RESOLUTION_COMMAND,
     DENIED_FETCH_SCOPES,
     KNOWN_ALLOWANCES,
     MAXIMUM_ADDED_LINES,
@@ -161,21 +168,34 @@ def edit_decision(
     when the session started: a grant is answered by a human while the session
     that asked for it is still running, and one resolved at launch could not
     have carried the answer.
+
+    A checker is started only where its answer decides something. The kernel
+    is asked first, from the tree and the tables alone, whether this edit
+    trips a rule whose verdict turns on a resolved declaration; almost none
+    do, and those are judged for nothing. Only the rest pay for a language
+    server, which is the difference between a gate that costs a second per
+    edit and one that costs a second on the edits that need it.
     """
     suffix = Path(path_text).suffix.lower()
+    python_source = suffix in (".py", ".pyi")
+    rows = ANTI_PATTERN_ROWS[suffix] if suffix in ANTI_PATTERN_ROWS else []
+    refuted = (
+        resolved_refutations(path_text, after, RESOLUTION_COMMAND)
+        if after is not None and awaits_resolution(before, after, rows, python_source)
+        else None
+    )
     return decide_edit(
         worktree_path(path_text),
         before,
         after,
         path_exists=path_exists,
         path_rules=PATH_RULES,
-        antipattern_rows=ANTI_PATTERN_ROWS[suffix]
-        if suffix in ANTI_PATTERN_ROWS
-        else [],
+        antipattern_rows=rows,
         path_roles=PATH_ROLES,
         maximum_added_lines=MAXIMUM_ADDED_LINES,
         autonomous=autonomous,
         allowances=granted_allowances(ALLOWANCE_GRANTS_ENV, KNOWN_ALLOWANCES),
-        python_source=suffix in (".py", ".pyi"),
+        python_source=python_source,
         acceptance_guard=ACCEPTANCE_GUARD,
+        refuted=refuted,
     )

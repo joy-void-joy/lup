@@ -7,6 +7,7 @@ the declarations the policy and plugin commands explain. An application adds
 whatever else its own `dev` tree offers to the app it gets back.
 """
 
+import sys
 from collections.abc import Callable
 from pathlib import Path
 from typing import Annotated
@@ -647,6 +648,30 @@ def create_dev_app(
         same scan, same file/line/text/context shape, narrowed to that flavor.
         """
         comments.report(as_json, commit=False, kind=NoteKind.template)
+
+    @app.command("refutations")
+    def refutations_cmd(
+        path: Annotated[
+            str,
+            typer.Option("--path", help="The file the content on stdin belongs to"),
+        ],
+    ) -> None:
+        """Resolve one file's proposed content and report what it refutes.
+
+        The edit gate's route to a checker. It judges a change before anything
+        is written, so the text is read from stdin rather than from *path* —
+        which names where the content belongs, and is what imports, the
+        module's own name, and every declaration reached through either
+        resolve against.
+
+        Always JSON: the only caller is a hook, and `resolved` tells it
+        whether a checker answered at all. A gate that gets no answer asks
+        instead of refusing, so "nothing was refuted" and "nothing could be
+        resolved" have to arrive as different replies.
+        """
+        antipatterns_mod.report_refutations(
+            declared().project, Path(path), sys.stdin.read()
+        )
 
     @app.command("directives")
     def directives_cmd(

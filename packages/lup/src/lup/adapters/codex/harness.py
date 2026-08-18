@@ -739,6 +739,7 @@ class CodexHookRenderer(ArtifactRenderer[HookSet]):
                             source.excluded_commands(),
                         ),
                         diagnostics_command=source.diagnostics_command,
+                        resolution_command=source.resolution_command,
                         rules=antipattern_set_for(
                             self.spellings.read_document(DOCUMENT_IN_HAND),
                             source.rules,

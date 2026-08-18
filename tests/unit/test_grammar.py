@@ -253,8 +253,15 @@ def test_query_lands_on_the_attribute_not_the_receiver(tmp_path: Path) -> None:
     assert [(position.line, position.column) for position in oracle.asked] == [(1, 16)]
 
 
-def test_hook_line_rule_is_unchanged() -> None:
-    """The kernel keeps denying every `.get(` — an edit fragment has no types."""
+def test_the_hook_row_declares_that_its_verdict_needs_a_declaration() -> None:
+    """The regex is unchanged; what the gate does when it fires is not.
+
+    A rule the grammar sharpens cannot be decided from an edit alone, and the
+    row says so rather than leaving the gate to state a verdict the audit
+    contradicts. Derived from `GRAMMAR_RULES` rather than declared beside it,
+    so a rule that gains or loses a refinement cannot disagree with the row
+    describing it.
+    """
     rows = [row for row in bundled_antipattern_rows()[".py"] if row["id"] == "dict-get"]
     assert rows == [
         AntiPatternRow(
@@ -264,11 +271,72 @@ def test_hook_line_rule_is_unchanged() -> None:
             context="code",
             refiner="dict_get_exempt_lines",
             strength="soft",
+            resolution="required",
         )
     ]
+
+
+def test_an_unrefined_rule_declares_no_resolution() -> None:
+    """Only the rules the grammar sharpens carry the ask-instead-of-deny path.
+
+    Every other rule decides from the text in front of it, so nothing about
+    them is pending a checker, and widening the field to all of them would
+    turn each into an approval question nobody can answer better than the
+    gate already did.
+    """
+    rows = bundled_antipattern_rows()[".py"]
+    refined = {rule.id for rule in GRAMMAR_RULES}
+    assert {row["id"] for row in rows if row["resolution"] == "required"} == refined
+
+
+def test_the_gate_asks_where_nothing_resolved_the_receiver() -> None:
+    """Told nothing, the gate says so instead of stating the audit's opposite.
+
+    This is the deadlock's own shape: the kernel denied `client.get(url)` and
+    demanded a directive, the audit resolved `Client`, refuted the finding,
+    and reported that directive spurious. No version of the file passed both.
+    """
+    rows = bundled_antipattern_rows()[".py"]
+
     decision = antipattern_decision(
         None, "response = client.get(url)\n", rows, python_source=True
     )
+
+    assert decision is not None and decision.effect == "ask"
+    assert "could not resolve" in decision.reason
+
+
+def test_a_resolved_receiver_is_admitted_without_a_directive() -> None:
+    """The answer the audit already gives, reaching the gate that refused it.
+
+    Refuted here means the same edit needs no marker at all — which is what
+    the rule's own text tells an author to write, and what the gate could not
+    admit while it had no way to know.
+    """
+    rows = bundled_antipattern_rows()[".py"]
+
+    decision = antipattern_decision(
+        None,
+        "response = client.get(url)\n",
+        rows,
+        python_source=True,
+        refuted={"dict-get": [1]},
+    )
+
+    assert decision is None or decision.effect == "allow"
+
+
+def test_an_unresolved_verdict_still_denies_a_rule_that_needs_no_checker() -> None:
+    """The ask reaches exactly the rules whose verdict was pending, and no others.
+
+    A rule decided from the text in front of it gains nothing from a checker,
+    so an absent one must not soften it — otherwise every gate in the table
+    degrades together the moment a language server is missing.
+    """
+    rows = bundled_antipattern_rows()[".py"]
+
+    decision = antipattern_decision(None, "import re\n", rows, python_source=True)
+
     assert decision is not None and decision.effect == "deny"
 
 

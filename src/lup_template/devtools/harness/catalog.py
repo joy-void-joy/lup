@@ -346,6 +346,7 @@ def portable_harness(version: str = "0.2.0", root: Path | None = None) -> Harnes
             # not the library's: the path is relative to the checkout that
             # holds the edited file, so a worktree runs its own.
             diagnostics_command=[".venv/bin/pyright", "--outputjson"],
+            resolution_command=[".venv/bin/lup-devtools", "dev", "refutations"],
             shell_rules=SHELL_RULES,
             # This project's toolchain: what `uv run <target>` may reach here
             # without a question, which is nothing any other project inherits.

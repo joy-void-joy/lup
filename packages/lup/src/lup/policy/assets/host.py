@@ -216,6 +216,80 @@ def file_diagnostics(
     ]
 
 
+def resolver_program(root: str, declared: str) -> str:
+    """Where the declared program is, or "" when it is not there to run.
+
+    Two spellings, because two kinds of project exist and only one of them
+    keeps its toolchain inside the checkout. A path — anything carrying a
+    separator — is resolved against the checkout, which is what makes the
+    answer the edited tree's rather than whichever environment the session
+    happened to launch from. A bare name is left for the OS to find on PATH,
+    for a project whose interpreter lives somewhere else entirely: a conda
+    environment, a pyenv shim, a system or user-level install, a virtualenv
+    that is not a sibling of the code.
+
+    Declaring the path is the stronger of the two and stays the default here,
+    but it must not be the only thing sayable — a gate no project outside one
+    layout can turn on is a gate most projects simply do not get.
+    """
+    if "/" not in declared and "\\" not in declared:
+        return declared
+    located = Path(root) / declared
+    return str(located) if located.is_file() else ""
+
+
+def resolved_refutations(
+    path_text: str,
+    proposed: str,
+    command: list[str],
+    timeout_seconds: float = 30.0,
+) -> dict[str, list[int]] | None:
+    """What a checker refutes in the text about to be written, or None.
+
+    The kernel decides from primitive rows and reads nothing, which is what
+    keeps a verdict a pure function of its inputs. Resolving a receiver's
+    declaration is not a decision — it is a fact about the machine, the same
+    kind this half already resolves — so it is answered here and passed in.
+
+    Run in the checkout holding the file, like every other checker this half
+    starts, and handed the proposed text on stdin: the change is judged before
+    it is written, so the copy on disk is the one being replaced. *path_text*
+    still names where the content belongs, because imports and the module's
+    own name resolve against it and against nothing else.
+
+    None where no answer was had — no declared resolver, none installed, a
+    crash, a timeout, output that will not decode — and it has to stay
+    distinct from an empty refutation. Empty means a checker looked and
+    refuted nothing, which is evidence; None means nothing looked, which is
+    the gate's cue to ask rather than refuse. Collapsing the two would turn
+    every unresolvable session into a wall of confident denials.
+    """
+    if not command:
+        return None
+    root = worktree_root(path_text)
+    if not root:
+        return None
+    located = resolver_program(root, command[0])
+    if not located:
+        return None
+    try:
+        finished = subprocess.run(
+            [located, *command[1:], "--path", str(Path(path_text).resolve())],
+            capture_output=True,
+            text=True,
+            input=proposed,
+            cwd=root,
+            timeout=timeout_seconds,
+            check=False,
+        )
+        reported = json.loads(finished.stdout)
+        if not reported["resolved"]:
+            return None
+        return {rule: list(lines) for rule, lines in reported["refuted"].items()}
+    except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError):
+        return None
+
+
 def existing_write_targets(targets: list[str]) -> list[str]:
     """Report which of a command's write targets already exist on disk.
 

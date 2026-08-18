@@ -13,6 +13,7 @@ from pathlib import Path
 from lup.policy.assets.host import (
     file_diagnostics,
     publish_edition,
+    resolver_program,
     shared_git_directory,
     worktree_root,
 )
@@ -178,6 +179,39 @@ def checker(root: Path, payload: str) -> list[str]:
     script.write_text(f"#!/bin/sh\ncat <<'JSON'\n{payload}\nJSON\n", encoding="utf-8")
     script.chmod(0o755)
     return ["fake-checker"]
+
+
+def test_a_declared_path_is_resolved_inside_the_edited_checkout(
+    tmp_path: Path,
+) -> None:
+    """A path names the checkout's own toolchain, which is the stronger form.
+
+    It is what makes the answer the edited tree's rather than whichever
+    environment the session was launched from — the same reason the checker
+    itself runs there. Absent, it is absent: nothing on PATH stands in for a
+    program the project said was inside its own tree.
+    """
+    assert resolver_program(str(tmp_path), "bin/nothing-here") == ""
+
+
+def test_a_bare_name_is_left_for_the_path_to_answer(tmp_path: Path) -> None:
+    """Not every project keeps its interpreter beside its code.
+
+    Conda, pyenv, a system install, a virtualenv somewhere else entirely —
+    none of them are reachable as a path relative to the checkout, and a gate
+    only a repo-local `.venv` can turn on is a gate most projects never get.
+    So a name with no separator is handed to the OS to find, unresolved here.
+    """
+    assert resolver_program(str(tmp_path), "lup-devtools") == "lup-devtools"
+
+
+def test_a_declared_path_that_is_there_resolves_to_it(tmp_path: Path) -> None:
+    work = checkout(tmp_path / "repo")
+    (work / "bin").mkdir()
+    program = work / "bin" / "resolver"
+    program.write_text("#!/bin/sh\n", encoding="utf-8")
+
+    assert resolver_program(str(work), "bin/resolver") == str(program)
 
 
 def report(file: Path, severity: str = "error", line: int = 0) -> str:
