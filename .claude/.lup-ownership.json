@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "664890681be5d56ff9744a1161165546b780cc80251e724d5d7f38a4cfd6c01a",
+  "source_digest": "2bf5821186adde9edc7dfd7bea294fbcbcec139562af73d7c4d69839435d1c07",
   "target_requirements": [
     "claude-code"
   ],
@@ -198,14 +198,14 @@
     {
       "path": ".claude/plugins/lup/commands/land.md",
       "category": "generated",
-      "sha256": "cf0f289e410dcbac463ae79f3cdb7667104243b9661526e5f97066bc6930a7c9",
+      "sha256": "ee1b8a78458558f423f779d97eac817a204a8e034bdecc2c10e0a4d374c00e02",
       "semantic_id": "skill.land",
       "executable": false
     },
     {
       "path": ".claude/plugins/lup/commands/merge.md",
       "category": "generated",
-      "sha256": "a32f0db1683399fa69af141a2abebf678337131831698944d0ea4ed70dce12ac",
+      "sha256": "4abad98387959b1e61167e1d494a30c1735c511f4cb19a495821cbf4831c596a",
       "semantic_id": "skill.merge",
       "executable": false
     },
@@ -338,7 +338,7 @@
     {
       "path": ".claude/plugins/lup/hooks/runtime/kernel/edit.py",
       "category": "generated",
-      "sha256": "c355ff10c0f08fdef54076974afdd7bf500ec679e3bbe41401616f2782daeb57",
+      "sha256": "6c3f5de1fbd8e1b3048b4fb1109287cd4d9d68722b7756b6723fadb5d7060fe0",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -401,7 +401,7 @@
     {
       "path": ".claude/plugins/lup/hooks/scripts/policy.py",
       "category": "generated",
-      "sha256": "c0c78db452c00b12498d9f77fd429b06b688869a50b8ae498c30dbf65c2e836f",
+      "sha256": "be21adbe7170beed3a4897d23ef602ab86a0ee8664bb7ef3544508b9ef324707",
       "semantic_id": "hooks.lup-policy",
       "executable": true
     },
@@ -415,7 +415,7 @@
     {
       "path": ".claude/settings.json",
       "category": "generated",
-      "sha256": "57a22be3a771a7814f687b9bf590163326bf9cf54fa68238a3b49625e9da59f9",
+      "sha256": "409232d5d85a3f2bd5651467105f395d5516f11fe00de79b9eefd195caffe149",
       "semantic_id": "harness.project-settings",
       "executable": false
     },

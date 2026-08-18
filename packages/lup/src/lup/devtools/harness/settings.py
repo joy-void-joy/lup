@@ -32,7 +32,13 @@ class Settings(BaseModel, frozen=True):
     )
     official_plugins: JsonObject = Field(
         default={},
-        description="Vendor-published plugins this project enables by name.",
+        description=(
+            "Vendor-published plugins this project decides by name. False is "
+            "a decision and not an omission: a project scope outranks the "
+            "user's, so it holds against a plugin enabled globally, and it "
+            "survives regeneration where an install written into this "
+            "artifact would read as drift."
+        ),
     )
     allowed: list[JsonValue] = Field(
         default=[],

@@ -183,6 +183,33 @@ def publish_edition(path_text: str) -> None:
         print(f"lup: could not publish the edition: {error}", file=sys.stderr)
 
 
+def declared_program(root: str, declared: str) -> str:
+    """Where a declared program is, or "" when it is not there to run.
+
+    The checkout answers first, whatever the spelling. That is what makes the
+    verdict the edited tree's rather than whichever environment the session
+    was launched from, and it is the property worth keeping — a sibling
+    worktree holds the same relative path with different contents.
+
+    Only where the checkout holds nothing does the spelling decide. A bare
+    name goes to the OS to find on ``PATH``, for a project whose toolchain
+    lives somewhere else entirely: a conda environment, a pyenv shim, a
+    system or user-level install, an environment ``UV_PROJECT_ENVIRONMENT``
+    put outside the project. A path that resolved to nothing stays nothing,
+    because a project that named a location meant that location.
+
+    Accepting only the first is what made this gate unavailable rather than
+    configurable. A declared program it could not resolve produced no
+    diagnostics and said nothing about why, so a project outside one layout
+    did not get a weaker check — it got silence indistinguishable from a
+    clean file, on every edit.
+    """
+    located = Path(root) / declared
+    if located.is_file():
+        return str(located)
+    return "" if "/" in declared or "\\" in declared else declared
+
+
 def file_diagnostics(
     path_text: str,
     command: list[str],
@@ -196,6 +223,16 @@ def file_diagnostics(
     checkout — same module names, different source, diagnostics about a file
     nobody edited. Running the checker per edit has no root to go stale:
     the file names its own checkout, and that is where the check runs.
+
+    The checkout alone does not decide it. A checker finds the interpreter
+    whose packages it resolves against by looking down ``PATH``, and a hook
+    inherits whichever one the session was launched with, so a check running
+    in one tree reads another tree's installed packages and calls every
+    third-party import unresolvable. The checker's own directory goes first:
+    that is the environment it was installed into, and therefore the one
+    belonging to the checkout that holds the file. A checker the checkout
+    does not hold has no such directory to prefer, and keeps the ``PATH`` it
+    inherited — that is where the OS is about to find it.
 
     Reported for the edited file alone. The checker resolves whatever the
     file imports, so it can have opinions about the whole tree, and a hook
@@ -219,16 +256,27 @@ def file_diagnostics(
     root = worktree_root(path_text)
     if not root:
         return []
-    executable = Path(root) / command[0]
-    if not executable.is_file():
+    located = declared_program(root, command[0])
+    if not located:
         return []
     edited = str(Path(path_text).resolve())
+    environ = os.environ  # lup: ignore[os-environ] — the checker inherits this
+    inherited = environ["PATH"] if "PATH" in environ else ""
+    # Only a checker the checkout holds has an own directory to put first.
+    # A bare name is about to be found on the PATH this inherits, so that
+    # PATH is already the environment it belongs to.
+    searched = (
+        f"{Path(located).parent}{os.pathsep}{inherited}"
+        if Path(located).is_absolute()
+        else inherited
+    )
     try:
         finished = subprocess.run(
-            [str(executable), *command[1:], edited],
+            [located, *command[1:], edited],
             capture_output=True,
             text=True,
             cwd=root,
+            env={**environ, "PATH": searched},
             timeout=timeout_seconds,
             check=False,
         )

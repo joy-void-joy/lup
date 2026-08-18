@@ -8,9 +8,11 @@ spans that boundary.
 """
 
 import json
+import os
 from pathlib import Path
 
 from lup.policy.assets.host import (
+    declared_program,
     file_diagnostics,
     publish_edition,
     shared_git_directory,
@@ -180,6 +182,47 @@ def checker(root: Path, payload: str) -> list[str]:
     return ["fake-checker"]
 
 
+def test_the_checkout_answers_for_a_declared_program_first(tmp_path: Path) -> None:
+    """A sibling worktree holds the same relative path with different contents.
+
+    Preferring the checkout is what makes the verdict the edited tree's
+    rather than whichever environment the session was launched from, and it
+    holds whether the project spelled a path or a name.
+    """
+    work = checkout(tmp_path / "repo")
+    (work / "bin").mkdir()
+    program = work / "bin" / "checker"
+    program.write_text("#!/bin/sh\n", encoding="utf-8")
+
+    assert declared_program(str(work), "bin/checker") == str(program)
+
+
+def test_a_bare_name_the_checkout_lacks_is_left_to_the_path(tmp_path: Path) -> None:
+    """Not every project keeps its toolchain beside its code.
+
+    conda, pyenv, a system install, an environment `UV_PROJECT_ENVIRONMENT`
+    put elsewhere — none are reachable by a path relative to the checkout,
+    and refusing them made this gate unavailable rather than configurable.
+    """
+    work = checkout(tmp_path / "repo")
+
+    assert declared_program(str(work), "pyright") == "pyright"
+
+
+def test_a_declared_path_that_resolves_to_nothing_stays_nothing(
+    tmp_path: Path,
+) -> None:
+    """A project that named a location meant that location.
+
+    Falling back to `PATH` here would run some other copy of the program in
+    silence, which is the substitution the checkout-first order exists to
+    prevent.
+    """
+    work = checkout(tmp_path / "repo")
+
+    assert declared_program(str(work), "bin/absent") == ""
+
+
 def report(file: Path, severity: str = "error", line: int = 0) -> str:
     return json.dumps(
         {
@@ -203,6 +246,31 @@ def test_a_diagnostic_for_the_edited_file_is_reported(tmp_path: Path) -> None:
     assert file_diagnostics(str(file), command) == [
         "error 1: something is wrong",
     ]
+
+
+def test_the_checker_leads_the_path_with_its_own_environment(tmp_path: Path) -> None:
+    """A checker resolves what it reads against the interpreter on its `PATH`.
+
+    Inheriting the session's leaves a check running in one checkout reading
+    another one's installed packages, and reporting every third-party import
+    of the edited file unresolvable. Those arrive looking exactly like the
+    edit having broken something, and no edit in the checked tree clears one.
+    """
+    work = checkout(tmp_path / "repo")
+    file = edited(work)
+    binaries = work / ".venv" / "bin"
+    binaries.mkdir(parents=True)
+    recorded = work / "seen-path"
+    script = binaries / "fake-checker"
+    script.write_text(
+        f'#!/bin/sh\nprintf "%s" "$PATH" > {recorded}\n'
+        "printf '{\"generalDiagnostics\": []}'\n",
+        encoding="utf-8",
+    )
+    script.chmod(0o755)
+
+    assert file_diagnostics(str(file), [".venv/bin/fake-checker"]) == []
+    assert recorded.read_text(encoding="utf-8").startswith(f"{binaries}{os.pathsep}")
 
 
 def test_a_file_the_checker_cannot_read_is_not_checked(tmp_path: Path) -> None:

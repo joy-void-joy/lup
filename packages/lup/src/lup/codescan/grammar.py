@@ -113,6 +113,42 @@ class ClassOrigin(BaseModel, frozen=True):
             base in family.classes for base in self.bases
         )
 
+    def describe(self) -> str:
+        """How an evidence sentence names this declaration."""
+        return f"`{self.name}`"
+
+
+class ModuleFunctionOrigin(BaseModel, frozen=True):
+    """A resolved declaration that is a function, belonging to no class at all.
+
+    A module-qualified receiver produces one: `httpx.get` resolves to a `def`
+    at column zero in `httpx/_api.py`, where `client.get` resolves to a method
+    inside `class Client`. Both are equally strong evidence about what the
+    call is, and reading only the class one left every module-qualified
+    receiver with no origin — indistinguishable, to the engine, from a symbol
+    the checker could not resolve, and so never refuted.
+
+    Membership is decided against declaring classes, and a function is not
+    one, so this is outside every family by construction rather than by a
+    lookup that could accidentally succeed.
+    """
+
+    name: str
+    path: Path
+    line: int
+
+    def in_family(self, family: TypeFamily) -> bool:
+        """Never: a family is a set of classes, and this declaration is not one."""
+        return False
+
+    def describe(self) -> str:
+        """How an evidence sentence names this declaration."""
+        return f"the module-level `{self.name}`"
+
+
+type Origin = ClassOrigin | ModuleFunctionOrigin
+"""Where a resolved declaration sits, in the terms family membership is read in."""
+
 
 def base_name(node: ast.expr) -> str | None:
     """The declared name of one base class, unqualified and unsubscripted."""
@@ -202,10 +238,38 @@ def class_at(tree: ast.Module, line: int) -> ast.ClassDef | None:
     return max(enclosing, key=lambda node: node.lineno) if enclosing else None
 
 
+def module_function_at(
+    tree: ast.Module, line: int
+) -> ast.FunctionDef | ast.AsyncFunctionDef | None:
+    """The module-level function whose body spans `line`, or None otherwise.
+
+    Only the module's own body is walked, so what comes back is a declaration
+    nothing encloses. That is the whole question: a `def` nested in a class is
+    already answered for by :func:`class_at`, and anything that is not a
+    function — an assignment, a stub the parse could not place — stays
+    unanswered rather than being read as evidence it is not.
+    """
+    return next(
+        (
+            node
+            for node in tree.body
+            if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
+            and node.lineno <= line <= (node.end_lineno or node.lineno)
+        ),
+        None,
+    )
+
+
 def origin_of(
     site: DefinitionSite, trees: dict[str, ast.Module | None]
-) -> ClassOrigin | None:
-    """Read the class a declaration belongs to out of the file declaring it."""
+) -> Origin | None:
+    """Read where a declaration sits out of the file declaring it.
+
+    A class first, since a method inside one is the receiver's own type. A
+    module-level function otherwise, which is what a module-qualified call
+    resolves to and is just as much an answer. Anything else is no answer,
+    and the caller leaves the broad verdict standing.
+    """
     key = site.path.as_posix()
     if key not in trees:
         try:
@@ -217,7 +281,12 @@ def origin_of(
         return None
     node = class_at(tree, site.line)
     if node is None:
-        return None
+        function = module_function_at(tree, site.line)
+        if function is None:
+            return None
+        return ModuleFunctionOrigin(
+            name=function.name, path=site.path, line=function.lineno
+        )
     return ClassOrigin(
         name=node.name,
         bases=[name for base in node.bases if (name := base_name(base)) is not None],
@@ -305,7 +374,7 @@ def refute(
             line=chosen.site.line,
             subject=chosen.site.subject,
             evidence=(
-                f"`{chosen.site.subject}` resolves to `{foreign.name}` declared "
+                f"`{chosen.site.subject}` resolves to {foreign.describe()} declared "
                 f"at {foreign.path.as_posix()}:{foreign.line}, outside the "
                 f"{chosen.rule.family.name} family"
             ),

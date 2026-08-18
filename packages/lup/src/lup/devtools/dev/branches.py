@@ -8,8 +8,9 @@ from collections.abc import Iterator
 from collections.abc import Set as AbstractSet
 from itertools import groupby
 from operator import attrgetter
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Literal, NoReturn, Required, TypedDict
+from urllib.parse import urlparse
 
 import sh
 import typer
@@ -47,8 +48,23 @@ class PRStatus(BaseModel):
     head_ref: str = Field(default="", alias="headRefName")
     url: str = ""
 
+    def reusable(self) -> bool:
+        """Whether a retirement can close this rather than opening its own.
 
-type BranchStatus = Literal["LAND", "DELETE", "STALE", "KEEP", "CURRENT", "NOT_FOUND"]
+        Only one still open. A request that already reached a terminal state
+        cannot be closed again — GitHub refuses the transition outright for a
+        merged one — so a retirement that reused whichever was most recent
+        would push the branch and then fail at the close, leaving the work
+        half-moved. A fresh request over the same head is allowed once the
+        previous is no longer open, and the old one keeps its own head ref
+        regardless, so nothing it preserved is lost by opening another.
+        """
+        return self.state == "OPEN"
+
+
+type BranchStatus = Literal[
+    "LAND", "DELETE", "STALE", "KEEP", "CURRENT", "UNRELATED", "NOT_FOUND"
+]
 
 
 class Disposition(BaseModel):
@@ -94,6 +110,18 @@ class BranchInfo(BaseModel):
     source_diff_lines: int
     disposition: BranchStatus
     reason: str
+    rewritten: int = 0
+    """How many unique commits already name a subject in the integration branch.
+
+    Never a disposition, and never subtracted from ``unique_commits``. A
+    containment check is decided by patch-id, which a rewrite changes, so a
+    commit that landed rebased or reworded reads as unlanded ever after and
+    a pre-rewrite snapshot presents its whole history as work at risk. A
+    shared subject is the cheapest signal that this happened and is not
+    proof it did, so it is carried where a reader will see it and nowhere a
+    verb is decided — the wrong direction to be wrong in is the one that
+    marks real work landed.
+    """
     changes: WorktreeChanges | None = None
     """What this branch's worktree holds uncommitted, where it has one.
 
@@ -312,6 +340,84 @@ def is_ancestor(ancestor: str, descendant: str) -> bool:
         return False
 
 
+def shares_history(branch: str, integration: str) -> bool:
+    """Whether the two have any commit in common.
+
+    Asked because neither counter fails without one, so nothing downstream
+    reports the difference. ``A...B`` degenerates to both sides entire when
+    there is no merge base, and ``--left-only`` then returns a plausible
+    small number; the diff is a direct two-tree comparison that never needed
+    a merge base, and reports the whole distance between two unrelated trees
+    as though it were a divergence. Both figures are then read as one, and a
+    branch whose real relationship to the integration branch is *none*
+    presents as ordinary unlanded work — which a sweep offers to rebase or
+    merge, and both would replay an unrelated tree.
+    """
+    try:
+        git("merge-base", branch, integration)
+        return True
+    except sh.ErrorReturnCode:
+        return False
+
+
+def never_diverged_from(branch: str, integration: str) -> bool:
+    """Whether the branch still stands where it was cut from the integration branch.
+
+    The difference between a branch that never diverged and one whose work
+    landed. Both are ancestors, so containment alone reads them alike and
+    calls the first spent. What tells them apart is which side of a merge the
+    tip sits on: a branch cut from the integration branch and not yet
+    committed to points at one of that branch's own commits, so it stands on
+    its first-parent history, where a branch whose work landed points at the
+    side parent a merge absorbed and never appears there.
+
+    Pointing at the tip exactly answers this for one commit's worth of time
+    and stops answering it the moment anything else lands — which during a
+    sweep is almost at once, because every merge moves the integration branch
+    out from under every workspace reserved against it.
+    """
+    try:
+        head = git.out("rev-parse", branch).strip()
+        return head in git.lines("rev-list", "--first-parent", integration)
+    except sh.ErrorReturnCode:
+        return False
+
+
+def rewrite_suspects(branch: str, integration: str) -> list[str]:
+    """This branch's commits whose subject already names one in *integration*.
+
+    Containment is decided by patch-id, which a rewrite changes: a commit
+    rebased, reworded, or squashed before it landed keeps its content and
+    reads as unlanded ever after. A branch kept as a pre-rewrite snapshot
+    then presents its whole history as work at risk.
+
+    Advisory, and deliberately not a disposition. A subject is not proof —
+    two commits may honestly share one — and a classifier that treated it as
+    proof would mark real work landed and invite deleting it. What this
+    supports is the reader's next question, which is whether to go and
+    compare; what it must never do is answer it.
+
+    Counted over the set :func:`count_unique_commits` counts, down to the
+    same ``--cherry-pick --left-only`` filter, so this is a subset of that
+    figure and the pair reads as "so many of those". Taken over a plain
+    range instead it drew from a wider set and reported five suspects
+    against four unique commits — a fraction past its own denominator, which
+    is the shape a reader stops believing.
+    """
+    landed = {line for line in git.lines("log", "--format=%s", integration) if line}
+    return [
+        subject
+        for subject in git.lines(
+            "log",
+            "--format=%s",
+            "--cherry-pick",
+            "--left-only",
+            f"{branch}...{integration}",
+        )
+        if subject in landed
+    ]
+
+
 def get_branch_worktree(branch: str) -> str | None:
     """Return the worktree path for a branch, or None."""
     return parse_worktrees().get(branch)  # lup: ignore[dict-get] — open branch map
@@ -366,6 +472,9 @@ def disposition_for(
     unique_commits: int,
     protected: AbstractSet[str] = PROTECTED_BRANCHES,
     held: str = "",
+    related: bool = True,
+    never_diverged: bool = False,
+    worktree: str | None = None,
 ) -> Disposition:
     """Resolve a branch to its single disposition.
 
@@ -379,6 +488,17 @@ def disposition_for(
     outranks every disposition but the current and protected ones. A resolver
     lease is the case: it reads as abandoned work by every other signal here,
     and both verbs a sweep would offer for it destroy something.
+
+    Two guards sit ahead of containment because containment answers them
+    wrongly rather than not at all. A branch sharing no history has no
+    divergence to measure, so every figure downstream describes a comparison
+    that means nothing. A branch that never diverged has spent nothing — an
+    ancestor exactly as a merged branch is, and for the opposite reason — so
+    a worktree held open on one is a workspace somebody reserved, not a
+    leftover. Which of the two it is comes from where the tip stands, never
+    from how far the integration branch has since travelled: a sweep moves
+    that branch under every workspace reserved against it, so a guard reading
+    distance would protect a workspace only until the sweep's first merge.
     """
     if name == current:
         return Disposition(status="CURRENT", reason="current branch")
@@ -386,6 +506,14 @@ def disposition_for(
         return Disposition(status="KEEP", reason="protected branch")
     if held:
         return Disposition(status="KEEP", reason=held)
+    if not related:
+        return Disposition(
+            status="UNRELATED", reason=f"shares no history with {integration}"
+        )
+    if never_diverged and worktree is not None:
+        return Disposition(
+            status="KEEP", reason=f"reserved workspace cut from {integration}"
+        )
     if integration in contained_in:
         return Disposition(status="DELETE", reason=f"merged into {integration}")
     if pr is not None and pr.state == "MERGED":
@@ -1110,7 +1238,11 @@ def survey(as_json: bool) -> None:
         contained_in = containment[name]
         pr_merged = name in pr_map and pr_map[name].state == "MERGED"
 
-        if integration in contained_in or pr_merged:
+        related = name == integration or shares_history(name, integration)
+        if integration in contained_in or pr_merged or not related:
+            # An unrelated branch reports both figures from comparisons that
+            # needed no merge base, so they measure distance between trees
+            # rather than divergence. Left at zero rather than shown wrong.
             unique = 0
             diff_lines = 0
         else:
@@ -1125,6 +1257,9 @@ def survey(as_json: bool) -> None:
             pr=pr_map.get(name),  # lup: ignore[dict-get] — open map
             unique_commits=unique,
             held=leased[name].reason() if name in leased else "",
+            related=related,
+            never_diverged=never_diverged_from(name, integration),
+            worktree=checkout,
         )
 
         return BranchInfo(
@@ -1139,6 +1274,7 @@ def survey(as_json: bool) -> None:
             source_diff_lines=diff_lines,
             disposition=verdict.status,
             reason=verdict.reason,
+            rewritten=len(rewrite_suspects(name, integration)) if unique else 0,
             changes=worktree_changes(checkout) if checkout else None,
         )
 
@@ -1163,13 +1299,23 @@ def survey(as_json: bool) -> None:
                 f"{marker}{bi.name}",
                 bi.disposition,
                 str(bi.unique_commits),
+                f"{bi.rewritten}?" if bi.rewritten else "-",
                 str(bi.source_diff_lines),
                 bi.changes.compact() if bi.changes else "-",
                 pr_str,
                 bi.reason,
             ]
 
-        headers = ("Branch", "Disposition", "Unique", "Diff", "Dirt", "PR", "Reason")
+        headers = (
+            "Branch",
+            "Disposition",
+            "Unique",
+            "Rewr",
+            "Diff",
+            "Dirt",
+            "PR",
+            "Reason",
+        )
         typer.echo(format_table(headers, [display_row(bi) for bi in branches_list]))
 
         for hold in result.runs:
@@ -1552,7 +1698,9 @@ def delete_branch(
     if plan.delete_remote and not is_ancestor(name, "HEAD"):
         typer.echo(
             f"Warning: {name} holds commits HEAD does not, and origin/{name} "
-            "is going with it — after this the work is in no branch.",
+            "is going with it — after this the work is in no branch. To keep "
+            f"it, `dev retire {name} --reason ...` closes a pull request over "
+            "it first, which preserves the commits past the deletion.",
             err=True,
         )
 
@@ -1560,6 +1708,245 @@ def delete_branch(
     # copy, and every later reader would see absence rather than loss.
     traces.keep_before_deleting(name)
     run_deletion(plan, force)
+
+
+class RetirementPlan(BaseModel):
+    """Every step retiring a branch takes, evaluated without mutating anything.
+
+    Retiring is deleting a branch whose work is *not* wanted, without losing
+    the work. The two are usually the same act and must not be: a branch the
+    integration branch never absorbed, deleted with no copy on the remote,
+    leaves its commits reachable from nothing and a collector free to take
+    them. `dev delete` says so at the moment it happens, which is too late to
+    be a choice.
+
+    A pull request is the durable copy. GitHub writes the head of every one
+    it has ever seen to ``refs/pull/<number>/head`` and keeps it there
+    whether the request merged, and whether the branch behind it still
+    exists — so a request opened and closed over work nobody wants outlives
+    both the branch and the remote copy, and carries the reason beside the
+    commits rather than in a session nobody will read again.
+    """
+
+    branch: str
+    integration: str
+    unique_commits: int
+    subjects: list[str] = []
+    """``<short sha> <subject>`` per commit the integration branch lacks."""
+    pull_request: int | None = None
+    """An existing request for this branch, reused rather than duplicated."""
+    actions: list[PlannedAction] = []
+
+    def blocked(self) -> list[PlannedAction]:
+        return [action for action in self.actions if action.verdict == "blocked"]
+
+    def body(self, reason: str, number: int) -> str:
+        """The record the pull request exists to keep.
+
+        Written after the number is known, because the recovery line is the
+        one thing a reader arriving here needs and a command they have to
+        assemble themselves is one they will get wrong.
+        """
+        listed = "\n".join(f"- `{subject}`" for subject in self.subjects)
+        return f"""**This pull request exists to be closed, not merged.**
+
+Retiring `{self.branch}`: {reason}
+
+Its commits stay reachable after the branch is deleted. GitHub keeps a closed
+request's head as `refs/pull/{number}/head` whether or not the branch behind it
+still exists, where a deleted branch with no remote copy becomes unreachable and
+is collected.
+
+Recover the work with:
+
+```bash
+git fetch origin refs/pull/{number}/head:{self.branch}
+```
+
+## What it held
+
+{self.unique_commits} commit(s) `{self.integration}` does not carry:
+
+{listed}
+"""
+
+
+def unique_subjects(branch: str, integration: str) -> list[str]:
+    """Each commit the integration branch lacks, as sha and subject.
+
+    By ancestry, not by the ``--cherry-pick`` filter the survey counts with,
+    because the two are wrong in opposite directions and only one of them is
+    survivable here. This decides whether there is anything to preserve, so
+    a false *yes* costs a pull request nobody needed and a false *no* sends
+    the caller to `dev delete` over work that had no other copy.
+    """
+    return [
+        line
+        for line in git.lines(
+            "log", "--format=%h %s", "--no-merges", f"{integration}..{branch}"
+        )
+        if line
+    ]
+
+
+def plan_retirement(name: str, integration: str) -> RetirementPlan:
+    """Evaluate every step a retirement depends on, changing nothing."""
+    from lup.devtools.dev.worktree import branch_exists
+
+    actions: list[PlannedAction] = []
+    if not branch_exists(name):
+        actions.append(
+            PlannedAction(
+                description=f"Retire {name}",
+                verdict="blocked",
+                detail="no such local branch",
+            )
+        )
+        return RetirementPlan(
+            branch=name, integration=integration, unique_commits=0, actions=actions
+        )
+
+    subjects = unique_subjects(name, integration)
+    existing = get_pr_info(name)
+    reused = existing.number if existing is not None and existing.reusable() else None
+
+    actions.append(PlannedAction(description=f"Push {name} to origin"))
+    if reused is None:
+        actions.append(
+            PlannedAction(description=f"Open a pull request onto {integration}")
+        )
+    else:
+        actions.append(
+            PlannedAction(
+                description=f"Reuse pull request #{reused}",
+                detail="already open for this branch",
+            )
+        )
+    actions.append(PlannedAction(description="Close it without merging"))
+    actions.append(PlannedAction(description=f"Delete {name}, locally and on origin"))
+
+    return RetirementPlan(
+        branch=name,
+        integration=integration,
+        unique_commits=len(subjects),
+        subjects=subjects,
+        pull_request=reused,
+        actions=actions,
+    )
+
+
+# lup: ignore[model-free-function] — driver: the plan describes, this runs gh
+def run_retirement(plan: RetirementPlan, reason: str) -> int:
+    """Carry out a plan whose preflight passed, returning the request's number.
+
+    Ordered so nothing is destroyed before the copy that replaces it exists:
+    the push, then the request, then the close, and only then the deletion.
+    A failure at any step leaves the branch where it was.
+    """
+    try:
+        git("push", "--force-with-lease", "origin", f"{plan.branch}:{plan.branch}")
+        typer.echo(f"Pushed {plan.branch} to origin")
+    except sh.ErrorReturnCode as error:
+        typer.echo(f"Could not push {plan.branch}: {decode_stderr(error)}", err=True)
+        raise typer.Exit(1)
+
+    number = plan.pull_request
+    if number is None:
+        try:
+            raw = gh.out(
+                "pr",
+                "create",
+                *repository_arguments(),
+                "--base",
+                plan.integration,
+                "--head",
+                plan.branch,
+                "--title",
+                f"retire: {plan.branch}",
+                "--body",
+                f"Retiring `{plan.branch}`: {reason}",
+            )
+        except sh.ErrorReturnCode as error:
+            typer.echo(f"Could not open a request: {decode_stderr(error)}", err=True)
+            raise typer.Exit(1)
+        number = int(PurePosixPath(urlparse(raw.strip().splitlines()[-1]).path).name)
+        typer.echo(f"Opened #{number}")
+
+    try:
+        gh(
+            "pr",
+            "edit",
+            str(number),
+            *repository_arguments(),
+            "--body",
+            plan.body(reason, number),
+        )
+    except sh.ErrorReturnCode as error:
+        # The request carries the commits either way; only the note is missing.
+        logger.warning("could not write the retirement note: %s", decode_stderr(error))
+
+    try:
+        gh(
+            "pr",
+            "close",
+            str(number),
+            *repository_arguments(),
+            "--comment",
+            f"Retired, not merged. Recover with "
+            f"`git fetch origin refs/pull/{number}/head:{plan.branch}`.",
+        )
+        typer.echo(f"Closed #{number}")
+    except sh.ErrorReturnCode as error:
+        typer.echo(f"Could not close #{number}: {decode_stderr(error)}", err=True)
+        raise typer.Exit(1)
+
+    return number
+
+
+def retire_branch(
+    name: str,
+    reason: str,
+    dry_run: bool,
+    integration: str | None = None,
+) -> None:
+    """Retire a branch through a pull request, so its commits outlive it."""
+    target = integration if integration is not None else get_integration_branch()
+    if name == git.out("branch", "--show-current"):
+        typer.echo(f"Error: cannot retire the current branch ({name})", err=True)
+        raise typer.Exit(1)
+
+    plan = plan_retirement(name, target)
+
+    if dry_run:
+        typer.echo(f"Would perform {len(plan.actions)} action(s):")
+        for action in plan.actions:
+            typer.echo(f"  {action.render()}")
+        if not plan.blocked():
+            typer.echo(
+                f"  Preserving {plan.unique_commits} commit(s) as refs/pull/<n>/head"
+            )
+        return
+
+    blocked = plan.blocked()
+    if blocked:
+        typer.echo(f"Refusing to retire {name} — nothing was changed:", err=True)
+        for action in blocked:
+            typer.echo(f"  {action.render()}", err=True)
+        raise typer.Exit(1)
+
+    if not plan.unique_commits:
+        typer.echo(
+            f"{name} holds nothing {target} lacks — `dev delete` is enough, and "
+            "no request is needed to preserve it.",
+            err=True,
+        )
+        raise typer.Exit(1)
+
+    number = run_retirement(plan, reason)
+    delete_branch(name, dry_run=False, force=True, remote=True)
+    typer.echo(
+        f"Retired {name}: recover with `git fetch origin refs/pull/{number}/head`"
+    )
 
 
 def create_resolve_branch(concern_id: str) -> None:

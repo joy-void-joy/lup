@@ -519,11 +519,35 @@ def claude_sandbox_arguments(plugin: Plugin) -> list[str]:
     return ["--settings", json.dumps(widened)]
 
 
-# lup: ignore[model-free-function] — a launcher is not an operation on a mode.
+def companion_plugin_directories(root: Path, generated: str) -> list[Path]:
+    """The plugin directories this checkout carries beside the generated one.
+
+    A project may keep a hand-written plugin next to the one the harness
+    compiles. Its only other way into a session is a marketplace, and a
+    marketplace name is one global namespace shared by every checkout
+    declaring it — so the plugin a session loaded is whichever tree
+    registered that name last, the same hazard `lease_plugin_dir` documents.
+    A directory carrying `.claude-plugin/plugin.json` is a plugin by its own
+    declaration, which is why nothing here needs to be written down twice.
+
+    Sorted, so what a launch names does not depend on directory order.
+    """
+    plugins = root / ".claude" / "plugins"
+    if not plugins.is_dir():
+        return []
+    return sorted(
+        directory
+        for directory in plugins.iterdir()
+        if directory.name != generated
+        and (directory / ".claude-plugin" / "plugin.json").is_file()
+    )
+
+
 # It takes a composition, an account, a profile, a model and a passthrough
 # vector, and a mode is one optional argument among them; moving it onto
 # LaunchMode would make the model answerable for starting a runtime it knows
 # nothing about, and leave a project declaring no mode with no launcher at all.
+# lup: ignore[model-free-function] — a launcher is not an operation on a mode.
 def launch_claude(
     composition: NativeHarnessComposition,
     extra_args: list[str],
@@ -544,10 +568,14 @@ def launch_claude(
     selected_model = model or (mode.model if mode is not None else None)
     if selected_model is not None:
         arguments.extend(["--model", selected_model])
+    root = project_root()
+    named = [
+        root / ".claude" / "plugins" / plugin.name,
+        *companion_plugin_directories(root, plugin.name),
+    ]
     arguments.extend(
         [
-            "--plugin-dir",
-            str(project_root() / ".claude" / "plugins" / plugin.name),
+            *[flag for directory in named for flag in ("--plugin-dir", str(directory))],
             *claude_sandbox_arguments(plugin),
             *(mode.command_words("claude") if mode is not None else []),
             *extra_args,
@@ -592,9 +620,9 @@ def launch_claude(
         transcript.close(succeeded=succeeded)
 
 
-# lup: ignore[model-free-function] — a launcher is not an operation on a mode,
-# for the reason spelled at `launch_claude`: the mode is one optional argument
+# For the reason spelled at `launch_claude`: the mode is one optional argument
 # among the ones that actually decide how a runtime starts.
+# lup: ignore[model-free-function] — a launcher is not an operation on a mode.
 def launch_codex(
     composition: NativeHarnessComposition,
     extra_args: list[str],
