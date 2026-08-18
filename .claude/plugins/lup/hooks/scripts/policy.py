@@ -211,6 +211,29 @@ def declared_program(root: str, declared: str) -> str:
     return "" if "/" in declared or "\\" in declared else declared
 
 
+def conflicted(path_text: str) -> bool:
+    """Whether a file is holding a merge open, and so is not source yet.
+
+    Both markers, at the start of a line. A lone `<<<<<<<` is reachable in
+    honest text — a diff quoted in a docstring, a fixture about conflicts, this
+    very sentence — and answering yes to one would silence the checker for a
+    file nothing is wrong with. A conflict always writes the pair, so requiring
+    both costs nothing it was meant to catch.
+
+    Unreadable is not conflicted. Whatever the reason, the checker is about to
+    meet the same file and is the one that should say so.
+    """
+    try:
+        lines = (
+            Path(path_text).read_text(encoding="utf-8", errors="replace").splitlines()
+        )
+    except OSError:
+        return False
+    return any(line.startswith("<<<<<<<") for line in lines) and any(
+        line.startswith(">>>>>>>") for line in lines
+    )
+
+
 def file_diagnostics(
     path_text: str,
     command: list[str],
@@ -251,8 +274,17 @@ def file_diagnostics(
     that exists to be read. It is a default rather than a constant because the
     checker is the caller's choice: a project whose checker reads more than
     Python says so instead of editing this.
+
+    A file mid-merge is the same case arriving from the other direction. Its
+    conflict markers are not source in any language, so the checker reports the
+    file as broken from the first one onward and every line it names is about
+    the merge rather than about the edit — during a resolution, which is
+    exactly when a reader is editing that file and has the least attention to
+    spare for a wall of output that cannot be acted on.
     """
     if not command or Path(path_text).suffix.lower() not in suffixes:
+        return []
+    if conflicted(path_text):
         return []
     root = worktree_root(path_text)
     if not root:
