@@ -361,6 +361,30 @@ def claude_sandbox_arguments(plugin: Plugin) -> list[str]:
     return ["--settings", json.dumps(widened)]
 
 
+def companion_plugin_directories(root: Path, generated: str) -> list[Path]:
+    """The plugin directories this checkout carries beside the generated one.
+
+    A project may keep a hand-written plugin next to the one the harness
+    compiles. Its only other way into a session is a marketplace, and a
+    marketplace name is one global namespace shared by every checkout
+    declaring it — so the plugin a session loaded is whichever tree
+    registered that name last, the same hazard `lease_plugin_dir` documents.
+    A directory carrying `.claude-plugin/plugin.json` is a plugin by its own
+    declaration, which is why nothing here needs to be written down twice.
+
+    Sorted, so what a launch names does not depend on directory order.
+    """
+    plugins = root / ".claude" / "plugins"
+    if not plugins.is_dir():
+        return []
+    return sorted(
+        directory
+        for directory in plugins.iterdir()
+        if directory.name != generated
+        and (directory / ".claude-plugin" / "plugin.json").is_file()
+    )
+
+
 def launch_claude(
     composition: NativeHarnessComposition,
     extra_args: list[str],
@@ -376,10 +400,14 @@ def launch_claude(
     arguments: list[str] = []
     if model is not None:
         arguments.extend(["--model", model])
+    root = project_root()
+    named = [
+        root / ".claude" / "plugins" / plugin.name,
+        *companion_plugin_directories(root, plugin.name),
+    ]
     arguments.extend(
         [
-            "--plugin-dir",
-            str(project_root() / ".claude" / "plugins" / plugin.name),
+            *[flag for directory in named for flag in ("--plugin-dir", str(directory))],
             *claude_sandbox_arguments(plugin),
             *extra_args,
         ]
