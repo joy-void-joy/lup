@@ -66,6 +66,19 @@ class SessionRequest(BaseModel, frozen=True, arbitrary_types_allowed=True):
 type SessionOpener = Callable[[SessionRequest], SessionFactory]
 """Render one request into the configured session factory of one runtime."""
 
+type WorkspaceHome = Callable[[EnvVars, Path], EnvVars]
+"""Give one workspace's sessions a configuration home of their own.
+
+Reads the environment a caller already selected — a profile naming which
+account to run as — and answers the variables routing this runtime's CLI at a
+home private to that workspace, so concurrent sessions cannot read each
+other's half-written startup document.
+
+Which variable carries it is the runtime's own, which is why this is a field
+rather than a shared helper: a session handed another runtime's is pointed at
+a directory its CLI never reads, and loses the home its profile chose.
+"""
+
 
 class Runtime(BaseModel, frozen=True, arbitrary_types_allowed=True):
     """One runtime an application selects, end to end.
@@ -73,12 +86,22 @@ class Runtime(BaseModel, frozen=True, arbitrary_types_allowed=True):
     A transparent carrier: it decides nothing and composes no seam, so an
     application stores one the way it stores any other declaration, and the
     single assignment naming it is the only place a provider is chosen.
+
+    End to end is what makes the carrier worth having. What a session opens
+    through, where the runtime keeps a login, and where a workspace's sessions
+    write are three facts about one provider, and an application that reads
+    them from three places can be switched in only some of them.
     """
 
     name: str
     login: ProviderLogin
     open: SessionOpener
+    workspace_home: WorkspaceHome
 
     def session_factory(self, request: SessionRequest) -> SessionFactory:
         """Open a session factory for this runtime from a portable request."""
         return self.open(request)
+
+    def workspace_environment(self, environment: EnvVars, workspace: Path) -> EnvVars:
+        """Route this runtime's sessions at a home private to that workspace."""
+        return self.workspace_home(environment, workspace)

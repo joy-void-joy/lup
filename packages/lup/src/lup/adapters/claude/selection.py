@@ -6,6 +6,7 @@ than dropped: Claude's effort ladder starts at ``low``, so a request for
 ``minimal`` opens at that floor.
 """
 
+from lup.adapters.claude.config_home import workspace_config_environment
 from lup.adapters.claude.login import CLAUDE_LOGIN
 from lup.adapters.claude.runtime import (
     ClaudeEffort,
@@ -80,5 +81,6 @@ CLAUDE_RUNTIME = Runtime(
     name="Claude Code",
     login=CLAUDE_LOGIN,
     open=claude_session,
+    workspace_home=workspace_config_environment,
 )
 """Claude Code, as the single value an application assigns to select it."""
