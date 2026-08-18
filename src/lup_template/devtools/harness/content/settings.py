@@ -24,6 +24,16 @@ DECLARED = Settings(
         "agent-sdk-dev@claude-plugins-official": True,
         "claude-md-management@claude-plugins-official": True,
         "github@claude-plugins-official": True,
+        # Refused rather than absent: this repository installs
+        # `pyright-langserver` for its own audit, which is the condition an
+        # editor language server is offered on, so a project that only left
+        # this out would be asked again. Two checkers over the same files
+        # disagree, and the one wired to the gates is the per-edit check in
+        # `lup.policy.assets.host`; the navigation half is already served by
+        # the codeintel tools. A vendor server rooted where the session opened
+        # also answers about the launch checkout after work moves to a
+        # worktree, which the guidance asks for on every change.
+        "pyright-lsp@claude-plugins-official": False,
     },
     allowed=[
         "WebSearch",
