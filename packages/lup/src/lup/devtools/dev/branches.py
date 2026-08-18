@@ -127,7 +127,7 @@ class BranchInfo(BaseModel):
     """What this branch's worktree holds uncommitted, where it has one.
 
     Carried beside the disposition rather than folded into its reason: the
-    classifier is shared with `dev status`, and a verb decided partly on
+    classifier is shared with `dev survey`, and a verb decided partly on
     working-tree state there would drift from the same verb decided here.
     What this changes is the cost of acting, not the action — a DELETE whose
     worktree is dirty still deletes, but refuses until forced, and a reader

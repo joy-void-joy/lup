@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "2bf5821186adde9edc7dfd7bea294fbcbcec139562af73d7c4d69839435d1c07",
+  "source_digest": "b9fd86ebdc2b40f99876d8b9a3c6197974cec98f56ace79049fb7c5c1f0ac9ce",
   "target_requirements": [
     "codex-cli>=0.144"
   ],
@@ -310,7 +310,7 @@
     {
       "path": ".codex/plugins/lup/skills/land/SKILL.md",
       "category": "generated",
-      "sha256": "3b0065e490d0e269dd58ece7252ee1891b231dee3a8ab7977277673c82c2b61a",
+      "sha256": "7a956d01fb4e037b44ce24bcb28ec0a9579bc653e6ae22fea9133a16325f3a9d",
       "semantic_id": "skill.land",
       "executable": false
     },

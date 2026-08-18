@@ -223,6 +223,21 @@ class AppServerRecord(BaseModel, frozen=True):
     environment: ChildEnvironment
     received: list[RpcMessage] = Field(default_factory=list)
 
+    def report_to(self, record: Path) -> None:
+        """Publish this record where the parent reads it, in one step.
+
+        The parent reads while the child is still writing: the assertions
+        about a terminated child ask what it saw immediately after killing it.
+        Writing in place truncates first and fills after, so a read landing in
+        that window gets an empty file and a JSON error naming this record —
+        a fault that looks like it belongs to whatever the test was driving.
+        Writing beside the target and renaming onto it leaves the reader
+        either the previous record or this one, never half of either.
+        """
+        beside = record.with_name(f"{record.name}.{os.getpid()}.part")
+        beside.write_text(self.model_dump_json(), encoding="utf-8")
+        os.replace(beside, record)
+
 
 def emit(message: OutgoingRpcMessage) -> None:
     """Write one JSON-RPC line, flushed so a pipe delivers it now."""
@@ -250,11 +265,11 @@ def converse(transcript: AppServerTranscript, record: Path) -> int:
     seen = AppServerRecord(
         pid=os.getpid(), arguments=sys.argv, environment=ChildEnvironment()
     )
-    record.write_text(seen.model_dump_json(), encoding="utf-8")
+    seen.report_to(record)
     for line in iter(sys.stdin.readline, ""):
         message = RpcMessage.model_validate_json(line)
         seen = seen.model_copy(update={"received": [*seen.received, message]})
-        record.write_text(seen.model_dump_json(), encoding="utf-8")
+        seen.report_to(record)
         reply = (
             transcript.replies[message.method]
             if message.method in transcript.replies
