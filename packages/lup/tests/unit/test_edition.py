@@ -290,6 +290,42 @@ def test_a_file_the_checker_cannot_read_is_not_checked(tmp_path: Path) -> None:
     assert file_diagnostics(str(manifest), command) == []
 
 
+def test_a_file_holding_a_merge_open_is_not_checked(tmp_path: Path) -> None:
+    """Conflict markers are not source, so the checker's verdict is about them.
+
+    The same failure as the manifest above, arriving where it costs most. A
+    resolution is edits to a file that does not parse until the last marker
+    goes, so every edit until then answers with the checker's opinion of the
+    markers — and the reader making those edits is the one who can least
+    afford to sort a real finding out of it.
+    """
+    work = checkout(tmp_path / "repo")
+    file = work / "module.py"
+    file.write_text(
+        "<<<<<<< HEAD\nx = 1\n=======\nx = 2\n>>>>>>> other\n", encoding="utf-8"
+    )
+    command = checker(work, report(file))
+
+    assert file_diagnostics(str(file), command) == []
+
+
+def test_a_file_quoting_one_marker_is_still_checked(tmp_path: Path) -> None:
+    """A lone marker is reachable in honest text and silences nothing.
+
+    A conflict writes the pair, so requiring both costs nothing it was meant
+    to catch — while answering to one would drop the checker for a file whose
+    docstring quotes a diff, or for the fixtures of this very rule.
+    """
+    work = checkout(tmp_path / "repo")
+    file = work / "module.py"
+    file.write_text('x = """\n<<<<<<< quoted, not conflicted\n"""\n', encoding="utf-8")
+    command = checker(work, report(file))
+
+    assert file_diagnostics(str(file), command) == [
+        "error 1: something is wrong",
+    ]
+
+
 def test_the_readable_suffixes_are_the_callers_to_choose(tmp_path: Path) -> None:
     """The checker is the caller's, so what it reads is declared, not assumed."""
     work = checkout(tmp_path / "repo")
