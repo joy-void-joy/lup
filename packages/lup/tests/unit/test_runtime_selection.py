@@ -133,3 +133,21 @@ def test_codex_will_not_infer_the_directory_it_sandboxes_against() -> None:
 def test_codex_rejects_a_tool_group_it_cannot_launch() -> None:
     with pytest.raises(ValueError, match="subprocess"):
         codex_mcp_server("group", {"type": "sse", "url": "https://example.test"})
+
+
+@pytest.mark.parametrize("runtime", [CLAUDE_RUNTIME, CODEX_RUNTIME])
+def test_a_workspace_home_is_named_in_the_runtime_that_opens_it(
+    runtime: Runtime, tmp_path: Path
+) -> None:
+    """Where a workspace's sessions write is a per-runtime fact, so the whole
+    selection has to carry it. An application deriving one runtime's home for
+    every session points the other at a directory its CLI never reads, while
+    dropping the home its profile selected."""
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+
+    environment = runtime.workspace_environment(
+        {runtime.login.config_home_env: str(tmp_path / "account")}, workspace
+    )
+
+    assert runtime.login.config_home_env in environment
