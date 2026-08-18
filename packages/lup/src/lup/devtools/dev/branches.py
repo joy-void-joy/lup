@@ -2,6 +2,7 @@
 
 import json
 import logging
+import sys
 from abc import abstractmethod
 from collections import defaultdict
 from collections.abc import Iterator
@@ -19,7 +20,7 @@ from pydantic import BaseModel, Field
 from lup.harness.environment import non_interactive_environment
 from lup.harness.process import LaunchRequest, ProcessLauncher
 import lup.devtools.dev.traces as traces
-from lup.devtools.dev.remote_auth import check_remote_auth
+from lup.devtools.dev.remote_auth import check_remote_auth, remote_auth_refusal
 from lup.resolver.models import HeldLease
 from lup.resolver.state import live_lease_branches
 from lup.types import StringMap
@@ -831,6 +832,21 @@ class BaseFreshness(BaseModel, frozen=True):
         """Whether either remote is known to hold commits this checkout does not."""
         return any(reading.stale() for reading in self.measures())
 
+    def unanswered(self) -> bool:
+        """Whether a remote was asked and did not answer.
+
+        The reading a caller has to tell apart from a clean one, because
+        every other question here answers the same for both: no measure was
+        taken, so nothing is behind, so nothing is stale. What separates
+        them is not the count but whether there is one.
+
+        Having nothing to ask is not this. A checkout that answers to no
+        remote branch has no base that could have moved out from under it,
+        where one whose fetch was refused has exactly the base it had before
+        asking and no idea whether it still stands.
+        """
+        return bool(self.unreachable)
+
     def report(self) -> str:
         """Every reading on its own line, or the one reason there are none.
 
@@ -950,6 +966,16 @@ def probe_base_freshness(launcher: ProcessLauncher, root: Path) -> BaseFreshness
     so only the remote can answer the question — one fetch, then a count per
     ref found. A remote that cannot be reached leaves the answer unknown
     rather than guessing it either way.
+
+    A refusal is asked about again before it is reported, because the fetch
+    runs where nothing may prompt and git's own account of that is the least
+    useful true thing there is to say: it names the key it was refused for,
+    never the one to load. The credential probe knows which identity ssh
+    would offer this destination, so where it identifies one that answer
+    replaces git's — the same event, re-asked by something that can name the
+    way out of it. Where it identifies nothing, git keeps the floor: the
+    probe is a second command and can disagree with the first about whether
+    the host was reachable at all.
     """
     remotes = tracked_remotes(launcher, root)
     if not remotes.named():
@@ -962,8 +988,14 @@ def probe_base_freshness(launcher: ProcessLauncher, root: Path) -> BaseFreshness
         )
     )
     if fetched.code != 0:
+        # `ls-remote --get-url` expands `url.<base>.insteadOf` and contacts
+        # nothing, so what is probed is the URL the fetch above actually
+        # reached rather than the one written in the config beside it.
+        origin = git_line(launcher, root, ["ls-remote", "--get-url", "origin"])
         return BaseFreshness(
-            unreachable=fetched.stderr.strip() or f"`git fetch` exited {fetched.code}",
+            unreachable=remote_auth_refusal(origin).diagnoses()
+            or fetched.stderr.strip()
+            or f"`git fetch` exited {fetched.code}",
         )
     return remotes.counted(launcher, root)
 
@@ -1033,10 +1065,12 @@ def settle_base_freshness(launcher: ProcessLauncher, root: Path) -> None:
     past; a base that has moved needs a merge, so it is named along with the
     merge that would take it and the session opens either way.
 
-    Whether anybody is at the terminal changes none of this. There is no
-    question to put to them — every part is either safe unattended or a line
-    of output — and the refusal that used to stand here fell on exactly the
-    scripted sessions nobody was watching.
+    Being unable to read the base at all is the one part that does put a
+    question to whoever is there. A session opened on an unread base is the
+    mistake this whole reading exists to prevent, and a line of output does
+    not prevent it: the one that reported this arrived under four lines
+    saying ready, in the shape of the status lines around it, a moment
+    before the terminal was handed to something that draws over all of them.
     """
     freshness = probe_base_freshness(launcher, root)
     synced = (
@@ -1051,6 +1085,30 @@ def settle_base_freshness(launcher: ProcessLauncher, root: Path) -> None:
         # counts are re-read — off the refs the probe has already fetched.
         freshness = tracked_remotes(launcher, root).counted(launcher, root)
     typer.echo(freshness.report())
+    if freshness.unanswered():
+        admit_an_unread_base()
+
+
+def admit_an_unread_base() -> None:
+    """Put an unread base to whoever is at the terminal; open anyway when nobody is.
+
+    Asked rather than refused, because a base that cannot be read is not the
+    same as one that has moved, and offline is a way of working rather than
+    a fault: the answer belongs to the person who knows which of the two
+    they are in. Asked rather than printed, because the alternative was
+    tried and is what brought this here.
+
+    Only where somebody can answer. The refusal that used to stand in this
+    module fell on exactly the scripted sessions nobody was watching, and a
+    prompt on an absent terminal is that refusal wearing a question mark —
+    `typer.confirm` reads end-of-file as an abort. So a session with nobody
+    in front of it says what it is doing and opens.
+    """
+    if not sys.stdin.isatty():
+        typer.echo("nobody is here to answer, so the session opens on it unread")
+        return
+    if not typer.confirm("Open the session on a base nothing could read?"):
+        raise typer.Abort()
 
 
 # lup: ignore[model-free-function] — driver: it ends the command, so what it
@@ -1063,10 +1121,22 @@ def require_fresh_base(freshness: BaseFreshness) -> None:
     diff against the new base, and re-running intake — which can add or drop
     concerns while work is in flight. Refusing before any of that exists
     costs a fetch; discovering it afterwards costs the run.
+
+    A base nothing could read is refused on the same terms rather than
+    passed. The session launchers ask about one, because a person is sitting
+    in front of them and offline is a way of working; here there is nobody to
+    ask and nothing to gain by guessing — a run that pins an unread base has
+    committed every lease it will cut to a guess, and it finds out whether
+    the guess held at the point where the answer costs the run.
     """
     typer.echo(freshness.report())
     if freshness.stale():
         raise typer.BadParameter(freshness.report())
+    if freshness.unanswered():
+        raise typer.BadParameter(
+            "a run pins one base for every lease it cuts, so it does not start "
+            "on a base nothing could read"
+        )
 
 
 # -- CLI functions --
