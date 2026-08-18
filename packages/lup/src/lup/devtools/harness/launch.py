@@ -9,13 +9,16 @@ import json
 import logging
 import os
 import shutil
+from collections.abc import Callable
+from contextlib import AbstractContextManager, nullcontext
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Protocol, runtime_checkable
 from uuid import uuid4
 
 import sh
 import typer
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from lup.runtime.profiles import ProfileDirectory
 from lup.adapters.claude.transcripts import ClaudeTranscripts
@@ -25,10 +28,14 @@ from lup.adapters.codex.harness_runtime import (
 )
 from lup.adapters.codex.transcripts import CodexTranscripts
 from lup.harness.environment import non_interactive_environment
-from lup.harness.models import Plugin
+from lup.harness.models import NativeName, Plugin
 from lup.harness.process import LocalProcessLauncher
 from lup.telemetry.journal import (
     ArgvRedaction,
+    KeyRedaction,
+    PathRedaction,
+    PortableRoot,
+    Redactions,
     TraceActor,
     TraceContext,
     TraceJournal,
@@ -41,6 +48,7 @@ from lup.adapters.codex.home import (
     login_state,
     select_codex_home,
 )
+from lup.devtools.harness.composition import NativeTargets
 from lup.devtools.dev.branches import settle_base_freshness
 from lup.devtools.harness.drift import generate_with_report
 from lup.devtools.harness.generate import NativeHarnessComposition
@@ -146,6 +154,133 @@ def capture_watcher_diagnostics(run_directory: Path) -> logging.Handler:
     return handler
 
 
+@runtime_checkable
+class LaunchSession(Protocol):
+    """How a launch mode opens whatever its session needs, around one run.
+
+    Runtime-checkable because :class:`LaunchMode` is a pydantic model and an
+    arbitrary-typed field is validated by ``isinstance``; the protocol carries
+    only ``__call__``, which is exactly what that check can answer.
+
+    Returns a context manager yielding the environment the native CLI is
+    launched under, so a mode that has state to hold — a directory to make, a
+    pointer to publish, a record to close — holds it for exactly the span the
+    CLI is running and gets its exit path for free.
+
+    The journal rather than a directory, because a mode's session usually has
+    to be *findable* by a subprocess the CLI spawns, and what identifies one
+    run is the trace context the journal already carries.
+    """
+
+    def __call__(
+        self, *, provider: str, journal: TraceJournal
+    ) -> AbstractContextManager[EnvVars]: ...
+
+
+class LaunchMode(BaseModel, frozen=True, arbitrary_types_allowed=True):
+    """One named way of opening a session that the default launch is not.
+
+    A mode is the application's, never the library's: it names a flag, the
+    tree generation compiles while it is in force, the model that kind of
+    session runs on, where its record is kept, and what has to be open around
+    it. The launchers take one and read it; nothing here knows what any
+    particular mode is *for*, which is what keeps a downstream project's
+    vocabulary out of the framework.
+    """
+
+    name: NativeName
+    """Spells the flag: a mode named ``syra`` is selected by ``--syra``."""
+
+    help: str = Field(min_length=1)
+
+    targets: NativeTargets
+    """What generation compiles while this mode is in force.
+
+    A mode changes the tree rather than only the command line, because the
+    thing a mode usually adds — a tool server, a hook, a document — has to
+    reach the session through an artifact the runtime reads at startup."""
+
+    model: str | None = None
+    """The native model this kind of session runs on, absent an explicit one."""
+
+    record_root: Callable[[], Path] | None = None
+    """Where this mode's transcripts are rooted, resolved at launch.
+
+    A callable because the answer is relative to a project root that moves
+    between worktrees, and a path captured at import time names the checkout
+    the process started in rather than the one it is running against."""
+
+    session: LaunchSession | None = None
+    """What must be open while a session of this kind runs."""
+
+
+class LaunchSelection(BaseModel, frozen=True, arbitrary_types_allowed=True):
+    """Which mode a caller's words selected, and what is left for the CLI."""
+
+    mode: LaunchMode | None
+    arguments: list[str]
+
+
+def extract_launch_mode(
+    modes: list[LaunchMode], arguments: list[str]
+) -> LaunchSelection:
+    """Take a declared mode flag out of the words meant for the native CLI.
+
+    Read out of the passthrough vector rather than declared as a command
+    option, because the flag's name belongs to a declaration the library
+    reads at runtime and a Typer option's name is fixed when its function is
+    defined. The launch commands already own unknown options — that is how
+    they forward a caller's own arguments — so recognizing a few of them
+    first is the same surface, not a new one.
+    """
+    selected = {f"--{mode.name}": mode for mode in modes}
+    chosen = [selected[word] for word in arguments if word in selected]
+    if len(chosen) > 1:
+        named = ", ".join(f"--{mode.name}" for mode in chosen)
+        raise typer.BadParameter(f"launch modes are exclusive; got {named}")
+    return LaunchSelection(
+        mode=chosen[0] if chosen else None,
+        arguments=[word for word in arguments if word not in selected],
+    )
+
+
+def mode_record_root(mode: LaunchMode | None) -> Path | None:
+    """Where this launch keeps its transcript, resolved now rather than at import."""
+    if mode is None or mode.record_root is None:
+        return None
+    return mode.record_root()
+
+
+def mode_session(
+    mode: LaunchMode | None, provider: str, journal: TraceJournal
+) -> AbstractContextManager[EnvVars]:
+    """Whatever this mode needs open around the run, or nothing to open.
+
+    An empty environment from :func:`contextlib.nullcontext` rather than a
+    branch at the call site, so the launchers hold one shape and a mode that
+    declares no session costs them no conditional.
+    """
+    if mode is None or mode.session is None:
+        return nullcontext({})
+    return mode.session(provider=provider, journal=journal)
+
+
+def portable_roots() -> list[PortableRoot]:
+    """The roots a durable transcript should name by role, not by location.
+
+    The project root, the tree of sibling checkouts around it, and the
+    operator's home — between them, everywhere a session's paths come from.
+    Ordered widest-last is irrelevant here because the rule sorts by length;
+    what matters is that all three are offered, since a payload quoting a
+    sibling worktree names none of the other two.
+    """
+    return [
+        PortableRoot(label="<project>", path=project_root()),
+        PortableRoot(label="<tree>", path=project_root().parent),
+        PortableRoot(label="<home>", path=Path.home()),
+    ]
+
+
 def start_harness_transcript(
     provider: str,
     transcripts: NativeTranscripts,
@@ -153,17 +288,26 @@ def start_harness_transcript(
     model: str | None,
     profile: str | None,
     arguments: list[str],
+    record_root: Path | None = None,
+    mode: str | None = None,
 ) -> HarnessTranscript:
     """Start one canonical transcript around a native interactive CLI.
 
     The runtime arrives as its own transcript reader rather than as a directory
     to scan, because where a runtime keeps its sessions and how one of its
     records names itself are the runtime's business, not this launcher's.
+
+    ``record_root`` is where the transcript tree is rooted, so a launch mode
+    whose records are kept to a different standard keeps them somewhere a
+    reader can tell apart without opening one. ``mode`` puts the same fact
+    inside the record, because a directory is renameable and a run that has
+    been copied out of one should still say what it was.
     """
     run_id = (
         f"{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}_{provider}_{uuid4().hex[:8]}"
     )
-    trace_path = notes_path() / "harness" / provider / run_id / "observable.jsonl"
+    root = record_root or notes_path() / "harness"
+    trace_path = root / provider / run_id / "observable.jsonl"
     journal = TraceJournal(
         trace_path,
         TraceContext.root(
@@ -175,6 +319,11 @@ def start_harness_transcript(
                 model=model,
             ),
         ),
+        # A harness transcript is the one journal written to be kept and read
+        # later, so it carries the path rule the in-process default does not:
+        # what it mirrors is a native CLI's own record, full of this machine's
+        # directories in prose no key-name rule can see.
+        redaction=Redactions(KeyRedaction(), PathRedaction(portable_roots())),
     )
     # An argv vector reaches the journal only redacted: these are the words a
     # caller typed, and a credential passed as an option value is a value the
@@ -184,6 +333,7 @@ def start_harness_transcript(
         "provider": provider,
         "model": model,
         "profile": profile,
+        "mode": mode,
         "arguments": safe_arguments,
     }
     journal.emit("run_start", payload)
@@ -368,14 +518,19 @@ def launch_claude(
     profile: str | None,
     model: str | None,
     generate_only: bool,
+    mode: LaunchMode | None = None,
 ) -> None:
     """Generate/reconcile Claude artifacts and launch the verified local plugin."""
     plugin = composition.recipe.source.plugins[0]
     if not ready_to_open(composition, generate_only):
         return
     arguments: list[str] = []
-    if model is not None:
-        arguments.extend(["--model", model])
+    # A mode's model is a default rather than a fixture: it says what this kind
+    # of session runs on when nobody said otherwise, and an explicit --model
+    # still wins, because overriding the model is why a caller passes one.
+    selected_model = model or (mode.model if mode is not None else None)
+    if selected_model is not None:
+        arguments.extend(["--model", selected_model])
     arguments.extend(
         [
             "--plugin-dir",
@@ -398,13 +553,17 @@ def launch_claude(
     transcript = start_harness_transcript(
         "claude",
         ClaudeTranscripts(home),
-        model=model,
+        model=selected_model,
         profile=profile,
         arguments=arguments,
+        record_root=mode_record_root(mode),
+        mode=mode.name if mode is not None else None,
     )
     succeeded = False
     try:
-        sh.Command("claude")(*arguments, _fg=True, _env=environment)
+        with mode_session(mode, "claude", transcript.journal) as session:
+            environment.update(session)
+            sh.Command("claude")(*arguments, _fg=True, _env=environment)
         succeeded = True
     except sh.CommandNotFound as error:
         raise typer.BadParameter("Claude Code CLI is not installed") from error
@@ -422,6 +581,7 @@ def launch_codex(
     model: str | None,
     generate_only: bool,
     force_install: bool,
+    mode: LaunchMode | None = None,
 ) -> None:
     """Generate/reconcile Codex artifacts and launch without updating the CLI."""
     plugin = composition.recipe.source.plugins[0]
@@ -441,25 +601,32 @@ def launch_codex(
     arguments: list[str] = list(envelope)
     if profile is not None:
         arguments.extend(["--profile", profile])
-    if model is not None:
-        arguments.extend(["--model", model])
+    selected_model = model or (mode.model if mode is not None else None)
+    if selected_model is not None:
+        arguments.extend(["--model", selected_model])
     arguments.extend(extra_args)
     environment["CODEX_HOME"] = str(selected_home)
     transcript = start_harness_transcript(
         "codex",
         CodexTranscripts(selected_home),
-        model=model,
+        model=selected_model,
         profile=profile,
         arguments=arguments,
+        record_root=mode_record_root(mode),
+        mode=mode.name if mode is not None else None,
     )
     succeeded = False
     try:
-        with installer.temporary(
-            project_root() / ".codex" / "plugins" / plugin.name,
-            project_root(),
-            force=force_install,
-        ) as cache:
+        with (
+            installer.temporary(
+                project_root() / ".codex" / "plugins" / plugin.name,
+                project_root(),
+                force=force_install,
+            ) as cache,
+            mode_session(mode, "codex", transcript.journal) as session,
+        ):
             typer.echo(f"Verified installed Codex plugin: {cache.installed_root}")
+            environment.update(session)
             sh.Command("codex")(*arguments, _fg=True, _env=environment)
         succeeded = True
     except sh.CommandNotFound as error:
