@@ -210,6 +210,14 @@ class LaunchMode(BaseModel, frozen=True, arbitrary_types_allowed=True):
     between worktrees, and a path captured at import time names the checkout
     the process started in rather than the one it is running against."""
 
+    arguments: Callable[[str], list[str]] | None = None
+    """Words this mode adds to the native command line, given the runtime.
+
+    Per runtime because the same intent is spelled differently or not at all:
+    a mode that wants its brief in the system prompt has a flag for that on
+    one CLI and a generated document on the other, and a seam that could not
+    tell them apart would put an unknown option on the second."""
+
     session: LaunchSession | None = None
     """What must be open while a session of this kind runs."""
 
@@ -242,6 +250,13 @@ def extract_launch_mode(
         mode=chosen[0] if chosen else None,
         arguments=[word for word in arguments if word not in selected],
     )
+
+
+def mode_arguments(mode: LaunchMode | None, provider: str) -> list[str]:
+    """Words this mode contributes to one runtime's command line, if any."""
+    if mode is None or mode.arguments is None:
+        return []
+    return mode.arguments(provider)
 
 
 def mode_record_root(mode: LaunchMode | None) -> Path | None:
@@ -536,6 +551,7 @@ def launch_claude(
             "--plugin-dir",
             str(project_root() / ".claude" / "plugins" / plugin.name),
             *claude_sandbox_arguments(plugin),
+            *mode_arguments(mode, "claude"),
             *extra_args,
         ]
     )
@@ -604,6 +620,7 @@ def launch_codex(
     selected_model = model or (mode.model if mode is not None else None)
     if selected_model is not None:
         arguments.extend(["--model", selected_model])
+    arguments.extend(mode_arguments(mode, "codex"))
     arguments.extend(extra_args)
     environment["CODEX_HOME"] = str(selected_home)
     transcript = start_harness_transcript(
