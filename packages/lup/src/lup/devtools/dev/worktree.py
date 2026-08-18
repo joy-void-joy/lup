@@ -10,6 +10,7 @@ import typer
 from pydantic import BaseModel
 
 from lup.devtools.dev.git_guards import DECLARED_GUARDS, GitGuard, arm, read_guard
+from lup.devtools.launcher import project_environment
 from lup.devtools.layout import get_tree_dir
 from lup.devtools.utils import (
     copy_to_clipboard,
@@ -300,10 +301,10 @@ class SyncedEnvironment(SetupStep, frozen=True):
     worktree: Path
 
     def label(self) -> str:
-        return "the synced environment (.venv)"
+        return f"the synced environment ({project_environment(self.worktree).name})"
 
     def satisfied(self) -> bool:
-        return (self.worktree / ".venv").is_dir()
+        return project_environment(self.worktree).is_dir()
 
     def run(self) -> None:
         typer.echo("Running uv sync...")

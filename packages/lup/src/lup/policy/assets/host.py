@@ -157,6 +157,33 @@ def publish_edition(path_text: str) -> None:
         print(f"lup: could not publish the edition: {error}", file=sys.stderr)
 
 
+def declared_program(root: str, declared: str) -> str:
+    """Where a declared program is, or "" when it is not there to run.
+
+    The checkout answers first, whatever the spelling. That is what makes the
+    verdict the edited tree's rather than whichever environment the session
+    was launched from, and it is the property worth keeping — a sibling
+    worktree holds the same relative path with different contents.
+
+    Only where the checkout holds nothing does the spelling decide. A bare
+    name goes to the OS to find on ``PATH``, for a project whose toolchain
+    lives somewhere else entirely: a conda environment, a pyenv shim, a
+    system or user-level install, an environment ``UV_PROJECT_ENVIRONMENT``
+    put outside the project. A path that resolved to nothing stays nothing,
+    because a project that named a location meant that location.
+
+    Accepting only the first is what made this gate unavailable rather than
+    configurable. A declared program it could not resolve produced no
+    diagnostics and said nothing about why, so a project outside one layout
+    did not get a weaker check — it got silence indistinguishable from a
+    clean file, on every edit.
+    """
+    located = Path(root) / declared
+    if located.is_file():
+        return str(located)
+    return "" if "/" in declared or "\\" in declared else declared
+
+
 def file_diagnostics(
     path_text: str,
     command: list[str],
@@ -193,13 +220,13 @@ def file_diagnostics(
     root = worktree_root(path_text)
     if not root:
         return []
-    executable = Path(root) / command[0]
-    if not executable.is_file():
+    located = declared_program(root, command[0])
+    if not located:
         return []
     edited = str(Path(path_text).resolve())
     try:
         finished = subprocess.run(
-            [str(executable), *command[1:], edited],
+            [located, *command[1:], edited],
             capture_output=True,
             text=True,
             cwd=root,

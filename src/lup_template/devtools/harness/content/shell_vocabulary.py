@@ -43,10 +43,13 @@ def lup_devtools_rule() -> ShellCommandRule:
     parsing `pyproject.toml` is how it guarantees a synced environment. The
     conflict workflow is the single place that guarantee cannot be paid for,
     because its commands exist to repair the merge that left the manifest
-    unparseable — so those are documented as `.venv/bin/lup-devtools`, and a
-    documented invocation the classifier does not resolve is a denial rather
-    than a fix. The rows match on the executable's name, which is what a
-    console script named by path still presents. Every other subcommand
+    unparseable — so those are documented reaching the console script
+    directly, and a documented invocation the classifier does not resolve is
+    a denial rather than a fix. The rows match on the executable's name, which
+    is what a console script presents however it was reached: by a path into
+    this project's environment, or bare off `PATH` where that environment is
+    not inside the checkout at all. One rule covers both, so a project's
+    layout never becomes a second policy. Every other subcommand
     bounces back naming the spelling that is admitted, which is what an agent
     reaching past `uv` for no reason should be told.
 
