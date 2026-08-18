@@ -127,6 +127,7 @@ from lup.devtools.harness import launch
 from lup.devtools.harness.launch import (
     claude_sandbox_arguments,
     codex_sandbox_arguments,
+    companion_plugin_directories,
 )
 from lup.policy.kernel.shell import sandbox_excluded
 from lup_template.devtools.harness.content.template_claude import (
@@ -2513,6 +2514,30 @@ def test_claude_sandbox_widens_the_writable_set_to_sibling_worktrees(
         *plugin.hooks.sandbox.writable_paths,
         str(tmp_path),
     ]
+
+
+def test_a_plugin_kept_beside_the_generated_one_is_named_at_launch(
+    tmp_path: Path,
+) -> None:
+    """A marketplace name is one global namespace; a directory is this checkout's.
+
+    Left to the namespace, the plugin a session loads is whichever tree
+    registered that name last — so a project's own plugin is named on the
+    same terms as the compiled one, and travels with the checkout.
+    """
+    plugins = tmp_path / ".claude" / "plugins"
+    for name in ("lup", "aib"):
+        declaration = plugins / name / ".claude-plugin" / "plugin.json"
+        declaration.parent.mkdir(parents=True)
+        declaration.write_text(json.dumps({"name": name}))
+    (plugins / "cache").mkdir()
+
+    assert companion_plugin_directories(tmp_path, "lup") == [plugins / "aib"]
+
+
+def test_a_checkout_keeping_no_companion_names_nothing_further(tmp_path: Path) -> None:
+    """A directory without a plugin declaration is not one, and neither is no directory."""
+    assert companion_plugin_directories(tmp_path, "lup") == []
 
 
 def test_entering_and_leaving_a_worktree_is_granted_rather_than_asked_about() -> None:
