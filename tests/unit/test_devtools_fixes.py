@@ -164,6 +164,25 @@ class TestParseRemote:
 
         assert parse_remote("/srv/git/repo.git") is None
 
+    def test_an_ssh_alias_names_the_host_ssh_will_resolve(self) -> None:
+        """What a remote looks like once a person has an `~/.ssh/config`.
+
+        urllib reads `jvj` as the scheme of a URL with no host, so a remote
+        written this way used to parse as nothing recognizable — and an
+        unrecognized remote is one the auth check passes without probing.
+        """
+        from lup.devtools.dev.remote_auth import RemoteRef, parse_remote
+
+        assert parse_remote("jvj:org/repo.git") == RemoteRef(
+            scheme="ssh", destination="jvj"
+        )
+
+    def test_a_windows_drive_is_a_path_rather_than_a_host(self) -> None:
+        """`C:/src/repo` is a clone source, not a machine with a key on it."""
+        from lup.devtools.dev.remote_auth import parse_remote
+
+        assert parse_remote("C:/src/repo.git") is None
+
 
 # ── fix 13: rebase uses REBASE_HEAD, not CHERRY_PICK_HEAD ──────────────────
 
