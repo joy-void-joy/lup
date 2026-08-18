@@ -100,7 +100,28 @@ class Runtime(BaseModel, frozen=True, arbitrary_types_allowed=True):
 
     def session_factory(self, request: SessionRequest) -> SessionFactory:
         """Open a session factory for this runtime from a portable request."""
-        return self.open(request)
+        return self.open(self.contained(request))
+
+    def contained(self, request: SessionRequest) -> SessionRequest:
+        """The same request, its sessions pointed at a home of the workspace's own.
+
+        Derived when a session is opened rather than when a request is built.
+        A request is a declaration and should cost nothing to state; a home
+        is a directory that has to exist, seeded from the account the
+        environment selects. Deriving it here is also what keeps the two from
+        disagreeing: an application that built the home into a request would
+        have chosen a runtime before naming one, and opening that request
+        through the other would point it at a directory no CLI there reads.
+
+        A request naming no working directory is returned untouched — there
+        is no workspace to contain it against.
+        """
+        if request.cwd is None:
+            return request
+        derived = self.workspace_environment(request.environment, request.cwd)
+        return request.model_copy(
+            update={"environment": {**request.environment, **derived}}
+        )
 
     def workspace_environment(self, environment: EnvVars, workspace: Path) -> EnvVars:
         """Route this runtime's sessions at a home private to that workspace."""
