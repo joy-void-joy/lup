@@ -259,6 +259,32 @@ def create_dev_app(
         """
         branches.delete_branch(name, dry_run, force, remote)
 
+    @app.command("retire")
+    def retire_cmd(
+        name: Annotated[str, typer.Argument(help="Branch name to retire")],
+        reason: Annotated[
+            str,
+            typer.Option("--reason", help="Why this work is not being landed"),
+        ],
+        dry_run: Annotated[
+            bool,
+            typer.Option("--dry-run", "-n", help="Show what would happen"),
+        ] = False,
+        base: Annotated[
+            str | None,
+            typer.Option("--base", help="Branch the request targets"),
+        ] = None,
+    ) -> None:
+        """Retire a branch through a pull request, so its commits outlive it.
+
+        For work that is not being landed and is not in the integration
+        branch either — where a plain delete leaves the commits reachable
+        from nothing. Pushes, opens a request, closes it without merging,
+        and then deletes: the head stays at `refs/pull/<number>/head`, which
+        outlives both the branch and origin's copy of it.
+        """
+        branches.retire_branch(name, reason, dry_run, base)
+
     @app.command("archive-traces")
     def archive_traces_cmd(
         name: Annotated[

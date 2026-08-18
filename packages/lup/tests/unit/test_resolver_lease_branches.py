@@ -9,7 +9,7 @@ apart, and these pin that it is asked and believed.
 
 from pathlib import Path
 
-from lup.devtools.dev.branches import disposition_for
+from lup.devtools.dev.branches import PRStatus, disposition_for
 from lup.harness.models import ResolveSpec, SkillInvocation
 from lup.resolver.models import (
     AcceptanceCriterion,
@@ -162,3 +162,98 @@ def test_an_unheld_branch_with_the_same_shape_is_still_landable() -> None:
     )
 
     assert verdict.status == "LAND"
+
+
+def test_only_an_open_request_can_be_closed_a_second_time() -> None:
+    """A retirement closes the request it reuses, and two states refuse that.
+
+    Reusing whichever was most recent pushed the branch and then failed at
+    the close, leaving the work half-moved: a branch that merged and then
+    gained commits has a MERGED request against its head, and GitHub refuses
+    that transition outright.
+    """
+    assert PRStatus(number=1, state="OPEN").reusable()
+    assert not PRStatus(number=2, state="MERGED").reusable()
+    assert not PRStatus(number=3, state="CLOSED").reusable()
+
+
+def test_a_branch_sharing_no_history_is_not_offered_for_landing() -> None:
+    """Both verbs a sweep offers a LAND branch would replay an unrelated tree.
+
+    Neither counter fails without a merge base, so the figures come back
+    plausible rather than absent: an adopter repo's survey read 17390 lines
+    of "divergence" for branches whose real relationship to the integration
+    branch was none.
+    """
+    verdict = disposition_for(
+        "fold-other-library",
+        integration="dev",
+        current="dev",
+        contained_in=[],
+        pr=None,
+        unique_commits=1,
+        related=False,
+    )
+
+    assert verdict.status == "UNRELATED"
+    assert verdict.reason == "shares no history with dev"
+
+
+def test_a_reserved_worktree_at_the_tip_is_not_spent_work() -> None:
+    """The workflow says to create a worktree first and commit into it after.
+
+    Between those two moments the branch is the integration tip exactly, and
+    containment alone reads that as merged — so a sweep offered to delete
+    the workspace the documented workflow had just told the user to make.
+    """
+    verdict = disposition_for(
+        "feat-not-started",
+        integration="dev",
+        current="dev",
+        contained_in=["dev"],
+        pr=None,
+        unique_commits=0,
+        at_tip=True,
+        worktree="/tree/feat-not-started",
+    )
+
+    assert verdict.status == "KEEP"
+    assert verdict.reason == "reserved workspace at the dev tip"
+
+
+def test_a_merged_branch_still_holding_a_worktree_is_spent() -> None:
+    """The ordinary cleanup path, and the case the guard above must not eat.
+
+    A branch that landed is an ancestor of the integration branch without
+    standing at its tip, which is the whole discriminator: it diverged, and
+    what it diverged by is now in.
+    """
+    verdict = disposition_for(
+        "feat-landed",
+        integration="dev",
+        current="dev",
+        contained_in=["dev"],
+        pr=None,
+        unique_commits=0,
+        at_tip=False,
+        worktree="/tree/feat-landed",
+    )
+
+    assert verdict.status == "DELETE"
+    assert verdict.reason == "merged into dev"
+
+
+def test_a_stale_pointer_at_the_tip_with_no_worktree_is_still_spent() -> None:
+    """Nothing is reserved, so there is nothing the delete would take away."""
+    verdict = disposition_for(
+        "feat-abandoned",
+        integration="dev",
+        current="dev",
+        contained_in=["dev"],
+        pr=None,
+        unique_commits=0,
+        at_tip=True,
+        worktree=None,
+    )
+
+    assert verdict.status == "DELETE"
