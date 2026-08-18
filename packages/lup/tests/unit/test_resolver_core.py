@@ -4,7 +4,7 @@ import asyncio
 from collections import Counter
 from collections.abc import Awaitable, Callable
 from contextlib import AbstractAsyncContextManager
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 import pytest
 from pydantic import BaseModel
@@ -60,6 +60,7 @@ from lup.resolver.core import (
     approval_question,
     resolver_config_digest,
 )
+from lup.channels.models import utc_now
 from lup.resolver.run import ResolveRun, ResolverInvariantError
 from lup.resolver.journal import Journal, LeaseDriftEvent
 from lup.resolver.models import (
@@ -3707,6 +3708,100 @@ async def test_a_drain_stops_integration_between_two_parents(tmp_path: Path) -> 
     assert len(persisted.join_progress.joined) == 1
     assert persisted.join_progress.joined[0] in {first, second}
     assert persisted.integration is None
+
+
+@pytest.mark.asyncio
+async def test_integration_opens_on_a_join_record_of_its_own(tmp_path: Path) -> None:
+    """What the worker phase left behind describes a different sequence.
+
+    ``join_progress`` is written by every join a run performs, dependency
+    joins included, and those name a concern lease's tree. Carried into
+    integration it is wrong twice over: a resume restores the integration
+    lease to another lease's commit, and the completions have the dependency
+    joins timing the integration ones — measured at 24m19s an item against
+    the five minutes they took.
+    """
+    launcher = LocalProcessLauncher()
+    workspace = failure_leg_workspace(tmp_path, launcher)
+
+    def git(*arguments: str) -> str:
+        status = launcher.launch(
+            LaunchRequest(
+                arguments=[
+                    "git",
+                    "-c",
+                    "user.email=resolver@example.test",
+                    "-c",
+                    "user.name=Resolver Test",
+                    *arguments,
+                ],
+                cwd=workspace,
+            )
+        )
+        assert status.code == 0, status.stderr
+        return status.stdout.strip()
+
+    def branch_adding(name: str, filename: str) -> str:
+        git("checkout", "-b", name, "source")
+        (workspace / filename).write_text(f"{name}\n", encoding="utf-8")
+        git("add", filename)
+        git("commit", "-m", f"add {filename}")
+        return git("rev-parse", "HEAD")
+
+    first = branch_adding("one", "one.txt")
+    second = branch_adding("two", "two.txt")
+    git("checkout", "source")
+
+    def unused_actor(_root: Path, _output_name: str) -> JsonObject:
+        raise AssertionError("a drained join spends no turn past the merger's")
+
+    core = failure_leg_core(
+        tmp_path, workspace, launcher, "fresh-join", unused_actor, unused_actor
+    )
+    core.turns.worker_factory = merger_draining_after_one_parent(
+        tmp_path / "state" / "fresh-join", launcher, unused_actor
+    )
+    concerns = [concern("a"), concern("b")]
+    stale = utc_now() - timedelta(hours=2)
+    state = ResolveState(
+        config_digest="config-sha",
+        run_id="fresh-join",
+        phase=ResolvePhase.REVIEW,
+        source=snapshot(workspace, launcher),
+        spec=resolve_spec(),
+        concerns=concerns,
+        progress=[
+            ConcernProgress(concern_id=item.id, status=ConcernStatus.VERIFIED)
+            for item in concerns
+        ],
+        outcomes=[
+            ConcernOutcome(
+                concern_id="a", branch="one", commit=first, head=first, verified=True
+            ),
+            ConcernOutcome(
+                concern_id="b", branch="two", commit=second, head=second, verified=True
+            ),
+        ],
+        # What a dependency join left behind: another lease's tree, and two
+        # landings two hours older than anything this phase will merge.
+        join_progress=JoinProgress(
+            joined=["dependency-parent"],
+            commit="a" * 40,
+            planned=["dependency-parent"],
+            completions=[stale, stale + timedelta(minutes=1)],
+        ),
+    )
+    core.persist(state)
+    with pytest.raises(ResolverDrained):
+        await core.integrate(state, state.outcomes)
+
+    persisted = core.repository.load()
+    assert persisted.join_progress is not None
+    # One landing, this phase's own: the samples it would have inherited are
+    # what made the rate an order of magnitude wrong.
+    assert len(persisted.join_progress.completions) == 1
+    assert persisted.join_progress.completions[0] > stale + timedelta(hours=1)
+    assert "dependency-parent" not in persisted.join_progress.joined
 
 
 @pytest.mark.asyncio
