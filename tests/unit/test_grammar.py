@@ -39,8 +39,19 @@ class Client(BaseClient):
     def get(self, url): ...
 """
 
+MODULE_API_STUB = """
+def get(url, **kwargs): ...
+
+
+def post(url, **kwargs): ...
+"""
+"""What a module-qualified `httpx.get` resolves to: a `def` inside no class."""
+
 STUB_DECLARATION_LINE = 3
-"""The `def get` line in both stubs above."""
+"""The `def get` line in the two class stubs above."""
+
+MODULE_DECLARATION_LINE = 2
+"""The `def get` line in the module-level stub, which has no class to indent under."""
 
 
 class TableOracle(DefinitionOracle):
@@ -61,14 +72,17 @@ class TableOracle(DefinitionOracle):
 
 
 def stubs(tmp_path: Path) -> dict[str, DefinitionSite]:
-    """Write the two declaring classes the oracle can resolve a `get` into."""
+    """Write every declaration the oracle can resolve a `get` into."""
     mapping = tmp_path / "builtins.pyi"
     mapping.write_text(MAPPING_STUB, encoding="utf-8")
     client = tmp_path / "_client.py"
     client.write_text(CLIENT_STUB, encoding="utf-8")
+    api = tmp_path / "_api.py"
+    api.write_text(MODULE_API_STUB, encoding="utf-8")
     return {
         "mapping": DefinitionSite(path=mapping, line=STUB_DECLARATION_LINE),
         "client": DefinitionSite(path=client, line=STUB_DECLARATION_LINE),
+        "module": DefinitionSite(path=api, line=MODULE_DECLARATION_LINE),
     }
 
 
@@ -102,6 +116,45 @@ def test_non_mapping_receiver_is_refuted_with_evidence(tmp_path: Path) -> None:
     assert "`Client`" in refuted[0].evidence
     assert "outside the mapping family" in refuted[0].evidence
     assert audit_text(text, PYTHON_ANTI_PATTERNS, refuted) == []
+
+
+def test_module_qualified_receiver_is_refuted_too(tmp_path: Path) -> None:
+    """`httpx.get` is the same evidence as `client.get`, declared without a class.
+
+    Reading only the declaring class left this with no origin at all, which is
+    what the engine gets for a symbol the checker could not resolve — so the
+    finding stood while every bare-variable sibling in the same run was
+    refuted. It could not be cleared from either side: the rule text says a
+    directive on a resolved non-mapping receiver is reported spurious, and
+    rewriting it to a bare variable trips the edit hook, which judges a
+    fragment with no oracle to resolve anything.
+    """
+    declaring = stubs(tmp_path)
+    text = "response = httpx.get('https://example.com')\n"
+    refutations = refute(
+        [source(text)], TableOracle({1: [declaring["module"]]}), GRAMMAR_RULES
+    )
+    refuted = refutations["sample.py"]
+    assert [row.rule_id for row in refuted] == ["dict-get"]
+    assert refuted[0].subject == "httpx"
+    assert "the module-level `get`" in refuted[0].evidence
+    assert "outside the mapping family" in refuted[0].evidence
+    assert audit_text(text, PYTHON_ANTI_PATTERNS, refuted) == []
+
+
+def test_a_declaration_that_is_neither_resolves_nothing(tmp_path: Path) -> None:
+    """A site that is no declaration must not be read as one outside the family.
+
+    Refuting on "not a class" alone would clear a finding whenever the checker
+    pointed anywhere this cannot read — which is the broad rule's job to keep,
+    not the refinement's to take away.
+    """
+    assignment = tmp_path / "constants.py"
+    assignment.write_text("get = 1\n", encoding="utf-8")
+    text = "value = payload.get('name')\n"
+    answers = {1: [DefinitionSite(path=assignment, line=1)]}
+
+    assert refute([source(text)], TableOracle(answers), GRAMMAR_RULES) == {}
 
 
 def test_unresolved_receiver_keeps_the_broad_verdict(tmp_path: Path) -> None:

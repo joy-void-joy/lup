@@ -543,9 +543,40 @@ def stream() -> None:
 """
 
 
+MODULE_QUALIFIED_GET = """\
+import os
+
+import httpx
+
+httpx.get("https://example.com")
+os.environ.get("PATH")
+"""
+
+
 def test_refiner_exempts_route_decorators() -> None:
     """`.get(` on a decorator names a route; the call below it is real."""
     assert dict_get_exempt_lines(ROUTE_DECORATOR) == {1, 6, 7, 8}
+
+
+def test_refiner_exempts_a_call_on_an_imported_module() -> None:
+    """A module is not a mapping, and which names are modules is in the tree.
+
+    The audit resolves `httpx.get` to a function declared inside no class and
+    drops the finding. Without the same answer here the two gates block on
+    opposite states: the kernel demands a directive the audit then reports
+    spurious, and no version of the file passes both.
+    """
+    assert dict_get_exempt_lines(MODULE_QUALIFIED_GET) == {5}
+
+
+def test_the_refiner_keeps_a_lookup_reached_through_a_module() -> None:
+    """`os.environ.get` is a keyed lookup that a module only happens to hold.
+
+    Only a name `import` binds directly is a module. Walking an attribute
+    chain back to its root would clear this one, which is exactly the access
+    the rule exists for.
+    """
+    assert 6 not in dict_get_exempt_lines(MODULE_QUALIFIED_GET)
 
 
 def test_refiner_survives_a_fragment_it_cannot_parse() -> None:
