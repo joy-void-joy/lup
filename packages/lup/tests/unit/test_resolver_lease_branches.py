@@ -9,8 +9,15 @@ apart, and these pin that it is asked and believed.
 
 from pathlib import Path
 
-from lup.devtools.dev.branches import PRStatus, disposition_for
+import pytest
+
+from lup.devtools.dev.branches import (
+    PRStatus,
+    disposition_for,
+    never_diverged_from,
+)
 from lup.harness.models import ResolveSpec, SkillInvocation
+from lup.harness.process import LaunchRequest, LocalProcessLauncher
 from lup.resolver.models import (
     AcceptanceCriterion,
     Concern,
@@ -199,10 +206,10 @@ def test_a_branch_sharing_no_history_is_not_offered_for_landing() -> None:
     assert verdict.reason == "shares no history with dev"
 
 
-def test_a_reserved_worktree_at_the_tip_is_not_spent_work() -> None:
+def test_a_reserved_worktree_is_not_spent_work() -> None:
     """The workflow says to create a worktree first and commit into it after.
 
-    Between those two moments the branch is the integration tip exactly, and
+    Between those two moments the branch has diverged by nothing, and
     containment alone reads that as merged — so a sweep offered to delete
     the workspace the documented workflow had just told the user to make.
     """
@@ -213,20 +220,21 @@ def test_a_reserved_worktree_at_the_tip_is_not_spent_work() -> None:
         contained_in=["dev"],
         pr=None,
         unique_commits=0,
-        at_tip=True,
+        never_diverged=True,
         worktree="/tree/feat-not-started",
     )
 
     assert verdict.status == "KEEP"
-    assert verdict.reason == "reserved workspace at the dev tip"
+    assert verdict.reason == "reserved workspace cut from dev"
 
 
 def test_a_merged_branch_still_holding_a_worktree_is_spent() -> None:
     """The ordinary cleanup path, and the case the guard above must not eat.
 
-    A branch that landed is an ancestor of the integration branch without
-    standing at its tip, which is the whole discriminator: it diverged, and
-    what it diverged by is now in.
+    A branch that landed diverged and had what it diverged by taken in, so
+    its tip is the side parent a merge absorbed rather than a commit standing
+    on the integration branch's own history. That is the discriminator, and
+    it keeps answering however far that branch travels afterwards.
     """
     verdict = disposition_for(
         "feat-landed",
@@ -235,7 +243,7 @@ def test_a_merged_branch_still_holding_a_worktree_is_spent() -> None:
         contained_in=["dev"],
         pr=None,
         unique_commits=0,
-        at_tip=False,
+        never_diverged=False,
         worktree="/tree/feat-landed",
     )
 
@@ -243,7 +251,53 @@ def test_a_merged_branch_still_holding_a_worktree_is_spent() -> None:
     assert verdict.reason == "merged into dev"
 
 
-def test_a_stale_pointer_at_the_tip_with_no_worktree_is_still_spent() -> None:
+def build_history(root: Path, launcher: LocalProcessLauncher) -> Path:
+    """A repository holding one reserved branch and one whose work landed.
+
+    ``feat-reserved`` is cut from ``dev`` and never committed to, which is
+    what ``worktree create`` leaves behind. ``feat-landed`` diverges and is
+    merged, moving ``dev`` past both — so the two are ancestors alike, and
+    which side of that merge their tips sit on is all that separates them.
+    """
+    work = root / "work"
+    # Identity per invocation, never `git config` — a persisted setting lands
+    # in the shared config every worktree of a real repository inherits.
+    who = ("-c", "user.email=branches@example.test", "-c", "user.name=Branch Test")
+    git_in = ("git", "-C", str(work))
+    for arguments in (
+        ["git", "init", "-b", "dev", str(work)],
+        [*git_in, *who, "commit", "--allow-empty", "-m", "base"],
+        [*git_in, "branch", "feat-reserved"],
+        [*git_in, "checkout", "-b", "feat-landed"],
+        [*git_in, *who, "commit", "--allow-empty", "-m", "work"],
+        [*git_in, "checkout", "dev"],
+        [*git_in, *who, "merge", "--no-ff", "feat-landed", "-m", "merge"],
+    ):
+        status = launcher.launch(LaunchRequest(arguments=arguments, cwd=root))
+        if status.code != 0:
+            raise AssertionError(status.stderr)
+    return work
+
+
+def test_a_reserved_branch_stays_undiverged_after_the_tip_moves(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The case a sweep creates for itself, and the reason distance cannot answer.
+
+    Every merge a sweep performs moves the integration branch out from under
+    every workspace reserved against it. Reading the reserved branch as spent
+    the moment that happens offers to delete a workspace somebody is holding
+    — and a sweep merges before it proposes deletions, so the window where a
+    tip comparison is right had closed before anyone was asked.
+    """
+    work = build_history(tmp_path, LocalProcessLauncher())
+    monkeypatch.chdir(work)
+
+    assert never_diverged_from("feat-reserved", "dev")
+    assert not never_diverged_from("feat-landed", "dev")
+
+
+def test_an_undiverged_pointer_with_no_worktree_is_still_spent() -> None:
     """Nothing is reserved, so there is nothing the delete would take away."""
     verdict = disposition_for(
         "feat-abandoned",
@@ -252,7 +306,7 @@ def test_a_stale_pointer_at_the_tip_with_no_worktree_is_still_spent() -> None:
         contained_in=["dev"],
         pr=None,
         unique_commits=0,
-        at_tip=True,
+        never_diverged=True,
         worktree=None,
     )
 
