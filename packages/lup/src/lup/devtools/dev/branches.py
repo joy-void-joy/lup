@@ -360,20 +360,25 @@ def shares_history(branch: str, integration: str) -> bool:
         return False
 
 
-def at_tip_of(branch: str, integration: str) -> bool:
-    """Whether the branch points at exactly the integration branch's commit.
+def never_diverged_from(branch: str, integration: str) -> bool:
+    """Whether the branch still stands where it was cut from the integration branch.
 
     The difference between a branch that never diverged and one whose work
     landed. Both are ancestors, so containment alone reads them alike and
-    calls the first spent — but a branch created and not yet committed to
-    *is* the integration tip, where one that merged sits behind it. Only the
-    second has anything to clean up.
+    calls the first spent. What tells them apart is which side of a merge the
+    tip sits on: a branch cut from the integration branch and not yet
+    committed to points at one of that branch's own commits, so it stands on
+    its first-parent history, where a branch whose work landed points at the
+    side parent a merge absorbed and never appears there.
+
+    Pointing at the tip exactly answers this for one commit's worth of time
+    and stops answering it the moment anything else lands — which during a
+    sweep is almost at once, because every merge moves the integration branch
+    out from under every workspace reserved against it.
     """
     try:
-        return (
-            git.out("rev-parse", branch).strip()
-            == git.out("rev-parse", integration).strip()
-        )
+        head = git.out("rev-parse", branch).strip()
+        return head in git.lines("rev-list", "--first-parent", integration)
     except sh.ErrorReturnCode:
         return False
 
@@ -468,7 +473,7 @@ def disposition_for(
     protected: AbstractSet[str] = PROTECTED_BRANCHES,
     held: str = "",
     related: bool = True,
-    at_tip: bool = False,
+    never_diverged: bool = False,
     worktree: str | None = None,
 ) -> Disposition:
     """Resolve a branch to its single disposition.
@@ -487,10 +492,13 @@ def disposition_for(
     Two guards sit ahead of containment because containment answers them
     wrongly rather than not at all. A branch sharing no history has no
     divergence to measure, so every figure downstream describes a comparison
-    that means nothing. A branch still standing at the integration tip has
-    diverged by nothing yet — an ancestor exactly as a merged branch is, and
-    spent for the opposite reason — so a worktree held open on one is a
-    workspace somebody reserved, not a leftover.
+    that means nothing. A branch that never diverged has spent nothing — an
+    ancestor exactly as a merged branch is, and for the opposite reason — so
+    a worktree held open on one is a workspace somebody reserved, not a
+    leftover. Which of the two it is comes from where the tip stands, never
+    from how far the integration branch has since travelled: a sweep moves
+    that branch under every workspace reserved against it, so a guard reading
+    distance would protect a workspace only until the sweep's first merge.
     """
     if name == current:
         return Disposition(status="CURRENT", reason="current branch")
@@ -502,9 +510,9 @@ def disposition_for(
         return Disposition(
             status="UNRELATED", reason=f"shares no history with {integration}"
         )
-    if at_tip and worktree is not None:
+    if never_diverged and worktree is not None:
         return Disposition(
-            status="KEEP", reason=f"reserved workspace at the {integration} tip"
+            status="KEEP", reason=f"reserved workspace cut from {integration}"
         )
     if integration in contained_in:
         return Disposition(status="DELETE", reason=f"merged into {integration}")
@@ -1250,7 +1258,7 @@ def survey(as_json: bool) -> None:
             unique_commits=unique,
             held=leased[name].reason() if name in leased else "",
             related=related,
-            at_tip=at_tip_of(name, integration),
+            never_diverged=never_diverged_from(name, integration),
             worktree=checkout,
         )
 
