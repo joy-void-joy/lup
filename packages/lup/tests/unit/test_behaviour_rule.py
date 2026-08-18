@@ -183,3 +183,40 @@ def test_a_suppression_guarding_nothing_is_reported_as_spurious() -> None:
     ) == [
         "spurious:def render(raw: str) -> str:  # lup: ignore[model-free-function] — stale"
     ]
+
+
+def test_a_source_read_more_than_once_grades_its_directive_once() -> None:
+    """One directive stays covered when its file reaches the audit twice.
+
+    The directives and the violations are both collected per source, so a file
+    the caller lists twice yields two of each. Every copy of the directive
+    reaches every copy of the violation, and grading one copy left the other
+    standing for nothing — the count of markers reported spurious tracking how
+    many times the file was read rather than anything written in it.
+    """
+    text = MODEL_MODULE + (
+        "\n\n# lup: ignore[model-free-function] — boundary\n"
+        "def render(part: TextPart) -> str:\n"
+        "    return part.text\n"
+    )
+    twice = [source(text, "models"), source(text, "models")]
+    assert reported(text, audit_model_free_functions(twice)) == []
+
+
+def test_every_directive_covering_one_violation_is_honoured() -> None:
+    """Two directives over one violation leave neither reported spurious.
+
+    Both reach it, so both are doing the job the rule asks of them. Grading
+    only the one the pairing happened to read first says of the other that it
+    guards no violation, while removing it reports the violation it was
+    guarding — the site cannot then be cleared from either side.
+    """
+    assert (
+        audit(
+            "\n\n# lup: ignore[model-free-function] — above\n"
+            "def render(part: TextPart) -> str:  "
+            "# lup: ignore[model-free-function] — inline\n"
+            "    return part.text\n"
+        )
+        == []
+    )
