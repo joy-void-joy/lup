@@ -14,10 +14,12 @@ Alone among this project's commands these are spelled without ``uv run``,
 which parses ``pyproject.toml`` before it will run anything: the moment the
 conflict is *in* that file, ``uv`` refuses to start and the whole conflict
 toolchain withdraws exactly where the manifest that configures the project is
-at stake. ``LAUNCHER`` names the console script in the project's own
-environment, which imports this package directly and reads no manifest.
+at stake. :func:`lup.devtools.launcher.launcher_invocation` names the console
+script in the project's own environment, which imports this package directly
+and reads no manifest.
 
-Examples::
+Examples, spelled as a project keeping its environment inside the checkout
+reaches them; one keeping it anywhere else gets the bare name instead::
 
     $ .venv/bin/lup-devtools dev conflict list
     $ .venv/bin/lup-devtools dev conflict list --json
@@ -35,6 +37,11 @@ import sh
 import typer
 from pydantic import BaseModel
 
+from lup.devtools.launcher import (
+    CONSOLE_SCRIPT,
+    DEFAULT_ENVIRONMENT,
+    launcher_invocation,
+)
 from lup.devtools.utils import (
     format_table,
     git,
@@ -45,24 +52,35 @@ from lup.devtools.utils import (
 
 logger = logging.getLogger(__name__)
 
-# lup: ignore[constant-declaration] — where uv installs a project's own console
-# script, which is the property the docstring below turns on
-LAUNCHER = ".venv/bin/lup-devtools"
-"""How the conflict workflow reaches this toolchain, named by path.
-
-A ``PATH`` lookup would let a sibling worktree's environment answer, and
-``uv run`` would parse the manifest that is under repair; the console script
-in this project's own environment does neither.
-"""
-
 # lup: ignore[constant-declaration] — what Python packaging calls the file
 MANIFEST = "pyproject.toml"
 """The file ``uv`` must parse before it will run anything."""
 
 
-def invocation(*words: str) -> str:
-    """Spell one command so it starts while the manifest holds conflicts."""
-    return " ".join([LAUNCHER, *words])
+DOCUMENTED_LAUNCHER = f"{DEFAULT_ENVIRONMENT}/bin/{CONSOLE_SCRIPT}"
+"""The launcher the merge guidance names: the layout ``uv sync`` produces.
+
+That guidance is prose and has to stay prose — an f-string in the prompt
+would un-mask the whole document to the anti-pattern scanner — so it names
+one spelling and says how to substitute for the environments that sit
+elsewhere. This is that spelling, and it is what the test holding the two
+together compares against.
+
+Deliberately not :func:`lup.devtools.launcher.launcher_invocation`. That
+answers for the machine it runs on, and a shared document pinned to it would
+be correct for whoever generated it and failing for everyone else.
+"""
+
+
+def invocation(launcher: str, *words: str) -> str:
+    """Spell one command so it starts while the manifest holds conflicts.
+
+    The launcher is the caller's to decide, because the two callers want
+    different ones: a notice printed into a live session names what will
+    start *there*, and guidance shared by a project names the convention it
+    documents.
+    """
+    return " ".join([launcher, *words])
 
 
 def manifest_conflicted(root: Path) -> bool:
@@ -74,13 +92,19 @@ def manifest_conflicted(root: Path) -> bool:
     return "<<<<<<<" in content and ">>>>>>>" in content
 
 
-def conflicted_manifest_notice() -> str:
-    """What to run instead, once the toolchain notices it is mid-conflict."""
+def conflicted_manifest_notice(root: Path) -> str:
+    """What to run instead, once the toolchain notices it is mid-conflict.
+
+    Named for the machine this is printed on rather than for the documented
+    convention: the session reading it is about to run the command, so the
+    spelling has to be one that starts here.
+    """
+    launcher = launcher_invocation(root)
     return (
         f"{MANIFEST} holds conflict markers, so `uv` cannot parse it and every "
         f"`uv run ...` command will fail to start until the merge is settled. "
-        f"Reach this toolchain as `{LAUNCHER} ...` meanwhile — "
-        f"`{invocation('dev', 'conflict', 'status', '--json')}`."
+        f"Reach this toolchain as `{launcher} ...` meanwhile — "
+        f"`{invocation(launcher, 'dev', 'conflict', 'status', '--json')}`."
     )
 
 

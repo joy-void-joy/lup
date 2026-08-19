@@ -309,6 +309,62 @@ class ArgvRedaction(Redaction):
                 return value
 
 
+class PortableRoot(BaseModel, frozen=True):
+    """One directory a record should name by role rather than by location."""
+
+    label: str = Field(min_length=1)
+    path: Path
+
+
+class PathRedaction(Redaction):
+    """Rewrite absolute paths to labels that name a root instead of a machine.
+
+    The rule the other two cannot state. A credential is identified by the
+    name beside it; a filesystem path identifies nothing and is still the
+    thing that makes a transcript unshareable — an operator's home, the
+    checkouts beside this one, the account directory a launch selected. None
+    of it is secret and all of it is theirs.
+
+    Substring rewriting rather than a parse, because a path in a payload is
+    rarely a path-shaped field: it is quoted inside an error message, printed
+    mid-sentence by a tool, or one word of a command line. Roots are applied
+    longest first, so a checkout nested under the home directory is labelled
+    as the checkout rather than as a directory inside a home.
+
+    Deliberately not in :class:`TraceJournal`'s default chain. A rule that
+    rewrites every string in every payload is the caller's decision to take
+    for a durable record, not a default every in-process journal inherits.
+    """
+
+    def __init__(self, roots: Sequence[PortableRoot]) -> None:
+        resolved = [(root.label, str(root.path.resolve())) for root in roots]
+        self.roots = sorted(resolved, key=lambda root: len(root[1]), reverse=True)
+
+    def rewrite(self, text: str) -> str:
+        """Replace every labelled root prefix appearing anywhere in ``text``."""
+        for label, root in self.roots:
+            # lup: ignore[string-replace] — the subject is prose that happens
+            # to contain a path, not a path: a traceback line, a shell word, a
+            # sentence a tool printed. `pathlib` parses a path once it has been
+            # found, and finding one inside arbitrary text is the whole problem.
+            text = text.replace(root, label)
+        return text
+
+    def apply(self, value: JsonValue) -> JsonValue:
+        match value:
+            case str() as text:
+                return self.rewrite(text)
+            case dict() as mapping:
+                return {
+                    self.rewrite(str(key)): self.apply(child)
+                    for key, child in mapping.items()
+                }
+            case list() as items:
+                return [self.apply(item) for item in items]
+            case _:
+                return value
+
+
 class Redactions(Redaction):
     """Apply several redactions in order, each over the last one's result."""
 

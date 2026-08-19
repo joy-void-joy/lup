@@ -71,7 +71,8 @@ def test_claude_renders_the_whole_request(
     assert config.permission_mode == "bypassPermissions"
     assert config.allowed_tools == ["Read"]
     assert config.max_turns == 3
-    assert config.environment == {"KEEP": "1"}
+    assert config.environment["KEEP"] == "1"
+    assert CLAUDE_RUNTIME.login.config_home_env in config.environment
     assert config.hooks is not None
 
 
@@ -133,3 +134,46 @@ def test_codex_will_not_infer_the_directory_it_sandboxes_against() -> None:
 def test_codex_rejects_a_tool_group_it_cannot_launch() -> None:
     with pytest.raises(ValueError, match="subprocess"):
         codex_mcp_server("group", {"type": "sse", "url": "https://example.test"})
+
+
+@pytest.mark.parametrize("runtime", [CLAUDE_RUNTIME, CODEX_RUNTIME])
+def test_a_workspace_home_is_named_in_the_runtime_that_opens_it(
+    runtime: Runtime, tmp_path: Path
+) -> None:
+    """Where a workspace's sessions write is a per-runtime fact, so the whole
+    selection has to carry it. An application deriving one runtime's home for
+    every session points the other at a directory its CLI never reads, while
+    dropping the home its profile selected."""
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+
+    environment = runtime.workspace_environment(
+        {runtime.login.config_home_env: str(tmp_path / "account")}, workspace
+    )
+
+    assert runtime.login.config_home_env in environment
+
+
+@pytest.mark.parametrize("runtime", [CLAUDE_RUNTIME, CODEX_RUNTIME])
+def test_a_request_costs_nothing_to_state_and_is_contained_when_opened(
+    runtime: Runtime, tmp_path: Path
+) -> None:
+    """Stating a request touches no filesystem, so building one cannot fail on
+    a home it has no reason to need yet. The home appears when the runtime
+    opens the session, which is the only moment both the workspace and the
+    runtime are known."""
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    request = SessionRequest(cwd=workspace)
+
+    assert runtime.login.config_home_env not in request.environment
+    assert runtime.login.config_home_env in runtime.contained(request).environment
+
+
+@pytest.mark.parametrize("runtime", [CLAUDE_RUNTIME, CODEX_RUNTIME])
+def test_a_request_naming_no_workspace_has_nothing_to_be_contained_against(
+    runtime: Runtime,
+) -> None:
+    request = SessionRequest()
+
+    assert runtime.contained(request) == request

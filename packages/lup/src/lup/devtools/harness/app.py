@@ -23,6 +23,7 @@ import lup.devtools.harness.reconcile as reconcile
 import lup.devtools.harness.resolve as resolve
 from lup.devtools.dev.issues import EXCLUDED_LABEL
 from lup.devtools.harness.composition import NativeTargets, claude_profile_directory
+from lup.devtools.harness.generate import NativeHarnessComposition
 from lup.devtools.harness.profile_app import create_profile_app
 from lup.runtime.profiles import ProfileDirectory
 from lup.devtools.harness.drift import RepositoryWriter
@@ -48,6 +49,7 @@ def create_harness_app(
     repository_writers: list[RepositoryWriter],
     model: resolve.ConfiguredModel | None = None,
     profiles: ProfileDirectory | None = None,
+    launch_modes: list[launch.LaunchMode] | None = None,
 ) -> typer.Typer:
     """Wire the harness command tree over the targets one project declares.
 
@@ -55,8 +57,14 @@ def create_harness_app(
     over that origin, so one name selects the same account for a launch here
     as it does everywhere else in that project. Supplying none falls back to
     the personal registry, which is the answer for a project keeping none.
+
+    ``launch_modes`` are that project's own kinds of session. Each adds a flag
+    to every launcher; selecting one compiles the tree it declares instead of
+    the default, so the mode reaches the artifacts a runtime reads at startup
+    rather than only the command line this tree assembles.
     """
     directory = profiles or claude_profile_directory()
+    modes = launch_modes or []
     app = typer.Typer(no_args_is_help=True, help="Generate and launch a native harness")
     selector = f"{', '.join(targets.builders)}, or {targets.every}"
 
@@ -418,6 +426,27 @@ def create_harness_app(
     # thing. Decide too whether the sweep follows: `dev check --antipatterns`
     # reads the same selection, and a session that edited freely under the flag
     # will fail it.
+    def selected_target(
+        mode: launch.LaunchMode | None, runtime: str
+    ) -> NativeHarnessComposition:
+        """The composition to generate and open, under whichever mode is in force.
+
+        A mode carries its own targets, so this is where "the tree differs by
+        mode" actually happens: everything downstream takes an already
+        concrete composition and cannot tell which declaration produced it.
+        """
+        source = mode.targets if mode is not None else targets
+        build = source.builder(runtime)
+        if build is None:
+            named = f"--{mode.name} " if mode is not None else ""
+            raise typer.BadParameter(f"{named}declares no {runtime} tree")
+        return build(project_root())
+
+    def launch_help(subject: str) -> str:
+        """One launcher's help, with whatever modes this project declares."""
+        flags = "".join(f"  --{mode.name}: {mode.help}" for mode in modes)
+        return f"{subject}{flags}"
+
     claude_target = targets.builder("claude")
     if claude_target is not None:
         app.add_typer(create_profile_app(directory), name="profile")
@@ -425,6 +454,9 @@ def create_harness_app(
         @app.command(
             "claude",
             context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+            help=launch_help(
+                "Generate/reconcile Claude artifacts and launch the verified plugin."
+            ),
         )
         def claude(
             ctx: typer.Context,
@@ -441,14 +473,15 @@ def create_harness_app(
                 typer.Option("--generate-only", help="Generate without launching"),
             ] = False,
         ) -> None:
-            """Generate/reconcile Claude artifacts and launch the verified plugin."""
+            selection = launch.extract_launch_mode(modes, ctx.args)
             launch.launch_claude(
-                claude_target(project_root()),
-                ctx.args,
+                selected_target(selection.mode, "claude"),
+                selection.arguments,
                 directory,
                 profile,
                 model,
                 generate_only,
+                selection.mode,
             )
 
     codex_target = targets.builder("codex")
@@ -457,6 +490,9 @@ def create_harness_app(
         @app.command(
             "codex",
             context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+            help=launch_help(
+                "Generate/reconcile Codex artifacts and launch without updating the CLI."
+            ),
         )
         def codex(
             ctx: typer.Context,
@@ -486,15 +522,16 @@ def create_harness_app(
                 ),
             ] = False,
         ) -> None:
-            """Generate/reconcile Codex artifacts and launch without updating the CLI."""
+            selection = launch.extract_launch_mode(modes, ctx.args)
             launch.launch_codex(
-                codex_target(project_root()),
-                ctx.args,
+                selected_target(selection.mode, "codex"),
+                selection.arguments,
                 codex_home,
                 profile,
                 model,
                 generate_only,
                 force_install,
+                selection.mode,
             )
 
     return app

@@ -343,10 +343,15 @@ def portable_harness(version: str = "0.2.0", root: Path | None = None) -> Harnes
             human_owned_files=[Path("README.md")],
             refused_tools=REFUSED_TOOLS,
             # Which checker answers for an edit is this project's toolchain,
-            # not the library's: the path is relative to the checkout that
-            # holds the edited file, so a worktree runs its own.
-            diagnostics_command=[".venv/bin/pyright", "--outputjson"],
-            resolution_command=[".venv/bin/lup-devtools", "dev", "refutations"],
+            # not the library's, and it is named rather than located: the
+            # resolution asks the checkout's own environment where the program
+            # is, so a worktree still runs its own copy without this having to
+            # know whether that environment is `.venv`, somewhere
+            # `UV_PROJECT_ENVIRONMENT` put it, or a conda or pyenv install
+            # reached through PATH. Spelling a path here would answer only for
+            # the layout it spelled, and gate every other one in silence.
+            diagnostics_command=["pyright", "--outputjson"],
+            resolution_command=["lup-devtools", "dev", "refutations"],
             shell_rules=SHELL_RULES,
             # This project's toolchain: what `uv run <target>` may reach here
             # without a question, which is nothing any other project inherits.

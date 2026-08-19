@@ -358,8 +358,13 @@ def audit_suppressions(
                 )
             )
             continue
+        # Every directive that reaches the violation, not the first one read.
+        # They all guard it, so grading only one leaves the rest answering for
+        # nothing where they stand while the violation they cover is silent —
+        # a site no edit can clear, because removing the marker called spurious
+        # reports the violation instead.
+        used.update(position for position, _ in covering)
         index, directive = covering[0]
-        used.add(index)
         if directive.rule_ids is None and index not in untyped_reported:
             findings.append(
                 RuleFinding(

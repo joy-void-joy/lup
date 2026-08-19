@@ -16,6 +16,7 @@ import typer
 
 from lup.devtools.dev.branches import (
     BaseFreshness,
+    admit_an_unread_base,
     BaseMeasure,
     UpstreamMeasure,
     probe_base_freshness,
@@ -172,10 +173,10 @@ def test_a_checkout_answering_to_no_remote_branch_says_so(
     assert not freshness.stale()
 
 
-def test_an_unreachable_remote_is_stated_rather_than_blocking(
+def test_an_unreachable_remote_is_stated_rather_than_counted(
     origin: Path, tmp_path: Path
 ) -> None:
-    """Neither the gate nor the sync stops on an unknown answer: offline works."""
+    """An unread base is its own answer: not behind, not current, not nothing."""
     clone = clone_of(origin, tmp_path / "clone")
     repo_git(clone)("remote", "set-url", "origin", str(tmp_path / "gone"))
 
@@ -183,8 +184,38 @@ def test_an_unreachable_remote_is_stated_rather_than_blocking(
 
     assert freshness.unreachable
     assert not freshness.stale()
+    assert freshness.unanswered()
     assert freshness.report().startswith("base freshness unknown:")
+
+
+def test_a_session_with_nobody_in_front_of_it_opens_on_an_unread_base(
+    origin: Path, tmp_path: Path
+) -> None:
+    """Offline works: the prompt is for whoever is there, and here nobody is."""
+    clone = clone_of(origin, tmp_path / "clone")
+    repo_git(clone)("remote", "set-url", "origin", str(tmp_path / "gone"))
+
     settle(clone)
+
+
+def test_a_run_refuses_to_pin_a_base_nothing_could_read() -> None:
+    """The gate a launcher asks about, where there is nobody to ask."""
+    unread = BaseFreshness(unreachable="ssh said no")
+
+    with pytest.raises(typer.BadParameter, match="nothing could read"):
+        require_fresh_base(unread)
+
+
+def test_a_checkout_with_no_remote_to_ask_is_not_an_unread_base(
+    origin: Path, tmp_path: Path
+) -> None:
+    """Nothing to ask is not the same as asking and getting no answer."""
+    clone = clone_of(origin, tmp_path / "clone")
+    repo_git(clone)("switch", "-c", "feature")
+
+    freshness = probe(clone)
+
+    assert not freshness.unanswered()
     require_fresh_base(freshness)
 
 
@@ -272,3 +303,39 @@ def test_a_run_refuses_to_pin_a_base_the_remote_has_moved_past() -> None:
 
     with pytest.raises(typer.BadParameter, match="git merge origin/main"):
         require_fresh_base(stale)
+
+
+class Terminal:
+    """Stand in for a person at the keyboard, which pytest's stdin is not."""
+
+    def isatty(self) -> bool:
+        return True
+
+
+def test_a_person_at_the_terminal_decides_whether_the_session_opens(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The whole of what the printed line could not do: wait for an answer."""
+    monkeypatch.setattr("sys.stdin", Terminal())
+    asked: list[str] = []
+
+    def decline(text: str, *arguments: object, **named: object) -> bool:
+        asked.append(text)
+        return False
+
+    monkeypatch.setattr(typer, "confirm", decline)
+
+    with pytest.raises(typer.Abort):
+        admit_an_unread_base()
+
+    assert asked == ["Open the session on a base nothing could read?"]
+
+
+def test_a_person_who_says_yes_gets_the_session(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Offline is a way of working, so the answer is theirs to give either way."""
+    monkeypatch.setattr("sys.stdin", Terminal())
+    monkeypatch.setattr(typer, "confirm", lambda *arguments, **named: True)
+
+    admit_an_unread_base()

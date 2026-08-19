@@ -5,6 +5,15 @@ GitLab with 0), https remotes via ``gh auth status``; local and
 unrecognized remotes pass. Callers gate remote operations on
 :func:`check_remote_auth` so a missing key or logged-out ``gh`` surfaces
 as one actionable message instead of a failed push.
+
+Every probe answers with a :class:`RemoteRefusal` rather than printing one,
+because two readers ask this and want different things back. A command
+reporting to a person wants to know whether an operation needing the remote
+can go ahead at all; the base-freshness reading wants words to put in front
+of a fetch that just failed, and only a declined credential is worth putting
+there -- git's own stderr says which key it was refused for and never which
+one to load, but a probe that cannot reach the host has learned nothing git
+did not already say better.
 """
 
 from urllib.parse import urlparse
@@ -13,7 +22,7 @@ import sh
 import typer
 from pydantic import BaseModel
 
-from lup.devtools.utils import gh, git
+from lup.devtools.utils import decode_stderr, gh, git
 
 
 class RemoteRef(BaseModel):
@@ -23,22 +32,59 @@ class RemoteRef(BaseModel):
     destination: str
 
 
+class RemoteRefusal(BaseModel, frozen=True):
+    """What probing one remote's credential found, empty when it answered."""
+
+    complaint: str = ""
+    """What to tell a reader; empty means the credential answered."""
+
+    credential: bool = False
+    """Whether the host declined a credential, rather than never being reached."""
+
+    def diagnoses(self) -> str:
+        """The words worth putting in front of a failed fetch, empty when none are.
+
+        A declined credential is the one finding that beats git's own
+        account, because git names the key it was refused for and never the
+        one to load. Anything else loses to it: this probe runs a second
+        command, and a second command can disagree with the first about
+        whether a host is even reachable -- so where it has not positively
+        identified the credential, what the fetch itself said stands.
+        """
+        return self.complaint if self.credential else ""
+
+
 def parse_remote(remote_url: str) -> RemoteRef | None:
     """Parse a git remote into (scheme, destination) for auth probing.
 
-    URL forms (https://host/org/repo, ssh://git@host/org/repo) are parsed
-    with urllib. SCP form ``[user@]host:path`` is git-equivalent to
-    ``ssh://[user@]host/path`` and is detected by a colon preceding the
-    first slash; it is normalized to ``ssh://`` and parsed the same way.
-    Returns None for local paths and unrecognized remotes.
+    URL forms (https://host/org/repo, ssh://git@host/org/repo) carry ``://``
+    and are parsed with urllib. Anything else is git's SCP form
+    ``[user@]host:path``, equivalent to ``ssh://[user@]host/path`` and
+    detected by a colon preceding the first slash; it is normalized to
+    ``ssh://`` and parsed the same way. Returns None for local paths and
+    unrecognized remotes.
+
+    The presence of ``://`` decides, rather than whether urllib finds a
+    scheme, because it finds one either way: ``jvj:org/repo`` -- an ssh
+    alias, which is what a remote looks like once a person has an
+    ``~/.ssh/config`` -- parses as the scheme ``jvj`` with no host, and a
+    remote nothing recognizes is a remote nothing checks.
+
+    :func:`lup.devtools.utils.slug_from_remote` reads the other half of the
+    same string for the same reason. It keeps what follows the colon and
+    discards the host, because `gh` needs the repository; this needs the
+    host and discards the rest, because ssh needs a destination. Neither can
+    be written in terms of the other, so what they share is the shape they
+    both have to know about.
     """
-    parsed = urlparse(remote_url)
-    if not parsed.scheme:
+    if "://" not in remote_url:
         colon, slash = remote_url.find(":"), remote_url.find("/")
-        if colon == -1 or (slash != -1 and slash < colon):
+        # A one-letter head is a Windows drive rather than a host, and
+        # `C:/src/repo` is a path git clones from, not a machine it reaches.
+        if colon < 2 or (slash != -1 and slash < colon):
             return None
-        normalized = "ssh://" + remote_url[:colon] + "/" + remote_url[colon + 1 :]
-        parsed = urlparse(normalized)
+        remote_url = "ssh://" + remote_url[:colon] + "/" + remote_url[colon + 1 :]
+    parsed = urlparse(remote_url)
     if parsed.scheme and parsed.hostname:
         user_prefix = f"{parsed.username}@" if parsed.username else ""
         return RemoteRef(
@@ -47,42 +93,77 @@ def parse_remote(remote_url: str) -> RemoteRef | None:
     return None
 
 
-def probe_ssh_auth(destination: str, remote_url: str) -> bool:
-    """Probe SSH auth with ``ssh -T``. GitHub answers with exit 1, GitLab with 0."""
+def ssh_auth_refusal(destination: str, remote_url: str) -> RemoteRefusal:
+    """Probe SSH auth with ``ssh -T``. GitHub answers with exit 1, GitLab with 0.
+
+    A key the host would not accept is reported with the identity ssh itself
+    says it would offer this destination, so the reply names the key to load
+    rather than leaving that to whoever reads it.
+
+    Anything else is a complaint that does not claim to be about a
+    credential. A host that was never reached has no key to load, and a
+    machine on a train told to run ``ssh-add`` has been sent after the wrong
+    thing by a message that sounds certain -- so what separates the two is
+    ssh's refusal wording, which is the only place either of them says which
+    one happened.
+    """
     try:
         ssh = sh.Command("ssh").bake(_tty_out=False)
     except sh.CommandNotFound:
-        typer.echo("ssh binary not found; skipping remote checks", err=True)
-        return False
+        return RemoteRefusal(complaint="ssh binary not found; skipping remote checks")
     probe = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=5", "-T", destination]
     try:
         ssh(*probe, _ok_code=[0, 1])
-        return True
-    except sh.ErrorReturnCode:
+        return RemoteRefusal()
+    except sh.ErrorReturnCode as refusal:
+        said = decode_stderr(refusal)
+        # OpenSSH's wording for every credential it declines, whatever the
+        # method named in the parenthesis after it. No structured form of
+        # this exists to read instead: the exit status is 255 for a declined
+        # key and 255 for a host that never answered.
+        if "Permission denied" not in said:
+            return RemoteRefusal(complaint=said)
         identity = ""
         lines = str(ssh("-G", destination, _ok_code=[0])).splitlines()
         for line in lines:
             if line.startswith("identityfile "):
                 identity = line.removeprefix("identityfile ")
                 break
-        msg = f"SSH authentication failed for remote '{remote_url}'."
+        complaint = f"SSH authentication failed for remote '{remote_url}'."
         if identity:
-            msg += f"\nLoad the key with:  ssh-add {identity}"
-        typer.echo(msg, err=True)
-        return False
+            complaint += f"\nLoad the key with:  ssh-add {identity}"
+        return RemoteRefusal(complaint=complaint, credential=True)
 
 
-def probe_gh_auth(remote_url: str) -> bool:
+def gh_auth_refusal(remote_url: str) -> RemoteRefusal:
     """Verify GitHub CLI auth, used for https remotes where ssh -T means nothing."""
     try:
         gh("auth", "status", _ok_code=[0])
-        return True
+        return RemoteRefusal()
     except (sh.ErrorReturnCode, sh.CommandNotFound):
-        typer.echo(
-            f"gh auth failed for remote '{remote_url}'. Run: gh auth login",
-            err=True,
+        return RemoteRefusal(
+            complaint=f"gh auth failed for remote '{remote_url}'. Run: gh auth login",
+            credential=True,
         )
-        return False
+
+
+def remote_auth_refusal(remote_url: str) -> RemoteRefusal:
+    """Why this remote's credential would refuse, empty when it answers.
+
+    A remote nothing here recognizes answers empty rather than guessing: a
+    local path has no credential to fail, and a scheme this does not probe
+    is one whose refusal it could not describe.
+    """
+    remote = parse_remote(remote_url)
+    if remote is None:
+        return RemoteRefusal()
+    match remote.scheme:
+        case "ssh" | "git":
+            return ssh_auth_refusal(remote.destination, remote_url)
+        case "http" | "https":
+            return gh_auth_refusal(remote_url)
+        case _:
+            return RemoteRefusal()
 
 
 def check_remote_auth() -> bool:
@@ -90,15 +171,12 @@ def check_remote_auth() -> bool:
 
     ssh-style remotes are probed with ``ssh -T``; https remotes are verified
     via ``gh auth status``. Local and unrecognized remotes pass.
+
+    Every complaint counts here, not only a declined credential: this asks
+    whether an operation needing the remote can go ahead, and one that never
+    reaches the host cannot either.
     """
-    remote_url = git.out("remote", "get-url", "origin")
-    remote = parse_remote(remote_url)
-    if remote is None:
-        return True
-    match remote.scheme:
-        case "ssh" | "git":
-            return probe_ssh_auth(remote.destination, remote_url)
-        case "http" | "https":
-            return probe_gh_auth(remote_url)
-        case _:
-            return True
+    refusal = remote_auth_refusal(git.out("remote", "get-url", "origin"))
+    if refusal.complaint:
+        typer.echo(refusal.complaint, err=True)
+    return not refusal.complaint

@@ -8,12 +8,17 @@ spans that boundary.
 """
 
 import json
+import os
+import sys
 from pathlib import Path
 
+import pytest
+
+from lup.devtools.launcher import ENVIRONMENT_VARIABLE
 from lup.policy.assets.host import (
+    declared_program,
     file_diagnostics,
     publish_edition,
-    resolver_program,
     shared_git_directory,
     worktree_root,
 )
@@ -181,37 +186,91 @@ def checker(root: Path, payload: str) -> list[str]:
     return ["fake-checker"]
 
 
-def test_a_declared_path_is_resolved_inside_the_edited_checkout(
-    tmp_path: Path,
-) -> None:
-    """A path names the checkout's own toolchain, which is the stronger form.
+def test_the_checkout_answers_for_a_declared_program_first(tmp_path: Path) -> None:
+    """A sibling worktree holds the same relative path with different contents.
 
-    It is what makes the answer the edited tree's rather than whichever
-    environment the session was launched from — the same reason the checker
-    itself runs there. Absent, it is absent: nothing on PATH stands in for a
-    program the project said was inside its own tree.
+    Preferring the checkout is what makes the verdict the edited tree's
+    rather than whichever environment the session was launched from, and it
+    holds whether the project spelled a path or a name.
     """
-    assert resolver_program(str(tmp_path), "bin/nothing-here") == ""
-
-
-def test_a_bare_name_is_left_for_the_path_to_answer(tmp_path: Path) -> None:
-    """Not every project keeps its interpreter beside its code.
-
-    Conda, pyenv, a system install, a virtualenv somewhere else entirely —
-    none of them are reachable as a path relative to the checkout, and a gate
-    only a repo-local `.venv` can turn on is a gate most projects never get.
-    So a name with no separator is handed to the OS to find, unresolved here.
-    """
-    assert resolver_program(str(tmp_path), "lup-devtools") == "lup-devtools"
-
-
-def test_a_declared_path_that_is_there_resolves_to_it(tmp_path: Path) -> None:
     work = checkout(tmp_path / "repo")
     (work / "bin").mkdir()
-    program = work / "bin" / "resolver"
+    program = work / "bin" / "checker"
     program.write_text("#!/bin/sh\n", encoding="utf-8")
 
-    assert resolver_program(str(work), "bin/resolver") == str(program)
+    assert declared_program(str(work), "bin/checker") == str(program)
+
+
+def test_a_bare_name_the_checkout_lacks_is_left_to_the_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Not every project keeps its toolchain beside its code.
+
+    conda, pyenv, a system install, an environment `UV_PROJECT_ENVIRONMENT`
+    put elsewhere — none are reachable by a path relative to the checkout,
+    and refusing them made this gate unavailable rather than configurable.
+    """
+    monkeypatch.delenv(ENVIRONMENT_VARIABLE, raising=False)
+    work = checkout(tmp_path / "repo")
+
+    assert declared_program(str(work), "pyright") == "pyright"
+
+
+def installed(environment: Path, name: str) -> Path:
+    """*name* as an environment's own scripts directory installs it."""
+    scripts = environment / Path(sys.executable).parent.name
+    scripts.mkdir(parents=True)
+    program = scripts / name
+    program.write_text("#!/bin/sh\n", encoding="utf-8")
+    return program
+
+
+def test_a_bare_name_is_asked_of_the_checkout_environment_before_the_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The declaration names the program; resolving it is what finds a copy.
+
+    A project installs its checker into its own environment, so that is where
+    a bare name is answered — before `PATH`, which would let whichever
+    environment the session was launched from answer for this checkout.
+    """
+    monkeypatch.delenv(ENVIRONMENT_VARIABLE, raising=False)
+    work = checkout(tmp_path / "repo")
+    program = installed(work / ".venv", "pyright")
+
+    assert declared_program(str(work), "pyright") == str(program)
+
+
+def test_a_redirected_environment_is_where_a_bare_name_resolves(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`.venv` is uv's default, not the answer, and the gate must not assume it.
+
+    `UV_PROJECT_ENVIRONMENT` is how one environment gets shared across
+    worktrees, kept off a slow filesystem, or put where a container expects
+    it. A declaration that spelled `.venv/bin/pyright` resolved to nothing
+    here and reported no diagnostics, on every edit, without saying why.
+    """
+    shared = tmp_path / "shared"
+    monkeypatch.setenv(ENVIRONMENT_VARIABLE, str(shared))
+    work = checkout(tmp_path / "repo")
+    program = installed(shared, "pyright")
+
+    assert declared_program(str(work), "pyright") == str(program)
+
+
+def test_a_declared_path_that_resolves_to_nothing_stays_nothing(
+    tmp_path: Path,
+) -> None:
+    """A project that named a location meant that location.
+
+    Falling back to `PATH` here would run some other copy of the program in
+    silence, which is the substitution the checkout-first order exists to
+    prevent.
+    """
+    work = checkout(tmp_path / "repo")
+
+    assert declared_program(str(work), "bin/absent") == ""
 
 
 def report(file: Path, severity: str = "error", line: int = 0) -> str:
@@ -239,6 +298,31 @@ def test_a_diagnostic_for_the_edited_file_is_reported(tmp_path: Path) -> None:
     ]
 
 
+def test_the_checker_leads_the_path_with_its_own_environment(tmp_path: Path) -> None:
+    """A checker resolves what it reads against the interpreter on its `PATH`.
+
+    Inheriting the session's leaves a check running in one checkout reading
+    another one's installed packages, and reporting every third-party import
+    of the edited file unresolvable. Those arrive looking exactly like the
+    edit having broken something, and no edit in the checked tree clears one.
+    """
+    work = checkout(tmp_path / "repo")
+    file = edited(work)
+    binaries = work / ".venv" / "bin"
+    binaries.mkdir(parents=True)
+    recorded = work / "seen-path"
+    script = binaries / "fake-checker"
+    script.write_text(
+        f'#!/bin/sh\nprintf "%s" "$PATH" > {recorded}\n'
+        "printf '{\"generalDiagnostics\": []}'\n",
+        encoding="utf-8",
+    )
+    script.chmod(0o755)
+
+    assert file_diagnostics(str(file), [".venv/bin/fake-checker"]) == []
+    assert recorded.read_text(encoding="utf-8").startswith(f"{binaries}{os.pathsep}")
+
+
 def test_a_file_the_checker_cannot_read_is_not_checked(tmp_path: Path) -> None:
     """A type checker handed a manifest reports the manifest as broken.
 
@@ -254,6 +338,42 @@ def test_a_file_the_checker_cannot_read_is_not_checked(tmp_path: Path) -> None:
     command = checker(work, report(manifest))
 
     assert file_diagnostics(str(manifest), command) == []
+
+
+def test_a_file_holding_a_merge_open_is_not_checked(tmp_path: Path) -> None:
+    """Conflict markers are not source, so the checker's verdict is about them.
+
+    The same failure as the manifest above, arriving where it costs most. A
+    resolution is edits to a file that does not parse until the last marker
+    goes, so every edit until then answers with the checker's opinion of the
+    markers — and the reader making those edits is the one who can least
+    afford to sort a real finding out of it.
+    """
+    work = checkout(tmp_path / "repo")
+    file = work / "module.py"
+    file.write_text(
+        "<<<<<<< HEAD\nx = 1\n=======\nx = 2\n>>>>>>> other\n", encoding="utf-8"
+    )
+    command = checker(work, report(file))
+
+    assert file_diagnostics(str(file), command) == []
+
+
+def test_a_file_quoting_one_marker_is_still_checked(tmp_path: Path) -> None:
+    """A lone marker is reachable in honest text and silences nothing.
+
+    A conflict writes the pair, so requiring both costs nothing it was meant
+    to catch — while answering to one would drop the checker for a file whose
+    docstring quotes a diff, or for the fixtures of this very rule.
+    """
+    work = checkout(tmp_path / "repo")
+    file = work / "module.py"
+    file.write_text('x = """\n<<<<<<< quoted, not conflicted\n"""\n', encoding="utf-8")
+    command = checker(work, report(file))
+
+    assert file_diagnostics(str(file), command) == [
+        "error 1: something is wrong",
+    ]
 
 
 def test_the_readable_suffixes_are_the_callers_to_choose(tmp_path: Path) -> None:

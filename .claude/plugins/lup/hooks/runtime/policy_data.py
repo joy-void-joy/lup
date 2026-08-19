@@ -7309,12 +7309,12 @@ SANDBOX_EXCLUDED_COMMANDS: list[str] = [
 AUTO_ESCAPE_PREFIXES: list[list[str]] = []
 
 DIAGNOSTICS_COMMAND: list[str] = [
-    ".venv/bin/pyright",
+    "pyright",
     "--outputjson",
 ]
 
 RESOLUTION_COMMAND: list[str] = [
-    ".venv/bin/lup-devtools",
+    "lup-devtools",
     "dev",
     "refutations",
 ]

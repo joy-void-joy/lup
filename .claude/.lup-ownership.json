@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "1fbd57eac20ce646f0de9c74a96271a1798814963563fe00d6bcfbb95cf90075",
+  "source_digest": "d7d9038549b5fff4c513a45fd44b3cc55fafac11450f70f796415b57e9555e51",
   "target_requirements": [
     "claude-code"
   ],
@@ -198,14 +198,14 @@
     {
       "path": ".claude/plugins/lup/commands/land.md",
       "category": "generated",
-      "sha256": "ee1b8a78458558f423f779d97eac817a204a8e034bdecc2c10e0a4d374c00e02",
+      "sha256": "0e824722d22d9c11594526805ce8247216aed73a973cb10e158d714f00c223b0",
       "semantic_id": "skill.land",
       "executable": false
     },
     {
       "path": ".claude/plugins/lup/commands/merge.md",
       "category": "generated",
-      "sha256": "a32f0db1683399fa69af141a2abebf678337131831698944d0ea4ed70dce12ac",
+      "sha256": "4abad98387959b1e61167e1d494a30c1735c511f4cb19a495821cbf4831c596a",
       "semantic_id": "skill.merge",
       "executable": false
     },
@@ -394,14 +394,14 @@
     {
       "path": ".claude/plugins/lup/hooks/runtime/policy_data.py",
       "category": "generated",
-      "sha256": "370e0f93be7ceef3b2aecf5194d56a1bec7aaec660f057a3c850dca2830981d1",
+      "sha256": "f3a6489ce58e5daa98d7e8e46d930d0b9901dccdbe021a442073a740cd225442",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
     {
       "path": ".claude/plugins/lup/hooks/scripts/policy.py",
       "category": "generated",
-      "sha256": "700002c7b86e64905330e78164146057a028cc8e2bcbc7351a04a7432118464b",
+      "sha256": "bbfbef21340cd70dff7c0c107931a829a5a1c82bbbabf69ab24ed1d28814b37d",
       "semantic_id": "hooks.lup-policy",
       "executable": true
     },
@@ -415,7 +415,7 @@
     {
       "path": ".claude/settings.json",
       "category": "generated",
-      "sha256": "57a22be3a771a7814f687b9bf590163326bf9cf54fa68238a3b49625e9da59f9",
+      "sha256": "409232d5d85a3f2bd5651467105f395d5516f11fe00de79b9eefd195caffe149",
       "semantic_id": "harness.project-settings",
       "executable": false
     },

@@ -16,8 +16,10 @@ possible is answered by the hardest this runtime thinks, which is what was
 wanted; asking for governance it has no way to apply is not.
 """
 
+from pathlib import Path
 from typing import Literal
 
+from lup.adapters.codex.home import select_codex_home
 from lup.adapters.codex.login import CODEX_LOGIN
 from lup.adapters.codex.runtime import (
     CodexMcpServerConfig,
@@ -32,6 +34,7 @@ from lup.runtime.selection import (
     SessionEffort,
     SessionRequest,
 )
+from lup.types import EnvVars
 
 type CodexSandbox = Literal["read-only", "workspace-write", "danger-full-access"]
 type CodexEffort = Literal["none", "minimal", "low", "medium", "high", "xhigh"]
@@ -128,9 +131,21 @@ def codex_session(request: SessionRequest) -> SessionFactory:
     return create_codex_session_factory(codex_config(request))
 
 
+def codex_workspace_home(environment: EnvVars, workspace: Path) -> EnvVars:
+    """Give one workspace's Codex sessions a home of their own.
+
+    A home the environment already names is honoured as it stands: Codex
+    seeds a scoped home by copying credentials into it, so deriving a second
+    one underneath a home somebody selected deliberately would run the
+    session against a copy of an account rather than the account.
+    """
+    return CODEX_LOGIN.environment(select_codex_home(None, environment, workspace).path)
+
+
 CODEX_RUNTIME = Runtime(
     name="Codex",
     login=CODEX_LOGIN,
     open=codex_session,
+    workspace_home=codex_workspace_home,
 )
 """Codex, as the single value an application assigns to select it."""

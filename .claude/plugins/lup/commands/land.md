@@ -43,7 +43,7 @@ Report which case it is and what the comparison showed, and let the user settle 
 uv run lup-devtools dev survey --json
 ```
 
-Every branch arrives with a `disposition` and a `reason` already computed. **Do not re-derive them** — the classifier is shared with `dev status`, so a judgement made here would drift from the one made there.
+Every branch arrives with a `disposition` and a `reason` already computed. **Do not re-derive them** — the classifier is shared with `dev survey`, so a judgement made here would drift from the one made there.
 
 ### 3. Reconcile against the runs holding branches
 
