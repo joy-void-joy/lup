@@ -19,6 +19,7 @@ from lup.resolver.contracts import (
     ResolverObserver,
     ResolverRegression,
     WorktreePreparer,
+    settles_the_actor,
 )
 from lup.actors.mailbox import ANSWER_POLL_SECONDS
 from lup.actors.refs import ActorRef
@@ -979,7 +980,7 @@ class ResolverCore:
                 results = await self.actors.work_all(
                     execute_for,
                     [ActorRef(kind="worker", id=concern.id) for concern in runnable],
-                    settles=self.executor.settles_the_worker,
+                    settles=settles_the_actor,
                 )
                 failures = [
                     result for result in results if isinstance(result, BaseException)

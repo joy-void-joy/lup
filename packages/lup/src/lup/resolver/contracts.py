@@ -67,6 +67,31 @@ class ResolverDrained(Exception):
         self.concerns = concerns
 
 
+def settles_the_actor(error: BaseException) -> bool:
+    """Whether a raise out of an agent's work means that agent is done.
+
+    Three of this run's failures stop a piece of work without ending the
+    agent doing it: a park is waiting on a human, a drain is an operator
+    asking the run to stop where stopping is free, and a host fault says
+    nothing about the work at all. Each expects the same agent to carry on —
+    a resume reattaches to that conversation rather than opening a fresh one,
+    and a run retrying past a host fault keeps every conversation it holds.
+    An agent recorded finished while its work is merely suspended is the
+    report that sends somebody looking for a failure that did not happen.
+
+    Anything else did end the agent, and is recorded against its address by
+    whoever catches it.
+
+    Here rather than on either wave that passes it, because the suspension
+    vocabulary is declared here and both waves answer to it. A worker's and a
+    reviewer's are the same judgement, and two copies of it agree only for as
+    long as somebody keeps them agreeing.
+    """
+    return not isinstance(
+        error, ResolverAwaitingAnswers | ResolverDrained | ResolverEnvironmentFault
+    )
+
+
 class ResolverAssemblyDeferred(Exception):
     """A human declined, for now, to assemble the review branch.
 

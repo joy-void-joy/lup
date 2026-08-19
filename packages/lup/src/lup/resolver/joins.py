@@ -22,12 +22,12 @@ assumed.
 """
 
 import asyncio
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Iterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 from lup.channels.models import utc_now
-from lup.resolver.contracts import ResolverDrained
+from lup.resolver.contracts import ResolverDrained, settles_the_actor
 from lup.resolver.dag import ConcernGraph
 from lup.resolver.journal import (
     JoinAuditEvent,
@@ -604,9 +604,12 @@ class Joiner:
         )
         if not asking:
             return carried
+        asking_by_id = {concern.id: concern for concern in asking}
         async with self.reading_pool(integration, len(asking)) as trees:
 
-            async def examine(concern: Concern) -> MaterialQuestion | None:
+            async def examine(opened: ActorRef) -> MaterialQuestion | None:
+                """This address's concern, re-checked against the merged tree."""
+                concern = asking_by_id[opened.id]
                 tree = await trees.get()
                 try:
                     question = await self.recheck_one(concern, tree, integration)
@@ -624,8 +627,32 @@ class Joiner:
                     )
                 return question
 
-            asked = await asyncio.gather(*[examine(concern) for concern in asking])
-        return [*carried, *[question for question in asked if question is not None]]
+            # The population's own wave rather than one assembled here, for
+            # the reasons the worker wave takes it: how many agents run at
+            # once is the population's cap and not this phase's, the roster
+            # carries the whole re-check rather than only the turns inside
+            # it, and a close reaches what is still reading.
+            asked = await self.runner.actors.work_all(
+                examine,
+                [ActorRef(kind="reviewer", id=concern.id) for concern in asking],
+                settles=settles_the_actor,
+            )
+
+        def reported() -> Iterator[MaterialQuestion]:
+            """What each re-check found, re-raising the ones that failed.
+
+            The wave answers positionally and keeps every failure rather than
+            propagating one, so the raise is made here instead: a re-check
+            that never reported is not a re-check that found nothing, and
+            integration is about to wait on exactly this list.
+            """
+            for outcome in asked:
+                if isinstance(outcome, BaseException):
+                    raise outcome
+                if outcome is not None:
+                    yield outcome
+
+        return [*carried, *reported()]
 
     @asynccontextmanager
     async def reading_pool(
