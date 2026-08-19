@@ -56,6 +56,17 @@ class SessionRequest(BaseModel, frozen=True, arbitrary_types_allowed=True):
     effort: SessionEffort | None = None
     tools: list[str] | None = None
     allowed_tools: list[str] = []
+    disallowed_tools: list[str] = []
+    """The tools this session may not call, whoever else would admit them.
+
+    The third of three fields that read alike. ``tools`` is the roster a
+    session is given, ``allowed_tools`` the part of it that runs without
+    being asked about, and this one a refusal that outranks both — which is
+    what lets a caller say "everything except this" without enumerating
+    everything. A roster states a session's whole reach and has to be
+    restated whenever that reach grows; a refusal keeps naming the same tool.
+    """
+
     tool_servers: dict[str, McpServerEntry] = {}
     max_turns: int | None = None
     max_thinking_tokens: int | None = None
