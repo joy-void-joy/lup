@@ -83,6 +83,26 @@ holds.
 """
 
 
+type WorkSettles = Callable[[BaseException], bool]
+"""Whether a raise out of an agent's work means that agent is done.
+
+A turn that raises settles the agent that took it, because an agent whose turn
+died is not going to take another. Work is the case where that stops holding:
+a whole piece of work can stop because it was *suspended* — parked on a
+question, drained at a boundary, or stopped by a host that failed — and every
+one of those expects the same agent to carry on once the reason is gone. An
+agent recorded finished while its work is merely suspended is the report that
+sends somebody looking for a failure that did not happen, and what resumes
+opens a fresh conversation instead of reattaching to the one that was already
+holding the context.
+
+Only the consumer knows which of its own failures suspend, so the judgement
+reaches it as a default rather than a fixed rule: everything settles unless a
+caller says otherwise, which is what a caller with no suspension of its own
+already meant.
+"""
+
+
 class CohortEntry(JournalRecord[ActorRef], frozen=True):
     """One thing an actor did, or one thing said to it."""
 
@@ -456,6 +476,7 @@ class ActorCohort:
         work: Callable[[ActorRef], Awaitable[T]],
         task: str = "",
         then: Callable[[T], Awaitable[None]] | None = None,
+        settles: WorkSettles = lambda _: True,
     ) -> ActorRef:
         """Set a whole piece of work going under one address, keeping the turn.
 
@@ -469,8 +490,10 @@ class ActorCohort:
 
         The work itself says whether it finishes the agent: what it runs is
         rounds, and only it knows which round was the last. What is recorded
-        here is the failure, because an agent whose work raised takes no
-        further round whatever it intended.
+        here is the failure — but only where the raise settles the agent,
+        which ``settles`` decides. Work that stopped because it was suspended
+        expects the same agent to carry on, so recording it finished would
+        cost the resume the conversation it meant to reattach to.
 
         The address is recorded before the cap rather than behind it, so an
         agent queued behind a full cap is one the caller can already list and
@@ -489,13 +512,62 @@ class ActorCohort:
                     result = await work(actor)
                 except Exception as error:
                     logger.exception("%s failed", actor.label())
-                    await self.finish(actor, error=str(error))
+                    if settles(error):
+                        await self.finish(actor, error=str(error))
                     raise
                 if then is not None:
                     await then(result)
 
         self.running[actor.conversation()] = asyncio.create_task(admitted_work())
         return actor
+
+    async def work_all[T](
+        self,
+        work: Callable[[ActorRef], Awaitable[T]],
+        over: list[ActorRef],
+        task: str = "",
+        settles: WorkSettles = lambda _: True,
+    ) -> list[T | BaseException]:
+        """Run one piece of work per address at once, and hand back each answer.
+
+        The wave shape, which is what a caller fanning out over a population
+        actually has: the same work, one agent per address, all of it under
+        the population's cap and all of it recorded against the population's
+        own task set — so a close reaches it and a door listing who is running
+        sees it. A caller assembling this from :meth:`start_work` and a gather
+        of its own gets the cap right and the other two wrong.
+
+        Results come back positionally against ``over``, each either what that
+        agent's work returned or what it raised. Faithfully, and including a
+        ``BaseException`` that is not an ``Exception``: a caller that
+        classifies failures — this one was a park, this one was the host —
+        cannot do it from a flattened list, and one that cannot see a
+        cancellation reads an interrupted wave as a wave that decided
+        something.
+        """
+        caught: dict[str, T | BaseException] = {}
+
+        def remembering(run: Callable[[ActorRef], Awaitable[T]]):
+            """The same work, keeping what it answered under its own address."""
+
+            async def kept(opened: ActorRef) -> None:
+                try:
+                    caught[opened.conversation()] = await run(opened)
+                # lup: ignore[except-baseexception] — taken and re-raised
+                # unconditionally, so nothing is swallowed; a cancellation the
+                # caller cannot see reads as a wave that decided something
+                except BaseException as error:
+                    caught[opened.conversation()] = error
+                    raise
+
+            return kept
+
+        for actor in over:
+            self.start_work(
+                actor, remembering(work), task=task or actor.id, settles=settles
+            )
+        await self.wait_all()
+        return [caught[actor.conversation()] for actor in over]
 
     async def wait_all(self) -> None:
         """Wait for everything started, whatever each of them does.

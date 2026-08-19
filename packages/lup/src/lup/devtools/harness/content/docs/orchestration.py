@@ -168,7 +168,7 @@ address, so an agent can say something back.
 | --- | --- |
 | Lifetime | As long as the population is held; each member across many turns |
 | Runtime | One held session per member, from a recipe the cohort configures |
-| Initiation | `ask` (awaited) or `start` (detached, caller keeps its turn) |
+| Initiation | `ask` (awaited), `start` (detached), or `work_all` (a whole wave) |
 | Communication | Mail both ways, mid-turn; questions through a `QuestionMailbox` |
 | Use case | Several agents at once, over work whose facts move under them |
 
@@ -177,6 +177,23 @@ inside an awaited call cannot make another, so a cohort whose members are all
 `ask`ed has steering tools that can never fire. `start` returns immediately
 and the caller keeps its turn — which is what makes saying anything possible
 at all.
+
+**Fan out with `work_all`, not with a gather of your own.** How many agents
+run at once, which of them are running, and what a close reaches are three
+facts about the population; a caller that assembles its own wave from
+`start_work` and `asyncio.gather` gets the cap right and the other two wrong.
+`work_all` runs one piece of work per address and hands back each answer
+positionally — a result or the exception it raised, faithfully, so a caller
+that classifies failures can still tell a park from a host fault from a
+cancellation.
+
+**A raise does not always finish an agent.** A turn that dies settles the
+agent that took it, but *work* can stop because it was suspended — parked on
+a question, drained at a boundary, stopped by a failing host — and every one
+of those expects the same agent to carry on. `settles` is how a consumer says
+which of its own failures suspend; recorded finished instead, the resume opens
+a fresh conversation rather than reattaching to the one holding the context,
+and every door reads a waiting agent as a stopped one.
 
 **The cohort owns the wiring.** Delivery works only if the inbox hook is in
 the options the session opened with, so callers pass an `ActorRecipe`

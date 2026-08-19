@@ -502,3 +502,62 @@ async def test_the_cohort_caps_how_many_of_its_agents_work_at_once(
     await cohort.wait_all()
 
     assert peak == 2
+
+
+@pytest.mark.asyncio
+async def test_a_wave_hands_back_every_answer_against_its_own_address(
+    tmp_path: Path,
+) -> None:
+    """A caller that classifies failures needs each one, not a flattened list.
+
+    The resolver's wave decides what a batch meant from the exceptions it
+    got — this one parked, this one was the host, this one really failed —
+    so a fan-out that returned only the successes, or only the count, would
+    leave it unable to tell a suspended batch from a failed one.
+    """
+    cohort = ActorCohort(tmp_path)
+    trouble = RuntimeError("the lease would not open")
+
+    async def work(opened: ActorRef) -> str:
+        if opened.id == "second":
+            raise trouble
+        return f"{opened.id} finished"
+
+    results = await cohort.work_all(
+        work,
+        [cohort.actor("worker", name) for name in ("first", "second", "third")],
+    )
+
+    assert results == ["first finished", trouble, "third finished"]
+
+
+@pytest.mark.asyncio
+async def test_a_wave_leaves_a_suspended_agent_standing(tmp_path: Path) -> None:
+    """Work that stopped because it was suspended has not finished its agent.
+
+    A park, a drain and a host fault all raise, and all three expect the same
+    agent to carry on once the reason is gone. Recorded finished, the resume
+    opens a fresh conversation instead of reattaching to the one already
+    holding the context, and every door reads a waiting agent as a stopped
+    one.
+    """
+
+    class Parked(Exception):
+        """The consumer's own way of saying "waiting on a human"."""
+
+    cohort = ActorCohort(tmp_path)
+
+    async def work(opened: ActorRef) -> None:
+        raise Parked("waiting") if opened.id == "parked" else RuntimeError("died")
+
+    results = await cohort.work_all(
+        work,
+        [cohort.actor("worker", name) for name in ("parked", "failed")],
+        settles=lambda error: not isinstance(error, Parked),
+    )
+
+    assert [type(result) for result in results] == [Parked, RuntimeError]
+    standing = {member.actor.id: member for member in cohort.live()}
+    assert standing["parked"].running is True
+    assert standing["failed"].running is False
+    assert standing["failed"].error == "died"
