@@ -59,6 +59,7 @@ def claude_config(request: SessionRequest) -> ClaudeSessionConfig:
         system_prompt=request.instructions,
         tools=request.tools,
         allowed_tools=request.allowed_tools,
+        disallowed_tools=request.disallowed_tools,
         tool_servers=request.tool_servers,
         permission_mode=(
             None if request.autonomy is None else CLAUDE_AUTONOMY[request.autonomy]
