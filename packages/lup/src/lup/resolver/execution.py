@@ -130,6 +130,25 @@ class ConcernExecutor:
             ActorRef(kind="worker", id=concern_id), summary=summary, error=error
         )
 
+    def settles_the_worker(self, error: BaseException) -> bool:
+        """Whether a raise out of a concern's work means its worker is done.
+
+        The counterpart of :meth:`settled_actors`, for the failures that
+        never reach it. Three of them stop the work without ending the agent:
+        a park is waiting on a human, a drain is an operator asking the run
+        to stop where stopping is free, and a host fault says nothing about
+        the work at all. Each expects the same worker to carry on — a resume
+        reattaches to that conversation rather than opening a fresh one, and
+        a run retrying past a host fault keeps every conversation it holds.
+
+        Anything else did end the agent, and is recorded against its address
+        by whoever catches it.
+        """
+        return not isinstance(
+            error,
+            ResolverAwaitingAnswers | ResolverDrained | ResolverEnvironmentFault,
+        )
+
     async def execute_concern(
         self,
         concern: Concern,

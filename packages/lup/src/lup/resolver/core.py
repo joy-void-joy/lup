@@ -960,24 +960,26 @@ class ResolverCore:
                 # phase left it and the next batch selects it again — which
                 # is what makes a cut wave resumable rather than lost.
                 #
-                # The cohort's cap rather than one of this phase's own. How
-                # many agents a population runs at once is a fact about the
-                # population, and a second semaphore over the same members
-                # is a second answer to it that nothing reconciles.
-                async def execute_when_admitted(
-                    concern: Concern,
-                ) -> ConcernExecution:
-                    async with self.actors.admitted:
-                        return await self.executor.execute_concern(
-                            concern,
-                            lease_by_concern[concern.id],
-                            commits,
-                            builder,
-                        )
+                # The population's own wave rather than one assembled here.
+                # How many agents run at once, which of them are running, and
+                # what a close reaches are three facts about the population,
+                # and a phase that fanned out for itself answered the last
+                # two differently from the roster every door reads.
+                runnable_by_id = {concern.id: concern for concern in runnable}
 
-                results = await asyncio.gather(
-                    *[execute_when_admitted(concern) for concern in runnable],
-                    return_exceptions=True,
+                async def execute_for(opened: ActorRef) -> ConcernExecution:
+                    """This address's concern, carried through its whole work."""
+                    return await self.executor.execute_concern(
+                        runnable_by_id[opened.id],
+                        lease_by_concern[opened.id],
+                        commits,
+                        builder,
+                    )
+
+                results = await self.actors.work_all(
+                    execute_for,
+                    [ActorRef(kind="worker", id=concern.id) for concern in runnable],
+                    settles=self.executor.settles_the_worker,
                 )
                 failures = [
                     result for result in results if isinstance(result, BaseException)
