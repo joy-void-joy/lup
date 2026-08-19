@@ -985,6 +985,7 @@ def probe_base_freshness(launcher: ProcessLauncher, root: Path) -> BaseFreshness
             arguments=["git", "fetch", "--quiet"],
             cwd=root,
             environment=non_interactive_environment({}),
+            stream=True,
         )
     )
     if fetched.code != 0:
@@ -1006,33 +1007,48 @@ def git_ran(launcher: ProcessLauncher, root: Path, arguments: list[str]) -> str:
     Empty means it worked. The probes beside this one ask questions with a
     blank answer, where a failure and no output mean the same thing; a
     command run for its effect has to say which of the two happened.
+
+    Shown as it runs, because these are the ones with a network or a hook at
+    the other end: working through a slow transfer and having stopped look
+    identical from a terminal that is told nothing until the exit. What comes
+    back is that exit rather than the stderr already on screen, so a caller
+    framing this answer in a line of its own does not print it twice.
     """
     status = launcher.launch(
         LaunchRequest(
             arguments=["git", *arguments],
             cwd=root,
             environment=non_interactive_environment({}),
+            stream=True,
         )
     )
     if not status.code:
         return ""
-    return status.stderr.strip() or f"`git {' '.join(arguments)}` exited {status.code}"
+    return f"`git {' '.join(arguments)}` exited {status.code}"
 
 
 # lup: ignore[model-free-function] — driver: it writes to the checkout, where
 # UpstreamMeasure is only the reading that says whether there is anything to write
 def sync_upstream(
-    launcher: ProcessLauncher, root: Path, measure: UpstreamMeasure
+    launcher: ProcessLauncher, root: Path, measure: UpstreamMeasure, *, publish: bool
 ) -> Iterator[str]:
-    """Take what the branch's own remote holds, and hand it what it lacks.
+    """Take what the branch's own remote holds, and say what it still lacks.
 
-    Both halves are what a reader would have done by hand and neither can go
-    wrong quietly: ``--ff-only`` cannot invent a merge, and a push that would
-    not fast-forward is refused by the remote. What makes them safe to do
+    Taking is what a reader would have done by hand and cannot go wrong
+    quietly: ``--ff-only`` cannot invent a merge. What makes it safe to do
     unattended is the clean tree, so a checkout with work in it is left
     exactly as it was — the mistake this prevents is smaller than the one it
-    would risk. A diverged branch stops after the failed pull rather than
-    pushing on top of the divergence it just failed to close.
+    would risk.
+
+    Handing back is ``publish``, and happens only where a caller asked for
+    it. The two directions read as symmetrical and are not: a pull changes
+    this checkout, where a push publishes commits under somebody's name and
+    runs whatever the local and remote hooks run — minutes of it, on the
+    hook side, with nothing to say it started. A caller that means to push
+    says so; one that only wants the checkout current is told the count
+    instead and can push it itself. A diverged branch stops after the failed
+    pull either way, rather than pushing on top of the divergence it just
+    failed to close.
     """
     if git_line(launcher, root, ["status", "--porcelain"]):
         yield f"not synced with {measure.tracked}: the working tree has changes"
@@ -1048,6 +1064,9 @@ def sync_upstream(
     )
     if not ahead.isdigit() or not int(ahead):
         return
+    if not publish:
+        yield f"{ahead} commit(s) {measure.tracked} does not have; `git push` sends them"
+        return
     complaint = git_ran(launcher, root, ["push"])
     yield (
         f"not pushed to {measure.tracked}: {complaint}"
@@ -1056,7 +1075,9 @@ def sync_upstream(
     )
 
 
-def settle_base_freshness(launcher: ProcessLauncher, root: Path) -> None:
+def settle_base_freshness(
+    launcher: ProcessLauncher, root: Path, *, publish: bool = False
+) -> None:
     """Make the checkout current where that is free, and report what is left.
 
     Being behind is not grounds for refusing a session. A clean checkout is
@@ -1065,6 +1086,12 @@ def settle_base_freshness(launcher: ProcessLauncher, root: Path) -> None:
     past; a base that has moved needs a merge, so it is named along with the
     merge that would take it and the session opens either way.
 
+    Free is what decides it, which is why ``publish`` is off unless asked
+    for. Taking commits costs a fetch nobody has to think about; handing
+    them back costs whatever the hooks on either side cost and puts this
+    checkout's work somewhere it can be read, neither of which is a price to
+    charge somebody who typed a command about opening a session.
+
     Being unable to read the base at all is the one part that does put a
     question to whoever is there. A session opened on an unread base is the
     mistake this whole reading exists to prevent, and a line of output does
@@ -1072,9 +1099,13 @@ def settle_base_freshness(launcher: ProcessLauncher, root: Path) -> None:
     saying ready, in the shape of the status lines around it, a moment
     before the terminal was handed to something that draws over all of them.
     """
+    # Said before the fetch rather than after it, because this is the first
+    # thing here that waits on somebody else's machine, and a line naming the
+    # wait is what separates a slow one from a stopped one.
+    typer.echo("reading what the remote holds")
     freshness = probe_base_freshness(launcher, root)
     synced = (
-        list(sync_upstream(launcher, root, freshness.upstream))
+        list(sync_upstream(launcher, root, freshness.upstream, publish=publish))
         if freshness.upstream
         else []
     )

@@ -187,7 +187,8 @@ def create_dev_app(
             bool,
             typer.Option(
                 "--settle",
-                help="Do what opening a session does: pull and push a clean checkout",
+                help="Settle a clean checkout rather than only reporting: pull "
+                "what the remote holds, then push what it lacks",
             ),
         ] = False,
     ) -> None:
@@ -198,7 +199,9 @@ def create_dev_app(
         answer otherwise only appears in front of a session nobody asked for.
         """
         if settle:
-            branches.settle_base_freshness(LocalProcessLauncher(), project_root())
+            branches.settle_base_freshness(
+                LocalProcessLauncher(), project_root(), publish=True
+            )
             return
         typer.echo(
             branches.probe_base_freshness(

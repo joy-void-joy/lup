@@ -82,8 +82,8 @@ def probe(root: Path) -> BaseFreshness:
     return probe_base_freshness(LocalProcessLauncher(), root)
 
 
-def settle(root: Path) -> None:
-    settle_base_freshness(LocalProcessLauncher(), root)
+def settle(root: Path, *, publish: bool = False) -> None:
+    settle_base_freshness(LocalProcessLauncher(), root, publish=publish)
 
 
 def head_of(work: Path, revision: str = "HEAD") -> str:
@@ -219,11 +219,11 @@ def test_a_checkout_with_no_remote_to_ask_is_not_an_unread_base(
     require_fresh_base(freshness)
 
 
-def synced(root: Path) -> list[str]:
+def synced(root: Path, *, publish: bool = False) -> list[str]:
     """Run the sync against whatever the probe says this checkout's own remote is."""
     measure = probe(root).upstream
     assert measure is not None
-    return list(sync_upstream(LocalProcessLauncher(), root, measure))
+    return list(sync_upstream(LocalProcessLauncher(), root, measure, publish=publish))
 
 
 def test_a_clean_checkout_behind_its_own_remote_is_fast_forwarded(
@@ -238,14 +238,34 @@ def test_a_clean_checkout_behind_its_own_remote_is_fast_forwarded(
     assert head_of(clone) == head_of(origin)
 
 
-def test_local_commits_on_a_clean_checkout_are_pushed(
+def test_local_commits_are_named_rather_than_sent(origin: Path, tmp_path: Path) -> None:
+    """Settling takes what the remote holds; handing work back is a separate ask.
+
+    The direction that earns being done unasked is the one that only changes
+    this checkout. A push puts the work somewhere others read it and runs
+    whatever the hooks on either end run, which is not a thing to do to
+    somebody who typed a command about opening a session.
+    """
+    clone = worktree_clone(origin, tmp_path / "clone")
+    repo_git(clone)("push", "-u", "origin", "feature")
+    commit_file(repo_git(clone), clone, "mine.txt", "mine", "feat: mine")
+    published = head_of(origin, "refs/heads/feature")
+
+    lines = synced(clone)
+
+    assert lines == ["1 commit(s) origin/feature does not have; `git push` sends them"]
+    assert head_of(origin, "refs/heads/feature") == published
+
+
+def test_a_caller_that_asks_to_publish_gets_the_push(
     origin: Path, tmp_path: Path
 ) -> None:
+    """And the ask is all that changed: the push itself is the one it always was."""
     clone = worktree_clone(origin, tmp_path / "clone")
     repo_git(clone)("push", "-u", "origin", "feature")
     commit_file(repo_git(clone), clone, "mine.txt", "mine", "feat: mine")
 
-    settle(clone)
+    settle(clone, publish=True)
 
     assert head_of(clone) == head_of(origin, "refs/heads/feature")
 
