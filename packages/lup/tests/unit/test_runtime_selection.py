@@ -20,6 +20,7 @@ from lup.adapters.codex.selection import (
     codex_mcp_server,
 )
 from lup.hooks import LupHooksConfig
+from lup.mcp import create_mcp_server
 from lup.runtime.factory import SessionFactory
 from lup.runtime.selection import Runtime, SessionAutonomy, SessionRequest
 
@@ -134,6 +135,20 @@ def test_codex_will_not_infer_the_directory_it_sandboxes_against() -> None:
 def test_codex_rejects_a_tool_group_it_cannot_launch() -> None:
     with pytest.raises(ValueError, match="subprocess"):
         codex_mcp_server("group", {"type": "sse", "url": "https://example.test"})
+
+
+def test_codex_will_not_relaunch_a_hosted_tool_group_as_a_subprocess() -> None:
+    """The refusal that stops a session's own state being answered around.
+
+    A hosted server reads the process hosting it — the context variables
+    scoping the session it answers inside, its clients, its caches. Relaunched
+    as a subprocess it would not fail: it would answer every call from
+    defaults, confidently, and nothing downstream could tell the difference.
+    So the refusal has to say why, or the transport change it looks like is
+    the repair somebody reaches for.
+    """
+    with pytest.raises(ValueError, match="answer from defaults"):
+        codex_mcp_server("group", create_mcp_server("group"))
 
 
 @pytest.mark.parametrize("runtime", [CLAUDE_RUNTIME, CODEX_RUNTIME])

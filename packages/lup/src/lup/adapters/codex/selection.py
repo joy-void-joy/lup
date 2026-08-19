@@ -74,7 +74,21 @@ CODEX_EFFORT: dict[SessionEffort, CodexEffort] = {
 
 
 def codex_mcp_server(name: str, server: McpServerEntry) -> CodexMcpServerConfig:
-    """Narrow one declared tool group into the subprocess Codex launches."""
+    """Narrow one declared tool group into the subprocess Codex launches.
+
+    The in-process case is refused rather than relaunched as a subprocess,
+    which is the repair its message is written to head off. A hosted server
+    closes over the state of the process that hosts it — the context
+    variables scoping the session it answers inside, its open clients, its
+    caches — and a subprocess inherits none of it while answering every call
+    as though it had. The failure that follows is not an error: it is a tool
+    returning a confident answer computed against defaults, which is the one
+    kind of wrong nothing downstream can detect.
+
+    Serving it is therefore an application's decision about what that group's
+    tools read, and the application has to state it by declaring a transport
+    that carries whatever they need.
+    """
     match server:
         case {"command": str(command)}:
             stdio: RawStdioServerConfig = server
@@ -85,8 +99,11 @@ def codex_mcp_server(name: str, server: McpServerEntry) -> CodexMcpServerConfig:
             )
         case _:
             raise ValueError(
-                f"Codex serves tool group {name!r} over a subprocess; this one "
-                "is declared as an in-process or networked server"
+                f"Codex serves tool group {name!r} over a subprocess; this one is "
+                "declared as an in-process or networked server. It is not relaunched "
+                "as one: a hosted server reads the hosting process's own state, and "
+                "a subprocess would answer from defaults rather than fail. Declare a "
+                "transport that carries what its tools read."
             )
 
 
