@@ -1,18 +1,21 @@
 """The git hooks that refuse work before it leaves the checkout.
 
 A check that runs when somebody remembers to run it is a warning, not a
-guarantee. Two of them earn a hook, at the two moments something becomes
-hard to take back.
+guarantee. What earns a hook is the ratio: a check standing between somebody
+and their next keystroke has to cost far less than the mistake it catches,
+because it is charged on every commit and the mistake is not.
 
 Drift, at ``pre-commit``: the sources compiled into the native trees are
 copied there verbatim, so rewording a comment in one of them makes both
 trees stale without changing anything either does, and a commit that skips
-``dev check`` writes that staleness into history.
+the check writes that staleness into history. Reading it back costs about a
+second, which is the ratio this hook is here for.
 
-The gate itself, at ``pre-push``: a commit is local and rewritable, and a
-push is neither. It runs the same ``dev check`` the pipeline runs, so a
-branch is refused here by the identical command that would refuse it in CI,
-minutes earlier and without spending a runner.
+The whole gate — ruff, pyright, and both suites — is the pipeline's, at the
+boundary where a runner spends the two minutes instead of the person who is
+still working. A hook charging that to every push would buy only the
+interval between pushing and the pipeline answering, and would charge it
+against the loop that has to stay tight.
 
 Each hook body is one line naming a command the pipeline also runs, so the
 places that can refuse the same work run one computation rather than several
@@ -20,7 +23,7 @@ that can disagree, and a hook nobody installed is still refused by the
 pipeline at the same line.
 
 Which hooks a project arms is its own declaration — :data:`DECLARED_GUARDS`
-is the pair lup ships, not a set an adopter has to fork this module to
+is what lup ships, not a set an adopter has to fork this module to
 change. A project may declare several guards at one moment, which git runs
 as the one script it runs per hook: :class:`HookScript` is that file, and it
 is the unit installed and read, because a guard is not what git has a name
@@ -43,11 +46,11 @@ DRIFT_COMMAND = "uv run lup-devtools harness check all"
 # lup: ignore[constant-declaration] — the command a reader types, whose words
 # are the CLI's own rather than a preference this module holds
 CHECK_COMMAND = "uv run lup-devtools dev check"
-"""The project's whole gate, run by the pipeline and by the push hook alike.
+"""The project's whole gate, run by the pipeline at the boundary it guards.
 
 Beside :data:`DRIFT_COMMAND` because the two are the same kind of thing —
-what a refusal actually runs — and because every consumer of one wants the
-other: the workflow renders both as steps and the guards install one each.
+what a refusal actually runs — and because the workflow renders both as
+steps, so the pipeline and the hook lup arms name the same commands.
 """
 
 # lup: ignore[constant-declaration] — the command a reader types, whose words
@@ -90,13 +93,15 @@ while read -r _ local_oid _; do
 done
 [ -n "$carries_content" ] || exit 0
 """
-"""What the push guard reads before deciding it has anything to judge.
+"""What a push guard reads before deciding it has anything to judge.
 
-Deleting a branch is the case that made this worth writing: it uploads no
-tree at all, so the gate could only re-judge what the remote already had,
-and it charged the whole suite for the privilege — long enough that a
-delete would time out having removed the local branch and left the remote
-copy standing.
+Offered rather than declared: lup leaves its gate to the pipeline, and a
+project that does want one at ``pre-push`` wants this in front of it.
+Deleting a branch is the case that makes it worth having — it uploads no
+tree at all, so a gate there could only re-judge what the remote already
+holds, and it would charge the whole suite for the privilege, long enough
+that a delete can time out having removed the local branch and left the
+remote copy standing.
 """
 
 
@@ -183,26 +188,14 @@ class GitGuard(BaseModel, frozen=True):
         )
 
 
-DECLARED_GUARDS = [
-    GitGuard(),
-    GitGuard(
-        command=CHECK_COMMAND,
-        hook="pre-push",
-        standdown=DELETION_STANDDOWN,
-        reads_stdin=True,
-        refusal=(
-            "Refuses this push while the project's own gate fails. A commit is\n"
-            f"# local and rewritable; a push is neither. Run `{CHECK_COMMAND}`."
-        ),
-    ),
-]
+DECLARED_GUARDS = [GitGuard()]
 """The hooks lup arms, offered to a project as the set it usually wants.
 
 A default rather than a fixture: a project that runs its gate somewhere else,
-or that has a third moment worth guarding, names its own list. What makes
-these two the offer is that both refuse at a boundary the pipeline refuses
-at anyway, so neither invents a rule — each only moves an existing refusal
-earlier, to where it is still cheap to answer.
+or that has a second moment worth guarding, names its own list. What makes
+drift the one lup arms is the ratio in :data:`DRIFT_COMMAND`'s favour — a
+second, against a staleness that is otherwise written into history and read
+back by whoever next regenerates.
 """
 
 
@@ -305,8 +298,16 @@ def hook_scripts(guards: list[GitGuard]) -> list[HookScript]:
     ]
 
 
-type GuardStatus = Literal["current", "stale", "absent", "foreign"]
-"""What sits at the hook path, judged against what this moment would write."""
+type GuardStatus = Literal[
+    "current", "stale", "absent", "foreign", "orphaned", "retired"
+]
+"""What sits at the hook path, judged against what this moment would write.
+
+``orphaned`` and ``retired`` are the two halves of a moment leaving the
+declaration: what a reading finds still installed there, and what an install
+reports having cleared. Separate words because one of them asks a reader for
+something and the other tells them it is already done.
+"""
 
 
 class GuardState(BaseModel, frozen=True):
@@ -335,6 +336,13 @@ class GuardState(BaseModel, frozen=True):
                 return f"guard not installed at {self.path}; run `{INSTALL_COMMAND}`"
             case "foreign":
                 return f"{self.path} holds a hook this did not write"
+            case "orphaned":
+                return (
+                    f"{self.path} guards a moment nothing declares; "
+                    f"`{INSTALL_COMMAND}` clears it"
+                )
+            case "retired":
+                return f"guard retired: {self.path}"
 
 
 class GuardConflict(RuntimeError):
@@ -372,6 +380,51 @@ def guard_state(script: HookScript, directory: Path) -> GuardState:
     return GuardState(path=path, status="current" if current else "stale")
 
 
+def orphaned_guards(guards: list[GitGuard], directory: Path) -> list[GuardState]:
+    """Hooks this command wrote at moments the declaration no longer names.
+
+    Every other reading here is driven by the declaration, so a moment that
+    leaves it takes its own reporting with it: git goes on running the file
+    while the gate that would have said so has stopped looking at that path.
+    This is the one reading that starts from the directory instead, which is
+    what lets a checkout be told about a hook nothing asks for any more.
+
+    Only files carrying the marker. A hook somebody else wrote at a moment
+    lup never declared is not this command's to name, let alone remove.
+    """
+    if not directory.is_dir():
+        return []
+    declared = {script.hook for script in hook_scripts(guards)}
+    ours = [
+        path
+        for path in sorted(directory.iterdir())
+        if path.name not in declared and path.is_file()
+    ]
+    return [
+        GuardState(path=path, status="orphaned")
+        for path in ours
+        if any(
+            marker in path.read_text(encoding="utf-8", errors="replace")
+            for marker in (GUARD_MARKER, LEGACY_GUARD_MARKER)
+        )
+    ]
+
+
+def retire_guards(guards: list[GitGuard], root: Path) -> list[GuardState]:
+    """Clear every hook this wrote at a moment the declaration has dropped.
+
+    Run by the same install that arms the declared moments, because a
+    declaration that stops naming one is only half applied while the hook it
+    used to write is still on disk and still running.
+    """
+
+    def retired(state: GuardState) -> GuardState:
+        state.path.unlink()
+        return GuardState(path=state.path, status="retired")
+
+    return [retired(state) for state in orphaned_guards(guards, hooks_directory(root))]
+
+
 def read_guards(guards: list[GitGuard], root: Path) -> list[GuardState]:
     """What one checkout would run, or fail to run, at each moment declared."""
     directory = hooks_directory(root)
@@ -399,6 +452,14 @@ class HooksReading(BaseModel, frozen=True):
 
     guards: list[GuardState]
 
+    orphaned: list[GuardState]
+    """Hooks this wrote at moments the declaration has since stopped naming.
+
+    The mirror of :attr:`reachable`, and quiet in the same way: git runs the
+    file whatever the declaration says, so a checkout still charging itself
+    for a retired guard reads exactly like one that never had it.
+    """
+
     def unarmed(self) -> list[GuardState]:
         """Each declared moment this checkout would not currently guard.
 
@@ -416,6 +477,7 @@ def read_hooks(guards: list[GitGuard], root: Path) -> HooksReading:
         directory=directory,
         reachable=directory.is_dir(),
         guards=[guard_state(script, directory) for script in hook_scripts(guards)],
+        orphaned=orphaned_guards(guards, directory),
     )
 
 
@@ -440,9 +502,15 @@ def install_script(
 def install_guards(
     guards: list[GitGuard], root: Path, *, force: bool = False
 ) -> list[GuardState]:
-    """Install every moment these guards declare, each as the one file git runs."""
+    """Arm every moment these guards declare, and clear the ones they dropped.
+
+    Both halves, so a checkout armed by an older declaration converges by
+    running the install command it was already told to run, rather than by
+    somebody being sent to delete a file they never knew was there.
+    """
     return [
-        install_script(script, root, force=force) for script in hook_scripts(guards)
+        *[install_script(script, root, force=force) for script in hook_scripts(guards)],
+        *retire_guards(guards, root),
     ]
 
 
@@ -454,7 +522,11 @@ def uninstall_script(script: HookScript, root: Path) -> GuardState:
         case "current" | "stale":
             state.path.unlink()
             return GuardState(path=state.path, status="absent")
-        case "absent" | "foreign":
+        # Nothing of this command's to remove. The last two cannot arrive from
+        # a declared moment's own path at all — they are what a scan of the
+        # directory says about some other path — and are named so the match
+        # stays total rather than because the reading can produce them here.
+        case "absent" | "foreign" | "orphaned" | "retired":
             return state
 
 
@@ -483,4 +555,15 @@ def arm(guards: list[GitGuard], root: Path) -> list[str]:
         except (OSError, GuardConflict, sh.ErrorReturnCode) as error:
             return f"{script.hook} guard not installed: {error}"
 
-    return [armed(script) for script in hook_scripts(guards)]
+    def cleared() -> list[str]:
+        try:
+            return [state.describe() for state in retire_guards(guards, root)]
+        except sh.ErrorReturnCode:
+            # Asking git where the hooks live is the first thing the arming
+            # above did too, so a checkout git cannot read has already said so
+            # once and does not need the same sentence in other words.
+            return []
+        except OSError as error:
+            return [f"retired guard not removed: {error}"]
+
+    return [*[armed(script) for script in hook_scripts(guards)], *cleared()]

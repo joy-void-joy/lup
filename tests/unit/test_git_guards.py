@@ -250,14 +250,16 @@ def test_the_installed_hook_runs_the_drift_check(tmp_path: Path) -> None:
     assert state.path.stat().st_mode & 0o111
 
 
-def test_the_declared_pair_guards_a_commit_and_a_push_at_their_own_paths(
+def test_the_declared_guard_arms_the_commit_moment_and_no_other(
     tmp_path: Path,
 ) -> None:
-    """Two moments, two hooks, each running the command the pipeline runs.
+    """One moment, one hook, running the command the pipeline runs.
 
-    A commit is local and rewritable and a push is neither, so the cheap
-    drift check sits at the first and the whole gate at the second. Arming
-    one is not arming the other, which is what the separate paths prove.
+    What earns a hook is the ratio. Reading the generated artifacts back
+    costs about a second and catches a staleness that would otherwise be
+    written into history, so it is charged to every commit. The whole gate
+    costs two minutes and refuses the same work in CI, where a runner pays
+    for it instead of the person who is still working.
     """
     work = tmp_path / "repo"
     initialized_repo(work, tmp_path / "hooks")
@@ -267,8 +269,8 @@ def test_the_declared_pair_guards_a_commit_and_a_push_at_their_own_paths(
         for state in install_guards(DECLARED_GUARDS, work)
     }
 
+    assert list(installed) == ["pre-commit"]
     assert installed["pre-commit"].endswith(f"exec {DRIFT_COMMAND}\n")
-    assert installed["pre-push"].endswith(f"exec {CHECK_COMMAND}\n")
 
 
 def test_a_hook_armed_under_the_previous_marker_is_still_recognized(
@@ -375,7 +377,11 @@ def test_the_commit_guard_carries_no_standdown(tmp_path: Path) -> None:
 def test_guards_group_into_the_moments_git_runs_them_at() -> None:
     """A moment is the installed unit, because a guard is not what git names."""
     scripts = hook_scripts(
-        [*DECLARED_GUARDS, GitGuard(command="a second commit check")]
+        [
+            GitGuard(),
+            GitGuard(command=CHECK_COMMAND, hook="pre-push"),
+            GitGuard(command="a second commit check"),
+        ]
     )
 
     assert [script.hook for script in scripts] == ["pre-commit", "pre-push"]
@@ -394,7 +400,7 @@ def test_a_moment_with_one_guard_is_the_script_it_was_before_moments_shared() ->
     anything in between, and it means arming a repository that declares one
     guard per moment rewrites nothing when the library learns to share one.
     """
-    body = hook_scripts(DECLARED_GUARDS)[1].body()
+    body = hook_scripts([GitGuard(command=CHECK_COMMAND, hook="pre-push")])[0].body()
 
     assert body.endswith(f"exec {CHECK_COMMAND}\n")
     assert "guarded_stdin" not in body

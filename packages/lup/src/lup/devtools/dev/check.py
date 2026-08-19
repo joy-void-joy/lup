@@ -335,6 +335,11 @@ def run_checks(
         typer.echo(f"git guards: ok ({armed}/{len(hooks.guards)} armed)")
         for state in unarmed:
             typer.echo(f"  {state.describe()}")
+    # The other direction, and just as quiet: git runs whatever is at the path
+    # whether or not anything still declares that moment, so a checkout armed
+    # by an older declaration goes on paying for a guard nobody asks for.
+    for state in hooks.orphaned:
+        typer.echo(f"  {state.describe()}")
     results.append(CheckOutcome(name="git guards", passed=hooks.reachable))
 
     # The same reading the commit hook and the pipeline refuse on, asked here
