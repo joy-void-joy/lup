@@ -16,6 +16,8 @@ from lup.adapters.codex.hooks import (
     APPROVAL_METHODS,
     CodexApprovalResponder,
 )
+from lup.adapters.codex.home import install_declared_policy
+from lup.adapters.codex.login import CODEX_HOME
 from lup.hooks import LupHooksConfig
 from lup.runtime.composition import AcceptedTurn, CompletedTurn, ComposedSession
 from lup.runtime.contracts import (
@@ -606,6 +608,13 @@ class CodexSessionOpener:
     async def open_session(
         self, resume: SessionId | None = None
     ) -> AsyncGenerator[SessionHandle]:
+        # Installed here rather than where the home is named: installing runs
+        # a package manager, and a home is named wherever a request is merely
+        # described. A session that opened without the policy it was meant to
+        # run under is indistinguishable from one running under it, so a
+        # failure is raised rather than warned past.
+        if CODEX_HOME in self.config.environment:
+            install_declared_policy(Path(self.config.environment[CODEX_HOME]))
         server = CodexAppServer(
             self.config.executable,
             arguments=(

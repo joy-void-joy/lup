@@ -28,7 +28,7 @@ wanted; asking for governance it has no way to apply is not.
 from pathlib import Path
 from typing import Literal
 
-from lup.adapters.codex.home import install_declared_policy, select_codex_home
+from lup.adapters.codex.home import select_codex_home
 from lup.adapters.codex.login import CODEX_LOGIN
 from lup.adapters.codex.runtime import (
     CodexMcpServerConfig,
@@ -149,15 +149,13 @@ def codex_workspace_home(environment: EnvVars, workspace: Path) -> EnvVars:
     one underneath a home somebody selected deliberately would run the
     session against a copy of an account rather than the account.
 
-    Whichever home is selected then has this project's own plugin installed
-    into it, because that plugin is where every refusal the project declares
-    is enforced. Only a launcher did this before, so a session an application
-    opened carried no dispatcher at all — and looked exactly like one that
-    carried it.
+    Naming a home is all this does. The project's own plugin is installed
+    into it when a session opens, because installing is a package manager
+    away and naming is asked for wherever a request is merely described —
+    including where a request states something Codex refuses, which has to
+    reach its refusal rather than dying on an install first.
     """
-    home = select_codex_home(None, environment, workspace)
-    install_declared_policy(home.path)
-    return CODEX_LOGIN.environment(home.path)
+    return CODEX_LOGIN.environment(select_codex_home(None, environment, workspace).path)
 
 
 CODEX_RUNTIME = Runtime(
