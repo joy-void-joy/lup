@@ -1,33 +1,44 @@
 """One durable session per actor, opened once and kept while the run moves.
 
-Every resolver turn used to go through :func:`lup.runtime.query.query`, which
-opens a session, takes one turn and closes it. Nine separate symptoms sat
-downstream of that one fact: a park discarded the whole turn, a reviewer
-re-read its concern cold each round, a merger never saw the parent it joined
-last, and the same question was answered four times because each turn
-re-derived it under an id no recorded answer matched.
+A caller reaching for :func:`lup.runtime.query.query` opens a session, takes
+one turn and closes it. Nine separate symptoms sat downstream of that one
+fact in the resolver: a park discarded the whole turn, a reviewer re-read its
+concern cold each round, a merger never saw the parent it joined last, and
+the same question was answered four times because each turn re-derived it
+under an id no recorded answer matched.
 
 An actor here is addressed rather than constructed per turn. It holds its
-session across every turn it takes, drains what it does into the journal as
-it happens, and is reattached after a park from its persisted identity. The
-multi-turn shape is not new — :class:`lup.runtime.background.BackgroundAgent`
-already holds one session open across many turns — the resolver simply
-reached for the one-shot convenience instead.
+session across every turn it takes, drains what it does into a journal as it
+happens, and is reattached after a park from its persisted identity. The
+multi-turn shape is not unusual — :class:`lup.runtime.background.BackgroundAgent`
+already holds one session open across many turns — the one-shot convenience
+was simply the easier reach.
 
 ``query()`` stays in the library. It is the legitimate one-shot convenience
-and ``examples/one_shot.py`` uses it; what changed is that no resolver turn
-calls it.
+and ``examples/one_shot.py`` uses it; what an actor buys over it is being
+reachable while it works.
 """
 
 import asyncio
 import hashlib
 import json
 import logging
+from collections.abc import AsyncIterator
 from contextlib import AsyncExitStack
 from pathlib import Path
+from typing import Protocol
 
 from pydantic import BaseModel, TypeAdapter
 
+from lup.actors.mail import (
+    ActorDelivery,
+    ActorMail,
+    ActorMessage,
+    MailEvent,
+    MessageOutstandingEvent,
+    MessagePostedEvent,
+)
+from lup.actors.refs import ActorRef
 from lup.channels.models import publish_atomic
 from lup.hooks import (
     LupHookInput,
@@ -35,19 +46,13 @@ from lup.hooks import (
     LupHookOutput,
     LupHooksConfig,
 )
-from lup.resolver.journal import (
-    Journal,
-    MessageOutstandingEvent,
-    MessagePostedEvent,
-    record_turn,
-)
-from lup.resolver.mailbox import ActorDelivery, ActorMessage, QuestionMailbox
-from lup.resolver.models import ActorRef
+from lup.journal import JournalRecord
 from lup.runtime.errors import ProviderTurnError
 from lup.runtime.factory import SessionFactory
 from lup.runtime.models import (
     SessionHandle,
     SessionId,
+    TurnEvent,
     TurnHandle,
     TurnRequest,
     TurnResult,
@@ -58,6 +63,29 @@ logger = logging.getLogger(__name__)
 # lup: ignore[constant-declaration] — the run directory's own layout, which a
 # resumed run must spell exactly as the run that wrote it
 SESSION_DIR = "sessions"
+
+
+type ActorEvent = TurnEvent | MailEvent
+"""What this layer puts in a journal: what a turn did, and what mail did to it."""
+
+
+class ActorJournal(Protocol):
+    """Whatever records an actor's events, in the consumer's own vocabulary.
+
+    A protocol rather than a class, because a consumer's journal admits more
+    than this layer ever writes — the resolver's also carries phases, joins
+    and verifications — and what an actor needs is only the narrow verb.
+    Structural, so nothing has to be registered to satisfy it.
+
+    The record comes back rather than nothing because the consumer's journal
+    returns its own entry and a protocol promising ``None`` would refuse it.
+    Nothing here reads the value; naming the shared base is what lets any
+    journal's own entry type satisfy this.
+    """
+
+    def append(self, actor: ActorRef, event: ActorEvent) -> JournalRecord[ActorRef]:
+        """Record one event against the actor that produced it."""
+        ...
 
 
 class ActorSchemaChangedError(RuntimeError):
@@ -80,7 +108,7 @@ class ActorRecord(BaseModel, frozen=True):
     """The digest this actor last used for each submission type it was asked for.
 
     Keyed by type rather than one per actor, because one actor is legitimately
-    asked for more than one: the merger drives a whole join and reports a
+    asked for more than one: a merger drives a whole join and reports a
     `JoinReport`, then adjudicates the finished tree and reports a
     `MergeReport`. A single digest read that second ask as the first schema
     having changed, and refused a conversation whose history is exactly what
@@ -99,6 +127,18 @@ def schema_digest(output_type: type[BaseModel] | type[None] | None) -> str | Non
     return hashlib.sha256(schema.encode("utf-8")).hexdigest()
 
 
+async def record_turn(
+    journal: ActorJournal, actor: ActorRef, events: AsyncIterator[TurnEvent]
+) -> None:
+    """Drain one turn's durable events into the journal as they arrive.
+
+    Taking the durable view rather than the live one keeps the journal a
+    record of what happened rather than of what was being typed.
+    """
+    async for event in events:
+        journal.append(actor, event)
+
+
 class ActorInbox:
     """One conversation's mail, delivered once by whichever path reaches it.
 
@@ -115,16 +155,14 @@ class ActorInbox:
     the position it commits is the one the next turn resumes from.
     """
 
-    def __init__(
-        self, mailbox: QuestionMailbox, journal: Journal, actor: ActorRef
-    ) -> None:
-        self.mailbox = mailbox
+    def __init__(self, mail: ActorMail, journal: ActorJournal, actor: ActorRef) -> None:
+        self.mail = mail
         self.journal = journal
         self.actor = actor
 
     def waiting(self) -> ActorDelivery:
         """What this conversation has queued, without consuming any of it."""
-        return self.mailbox.waiting(self.actor)
+        return self.mail.waiting(self.actor)
 
     def commit(self, delivery: ActorDelivery) -> None:
         """Record one delivery as handed over, and resume after it next time.
@@ -149,7 +187,7 @@ class ActorInbox:
                     redirect=message.redirect,
                 ),
             )
-        self.mailbox.delivered(self.actor, delivery.through)
+        self.mail.delivered(self.actor, delivery.through)
 
     def take(self) -> list[ActorMessage]:
         """Take everything queued, for a caller delivering it here and now."""
@@ -174,8 +212,7 @@ def create_inbox_hooks(inbox: ActorInbox) -> LupHooksConfig:
     Non-cooperative by construction. The actor calls any tool at all and the
     message is in its context — it never chooses to check, so it cannot fail
     to. Waiting for the next turn would mean a directive sits unread for as
-    long as the current one runs, which on a resolver turn is most of the
-    run.
+    long as the current one runs, which on a long turn is most of the run.
 
     Telling and stopping are different acts and get different verdicts. A
     message rides alongside the call and the actor keeps going. A redirect
@@ -188,8 +225,8 @@ def create_inbox_hooks(inbox: ActorInbox) -> LupHooksConfig:
 
     The inbox is the actor's own rather than one opened here, so what this
     delivers the next turn does not deliver again, and what it delivers is
-    recorded. Built from a target of its own, it matched the bare concern id
-    while the console printed and accepted ``worker:some-concern#1`` — so a
+    recorded. Built from a target of its own, it matched the bare id while
+    the console printed and accepted ``worker:some-concern#1`` — so a
     redirect sent to the address the console gave reached neither path.
     """
 
@@ -223,7 +260,7 @@ class ActorSession:
         self,
         actor: ActorRef,
         factory: SessionFactory,
-        journal: Journal,
+        journal: ActorJournal,
         record: ActorRecord | None = None,
         inbox: ActorInbox | None = None,
     ) -> None:
@@ -406,10 +443,10 @@ class ActorSessions:
     job and happens once, at the end of the run or at a park.
     """
 
-    def __init__(self, root: Path, journal: Journal, mailbox: QuestionMailbox) -> None:
+    def __init__(self, root: Path, journal: ActorJournal, mail: ActorMail) -> None:
         self.root = root / SESSION_DIR
         self.journal = journal
-        self.mailbox = mailbox
+        self.mail = mail
         self.sessions: dict[str, ActorSession] = {}
         self.inboxes: dict[str, ActorInbox] = {}
 
@@ -421,13 +458,13 @@ class ActorSessions:
 
         One object per conversation rather than one per caller, because the
         hook that interrupts a live turn and the collection that heads the
-        next one are two views of one mailbox. Handing each its own left
-        them with two positions over one stream, and a message could sit
-        behind both.
+        next one are two views of one stream. Handing each its own left
+        them with two positions over it, and a message could sit behind
+        both.
         """
         held = self.inboxes.get(actor.conversation())  # lup: ignore[dict-get] presence
         if held is None:
-            held = ActorInbox(self.mailbox, self.journal, actor)
+            held = ActorInbox(self.mail, self.journal, actor)
             self.inboxes[actor.conversation()] = held
         held.actor = actor
         return held

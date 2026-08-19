@@ -6,6 +6,7 @@ about the review branch. Recording the answer and completing anyway made the
 question a decision about nothing, so these pin what each ruling does.
 """
 
+from lup.actors.questions import QuestionAnswer
 from lup.resolver.contracts import ResolverRegression
 from lup.resolver.joins import asked_rulings
 from lup.resolver.models import (
@@ -13,7 +14,6 @@ from lup.resolver.models import (
     RECHECK_SUPERSEDED,
     ConcernOutcome,
     MaterialQuestion,
-    QuestionAnswer,
     RecheckRuling,
 )
 

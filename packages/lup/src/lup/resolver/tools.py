@@ -23,15 +23,14 @@ from lup.mcp import LupMcpTool, ToolError, lup_tool
 from lup.policy.assets.host import recoverable_write_targets
 from lup.channels.models import utc_now
 from lup.resolver.declaration import declaration_delta, inspect_changes
-from lup.resolver.mailbox import (
+from lup.actors.mail import ActorMessage
+from lup.actors.mailbox import (
     ANSWER_POLL_SECONDS,
-    ActorMessage,
     AnswerDoor,
     MailboxConflictError,
-    PendingQuestion,
-    QuestionMailbox,
     wait_for_answers,
 )
+from lup.resolver.mailbox import PendingQuestion, QuestionMailbox
 from lup.policy.identity import ConcernAllowance
 from lup.resolver.models import (
     ALLOWANCE_GRANTED,

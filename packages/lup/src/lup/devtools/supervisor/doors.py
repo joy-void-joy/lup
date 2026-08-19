@@ -24,14 +24,14 @@ from lup.resolver.models import (
 )
 from lup.resolver.state import ResolverStateRepository, StateTransitionError
 from lup.resolver.status import RunStatus, run_status
-from lup.resolver.mailbox import (
+from lup.actors.mail import new_message
+from lup.actors.mailbox import (
     AnswerDoor,
     AnswerOffer,
     MailboxConflictError,
     ParkRequest,
-    QuestionMailbox,
-    new_message,
 )
+from lup.resolver.mailbox import QuestionMailbox
 from lup.workspace.paths import project_root
 from lup.devtools.harness.resolve import parse_answer_flags
 from lup.devtools.supervisor.projection import PendingQuestionView

@@ -41,7 +41,7 @@ from lup.resolver.contracts import (
     ResolverObserver,
     WorktreePreparer,
 )
-from lup.resolver.actors import create_inbox_hooks
+from lup.actors.sessions import create_inbox_hooks
 from lup.resolver.core import ASSEMBLY_QUESTION_ID, ResolverCore
 from lup.resolver.journal import Journal
 from lup.resolver.orchestrator import WorktreeOrchestrator
@@ -68,12 +68,12 @@ from lup.resolver.models import (
     WorkerContext,
 )
 from lup.channels.models import local_stamp, utc_now
-from lup.resolver.mailbox import (
+from lup.actors.mailbox import (
     AnswerDoor,
     AnswerOffer,
     MailboxConflictError,
-    QuestionMailbox,
 )
+from lup.resolver.mailbox import QuestionMailbox
 from lup.resolver.tools import (
     RESOLVER_CONCERN_ENV,
     RESOLVER_RUN_DIR_ENV,

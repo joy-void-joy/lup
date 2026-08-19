@@ -7,10 +7,11 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
-from lup.resolver.actors import ActorInbox, ActorRecord, ActorSession
+from lup.actors.mail import ActorMail, new_message
+from lup.actors.mailbox import AnswerDoor
+from lup.actors.refs import ActorRef
+from lup.actors.sessions import ActorInbox, ActorRecord, ActorSession
 from lup.resolver.journal import Journal
-from lup.resolver.mailbox import AnswerDoor, QuestionMailbox, new_message
-from lup.resolver.models import ActorRef
 from lup.runtime.contracts import Session
 from lup.runtime.errors import ProviderTurnError, TurnFailure
 from lup.runtime.factory import SessionFactory
@@ -108,13 +109,13 @@ def mailed_session(
     recording = RecordingSession()
     actor = ActorRef(kind="worker", id="a-concern")
     journal = Journal(tmp_path)
-    inbox = ActorInbox(QuestionMailbox(tmp_path), journal, actor)
+    inbox = ActorInbox(ActorMail(tmp_path), journal, actor)
     session = ActorSession(actor, session_factory(recording), journal, None, inbox)
     return session, inbox, recording
 
 
 def post(tmp_path: Path, text: str) -> None:
-    QuestionMailbox(tmp_path).send(
+    ActorMail(tmp_path).send(
         new_message("run-1", "worker:a-concern#1", text, AnswerDoor.AGENT)
     )
 

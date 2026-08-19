@@ -21,13 +21,9 @@ from lup.policy.models import EditBatch, EditChange
 from lup.policy.rules import EditPolicy, PathRule
 from lup.resolver.grants import GrantLedger, concern_grants
 from lup.resolver.journal import Journal
-from lup.resolver.mailbox import (
-    AnswerDoor,
-    AnswerOffer,
-    ParkRequest,
-    PendingQuestion,
-    QuestionMailbox,
-)
+from lup.actors.mailbox import AnswerDoor, AnswerOffer, ParkRequest
+from lup.actors.questions import QuestionAnswer
+from lup.resolver.mailbox import PendingQuestion, QuestionMailbox
 from lup.resolver.models import (
     INTEGRATION_CONCERN_ID,
     AcceptanceCriterion,
@@ -35,7 +31,6 @@ from lup.resolver.models import (
     ConcernProgress,
     ConcernStatus,
     MaterialQuestion,
-    QuestionAnswer,
     ResolvePhase,
     ResolveState,
     ResolverConfig,
@@ -45,7 +40,7 @@ from lup.resolver.models import (
     WritableRootLease,
     allowance_question_id,
 )
-from lup.resolver.actors import ActorSessions
+from lup.actors.sessions import ActorSessions
 from lup.resolver.questions import QuestionBroker
 from lup.resolver.run import ResolveRun
 from lup.resolver.state import ResolverStateRepository
@@ -194,7 +189,7 @@ def turn_runner(desk: QuestionBroker, recipe: RecordingRecipe) -> TurnRunner:
     return TurnRunner(
         desk.run.require().spec,
         desk.run,
-        ActorSessions(desk.mailbox.root, desk.journal, desk.mailbox),
+        ActorSessions(desk.mailbox.root, desk.journal, desk.mailbox.mail),
         desk.mailbox,
         recipe,
         lambda _worktree: session_factory(IdleSession()),

@@ -24,7 +24,10 @@ from pydantic import BaseModel
 from lup.harness.contracts import SkillInvocationRenderer
 from lup.harness.models import ResolveSpec
 from lup.policy.identity import ConcernAllowance
-from lup.resolver.actors import ActorSession, ActorSessions
+from lup.actors.mailbox import ParkRequest
+from lup.actors.questions import QuestionAnswer
+from lup.actors.refs import ActorRef
+from lup.actors.sessions import ActorSession, ActorSessions
 from lup.resolver.grants import GrantLedger, concern_grants, lease_grants
 from lup.resolver.join_desk import (
     JoinPlan,
@@ -32,14 +35,12 @@ from lup.resolver.join_desk import (
     JoinTip,
 )
 from lup.resolver.join_tools import JoinReport
-from lup.resolver.mailbox import ParkRequest, QuestionMailbox
+from lup.resolver.mailbox import QuestionMailbox
 from lup.resolver.models import (
-    ActorRef,
     CarriedParent,
     Concern,
     DropCandidate,
     MergeReport,
-    QuestionAnswer,
     ReviewReport,
     WorkAssignment,
     WorkerContext,

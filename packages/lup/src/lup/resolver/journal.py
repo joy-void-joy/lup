@@ -15,24 +15,24 @@ logs would have to invent an ordering between them, and knowing what
 actually happened first is the one thing a reader wants from a merged view.
 """
 
-from collections.abc import AsyncIterator
 from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel, TypeAdapter
 
+from lup.actors.mail import MessageOutstandingEvent, MessagePostedEvent
+from lup.actors.questions import QuestionAnswer
+from lup.actors.refs import ActorRef
 from lup.channels.models import utc_now
 from lup.journal import Journal as SharedJournal
 from lup.journal import JournalRecord
 from lup.journal import JournalTail as SharedTail
 from lup.journal import last_record
 from lup.resolver.models import (
-    ActorRef,
     CarriedParent,
     ConcernProgress,
     MaterialQuestion,
-    QuestionAnswer,
     ResolvePhase,
 )
 from lup.runtime.models import TurnEvent
@@ -70,38 +70,6 @@ class AnswerSettledEvent(BaseModel, frozen=True):
     type: Literal["answer_settled"] = "answer_settled"
     answer: QuestionAnswer
     door: str
-
-
-class MessagePostedEvent(BaseModel, frozen=True):
-    """A door volunteered something to an actor, or an actor replied.
-
-    An intervention belongs in the record beside what it interrupted. A
-    reader scrolling one actor's trace sees the moment someone redirected
-    it, in order, against what it was doing — which is the difference
-    between a trace and an audit filed somewhere else.
-    """
-
-    type: Literal["message_posted"] = "message_posted"
-    text: str
-    door: str
-    in_reply_to: str | None = None
-    redirect: bool = False
-
-
-class MessageOutstandingEvent(BaseModel, frozen=True):
-    """A message still queued for an actor whose session is being closed.
-
-    Recorded because the sender was told the message was sent, and the
-    stream alone cannot say whether anyone read it. On a park this is a
-    message that will land at the head of the resumed turn; on a run that
-    ended it is one that reached nobody, and a redirect nobody read is the
-    failure of an operation somebody performed to stop something.
-    """
-
-    type: Literal["message_outstanding"] = "message_outstanding"
-    text: str
-    door: str
-    redirect: bool = False
 
 
 class JoinCompletedEvent(BaseModel, frozen=True):
@@ -365,18 +333,6 @@ class Journal(SharedJournal[ActorRef, JournalEntry]):
     def record(self, event: RunEvent) -> JournalEntry:
         """Record something the run did rather than something an actor did."""
         return self.append(self.run, event)
-
-
-async def record_turn(
-    journal: Journal, actor: ActorRef, events: AsyncIterator[TurnEvent]
-) -> None:
-    """Drain one turn's durable events into the journal as they arrive.
-
-    Taking the durable view rather than the live one keeps the journal a
-    record of what happened rather than of what was being typed.
-    """
-    async for event in events:
-        journal.append(actor, event)
 
 
 def journal_tail(root: Path) -> JournalEntry | None:

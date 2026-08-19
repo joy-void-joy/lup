@@ -23,11 +23,11 @@ from lup.policy.grants import (
     read_allowance_grants,
     write_allowance_grants,
 )
+from lup.actors.questions import QuestionAnswer
 from lup.policy.identity import ConcernAllowance
 from lup.resolver.models import (
     ALLOWANCE_GRANTED,
     ConcernShape,
-    QuestionAnswer,
     allowance_question_id,
 )
 

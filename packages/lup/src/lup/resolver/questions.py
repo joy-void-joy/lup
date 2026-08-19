@@ -22,20 +22,19 @@ from lup.resolver.journal import (
     Journal,
     QuestionAskedEvent,
 )
-from lup.resolver.mailbox import (
+from lup.actors.mailbox import (
     ANSWER_POLL_SECONDS,
     ParkRequest,
-    PendingQuestion,
-    QuestionMailbox,
     RecordedAnswer,
     wait_for_answers,
 )
+from lup.actors.questions import QuestionAnswer
+from lup.resolver.mailbox import PendingQuestion, QuestionMailbox
 from lup.resolver.models import (
     ALLOWANCE_GRANTED,
     AnswerBatch,
     ConcernStatus,
     MaterialQuestion,
-    QuestionAnswer,
     QuestionBatch,
     ResolveState,
     ResolverConfig,

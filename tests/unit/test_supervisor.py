@@ -28,22 +28,18 @@ from lup.harness.models import ResolveSpec, SkillInvocation
 from lup.channels.models import utc_now
 from lup.resolver.journal import Journal, JournalEntry, PhaseChangedEvent, RunEvent
 from lup.runtime.models import TurnEvent
-from lup.resolver.mailbox import (
-    AnswerDoor,
-    PendingQuestion,
-    QuestionMailbox,
-    RecordedAnswer,
-)
+from lup.actors.mailbox import AnswerDoor, RecordedAnswer
+from lup.actors.questions import QuestionAnswer
+from lup.actors.refs import ActorRef
+from lup.resolver.mailbox import PendingQuestion, QuestionMailbox
 from lup.resolver.models import (
     AcceptanceCriterion,
-    ActorRef,
     AnswerBatch,
     Concern,
     ConcernProgress,
     ConcernStatus,
     IntegrationRecord,
     MaterialQuestion,
-    QuestionAnswer,
     QuestionBatch,
     ResolvePhase,
     ResolveState,
