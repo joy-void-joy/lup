@@ -1,6 +1,5 @@
 """Stable per-worktree Codex homes for locally installed harness plugins."""
 
-import hashlib
 import logging
 import shutil
 from datetime import datetime
@@ -14,14 +13,25 @@ from lup.adapters.codex.harness_runtime import CodexPluginInstaller, PluginCache
 from lup.adapters.codex.login import CODEX_LOGIN
 from lup.adapters.codex.marketplace import CodexMarketplace
 from lup.types import EnvVars
-from lup.workspace.paths import project_root
+from lup.workspace.paths import declared_project_root, project_root
 
 
 logger = logging.getLogger(__name__)
 
 
 DEFAULT_ACCOUNT_HOME = Path.home() / ".codex"
-DEFAULT_SCOPED_ROOT = Path.home() / ".lup" / "codex" / "worktrees"
+SCOPED_HOME_DIR = Path(".lup") / "codex-home"
+"""Where a checkout keeps the Codex home its own sessions run under.
+
+Relative, and resolved against the checkout rather than against anything of
+the operator's. An absolute path handed here would resolve to itself for
+every worktree, which is the shared root this replaced.
+
+The directory holds a copy of the account credential, so a checkout that has
+opened a session is credential-bearing. `.lup/` is ignored, so git will not
+carry it; anything reading the tree without consulting git — an archive, a
+build context, an editor index — reads the credential along with the code.
+"""
 # lup: ignore[constant-declaration] — the keys Codex writes its own state under
 CODEX_CONFIG_STATE_KEYS = ("marketplaces", "plugins")
 
@@ -188,16 +198,26 @@ class CodexWorktreeHomeStore:
     def __init__(
         self,
         account_home: Path = DEFAULT_ACCOUNT_HOME,
-        scoped_root: Path = DEFAULT_SCOPED_ROOT,
+        scoped_dir: Path = SCOPED_HOME_DIR,
     ) -> None:
         self.account_home = account_home
-        self.scoped_root = scoped_root
+        self.scoped_dir = scoped_dir
 
     def home_for(self, worktree: Path) -> Path:
-        """Derive a stable home from the canonical worktree path."""
+        """The home belonging to the checkout that encloses one worktree.
+
+        Inside the checkout, because a project's own state is the project's.
+        A checkout is already distinct from every other one, which is what
+        retires the path digest a root shared across projects needed to tell
+        two of them apart — and a worktree named below the root answers with
+        the root's home rather than opening a second one beneath itself.
+
+        A worktree enclosed by no declared project answers for itself. There
+        is no project to hold the home, and the alternative is reaching back
+        outside the tree for somewhere to put it.
+        """
         canonical = worktree.expanduser().resolve()
-        digest = hashlib.sha256(str(canonical).encode("utf-8")).hexdigest()[:12]
-        return self.scoped_root / f"{canonical.name}-{digest}"
+        return (declared_project_root(canonical) or canonical) / self.scoped_dir
 
     def prepare(self, worktree: Path, profile: str | None = None) -> Path:
         """Create a scoped home and seed account files on its first use."""
