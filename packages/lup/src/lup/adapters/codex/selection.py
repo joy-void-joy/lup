@@ -148,6 +148,12 @@ def codex_workspace_home(environment: EnvVars, workspace: Path) -> EnvVars:
     seeds a scoped home by copying credentials into it, so deriving a second
     one underneath a home somebody selected deliberately would run the
     session against a copy of an account rather than the account.
+
+    Naming a home is all this does. The project's own plugin is installed
+    into it when a session opens, because installing is a package manager
+    away and naming is asked for wherever a request is merely described —
+    including where a request states something Codex refuses, which has to
+    reach its refusal rather than dying on an install first.
     """
     return CODEX_LOGIN.environment(select_codex_home(None, environment, workspace).path)
 

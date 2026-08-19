@@ -158,11 +158,13 @@ async def test_whether_a_denied_command_is_refused_by_the_project_hook() -> None
 @pytest.mark.xfail(
     strict=True,
     reason=(
-        "Measured: this session runs a command the policy denies. The scoped "
-        "home `contained()` selects is seeded by `seed_config`, which strips "
-        "account-wide plugin state by design — so no plugin is enabled there, "
-        "the generated dispatcher never loads, and the policy governs no "
-        "session an application opens. Remove this marker with the repair."
+        "Half repaired. The plugin now installs into the scoped home and is "
+        "enabled there, which it was not before. It still does not govern: "
+        "Codex trusts a hook per event and per hash, and the operator's home "
+        "carries trust for `pre_tool_use:0:0` alone, while a shell command is "
+        "gated by `permission_request`. Granting the rest is a decision only "
+        "an operator makes, so the remaining half is not lup's to take "
+        "silently. Remove this marker with that decision."
     ),
 )
 async def test_a_session_opened_the_way_an_application_opens_one() -> None:
