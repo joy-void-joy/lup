@@ -134,6 +134,7 @@ class ClaudeSessionConfig(BaseModel, frozen=True, arbitrary_types_allowed=True):
     coding_harness_preset: bool = True
     tools: list[str] | None = None
     allowed_tools: list[str] = []
+    disallowed_tools: list[str] = []
     tool_servers: dict[str, McpServerEntry] = {}
     permission_mode: ClaudePermissionMode | None = "bypassPermissions"
     max_turns: int | None = None
@@ -957,6 +958,7 @@ def build_claude_options(
         system_prompt=system_prompt,
         tools=config.tools,
         allowed_tools=list(dict.fromkeys(allowed)),
+        disallowed_tools=list(config.disallowed_tools),
         mcp_servers={name: native_server(server) for name, server in servers.items()},
         agents={
             spec.name: claude_types.AgentDefinition(
