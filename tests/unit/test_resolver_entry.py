@@ -8,13 +8,14 @@ import typer
 
 from lup.codescan.markers import NoteKind
 from lup.channels.models import utc_now
-from lup.resolver.mailbox import (
+from lup.actors.mailbox import (
     AnswerDoor,
     AnswerOffer,
     MailboxConflictError,
-    QuestionMailbox,
     RecordedAnswer,
 )
+from lup.actors.questions import QuestionAnswer
+from lup.resolver.mailbox import QuestionMailbox
 from lup.resolver.core import planned_evidence
 from lup.resolver.models import (
     AcceptanceCriterion,
@@ -24,7 +25,6 @@ from lup.resolver.models import (
     InventoryPlanner,
     MaterialQuestion,
     PlannedConcern,
-    QuestionAnswer,
     QuestionBatch,
     ResolveInventory,
     ResolvePhase,

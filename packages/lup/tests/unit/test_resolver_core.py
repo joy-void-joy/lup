@@ -35,13 +35,9 @@ from tests.unit.doubles import (
     session_factory,
     turn_result,
 )
-from lup.resolver.mailbox import (
-    AnswerDoor,
-    AnswerOffer,
-    ParkRequest,
-    PendingQuestion,
-    QuestionMailbox,
-)
+from lup.actors.mailbox import AnswerDoor, AnswerOffer, ParkRequest
+from lup.actors.questions import QuestionAnswer
+from lup.resolver.mailbox import PendingQuestion, QuestionMailbox
 from lup.policy.identity import ConcernAllowance
 from lup.resolver.contracts import (
     ResolverAwaitingAnswers,
@@ -83,7 +79,6 @@ from lup.resolver.models import (
     InventoryNote,
     MaterialQuestion,
     MergeReport,
-    QuestionAnswer,
     QuestionBatch,
     ResolveInventory,
     ResolveRequest,

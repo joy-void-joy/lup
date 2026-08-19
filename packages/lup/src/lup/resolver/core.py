@@ -20,7 +20,9 @@ from lup.resolver.contracts import (
     ResolverRegression,
     WorktreePreparer,
 )
-from lup.resolver.actors import ActorSessions
+from lup.actors.mailbox import ANSWER_POLL_SECONDS
+from lup.actors.refs import ActorRef
+from lup.actors.sessions import ActorSessions
 from lup.resolver.dag import ConcernGraph
 from lup.resolver.execution import ConcernExecutor
 from lup.resolver.grants import GrantLedger
@@ -30,13 +32,9 @@ from lup.resolver.journal import (
     LeaseDriftEvent,
     RunFailedEvent,
 )
-from lup.resolver.mailbox import (
-    ANSWER_POLL_SECONDS,
-    QuestionMailbox,
-)
+from lup.resolver.mailbox import QuestionMailbox
 from lup.resolver.models import (
     INTEGRATION_CONCERN_ID,
-    ActorRef,
     AdmissionRequest,
     AnswerBatch,
     CleanupRecord,
@@ -372,7 +370,9 @@ class ResolverCore:
         )
         self.mailbox = QuestionMailbox(self.repository.root)
         self.journal = Journal(self.repository.root)
-        self.actors = ActorSessions(self.repository.root, self.journal, self.mailbox)
+        self.actors = ActorSessions(
+            self.repository.root, self.journal, self.mailbox.mail
+        )
         self.run_state = ResolveRun(self.repository, self.journal, observer)
         self.rebaser = BaseRefresher(self.run_state, self.worktrees, self.journal)
         self.grants = GrantLedger(self.repository.root)

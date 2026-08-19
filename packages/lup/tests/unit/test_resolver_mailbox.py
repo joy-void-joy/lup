@@ -6,18 +6,18 @@ from pathlib import Path
 
 import pytest
 
-from lup.resolver.mailbox import (
+from lup.actors.mailbox import (
     AnswerDoor,
     AnswerOffer,
     MailboxConflictError,
     MailboxCorruptionError,
     ParkRequest,
-    PendingQuestion,
-    QuestionMailbox,
     RecordedAnswer,
     wait_for_answers,
 )
-from lup.resolver.models import MaterialQuestion, QuestionAnswer
+from lup.actors.questions import QuestionAnswer
+from lup.resolver.mailbox import PendingQuestion, QuestionMailbox
+from lup.resolver.models import MaterialQuestion
 
 EPOCH = datetime(2026, 7, 27, 12, 0, tzinfo=UTC)
 

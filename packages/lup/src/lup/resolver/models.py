@@ -9,66 +9,31 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
 
+from lup.actors.questions import Question, QuestionAnswer
+from lup.actors.refs import ActorRef
 from lup.codescan.symbols import DefinedSymbol
 from lup.harness.models import ResolveSpec
 from lup.policy.grants import LeaseGrants
 from lup.policy.identity import ConcernAllowance
 
 type ActorKind = Literal["worker", "reviewer", "merger", "planner", "run"]
+"""The roles this run addresses, which the resolver validates at its own edge.
+
+The neutral :class:`~lup.actors.refs.ActorRef` leaves ``kind`` open, because a
+closed set underneath every consumer would be every consumer's set at once.
+The closed set that matters *here* is this one, checked where a run builds a
+ref rather than carried in the type it shares with everyone else.
+"""
 
 
-class ActorRef(BaseModel, frozen=True):
-    """Which actor something belongs to.
+def actor(kind: ActorKind, id: str, round: int = 1) -> ActorRef:
+    """Build a ref for one of this run's own roles.
 
-    A round is part of the identity because the same concern's worker is a
-    different actor on round two: it holds a different session, and a reader
-    tracing a decision needs to know which attempt they are looking at.
-
-    Here rather than with the record it attributes, because addressing an
-    actor is not the journal's business alone: the mailbox routes mail by
-    the same identity, and the two disagreeing about what named an actor is
-    what made a redirect reach nobody.
+    The one construction site that names a kind, so the resolver's closed set
+    is enforced by the type checker at every call without the shared record
+    having to know what a resolver role is.
     """
-
-    kind: ActorKind
-    id: str
-    round: int = Field(default=1, ge=1)
-
-    def label(self) -> str:
-        return f"{self.kind}:{self.id}#{self.round}"
-
-    def conversation(self) -> str:
-        """Which session this actor speaks through, which outlives its round.
-
-        Deliberately not the label. A worker on round two is the agent that
-        wrote round one's code and was told what was wrong with it, so the
-        round attributes what happened without forking the conversation —
-        and anything held per conversation, an open session or a delivery
-        position, is keyed by this rather than by the round it is on.
-        """
-        return f"{self.kind}-{self.id}"
-
-    def addresses(self) -> list[str]:
-        """Every spelling a door may use that reaches this actor.
-
-        Recognizing rather than parsing, because the two delivery paths
-        disagreed about what an address was: the console prints and accepts
-        ``worker:some-concern#1`` while the mid-turn hook matched the bare
-        concern id, so a redirect sent to the address the console itself
-        printed reached nobody.
-
-        Earlier rounds are included because they name the same conversation.
-        A worker's second round is the session that took its first, so an
-        operator addressing the label ``actors`` printed a round ago is not
-        addressing a different agent, and nothing they could read would tell
-        them the label had moved on.
-        """
-        return [
-            "",
-            self.id,
-            f"{self.kind}:{self.id}",
-            *(f"{self.kind}:{self.id}#{taken}" for taken in range(1, self.round + 1)),
-        ]
+    return ActorRef(kind=kind, id=id, round=round)
 
 
 class ResolvePhase(StrEnum):
@@ -299,28 +264,23 @@ class AcceptanceCriterion(BaseModel, frozen=True):
     description: str
 
 
-class MaterialQuestion(BaseModel, frozen=True):
-    id: str
+class MaterialQuestion(Question, frozen=True):
+    """A resolver question: the mailbox's shape, plus what the run consults.
+
+    The id, the prompt, the answer domain and the two validators over them
+    are what any door reads, and live on :class:`~lup.actors.questions.Question`.
+    Added here is only what the resolver itself consults — which concern the
+    question belongs to, which edit gates an option would need, and which
+    lost criteria a re-check is about.
+    """
+
     concern_id: str
-    prompt: str
-    choices: list[str] = []
     allowances: list[ConcernAllowance] = Field(
         default=[],
         description=(
             "Every edit gate some choice here would need. An option the "
             "concern has no grant for is an option whose worker is denied, "
             "so naming the gate here is what makes the concern carry it."
-        ),
-    )
-    recommendation: str | None = None
-    closed_choices: bool = Field(
-        default=False,
-        description=(
-            "Whether the choices are the complete answer domain. Planned design "
-            "questions must leave this false: their choices are suggestions, and "
-            "the human may answer in their own words. The gates whose domain "
-            "really is two words close it — integration, and allowance, whose "
-            "reader tests for a literal token and so cannot accept prose."
         ),
     )
     criteria: list[str] = Field(
@@ -331,36 +291,6 @@ class MaterialQuestion(BaseModel, frozen=True):
             "occasions instead of re-asked per join."
         ),
     )
-
-    def restates(self, asked: "MaterialQuestion") -> bool:
-        """Whether this is ``asked`` again, re-rendered from facts that moved.
-
-        An answer binds to the choices, not to the prose around them. The
-        assembly gate names the base it would merge onto and how far behind
-        that base is, and both move while a run is parked — so the gate
-        re-rendering itself is the question staying true, where a moved
-        answer domain would be a different question wearing one id.
-        """
-        return self.model_copy(update={"prompt": asked.prompt}) == asked
-
-    @model_validator(mode="after")
-    def identity_is_path_safe(self) -> "MaterialQuestion":
-        """Each question is one file in the mailbox, so its id is a filename."""
-        if not self.id or Path(self.id).name != self.id:
-            raise ValueError(f"question id {self.id!r} is not a path-safe name")
-        return self
-
-    @model_validator(mode="after")
-    def recommendation_is_a_choice(self) -> "MaterialQuestion":
-        if (
-            self.recommendation is not None
-            and self.choices
-            and self.recommendation not in self.choices
-        ):
-            raise ValueError(
-                f"question {self.id!r} recommendation is not one of its choices"
-            )
-        return self
 
 
 # lup: ignore[constant-declaration] — one of the two words the re-check question
@@ -447,11 +377,6 @@ class QuestionBatch(BaseModel, frozen=True):
         if len(identifiers) != len(dict.fromkeys(identifiers)):
             raise ValueError("question ids must be unique")
         return self
-
-
-class QuestionAnswer(BaseModel, frozen=True):
-    question_id: str
-    value: str
 
 
 class AnswerBatch(BaseModel, frozen=True):

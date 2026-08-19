@@ -10,10 +10,11 @@ printed `redirected worker:research-corpus-retrieval#1`.
 
 from pathlib import Path
 
-from lup.resolver.actors import ActorInbox, create_inbox_hooks
+from lup.actors.mail import ActorMail, new_message
+from lup.actors.mailbox import AnswerDoor
+from lup.actors.refs import ActorRef
+from lup.actors.sessions import ActorInbox, create_inbox_hooks
 from lup.resolver.journal import Journal
-from lup.resolver.mailbox import AnswerDoor, QuestionMailbox, new_message
-from lup.resolver.models import ActorRef
 
 from lup.hooks import LupHookInput
 
@@ -23,11 +24,11 @@ def worker(round_number: int = 1) -> ActorRef:
 
 
 def inbox_for(tmp_path: Path, actor: ActorRef) -> ActorInbox:
-    return ActorInbox(QuestionMailbox(tmp_path), Journal(tmp_path), actor)
+    return ActorInbox(ActorMail(tmp_path), Journal(tmp_path), actor)
 
 
 def post(tmp_path: Path, to: str, text: str, redirect: bool = False) -> None:
-    QuestionMailbox(tmp_path).send(
+    ActorMail(tmp_path).send(
         new_message("run-1", to, text, AnswerDoor.AGENT, redirect=redirect)
     )
 
