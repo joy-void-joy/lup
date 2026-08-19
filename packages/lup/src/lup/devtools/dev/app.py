@@ -126,7 +126,13 @@ def create_dev_app(
     ) -> None:
         """Create or re-attach a git worktree."""
         worktree.create(
-            name, no_sync, no_copy_data, base_branch, relocation_hint, force=force
+            name,
+            no_sync,
+            no_copy_data,
+            base_branch,
+            relocation_hint,
+            force=force,
+            guards=declared().git_guards,
         )
 
     @worktree_app.command("list")
@@ -435,27 +441,28 @@ def create_dev_app(
         which of them the error was about.
         """
         root = project_root()
-        for guard in declared().git_guards:
-            try:
-                state = git_guards_mod.install_guard(guard, root, force=force)
-            except git_guards_mod.GuardConflict as error:
-                typer.echo(str(error), err=True)
-                raise typer.Exit(1) from error
+        try:
+            installed = git_guards_mod.install_guards(
+                declared().git_guards, root, force=force
+            )
+        except git_guards_mod.GuardConflict as error:
+            typer.echo(str(error), err=True)
+            raise typer.Exit(1) from error
+        for state in installed:
             typer.echo(state.describe())
 
     @guard_app.command("status")
     def guard_status_cmd() -> None:
         """Report what this clone refuses, at each moment it declares a hook."""
-        root = project_root()
-        for guard in declared().git_guards:
-            typer.echo(git_guards_mod.read_guard(guard, root).describe())
+        for state in git_guards_mod.read_guards(declared().git_guards, project_root()):
+            typer.echo(state.describe())
 
     @guard_app.command("uninstall")
     def guard_uninstall_cmd() -> None:
         """Remove them, leaving hooks written elsewhere alone."""
-        root = project_root()
-        for guard in declared().git_guards:
-            typer.echo(git_guards_mod.uninstall_guard(guard, root).describe())
+        removed = git_guards_mod.uninstall_guards(declared().git_guards, project_root())
+        for state in removed:
+            typer.echo(state.describe())
 
     # -- check command --
 
