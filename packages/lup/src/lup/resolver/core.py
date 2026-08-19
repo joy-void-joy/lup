@@ -22,7 +22,7 @@ from lup.resolver.contracts import (
 )
 from lup.actors.mailbox import ANSWER_POLL_SECONDS
 from lup.actors.refs import ActorRef
-from lup.actors.sessions import ActorSessions
+from lup.actors.cohort import ActorCohort
 from lup.resolver.dag import ConcernGraph
 from lup.resolver.execution import ConcernExecutor
 from lup.resolver.grants import GrantLedger
@@ -370,8 +370,15 @@ class ResolverCore:
         )
         self.mailbox = QuestionMailbox(self.repository.root)
         self.journal = Journal(self.repository.root)
-        self.actors = ActorSessions(
-            self.repository.root, self.journal, self.mailbox.mail
+        # The run's own ref is the spawner, so a worker telling the humans
+        # something has an address to send it to. It was already constructed
+        # to attribute the run's own journal entries; nothing delivered to it,
+        # so a worker's only route out was a blocking question.
+        self.actors = ActorCohort(
+            self.repository.root,
+            journal=self.journal,
+            mail=self.mailbox.mail,
+            spawner=self.journal.run,
         )
         self.run_state = ResolveRun(self.repository, self.journal, observer)
         self.rebaser = BaseRefresher(self.run_state, self.worktrees, self.journal)

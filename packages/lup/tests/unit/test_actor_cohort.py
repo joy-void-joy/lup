@@ -1,14 +1,102 @@
-"""Reaching an agent whose address did not exist a moment ago.
+"""A population of agents that stays reachable, from inside and from outside.
 
-A cohort's actors are minted as a session goes, so the thing an operator
-types is the only handle anyone has on one. These are written against the
-failure that makes: printing a label the send path then fails to recognize,
-so a message is reported sent and reaches nobody.
+These are written against the failures that make a cohort useless without
+being visibly broken: an agent that cannot be steered because whoever spawned
+it is blocked waiting for it, an address that resolves only in the process
+that minted it, a second round that turns one agent into two, and a message
+meant for the spawner that its siblings eat.
 """
 
+import asyncio
 from pathlib import Path
 
-from lup.actors.cohort import ActorCohort
+import pytest
+from pydantic import BaseModel
+
+from lup.actors.cohort import ActorCohort, ActorRecipe, CohortJournal
+from lup.actors.mail import EVERYONE
+from lup.actors.refs import ActorRef
+from lup.hooks import LupHooksConfig
+from lup.runtime.contracts import Session, Turn
+from lup.runtime.factory import SessionFactory
+from lup.runtime.models import (
+    TurnHandle,
+    TurnInput,
+    TurnRequest,
+    TurnResult,
+    turn_request,
+)
+from tests.unit.doubles import session_factory, turn_result
+
+
+class Finding(BaseModel):
+    """A submission carrying the field a finished spawn is summarized by."""
+
+    summary: str = ""
+
+
+class HeldTurn[T: BaseModel | None](Turn[T]):
+    """A turn that finishes when the test says so, or fails as it was told."""
+
+    def __init__(
+        self,
+        value: TurnResult[T],
+        hold: asyncio.Event | None,
+        fails: Exception | None,
+    ) -> None:
+        self.value = value
+        self.hold = hold
+        self.fails = fails
+
+    async def result(self) -> TurnResult[T]:
+        if self.hold is not None:
+            await self.hold.wait()
+        if self.fails is not None:
+            raise self.fails
+        return self.value
+
+
+class HeldSession(Session):
+    """A session whose turn the test controls, keeping the hooks it opened with.
+
+    Holding the turn open is what lets a test steer a spawn that is still
+    working, which is the whole property `start` exists for.
+    """
+
+    def __init__(
+        self,
+        summary: str = "",
+        hold: asyncio.Event | None = None,
+        fails: Exception | None = None,
+    ) -> None:
+        self.summary = summary
+        self.hold = hold
+        self.fails = fails
+        self.hooks: LupHooksConfig | None = None
+
+    async def start[T: BaseModel | None](
+        self, request: TurnRequest[T]
+    ) -> TurnHandle[T]:
+        output_type = request.output_type
+        if output_type is None or not issubclass(output_type, BaseModel):
+            raise AssertionError("these turns request typed output")
+        output = output_type.model_validate({"summary": self.summary})
+        return TurnHandle[T](turn=HeldTurn(turn_result(output), self.hold, self.fails))
+
+
+def recipe_for(session: HeldSession) -> ActorRecipe:
+    """A recipe that opens one held session and keeps the hooks it is given.
+
+    The hooks are threaded through rather than dropped, because a recipe that
+    ignores them is exactly how an agent ends up looking spawned and reading
+    nothing anyone sends it.
+    """
+
+    def recipe(_actor: ActorRef, hooks: LupHooksConfig) -> SessionFactory:
+        session.hooks = hooks
+        return session_factory(session)
+
+    return recipe
 
 
 def test_a_spawn_is_reached_by_every_spelling_of_the_label_it_printed(
@@ -16,8 +104,8 @@ def test_a_spawn_is_reached_by_every_spelling_of_the_label_it_printed(
 ) -> None:
     """Whatever a reader saw is a handle they can use."""
     cohort = ActorCohort(tmp_path)
-    actor = cohort.address("verifier")
-    cohort.record(actor, "check the drift bound")
+    actor = cohort.actor("verifier")
+    cohort.spawn(actor, "check the drift bound")
 
     printed = cohort.live()[0].address
     assert cohort.reaching(printed) == actor
@@ -28,24 +116,60 @@ def test_a_spawn_is_reached_by_every_spelling_of_the_label_it_printed(
 def test_an_address_nobody_spawned_reaches_nobody(tmp_path: Path) -> None:
     """A miss is a miss rather than the first actor in the store."""
     cohort = ActorCohort(tmp_path)
-    cohort.record(cohort.address("verifier"), "check something")
+    cohort.spawn(cohort.actor("verifier"), "check something")
 
     assert cohort.reaching("verifier:beefbeef") is None
     assert cohort.reaching("") is None
 
 
+def test_a_broadcast_token_names_no_single_agent(tmp_path: Path) -> None:
+    """`*` is every agent, so resolving it to one would deliver to the wrong one."""
+    cohort = ActorCohort(tmp_path)
+    cohort.spawn(cohort.actor("analyst"), "position the claim")
+
+    assert cohort.reaching(EVERYONE) is None
+
+
 def test_two_spawns_of_one_kind_are_told_apart(tmp_path: Path) -> None:
     """The kind is a label, not an identity — a cohort holds many of one."""
     cohort = ActorCohort(tmp_path)
-    first = cohort.address("refuter")
-    second = cohort.address("refuter")
-    cohort.record(first, "attack the lemma")
-    cohort.record(second, "attack the corollary")
+    first = cohort.actor("refuter")
+    second = cohort.actor("refuter")
+    cohort.spawn(first, "attack the lemma")
+    cohort.spawn(second, "attack the corollary")
 
     assert first != second
-    cohort.say(first, "only you", redirect=False)
+    cohort.say(first, "only you")
     assert cohort.outstanding(first) == 1
     assert cohort.outstanding(second) == 0
+
+
+def test_an_id_a_caller_supplies_is_the_address(tmp_path: Path) -> None:
+    """A caller with durable state to name an agent by keeps naming it.
+
+    Which is what lets a restarted run reattach: a minted id would be
+    different on the next process and every persisted session orphaned.
+    """
+    cohort = ActorCohort(tmp_path)
+
+    assert cohort.actor("worker", "some-concern").label() == "worker:some-concern#1"
+    assert cohort.actor("worker", "some-concern") == cohort.actor(
+        "worker", "some-concern"
+    )
+
+
+def test_a_second_round_advances_one_agent_rather_than_adding_another(
+    tmp_path: Path,
+) -> None:
+    """A worker's round two is the agent that took round one, one attempt on."""
+    cohort = ActorCohort(tmp_path)
+    cohort.spawn(cohort.actor("worker", "a-concern"), "first attempt")
+    cohort.spawn(cohort.actor("worker", "a-concern", round=2), "after review")
+
+    assert [member.address for member in cohort.live()] == ["worker:a-concern#2"]
+    assert cohort.reaching("worker:a-concern#1") == cohort.reaching(
+        "worker:a-concern#2"
+    )
 
 
 def test_what_was_sent_is_outstanding_until_it_is_handed_over(
@@ -53,14 +177,14 @@ def test_what_was_sent_is_outstanding_until_it_is_handed_over(
 ) -> None:
     """Accepting a message is not the same as anyone having read it."""
     cohort = ActorCohort(tmp_path)
-    actor = cohort.address("analyst")
-    cohort.record(actor, "position the claim")
+    actor = cohort.actor("analyst")
+    cohort.spawn(actor, "position the claim")
 
-    cohort.say(actor, "the base moved", redirect=False)
+    cohort.say(actor, "the base moved")
     cohort.say(actor, "stop that branch", redirect=True)
     assert cohort.outstanding(actor) == 2
 
-    delivered = cohort.sessions.inbox(actor).take()
+    delivered = cohort.inbox(actor).take()
     assert [message.redirect for message in delivered] == [False, True]
     assert cohort.outstanding(actor) == 0
 
@@ -70,24 +194,24 @@ def test_delivery_is_recorded_against_the_actor_that_received_it(
 ) -> None:
     """A message that reached someone leaves a record saying so."""
     cohort = ActorCohort(tmp_path)
-    actor = cohort.address("computator")
-    cohort.record(actor, "measure the drift")
-    cohort.say(actor, "use exact arithmetic", redirect=False)
+    actor = cohort.actor("computator")
+    cohort.spawn(actor, "measure the drift")
+    cohort.say(actor, "use exact arithmetic")
 
-    cohort.sessions.inbox(actor).take()
+    cohort.inbox(actor).take()
 
-    posted = [entry.event for entry in cohort.journal.for_actor(actor)]
+    posted = [entry.event for entry in CohortJournal(tmp_path).for_actor(actor)]
     assert [event.type for event in posted] == ["message_posted"]
 
 
 def test_a_finished_spawn_sorts_behind_a_running_one(tmp_path: Path) -> None:
     """What is still working is what a reader is looking for."""
     cohort = ActorCohort(tmp_path)
-    done = cohort.address("certifier")
-    working = cohort.address("analyst")
-    cohort.record(done, "search the matrix space")
-    cohort.record(working, "position the result")
-    cohort.finish(done, summary="found a 3x3 witness")
+    done = cohort.actor("certifier")
+    working = cohort.actor("analyst")
+    cohort.spawn(done, "search the matrix space")
+    cohort.spawn(working, "position the result")
+    cohort.roster.finished(done, summary="found a 3x3 witness")
 
     assert [spawn.running for spawn in cohort.live()] == [True, False]
     assert cohort.live()[1].summary == "found a 3x3 witness"
@@ -96,6 +220,144 @@ def test_a_finished_spawn_sorts_behind_a_running_one(tmp_path: Path) -> None:
 def test_finishing_an_address_nobody_recorded_is_ignored(tmp_path: Path) -> None:
     """A stray completion is not a reason to invent a spawn."""
     cohort = ActorCohort(tmp_path)
-    cohort.finish(cohort.address("analyst"), summary="never started")
+    cohort.roster.finished(cohort.actor("analyst"), summary="never started")
 
     assert cohort.live() == []
+
+
+def test_a_process_that_spawned_nothing_reaches_what_another_one_did(
+    tmp_path: Path,
+) -> None:
+    """The door steering a spawn is usually not the process that made it.
+
+    An in-memory registry answered only for its own process, so a console in
+    another terminal — and a run resumed after a park — saw an empty cohort
+    and reported every address as unknown.
+    """
+    spawning = ActorCohort(tmp_path)
+    actor = spawning.actor("refuter")
+    spawning.spawn(actor, "attack the bound")
+
+    outside = ActorCohort(tmp_path)
+
+    assert outside.reaching(actor.label()) == actor
+    assert [member.task for member in outside.live()] == ["attack the bound"]
+
+
+def test_the_spawner_is_an_address_its_agents_can_reach(tmp_path: Path) -> None:
+    """A member's report goes to whoever spawned it, and to no sibling.
+
+    Addressed to the humans by leaving the target blank, it used to match
+    every actor's own address list — so it was delivered into the siblings'
+    context, consumed there, and never seen by a person at all.
+    """
+    cohort = ActorCohort(tmp_path)
+    sibling = cohort.actor("worker", "other-concern")
+    cohort.spawn(sibling, "do the other thing")
+
+    cohort.tell_spawner("I could not remove my own scratch file")
+
+    assert [message.text for message in cohort.heard().messages] == [
+        "I could not remove my own scratch file"
+    ]
+    assert cohort.outstanding(sibling) == 0
+
+
+def test_a_broadcast_reaches_every_member_including_a_later_one(
+    tmp_path: Path,
+) -> None:
+    """One record rather than a fan-out, so a spawn made afterwards still reads it."""
+    cohort = ActorCohort(tmp_path)
+    early = cohort.actor("analyst")
+    cohort.spawn(early, "position the claim")
+
+    cohort.say_all("the base moved under all of you")
+
+    late = cohort.actor("refuter")
+    cohort.spawn(late, "attack it")
+
+    assert cohort.outstanding(early) == 1
+    assert cohort.outstanding(late) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_started_agent_leaves_its_caller_free_to_steer_it(
+    tmp_path: Path,
+) -> None:
+    """The whole point of starting rather than asking.
+
+    A caller blocked inside an awaited call cannot make another, so a cohort
+    of awaited spawns has steering tools that can never fire. Here the caller
+    keeps its turn and redirects what it just started.
+    """
+    cohort = ActorCohort(tmp_path)
+    actor = cohort.actor("refuter")
+    working = asyncio.Event()
+    session = HeldSession(summary="attacked", hold=working)
+
+    cohort.start(
+        actor, turn_request(TurnInput(text="attack it"), Finding), recipe_for(session)
+    )
+
+    assert [member.running for member in cohort.live()] == [True]
+    cohort.say(actor, "that branch is closed", redirect=True)
+    assert cohort.outstanding(actor) == 1
+
+    working.set()
+    await cohort.wait_all()
+
+    assert [member.running for member in cohort.live()] == [False]
+    assert cohort.live()[0].summary == "attacked"
+
+
+@pytest.mark.asyncio
+async def test_an_asked_agent_records_what_it_found(tmp_path: Path) -> None:
+    """The awaited path leaves the same record the started one does."""
+    cohort = ActorCohort(tmp_path)
+    actor = cohort.actor("analyst")
+    session = HeldSession(summary="the bound holds")
+
+    result = await cohort.ask(
+        actor, turn_request(TurnInput(text="check it"), Finding), recipe_for(session)
+    )
+
+    assert result.output is not None and result.output.summary == "the bound holds"
+    assert [member.summary for member in cohort.live()] == ["the bound holds"]
+    assert [member.running for member in cohort.live()] == [False]
+
+
+@pytest.mark.asyncio
+async def test_a_failed_agent_records_why_rather_than_vanishing(
+    tmp_path: Path,
+) -> None:
+    """A spawn that died is a spawn whose reader can find out that it died."""
+    cohort = ActorCohort(tmp_path)
+    actor = cohort.actor("formalizer")
+    session = HeldSession(fails=RuntimeError("the toolchain is degraded"))
+
+    with pytest.raises(RuntimeError):
+        await cohort.ask(
+            actor,
+            turn_request(TurnInput(text="formalize it"), Finding),
+            recipe_for(session),
+        )
+
+    assert cohort.live()[0].error == "the toolchain is degraded"
+    assert cohort.live()[0].running is False
+
+
+@pytest.mark.asyncio
+async def test_a_spawn_is_handed_the_hooks_that_reach_it(tmp_path: Path) -> None:
+    """The wiring the cohort owns, so a recipe cannot forget it.
+
+    Delivery works only if the hook is in the options the session opened
+    with. A caller that had to fetch it could write a recipe once without
+    it, producing an agent that looks addressed and reads nothing.
+    """
+    cohort = ActorCohort(tmp_path)
+    session = HeldSession()
+
+    cohort.session(cohort.actor("analyst"), recipe_for(session))
+
+    assert session.hooks is not None
+    assert [matcher.tag for matcher in session.hooks.pre_tool_use] == ["inbox"]

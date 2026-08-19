@@ -41,7 +41,6 @@ from lup.resolver.contracts import (
     ResolverObserver,
     WorktreePreparer,
 )
-from lup.actors.sessions import create_inbox_hooks
 from lup.resolver.core import ASSEMBLY_QUESTION_ID, ResolverCore
 from lup.resolver.journal import Journal
 from lup.resolver.orchestrator import WorktreeOrchestrator
@@ -62,6 +61,7 @@ from lup.resolver.models import (
     ResolvePhase,
     ResolveRequest,
     ResolverConfig,
+    ReviewerContext,
     RunTally,
     SourceSnapshot,
     VerificationCommand,
@@ -1654,13 +1654,14 @@ def run_resolve(
             a sibling. ``core`` is read at call time, which is after it is
             built — the wake event only exists once the core does.
 
-            The inbox is the run's own for this actor, not a second reader
-            opened here. Two readers over one message stream each began at
-            whatever its head was when they were made, so a message posted
-            while a turn was in flight sat behind both of them.
+            The delivery hooks arrive in the context rather than being
+            fetched here. They are the run's own inbox for this actor, and
+            opening a second reader over one message stream gave the two
+            positions that each began at whatever the head was when they were
+            made — so a message posted while a turn was in flight sat behind
+            both of them.
             """
             cwd = context.root
-            inbox = core.actors.inbox(context.actor)
             tool_context = ResolverToolContext(
                 run_dir=state_root / resolved_run_id,
                 concern_id=context.concern_id,
@@ -1729,7 +1730,7 @@ def run_resolve(
                                 ),
                                 create_git_inspection_hook(),
                             ),
-                            create_inbox_hooks(inbox),
+                            context.hooks,
                         ),
                     )
                 )
@@ -1753,7 +1754,7 @@ def run_resolve(
                             CODEX_SEMANTICS,
                             codex_worker_sandbox,
                         ),
-                        create_inbox_hooks(inbox),
+                        context.hooks,
                     ),
                     environment=concern_environment,
                     mcp_servers={
@@ -1772,7 +1773,13 @@ def run_resolve(
                 )
             )
 
-        def reviewer_factory(cwd: Path) -> SessionFactory:
+        def reviewer_factory(context: ReviewerContext) -> SessionFactory:
+            # A reviewer takes the same mail every other actor does. It used
+            # to take none, being the one kind whose recipe was handed a bare
+            # path, so the actor best placed to use a late fact — a criterion
+            # already settled elsewhere, a base that moved under the tree it
+            # is judging — was the one nobody could tell.
+            cwd = context.root
             if adapter == "claude":
                 return create_claude_session_factory(
                     ClaudeSessionConfig(
@@ -1786,14 +1793,18 @@ def run_resolve(
                         environment=isolated_claude_environment(
                             reviewer_environment, cwd
                         ),
-                        hooks=create_permission_hooks([], [cwd]),
+                        hooks=merge_hooks(
+                            create_permission_hooks([], [cwd]), context.hooks
+                        ),
                     )
                 )
             return create_codex_session_factory(
                 CodexSessionConfig(
                     model=session_model,
                     approval_policy="on-request",
-                    hooks=create_permission_hooks([], [cwd]),
+                    hooks=merge_hooks(
+                        create_permission_hooks([], [cwd]), context.hooks
+                    ),
                     developer_instructions=(
                         "Independently review the persisted resolver change."
                     ),

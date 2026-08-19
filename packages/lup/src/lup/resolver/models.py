@@ -13,6 +13,7 @@ from lup.actors.questions import Question, QuestionAnswer
 from lup.actors.refs import ActorRef
 from lup.codescan.symbols import DefinedSymbol
 from lup.harness.models import ResolveSpec
+from lup.hooks import LupHooksConfig
 from lup.policy.grants import LeaseGrants
 from lup.policy.identity import ConcernAllowance
 
@@ -628,6 +629,26 @@ class WorkerContext(BaseModel, frozen=True, arbitrary_types_allowed=True):
     session runs has no other way to reach it, and one they take back has no
     other way to stop applying. The document it names is the same one the
     lease's own deployed dispatcher reads."""
+    hooks: LupHooksConfig = Field(default_factory=LupHooksConfig)
+    """The mid-turn delivery this session must open with, handed over rather
+    than fetched. Delivery works only if the hook is in the options the
+    session is built from, so a recipe that had to remember to go and get it
+    could be written once without it — producing a worker that looks addressed
+    and reads nothing anyone sends it."""
+
+
+class ReviewerContext(BaseModel, frozen=True, arbitrary_types_allowed=True):
+    """What one reading session needs: the tree it judges, and its own mail.
+
+    A reviewer once took only a path, which is why it was the one actor kind
+    nobody could say anything to. Judging is where a fact arriving late is
+    most worth having — a criterion already checked elsewhere, a base that
+    moved under the tree — so it carries the same delivery every other actor
+    does.
+    """
+
+    root: Path
+    hooks: LupHooksConfig = Field(default_factory=LupHooksConfig)
 
 
 class WorkerReport(BaseModel, frozen=True, extra="forbid"):

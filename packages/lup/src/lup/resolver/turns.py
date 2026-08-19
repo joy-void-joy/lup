@@ -23,11 +23,13 @@ from pydantic import BaseModel
 
 from lup.harness.contracts import SkillInvocationRenderer
 from lup.harness.models import ResolveSpec
+from lup.hooks import LupHooksConfig
 from lup.policy.identity import ConcernAllowance
 from lup.actors.mailbox import ParkRequest
 from lup.actors.questions import QuestionAnswer
 from lup.actors.refs import ActorRef
-from lup.actors.sessions import ActorSession, ActorSessions
+from lup.actors.cohort import ActorCohort
+from lup.actors.sessions import ActorSession
 from lup.resolver.grants import GrantLedger, concern_grants, lease_grants
 from lup.resolver.join_desk import (
     JoinPlan,
@@ -41,6 +43,7 @@ from lup.resolver.models import (
     Concern,
     DropCandidate,
     MergeReport,
+    ReviewerContext,
     ReviewReport,
     WorkAssignment,
     WorkerContext,
@@ -54,7 +57,7 @@ from lup.runtime.models import TurnInput, turn_request
 from lup.runtime.wrappers import CorrectionConfig, decorated_session_factory
 
 type WorkerFactoryRecipe = Callable[[WorkerContext], SessionFactory]
-type ReviewerFactoryRecipe = Callable[[Path], SessionFactory]
+type ReviewerFactoryRecipe = Callable[[ReviewerContext], SessionFactory]
 
 
 def corrective[T](
@@ -78,7 +81,19 @@ def corrective[T](
 ASK_PREAMBLE = (
     "When a decision is not yours to make, ask through the resolver's question "
     "tools — queue_questions, await_answers, ask_questions — rather than "
-    "guessing or ending your turn to report it. " + WAIT_CONTRACT
+    "guessing or ending your turn to report it. " + WAIT_CONTRACT + " "
+    # Naming the other half of the channel, because a worker told only about
+    # questions uses questions for everything. Two workers in one run parked
+    # on housekeeping — a stray temp file, a broken venv — each spending a
+    # human round trip on something that carried no decision, while the tool
+    # that says a thing without stopping was in their toolset all along and
+    # in none of their instructions.
+    "When what you have is not a decision — something you found that whoever "
+    "merges your work should know, or something blocking you that a human "
+    "would simply fix, like a gate that refused you or a file you cannot "
+    "remove — use send_message instead. It reaches the humans watching, it "
+    "never parks you, and it costs nobody a round trip. Reserve questions for "
+    "what genuinely cannot proceed until somebody decides."
 )
 
 # lup: ignore[constant-declaration] — one instruction every worker prompt states
@@ -227,7 +242,7 @@ class TurnRunner:
         self,
         spec: ResolveSpec,
         run: ResolveRun,
-        actors: ActorSessions,
+        actors: ActorCohort,
         mailbox: QuestionMailbox,
         worker_factory: WorkerFactoryRecipe,
         reviewer_factory: ReviewerFactoryRecipe,
@@ -261,21 +276,24 @@ class TurnRunner:
         reader had already seen would take it away — and be reported as the
         withdrawal it is indistinguishable from.
         """
-        return self.actors.session(
-            actor,
-            self.worker_factory(
+
+        def recipe(opened: ActorRef, hooks: LupHooksConfig) -> SessionFactory:
+            """Configure this worker's session around the mail that reaches it."""
+            return self.worker_factory(
                 WorkerContext(
                     root=root,
-                    concern_id=actor.id,
-                    actor=actor,
+                    concern_id=opened.id,
+                    actor=opened,
                     grants=self.grants.lease(
-                        actor.id,
-                        lease_grants(actor.id, allowances, self.recorded_answers()),
+                        opened.id,
+                        lease_grants(opened.id, allowances, self.recorded_answers()),
                         self.park_lease,
                     ),
+                    hooks=hooks,
                 )
-            ),
-        )
+            )
+
+        return self.actors.session(actor, recipe)
 
     def recorded_answers(self) -> list[QuestionAnswer]:
         """Every answer this run has settled, from the record that settles them.
@@ -294,7 +312,12 @@ class TurnRunner:
 
     def reviewer_session(self, actor: ActorRef, worktree: Path) -> ActorSession:
         """One reading actor's session, opened over the tree it judges."""
-        return self.actors.session(actor, self.reviewer_factory(worktree))
+        return self.actors.session(
+            actor,
+            lambda _opened, hooks: self.reviewer_factory(
+                ReviewerContext(root=worktree, hooks=hooks)
+            ),
+        )
 
     def worker_invocation(self) -> str:
         """The rendered call for this run's declared worker skill."""

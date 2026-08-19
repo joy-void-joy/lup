@@ -40,7 +40,7 @@ from lup.resolver.models import (
     WritableRootLease,
     allowance_question_id,
 )
-from lup.actors.sessions import ActorSessions
+from lup.actors.cohort import ActorCohort
 from lup.resolver.questions import QuestionBroker
 from lup.resolver.run import ResolveRun
 from lup.resolver.state import ResolverStateRepository
@@ -189,10 +189,15 @@ def turn_runner(desk: QuestionBroker, recipe: RecordingRecipe) -> TurnRunner:
     return TurnRunner(
         desk.run.require().spec,
         desk.run,
-        ActorSessions(desk.mailbox.root, desk.journal, desk.mailbox.mail),
+        ActorCohort(
+            desk.mailbox.root,
+            journal=desk.journal,
+            mail=desk.mailbox.mail,
+            spawner=desk.journal.run,
+        ),
         desk.mailbox,
         recipe,
-        lambda _worktree: session_factory(IdleSession()),
+        lambda _context: session_factory(IdleSession()),
         LiteralRenderer(),
         desk.grants,
     )
