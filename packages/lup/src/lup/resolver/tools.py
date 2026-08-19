@@ -24,6 +24,7 @@ from lup.policy.assets.host import recoverable_write_targets
 from lup.channels.models import utc_now
 from lup.resolver.declaration import declaration_delta, inspect_changes
 from lup.actors.mail import ActorMessage
+from lup.actors.refs import ActorRef
 from lup.actors.mailbox import (
     ANSWER_POLL_SECONDS,
     AnswerDoor,
@@ -229,8 +230,9 @@ class SendMessageInput(BaseModel):
     to_actor: str = Field(
         default="",
         description=(
-            "Actor label to address, like 'worker:some-concern#1'. Leave empty "
-            "to reach everyone watching."
+            "Actor label to address, like 'worker:some-concern#1'. Leave it "
+            "out to reach the humans watching this run, which is what you "
+            "want unless you are answering another actor by name."
         ),
     )
     in_reply_to: str = Field(
@@ -381,17 +383,30 @@ def create_question_tools(
     @lup_tool(
         "Tell the humans watching this run — or one other actor in it — "
         "something, without waiting for a reply. Use this to volunteer what "
-        "you have found, flag a consequence for whoever merges your work, or "
-        "answer something you were asked, naming the actor that asked. This "
-        "never blocks and never parks the run — if you need a decision before "
-        "you can continue, that is a question, not a message.",
+        "you have found, flag a consequence for whoever merges your work, "
+        "answer something you were asked by naming the actor that asked, or "
+        "say that you are stuck on something that is not a decision: a gate "
+        "that refused you, a file you cannot remove, an environment you "
+        "cannot repair.\n\n"
+        "That last case is worth naming, because the alternative is worse. A "
+        "question parks you until a human answers it, so raising one over "
+        "housekeeping spends your turn and their attention on something that "
+        "was never a decision. Say it here instead and keep working on "
+        "whatever does not depend on it.\n\n"
+        "This never blocks and never parks the run — if you genuinely need a "
+        "decision before you can continue, that is a question, not a message.",
         name="send_message",
     )
     async def send_message(params: SendMessageInput) -> SendMessageOutput:
+        # An unaddressed message goes to the run, which is the address the
+        # humans read. It used to go out with a blank target, which every
+        # actor's own address list matched — so a worker's report to the
+        # humans was delivered into its siblings' context, consumed there,
+        # and shown on no surface a person looks at.
         mailbox.send(
             ActorMessage(
                 run_id=run_id,
-                to_actor=params.to_actor,
+                to_actor=params.to_actor or ActorRef(kind="run", id=run_id).label(),
                 text=params.text,
                 door=AnswerDoor.AGENT,
                 sent_at=utc_now(),

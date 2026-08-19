@@ -10,7 +10,7 @@ printed `redirected worker:research-corpus-retrieval#1`.
 
 from pathlib import Path
 
-from lup.actors.mail import ActorMail, new_message
+from lup.actors.mail import EVERYONE, ActorMail, new_message
 from lup.actors.mailbox import AnswerDoor
 from lup.actors.refs import ActorRef
 from lup.actors.sessions import ActorInbox, create_inbox_hooks
@@ -89,12 +89,32 @@ def test_the_reported_run_replayed_end_to_end(tmp_path: Path) -> None:
 
 def test_reading_what_is_waiting_does_not_consume_it(tmp_path: Path) -> None:
     """Asking whether anything was read cannot be what makes it disappear."""
-    post(tmp_path, "", "everyone stop")
+    post(tmp_path, EVERYONE, "everyone stop")
     inbox = inbox_for(tmp_path, worker())
 
     assert [message.text for message in inbox.waiting().messages] == ["everyone stop"]
     assert [message.text for message in inbox.take()] == ["everyone stop"]
     assert inbox.waiting().messages == []
+
+
+def test_a_message_addressed_to_everyone_reaches_an_actor(tmp_path: Path) -> None:
+    """Broadcasting stays one record every actor matches, by an explicit token."""
+    post(tmp_path, EVERYONE, "the base moved")
+
+    assert [
+        message.text for message in inbox_for(tmp_path, worker()).waiting().messages
+    ] == ["the base moved"]
+
+
+def test_a_message_addressed_to_nobody_reaches_nobody(tmp_path: Path) -> None:
+    """A blank target is a target somebody left out, not a target of everyone.
+
+    It used to be the broadcast address, which put a worker's report to the
+    humans into every sibling's context and nowhere a person could read it.
+    """
+    post(tmp_path, "", "meant for whoever is watching")
+
+    assert inbox_for(tmp_path, worker()).waiting().messages == []
 
 
 def test_the_label_the_console_prints_reaches_the_actor() -> None:
@@ -105,7 +125,7 @@ def test_the_label_the_console_prints_reaches_the_actor() -> None:
     assert "worker:a-concern#1" in actor.addresses()
     assert "worker:a-concern" in actor.addresses()
     assert "a-concern" in actor.addresses()
-    assert "" in actor.addresses()
+    assert "" not in actor.addresses()
 
 
 def test_a_label_from_an_earlier_round_still_reaches_the_conversation(

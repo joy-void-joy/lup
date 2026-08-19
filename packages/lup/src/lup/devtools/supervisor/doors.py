@@ -24,7 +24,7 @@ from lup.resolver.models import (
 )
 from lup.resolver.state import ResolverStateRepository, StateTransitionError
 from lup.resolver.status import RunStatus, run_status
-from lup.actors.mail import new_message
+from lup.actors.mail import EVERYONE, new_message
 from lup.actors.mailbox import (
     AnswerDoor,
     AnswerOffer,
@@ -98,6 +98,8 @@ def queued(run_id: str, to: str) -> list[str]:
     read it. Not a refusal: a message may legitimately be posted for a
     concern that has not started, and it waits at that actor's first turn.
     """
+    if to == EVERYONE:
+        return ["queued for every actor in this run, including ones not yet started"]
     reached = [
         actor
         for actor in Journal(resolve_state_root() / run_id).actors()
@@ -105,8 +107,8 @@ def queued(run_id: str, to: str) -> list[str]:
     ]
     if not reached:
         return [
-            f"queued for {to or 'every actor'}, which names no actor this run "
-            "has recorded yet; it waits until one by that address takes a turn",
+            f"queued for {to!r}, which names no actor this run has recorded "
+            "yet; it waits until one by that address takes a turn",
         ]
     return [
         f"queued for {actor.label()}; it arrives at that actor's next tool call or turn"
@@ -205,11 +207,23 @@ def list_actors(
     # zero — indistinguishable from a real run that has not started, and the
     # answer a sibling worktree with no `.lup` at all gave for every id.
     mailbox = open_mailbox(run_id)
-    actors = Journal(resolve_state_root() / run_id).actors()
+    journal = Journal(resolve_state_root() / run_id)
+    actors = journal.actors()
     if not actors:
         typer.echo("No actor has recorded anything yet.")
         return
+    # What the run itself has been told, first, because it is addressed to
+    # whoever is reading this. A worker's report used to go out unaddressed,
+    # which every actor matched and consumed, so the one message meant for a
+    # person was the one no surface showed.
+    told = mailbox.waiting(journal.run).messages
+    if told:
+        typer.echo(f"{journal.run.label()} — said to you by this run's actors:")
+        for message in told:
+            typer.echo(f"  {message.text}")
     for actor in actors:
+        if actor == journal.run:
+            continue
         typer.echo(actor.label())
         waiting = mailbox.waiting(actor)
         for message in waiting.messages:
@@ -222,7 +236,9 @@ def say_to_actor(
     text: str = typer.Argument(..., help="What to tell the actor"),
     run_id: str = typer.Option(..., "--run-id", help="Run whose mailbox to write"),
     to: str = typer.Option(
-        "", "--to", help="Actor label from `actors`, or empty to reach every actor"
+        EVERYONE,
+        "--to",
+        help="Actor label from `actors`; the default reaches every actor",
     ),
     in_reply_to: str = typer.Option(
         "", "--in-reply-to", help="Question or message id this answers, if any"
@@ -271,7 +287,9 @@ def redirect_actor(
     text: str = typer.Argument(..., help="What the actor should do instead"),
     run_id: str = typer.Option(..., "--run-id", help="Run whose mailbox to write"),
     to: str = typer.Option(
-        "", "--to", help="Actor label from `actors`, or empty to reach every actor"
+        EVERYONE,
+        "--to",
+        help="Actor label from `actors`; the default reaches every actor",
     ),
 ) -> None:
     """Stop an actor and put it on something else.
