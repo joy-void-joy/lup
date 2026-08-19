@@ -10,8 +10,11 @@ import jwt
 import tomlkit
 from pydantic import BaseModel, ValidationError
 
+from lup.adapters.codex.harness_runtime import CodexPluginInstaller, PluginCacheConfig
 from lup.adapters.codex.login import CODEX_LOGIN
+from lup.adapters.codex.marketplace import CodexMarketplace
 from lup.types import EnvVars
+from lup.workspace.paths import project_root
 
 
 logger = logging.getLogger(__name__)
@@ -240,3 +243,31 @@ def select_codex_home(
         path=active_store.prepare(worktree, profile),
         isolated=True,
     )
+
+
+def install_declared_policy(
+    home: Path, root: Path | None = None
+) -> CodexMarketplace | None:
+    """Install the project's own plugin into one home, and say which it was.
+
+    The half ``sanitized_codex_config`` promises and nothing performed for a
+    session. Stripping account-wide plugin state is right — a scoped home
+    should install its own against a verified digest — but a home that then
+    installs nothing carries no dispatcher, and every refusal the project
+    declares goes unenforced with nothing saying so.
+
+    Failure is raised rather than warned past. A session that opened without
+    the policy it was meant to run under is indistinguishable from one running
+    under it, which is the property that made this worth finding.
+    """
+    project = root or project_root()
+    declared = CodexMarketplace.declared(project)
+    if declared is None:
+        return None
+    installer = CodexPluginInstaller(
+        PluginCacheConfig(
+            codex_home=home, marketplace=declared.name, plugin=declared.plugin
+        )
+    )
+    installer.ensure(declared.source, project)
+    return declared
