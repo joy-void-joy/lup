@@ -3,12 +3,21 @@
 Codex decides autonomy with a sandbox rather than a permission mode over
 tools: this adapter drives the app-server, whose approval channel it does not
 implement, so a request is honoured by bounding what a session may reach
-instead of by asking. Three fields have no Codex spelling and are refused
-rather than dropped — ``tools`` and ``allowed_tools``, which have no
-app-server equivalent, and ``hooks``, which Codex governs through the policy
-dispatcher its harness tree installs rather than per session. A caller that
-set one asked for something this runtime cannot do, and silence there would
-be a session running with less governance than it requested.
+instead of by asking. Four fields have no Codex spelling and are refused
+rather than dropped — ``tools``, ``allowed_tools`` and ``disallowed_tools``,
+which have no app-server equivalent, and ``hooks``, which Codex governs
+through the policy dispatcher its harness tree installs rather than per
+session. A caller that set one asked for something this runtime cannot do,
+and silence there would be a session running with less governance than it
+requested.
+
+``disallowed_tools`` is refused despite the dispatcher being able to deny a
+tool it can match, because that dispatcher is installed once per harness tree
+and this field is asked per session: honouring it there would give every
+session in the project a refusal one of them asked for. A block list is also
+the field where silence costs most — a roster that came out too wide fails
+visibly, where a refusal that was dropped leaves the tool callable and
+nothing saying so.
 
 ``effort`` is narrowed rather than refused: Codex's ladder ends at ``xhigh``,
 so a request for ``max`` opens at that ceiling. Asking to think as hard as
@@ -97,6 +106,7 @@ def codex_config(request: SessionRequest) -> CodexSessionConfig:
         for name, asked in (
             ("tools", request.tools is not None),
             ("allowed_tools", bool(request.allowed_tools)),
+            ("disallowed_tools", bool(request.disallowed_tools)),
             ("hooks", request.hooks is not None),
         )
         if asked
