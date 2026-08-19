@@ -1,4 +1,4 @@
-"""Private per-session configuration homes derived under a shared one.
+"""Private per-session configuration homes, kept in the checkout they serve.
 
 A provider CLI reads its configuration document at startup and writes it
 back, and nothing about that exchange is atomic. Sessions opened together
@@ -14,12 +14,20 @@ and stored login the selected profile already carries — the login most of
 all, since a refresh rotates the token and one copy of it going stale
 invalidates the rest. Only the entries a runtime names unshareable are real
 files in the derived home, and a runtime that names none shares everything.
+
+Where the homes live and what they point at are two separate questions. They
+live in the checkout, because they are this project's own state and the
+shared home is an account's. They point back at that account, because a
+login is the account's and copying it is what a rotation invalidates. The
+symlink is what lets both answers stand at once.
 """
 
 import hashlib
 from pathlib import Path
 
 from pydantic import BaseModel
+
+from lup.workspace.paths import declared_project_root
 
 
 class SessionHomeLayout(BaseModel, frozen=True):
@@ -30,10 +38,14 @@ class SessionHomeLayout(BaseModel, frozen=True):
     their own. Named by the runtime that spells them, because which file a
     startup rewrites is that runtime's own fact and no portable one."""
 
-    derived_dir: str = ".lup-sessions"
-    """Where under the shared home the derived homes are kept. Dot-prefixed
-    and lup-named so it cannot collide with a directory the runtime itself
-    keeps there."""
+    derived_dir: Path = Path(".lup") / "sessions"
+    """Where under the checkout the derived homes are kept.
+
+    In the checkout, not under the shared home. A derived home is lup's own
+    state, while the shared home belongs to whoever the profile selected —
+    by default the operator's account, which a project has no business
+    writing into. Relative, and resolved against the checkout: an absolute
+    path would resolve to itself for every workspace."""
 
 
 class SessionHomes:
@@ -43,9 +55,16 @@ class SessionHomes:
         self.shared = shared
         self.layout = layout
 
-    def root(self) -> Path:
-        """Where every home derived from this shared one is kept."""
-        return self.shared / self.layout.derived_dir
+    def root(self, workspace: Path) -> Path:
+        """Where the homes derived for one workspace's checkout are kept.
+
+        The checkout holds them, so a run writes its own state into the tree
+        it was given and leaves the selected home to the account that owns
+        it. The entries inside still point back at that home, which is what
+        keeps one login serving every session derived from it.
+        """
+        canonical = workspace.resolve()
+        return (declared_project_root(canonical) or canonical) / self.layout.derived_dir
 
     def name_for(self, workspace: Path) -> str:
         """The directory name the sessions opened in one workspace share.
@@ -64,7 +83,7 @@ class SessionHomes:
 
     def derive(self, workspace: Path) -> Path:
         """Create or refresh the home that one workspace's sessions open."""
-        home = self.root() / self.name_for(workspace)
+        home = self.root(workspace) / self.name_for(workspace)
         home.mkdir(parents=True, exist_ok=True)
         self.link_shared(home)
         return home
@@ -80,7 +99,11 @@ class SessionHomes:
         """
         if not self.shared.is_dir():
             return
-        reserved = [self.layout.derived_dir, *self.layout.private_files]
+        # The derived homes sit in the checkout, so the shared home no longer
+        # contains them — except where somebody selected the checkout itself
+        # as the shared home, which would otherwise link the tree into a home
+        # inside it. Reserving the leading segment keeps that from closing.
+        reserved = [self.layout.derived_dir.parts[0], *self.layout.private_files]
         for entry in self.shared.iterdir():
             link = home / entry.name
             if entry.name in reserved or link.is_symlink() or link.exists():

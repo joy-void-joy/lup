@@ -55,6 +55,48 @@ def test_a_derived_home_shares_everything_but_the_document(tmp_path: Path) -> No
     assert not (derived / CLAUDE_CONFIG_FILE).exists()
 
 
+def test_a_derived_home_lives_in_the_checkout_and_still_reads_the_account(
+    tmp_path: Path,
+) -> None:
+    """Where a home lives and what it reads are answered separately.
+
+    It lives in the checkout, because the state is the project's. It reads
+    the selected home, because the login is the account's. Selecting an
+    account home is not a licence to write inside it, and the symlink is
+    what lets both hold at once."""
+    homes = homes_under(tmp_path)
+    workspace = tmp_path / "lease-a"
+
+    derived = homes.derive(workspace)
+    shared = homes.shared
+
+    assert shared not in derived.parents
+    assert workspace in derived.parents
+    assert (derived / "settings.json").resolve().is_relative_to(shared)
+
+
+def test_two_workspaces_in_one_checkout_keep_separate_documents(
+    tmp_path: Path,
+) -> None:
+    """Rooting at the checkout must not merge the homes racing inside it.
+
+    The document is per-workspace because that is what runs concurrently;
+    a checkout holding two of them still owes each its own."""
+    root = tmp_path / "project"
+    (root / "a").mkdir(parents=True)
+    (root / "b").mkdir()
+    (root / "pyproject.toml").write_text(
+        '[tool.lup]\nversion = "1.0.0"\n', encoding="utf-8"
+    )
+    homes = homes_under(tmp_path)
+
+    first = homes.derive(root / "a")
+    second = homes.derive(root / "b")
+
+    assert first != second
+    assert first.parent == second.parent == root / ".lup" / "sessions"
+
+
 def test_a_refreshed_login_reaches_every_derived_home(tmp_path: Path) -> None:
     """One file for every session, because a rotation invalidates copies."""
     homes = homes_under(tmp_path)
