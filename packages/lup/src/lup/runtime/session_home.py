@@ -67,7 +67,7 @@ class SessionHomes:
         return (declared_project_root(canonical) or canonical) / self.layout.derived_dir
 
     def name_for(self, workspace: Path) -> str:
-        """The directory name the sessions opened in one workspace share.
+        """The directory name the sessions of one workspace and account share.
 
         The workspace decides rather than a per-session identifier, because
         the workspace is what actually runs concurrently: a run leases one
@@ -77,8 +77,17 @@ class SessionHomes:
         its reviewer read one. The digest carries the whole path so two
         leases with the same basename cannot land on one home; the basename
         rides in front of it so a human can tell them apart on disk.
+
+        The account is in the digest too, and has to be. While the homes sat
+        under the shared one the account was carried by the parent directory;
+        moving them into the checkout dropped it out of the path, and a name
+        derived from the workspace alone handed the second account a home the
+        first had already derived — whose entries point at the first and are
+        never re-pointed. Nothing failed. The session opened and ran as the
+        wrong login, which is the one reading a profile exists to rule out.
         """
-        digest = hashlib.sha256(str(workspace.resolve()).encode("utf-8"))
+        identity = f"{self.shared.resolve()}\n{workspace.resolve()}"
+        digest = hashlib.sha256(identity.encode("utf-8"))
         return f"{workspace.name}-{digest.hexdigest()[:12]}"
 
     def derive(self, workspace: Path) -> Path:

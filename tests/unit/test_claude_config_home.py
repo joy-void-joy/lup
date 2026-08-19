@@ -110,6 +110,29 @@ def test_a_refreshed_login_reaches_every_derived_home(tmp_path: Path) -> None:
     assert (second / ".credentials.json").read_text(encoding="utf-8") == rotated
 
 
+def test_switching_account_does_not_reuse_the_previous_login(tmp_path: Path) -> None:
+    """Two accounts working one checkout each get a derived home of their own.
+
+    The account used to be carried by the parent directory, back when these
+    were kept under the shared home. Moving them into the checkout dropped it
+    out of the path, and a name derived from the workspace alone handed the
+    second account a home the first had already derived — whose entries are
+    symlinked to the first and never re-pointed. Nothing fails: the session
+    opens and runs as the wrong login, which is the reading a profile exists
+    to make impossible.
+    """
+    workspace = tmp_path / "lease-a"
+    first = homes_under(tmp_path / "account-one")
+    second = homes_under(tmp_path / "account-two")
+
+    before = first.derive(workspace)
+    after = second.derive(workspace)
+
+    assert before != after
+    assert (before / ".credentials.json").resolve().is_relative_to(first.shared)
+    assert (after / ".credentials.json").resolve().is_relative_to(second.shared)
+
+
 def test_an_entry_made_later_reaches_a_home_derived_before_it(tmp_path: Path) -> None:
     """A runtime makes directories the first time it needs one."""
     homes = homes_under(tmp_path)
