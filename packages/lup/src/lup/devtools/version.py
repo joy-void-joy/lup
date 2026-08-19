@@ -13,8 +13,11 @@ Examples::
     $ uv run lup-devtools version changelog
     $ uv run lup-devtools version changelog --json
     $ uv run lup-devtools version bump minor
+    $ uv run lup-devtools version bump minor "What changed" -d "one" -d "another"
 """
 
+import datetime as dt
+from pathlib import Path
 from typing import Annotated, Literal, TypedDict
 
 import sh
@@ -24,6 +27,7 @@ import typer
 from lup.workspace.history import parse_semver
 from lup.workspace.paths import agent_version
 
+from lup.devtools.changelog import Changelog, ReleaseNote
 from lup.devtools.subapps import subapp
 from lup.devtools.utils import git, output_json, short_sha
 
@@ -227,12 +231,53 @@ def changelog_cmd(
     typer.echo(f"\nTotal: {total} commits ({len(report['behavior'])} behavior)")
 
 
+def release_note(version: str, summary: str, details: list[str]) -> ReleaseNote:
+    """What a bump would record, dated today.
+
+    Separate from writing it so a dry run shows the entry itself rather than
+    a description of one — the summary and its bullets are what a reader is
+    deciding about, and the rendering is where they have been damaged before.
+    """
+    return ReleaseNote(
+        version=version, date=dt.date.today(), summary=summary, details=details
+    )
+
+
+def write_release_note(
+    root: Path, version: str, summary: str | None, details: list[str]
+) -> list[Path]:
+    """Record this release in the changelog, and say what that wrote.
+
+    A bump with no summary writes nothing and says so by returning nothing:
+    the version alone is a fact the manifest already carries, and a changelog
+    entry with no sentence in it is worse than the absence of one.
+    """
+    if summary is None:
+        return []
+    path = root / "CHANGELOG.md"
+    note = release_note(version, summary, details)
+    path.write_text(Changelog.read(path).with_note(note).render())
+    return [path]
+
+
 @app.command("bump")
 def bump_cmd(
     level: Annotated[
         str | None,
         typer.Argument(help="Bump level: patch, minor, or major"),
     ] = None,
+    summary: Annotated[
+        str | None,
+        typer.Argument(help="One-line summary of what changed, for the changelog"),
+    ] = None,
+    details: Annotated[
+        list[str] | None,
+        typer.Option("--detail", "-d", help="One changelog bullet; repeat for several"),
+    ] = None,
+    no_tag: Annotated[
+        bool,
+        typer.Option("--no-tag", help="Skip creating a git tag"),
+    ] = False,
     as_json: Annotated[
         bool,
         typer.Option("--json", help="Output result as JSON"),
@@ -242,7 +287,12 @@ def bump_cmd(
         typer.Option("--dry-run", "-n", help="Show what would happen"),
     ] = False,
 ) -> None:
-    """Bump agent version and create a git tag."""
+    """Bump agent version, record the release, and create a git tag.
+
+    Each ``--detail`` is one bullet, taken whole. They are separate options
+    rather than one delimited string so that a detail may contain whatever
+    punctuation its prose needs.
+    """
     from lup.workspace.paths import find_project_root, read_agent_version
 
     root = find_project_root()
@@ -261,6 +311,10 @@ def bump_cmd(
         typer.echo("Specify bump level: patch, minor, or major")
         raise typer.Exit(1)
 
+    if details and summary is None:
+        typer.echo("A detail belongs under a summary; give one, or drop --detail")
+        raise typer.Exit(1)
+
     match level:
         case "patch":
             new_version = f"{major}.{minor}.{patch_v + 1}"
@@ -277,7 +331,9 @@ def bump_cmd(
             output_json({"old": current, "new": new_version, "tag": f"v{new_version}"})
         else:
             typer.echo(f"\nWould bump: {current} → {new_version}")
-            typer.echo(f"Would tag: v{new_version}")
+            if summary is not None:
+                typer.echo(release_note(new_version, summary, details or []).render())
+            typer.echo("Would not tag" if no_tag else f"Would tag: v{new_version}")
         return
 
     doc = tomlkit.parse(pyproject.read_text())
@@ -288,9 +344,15 @@ def bump_cmd(
         raise typer.Exit(1) from None
     pyproject.write_text(tomlkit.dumps(doc))
 
-    git.add(str(pyproject))
+    written = [
+        pyproject,
+        *write_release_note(root, new_version, summary, details or []),
+    ]
+
+    git.add(*(str(path) for path in written))
     git.commit("-m", f"chore(version): bump {current} → {new_version}")
-    git.tag(f"v{new_version}")
+    if not no_tag:
+        git.tag(f"v{new_version}")
 
     if as_json:
         output_json({"old": current, "new": new_version, "tag": f"v{new_version}"})
