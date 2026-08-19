@@ -98,6 +98,46 @@ def repository_staleness(write: RepositoryWriter) -> list[str]:
     return []
 
 
+class RosterGap(BaseModel, frozen=True):
+    """One declaration a target's tree renders nothing for."""
+
+    target: str
+    declaration: str
+
+    def describe(self) -> str:
+        """One line naming the target and what it left out."""
+        return f"{self.target} renders nothing for {self.declaration}"
+
+
+def roster_gaps(compositions: list[NativeHarnessComposition]) -> list[RosterGap]:
+    """Every declaration a composition's desired tree carries no artifact for.
+
+    The parity gate, written as completeness against the shared source rather
+    than as a diff between two trees. Both readings catch a target that drops
+    a skill the other keeps, but the trees themselves are not comparable: they
+    shape a skill as ``commands/<name>.md`` and as ``skills/<name>/SKILL.md``,
+    and each legitimately carries files the other has no equivalent for — a
+    settings file, a config file. Diffing them would need an exception list
+    that grows with every such file and would let a real gap hide in it.
+
+    Measuring each target against :attr:`Harness.declared_ids` needs no
+    exceptions: an artifact outside the roster is target-specific by
+    construction and never considered, and a roster entry missing from one
+    tree is named against that tree. It is also the stronger reading, because
+    a declaration both targets dropped is still a gap here, where a diff
+    between the two would call it parity.
+    """
+    return [
+        RosterGap(target=composition.recipe.label, declaration=declared)
+        for composition in compositions
+        for rendered in [
+            {artifact.semantic_id for artifact in composition.recipe.desired.artifacts}
+        ]
+        for declared in composition.recipe.source.rendered_ids
+        if declared not in rendered
+    ]
+
+
 class DriftVerdict(BaseModel, frozen=True):
     """One reading of whether every generated artifact is what its source renders."""
 
@@ -175,10 +215,20 @@ def check_targets(
     compositions: list[NativeHarnessComposition],
     repository_writers: list[RepositoryWriter],
 ) -> None:
-    """Report drift for every selected composition; exit nonzero when dirty."""
+    """Report drift and roster parity for every selected composition.
+
+    Both refusals are read here rather than in separate commands, because a
+    tree can be perfectly current against a source that renders one target a
+    skill short. Drift asks whether each tree is what its source renders;
+    parity asks whether what it renders is the whole roster.
+    """
     verdict = inspect_drift(compositions, repository_writers)
     for report in verdict.reports:
         report_drift(report)
+    gaps = roster_gaps(compositions)
+    for gap in gaps:
+        typer.echo(f"  roster gap: {gap.describe()}", err=True)
     if not verdict.clean:
         report_stale(verdict)
+    if not verdict.clean or gaps:
         raise typer.Exit(1)

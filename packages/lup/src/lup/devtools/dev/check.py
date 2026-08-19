@@ -25,6 +25,7 @@ from lup.devtools.harness.drift import (
     RepositoryWriter,
     inspect_drift,
     report_stale,
+    roster_gaps,
 )
 from lup.devtools.harness.generate import NativeHarnessComposition
 from lup.devtools.utils import decode_stderr, git, uv
@@ -346,6 +347,18 @@ def run_checks(
         typer.echo(f"harness drift: FAIL ({len(drift.stale_trees)} tree(s))")
         report_stale(drift)
     results.append(CheckOutcome(name="harness drift", passed=drift.clean))
+
+    # Beside drift because a tree can be perfectly current against a source
+    # that renders one target a skill short, and drift reads every tree as
+    # clean while the two rosters have parted.
+    gaps = roster_gaps(compositions)
+    if gaps:
+        typer.echo(f"roster parity: FAIL ({len(gaps)} gap(s))")
+        for gap in gaps:
+            typer.echo(f"  {gap.describe()}")
+    else:
+        typer.echo("roster parity: ok")
+    results.append(CheckOutcome(name="roster parity", passed=not gaps))
 
     used = max(
         document_byte_size(claude_prompt_renderer().render(guidance)),
