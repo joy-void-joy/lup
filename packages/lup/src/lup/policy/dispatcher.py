@@ -179,6 +179,19 @@ class SourceHalf(BaseModel, frozen=True, arbitrary_types_allowed=True):
         """The top-level function this half defines under this name, if any."""
         return next((node for node in self.functions() if node.name == name), None)
 
+    def stranded(self) -> list[str]:
+        """Every top-level name this half declares that splicing leaves behind.
+
+        Only functions are emitted, so a constant or a class beside them is
+        read by the type checker, passes every check in the workspace, and
+        then is simply absent from the script — where the function that reads
+        it raises :class:`NameError` at the first edit, in a hook whose
+        failure a session sees only as a decision that never happened.
+
+        Imports are not stranded: :meth:`spliced_prologue` carries them.
+        """
+        return [name for node in self.tree.body for name in top_level_names(node)]
+
     def source_of(self, node: ast.FunctionDef) -> str:
         """The exact source of one function, comments and docstring intact."""
         segment = ast.get_source_segment(self.text, node)
@@ -323,6 +336,24 @@ def import_statement(node: ast.stmt) -> list[DispatcherImport]:
             return []
 
 
+def top_level_names(node: ast.stmt) -> list[str]:
+    """Read one statement as the names splicing would leave behind, if any.
+
+    A function is emitted and an import is carried by the prologue. Anything
+    else that binds a name at module level — a constant, an annotated one, a
+    class — is read where it is written and absent where it is used.
+    """
+    match node:
+        case ast.Assign(targets=targets):
+            return [target.id for target in targets if isinstance(target, ast.Name)]
+        case ast.AnnAssign(target=ast.Name(id=name)):
+            return [name]
+        case ast.ClassDef(name=name):
+            return [name]
+        case _:
+            return []
+
+
 def string_constants(node: ast.AST) -> list[str]:
     """Every string literal beneath one node."""
     return [
@@ -367,6 +398,28 @@ def import_breaches(
         for item in half.imports()
         if item.module not in SPLICED_MEMBERS
         and not resolvable(item.module, declaration)
+    ]
+
+
+def stranded_breaches(shared: SourceHalf, decisions: SourceHalf) -> list[str]:
+    """Names a spliced half declares that the compiled script would not carry.
+
+    Splicing emits functions, so a constant or a class written beside them is
+    dropped on the way into the script. Nothing downstream is placed to say
+    so: the workspace type-checks the half where the name is defined and finds
+    it, and the generated script is the only place it is missing — where the
+    first edit meets a :class:`NameError` inside a hook, and a hook that
+    raises is a permission decision that never happens.
+
+    Reported here because this compiler is the only reader that knows both
+    what a half declares and what the script receives. The fix is to carry the
+    value where the function can see it — a default in its signature, or a
+    literal in its body — rather than to hope the two stay in step.
+    """
+    return [
+        f"{half.module} declares {name}, which splicing leaves behind"
+        for half in (shared, decisions)
+        for name in half.stranded()
     ]
 
 
@@ -523,6 +576,7 @@ def compile_dispatcher(declaration: DispatcherDeclaration) -> str:
     breaches = [
         *import_breaches(declaration, shared, decisions, runtime),
         *host_purity_breaches(shared),
+        *stranded_breaches(shared, decisions),
         *sharing_breaches(shared, decisions, runtime),
         *declaration_breaches(declaration, shared, decisions, runtime),
     ]
