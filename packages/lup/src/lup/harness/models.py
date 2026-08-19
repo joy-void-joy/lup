@@ -23,6 +23,7 @@ from pydantic import (
 )
 
 from lup.codescan.common import AntiPattern, RuleSelection
+from lup.devtools.launcher import DEFAULT_ENVIRONMENT
 from lup.harness.banner import ArtifactBanner, GeneratedBanner
 from lup.markdown import CodeCell, PlainCell, TableCell, escaped
 from lup.mcp import ToolDeclaration
@@ -953,6 +954,37 @@ class HookSet(BaseModel, frozen=True):
         ),
     )
     sandbox: HookSandbox | None = None
+
+    @model_validator(mode="after")
+    def a_toolchain_is_named_rather_than_located(self) -> "HookSet":
+        """Refuse a declared program that spells the environment holding it.
+
+        Resolution already asks the checkout where its environment is, and so
+        answers for the ones no path can reach: a redirected
+        ``UV_PROJECT_ENVIRONMENT``, a conda or pyenv install found on
+        ``PATH``. Spelling that directory here re-derives what resolution
+        derives, and gets it wrong for every layout but the one spelled —
+        where the program resolves to nothing, the gate reports no findings,
+        and silence is exactly what a clean file looks like. Nothing
+        downstream is placed to say otherwise, which is why this is refused
+        at construction rather than reported later.
+
+        A path stays declarable, for a program a project genuinely vendors at
+        a fixed place of its own. Naming *the environment* is what is
+        refused, because that question already has a better answer.
+        """
+        for field, command in (
+            ("diagnostics_command", self.diagnostics_command),
+            ("resolution_command", self.resolution_command),
+        ):
+            program = PurePosixPath(command[0] if command else "")
+            if DEFAULT_ENVIRONMENT in program.parts:
+                raise ValueError(
+                    f"{field} spells {DEFAULT_ENVIRONMENT!r} in {command[0]!r}; "
+                    f"declare {program.name!r} and let the checkout answer "
+                    "where its environment is"
+                )
+        return self
 
     def excluded_commands(self) -> list[str]:
         """Commands no OS boundary confines, declared sandbox or not.

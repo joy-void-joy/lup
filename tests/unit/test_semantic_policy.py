@@ -16,7 +16,7 @@ from typing import Literal, get_args
 
 import pytest
 import sh
-from pydantic import AnyHttpUrl, BaseModel, Field
+from pydantic import AnyHttpUrl, BaseModel, Field, ValidationError
 
 from lup.adapters.claude.native import (
     ClaudeBeforeToolEvent,
@@ -3259,3 +3259,48 @@ def test_a_real_note_deletion_is_still_denied_when_both_sides_parse() -> None:
 
     assert decision.effect == "deny"
     assert "removes inline review feedback" in decision.reason
+
+
+def test_a_declared_checker_naming_the_environment_is_refused() -> None:
+    """The layout it spells is the only one it answers for.
+
+    Resolution asks the checkout where its environment is, so a declaration
+    that spells `.venv` re-derives the answer and gets it wrong wherever the
+    environment sits elsewhere — a redirected `UV_PROJECT_ENVIRONMENT`, a
+    conda or pyenv install. There the program resolves to nothing and the
+    gate reports no findings, which reads exactly like a clean file.
+    """
+    with pytest.raises(ValidationError) as refused:
+        HookSet(
+            id="test",
+            policy_ids=["edit"],
+            diagnostics_command=[".venv/bin/pyright", "--outputjson"],
+        )
+
+    assert "declare 'pyright'" in str(refused.value)
+
+
+def test_a_declared_resolver_naming_the_environment_is_refused_too() -> None:
+    """Both declarations reach the same resolution, so both are held to it."""
+    with pytest.raises(ValidationError):
+        HookSet(
+            id="test",
+            policy_ids=["edit"],
+            resolution_command=[".venv/bin/lup-devtools", "dev"],
+        )
+
+
+def test_a_vendored_program_may_still_be_declared_by_path() -> None:
+    """Naming the environment is refused; naming a location is not.
+
+    A project that keeps a checker at a fixed place of its own means that
+    place, and resolution honours it — what it must not do is spell the
+    environment, which is the one path resolution already knows how to find.
+    """
+    hooks = HookSet(
+        id="test",
+        policy_ids=["edit"],
+        diagnostics_command=["tools/mychecker", "--json"],
+    )
+
+    assert hooks.diagnostics_command[0] == "tools/mychecker"
