@@ -52,8 +52,28 @@ async def call(name: str, params, edition: Path | None = None):
     return json.loads(block["text"])
 
 
+@pytest.fixture
+def unpublished(tmp_path: Path) -> Path:
+    """An edition location nothing has published to.
+
+    A relative path resolves against wherever editing was last published, and
+    that record is keyed to the repository rather than to a checkout — every
+    worktree of it reads and writes the same file. So a test measuring a line
+    in its own tree and then asking for it by a relative path is asking about
+    whichever tree somebody else is editing, and the two are the same tree
+    only while nobody else is working.
+
+    Reading no record is what these tests mean: resolve against the checkout
+    under test. The one test that is about following a published edition
+    publishes one and passes it.
+    """
+    return tmp_path / "edition.json"
+
+
 @pytest.mark.asyncio
-async def test_a_definition_resolves_through_the_import_that_names_it() -> None:
+async def test_a_definition_resolves_through_the_import_that_names_it(
+    unpublished: Path,
+) -> None:
     """`utf16_column` is called in `position_in`; the definition is above it."""
     lines = (project_root() / TARGET).read_text(encoding="utf-8").splitlines()
     line = next(
@@ -64,7 +84,9 @@ async def test_a_definition_resolves_through_the_import_that_names_it() -> None:
     column = lines[line - 1].index("utf16_column")
 
     result = await call(
-        "find_definition", PositionInput(path=TARGET, line=line, column=column)
+        "find_definition",
+        PositionInput(path=TARGET, line=line, column=column),
+        edition=unpublished,
     )
 
     assert result["sites"], "the server resolved no definition at all"
@@ -72,7 +94,9 @@ async def test_a_definition_resolves_through_the_import_that_names_it() -> None:
 
 
 @pytest.mark.asyncio
-async def test_references_find_a_use_the_declaration_line_does_not_show() -> None:
+async def test_references_find_a_use_the_declaration_line_does_not_show(
+    unpublished: Path,
+) -> None:
     lines = (project_root() / TARGET).read_text(encoding="utf-8").splitlines()
     line = next(
         number
@@ -82,15 +106,17 @@ async def test_references_find_a_use_the_declaration_line_does_not_show() -> Non
     column = lines[line - 1].index("utf16_column")
 
     result = await call(
-        "find_references", PositionInput(path=TARGET, line=line, column=column)
+        "find_references",
+        PositionInput(path=TARGET, line=line, column=column),
+        edition=unpublished,
     )
 
     assert result["sites"], "the server found no uses of a symbol that has one"
 
 
 @pytest.mark.asyncio
-async def test_listing_symbols_names_the_session_class() -> None:
-    result = await call("list_symbols", DocumentInput(path=TARGET))
+async def test_listing_symbols_names_the_session_class(unpublished: Path) -> None:
+    result = await call("list_symbols", DocumentInput(path=TARGET), edition=unpublished)
 
     names = {symbol["name"] for symbol in result["symbols"]}
     assert "LspSession" in names
@@ -98,7 +124,7 @@ async def test_listing_symbols_names_the_session_class() -> None:
 
 
 @pytest.mark.asyncio
-async def test_hover_reports_a_resolved_type() -> None:
+async def test_hover_reports_a_resolved_type(unpublished: Path) -> None:
     lines = (project_root() / TARGET).read_text(encoding="utf-8").splitlines()
     line = next(
         number
@@ -107,13 +133,17 @@ async def test_hover_reports_a_resolved_type() -> None:
     )
     column = lines[line - 1].index("utf16_column")
 
-    result = await call("hover", PositionInput(path=TARGET, line=line, column=column))
+    result = await call(
+        "hover",
+        PositionInput(path=TARGET, line=line, column=column),
+        edition=unpublished,
+    )
 
     assert "utf16_column" in result["text"]
 
 
 @pytest.mark.asyncio
-async def test_a_rename_is_planned_and_never_written() -> None:
+async def test_a_rename_is_planned_and_never_written(unpublished: Path) -> None:
     target = project_root() / TARGET
     before = target.read_text(encoding="utf-8")
     lines = before.splitlines()
@@ -127,6 +157,7 @@ async def test_a_rename_is_planned_and_never_written() -> None:
     result = await call(
         "rename_symbol",
         RenameInput(path=TARGET, line=line, column=column, new_name="utf16_offset"),
+        edition=unpublished,
     )
 
     assert result["files"], "a symbol with uses planned no edits"
@@ -227,8 +258,10 @@ def test_the_oracle_resolves_a_buffer_that_disk_does_not_hold(tmp_path: Path) ->
 
 
 @pytest.mark.asyncio
-async def test_a_missing_file_is_an_error_rather_than_an_empty_answer() -> None:
-    handler = tools_by_name()["find_definition"].handler
+async def test_a_missing_file_is_an_error_rather_than_an_empty_answer(
+    unpublished: Path,
+) -> None:
+    handler = tools_by_name(unpublished)["find_definition"].handler
 
     response = await handler(
         PositionInput(path="does/not/exist.py", line=1).model_dump()

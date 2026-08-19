@@ -94,7 +94,7 @@ def test_the_chain_verifies_and_a_tampered_payload_breaks_it(tmp_path: Path) -> 
     journal.emit("message", {"text": "hello"})
 
     events = read_observable_events(path)
-    assert [event.sequence for event in events] == [0, 1]
+    assert [event.seq for event in events] == [0, 1]
     assert verify_event_chain(events)
 
     tampered = events[1].model_copy(update={"payload": {"text": "goodbye"}})

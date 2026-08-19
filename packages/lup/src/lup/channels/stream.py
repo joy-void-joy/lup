@@ -16,6 +16,7 @@ poison a log that a live process is still appending to.
 """
 
 import logging
+import os
 from pathlib import Path
 
 from pydantic import TypeAdapter, ValidationError
@@ -42,11 +43,16 @@ class Stream[T]:
     """
 
     def __init__(
-        self, path: Path, adapter: TypeAdapter[T], max_bytes: int | None = None
+        self,
+        path: Path,
+        adapter: TypeAdapter[T],
+        max_bytes: int | None = None,
+        durable: bool = False,
     ) -> None:
         self.path = path
         self.adapter = adapter
         self.max_bytes = max_bytes
+        self.durable = durable
 
     def append(self, record: T) -> int:
         """Append one record and return the offset that consumes it.
@@ -68,6 +74,13 @@ class Stream[T]:
         line = self.adapter.dump_json(record).decode("utf-8") + "\n"
         with self.path.open("a", encoding="utf-8", newline="\n") as handle:
             handle.write(line)
+            if self.durable:
+                # Only a record whose absence would be read as evidence pays
+                # for the round trip. A transcript that claims to be complete
+                # must not lose its tail to a crash; an ordinary channel is
+                # replayed from its writer's own state and stays cheap.
+                handle.flush()
+                os.fsync(handle.fileno())
         return self.path.stat().st_size
 
     def read_from(self, offset: int) -> list[Offset[T]]:
