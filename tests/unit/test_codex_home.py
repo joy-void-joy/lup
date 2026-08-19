@@ -11,10 +11,14 @@ from tomlkit.items import Table
 
 from lup.types import EnvVars
 from lup.adapters.codex.home import (
+    HOOKS_MANIFEST,
     CodexWorktreeHomeStore,
+    declared_hook_records,
     login_state,
     select_codex_home,
+    untrusted_hooks,
 )
+from lup.adapters.codex.marketplace import CodexMarketplace
 
 
 ACCOUNT_CONFIG = """\
@@ -293,3 +297,153 @@ def test_profile_name_cannot_escape_the_scoped_home(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="invalid Codex profile name"):
         store.prepare(worktree, profile="../outside")
+
+
+def plugin_declaring(root: Path, events: dict[str, int]) -> CodexMarketplace:
+    """A plugin whose manifest declares one matcher per named event.
+
+    The count is how many hooks that matcher carries, because a record names
+    the hook's place inside the event rather than the event alone.
+    """
+    manifest = root / HOOKS_MANIFEST
+    manifest.parent.mkdir(parents=True, exist_ok=True)
+    manifest.write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    event: [
+                        {
+                            "matcher": "Bash",
+                            "hooks": [
+                                {"type": "command", "command": "policy.py"}
+                                for _ in range(count)
+                            ],
+                        }
+                    ]
+                    for event, count in events.items()
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    return CodexMarketplace(name="proj", plugin="lup", source=root)
+
+
+def home_trusting(root: Path, records: dict[str, bool]) -> Path:
+    """A Codex home whose config records trust the way the runtime writes it."""
+    root.mkdir(parents=True, exist_ok=True)
+    document = tomlkit.document()
+    state = tomlkit.table(is_super_table=True)
+    for record, enabled in records.items():
+        entry = tomlkit.table()
+        entry["trusted_hash"] = "sha256:whatever-this-was-when-reviewed"
+        entry["enabled"] = enabled
+        state[record] = entry
+    hooks = tomlkit.table()
+    hooks["state"] = state
+    document["hooks"] = hooks
+    (root / "config.toml").write_text(tomlkit.dumps(document), encoding="utf-8")
+    return root
+
+
+def test_a_home_trusting_every_declared_hook_would_run_them_all(
+    tmp_path: Path,
+) -> None:
+    """The governed reading, so the refusal cannot pass by being unable to fail."""
+    marketplace = plugin_declaring(
+        tmp_path / "plugin", {"PreToolUse": 1, "PermissionRequest": 1}
+    )
+    home = home_trusting(
+        tmp_path / "home",
+        {
+            "lup@proj:hooks/hooks.json:pre_tool_use:0:0": True,
+            "lup@proj:hooks/hooks.json:permission_request:0:0": True,
+        },
+    )
+
+    assert untrusted_hooks(home, marketplace) == []
+
+
+def test_a_home_trusting_one_event_of_three_names_the_other_two(
+    tmp_path: Path,
+) -> None:
+    """The measured case, and why a plugin being installed proves nothing.
+
+    An operator's home carried trust for `pre_tool_use` alone. A shell command
+    is gated by `permission_request`, so the session ran the command the
+    policy refuses — while carrying that policy, enabled, and reading exactly
+    like a governed session.
+    """
+    marketplace = plugin_declaring(
+        tmp_path / "plugin",
+        {"PreToolUse": 1, "PostToolUse": 1, "PermissionRequest": 1},
+    )
+    home = home_trusting(
+        tmp_path / "home", {"lup@proj:hooks/hooks.json:pre_tool_use:0:0": True}
+    )
+
+    assert untrusted_hooks(home, marketplace) == [
+        "lup@proj:hooks/hooks.json:post_tool_use:0:0",
+        "lup@proj:hooks/hooks.json:permission_request:0:0",
+    ]
+
+
+def test_a_hook_trusted_and_then_disabled_is_one_that_will_not_run(
+    tmp_path: Path,
+) -> None:
+    """Trust and enablement are two records, and either one off is a skip."""
+    marketplace = plugin_declaring(tmp_path / "plugin", {"PreToolUse": 1})
+    home = home_trusting(
+        tmp_path / "home", {"lup@proj:hooks/hooks.json:pre_tool_use:0:0": False}
+    )
+
+    assert untrusted_hooks(home, marketplace) == [
+        "lup@proj:hooks/hooks.json:pre_tool_use:0:0"
+    ]
+
+
+def test_every_hook_of_a_matcher_is_asked_about_separately(tmp_path: Path) -> None:
+    """A record names the hook's place, so a matcher carrying two needs two."""
+    marketplace = plugin_declaring(tmp_path / "plugin", {"PreToolUse": 2})
+    home = home_trusting(
+        tmp_path / "home", {"lup@proj:hooks/hooks.json:pre_tool_use:0:0": True}
+    )
+
+    assert untrusted_hooks(home, marketplace) == [
+        "lup@proj:hooks/hooks.json:pre_tool_use:0:1"
+    ]
+
+
+def test_a_home_that_has_recorded_nothing_trusts_nothing(tmp_path: Path) -> None:
+    """A scoped home on its first use, which is where this was found."""
+    marketplace = plugin_declaring(tmp_path / "plugin", {"PreToolUse": 1})
+
+    assert untrusted_hooks(tmp_path / "empty", marketplace) == [
+        "lup@proj:hooks/hooks.json:pre_tool_use:0:0"
+    ]
+
+
+def test_an_event_this_cannot_ask_about_is_refused_rather_than_skipped(
+    tmp_path: Path,
+) -> None:
+    """An event added to the manifest and unknown here must not read as trusted.
+
+    What this check exists to close is a hook that does not run while nothing
+    says so, and quietly omitting an unrecognized event from the question
+    would rebuild exactly that, one layer up.
+    """
+    marketplace = plugin_declaring(tmp_path / "plugin", {"SessionStart": 1})
+
+    with pytest.raises(ValueError, match="cannot ask about"):
+        untrusted_hooks(tmp_path / "home", marketplace)
+
+
+def test_a_plugin_declaring_no_hooks_has_nothing_to_trust(tmp_path: Path) -> None:
+    """A project whose plugin carries only skills is not refused over hooks."""
+    root = tmp_path / "plugin"
+    root.mkdir()
+
+    marketplace = CodexMarketplace(name="proj", plugin="lup", source=root)
+
+    assert declared_hook_records(marketplace) == []
+    assert untrusted_hooks(tmp_path / "home", marketplace) == []

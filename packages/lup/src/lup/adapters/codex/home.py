@@ -1,9 +1,11 @@
 """Stable per-worktree Codex homes for locally installed harness plugins."""
 
+import json
 import logging
 import shutil
 from datetime import datetime
 from pathlib import Path
+from typing import Literal
 
 import jwt
 import tomlkit
@@ -34,6 +36,29 @@ build context, an editor index — reads the credential along with the code.
 """
 # lup: ignore[constant-declaration] — the keys Codex writes its own state under
 CODEX_CONFIG_STATE_KEYS = ("marketplaces", "plugins")
+
+# lup: ignore[constant-declaration] — Codex's own plugin layout, and the same
+# spelling it writes into a trust record; a caller given it to set would be
+# naming a file the runtime looks for somewhere else
+HOOKS_MANIFEST = Path("hooks/hooks.json")
+"""Where a plugin declares its hooks, and how a trust record names that file."""
+
+type CodexHookEvent = Literal["PreToolUse", "PostToolUse", "PermissionRequest"]
+"""Every event a hook manifest may declare, as the manifest spells it."""
+
+# lup: ignore[constant-declaration] — each value is Codex's own spelling for the
+# event beside it, over a vocabulary the manifest closes
+CODEX_HOOK_EVENTS: dict[CodexHookEvent, str] = {
+    "PreToolUse": "pre_tool_use",
+    "PostToolUse": "post_tool_use",
+    "PermissionRequest": "permission_request",
+}
+"""What Codex calls each declared event where it records trust for one.
+
+The manifest spells an event one way and the trust record another, and the
+two have to be matched to ask whether a declared hook is trusted. A table
+rather than a transformation, so an event added to the manifest and unknown
+here is refused rather than quietly read as needing no trust."""
 
 
 class CodexHomeSelection(BaseModel, frozen=True):
@@ -265,6 +290,65 @@ def select_codex_home(
     )
 
 
+class CodexPolicyUntrusted(RuntimeError):
+    """A home carries the policy plugin and would run none of its hooks."""
+
+
+def declared_hook_records(marketplace: CodexMarketplace) -> list[str]:
+    """Every trust record Codex keeps for the hooks this plugin declares.
+
+    A record is named for the plugin, the manifest it was read from, the
+    event, and the hook's place within it — so the names can be constructed
+    from the manifest rather than read back out of Codex's own state and
+    taken apart, which would be reading a spelling this does not own.
+    """
+    manifest = marketplace.source / HOOKS_MANIFEST
+    if not manifest.is_file():
+        return []
+    declared = json.loads(manifest.read_text(encoding="utf-8"))["hooks"]
+    unknown = [event for event in declared if event not in CODEX_HOOK_EVENTS]
+    if unknown:
+        raise ValueError(
+            f"{manifest} declares hook events this cannot ask about: {unknown}. "
+            "Add each to CODEX_HOOK_EVENTS with the name Codex records it under"
+        )
+    return [
+        f"{marketplace.selector}:{HOOKS_MANIFEST.as_posix()}:{spelled}:{group}:{index}"
+        for event, spelled in CODEX_HOOK_EVENTS.items()
+        if event in declared
+        for group, matched in enumerate(declared[event])
+        for index in range(len(matched["hooks"]))
+    ]
+
+
+def untrusted_hooks(home: Path, marketplace: CodexMarketplace) -> list[str]:
+    """Which of this plugin's declared hooks the home would not actually run.
+
+    Codex trusts a hook per event and per hash, and *skips* one it does not
+    trust rather than refusing it — so a home carrying the plugin, enabled,
+    with trust recorded for one event of three runs every session past the
+    two it never granted, and says nothing.
+
+    Presence and enablement are what can be asked here. A recorded hash that
+    has since gone stale is not: computing it would mean reimplementing a
+    digest this does not own, and getting that wrong refuses every session
+    over a hook that is fine. Codex skips a stale hook exactly as it skips an
+    absent one, so what is left uncovered is a hook whose trust was granted
+    and whose body has since been regenerated.
+    """
+    config = home / "config.toml"
+    if not config.is_file():
+        return declared_hook_records(marketplace)
+    document = tomlkit.parse(config.read_text(encoding="utf-8"))
+    hooks = document["hooks"] if "hooks" in document else {}
+    state = hooks["state"] if "state" in hooks else {}
+    return [
+        record
+        for record in declared_hook_records(marketplace)
+        if record not in state or not state[record]["enabled"]
+    ]
+
+
 def install_declared_policy(
     home: Path, root: Path | None = None
 ) -> CodexMarketplace | None:
@@ -279,6 +363,14 @@ def install_declared_policy(
     Failure is raised rather than warned past. A session that opened without
     the policy it was meant to run under is indistinguishable from one running
     under it, which is the property that made this worth finding.
+
+    Installing it is not the whole of carrying it, which is why the trust is
+    read here too. Trust is a decision about a hook, and only a person makes
+    one: this refuses a session the decision was never made for rather than
+    recording it on their behalf, because a trust granted by the thing being
+    trusted is not one. The decision is made in an interactive session, which
+    is where Codex asks — and which does not come through here, so refusing
+    cannot close the door on its own remedy.
     """
     project = root or project_root()
     declared = CodexMarketplace.declared(project)
@@ -290,4 +382,14 @@ def install_declared_policy(
         )
     )
     installer.ensure(declared.source, project)
+    skipped = untrusted_hooks(home, declared)
+    if skipped:
+        raise CodexPolicyUntrusted(
+            f"{home} carries {declared.selector} and would run none of "
+            f"{len(skipped)} declared hook(s): {', '.join(skipped)}. Codex skips "
+            "a hook it does not trust rather than refusing it, so this session "
+            "would run ungoverned and read exactly like one that is governed. "
+            "Open an interactive session in this checkout and trust the plugin "
+            "there, which is where Codex asks."
+        )
     return declared
