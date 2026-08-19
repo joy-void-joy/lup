@@ -22,6 +22,7 @@ from lup.harness.enforcement import semantic_policy_for
 from lup.harness.models import HookSet
 from lup.hooks import LupHooksConfig
 from lup.policy.enforcement import (
+    EscalationRelay,
     NativeSemantics,
     SandboxPosture,
     create_policy_hooks,
@@ -95,6 +96,7 @@ from lup.devtools.dev.worktree import (
 )
 from lup.devtools.harness.generate import NativeHarnessComposition
 from lup.devtools.supervisor.page import SUPERVISOR_PORT
+from lup.devtools.utils import refuse_blocked_config_writes
 from lup.devtools.supervisor.projection import answer_recipe as rerun_recipe
 from lup.devtools.supervisor.projection import PendingQuestionView, question_views
 
@@ -1251,6 +1253,7 @@ def worker_policy_hooks(
     grants: LeaseGrants,
     semantics: NativeSemantics,
     sandbox: SandboxPosture,
+    relay: EscalationRelay | None = None,
 ) -> LupHooksConfig:
     """Judge a worker's calls by the policy every plugin enforces.
 
@@ -1274,6 +1277,14 @@ def worker_policy_hooks(
     policy judges. It is a parameter rather than a constant because both
     runtimes have that decode now, and hardcoding one was what left the
     other's workers judged by nothing.
+
+    ``relay`` is where an escalation goes when there is nobody here to answer
+    it. The marker exists to route a judgement to a human who can weigh the
+    actual command, and a worker session has none attached — so for a worker
+    the three tiers collapsed to two and every escalation was a guaranteed
+    refusal, in exactly the context that most needs one. It still refuses,
+    because nothing here can approve what no human saw; what it stops doing
+    is refusing in silence.
 
     ``sandbox`` is the session's own confinement, read from the declaration
     the factory opens it with rather than from the runtime. Taking the
@@ -1308,6 +1319,7 @@ def worker_policy_hooks(
         ),
         semantics.also_refusing(declared_hooks.refused_tools),
         sandbox=sandbox,
+        relay=relay,
     )
 
 
@@ -1446,6 +1458,14 @@ def run_resolve(
     if not ResolverStateRepository(state_root, resolved_run_id).exists():
         if abort_reason is None:
             require_fresh_base(probe_base_freshness(launcher, root))
+    # A run leases a worktree per concern, and `worktree add` writes git
+    # config three times over — so a confinement that owns `config.lock` stops
+    # this run at its first lease, however many concerns it planned, with a
+    # bare `File exists` that names nothing about a sandbox. Said once here
+    # instead, before anything is planned or leased. Aborting takes no lease,
+    # so it is the one path that still runs confined.
+    if abort_reason is None:
+        refuse_blocked_config_writes(root)
 
     async def execute() -> None:
         from lup.adapters.claude.runtime import (
@@ -1668,6 +1688,19 @@ def run_resolve(
                 lease_root=cwd,
                 actor_kind=context.actor.kind,
             )
+
+            def relay(why: str, refusal: str) -> None:
+                """Put a refused escalation where a human running this will see it.
+
+                Addressed to the run rather than broadcast, so it lands in the
+                one inbox `resolve actors` prints for a person rather than in
+                every sibling worker's context.
+                """
+                core.actors.tell_spawner(
+                    f"{context.actor.label()} was refused a command it escalated.\n"
+                    f"Its reason: {why}\n"
+                    f"The refusal: {refusal}"
+                )
             # Grants are per-concern, and the environment names where this
             # lease's are written rather than carrying them: a gate granted
             # after this session starts reaches it, and one taken back stops
@@ -1726,6 +1759,7 @@ def run_resolve(
                                         context.grants,
                                         CLAUDE_SEMANTICS,
                                         claude_worker_sandbox.posture(),
+                                        relay,
                                     ),
                                 ),
                                 create_git_inspection_hook(),
@@ -1753,6 +1787,7 @@ def run_resolve(
                             context.grants,
                             CODEX_SEMANTICS,
                             codex_worker_sandbox,
+                            relay,
                         ),
                         context.hooks,
                     ),
