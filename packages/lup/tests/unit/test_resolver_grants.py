@@ -41,6 +41,7 @@ from lup.resolver.models import (
     allowance_question_id,
 )
 from lup.actors.cohort import ActorCohort
+from lup.actors.refs import ActorRef
 from lup.resolver.questions import QuestionBroker
 from lup.resolver.run import ResolveRun
 from lup.resolver.state import ResolverStateRepository
@@ -334,12 +335,16 @@ def test_a_later_turn_on_the_same_lease_does_not_take_a_mid_lease_grant_back(
         root=tmp_path / "integration",
         branch="resolve/grant-run/review",
     )
-    turns.merger_session(lease)
+    turns.actors.session(
+        ActorRef(kind="merger", id=lease.concern_id), turns.merger_recipe(lease)
+    )
     policy = judge(recipe.opened[0].grants)
     human_grants(desk, INTEGRATION_CONCERN_ID, "grant")
     assert policy.decide(CREATION).effect == "allow"
 
-    turns.merger_session(lease)
+    turns.actors.session(
+        ActorRef(kind="merger", id=lease.concern_id), turns.merger_recipe(lease)
+    )
 
     assert policy.decide(CREATION).effect == "allow"
     parked(desk)

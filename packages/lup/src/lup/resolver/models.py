@@ -814,6 +814,18 @@ class ConcernOutcome(BaseModel, frozen=True):
     notes_cleared: list[ReviewNote] = []
     notes_missing: list[ReviewNote] = []
 
+    def settled_summary(self) -> str:
+        """How this concern ended, in the one line a roster entry carries.
+
+        The rounds are named because they are what a reader sizing the next
+        pass wants and cannot get from the verdict: two concerns both
+        verified are not the same result when one took four rounds.
+        """
+        if not self.verified:
+            return ""
+        spent = f" in {len(self.rounds)} round{'' if len(self.rounds) == 1 else 's'}"
+        return f"verified{spent}"
+
 
 class ConcernExecution(BaseModel, frozen=True):
     base: DependencyBase

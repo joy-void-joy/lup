@@ -24,7 +24,9 @@ from lup.resolver.models import (
 )
 from lup.resolver.state import ResolverStateRepository, StateTransitionError
 from lup.resolver.status import RunStatus, run_status
-from lup.actors.mail import EVERYONE, new_message
+from lup.actors.cohort import ActorCohort
+from lup.actors.mail import EVERYONE
+from lup.actors.refs import ActorRef
 from lup.actors.mailbox import (
     AnswerDoor,
     AnswerOffer,
@@ -47,6 +49,27 @@ def open_mailbox(run_id: str) -> QuestionMailbox:
     if not root.is_dir():
         raise typer.BadParameter(f"no resolver run {run_id!r} under {root.parent}")
     return QuestionMailbox(root)
+
+
+def open_cohort(run_id: str) -> ActorCohort:
+    """This run's population, as the run's own process holds it.
+
+    Over the same mail and the same journal the run writes, so a door and
+    the process it is steering read one record rather than two — and the
+    address this resolves is the address the run's own tools resolve.
+
+    A cohort here opens no session and spawns nobody. It is the reading half:
+    who the run holds, what each was asked, and what is queued for whom, all
+    of it folded from files the run has already written.
+    """
+    mailbox = open_mailbox(run_id)
+    return ActorCohort(
+        mailbox.root,
+        journal=Journal(mailbox.root),
+        mail=mailbox.mail,
+        run_id=run_id,
+        spawner=ActorRef(kind="run", id=run_id),
+    )
 
 
 def pending_views(mailbox: QuestionMailbox) -> list[PendingQuestionView]:
@@ -100,19 +123,19 @@ def queued(run_id: str, to: str) -> list[str]:
     """
     if to == EVERYONE:
         return ["queued for every actor in this run, including ones not yet started"]
-    reached = [
-        actor
-        for actor in Journal(resolve_state_root() / run_id).actors()
-        if to in actor.addresses()
-    ]
-    if not reached:
+    # The population's own answer, rather than a second one assembled here.
+    # Every consumer that resolved an address for itself disagreed with
+    # whatever printed it, and a message sent to the spelling shown reached
+    # nobody.
+    reached = open_cohort(run_id).reaching(to)
+    if reached is None:
         return [
             f"queued for {to!r}, which names no actor this run has recorded "
             "yet; it waits until one by that address takes a turn",
         ]
     return [
-        f"queued for {actor.label()}; it arrives at that actor's next tool call or turn"
-        for actor in reached
+        f"queued for {reached.label()}; it arrives at that actor's next tool "
+        "call or turn"
     ]
 
 
@@ -206,27 +229,30 @@ def list_actors(
     # there yields no actors, which printed "nothing recorded yet" and exited
     # zero — indistinguishable from a real run that has not started, and the
     # answer a sibling worktree with no `.lup` at all gave for every id.
-    mailbox = open_mailbox(run_id)
-    journal = Journal(resolve_state_root() / run_id)
-    actors = journal.actors()
-    if not actors:
+    cohort = open_cohort(run_id)
+    members = cohort.live()
+    if not members:
         typer.echo("No actor has recorded anything yet.")
         return
     # What the run itself has been told, first, because it is addressed to
     # whoever is reading this. A worker's report used to go out unaddressed,
     # which every actor matched and consumed, so the one message meant for a
     # person was the one no surface showed.
-    told = mailbox.waiting(journal.run).messages
+    told = cohort.heard().messages
     if told:
-        typer.echo(f"{journal.run.label()} — said to you by this run's actors:")
+        typer.echo(f"{cohort.spawner.label()} — said to you by this run's actors:")
         for message in told:
             typer.echo(f"  {message.text}")
-    for actor in actors:
-        if actor == journal.run:
-            continue
-        typer.echo(actor.label())
-        waiting = mailbox.waiting(actor)
-        for message in waiting.messages:
+    for member in members:
+        # What each was asked and how it ended, which the population record
+        # carries and a list of bare addresses never could: an operator
+        # deciding which spawn they meant is choosing between tasks, not
+        # between identifiers.
+        state = "working" if member.running else (member.error or member.summary)
+        typer.echo(
+            f"{member.address} — {member.task}" + (f" [{state}]" if state else "")
+        )
+        for message in cohort.mail.waiting(member.actor).messages:
             kind = "redirect" if message.redirect else "message"
             typer.echo(f"  undelivered {kind} from {message.door}: {message.text}")
 
@@ -245,9 +271,10 @@ def say_to_actor(
     ),
 ) -> None:
     """Tell an actor something. It reads this and keeps going."""
-    open_mailbox(run_id).send(
-        new_message(run_id, to, text, AnswerDoor.AGENT, in_reply_to)
-    )
+    # Through the cohort, which is the one place a message is built. A door
+    # assembling its own reached the stream by a second route, and the two
+    # had to be kept agreeing by hand about what an address means.
+    open_cohort(run_id).post(to, text, door=AnswerDoor.AGENT, in_reply_to=in_reply_to)
     for line in queued(run_id, to):
         typer.echo(line)
 
@@ -298,9 +325,7 @@ def redirect_actor(
     call and hands back this text as the reason — so an actor going the wrong
     way cannot take one more step down it before reading why it was stopped.
     """
-    open_mailbox(run_id).send(
-        new_message(run_id, to, text, AnswerDoor.AGENT, redirect=True)
-    )
+    open_cohort(run_id).post(to, text, redirect=True, door=AnswerDoor.AGENT)
     for line in queued(run_id, to):
         typer.echo(line)
 

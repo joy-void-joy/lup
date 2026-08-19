@@ -729,9 +729,7 @@ class Joiner:
         twice rather than colliding on one id — the second failure is its own
         fact, and it names a different join.
         """
-        reviewer = self.runner.reviewer_session(
-            ActorRef(kind="reviewer", id=concern.id), worktree
-        )
+        reviewer = ActorRef(kind="reviewer", id=concern.id)
         declared = {criterion.id: True for criterion in concern.criteria}
         # The reviewer session may be fresh — a resumed run, a parked actor —
         # so the concern record rides with the prompt rather than being
@@ -745,7 +743,9 @@ class Joiner:
             "above — echo an id verbatim when its criterion still holds, and "
             "omit it when it does not."
         )
-        result = await reviewer.turn(turn_request(TurnInput(text=prompt), ReviewReport))
+        result = await self.runner.reviewer_round(
+            reviewer, worktree, turn_request(TurnInput(text=prompt), ReviewReport)
+        )
         unknown = [
             label for label in result.output.criteria_met if label not in declared
         ]
@@ -756,8 +756,10 @@ class Joiner:
                 + ". Resubmit with criteria_met drawn only from the declared "
                 "ids: " + ", ".join(declared)
             )
-            result = await reviewer.turn(
-                turn_request(TurnInput(text=correction), ReviewReport)
+            result = await self.runner.reviewer_round(
+                reviewer,
+                worktree,
+                turn_request(TurnInput(text=correction), ReviewReport),
             )
         met = {identifier: True for identifier in result.output.criteria_met}
         lost = [

@@ -2139,6 +2139,25 @@ async def test_complete_resolver_lifecycle_uses_real_isolated_git_worktrees(
     assert git("branch", "--show-current") == source_branch
     assert git("rev-parse", "HEAD") == source_commit
 
+    # The population record, which is what an outside door reads. It was
+    # empty for every resolver run: the run drove its own sessions, so
+    # nothing ever announced an agent, and `resolve actors` answered from a
+    # full scan of a journal that reaches tens of megabytes instead.
+    members = {member.address: member for member in core.actors.live()}
+    assert {"worker:a#2", "worker:b#1", "worker:c#1"} <= set(members)
+    # One member per worker, not one per round: a's second round is the
+    # agent that took its first.
+    assert members["worker:a#2"].actor.round == 2
+    assert members["worker:a#2"].running is False
+    assert members["worker:a#2"].summary == "verified in 2 rounds"
+    # Every kind the run opens, not only the writing ones.
+    assert {"reviewer-a", "reviewer-b", "reviewer-c", "merger-c"} <= {
+        member.actor.conversation() for member in core.actors.live()
+    }
+    # And it resolves the addresses it prints, from the record alone.
+    assert core.actors.reaching("worker:a#1") == members["worker:a#2"].actor
+    assert core.actors.reaching("b") == members["worker:b#1"].actor
+
     assert [record.action for record in manifest.cleanup] == [
         "removed",
         "removed",

@@ -379,6 +379,7 @@ class ResolverCore:
             journal=self.journal,
             mail=self.mailbox.mail,
             spawner=self.journal.run,
+            parallel=config.max_parallel_workers,
         )
         self.run_state = ResolveRun(self.repository, self.journal, observer)
         self.rebaser = BaseRefresher(self.run_state, self.worktrees, self.journal)
@@ -516,9 +517,7 @@ class ResolverCore:
             f"user.{reserved}"
             f"\n\nReview evidence:\n{request.model_dump_json(indent=2)}"
         )
-        planner = self.turns.reviewer_session(
-            ActorRef(kind="planner", id=self.config.run_id), self.config.workspace
-        )
+        planner = ActorRef(kind="planner", id=self.config.run_id)
         # A retry is a second turn on the planner's own session, so the
         # correction is the whole input: it already holds the evidence and the
         # partition it just proposed, and restating both would invite it to
@@ -526,8 +525,10 @@ class ResolverCore:
         attempt = prompt
         complaint: str | None = None
         for _ in range(attempts):
-            result = await planner.turn(
-                turn_request(TurnInput(text=attempt), ConcernInventory)
+            result = await self.turns.reviewer_round(
+                planner,
+                self.config.workspace,
+                turn_request(TurnInput(text=attempt), ConcernInventory),
             )
             referenced = [
                 index
@@ -952,17 +953,21 @@ class ResolverCore:
                         unmet,
                     )
                     completed_ids.add(blocked.id)
+
                 # Capped rather than gathered wholesale. A concern still
                 # waiting on the cap has started nothing and recorded
                 # nothing, so an interruption leaves it exactly as the lease
                 # phase left it and the next batch selects it again — which
                 # is what makes a cut wave resumable rather than lost.
-                admitted = asyncio.Semaphore(self.config.max_parallel_workers)
-
+                #
+                # The cohort's cap rather than one of this phase's own. How
+                # many agents a population runs at once is a fact about the
+                # population, and a second semaphore over the same members
+                # is a second answer to it that nothing reconciles.
                 async def execute_when_admitted(
                     concern: Concern,
                 ) -> ConcernExecution:
-                    async with admitted:
+                    async with self.actors.admitted:
                         return await self.executor.execute_concern(
                             concern,
                             lease_by_concern[concern.id],
