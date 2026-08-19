@@ -76,11 +76,13 @@ def account_home_with(credential: str, root: Path) -> Path:
     return account
 
 
-def test_worktree_home_is_stable_and_path_scoped(tmp_path: Path) -> None:
-    store = CodexWorktreeHomeStore(
-        account_home=tmp_path / "account",
-        scoped_root=tmp_path / "scoped",
-    )
+def test_worktree_home_is_stable_and_lives_in_the_checkout(tmp_path: Path) -> None:
+    """Two checkouts are two homes, and each sits inside the checkout it serves.
+
+    What a shared root needed a path digest to guarantee, distinct checkouts
+    now give for free — so the assertion is where the home is, not what it is
+    named."""
+    store = CodexWorktreeHomeStore(account_home=tmp_path / "account")
     first = tmp_path / "tree" / "first"
     second = tmp_path / "tree" / "second"
     first.mkdir(parents=True)
@@ -88,7 +90,27 @@ def test_worktree_home_is_stable_and_path_scoped(tmp_path: Path) -> None:
 
     assert store.home_for(first) == store.home_for(first)
     assert store.home_for(first) != store.home_for(second)
-    assert store.home_for(first).name.startswith("first-")
+    assert store.home_for(first) == first / ".lup" / "codex-home"
+    assert first in store.home_for(first).parents
+
+
+def test_a_worktree_below_a_project_answers_with_the_project_home(
+    tmp_path: Path,
+) -> None:
+    """One checkout keeps one home, reached from anywhere inside it.
+
+    A session opened in a subdirectory must not open a second home beneath
+    itself — the credential would be seeded twice and the two would rotate
+    independently."""
+    root = tmp_path / "project"
+    (root / "src" / "deep").mkdir(parents=True)
+    (root / "pyproject.toml").write_text(
+        '[tool.lup]\nversion = "1.0.0"\n', encoding="utf-8"
+    )
+    store = CodexWorktreeHomeStore(account_home=tmp_path / "account")
+
+    assert store.home_for(root / "src" / "deep") == root / ".lup" / "codex-home"
+    assert store.home_for(root) == store.home_for(root / "src" / "deep")
 
 
 def test_prepare_seeds_auth_and_sanitized_personal_settings(tmp_path: Path) -> None:
@@ -101,7 +123,7 @@ def test_prepare_seeds_auth_and_sanitized_personal_settings(tmp_path: Path) -> N
     (account / "review.config.toml").write_text(PROFILE_CONFIG, encoding="utf-8")
     worktree = tmp_path / "tree" / "dev"
     worktree.mkdir(parents=True)
-    store = CodexWorktreeHomeStore(account, tmp_path / "scoped")
+    store = CodexWorktreeHomeStore(account)
 
     scoped = store.prepare(worktree, profile="review")
 
@@ -135,7 +157,7 @@ def test_prepare_preserves_scoped_state_after_first_use(tmp_path: Path) -> None:
     (account / "config.toml").write_text(ACCOUNT_CONFIG, encoding="utf-8")
     worktree = tmp_path / "worktree"
     worktree.mkdir()
-    store = CodexWorktreeHomeStore(account, tmp_path / "scoped")
+    store = CodexWorktreeHomeStore(account)
     scoped = store.prepare(worktree)
     (scoped / "auth.json").write_text("scoped-auth", encoding="utf-8")
     (scoped / "config.toml").write_text('model = "scoped"\n', encoding="utf-8")
@@ -157,10 +179,7 @@ def test_explicit_home_and_environment_bypass_scoped_initialization(
 ) -> None:
     worktree = tmp_path / "worktree"
     worktree.mkdir()
-    store = CodexWorktreeHomeStore(
-        account_home=tmp_path / "account",
-        scoped_root=tmp_path / "scoped",
-    )
+    store = CodexWorktreeHomeStore(account_home=tmp_path / "account")
     configured = tmp_path / "configured"
     environment: EnvVars = {"CODEX_HOME": str(configured)}
 
@@ -173,16 +192,13 @@ def test_explicit_home_and_environment_bypass_scoped_initialization(
     assert from_environment.isolated is False
     assert explicit.path == tmp_path / "explicit"
     assert explicit.isolated is False
-    assert not (tmp_path / "scoped").exists()
+    assert not (worktree / ".lup").exists()
 
 
 def test_default_selection_prepares_the_scoped_home(tmp_path: Path) -> None:
     worktree = tmp_path / "worktree"
     worktree.mkdir()
-    store = CodexWorktreeHomeStore(
-        account_home=tmp_path / "account",
-        scoped_root=tmp_path / "scoped",
-    )
+    store = CodexWorktreeHomeStore(account_home=tmp_path / "account")
 
     selection = select_codex_home(None, {}, worktree, store=store)
 
@@ -195,7 +211,7 @@ def test_a_rotated_account_login_reaches_a_stale_scoped_home(tmp_path: Path) -> 
     account = account_home_with(ROTATED_CREDENTIAL, tmp_path)
     worktree = tmp_path / "worktree"
     worktree.mkdir()
-    store = CodexWorktreeHomeStore(account, tmp_path / "scoped")
+    store = CodexWorktreeHomeStore(account)
     scoped = store.prepare(worktree)
     (scoped / "auth.json").write_text(SEEDED_CREDENTIAL, encoding="utf-8")
 
@@ -209,7 +225,7 @@ def test_a_rotation_inside_a_scoped_home_returns_to_the_account(
     account = account_home_with(SEEDED_CREDENTIAL, tmp_path)
     worktree = tmp_path / "worktree"
     worktree.mkdir()
-    store = CodexWorktreeHomeStore(account, tmp_path / "scoped")
+    store = CodexWorktreeHomeStore(account)
     scoped = store.prepare(worktree)
     (scoped / "auth.json").write_text(ROTATED_CREDENTIAL, encoding="utf-8")
 
@@ -221,7 +237,7 @@ def test_publishing_an_unrotated_login_changes_nothing(tmp_path: Path) -> None:
     account = account_home_with(SEEDED_CREDENTIAL, tmp_path)
     worktree = tmp_path / "worktree"
     worktree.mkdir()
-    store = CodexWorktreeHomeStore(account, tmp_path / "scoped")
+    store = CodexWorktreeHomeStore(account)
     store.prepare(worktree)
 
     assert store.publish(worktree) is False
@@ -231,7 +247,7 @@ def test_an_unreadable_credential_is_never_overwritten(tmp_path: Path) -> None:
     account = account_home_with("not-json", tmp_path)
     worktree = tmp_path / "worktree"
     worktree.mkdir()
-    store = CodexWorktreeHomeStore(account, tmp_path / "scoped")
+    store = CodexWorktreeHomeStore(account)
     scoped = store.prepare(worktree)
     (scoped / "auth.json").write_text(ROTATED_CREDENTIAL, encoding="utf-8")
 
@@ -273,10 +289,7 @@ def test_a_record_stating_no_expiry_is_left_to_the_runtime(tmp_path: Path) -> No
 def test_profile_name_cannot_escape_the_scoped_home(tmp_path: Path) -> None:
     worktree = tmp_path / "worktree"
     worktree.mkdir()
-    store = CodexWorktreeHomeStore(
-        account_home=tmp_path / "account",
-        scoped_root=tmp_path / "scoped",
-    )
+    store = CodexWorktreeHomeStore(account_home=tmp_path / "account")
 
     with pytest.raises(ValueError, match="invalid Codex profile name"):
         store.prepare(worktree, profile="../outside")
