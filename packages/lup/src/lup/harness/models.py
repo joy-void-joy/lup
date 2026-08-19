@@ -887,6 +887,15 @@ class HookSet(BaseModel, frozen=True):
             "reports nothing rather than guessing at one"
         ),
     )
+    resolution_command: list[str] = Field(
+        default=[],
+        description=(
+            "How to resolve one edited file's receivers, run from the checkout "
+            "that holds it with the proposed text on stdin and the file named "
+            "by --path. Empty declares no resolver, and a rule whose verdict "
+            "turns on a declaration then asks rather than refusing"
+        ),
+    )
     refused_tools: list[RefusedTool] = Field(
         default=[],
         description=(

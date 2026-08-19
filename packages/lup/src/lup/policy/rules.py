@@ -15,6 +15,7 @@ from pydantic import AnyHttpUrl, BaseModel, Field
 
 from lup.codescan.antipatterns import patterns_for_suffix
 from lup.codescan.common import AntiPattern
+from lup.codescan.grammar import GRAMMAR_RULES
 from lup.policy.contracts import DecisionPolicy
 from lup.policy.grants import LeaseGrants
 from lup.policy.kernel.decision import KernelDecision
@@ -277,6 +278,13 @@ def antipattern_row(rule: AntiPattern) -> AntiPatternRow:
         context=rule.context,
         refiner="" if rule.refiner is None else rule.refiner.exempt.__name__,
         strength=rule.strength,
+        # Derived from the grammar rather than declared beside it: a gate has
+        # to know which of its verdicts turn on a resolution it may not have,
+        # and a second list saying so is one that can disagree with the rules
+        # it describes — which is the disagreement it would exist to prevent.
+        resolution="required"
+        if any(refined.id == rule.id for refined in GRAMMAR_RULES)
+        else "",
     )
 
 

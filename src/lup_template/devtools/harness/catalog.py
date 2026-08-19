@@ -351,6 +351,7 @@ def portable_harness(version: str = "0.2.0", root: Path | None = None) -> Harnes
             # reached through PATH. Spelling a path here would answer only for
             # the layout it spelled, and gate every other one in silence.
             diagnostics_command=["pyright", "--outputjson"],
+            resolution_command=["lup-devtools", "dev", "refutations"],
             shell_rules=SHELL_RULES,
             # This project's toolchain: what `uv run <target>` may reach here
             # without a question, which is nothing any other project inherits.

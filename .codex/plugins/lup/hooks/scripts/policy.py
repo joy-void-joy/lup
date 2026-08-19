@@ -27,7 +27,12 @@ from policy_data import AGENT_IDENTITY_ENV, AUTONOMOUS_AGENT_IDENTITIES
 
 # lup: ignore[subprocess] — `sh` is third-party and this half is compiled into a bare script that has no virtual environment to resolve it from
 import subprocess
-from kernel.edit import decide_edit, relocated_edit_text, relocated_suppressions
+from kernel.edit import (
+    awaits_resolution,
+    decide_edit,
+    relocated_edit_text,
+    relocated_suppressions,
+)
 from kernel.fetch import decide_fetch
 from kernel.lex import shell_path_verb_targets, shell_write_targets
 from kernel.shell import decide_shell
@@ -37,6 +42,7 @@ from policy_data import (
     ALLOWANCE_GRANTS_ENV,
     ALLOWED_FETCH_SCOPES,
     ANTI_PATTERN_ROWS,
+    RESOLUTION_COMMAND,
     DENIED_FETCH_SCOPES,
     KNOWN_ALLOWANCES,
     MAXIMUM_ADDED_LINES,
@@ -370,6 +376,58 @@ def file_diagnostics(
     ]
 
 
+def resolved_refutations(
+    path_text: str,
+    proposed: str,
+    command: list[str],
+    timeout_seconds: float = 30.0,
+) -> dict[str, list[int]] | None:
+    """What a checker refutes in the text about to be written, or None.
+
+    The kernel decides from primitive rows and reads nothing, which is what
+    keeps a verdict a pure function of its inputs. Resolving a receiver's
+    declaration is not a decision — it is a fact about the machine, the same
+    kind this half already resolves — so it is answered here and passed in.
+
+    Run in the checkout holding the file, like every other checker this half
+    starts, and handed the proposed text on stdin: the change is judged before
+    it is written, so the copy on disk is the one being replaced. *path_text*
+    still names where the content belongs, because imports and the module's
+    own name resolve against it and against nothing else.
+
+    None where no answer was had — no declared resolver, none installed, a
+    crash, a timeout, output that will not decode — and it has to stay
+    distinct from an empty refutation. Empty means a checker looked and
+    refuted nothing, which is evidence; None means nothing looked, which is
+    the gate's cue to ask rather than refuse. Collapsing the two would turn
+    every unresolvable session into a wall of confident denials.
+    """
+    if not command:
+        return None
+    root = worktree_root(path_text)
+    if not root:
+        return None
+    located = declared_program(root, command[0])
+    if not located:
+        return None
+    try:
+        finished = subprocess.run(
+            [located, *command[1:], "--path", str(Path(path_text).resolve())],
+            capture_output=True,
+            text=True,
+            input=proposed,
+            cwd=root,
+            timeout=timeout_seconds,
+            check=False,
+        )
+        reported = json.loads(finished.stdout)
+        if not reported["resolved"]:
+            return None
+        return {rule: list(lines) for rule, lines in reported["refuted"].items()}
+    except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError):
+        return None
+
+
 def existing_write_targets(targets: list[str]) -> list[str]:
     """Report which of a command's write targets already exist on disk.
 
@@ -622,23 +680,36 @@ def edit_decision(
     when the session started: a grant is answered by a human while the session
     that asked for it is still running, and one resolved at launch could not
     have carried the answer.
+
+    A checker is started only where its answer decides something. The kernel
+    is asked first, from the tree and the tables alone, whether this edit
+    trips a rule whose verdict turns on a resolved declaration; almost none
+    do, and those are judged for nothing. Only the rest pay for a language
+    server, which is the difference between a gate that costs a second per
+    edit and one that costs a second on the edits that need it.
     """
     suffix = Path(path_text).suffix.lower()
+    python_source = suffix in (".py", ".pyi")
+    rows = ANTI_PATTERN_ROWS[suffix] if suffix in ANTI_PATTERN_ROWS else []
+    refuted = (
+        resolved_refutations(path_text, after, RESOLUTION_COMMAND)
+        if after is not None and awaits_resolution(before, after, rows, python_source)
+        else None
+    )
     return decide_edit(
         worktree_path(path_text),
         before,
         after,
         path_exists=path_exists,
         path_rules=PATH_RULES,
-        antipattern_rows=ANTI_PATTERN_ROWS[suffix]
-        if suffix in ANTI_PATTERN_ROWS
-        else [],
+        antipattern_rows=rows,
         path_roles=PATH_ROLES,
         maximum_added_lines=MAXIMUM_ADDED_LINES,
         autonomous=autonomous,
         allowances=granted_allowances(ALLOWANCE_GRANTS_ENV, KNOWN_ALLOWANCES),
-        python_source=suffix in (".py", ".pyi"),
+        python_source=python_source,
         acceptance_guard=ACCEPTANCE_GUARD,
+        refuted=refuted,
     )
 
 

@@ -472,3 +472,37 @@ def report(
     typer.echo(f"Rule reference: {RULE_REFERENCE} (`uv run lup-devtools dev rules`)")
     if blocking:
         raise typer.Exit(1)
+
+
+def report_refutations(project: DevProject, path: Path, text: str) -> None:
+    """Emit what the typed grammar refutes in one file's proposed content.
+
+    The edit gate's answer for a rule whose verdict turns on a declaration.
+    It holds the text before anything is written, so what is on disk is not
+    what is being judged, and every sweep entry point beside this one reads
+    files — which is the one thing that cannot answer here.
+
+    ``resolved`` is the whole difference between a verdict and a question. A
+    gate told nothing cannot tell the defect from the shape the rule permits
+    and has to ask rather than refuse, so a session with no language server
+    must not report an empty refutation: that reads as "resolved, and nothing
+    was refuted", which is the one wrong answer of the three available.
+    """
+    oracle = default_oracle()
+    if oracle is None:
+        output_json({"resolved": False, "refuted": {}})
+        return
+    source = PythonSource(
+        path=path, module=module_name(path, scanned_roots(project)), text=text
+    )
+    found = refute([source], oracle)
+    rows = found[path.as_posix()] if path.as_posix() in found else []
+    output_json(
+        {
+            "resolved": True,
+            "refuted": {
+                rule: [row.line for row in rows if row.rule_id == rule]
+                for rule in dict.fromkeys(row.rule_id for row in rows)
+            },
+        }
+    )

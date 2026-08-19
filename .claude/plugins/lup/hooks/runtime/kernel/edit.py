@@ -1198,6 +1198,62 @@ def anti_pattern_denial(number: int, row: AntiPatternRow) -> KernelDecision:
     )
 
 
+def awaits_resolution(
+    before: str | None, after: str, rows: list[AntiPatternRow], python_source: bool
+) -> bool:
+    """Whether this edit trips a rule whose verdict turns on a declaration.
+
+    The one question a caller needs answered before paying for a checker
+    session, and it is answerable without one: the regex and the tree already
+    say which lines are candidates, and only those can be decided differently
+    once a receiver is resolved. Every other edit — most of them — is judged
+    exactly as before and costs nothing.
+
+    A line a directive already covers still counts. Resolving it is not waste:
+    if the declaration turns out to be outside the rule's family, the audit
+    calls that directive dead, and a gate that skipped the lookup would admit
+    a marker `dev check` immediately reports.
+    """
+    if not python_source:
+        return False
+    original_lines = after.splitlines()
+    return any(
+        hit["row"]["resolution"] == "required"
+        for hit in anti_pattern_hits(
+            added_line_numbers(before, after),
+            rows,
+            python_code_lines(after),
+            mask_python_string_literals(after),
+            refined_exempt_lines(after, rows),
+            python_comment_columns(after) is not None,
+        )
+        if hit["line"] <= len(original_lines)
+    )
+
+
+def unresolved_anti_pattern_ask(number: int, row: AntiPatternRow) -> KernelDecision:
+    """Ask about a line whose rule needs a resolution this gate did not get.
+
+    The message the rule carries tells an author to add a directive on an open
+    mapping and to add nothing on a typed non-mapping receiver, because the
+    audit resolves that one and reports a marker there as spurious. Repeating
+    it under a denial is what closed the recovery in both directions: a
+    directive the audit calls dead, or a line this gate will not admit.
+
+    So the question says what is not known rather than what to write, and
+    leaves the answer to whoever can see the receiver's type. Approving is not
+    approving a defect — it admits a line the audit still judges, on evidence
+    this gate did not have.
+    """
+    return KernelDecision(
+        "ask",
+        f"line {number}: {row['message']} — this gate could not resolve what the"
+        " receiver is declared on, so it cannot tell the defect from the"
+        " shape the rule permits; approve if the receiver is typed and not a"
+        f" mapping, and `dev check` will confirm it (rule {row['id']})",
+    )
+
+
 def spurious_refusal(number: int, dead: list[str], live: list[str]) -> KernelDecision:
     """Refuse a directive for the rules it names that nothing it guards trips.
 
@@ -1230,6 +1286,7 @@ def antipattern_decision(
     rows: list[AntiPatternRow],
     python_source: bool,
     allowances: list[str] | None = None,
+    refuted: dict[str, list[int]] | None = None,
 ) -> KernelDecision | None:
     """Reject newly added unsuppressed anti-patterns and ask on suppressions.
 
@@ -1268,6 +1325,10 @@ def antipattern_decision(
     )
     code_lines = python_code_lines(after) if python_source else original_lines
     exempt = refined_exempt_lines(after, rows) if python_source else {}
+    for rule_id, lines in (refuted or {}).items():
+        exempt[rule_id] = (
+            exempt[rule_id] | set(lines) if rule_id in exempt else set(lines)
+        )
     comment_columns = python_comment_columns(after) if python_source else None
     file_level = file_ignore(after)
     has_file_ignore = file_level["present"]
@@ -1386,6 +1447,13 @@ def antipattern_decision(
                     continue
                 covering[holder] = True
                 continue
+        # A verdict this gate cannot support is asked about rather than
+        # stated. The regex is wider than the defect for a resolution-required
+        # rule, and what settles the difference is a declaration nothing here
+        # resolved — so a denial would be the audit's opposite, and the two
+        # would block on states no version of the file satisfies at once.
+        if refuted is None and hit["row"]["resolution"] == "required":
+            return unresolved_anti_pattern_ask(number, hit["row"])
         return anti_pattern_denial(number, hit["row"])
 
     def sites_at(numbers: list[int]) -> list[str]:
@@ -1520,6 +1588,7 @@ def decide_edit(
     python_source: bool = False,
     acceptance_guard: AcceptanceGuardRow | None = None,
     marker_files: tuple[str, ...] = PACKAGE_MARKER_FILES,
+    refuted: dict[str, list[int]] | None = None,
 ) -> KernelDecision:
     """Apply anti-pattern, path, marker, full-write, deletion, and size gates.
 
@@ -1571,7 +1640,7 @@ def decide_edit(
     # neither is judged against them.
     if after is not None and role == "production":
         antipattern = antipattern_decision(
-            before, after, antipattern_rows, python_source, granted
+            before, after, antipattern_rows, python_source, granted, refuted
         )
         # A granted suppression answers this gate and no other, so an allow
         # falls through to the rest of the lattice rather than ending it.

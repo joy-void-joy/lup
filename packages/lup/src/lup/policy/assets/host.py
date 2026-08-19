@@ -344,6 +344,58 @@ def file_diagnostics(
     ]
 
 
+def resolved_refutations(
+    path_text: str,
+    proposed: str,
+    command: list[str],
+    timeout_seconds: float = 30.0,
+) -> dict[str, list[int]] | None:
+    """What a checker refutes in the text about to be written, or None.
+
+    The kernel decides from primitive rows and reads nothing, which is what
+    keeps a verdict a pure function of its inputs. Resolving a receiver's
+    declaration is not a decision — it is a fact about the machine, the same
+    kind this half already resolves — so it is answered here and passed in.
+
+    Run in the checkout holding the file, like every other checker this half
+    starts, and handed the proposed text on stdin: the change is judged before
+    it is written, so the copy on disk is the one being replaced. *path_text*
+    still names where the content belongs, because imports and the module's
+    own name resolve against it and against nothing else.
+
+    None where no answer was had — no declared resolver, none installed, a
+    crash, a timeout, output that will not decode — and it has to stay
+    distinct from an empty refutation. Empty means a checker looked and
+    refuted nothing, which is evidence; None means nothing looked, which is
+    the gate's cue to ask rather than refuse. Collapsing the two would turn
+    every unresolvable session into a wall of confident denials.
+    """
+    if not command:
+        return None
+    root = worktree_root(path_text)
+    if not root:
+        return None
+    located = declared_program(root, command[0])
+    if not located:
+        return None
+    try:
+        finished = subprocess.run(
+            [located, *command[1:], "--path", str(Path(path_text).resolve())],
+            capture_output=True,
+            text=True,
+            input=proposed,
+            cwd=root,
+            timeout=timeout_seconds,
+            check=False,
+        )
+        reported = json.loads(finished.stdout)
+        if not reported["resolved"]:
+            return None
+        return {rule: list(lines) for rule, lines in reported["refuted"].items()}
+    except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError):
+        return None
+
+
 def existing_write_targets(targets: list[str]) -> list[str]:
     """Report which of a command's write targets already exist on disk.
 

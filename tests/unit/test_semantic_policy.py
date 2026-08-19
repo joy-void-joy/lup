@@ -1343,6 +1343,7 @@ def test_assembled_kernel_runs_without_site_packages(tmp_path: Path) -> None:
             sandbox_excluded_commands=FIXTURE_EXCLUDED_COMMANDS,
             auto_escape_prefixes=[],
             diagnostics_command=[],
+            resolution_command=[],
         ),
         encoding="utf-8",
     )
