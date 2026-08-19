@@ -6,15 +6,31 @@ being a scalar that kept only the last `--detail`, and in that one string
 being split on its own commas afterwards. Both faults live between the
 command line and the model, which is where a test has to stand to see them.
 
-Every case runs `--dry-run`: the entry is rendered and shown without a file
-being written, a commit made, or a tag created.
+Every changelog case runs `--dry-run`: the entry is rendered and shown
+without a file being written, a commit made, or a tag created. What a bump
+does write is checked against the writer itself, which is the whole of what
+it changes in the manifest.
 """
 
+from pathlib import Path
+
+import pytest
+import tomlkit
 from typer.testing import CliRunner
 
-from lup.devtools.version import app
+from lup.devtools.version import app, write_agent_version
 
 runner = CliRunner()
+
+MANIFEST = """\
+[project]
+name = "example"  # the name this repository publishes under
+
+# Read by lup rather than by the packaging tools.
+[tool.lup]
+agent_version = "1.2.3"
+"""
+"""A manifest carrying exactly what rewriting rather than editing would lose."""
 
 
 def bullets(output: str) -> list[str]:
@@ -70,3 +86,32 @@ def test_no_tag_is_reported_rather_than_assumed() -> None:
     """A dry run has to say which of the two it would do."""
     assert "Would not tag" in dry_bump("A summary", "--no-tag")
     assert "Would tag" in dry_bump("A summary")
+
+
+def test_a_bump_rewrites_only_the_version(tmp_path: Path) -> None:
+    """Everything a reviewer wrote around the value survives changing it.
+
+    A bump that reformatted the manifest would put a diff nobody authored in
+    front of every reviewer of every release, with the three characters that
+    are the release somewhere inside it — and the comments explaining why a
+    key is there are the first thing such a rewrite drops.
+    """
+    manifest = tmp_path / "pyproject.toml"
+    manifest.write_text(MANIFEST, encoding="utf-8")
+
+    write_agent_version(manifest, "2.0.0")
+
+    written = manifest.read_text(encoding="utf-8")
+    assert written == MANIFEST.replace('"1.2.3"', '"2.0.0"')
+    assert tomlkit.parse(written)["tool"]["lup"]["agent_version"] == "2.0.0"
+
+
+def test_a_manifest_that_declares_no_agent_version_is_refused(tmp_path: Path) -> None:
+    """A project that never adopted the version is told, not given a table."""
+    manifest = tmp_path / "pyproject.toml"
+    manifest.write_text('[project]\nname = "example"\n', encoding="utf-8")
+
+    with pytest.raises((KeyError, TypeError)):
+        write_agent_version(manifest, "2.0.0")
+
+    assert manifest.read_text(encoding="utf-8") == '[project]\nname = "example"\n'
