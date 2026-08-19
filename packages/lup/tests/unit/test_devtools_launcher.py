@@ -18,8 +18,8 @@ from lup.devtools.launcher import (
     ENVIRONMENT_VARIABLE,
     console_script,
     launcher_invocation,
-    project_environment,
 )
+from lup.policy.assets.host import project_environment
 
 
 def installed(root: Path, environment: str = DEFAULT_ENVIRONMENT) -> Path:

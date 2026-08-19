@@ -9,8 +9,12 @@ spans that boundary.
 
 import json
 import os
+import sys
 from pathlib import Path
 
+import pytest
+
+from lup.devtools.launcher import ENVIRONMENT_VARIABLE
 from lup.policy.assets.host import (
     declared_program,
     file_diagnostics,
@@ -197,16 +201,62 @@ def test_the_checkout_answers_for_a_declared_program_first(tmp_path: Path) -> No
     assert declared_program(str(work), "bin/checker") == str(program)
 
 
-def test_a_bare_name_the_checkout_lacks_is_left_to_the_path(tmp_path: Path) -> None:
+def test_a_bare_name_the_checkout_lacks_is_left_to_the_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Not every project keeps its toolchain beside its code.
 
     conda, pyenv, a system install, an environment `UV_PROJECT_ENVIRONMENT`
     put elsewhere — none are reachable by a path relative to the checkout,
     and refusing them made this gate unavailable rather than configurable.
     """
+    monkeypatch.delenv(ENVIRONMENT_VARIABLE, raising=False)
     work = checkout(tmp_path / "repo")
 
     assert declared_program(str(work), "pyright") == "pyright"
+
+
+def installed(environment: Path, name: str) -> Path:
+    """*name* as an environment's own scripts directory installs it."""
+    scripts = environment / Path(sys.executable).parent.name
+    scripts.mkdir(parents=True)
+    program = scripts / name
+    program.write_text("#!/bin/sh\n", encoding="utf-8")
+    return program
+
+
+def test_a_bare_name_is_asked_of_the_checkout_environment_before_the_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The declaration names the program; resolving it is what finds a copy.
+
+    A project installs its checker into its own environment, so that is where
+    a bare name is answered — before `PATH`, which would let whichever
+    environment the session was launched from answer for this checkout.
+    """
+    monkeypatch.delenv(ENVIRONMENT_VARIABLE, raising=False)
+    work = checkout(tmp_path / "repo")
+    program = installed(work / ".venv", "pyright")
+
+    assert declared_program(str(work), "pyright") == str(program)
+
+
+def test_a_redirected_environment_is_where_a_bare_name_resolves(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`.venv` is uv's default, not the answer, and the gate must not assume it.
+
+    `UV_PROJECT_ENVIRONMENT` is how one environment gets shared across
+    worktrees, kept off a slow filesystem, or put where a container expects
+    it. A declaration that spelled `.venv/bin/pyright` resolved to nothing
+    here and reported no diagnostics, on every edit, without saying why.
+    """
+    shared = tmp_path / "shared"
+    monkeypatch.setenv(ENVIRONMENT_VARIABLE, str(shared))
+    work = checkout(tmp_path / "repo")
+    program = installed(shared, "pyright")
+
+    assert declared_program(str(work), "pyright") == str(program)
 
 
 def test_a_declared_path_that_resolves_to_nothing_stays_nothing(
