@@ -9,7 +9,7 @@ import sh
 import typer
 from pydantic import BaseModel
 
-from lup.devtools.dev.git_guards import DECLARED_GUARDS, GitGuard, arm, read_guard
+from lup.devtools.dev.git_guards import DECLARED_GUARDS, GitGuard, arm, read_guards
 from lup.policy.assets.host import project_environment
 from lup.devtools.layout import get_tree_dir
 from lup.devtools.utils import (
@@ -177,16 +177,24 @@ class ArmedGitGuards(SetupStep, frozen=True):
     A worktree is where a commit is made and where a branch is pushed from,
     so it is where the guards have to be armed: a check that only runs when
     somebody remembers to run it is what let two artifact-stale commits land.
+
+    Armed from the project's own declaration rather than from lup's default
+    pair. Reading the default instead made a repository that guards its
+    moments differently unable to finish setup at all: the step arms hooks
+    that repository never declared, finds its own hooks at those paths and
+    reads them as somebody else's, and reports itself unsatisfied on every
+    re-run — a worktree that is never ready over guards nobody asked for.
     """
 
     guards: list[GitGuard] = DECLARED_GUARDS
     worktree: Path
 
     def label(self) -> str:
-        return f"the {' and '.join(guard.hook for guard in self.guards)} guards"
+        moments = dict.fromkeys(guard.hook for guard in self.guards)
+        return f"the {' and '.join(moments)} guards"
 
     def satisfied(self) -> bool:
-        return all(read_guard(guard, self.worktree).armed for guard in self.guards)
+        return all(state.armed for state in read_guards(self.guards, self.worktree))
 
     def run(self) -> None:
         for line in arm(self.guards, self.worktree):
@@ -360,6 +368,7 @@ def create(
     launcher: WorktreeLauncher,
     force: bool = False,
     extras: list[str] = GITIGNORED_EXTRAS,
+    guards: list[GitGuard] = DECLARED_GUARDS,
 ) -> None:
     """Create a git worktree, re-attach one, or finish one left half-made."""
     # Three config writes follow — the two merge-driver settings and the
@@ -391,7 +400,7 @@ def create(
     def setup() -> Iterator[SetupStep]:
         """Everything that has to hold before this worktree can be used."""
         yield MergeDriver()
-        yield ArmedGitGuards(worktree=worktree_path)
+        yield ArmedGitGuards(guards=guards, worktree=worktree_path)
         # lup: `lup-devtools sync base` often reports "Base guessed", because this is
         # where the record fails to happen: the fallback reads the *cwd's* current
         # branch, which is not the branch being worked in once EnterWorktree has

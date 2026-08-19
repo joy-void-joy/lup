@@ -24,11 +24,11 @@ def test_every_installed_hook_scrubs_the_environment_before_its_check() -> None:
     time anything the check runs asks git which repository it is in.
     """
     for guard in DECLARED_GUARDS:
-        body = guard.body()
+        check = guard.check()
 
         assert guard.environment == GIT_ENVIRONMENT
-        assert f"unset {' '.join(guard.environment)}" in body
-        assert body.index("unset ") < body.index(f"exec {guard.command}")
+        assert f"unset {' '.join(guard.environment)}" in check
+        assert check.index("unset ") < check.index(f"exec {guard.command}")
 
 
 def test_a_guard_that_wants_nothing_dropped_writes_no_scrub() -> None:
@@ -37,10 +37,10 @@ def test_a_guard_that_wants_nothing_dropped_writes_no_scrub() -> None:
     Declining has to leave a hook that still runs, rather than one carrying a
     bare `unset` and a comment explaining a line that is not there.
     """
-    body = GitGuard(environment=()).body()
+    check = GitGuard(environment=()).check()
 
-    assert "unset" not in body
-    assert body.endswith(f"exec {DRIFT_COMMAND}\n")
+    assert "unset" not in check
+    assert check.endswith(f"exec {DRIFT_COMMAND}\n")
 
 
 def test_a_session_that_touched_nothing_reports_nothing() -> None:

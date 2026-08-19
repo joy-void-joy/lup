@@ -33,6 +33,7 @@ from lup.adapters.harness import (
     compile_codex,
 )
 from lup.codescan.registry import RULE_REFERENCE
+from lup.devtools.harness.drift import roster_gaps
 from lup.harness.banner import (
     ARTIFACT_COMMENT_ROUTER,
     REGENERATE_COMMAND,
@@ -144,6 +145,7 @@ from lup_template.devtools.harness.composition import (
 )
 from lup.devtools.harness.generate import (
     GenerationRecipe,
+    NativeHarnessComposition,
     current_reader,
     manifest_of,
     generate,
@@ -2700,3 +2702,56 @@ def test_a_named_session_is_what_makes_a_native_server_serve_real_tools() -> Non
     context = harness_session_context(HARNESS_SESSION)
     assert context.session_id == HARNESS_SESSION
     assert NOTES_GROUP in collect_tools_by_server(context)
+
+
+def test_every_target_renders_every_declaration_the_source_names() -> None:
+    """Parity, at the compiler where a target would drop one.
+
+    The two trees shape a skill differently — `commands/<name>.md` against
+    `skills/<name>/SKILL.md` — so nothing about the files says the rosters
+    agree. What both carry back is the declaration's own semantic id, and
+    measuring each tree against the source's list is what makes a renderer
+    that quietly skips a kind fail here rather than months later, when
+    somebody on the other runtime asks where a skill went.
+    """
+    harness = portable_harness()
+
+    for tree in (compile_claude(harness), compile_codex(harness)):
+        rendered = {artifact.semantic_id for artifact in tree.artifacts}
+        assert [
+            declared for declared in harness.rendered_ids if declared not in rendered
+        ] == []
+
+
+def test_a_target_that_renders_one_declaration_short_is_named_with_it(
+    tmp_path: Path,
+) -> None:
+    """The gate has to be able to fail, and to say which target and which name."""
+    harness = portable_harness()
+    full = compile_claude(harness)
+    dropped = harness.plugins[0].skills[0].id
+    composition = NativeHarnessComposition(
+        recipe=GenerationRecipe(
+            label="claude",
+            root=tmp_path,
+            source=harness,
+            desired=ArtifactTree(
+                artifacts=[
+                    artifact
+                    for artifact in full.artifacts
+                    if artifact.semantic_id != dropped
+                ]
+            ),
+            manifest_path=tmp_path / "manifest.json",
+            prior=None,
+            reader=FilesystemCurrentTreeReader(None),
+            target_requirements=[],
+        ),
+        readiness=list,
+        invocation_renderer=ClaudeSpellings(),
+    )
+
+    gaps = roster_gaps([composition])
+
+    assert [gap.declaration for gap in gaps] == [dropped]
+    assert gaps[0].describe() == f"claude renders nothing for {dropped}"

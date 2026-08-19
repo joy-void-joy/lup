@@ -260,6 +260,24 @@ def write_release_note(
     return [path]
 
 
+def write_agent_version(pyproject: Path, version: str) -> None:
+    """Record a new agent version, changing nothing else in the manifest.
+
+    Parsed and dumped through tomlkit rather than rewritten, so the comments,
+    key order, blank lines and quoting style around the one value stay exactly
+    as their author left them. A bump that reformatted the manifest would put
+    a diff nobody wrote in front of every reviewer of every release, with the
+    real change — three characters — somewhere inside it.
+
+    Raises where the manifest declares no ``[tool.lup]`` ``agent_version``,
+    which is a project that has not adopted the version this bumps rather
+    than a manifest this could repair.
+    """
+    document = tomlkit.parse(pyproject.read_text(encoding="utf-8"))
+    document["tool"]["lup"]["agent_version"] = version
+    pyproject.write_text(tomlkit.dumps(document), encoding="utf-8")
+
+
 @app.command("bump")
 def bump_cmd(
     level: Annotated[
@@ -336,13 +354,11 @@ def bump_cmd(
             typer.echo("Would not tag" if no_tag else f"Would tag: v{new_version}")
         return
 
-    doc = tomlkit.parse(pyproject.read_text())
     try:
-        doc["tool"]["lup"]["agent_version"] = new_version
+        write_agent_version(pyproject, new_version)
     except (KeyError, TypeError):
         typer.echo("No [tool.lup] agent_version table in pyproject.toml")
         raise typer.Exit(1) from None
-    pyproject.write_text(tomlkit.dumps(doc))
 
     written = [
         pyproject,

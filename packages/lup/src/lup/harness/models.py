@@ -1053,9 +1053,48 @@ class Harness(BaseModel, frozen=True):
         """
         return next(plugin.hooks for plugin in self.plugins if plugin.hooks is not None)
 
-    @model_validator(mode="after")
-    def unique_semantic_ids(self) -> "Harness":
-        ids = [
+    @property
+    def rendered_ids(self) -> list[str]:
+        """Every declaration a target renders as an artifact of its own.
+
+        The roster as the source states it, before any target has shaped it
+        into files. Each id is what a rendered artifact carries back, so this
+        is the one list both trees can be measured against — which is how a
+        target that silently renders one fewer skill than another is caught
+        without either tree's own path shapes entering the comparison.
+
+        The tool servers are absent because they are not rendered as
+        artifacts: each target writes its whole server table into one shared
+        configuration file, which carries that file's own id. So a dropped
+        server is a difference in an artifact's content rather than a missing
+        artifact, and asking for one by id would report every server missing
+        from every tree.
+
+        That difference is answered where the format is known, by one test
+        per adapter reading the whole table back out of the artifact it was
+        written into. Asking it here instead would mean parsing both formats,
+        which is the runtime spelling this list exists to stay clear of.
+        """
+        return [
+            declaration_id
+            for plugin in self.plugins
+            for declaration_id in [
+                plugin.id,
+                *[skill.id for skill in plugin.skills],
+                *[agent.id for agent in plugin.agents],
+            ]
+        ]
+
+    @property
+    def declared_ids(self) -> list[str]:
+        """Every semantic id this source names anywhere, in declaration order.
+
+        Wider than :attr:`rendered_ids` by the tool servers, because this
+        answers whether two declarations collide rather than whether a target
+        rendered one, and a server's id collides with a skill's exactly as a
+        skill's does.
+        """
+        return [
             declaration_id
             for plugin in self.plugins
             for declaration_id in [
@@ -1065,6 +1104,10 @@ class Harness(BaseModel, frozen=True):
                 *[server.id for server in plugin.mcp_servers],
             ]
         ]
+
+    @model_validator(mode="after")
+    def unique_semantic_ids(self) -> "Harness":
+        ids = self.declared_ids
         if len(ids) != len(dict.fromkeys(ids)):
             raise ValueError("harness semantic ids must be globally unique")
         plugin_names = [plugin.name for plugin in self.plugins]
