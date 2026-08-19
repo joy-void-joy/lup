@@ -26,11 +26,13 @@ from lup.devtools.dev.git_guards import (
     LEGACY_GUARD_MARKER,
     GitGuard,
     GuardConflict,
+    HookScript,
     arm,
-    install_guard,
-    read_guard,
+    hook_scripts,
+    install_guards,
+    read_guards,
     read_hooks,
-    uninstall_guard,
+    uninstall_guards,
 )
 from lup.devtools.dev.workflow import WorkflowSpec
 from lup.harness.banner import REGENERATE_COMMAND
@@ -116,8 +118,8 @@ def repository(tmp_path: Path) -> Repository:
     script.write_text(GUARD_SCRIPT, encoding="utf-8")
     (work / "canon.py").write_text(canon("the first wording"), encoding="utf-8")
     repository = Repository(work, git, script)
-    install_guard(
-        GitGuard(command=f"{sys.executable} {script}"),
+    install_guards(
+        [GitGuard(command=f"{sys.executable} {script}")],
         work,
     )
     repository.regenerate()
@@ -177,10 +179,10 @@ def test_the_guard_leaves_a_hook_it_did_not_write_alone(tmp_path: Path) -> None:
     foreign.write_text("#!/bin/sh\nexec ./scripts/mine.sh\n", encoding="utf-8")
 
     with pytest.raises(GuardConflict):
-        install_guard(GitGuard(), work)
+        install_guards([GitGuard()], work)
 
-    assert read_guard(GitGuard(), work).status == "foreign"
-    assert uninstall_guard(GitGuard(), work).status == "foreign"
+    assert read_guards([GitGuard()], work)[0].status == "foreign"
+    assert uninstall_guards([GitGuard()], work)[0].status == "foreign"
     assert foreign.is_file()
 
 
@@ -193,10 +195,10 @@ def test_reinstalling_refreshes_a_body_left_by_an_older_library(
     git = initialized_repo(work, hooks)
     git("config", "core.hooksPath", str(hooks))
     guard = GitGuard()
-    install_guard(GitGuard(command="an older check"), work)
+    install_guards([GitGuard(command="an older check")], work)
 
-    assert read_guard(guard, work).status == "stale"
-    assert install_guard(guard, work).armed
+    assert read_guards([guard], work)[0].status == "stale"
+    assert install_guards([guard], work)[0].armed
 
 
 def test_a_hooks_directory_that_is_gone_reads_as_unreachable(tmp_path: Path) -> None:
@@ -228,8 +230,7 @@ def test_an_armed_checkout_reads_as_reachable_with_nothing_unarmed(
     hooks = tmp_path / "hooks"
     git = initialized_repo(work, hooks)
     git("config", "core.hooksPath", str(hooks))
-    for guard in DECLARED_GUARDS:
-        install_guard(guard, work)
+    install_guards(DECLARED_GUARDS, work)
 
     reading = read_hooks(DECLARED_GUARDS, work)
 
@@ -242,7 +243,7 @@ def test_the_installed_hook_runs_the_drift_check(tmp_path: Path) -> None:
     work = tmp_path / "repo"
     initialized_repo(work, tmp_path / "hooks")
 
-    state = install_guard(GitGuard(), work)
+    state = install_guards([GitGuard()], work)[0]
 
     assert state.path == work / ".git" / "hooks" / "pre-commit"
     assert state.path.read_text(encoding="utf-8").endswith(f"exec {DRIFT_COMMAND}\n")
@@ -263,7 +264,7 @@ def test_the_declared_pair_guards_a_commit_and_a_push_at_their_own_paths(
 
     installed = {
         state.path.name: state.path.read_text(encoding="utf-8")
-        for state in (install_guard(guard, work) for guard in DECLARED_GUARDS)
+        for state in install_guards(DECLARED_GUARDS, work)
     }
 
     assert installed["pre-commit"].endswith(f"exec {DRIFT_COMMAND}\n")
@@ -290,8 +291,8 @@ def test_a_hook_armed_under_the_previous_marker_is_still_recognized(
         encoding="utf-8",
     )
 
-    assert read_guard(GitGuard(), work).status == "stale"
-    assert install_guard(GitGuard(), work).armed
+    assert read_guards([GitGuard()], work)[0].status == "stale"
+    assert install_guards([GitGuard()], work)[0].armed
 
 
 def test_arming_a_checkout_it_cannot_write_reports_instead_of_failing(
@@ -338,8 +339,8 @@ def test_a_push_that_only_deletes_refs_stands_the_gate_down(tmp_path: Path) -> N
     git("remote", "add", "origin", str(origin))
     commit_file(git, work, "file.txt", "one\n", "chore: base")
     git("push", "origin", "main", "main:spent")
-    install_guard(
-        GitGuard(command="false", hook="pre-push", standdown=DELETION_STANDDOWN),
+    install_guards(
+        [GitGuard(command="false", hook="pre-push", standdown=DELETION_STANDDOWN)],
         work,
     )
 
@@ -364,8 +365,206 @@ def test_the_commit_guard_carries_no_standdown(tmp_path: Path) -> None:
     work = tmp_path / "repo"
     initialized_repo(work, tmp_path / "hooks")
 
-    installed = install_guard(GitGuard(), work).path.read_text(encoding="utf-8")
+    installed = install_guards([GitGuard()], work)[0].path.read_text(encoding="utf-8")
 
     assert GitGuard().standdown == ""
     assert "read -r" not in installed
     assert installed.endswith(f"exec {DRIFT_COMMAND}\n")
+
+
+def test_guards_group_into_the_moments_git_runs_them_at() -> None:
+    """A moment is the installed unit, because a guard is not what git names."""
+    scripts = hook_scripts(
+        [*DECLARED_GUARDS, GitGuard(command="a second commit check")]
+    )
+
+    assert [script.hook for script in scripts] == ["pre-commit", "pre-push"]
+    assert [guard.command for guard in scripts[0].guards] == [
+        DRIFT_COMMAND,
+        "a second commit check",
+    ]
+    assert [guard.command for guard in scripts[1].guards] == [CHECK_COMMAND]
+
+
+def test_a_moment_with_one_guard_is_the_script_it_was_before_moments_shared() -> None:
+    """A lone guard shares with nobody, so nothing is framed around its check.
+
+    Worth pinning rather than left to fall out: the hook process becomes the
+    check, which is what lets a push guard read git's own stdin without
+    anything in between, and it means arming a repository that declares one
+    guard per moment rewrites nothing when the library learns to share one.
+    """
+    body = hook_scripts(DECLARED_GUARDS)[1].body()
+
+    assert body.endswith(f"exec {CHECK_COMMAND}\n")
+    assert "guarded_stdin" not in body
+    assert "exit $?" not in body
+
+
+def test_a_shared_moment_no_guard_reads_captures_no_stdin() -> None:
+    """The capture is a `cat`, and one where nothing reads buys the moment nothing."""
+    shared = HookScript(
+        hook="pre-commit", guards=[GitGuard(), GitGuard(command="a second check")]
+    )
+
+    assert not shared.replayed
+    assert "guarded_stdin" not in shared.body()
+
+
+def test_both_guards_at_one_moment_run_in_the_order_declared(tmp_path: Path) -> None:
+    """Git runs one script per moment, so a moment guarded twice is one file.
+
+    Declaration order is running order, which is what lets a repository put
+    its nearly-free refusal in front of the one that boots an interpreter.
+    """
+    work = tmp_path / "repo"
+    hooks = tmp_path / "hooks"
+    git = initialized_repo(work, hooks)
+    git("config", "core.hooksPath", str(hooks))
+    ran = tmp_path / "ran"
+    install_guards(
+        [
+            GitGuard(command=f"sh -c 'echo first >>{ran}'"),
+            GitGuard(command=f"sh -c 'echo second >>{ran}'"),
+        ],
+        work,
+    )
+
+    commit_file(git, work, "file.txt", "one\n", "chore: base")
+
+    assert ran.read_text(encoding="utf-8").split() == ["first", "second"]
+
+
+def test_the_first_guard_to_refuse_ends_the_moment(tmp_path: Path) -> None:
+    """A refusal is the answer, so nothing after it runs and nothing is committed."""
+    work = tmp_path / "repo"
+    hooks = tmp_path / "hooks"
+    git = initialized_repo(work, hooks)
+    git("config", "core.hooksPath", str(hooks))
+    ran = tmp_path / "ran"
+    install_guards(
+        [
+            GitGuard(command="false"),
+            GitGuard(command=f"sh -c 'echo reached >>{ran}'"),
+        ],
+        work,
+    )
+
+    with pytest.raises(sh.ErrorReturnCode):
+        commit_file(git, work, "file.txt", "one\n", "chore: base")
+
+    assert not ran.exists()
+
+
+def test_a_standdown_stands_its_own_guard_down_and_not_the_moment(
+    tmp_path: Path,
+) -> None:
+    """The subshell is what makes an `exit 0` mean this guard rather than the hook.
+
+    Without it the first guard's standdown would take the whole moment with
+    it, disarming every guard declared after it while the hook still reported
+    as armed — the silent-disarm failure this module exists to make
+    impossible, arriving through the field that was meant to be safe.
+    """
+    work = tmp_path / "repo"
+    hooks = tmp_path / "hooks"
+    git = initialized_repo(work, hooks)
+    git("config", "core.hooksPath", str(hooks))
+    install_guards(
+        [
+            GitGuard(command="false", standdown="exit 0\n"),
+            GitGuard(command="false"),
+        ],
+        work,
+    )
+
+    with pytest.raises(sh.ErrorReturnCode):
+        commit_file(git, work, "file.txt", "one\n", "chore: base")
+
+    install_guards(
+        [
+            GitGuard(command="false", standdown="exit 0\n"),
+            GitGuard(command="true"),
+        ],
+        work,
+    )
+    commit_file(git, work, "file.txt", "one\n", "chore: base")
+
+    assert int(str(git("rev-list", "--count", "HEAD"))) == 1
+
+
+def test_both_guards_at_a_shared_push_moment_read_the_same_ref_list(
+    tmp_path: Path,
+) -> None:
+    """Git delivers a moment's stdin once, and each guard here reads it whole.
+
+    The reason the capture exists. A push moment carrying a data check and a
+    gate has two guards that both parse git's ref list, and whichever ran
+    first would drain it — leaving the second judging what looks like a push
+    of nothing, which for a standdown reads as a deletion and stands the gate
+    down on every push there is.
+    """
+    origin = tmp_path / "origin.git"
+    sh.Command("git")("init", "--bare", "-b", "main", str(origin))
+    work = tmp_path / "repo"
+    hooks = tmp_path / "hooks"
+    git = initialized_repo(work, hooks)
+    git("config", "core.hooksPath", str(hooks))
+    git("remote", "add", "origin", str(origin))
+    commit_file(git, work, "file.txt", "one\n", "chore: base")
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    install_guards(
+        [
+            GitGuard(
+                command=f"sh -c 'cat >{first}'", hook="pre-push", reads_stdin=True
+            ),
+            GitGuard(
+                command=f"sh -c 'cat >{second}'", hook="pre-push", reads_stdin=True
+            ),
+        ],
+        work,
+    )
+
+    git("push", "origin", "main")
+
+    assert "refs/heads/main" in first.read_text(encoding="utf-8")
+    assert second.read_text(encoding="utf-8") == first.read_text(encoding="utf-8")
+
+
+def test_a_shared_push_moment_still_stands_down_on_a_deletion(tmp_path: Path) -> None:
+    """The replay preserves an empty stdin as empty, not as one blank line.
+
+    Command substitution strips trailing newlines, so a capture replayed with
+    a bare `printf` hands a guard one blank line where git handed it nothing.
+    A blank line parses as no ref update, which is exactly what a deletion
+    standdown reads to decide there is nothing to judge — so the bug would
+    have shown up as a gate that runs on deletions again, in the one case the
+    standdown was written for.
+    """
+    origin = tmp_path / "origin.git"
+    sh.Command("git")("init", "--bare", "-b", "main", str(origin))
+    work = tmp_path / "repo"
+    hooks = tmp_path / "hooks"
+    git = initialized_repo(work, hooks)
+    git("config", "core.hooksPath", str(hooks))
+    git("remote", "add", "origin", str(origin))
+    commit_file(git, work, "file.txt", "one\n", "chore: base")
+    git("push", "origin", "main", "main:spent")
+    install_guards(
+        [
+            GitGuard(command="true", hook="pre-push", reads_stdin=True),
+            GitGuard(
+                command="false",
+                hook="pre-push",
+                standdown=DELETION_STANDDOWN,
+                reads_stdin=True,
+            ),
+        ],
+        work,
+    )
+
+    git("push", "origin", "--delete", "spent")
+
+    with pytest.raises(sh.ErrorReturnCode):
+        git("push", "origin", "main:carries-content")

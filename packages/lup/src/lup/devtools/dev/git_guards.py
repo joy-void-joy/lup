@@ -21,7 +21,10 @@ pipeline at the same line.
 
 Which hooks a project arms is its own declaration — :data:`DECLARED_GUARDS`
 is the pair lup ships, not a set an adopter has to fork this module to
-change.
+change. A project may declare several guards at one moment, which git runs
+as the one script it runs per hook: :class:`HookScript` is that file, and it
+is the unit installed and read, because a guard is not what git has a name
+for.
 """
 
 from pathlib import Path
@@ -141,14 +144,30 @@ class GitGuard(BaseModel, frozen=True):
     is certainly looking.
     """
 
-    def body(self) -> str:
-        """The hook script: the marker that claims it, the scrub, then the check.
+    reads_stdin: bool = False
+    """Whether this check, or its standdown, reads the moment's own stdin.
+
+    Git delivers a moment's stdin once, so a moment guarded twice has to hand
+    both the same copy — declared rather than detected, because whether a
+    command reads is a fact about that command and nothing here can see
+    inside it. False by default: only the push moment describes itself on
+    stdin at all, and capturing where nothing reads buys a moment's guarding
+    nothing.
+    """
+
+    def check(self) -> str:
+        """This guard's own lines: what it refuses, the scrub, then the command.
 
         Git names this repository to a hook through the environment, which
         outranks the `-C` any command the check runs binds itself with. A
         check whose suite builds throwaway repositories would resolve this one
         instead and commit into the branch being pushed, so the names go
         before the check rather than travelling into it.
+
+        Ends in an ``exec`` whether or not this guard is the last at its
+        moment: :class:`HookScript` puts a guard with another after it in a
+        subshell, where the exec replaces that subshell and its status is
+        what the moment reads.
         """
         scrub = (
             "# Dropped so the check below resolves this repository from the\n"
@@ -157,8 +176,6 @@ class GitGuard(BaseModel, frozen=True):
             f"unset {' '.join(self.environment)}\n"
         )
         return (
-            "#!/bin/sh\n"
-            f"# {GUARD_MARKER}: written by `{INSTALL_COMMAND}`.\n"
             f"# {self.refusal}\n"
             f"{scrub if self.environment else ''}"
             f"{self.standdown}"
@@ -172,6 +189,7 @@ DECLARED_GUARDS = [
         command=CHECK_COMMAND,
         hook="pre-push",
         standdown=DELETION_STANDDOWN,
+        reads_stdin=True,
         refusal=(
             "Refuses this push while the project's own gate fails. A commit is\n"
             f"# local and rewritable; a push is neither. Run `{CHECK_COMMAND}`."
@@ -188,12 +206,111 @@ earlier, to where it is still cheap to answer.
 """
 
 
+# lup: ignore[constant-declaration] — a local name inside a script this module
+# both writes and reads back, so the definition and every use are here; a caller
+# given it to set would be naming a shell variable nothing outside can see
+REPLAY_CALL = "replay_stdin"
+"""The shell function a shared moment hands each of its guards stdin through."""
+
+
+class HookScript(BaseModel, frozen=True):
+    """Every guard a repository declares at one moment, as the one file git runs.
+
+    Git runs a single script per hook, so a moment guarded twice is one file
+    rather than two — which is why the installed unit is a moment and not a
+    guard. The guards run in the order they were declared and the first to
+    refuse ends the operation, so the cheap check goes before the expensive
+    one and a reader of the script meets them in that order.
+    """
+
+    hook: str
+    guards: list[GitGuard]
+
+    @property
+    def replayed(self) -> bool:
+        """Whether this moment has to hand its guards a captured stdin.
+
+        Both halves are load-bearing. A moment with one guard has nobody to
+        share with, and passing git's own stdin straight through is what that
+        guard already expects. A moment where nothing reads must not capture
+        at all: the capture is a ``cat``, and running one at a moment whose
+        stdin nothing fills would buy the guarding nothing.
+        """
+        return len(self.guards) > 1 and any(guard.reads_stdin for guard in self.guards)
+
+    def capture(self) -> str:
+        """The read that makes this moment's stdin answerable more than once.
+
+        Git delivers it once, so the first guard to read drains it for every
+        guard after — a push whose data check read the ref list would leave
+        the gate beside it judging a push that looks empty, and standing
+        down. Replayed rather than teed so each guard reads from the start.
+
+        The emptiness test is not defensive: command substitution strips
+        trailing newlines, so replaying an empty capture with a bare
+        ``printf`` would hand a guard one blank line where git handed it
+        nothing, and a line that parses as no ref update reads to a guard
+        like a push it cannot account for.
+        """
+        if not self.replayed:
+            return ""
+        return (
+            "# Git delivers this moment's stdin once, and more than one guard\n"
+            "# below reads it. Captured here and replayed to each, so the first\n"
+            "# to read does not drain it for the rest.\n"
+            "guarded_stdin=$(cat)\n"
+            f'{REPLAY_CALL}() {{ [ -z "$guarded_stdin" ] || '
+            "printf '%s\\n' \"$guarded_stdin\"; }\n"
+        )
+
+    def framed(self, guard: GitGuard, *, tail: bool) -> str:
+        """One guard's check, in whatever this moment's sharing asks of it.
+
+        The last guard is left bare so the hook process becomes its command,
+        which is both a process saved and the reason a lone guard's script is
+        exactly what it was before any moment carried two. Every other guard
+        runs in a subshell, so a standdown's ``exit 0`` stands that guard down
+        rather than the moment, and ``|| exit $?`` carries a real refusal out.
+        """
+        if tail and not self.replayed:
+            return guard.check()
+        piped = f"{REPLAY_CALL} | " if self.replayed else ""
+        carried = "" if tail else " || exit $?"
+        return f"{piped}(\n{guard.check()}){carried}\n"
+
+    def body(self) -> str:
+        """The hook script: the marker that claims it, then each guard in turn."""
+        last = len(self.guards) - 1
+        framed = [
+            self.framed(guard, tail=index == last)
+            for index, guard in enumerate(self.guards)
+        ]
+        return (
+            "#!/bin/sh\n"
+            f"# {GUARD_MARKER}: written by `{INSTALL_COMMAND}`.\n"
+            f"{self.capture()}{''.join(framed)}"
+        )
+
+
+def hook_scripts(guards: list[GitGuard]) -> list[HookScript]:
+    """Group guards into the moments they are installed as, order preserved.
+
+    Declaration order is the running order, so a project states its cheap
+    refusal before its expensive one and gets exactly that.
+    """
+    moments = dict.fromkeys(guard.hook for guard in guards)
+    return [
+        HookScript(hook=hook, guards=[g for g in guards if g.hook == hook])
+        for hook in moments
+    ]
+
+
 type GuardStatus = Literal["current", "stale", "absent", "foreign"]
-"""What sits at the hook path, judged against what this guard would write."""
+"""What sits at the hook path, judged against what this moment would write."""
 
 
 class GuardState(BaseModel, frozen=True):
-    """Where one of a repository's guards lives and what is actually there."""
+    """Where one of a repository's guarded moments lives, and what is there."""
 
     path: Path
     status: GuardStatus
@@ -242,24 +359,25 @@ def hooks_directory(root: Path) -> Path:
 
 
 # lup: ignore[model-free-function] — driver: it reads the hook file on disk, and
-# GitGuard is the declaration of which hook rather than the thing that reads
-def guard_state(guard: GitGuard, directory: Path) -> GuardState:
-    """Read what is installed at the guard's hook path."""
-    path = directory / guard.hook
+# HookScript is the declaration of which hook rather than the thing that reads
+def guard_state(script: HookScript, directory: Path) -> GuardState:
+    """Read what is installed at this moment's hook path."""
+    path = directory / script.hook
     if not path.is_file():
         return GuardState(path=path, status="absent")
     installed = path.read_text(encoding="utf-8")
     if not any(marker in installed for marker in (GUARD_MARKER, LEGACY_GUARD_MARKER)):
         return GuardState(path=path, status="foreign")
-    current = installed == guard.body()
+    current = installed == script.body()
     return GuardState(path=path, status="current" if current else "stale")
 
 
 # lup: ignore[model-free-function] — driver: the same disk read, resolved from a
 # checkout root
-def read_guard(guard: GitGuard, root: Path) -> GuardState:
-    """What one checkout would run, or fail to run, at this guard's moment."""
-    return guard_state(guard, hooks_directory(root))
+def read_guards(guards: list[GitGuard], root: Path) -> list[GuardState]:
+    """What one checkout would run, or fail to run, at each moment declared."""
+    directory = hooks_directory(root)
+    return [guard_state(script, directory) for script in hook_scripts(guards)]
 
 
 class HooksReading(BaseModel, frozen=True):
@@ -284,7 +402,7 @@ class HooksReading(BaseModel, frozen=True):
     guards: list[GuardState]
 
     def unarmed(self) -> list[GuardState]:
-        """Each declared guard this checkout would not currently run.
+        """Each declared moment this checkout would not currently guard.
 
         Reported rather than refused: a clone that never ran the install
         command is a working clone, and the pipeline refuses the same drift
@@ -294,35 +412,46 @@ class HooksReading(BaseModel, frozen=True):
 
 
 def read_hooks(guards: list[GitGuard], root: Path) -> HooksReading:
-    """Where `root` resolves its hooks, and the state of each guard declared for it."""
+    """Where `root` resolves its hooks, and the state of each moment declared for it."""
     directory = hooks_directory(root)
     return HooksReading(
         directory=directory,
         reachable=directory.is_dir(),
-        guards=[guard_state(guard, directory) for guard in guards],
+        guards=[guard_state(script, directory) for script in hook_scripts(guards)],
     )
 
 
 # lup: ignore[model-free-function] — driver: it writes the hook file
-def install_guard(guard: GitGuard, root: Path, *, force: bool = False) -> GuardState:
-    """Write the hook, refusing to displace one this command did not write."""
+def install_script(
+    script: HookScript, root: Path, *, force: bool = False
+) -> GuardState:
+    """Write one moment's hook, refusing to displace one written elsewhere."""
     directory = hooks_directory(root)
-    existing = guard_state(guard, directory)
+    existing = guard_state(script, directory)
     if existing.status == "foreign" and not force:
         raise GuardConflict(
             f"{existing.path} holds a hook this did not write; read it, then pass "
             "--force to replace it"
         )
     directory.mkdir(parents=True, exist_ok=True)
-    existing.path.write_text(guard.body(), encoding="utf-8", newline="\n")
+    existing.path.write_text(script.body(), encoding="utf-8", newline="\n")
     existing.path.chmod(0o755)
-    return guard_state(guard, directory)
+    return guard_state(script, directory)
+
+
+def install_guards(
+    guards: list[GitGuard], root: Path, *, force: bool = False
+) -> list[GuardState]:
+    """Install every moment these guards declare, each as the one file git runs."""
+    return [
+        install_script(script, root, force=force) for script in hook_scripts(guards)
+    ]
 
 
 # lup: ignore[model-free-function] — driver: it removes the hook file
-def uninstall_guard(guard: GitGuard, root: Path) -> GuardState:
-    """Remove the hook, leaving one this command did not write alone."""
-    state = read_guard(guard, root)
+def uninstall_script(script: HookScript, root: Path) -> GuardState:
+    """Remove one moment's hook, leaving one written elsewhere alone."""
+    state = guard_state(script, hooks_directory(root))
     match state.status:
         case "current" | "stale":
             state.path.unlink()
@@ -331,8 +460,13 @@ def uninstall_guard(guard: GitGuard, root: Path) -> GuardState:
             return state
 
 
+def uninstall_guards(guards: list[GitGuard], root: Path) -> list[GuardState]:
+    """Remove every moment these guards declare, leaving foreign hooks alone."""
+    return [uninstall_script(script, root) for script in hook_scripts(guards)]
+
+
 def arm(guards: list[GitGuard], root: Path) -> list[str]:
-    """Install each guard where a setup command can only report a failure.
+    """Install each moment where a setup command can only report a failure.
 
     Worktree creation runs under sandboxes that mount the hooks directory
     read-only, and a checkout without the hooks is still a working checkout —
@@ -340,15 +474,15 @@ def arm(guards: list[GitGuard], root: Path) -> list[str]:
     this says what happened and lets setup carry on, rather than failing it
     over a second line of defence.
 
-    Each guard is reported on its own line and none stops the next: they
+    Each moment is reported on its own line and none stops the next: they
     guard different moments, and one hook path already occupied is no reason
     to leave the other unarmed.
     """
 
-    def armed(guard: GitGuard) -> str:
+    def armed(script: HookScript) -> str:
         try:
-            return install_guard(guard, root).describe()
+            return install_script(script, root).describe()
         except (OSError, GuardConflict, sh.ErrorReturnCode) as error:
-            return f"{guard.hook} guard not installed: {error}"
+            return f"{script.hook} guard not installed: {error}"
 
-    return [armed(guard) for guard in guards]
+    return [armed(script) for script in hook_scripts(guards)]
