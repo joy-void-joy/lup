@@ -182,6 +182,72 @@ def clear_markers(targets: list[str], *, wake: bool = False) -> None:
         typer.echo(f"Cleared {len(removal.removed)} marker(s) from {rel}")
 
 
+def withdraw_notes(targets: list[str], reason: str) -> None:
+    """Retract notes that should not have been written, recording why.
+
+    Conversion answers a note that was asked and addressed. It is the wrong
+    shape for one that was mistaken — writing `# lup: solved:` in front of a
+    question nobody needed answered claims work that never happened, and the
+    verify pass then checks a claim against an ask that was never real. So
+    withdrawal is its own act, and the reason is mandatory: what the edit
+    gate refuses is a note vanishing with nothing left to review, and a
+    recorded reason is exactly what that absence otherwise lacks.
+
+    Naming a `file:line` withdraws whatever note sits there, deferrals
+    included — a parked task can be mistaken the same way, and the target
+    was named deliberately with a reason attached.
+
+    The removal is committed on its own so the note's words and the reason
+    for dropping them stay together in history. Files carrying other
+    uncommitted work are refused rather than swept into that commit.
+    """
+    wanted = targets_by_file(targets)
+    if not wanted:
+        typer.echo("Name the notes to withdraw as file:line", err=True)
+        raise typer.Exit(2)
+    dirty = [rel for rel in wanted if git.out("diff", "--", rel).strip()]
+    if dirty:
+        typer.echo(
+            "Refusing to withdraw: uncommitted changes in "
+            f"{', '.join(sorted(dirty))}. A withdrawal is committed by itself "
+            "so its reason stays attached to the note it removed — commit or "
+            "stash the other work first.",
+            err=True,
+        )
+        raise typer.Exit(1)
+
+    withdrawn: list[str] = []
+    for rel, lines in wanted.items():
+        path = Path(rel)
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            typer.echo(f"Skipping unreadable file: {rel}", err=True)
+            continue
+        removal = remove_notes(
+            text,
+            scan_mode_for(path),
+            [NoteTarget(line=line_no) for line_no in lines],
+            wake=True,
+        )
+        for target in removal.missing:
+            typer.echo(f"No note to withdraw at {rel}:{target.line}", err=True)
+        if not removal.removed:
+            continue
+        path.write_text(removal.text, encoding="utf-8")
+        withdrawn.extend(
+            f"{rel}:{note.start_line} {note.marker_text()}" for note in removal.removed
+        )
+    if not withdrawn:
+        typer.echo("No notes withdrawn.")
+        return
+    git("add", "--", *sorted(wanted))
+    body = "\n".join(withdrawn)
+    subject = f"chore(review): withdraw {len(withdrawn)} inline note(s)"
+    git("commit", "-m", f"{subject}\n\n{reason}\n\n{body}")
+    typer.echo(f"Withdrew {len(withdrawn)} note(s):\n{body}")
+
+
 def commit_prompts() -> None:
     """Snapshot the current feedback prompts into one commit before resolving them."""
     found = scan_tracked(find_feedback)

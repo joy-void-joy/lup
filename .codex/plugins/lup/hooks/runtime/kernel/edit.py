@@ -7,6 +7,8 @@ import io
 import posixpath
 import re
 import tokenize
+import difflib
+from collections import Counter
 from collections.abc import Callable, Iterator
 from typing import TypedDict
 
@@ -39,6 +41,14 @@ OPEN_NOTE_RE = re.compile(
     r"(#|//)\s*lup\s*:(?!\s*(?:ignore|solved|template)\b)", re.IGNORECASE
 )
 SOLVED_NOTE_RE = re.compile(r"(#|//)\s*lup\s*:\s*solved\b", re.IGNORECASE)
+# Everything before a note's own words: the marker, and the kind keyword where
+# one is present. `defer` carries an optional bracketed gate that belongs to
+# the head rather than the text, so waking a deferral reads as the same note
+# it always was instead of as one deleted and another added.
+NOTE_HEAD_RE = re.compile(
+    r"(#|//)\s*lup\s*:\s*(?:(?:solved|defer(?:\s*\[[^\]]*\])?)\s*:\s*)?",
+    re.IGNORECASE,
+)
 IGNORE_RE = re.compile(
     r"(#|//)\s*lup\s*:\s*ignore\b(?:\s*\[(?P<ids>[^\]]*)\])?",
     re.IGNORECASE,
@@ -418,38 +428,63 @@ def quoted_example(line: str, position: int) -> bool:
     return prefix.count("`") % 2 == 1 or prefix.endswith("`")
 
 
-def count_outside_examples(pattern: re.Pattern[str], text: str) -> int:
-    """Count matches in one chunk of prose, skipping backtick-quoted examples."""
-    return sum(
-        1
-        for line in text.splitlines()
+class LocatedNote(TypedDict):
+    """One marker match: where it sits, and the words it carries.
+
+    The line is what lets a vanished note be paired with the code it
+    annotated; the text is what lets it be recognised in the next revision.
+    A tally supports neither, which is why both are carried rather than
+    counted and discarded.
+    """
+
+    line: int
+    text: str
+
+
+def notes_outside_examples(
+    pattern: re.Pattern[str], text: str, first_line: int = 1
+) -> list[LocatedNote]:
+    """Locate matches in one chunk of prose, skipping backtick-quoted examples.
+
+    ``first_line`` is where this chunk begins in the file, so a match inside a
+    multi-line docstring token reports the line it actually occupies rather
+    than the token's.
+    """
+    return [
+        LocatedNote(line=first_line + offset, text=line[match.start() :].strip())
+        for offset, line in enumerate(text.splitlines())
         for match in pattern.finditer(line)
         if not quoted_example(line, match.start())
-    )
+    ]
 
 
-def count_in_prose(
+def count_outside_examples(pattern: re.Pattern[str], text: str) -> int:
+    """Count matches in one chunk of prose, skipping backtick-quoted examples."""
+    return len(notes_outside_examples(pattern, text))
+
+
+def notes_in_prose(
     source: str, pattern: re.Pattern[str], python_source: bool = False
-) -> int | None:
-    """Count pattern matches where prose belongs, not inside ordinary strings.
+) -> list[LocatedNote] | None:
+    """Locate pattern matches where prose belongs, not inside ordinary strings.
 
     `None` where a Python source does not tokenize, because there is then no
-    way to tell a comment from a string and the honest answer is that the
-    count is unknown for that revision. Returning a whole-text tally instead
-    counts a different population, so differencing it against a tokenised
+    way to tell a comment from a string and the honest answer is that which
+    notes the revision holds is unknown. Scanning the whole text instead
+    gathers a different population, so differencing it against a tokenised
     one measures the change of regime rather than the change of notes: a
     conflicted file mentioning the marker in a string literal counted one
     higher until its last conflict marker went, and that drop read as
     deleted feedback.
     """
     if not python_source:
-        return count_outside_examples(pattern, source)
+        return notes_outside_examples(pattern, source)
     tokens = python_tokens(source)
     if tokens is None:
         return None
     documentation = docstring_lines(source)
-    return sum(
-        count_outside_examples(pattern, token.string)
+    return [
+        note
         for token in tokens
         if token.type == tokenize.COMMENT
         or (
@@ -459,7 +494,16 @@ def count_in_prose(
                 for line in range(token.start[0], token.end[0] + 1)
             )
         )
-    )
+        for note in notes_outside_examples(pattern, token.string, token.start[0])
+    ]
+
+
+def count_in_prose(
+    source: str, pattern: re.Pattern[str], python_source: bool = False
+) -> int | None:
+    """Tally the notes :func:`notes_in_prose` finds, preserving its `None`."""
+    located = notes_in_prose(source, pattern, python_source)
+    return None if located is None else len(located)
 
 
 def review_marker_count(source: str, python_source: bool = False) -> int | None:
@@ -475,6 +519,108 @@ def open_note_count(source: str, python_source: bool = False) -> int | None:
 def solved_note_count(source: str, python_source: bool = False) -> int | None:
     """Count resolution claims waiting to be checked."""
     return count_in_prose(source, SOLVED_NOTE_RE, python_source)
+
+
+def note_body(text: str) -> str:
+    """The words a note carries, with its marker head and kind keyword removed.
+
+    Conversion is what this exists for: `# lup: is parity gated?` and
+    `# lup: solved: is parity gated?` are the same ask at two stages, and
+    stripping both heads is what lets the second be recognised as the first
+    rather than counted as one note lost and one claim gained.
+    """
+    return NOTE_HEAD_RE.sub("", text, count=1).strip()
+
+
+def note_subject(lines: list[str], line: int) -> int | None:
+    """Which line a note concerns, or `None` where it annotates nothing.
+
+    A note either trails the line it is about or sits above it, so the
+    subject is the note's own line when code precedes the marker there, and
+    otherwise the next line below carrying anything but another note. Blank
+    lines are skipped because a note separated from its subject by one is
+    still about it, and stacked notes are skipped because they share the
+    subject beneath them.
+
+    Deliberately textual. The kernel has `ast`, but :func:`notes_in_prose`
+    already answers `None` for a revision that will not tokenize, and the
+    revision that will not tokenize is the one mid-merge — exactly where a
+    subject has to be resolvable for the completing edit to land.
+    """
+    own = lines[line - 1] if 0 < line <= len(lines) else ""
+    head = NOTE_RE.search(own)
+    if head is None:
+        return None
+    if own[: head.start()].strip():
+        return line
+    for offset, candidate in enumerate(lines[line:], start=line + 1):
+        if not candidate.strip() or NOTE_RE.search(candidate):
+            continue
+        return offset
+    return None
+
+
+def deleted_lines(previous: str, updated: str) -> set[int]:
+    """Which of ``previous``'s lines this edit removed outright, 1-based.
+
+    Removed, not merely absent. A line rewritten in place reads as gone if
+    the revisions are compared as sets, which would make editing the code
+    under a note a way to drop the note with it — so `replace` is excluded
+    and only `delete` counts. What survives that distinction is the case the
+    subject rule is for: code that went away, taking its feedback along.
+    """
+    matcher = difflib.SequenceMatcher(
+        a=previous.splitlines(), b=updated.splitlines(), autojunk=False
+    )
+    return {
+        line
+        for tag, start, end, _, _ in matcher.get_opcodes()
+        if tag == "delete"
+        for line in range(start + 1, end + 1)
+    }
+
+
+def note_bodies(notes: list[LocatedNote]) -> Counter[str]:
+    """How many times each note's words appear, so duplicates stay distinct."""
+    return Counter(note_body(note["text"]) for note in notes)
+
+
+def spent_notes(
+    previous: str,
+    updated: str,
+    was_open: list[LocatedNote],
+    is_open: list[LocatedNote],
+    python_source: bool,
+) -> str | None:
+    """The first note this edit dropped while its subject stands, or `None`.
+
+    A note leaves a file honestly three ways: it is still open under the same
+    words, it was converted into a claim this edit added, or the code it
+    annotated went with it. Anything else is feedback stripped off code that
+    is still there, which is the one act the gate exists to refuse.
+    """
+    added_claims = note_bodies(
+        notes_in_prose(updated, SOLVED_NOTE_RE, python_source) or []
+    ) - note_bodies(notes_in_prose(previous, SOLVED_NOTE_RE, python_source) or [])
+    survived = note_bodies(is_open) + added_claims
+    lines = previous.splitlines()
+    removed = deleted_lines(previous, updated)
+    for note in was_open:
+        body = note_body(note["text"])
+        if survived[body] > 0:
+            survived[body] -= 1
+            continue
+        subject = note_subject(lines, note["line"])
+        # A note annotating nothing in particular is about the file, so only
+        # the file's own deletion spends it.
+        spent = (
+            not updated.strip()
+            if subject is None
+            else note["line"] in removed and subject in removed
+        )
+        if not spent:
+            return note["text"]
+    return None
 
 
 class MarkerVerdict(TypedDict):
@@ -510,38 +656,51 @@ def marker_decision(
     `--restore`, which touches only `solved:` claims. No session's edits are
     exempt here: an environment cannot carry this authority, so a grant that
     claims to is ignored.
+
+    Notes are matched by their words rather than tallied, because a tally
+    answers only "how many", and four different acts spend a note: dropping
+    the feedback, converting it, deleting the code it annotated, and moving
+    that code elsewhere. Only the first is the act worth denying, and a
+    difference of counts cannot tell them apart — nor can it tell a real
+    deletion from one hidden inside a conversion, where the deltas cancel
+    and the edit reads as though nothing left.
+
+    So a vanished note is judged against its subject: gone with the code it
+    annotated, it was spent by that deletion and nothing is owed. Standing
+    code with the note stripped off it is the deletion this gate exists for.
+    Where the subject merely moved within the file the note should have
+    moved too, so presence anywhere in the revision counts as standing.
     """
-    # A revision whose note count could not be established has not been shown
-    # to have lost anything, and denying on an unmeasurable difference is
-    # what blocked the completing step of every merge resolution: removing a
+    # A revision whose notes could not be established has not been shown to
+    # have lost anything, and denying on an unmeasurable difference is what
+    # blocked the completing step of every merge resolution: removing a
     # file's last conflict marker is what makes it parse for the first time.
-    opened_now = open_note_count(updated, python_source)
-    opened_before = open_note_count(previous, python_source)
+    was_open = notes_in_prose(previous, OPEN_NOTE_RE, python_source)
+    is_open = notes_in_prose(updated, OPEN_NOTE_RE, python_source)
     claimed_now = solved_note_count(updated, python_source)
     claimed_before = solved_note_count(previous, python_source)
     if (
-        opened_now is None
-        or opened_before is None
+        was_open is None
+        or is_open is None
         or claimed_now is None
         or claimed_before is None
     ):
         return None
-    opened = opened_now - opened_before
-    claimed = claimed_now - claimed_before
-    if opened < 0 and opened + claimed == 0:
-        return None
-    if opened < 0:
+    lost = spent_notes(previous, updated, was_open, is_open, python_source)
+    if lost is not None:
         return MarkerVerdict(
             gate="feedback-removed",
             decision=KernelDecision(
                 "deny",
-                "this edit removes inline review feedback. Resolving a note means "
-                "replacing `# lup:` with `# lup: solved:` and keeping its text, so "
-                "the claim can be checked against what was asked; deleting it "
-                "leaves nothing to check",
+                "this edit removes inline review feedback that still has a "
+                f"subject — {lost}. Resolving a note means replacing `# lup:` "
+                "with `# lup: solved:` and keeping its text, so the claim can be "
+                "checked against what was asked; deleting it leaves nothing to "
+                "check. Where the note was mistaken rather than answered, "
+                "withdraw it with `dev comments --withdraw file:line --reason`",
             ),
         )
-    if claimed < 0:
+    if claimed_now < claimed_before:
         return MarkerVerdict(
             gate="claim-removed",
             decision=KernelDecision(
@@ -552,7 +711,7 @@ def marker_decision(
                 "feedback (`dev comments --restore file:line`)",
             ),
         )
-    if opened > 0:
+    if note_bodies(is_open) - note_bodies(was_open):
         return MarkerVerdict(
             gate="feedback-added",
             decision=KernelDecision("ask", "edit adds inline review feedback"),
