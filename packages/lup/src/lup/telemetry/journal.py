@@ -22,11 +22,8 @@ reads like evidence.
 """
 
 import asyncio
-import fcntl
 import hashlib
 import logging
-import os
-import threading
 from abc import ABC, abstractmethod
 from collections.abc import AsyncGenerator, AsyncIterator, Iterator, Sequence
 from contextlib import asynccontextmanager
@@ -35,8 +32,10 @@ from pathlib import Path
 from typing import Literal
 from uuid import uuid4
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, TypeAdapter
 
+from lup.channels.stream import Stream
+from lup.journal import ChainedWriter, Journal, JournalRecord, last_record
 from lup.runtime.composition import is_output_model
 from lup.runtime.contracts import EventStream, Session, Turn
 from lup.runtime.errors import TurnError
@@ -62,7 +61,15 @@ from lup.types import JsonObject, JsonValue
 
 logger = logging.getLogger(__name__)
 
-TRACE_SCHEMA_VERSION = 1
+TRACE_SCHEMA_VERSION = 2
+"""Which record shape the chain in a transcript was computed over.
+
+The digest covers every field of a draft, so a transcript written under an
+earlier shape verifies against the rules it was written by and not against
+these. Bumping here is what keeps that legible: an old transcript reads as
+old rather than as tampered with.
+"""
+
 BLOB_THRESHOLD_BYTES = 64 * 1024
 # lup: ignore[constant-declaration] — the marker this repository writes into a
 # transcript in place of a secret, which a reader recognizes by sight
@@ -161,17 +168,21 @@ class TraceContext(BaseModel, frozen=True):
         )
 
 
-class ObservableEventDraft(BaseModel, frozen=True):
-    """Hash input for one event, excluding the chain-derived digest."""
+class ObservableEventDraft(JournalRecord[TraceActor], frozen=True):
+    """Hash input for one event, excluding the chain-derived digest.
+
+    Where the record sits in the order, and whose it is, come from the shared
+    journal record — so a transcript is paged by the same reader that pages a
+    decision log. The digest covers the whole draft including those two,
+    which is what :data:`TRACE_SCHEMA_VERSION` names.
+    """
 
     schema_version: int = TRACE_SCHEMA_VERSION
-    sequence: int = Field(ge=0)
     timestamp: str
     run_id: str
     trace_id: str
     span_id: str
     parent_span_id: str | None = None
-    actor: TraceActor
     session_id: str | None = None
     turn_id: str | None = None
     kind: ObservableEventKind
@@ -409,41 +420,52 @@ def store_large_values(value: JsonValue, directory: Path) -> JsonValue:
             return value
 
 
-class JournalState:
-    """Shared append cursor and lock for every actor in one trace tree."""
+EVENT_ADAPTER: TypeAdapter[ObservableEvent] = TypeAdapter(ObservableEvent)
 
-    def __init__(self, path: Path) -> None:
-        self.path = path
-        self.lock_path = path.with_suffix(path.suffix + ".lock")
-        existing = read_observable_events(path) if path.exists() else []
-        self.sequence = len(existing)
-        self.previous_hash = existing[-1].event_hash if existing else None
-        self.lock = threading.Lock()
+type ObservableJournal = Journal[TraceActor, ObservableEvent]
+"""The ordered file every span of one trace tree appends to."""
+
+
+def open_observable_journal(path: Path) -> ObservableJournal:
+    """One transcript, written durably and chained under a cross-process lock."""
+    return Journal(
+        path, EVENT_ADAPTER, ChainedWriter(path.with_suffix(path.suffix + ".lock"))
+    )
 
 
 class TraceJournal:
-    """Append complete observable events immediately and durably."""
+    """Append complete observable events immediately and durably.
+
+    One span's view of a shared record. The ordering, the lock and the chain
+    belong to the journal underneath; what is here is the span — which actor
+    is speaking, and under which parent — and the redaction a payload passes
+    through before anything durable holds it.
+    """
 
     def __init__(
         self,
         path: Path,
         context: TraceContext,
-        state: JournalState | None = None,
+        journal: ObservableJournal | None = None,
         redaction: Redaction | None = None,
     ) -> None:
         self.context = context
-        self.state = state or JournalState(path)
+        self.journal = journal or open_observable_journal(path)
         self.redaction = redaction or KeyRedaction()
 
     @property
     def path(self) -> Path:
         """The shared JSONL path this actor span appends to."""
-        return self.state.path
+        return self.journal.path
 
     def child(self, actor: TraceActor) -> "TraceJournal":
-        """Write a child span into the same canonical event stream."""
+        """Write a child span into the same canonical event stream.
+
+        The journal itself is handed over rather than reopened, so every span
+        in one tree shares the order, the lock, and the chain head.
+        """
         return TraceJournal(
-            self.path, self.context.child(actor), self.state, self.redaction
+            self.path, self.context.child(actor), self.journal, self.redaction
         )
 
     def emit(
@@ -456,31 +478,27 @@ class TraceJournal:
     ) -> ObservableEvent:
         """Redact, chain, append, flush, and return one event.
 
-        The chain head is re-read from the file inside the lock rather than
-        trusted from memory, because a second process appending to the same
-        transcript would otherwise leave both writers chaining from a head
-        that is no longer last.
+        Everything happens inside the journal's lock, including the redaction
+        and the blob spilling: the chain head is whatever the file holds at
+        the moment this record is built, and a second process appending to
+        the same transcript must not be able to move it in between.
         """
-        with self.state.lock:
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            with self.state.lock_path.open("a", encoding="utf-8") as lock_stream:
-                fcntl.flock(lock_stream.fileno(), fcntl.LOCK_EX)
-                try:
-                    return self.append(kind, payload, session_id, turn_id)
-                finally:
-                    fcntl.flock(lock_stream.fileno(), fcntl.LOCK_UN)
+        return self.journal.write(
+            lambda seq, previous: self.event(
+                seq, previous, kind, payload, session_id, turn_id
+            )
+        )
 
-    def append(
+    def event(
         self,
+        seq: int,
+        previous: ObservableEvent | None,
         kind: ObservableEventKind,
         payload: JsonObject | None,
         session_id: str | None,
         turn_id: str | None,
     ) -> ObservableEvent:
-        """Chain and write one event, with the transcript lock already held."""
-        latest = read_last_observable_event(self.path)
-        self.state.sequence = latest.sequence + 1 if latest else 0
-        self.state.previous_hash = latest.event_hash if latest else None
+        """Build one chained event, with the transcript lock already held."""
         safe_payload = self.redaction.apply(payload or {})
         if not isinstance(safe_payload, dict):
             raise TypeError("event payload redaction changed object shape")
@@ -488,7 +506,7 @@ class TraceJournal:
         if not isinstance(persisted, dict):
             raise TypeError("event payload storage changed object shape")
         draft = ObservableEventDraft(
-            sequence=self.state.sequence,
+            seq=seq,
             timestamp=datetime.now().astimezone().isoformat(),
             run_id=self.context.run_id,
             trace_id=self.context.trace_id,
@@ -499,49 +517,23 @@ class TraceJournal:
             turn_id=turn_id,
             kind=kind,
             payload=persisted,
-            previous_hash=self.state.previous_hash,
+            previous_hash=previous.event_hash if previous is not None else None,
         )
-        event = ObservableEvent(
+        return ObservableEvent(
             **draft.model_dump(mode="python"),
             event_hash=draft.digest(),
         )
-        with self.path.open("a", encoding="utf-8") as stream:
-            stream.write(event.model_dump_json() + "\n")
-            stream.flush()
-            os.fsync(stream.fileno())
-        self.state.sequence += 1
-        self.state.previous_hash = event.event_hash
-        return event
 
 
 def read_last_observable_event(path: Path) -> ObservableEvent | None:
-    """Read only the final complete JSONL record.
+    """Read only the final complete record.
 
-    Seeking to the last line rather than parsing the file is what keeps the
-    per-event cost flat: a transcript is appended to once per event, and
-    re-reading all of it each time would make a long run quadratic.
+    Reading backwards from a bounded window rather than parsing the file is
+    what keeps the per-event cost flat: a transcript is appended to once per
+    event, and re-reading all of it each time would make a long run
+    quadratic.
     """
-    if not path.exists() or path.stat().st_size == 0:
-        return None
-    with path.open("rb") as stream:
-        stream.seek(0, os.SEEK_END)
-        position = stream.tell() - 1
-        while position >= 0:
-            stream.seek(position)
-            if stream.read(1) != b"\n":
-                break
-            position -= 1
-        while position >= 0:
-            stream.seek(position)
-            if stream.read(1) == b"\n":
-                position += 1
-                break
-            position -= 1
-        stream.seek(max(position, 0))
-        line = stream.readline().decode("utf-8")
-    if not line:
-        return None
-    return ObservableEvent.model_validate_json(line)
+    return last_record(path, EVENT_ADAPTER)
 
 
 def read_observable_events(path: Path) -> list[ObservableEvent]:
@@ -551,24 +543,14 @@ def read_observable_events(path: Path) -> list[ObservableEvent]:
     run killed mid-write leaves a torn final line, and the events before it
     are still the evidence somebody opened the file for.
     """
-    if not path.exists():
-        return []
-    events: list[ObservableEvent] = []
-    for line in path.read_text(encoding="utf-8").splitlines():
-        if not line:
-            continue
-        try:
-            events.append(ObservableEvent.model_validate_json(line))
-        except ValueError:
-            logger.exception("Skipping malformed observable trace line in %s", path)
-    return events
+    return Stream(path, EVENT_ADAPTER).read_all()
 
 
 def verify_event_chain(events: list[ObservableEvent]) -> bool:
     """Check sequence, prior-hash linkage, and every event digest."""
     prior: str | None = None
     for sequence, event in enumerate(events):
-        if event.sequence != sequence or event.previous_hash != prior:
+        if event.seq != sequence or event.previous_hash != prior:
             return False
         draft = ObservableEventDraft.model_validate(
             event.model_dump(exclude={"event_hash"})
