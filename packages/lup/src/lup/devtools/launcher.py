@@ -23,9 +23,10 @@ disk, and reading them costs a `stat` — which is less than the guidance it
 replaces cost anybody who did not match the layout it assumed.
 """
 
-import os
 import sys
 from pathlib import Path
+
+from lup.policy.assets.host import project_environment
 
 # lup: ignore[constant-declaration] — uv's own variable name, not a judgement
 ENVIRONMENT_VARIABLE = "UV_PROJECT_ENVIRONMENT"
@@ -33,28 +34,14 @@ ENVIRONMENT_VARIABLE = "UV_PROJECT_ENVIRONMENT"
 
 # lup: ignore[constant-declaration] — the directory name uv creates by default
 DEFAULT_ENVIRONMENT = ".venv"
-"""Where `uv sync` writes an environment when nothing redirects it."""
+"""Where `uv sync` writes an environment when nothing redirects it.
 
-
-def project_environment(root: Path) -> Path:
-    """Where a sync puts *root*'s environment.
-
-    ``.venv`` beside the manifest is `uv`'s default and this project's own
-    layout, but it is a default rather than the answer:
-    ``UV_PROJECT_ENVIRONMENT`` redirects it, which is how one environment gets
-    shared across worktrees, kept off a slow filesystem, or placed where a
-    container expects it. A relative value resolves against the project, the
-    way `uv` resolves it, rather than against whatever directory a command
-    happened to run in.
-    """
-    environ = os.environ  # lup: ignore[os-environ] — uv's own configuration
-    declared = (
-        environ[ENVIRONMENT_VARIABLE] if ENVIRONMENT_VARIABLE in environ else ""
-    ).strip()
-    if not declared:
-        return root / DEFAULT_ENVIRONMENT
-    return Path(declared) if Path(declared).is_absolute() else root / declared
-
+Named for what has to *say* it rather than resolve it: the one spelling the
+merge guidance documents, and the tests that redirect it. Resolving is
+:func:`~lup.policy.assets.host.project_environment`, which carries both names
+as signature defaults because the compiler splicing it into each bare hook
+script carries functions alone and would leave a constant beside it behind.
+"""
 
 CONSOLE_SCRIPT = "lup-devtools"
 """The entry point this package installs, named in its own packaging metadata."""

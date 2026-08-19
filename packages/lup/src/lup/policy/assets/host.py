@@ -157,6 +157,38 @@ def publish_edition(path_text: str) -> None:
         print(f"lup: could not publish the edition: {error}", file=sys.stderr)
 
 
+def project_environment(
+    root: Path,
+    variable: str = "UV_PROJECT_ENVIRONMENT",
+    default: str = ".venv",
+) -> Path:
+    """Where a sync puts *root*'s environment.
+
+    ``.venv`` beside the manifest is `uv`'s default and this project's own
+    layout, but it is a default rather than the answer: *variable* redirects
+    it, which is how one environment gets shared across worktrees, kept off a
+    slow filesystem, or placed where a container expects it. A relative value
+    resolves against the project, the way `uv` resolves it, rather than
+    against whatever directory a command happened to run in.
+
+    Lives in this half because this is the constrained one: the hook is
+    compiled to a bare script that may import nothing but the standard
+    library, so logic it needs cannot sit anywhere it would have to import
+    from. Everything else reads it from here, which is what keeps one answer
+    rather than two that agree until they do not.
+
+    Both names arrive as defaults rather than as module constants because the
+    compiler that splices this half into each hook carries functions alone —
+    a name declared beside one would be left behind, and the script would
+    reference it undefined.
+    """
+    environ = os.environ  # lup: ignore[os-environ] — uv's own configuration
+    declared = (environ[variable] if variable in environ else "").strip()
+    if not declared:
+        return root / default
+    return Path(declared) if Path(declared).is_absolute() else root / declared
+
+
 def declared_program(root: str, declared: str) -> str:
     """Where a declared program is, or "" when it is not there to run.
 
@@ -177,11 +209,27 @@ def declared_program(root: str, declared: str) -> str:
     diagnostics and said nothing about why, so a project outside one layout
     did not get a weaker check — it got silence indistinguishable from a
     clean file, on every edit.
+
+    A bare name is asked of the checkout's own environment before ``PATH``,
+    because that is where a project's toolchain is installed and asking is
+    what keeps the declaration from naming a layout. Spelling the path in
+    would answer only for the layout it spelled: ``.venv`` is `uv`'s default
+    and nothing else's, so a project that redirected it, or that installs
+    through conda or pyenv, resolved to nothing and was gated in silence.
+    The scripts directory comes from the running interpreter — ``bin`` on
+    POSIX, ``Scripts`` on Windows — because that is a property of how Python
+    is installed rather than of any project, and reading it is what keeps
+    this from being a second layout assumption behind the one it replaces.
     """
     located = Path(root) / declared
     if located.is_file():
         return str(located)
-    return "" if "/" in declared or "\\" in declared else declared
+    if "/" in declared or "\\" in declared:
+        return ""
+    installed = (
+        project_environment(Path(root)) / Path(sys.executable).parent.name / declared
+    )
+    return str(installed) if installed.is_file() else declared
 
 
 def conflicted(path_text: str) -> bool:
