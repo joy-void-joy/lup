@@ -187,7 +187,8 @@ def create_dev_app(
             bool,
             typer.Option(
                 "--settle",
-                help="Do what opening a session does: pull and push a clean checkout",
+                help="Settle a clean checkout rather than only reporting: pull "
+                "what the remote holds, then push what it lacks",
             ),
         ] = False,
     ) -> None:
@@ -198,7 +199,9 @@ def create_dev_app(
         answer otherwise only appears in front of a session nobody asked for.
         """
         if settle:
-            branches.settle_base_freshness(LocalProcessLauncher(), project_root())
+            branches.settle_base_freshness(
+                LocalProcessLauncher(), project_root(), publish=True
+            )
             return
         typer.echo(
             branches.probe_base_freshness(
@@ -448,13 +451,26 @@ def create_dev_app(
         except git_guards_mod.GuardConflict as error:
             typer.echo(str(error), err=True)
             raise typer.Exit(1) from error
+        except OSError as error:
+            # One clone's hooks directory is shared by every worktree cut from
+            # it and sits outside all of them, so a sandbox confining writes to
+            # the checkout refuses this — as an errno naming a path, which says
+            # nothing about hooks to whoever reads it out of a traceback.
+            typer.echo(f"the hooks could not be written: {error}", err=True)
+            raise typer.Exit(1) from error
         for state in installed:
             typer.echo(state.describe())
 
     @guard_app.command("status")
     def guard_status_cmd() -> None:
-        """Report what this clone refuses, at each moment it declares a hook."""
-        for state in git_guards_mod.read_guards(declared().git_guards, project_root()):
+        """Report what this clone refuses, at every moment a hook sits at.
+
+        Both directions, because either alone reads as fully armed: a moment
+        this declares with nothing installed at it, and a hook this installed
+        at a moment nothing declares any more.
+        """
+        hooks = git_guards_mod.read_hooks(declared().git_guards, project_root())
+        for state in [*hooks.guards, *hooks.orphaned]:
             typer.echo(state.describe())
 
     @guard_app.command("uninstall")

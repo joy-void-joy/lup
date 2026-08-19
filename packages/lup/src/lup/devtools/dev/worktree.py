@@ -260,15 +260,16 @@ class PushedBranch(SetupStep, frozen=True):
     def run(self) -> None:
         if self.carries_unpushed_work():
             typer.echo(
-                f"Not pushing {self.branch}: it holds commits no remote does, and "
-                "`dev pr push` pushes those with the pre-push gate running."
+                f"Not pushing {self.branch}: it holds commits no remote does, "
+                "and setting a checkout up does not publish somebody's work. "
+                "`dev pr push` sends them."
             )
             return
-        # The guards were armed a step ago, and the pre-push one runs the whole
-        # gate on any push at all. This push carries a tip some remote already
-        # holds, so there is nothing there for the gate to judge and a full
-        # check to wait through — which is why the branch is only ever given
-        # its remote here while that is still true of it.
+        # This push carries a tip some remote already holds, so there is
+        # nothing in it for a guard to judge — and a project declaring one at
+        # this moment would make setup wait through its whole gate for that
+        # nothing. Which is why the branch is only ever given its remote here
+        # while that is still true of it.
         git("push", "--no-verify", "-u", "origin", self.branch)
 
     def required(self) -> bool:

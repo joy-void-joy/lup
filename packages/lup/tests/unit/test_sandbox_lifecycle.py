@@ -12,9 +12,12 @@ fails the unit lane instead of waiting for the nightly integration run.
 import io
 import json
 import os
+import shutil
 import socket
 import tarfile
+import tempfile
 import time
+from collections.abc import Iterator
 from pathlib import Path
 from typing import cast
 
@@ -252,10 +255,30 @@ def as_container(fake: FakeContainer) -> Container:
     return cast(Container, fake)  # lup: ignore[cast]
 
 
+SHARED_ROOT = Path(tempfile.mkdtemp(prefix="lup-sandbox-lifecycle-"))
+"""A writable root for the fakes below, taken from wherever temp files go here.
+
+Asked for rather than spelled. A sandbox derives its egress config path from
+the parent of its shared directory and unlinks it on the way down, so naming
+a literal ``/tmp`` puts a write into a directory the suite does not own — and
+``missing_ok`` covers a file that is not there, not a filesystem that will
+not take one. The suite then passes or fails on whether the machine running
+it happens to keep ``/tmp`` writable, which is how it came to fail under a
+sandbox that mounts it read-only while passing everywhere else.
+"""
+
+
+@pytest.fixture(scope="session", autouse=True)
+def cleared_shared_root() -> Iterator[None]:
+    """Take the root back down, since this module made it rather than pytest."""
+    yield
+    shutil.rmtree(SHARED_ROOT)
+
+
 def make_sandbox(client: FakeDockerClient, **overrides: str) -> Sandbox:
     sandbox = Sandbox(
         session_id=overrides.get("session_id", "t1"),
-        shared_dir="/tmp/lup-test-shared",
+        shared_dir=str(SHARED_ROOT / "shared"),
         pre_install=None,
     )
     sandbox.docker_client = as_client(client)

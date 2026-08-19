@@ -7,8 +7,11 @@ because launchers are their only producers.
 """
 
 import os
+import sys
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from pathlib import Path
+from typing import TextIO
 
 import sh
 from pydantic import BaseModel
@@ -20,6 +23,21 @@ class LaunchRequest(BaseModel, frozen=True):
     arguments: list[str]
     cwd: Path
     environment: EnvVars = {}
+
+    stream: bool = False
+    """Whether the child's output also reaches this process's own terminal.
+
+    Off by default, because most launches here are probes run for an answer
+    the caller reads out of :class:`ExitStatus`, and printing that answer on
+    the way past would only duplicate it.
+
+    Worth turning on for the few that a person waits through. A command with
+    a network or a git hook behind it can take minutes, and a captured one
+    says nothing at all while it does — indistinguishable, from the outside,
+    from a process that has stopped. Captured either way, so a caller reading
+    ``stderr`` for a diagnostic does not have to choose between reading it
+    and letting whoever is watching see progress.
+    """
 
 
 class ExitStatus(BaseModel, frozen=True):
@@ -61,6 +79,26 @@ class LocalProcessLauncher(ProcessLauncher):
             **os.environ,  # lup: ignore[os-environ] — inherit the process boundary
             **request.environment,
         }
+        shown: list[str] = []
+        complained: list[str] = []
+
+        def tee(buffer: list[str], sink: TextIO) -> Callable[[str], None]:
+            """Keep each chunk the child writes, and show it as it arrives.
+
+            Flushed per chunk because the point of showing it is that somebody
+            is waiting: output held in a buffer until the command exits tells
+            them exactly what capturing it told them, one exit later.
+            """
+
+            def written(chunk: str) -> None:
+                buffer.append(chunk)
+                sink.write(chunk)
+                sink.flush()
+
+            return written
+
+        # ``None`` is what sh takes for its own buffering, so a launch that
+        # asked for nothing gets exactly the collection it always did.
         result = command(
             *arguments,
             _cwd=str(request.cwd),
@@ -68,11 +106,19 @@ class LocalProcessLauncher(ProcessLauncher):
             _ok_code=list(range(256)),
             _return_cmd=True,
             _tty_out=False,
+            _out=tee(shown, sys.stdout) if request.stream else None,
+            _err=tee(complained, sys.stderr) if request.stream else None,
         )
         if not isinstance(result, sh.RunningCommand):
             raise RuntimeError(f"process {executable!r} did not return command state")
         if result.exit_code is None:
             raise RuntimeError(f"process {executable!r} has no terminal exit status")
+        if request.stream:
+            return ExitStatus(
+                code=result.exit_code,
+                stdout="".join(shown),
+                stderr="".join(complained),
+            )
         return ExitStatus(
             code=result.exit_code,
             stdout=decoded_output(result.stdout),

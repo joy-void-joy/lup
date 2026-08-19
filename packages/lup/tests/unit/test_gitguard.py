@@ -4,7 +4,14 @@ from pathlib import Path
 
 import sh
 
-from lup.devtools.dev.git_guards import DECLARED_GUARDS, DRIFT_COMMAND, GitGuard
+from lup.devtools.dev.git_guards import (
+    DECLARED_GUARDS,
+    DRIFT_COMMAND,
+    GitGuard,
+    hooks_directory,
+    install_guards,
+    read_hooks,
+)
 from lup.gitguard import (
     GIT_ENVIRONMENT,
     guard_report,
@@ -41,6 +48,53 @@ def test_a_guard_that_wants_nothing_dropped_writes_no_scrub() -> None:
 
     assert "unset" not in check
     assert check.endswith(f"exec {DRIFT_COMMAND}\n")
+
+
+def test_a_hook_at_a_moment_nothing_declares_is_reported_then_cleared(
+    tmp_path: Path,
+) -> None:
+    """The half a declaration cannot report on its own.
+
+    Every other reading here starts from the declaration, so a moment leaving
+    it takes its own reporting with it: git goes on running the file while
+    the gate that would have said so has stopped looking at that path. A
+    checkout armed by an older declaration would keep paying for a guard
+    nobody asks for, and read as fully armed while doing it.
+    """
+    sh.Command("git").bake("-C", str(tmp_path), _tty_out=False)("init", "-b", "main")
+    declared = [GitGuard()]
+    install_guards(
+        [*declared, GitGuard(hook="pre-push", command="echo gate")], tmp_path
+    )
+    hooks = hooks_directory(tmp_path)
+    assert (hooks / "pre-push").is_file()
+
+    reading = read_hooks(declared, tmp_path)
+    cleared = install_guards(declared, tmp_path)
+
+    assert [state.path.name for state in reading.orphaned] == ["pre-push"]
+    assert [state.status for state in cleared] == ["current", "retired"]
+    assert not (hooks / "pre-push").exists()
+    assert read_hooks(declared, tmp_path).orphaned == []
+
+
+def test_a_hook_this_did_not_write_is_left_where_it_is(tmp_path: Path) -> None:
+    """Clearing a moment is about this command's own files and nothing else.
+
+    A repository may guard a moment lup never declared, for reasons of its
+    own. Reading the marker is what tells the two apart, so the sweep that
+    retires a dropped guard cannot reach a hook somebody else installed.
+    """
+    sh.Command("git").bake("-C", str(tmp_path), _tty_out=False)("init", "-b", "main")
+    hooks = hooks_directory(tmp_path)
+    hooks.mkdir(parents=True, exist_ok=True)
+    theirs = hooks / "pre-push"
+    theirs.write_text("#!/bin/sh\nexec ./their-own-check\n", encoding="utf-8")
+
+    install_guards([GitGuard()], tmp_path)
+
+    assert read_hooks([GitGuard()], tmp_path).orphaned == []
+    assert theirs.read_text(encoding="utf-8") == "#!/bin/sh\nexec ./their-own-check\n"
 
 
 def test_a_session_that_touched_nothing_reports_nothing() -> None:
