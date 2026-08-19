@@ -372,8 +372,6 @@ def guard_state(script: HookScript, directory: Path) -> GuardState:
     return GuardState(path=path, status="current" if current else "stale")
 
 
-# lup: ignore[model-free-function] — driver: the same disk read, resolved from a
-# checkout root
 def read_guards(guards: list[GitGuard], root: Path) -> list[GuardState]:
     """What one checkout would run, or fail to run, at each moment declared."""
     directory = hooks_directory(root)
