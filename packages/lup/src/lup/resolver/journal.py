@@ -23,7 +23,10 @@ from typing import Literal
 from pydantic import BaseModel, TypeAdapter
 
 from lup.channels.models import utc_now
-from lup.channels.stream import Stream
+from lup.journal import Journal as SharedJournal
+from lup.journal import JournalRecord
+from lup.journal import JournalTail as SharedTail
+from lup.journal import last_record
 from lup.resolver.models import (
     ActorRef,
     CarriedParent,
@@ -326,98 +329,42 @@ logs cannot answer that.
 """
 
 
-class JournalEntry(BaseModel, frozen=True):
+class JournalEntry(JournalRecord[ActorRef], frozen=True):
     """One event, stamped and attributed."""
 
-    seq: int
     at: datetime
-    actor: ActorRef
     event: TurnEvent | RunEvent
 
 
 ENTRY_ADAPTER: TypeAdapter[JournalEntry] = TypeAdapter(JournalEntry)
 
-
-class JournalTail(BaseModel, frozen=True):
-    """What one follower read, and where it should resume."""
-
-    entries: list[JournalEntry]
-    offset: int
+type JournalTail = SharedTail[JournalEntry]
+"""What one follower read, and where it should resume."""
 
 
-class Journal:
-    """The run's single ordered record, appended by one writer."""
+class Journal(SharedJournal[ActorRef, JournalEntry]):
+    """The run's single ordered record, appended by one writer.
+
+    The ordering, the paging and the actor filter are the shared journal's;
+    what is here is the resolver's own vocabulary for them — an event
+    attributed to an actor, and one attributed to the run itself.
+    """
 
     def __init__(self, root: Path) -> None:
-        self.stream: Stream[JournalEntry] = Stream(root / JOURNAL_FILE, ENTRY_ADAPTER)
-        self.next_seq = len(self.stream.read_all())
+        super().__init__(root / JOURNAL_FILE, ENTRY_ADAPTER)
         self.run = ActorRef(kind="run", id=root.name)
 
     def append(self, actor: ActorRef, event: TurnEvent | RunEvent) -> JournalEntry:
-        """Record one event.
-
-        Appending reaches no await, so concurrent actors draining their own
-        sessions into the same journal interleave between entries and never
-        within one. That is what keeps the single-writer claim true once
-        every actor holds a live session instead of taking turns.
-        """
-        entry = JournalEntry(seq=self.next_seq, at=utc_now(), actor=actor, event=event)
-        self.stream.append(entry)
-        self.next_seq += 1
-        return entry
+        """Record one event."""
+        return self.write(
+            lambda seq, _previous: JournalEntry(
+                seq=seq, at=utc_now(), actor=actor, event=event
+            )
+        )
 
     def record(self, event: RunEvent) -> JournalEntry:
         """Record something the run did rather than something an actor did."""
         return self.append(self.run, event)
-
-    def read(self, after_seq: int = -1) -> list[JournalEntry]:
-        """Every entry after ``after_seq``, which is what an SSE resume wants.
-
-        Reconnecting replays from ``seq + 1`` rather than from zero, so a
-        page open all run does not re-render the whole run whenever its
-        connection blinks.
-        """
-        return [entry for entry in self.stream.read_all() if entry.seq > after_seq]
-
-    def tail(self, offset: int) -> JournalTail:
-        """Whatever arrived after ``offset``, and where to resume.
-
-        A follower reads by byte offset rather than by sequence number so
-        that watching a run costs the size of what is new. Filtering by
-        ``seq`` re-parses the whole file on every poll, which turns a long
-        run into quadratic work exactly as it becomes interesting.
-        """
-        found = self.stream.read_from(offset)
-        if not found:
-            return JournalTail(entries=[], offset=offset)
-        return JournalTail(
-            entries=[pair.item for pair in found], offset=found[-1].commit_offset
-        )
-
-    def entry(self, seq: int) -> JournalEntry | None:
-        """One entry whole, for a reader expanding a truncated block."""
-        return next((item for item in self.stream.read_all() if item.seq == seq), None)
-
-    def before(self, seq: int, count: int) -> list[JournalEntry]:
-        """The ``count`` entries just before ``seq``, oldest first.
-
-        A fresh follower starts from a bounded tail of the record, so the
-        run older than that tail is reached from here one page at a time —
-        on demand, rather than by replaying the whole run into the reader
-        the bound exists to protect.
-        """
-        if count <= 0:
-            return []
-        earlier = [entry for entry in self.stream.read_all() if entry.seq < seq]
-        return earlier[-count:]
-
-    def actors(self) -> list[ActorRef]:
-        """Every actor that has produced an entry, in first-seen order."""
-        return list(dict.fromkeys(entry.actor for entry in self.stream.read_all()))
-
-    def for_actor(self, actor: ActorRef, after_seq: int = -1) -> list[JournalEntry]:
-        """One actor's slice of the record, which is its whole trace."""
-        return [entry for entry in self.read(after_seq) if entry.actor == actor]
 
 
 async def record_turn(
@@ -433,11 +380,10 @@ async def record_turn(
 
 
 def journal_tail(root: Path) -> JournalEntry | None:
-    """A run's most recent entry, without paying for its whole journal.
+    """A run's most recent entry, without constructing a journal to ask.
 
-    `Journal` counts every record on construction to know its next
-    sequence, which a writer needs and a reader does not. A status view
-    asks this each time it runs against a file that reaches tens of
-    megabytes in one run, so it reads the stream directly.
+    A status view asks this each time it runs, against a file that reaches
+    tens of megabytes in one run. Opening a journal to read one record is
+    what a writer needs, so a reader goes straight to the record.
     """
-    return Stream(root / JOURNAL_FILE, ENTRY_ADAPTER).last()
+    return last_record(root / JOURNAL_FILE, ENTRY_ADAPTER)
