@@ -251,7 +251,10 @@ class KernelDecision:
         if self.sandbox == "escalable" and not agent_escalates:
             reason = self.reason + SANDBOX_ESCALATION_UNSUPPORTED
             return KernelDecision(
-                self.effect, reason, "inside" if escapable else "ambient", self.escalated
+                self.effect,
+                reason,
+                "inside" if escapable else "ambient",
+                self.escalated,
             )
         if self.sandbox == "escalable":
             reason = self.reason + SANDBOX_ESCALATION_OFFER

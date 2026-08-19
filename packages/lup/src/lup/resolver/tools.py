@@ -13,7 +13,6 @@ the relayed context. Only where that context comes from differs.
 import asyncio
 from collections.abc import Collection
 from pathlib import Path
-from typing import Literal
 
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings
@@ -21,17 +20,20 @@ from pydantic_settings import BaseSettings
 from lup.harness.process import LocalProcessLauncher, ProcessLauncher
 from lup.mcp import LupMcpTool, ToolError, lup_tool
 from lup.policy.assets.host import recoverable_write_targets
-from lup.channels.models import utc_now
 from lup.resolver.declaration import declaration_delta, inspect_changes
-from lup.actors.mail import ActorMessage
+from lup.actors.cohort import ActorCohort
 from lup.actors.refs import ActorRef
+from lup.actors.tools import (
+    AskedQuestion,
+    AwaitAnswersOutput,
+    QuestionDesk,
+    create_cohort_tools,
+)
+from lup.resolver.journal import Journal
 from lup.actors.mailbox import (
     ANSWER_POLL_SECONDS,
-    AnswerDoor,
-    MailboxConflictError,
-    wait_for_answers,
 )
-from lup.resolver.mailbox import PendingQuestion, QuestionMailbox
+from lup.resolver.mailbox import QuestionMailbox
 from lup.policy.identity import ConcernAllowance
 from lup.resolver.models import (
     ALLOWANCE_GRANTED,
@@ -106,58 +108,6 @@ def read_resolver_tool_context() -> ResolverToolContext | None:
     )
 
 
-class AskedQuestion(BaseModel):
-    """One decision a worker needs a human to make."""
-
-    id: str = Field(
-        description="Short id, unique among your questions. Letters, digits, dashes."
-    )
-    prompt: str = Field(
-        description="The decision, stated so a human can answer it cold"
-    )
-    choices: list[str] = Field(
-        default=[],
-        description="The allowed answers. Leave empty for free text.",
-    )
-    recommendation: str | None = Field(
-        default=None, description="Your preferred answer, which must be a choice"
-    )
-
-
-class QueueQuestionsInput(BaseModel):
-    questions: list[AskedQuestion] = Field(
-        min_length=1, description="Every question you want answered"
-    )
-
-
-class QueueQuestionsOutput(BaseModel):
-    question_ids: list[str] = Field(description="Pass these verbatim to await_answers")
-    already_answered: list[str] = Field(
-        description="Questions a human had already answered before you asked"
-    )
-    pending: list[str] = Field(description="Questions still waiting for a human")
-
-
-class AwaitAnswersInput(BaseModel):
-    question_ids: list[str] = Field(
-        default=[],
-        description="Ids from queue_questions. Empty waits for every one you queued.",
-    )
-
-
-class AnsweredQuestion(BaseModel):
-    id: str
-    prompt: str
-    value: str
-
-
-class AwaitAnswersOutput(BaseModel):
-    status: Literal["answered", "parked"]
-    answers: list[AnsweredQuestion]
-    unanswered: list[str]
-    instruction: str
-
-
 class CheckDeclarationInput(BaseModel):
     files_changed: list[Path] = Field(
         default=[],
@@ -225,26 +175,6 @@ class RequestAllowanceInput(BaseModel):
     )
 
 
-class SendMessageInput(BaseModel):
-    text: str = Field(description="What to tell the humans watching this run")
-    to_actor: str = Field(
-        default="",
-        description=(
-            "Actor label to address, like 'worker:some-concern#1'. Leave it "
-            "out to reach the humans watching this run, which is what you "
-            "want unless you are answering another actor by name."
-        ),
-    )
-    in_reply_to: str = Field(
-        default="",
-        description="The id of a message or question this answers, if any",
-    )
-
-
-class SendMessageOutput(BaseModel):
-    sent: bool = Field(description="Whether the message reached the run's record")
-
-
 def create_question_tools(
     mailbox: QuestionMailbox,
     concern_id: str,
@@ -263,157 +193,50 @@ def create_question_tools(
     and ids are composed rather than trusted — two workers inventing the
     same short id must not collide in one flat namespace.
     """
-    queued: list[str] = []
     inspector = launcher if launcher is not None else LocalProcessLauncher()
-
-    def compose(identifier: str) -> str:
-        return f"{concern_id}-{identifier}"
-
-    def prompts() -> dict[str, str]:  # lup: ignore[dict-str-payload] — open id map
-        return {item.question.id: item.question.prompt for item in mailbox.questions()}
-
-    @lup_tool(
-        "Ask the human one or more material questions about this concern and "
-        "return immediately. Use this the moment you know a decision is not "
-        "yours to make — queue every question you have at once so a human can "
-        "answer them in one pass, keep working on whatever does not depend on "
-        "them, then call await_answers. Returns the ids to wait on.",
-        name="queue_questions",
+    # Over the mailbox's own mail and the run's own journal, so this process
+    # and the orchestrator share one message stream and one record. Left to
+    # build its own, a cohort here would open a second stream beside the one
+    # every door writes, and a journal on the path the run's own already
+    # holds.
+    cohort = ActorCohort(
+        mailbox.root,
+        journal=Journal(mailbox.root),
+        mail=mailbox.mail,
+        run_id=run_id,
+        spawner=ActorRef(kind="run", id=run_id),
     )
-    async def queue_questions(params: QueueQuestionsInput) -> QueueQuestionsOutput:
-        answered = mailbox.answered_ids()
-        composed: list[str] = []
-        for asked in params.questions:
-            identifier = compose(asked.id)
-            try:
-                question = MaterialQuestion(
-                    id=identifier,
-                    concern_id=concern_id,
-                    prompt=asked.prompt,
-                    choices=asked.choices,
-                    recommendation=asked.recommendation,
-                    closed_choices=asks_for_an_allowance(concern_id, identifier),
-                )
-            except ValueError as error:
-                raise ToolError(
-                    f"question {asked.id!r} is not well formed: {error}"
-                ) from error
-            try:
-                mailbox.queue(
-                    PendingQuestion(
-                        run_id=run_id,
-                        question=question,
-                        asked_by=concern_id,
-                        asked_at=utc_now(),
-                    )
-                )
-            except MailboxConflictError as error:
-                raise ToolError(str(error)) from error
-            composed.append(identifier)
-            if identifier not in queued:
-                queued.append(identifier)
-        return QueueQuestionsOutput(
-            question_ids=composed,
-            already_answered=[name for name in composed if name in answered],
-            pending=[name for name in composed if name not in answered],
+
+    def material(identifier: str, asked: AskedQuestion) -> MaterialQuestion:
+        """This run's own question type, under the id the desk composed.
+
+        The only thing the resolver adds to a question: which concern is
+        asking, and whether the answer domain is closed — a gate whose reader
+        tests for a literal token closes it, where an ordinary question leaves
+        the human free to answer in their own words.
+        """
+        return MaterialQuestion(
+            id=identifier,
+            concern_id=concern_id,
+            prompt=asked.prompt,
+            choices=asked.choices,
+            recommendation=asked.recommendation,
+            closed_choices=asks_for_an_allowance(concern_id, identifier),
         )
 
-    @lup_tool(
-        "Wait for the human's answers to questions you queued, then return them. "
-        + WAIT_CONTRACT
-        + " If nobody answers in time the run parks: you will get status "
-        "'parked', and you should stop work on this concern and submit your "
-        "report so the orchestrator can resume once an answer arrives.",
-        name="await_answers",
+    desk = QuestionDesk(
+        mailbox,
+        concern_id,
+        material,
+        run_id=run_id,
+        wait_seconds=wait_seconds,
+        poll_interval_seconds=poll_interval_seconds,
+        wake=wake,
+        parked_instruction=(
+            "Stop working on this concern and submit your report now — the "
+            "orchestrator parks the run and resumes it once a human answers."
+        ),
     )
-    async def await_answers(params: AwaitAnswersInput) -> AwaitAnswersOutput:
-        wanted = params.question_ids or list(queued)
-        if not wanted:
-            raise ToolError("queue a question before waiting for an answer")
-        known = prompts()
-        unknown = [name for name in wanted if name not in known]
-        if unknown:
-            raise ToolError(
-                "no question is queued under "
-                + ", ".join(repr(name) for name in unknown)
-                + "; call queue_questions first and pass the ids it returns"
-            )
-        result = await wait_for_answers(
-            mailbox,
-            wanted,
-            wait_seconds=wait_seconds,
-            poll_interval_seconds=poll_interval_seconds,
-            wake=wake,
-        )
-        answers = [
-            AnsweredQuestion(
-                id=record.answer.question_id,
-                prompt=known[record.answer.question_id],
-                value=record.answer.value,
-            )
-            for record in result.answered
-        ]
-        if not result.unanswered:
-            return AwaitAnswersOutput(
-                status="answered",
-                answers=answers,
-                unanswered=[],
-                instruction="Act on these answers and finish the concern.",
-            )
-        return AwaitAnswersOutput(
-            status="parked",
-            answers=answers,
-            unanswered=result.unanswered,
-            instruction=(
-                f"No answer arrived ({result.reason}). Stop working on this "
-                "concern and submit your report now — the orchestrator parks the "
-                "run and resumes it once a human answers."
-            ),
-        )
-
-    @lup_tool(
-        "Ask the human one or more material questions and wait for the answers. "
-        "This is queue_questions followed by await_answers. " + WAIT_CONTRACT,
-        name="ask_questions",
-    )
-    async def ask_questions(params: QueueQuestionsInput) -> AwaitAnswersOutput:
-        posted = await queue_questions(params)
-        return await await_answers(AwaitAnswersInput(question_ids=posted.question_ids))
-
-    @lup_tool(
-        "Tell the humans watching this run — or one other actor in it — "
-        "something, without waiting for a reply. Use this to volunteer what "
-        "you have found, flag a consequence for whoever merges your work, "
-        "answer something you were asked by naming the actor that asked, or "
-        "say that you are stuck on something that is not a decision: a gate "
-        "that refused you, a file you cannot remove, an environment you "
-        "cannot repair.\n\n"
-        "That last case is worth naming, because the alternative is worse. A "
-        "question parks you until a human answers it, so raising one over "
-        "housekeeping spends your turn and their attention on something that "
-        "was never a decision. Say it here instead and keep working on "
-        "whatever does not depend on it.\n\n"
-        "This never blocks and never parks the run — if you genuinely need a "
-        "decision before you can continue, that is a question, not a message.",
-        name="send_message",
-    )
-    async def send_message(params: SendMessageInput) -> SendMessageOutput:
-        # An unaddressed message goes to the run, which is the address the
-        # humans read. It used to go out with a blank target, which every
-        # actor's own address list matched — so a worker's report to the
-        # humans was delivered into its siblings' context, consumed there,
-        # and shown on no surface a person looks at.
-        mailbox.send(
-            ActorMessage(
-                run_id=run_id,
-                to_actor=params.to_actor or ActorRef(kind="run", id=run_id).label(),
-                text=params.text,
-                door=AnswerDoor.AGENT,
-                sent_at=utc_now(),
-                in_reply_to=params.in_reply_to,
-            )
-        )
-        return SendMessageOutput(sent=True)
 
     @lup_tool(
         "Ask for a gate your concern was not approved for. A plan-time "
@@ -427,19 +250,17 @@ def create_question_tools(
         name="request_allowance",
     )
     async def request_allowance(params: RequestAllowanceInput) -> AwaitAnswersOutput:
-        return await ask_questions(
-            QueueQuestionsInput(
-                questions=[
-                    AskedQuestion(
-                        id=f"allow-{params.allowance}",
-                        prompt=(
-                            f"Grant `{params.allowance}` to {concern_id}?\n\n"
-                            f"{params.reason}"
-                        ),
-                        choices=[ALLOWANCE_GRANTED, ALLOWANCE_REFUSED],
-                    )
-                ]
-            )
+        return await desk.ask(
+            [
+                AskedQuestion(
+                    id=f"allow-{params.allowance}",
+                    prompt=(
+                        f"Grant `{params.allowance}` to {concern_id}?\n\n"
+                        f"{params.reason}"
+                    ),
+                    choices=[ALLOWANCE_GRANTED, ALLOWANCE_REFUSED],
+                )
+            ]
         )
 
     @lup_tool(
@@ -479,11 +300,12 @@ def create_question_tools(
             ),
         )
 
+    # The common verbs come from the library, which is where they are written
+    # once: reporting and asking, but not steering — a worker holds a lease on
+    # one concern, and letting it redirect a sibling's session would be commit
+    # authority over somebody else's attention that no lease grants.
     return [
-        queue_questions,
-        await_answers,
-        ask_questions,
-        send_message,
+        *create_cohort_tools(cohort, report=True, questions=desk),
         request_allowance,
         check_declaration,
     ]

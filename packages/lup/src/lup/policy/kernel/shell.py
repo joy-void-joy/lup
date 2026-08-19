@@ -924,14 +924,18 @@ def decide_shell(
 
     def resolve(decision: KernelDecision) -> KernelDecision:
         if sandboxed and not escapable and decision.sandbox == "outside":
-            return KernelDecision("deny", SANDBOX_TRAPPED_REASON, escalated=decision.escalated)
+            return KernelDecision(
+                "deny", SANDBOX_TRAPPED_REASON, escalated=decision.escalated
+            )
         match decision.effect:
             case "allow":
                 return decision
             case "ask" if interactive:
                 return decision
             case "defer" | "ask" if confined:
-                return KernelDecision("defer", decision.reason, escalated=decision.escalated)
+                return KernelDecision(
+                    "defer", decision.reason, escalated=decision.escalated
+                )
             case _:
                 # The stated intent outlives the refusal. A host with no human
                 # to ask still has somewhere to send this, and the marker's

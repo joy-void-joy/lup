@@ -1,10 +1,17 @@
-"""The tools an agent uses to reach the rest of its cohort, and the outside.
+"""The verbs an agent uses to reach the rest of its cohort, and the outside.
 
-Written once here because every consumer needs the same three verbs and had
-been writing its own: list who I spawned, say something to one of them, say
-something back to whoever spawned me. Each hand-written copy disagreed
-slightly with the delivery path about what an address was, and the copy that
-disagreed is the one where a message was reported sent and read by nobody.
+Every consumer that spawns agents needs the same small set — say who I have
+running, say something to one of them, say something back to whoever spawned
+me, and ask a question that somebody has to decide. Written per consumer they
+come out slightly different each time, and the copy that disagrees with the
+delivery path about what an address is is the one where a message is reported
+sent and read by nobody.
+
+A consumer takes what it wants. The steering verbs suit a session that spawns
+agents as it goes and may want to redirect one; a run whose population is
+fixed and whose members must not retarget each other takes the reporting and
+question verbs alone. The selection is a parameter rather than a fork, so the
+descriptions an agent reads are the same wherever they are served.
 
 The descriptions are part of the mechanism rather than decoration. An agent
 never sees this module; the description is its whole documentation, and the
@@ -12,12 +19,40 @@ distinction between telling something and stopping it is only useful if the
 tool says which is which.
 """
 
+import asyncio
+from collections.abc import Callable
+
 from pydantic import BaseModel, Field
 
 from lup.actors.cohort import ActorCohort
+from lup.actors.mailbox import (
+    ANSWER_POLL_SECONDS,
+    MailboxConflictError,
+    PendingQuestion,
+    QuestionMailbox,
+    wait_for_answers,
+)
+from lup.actors.questions import Question
 from lup.actors.roster import SpawnedActor
-from lup.channels.models import Door
+from lup.channels.models import Door, utc_now
 from lup.mcp import LupMcpTool, ToolError, lup_tool
+
+TOOL_WAIT_SECONDS = 300.0
+"""How long one wait call holds before it reports back unanswered.
+
+An overridable default rather than a constant: how long an agent should sit on
+a decision is the consumer's judgement about its own humans, not this layer's.
+"""
+
+# lup: ignore[constant-declaration] — the contract this tool states about its
+# own blocking, declared beside the tools that block; a caller free to reword
+# it is a caller free to tell an agent that polling is fine
+WAIT_CONTRACT = (
+    "This call blocks until a human answers. Blocking is expected and correct: "
+    "you are not stuck, you are waiting. Do not poll, do not call this again in "
+    "a loop, do not sleep and retry, and do not read files under .lup/. Make one "
+    "call, wait for it to return, then act on what it gives you."
+)
 
 
 class NoInput(BaseModel):
@@ -60,24 +95,215 @@ class SpawnSayOutput(BaseModel):
     )
 
 
-class TellSpawnerInput(BaseModel):
-    text: str = Field(description="What whoever spawned you should know")
+class SendMessageInput(BaseModel):
+    text: str = Field(description="What whoever is watching should know")
+    to_actor: str = Field(
+        default="",
+        description=(
+            "Actor label to address, like 'worker:some-concern#1'. Leave it "
+            "out to reach the humans watching, which is what you want unless "
+            "you are answering another actor by name."
+        ),
+    )
     in_reply_to: str = Field(
         default="",
         description="The id of a message or question this answers, if any",
     )
 
 
-class TellSpawnerOutput(BaseModel):
-    delivered: bool = Field(
-        description="Whether the message reached the cohort's record"
+class SendMessageOutput(BaseModel):
+    sent: bool = Field(description="Whether the message reached the record")
+
+
+class AskedQuestion(BaseModel):
+    """One question an agent wants decided, in the terms it states it."""
+
+    id: str = Field(description="Short identifier, unique among the questions you ask")
+    prompt: str = Field(description="What you need decided, stated in full")
+    choices: list[str] = Field(
+        default=[], description="The options, where the answer is a choice"
+    )
+    recommendation: str | None = Field(
+        default=None, description="Which choice you would take, and it must be one"
     )
 
 
-def create_cohort_tools(
-    cohort: ActorCohort, door: Door = Door.AGENT
+class QueueQuestionsInput(BaseModel):
+    questions: list[AskedQuestion] = Field(description="Everything you need decided")
+
+
+class QueueQuestionsOutput(BaseModel):
+    question_ids: list[str] = Field(description="The ids to wait on")
+    already_answered: list[str] = []
+    pending: list[str] = []
+
+
+class AwaitAnswersInput(BaseModel):
+    question_ids: list[str] = Field(
+        default=[], description="Which to wait for; empty waits for all you queued"
+    )
+
+
+class AnsweredQuestion(BaseModel):
+    id: str
+    prompt: str
+    value: str
+
+
+class AwaitAnswersOutput(BaseModel):
+    status: str = Field(description="'answered' or 'parked'")
+    answers: list[AnsweredQuestion] = []
+    unanswered: list[str] = []
+    instruction: str = Field(description="What to do with this outcome")
+
+
+class QuestionDesk[Q: Question]:
+    """One asker's bound question channel: where to post, and under whose name.
+
+    A plain class rather than a model because it holds a builder and a live
+    mailbox — behaviour and a seam, on the same terms as
+    :class:`~lup.runtime.factory.SessionFactory`.
+
+    ``asked_by`` is bound at construction rather than taken per call, so an
+    agent structurally cannot post a question against a sibling, and ids are
+    composed rather than trusted: two agents inventing the same short id must
+    not collide in one flat namespace.
+    """
+
+    def __init__(
+        self,
+        mailbox: QuestionMailbox[Q],
+        asked_by: str,
+        build: Callable[[str, AskedQuestion], Q],
+        *,
+        run_id: str,
+        wait_seconds: float = TOOL_WAIT_SECONDS,
+        poll_interval_seconds: float = ANSWER_POLL_SECONDS,
+        wake: asyncio.Event | None = None,
+        parked_instruction: str = "",
+    ) -> None:
+        self.mailbox = mailbox
+        self.asked_by = asked_by
+        self.build = build
+        self.run_id = run_id
+        self.wait_seconds = wait_seconds
+        self.poll_interval_seconds = poll_interval_seconds
+        self.wake = wake
+        self.parked_instruction = parked_instruction
+        self.queued: list[str] = []
+
+    def compose(self, identifier: str) -> str:
+        """This asker's own namespace for a short id it made up."""
+        return f"{self.asked_by}-{identifier}"
+
+    def prompts(self) -> dict[str, str]:  # lup: ignore[dict-str-payload] — open id map
+        return {
+            item.question.id: item.question.prompt for item in self.mailbox.questions()
+        }
+
+    def queue(self, asked: list[AskedQuestion]) -> QueueQuestionsOutput:
+        """Post questions under this asker's name, and say which already stand."""
+        answered = self.mailbox.answered_ids()
+        composed = [self.compose(item.id) for item in asked]
+        for identifier, item in zip(composed, asked, strict=True):
+            try:
+                question = self.build(identifier, item)
+            except ValueError as error:
+                raise ToolError(
+                    f"question {item.id!r} is not well formed: {error}"
+                ) from error
+            try:
+                self.mailbox.queue(
+                    PendingQuestion(
+                        run_id=self.run_id,
+                        question=question,
+                        asked_by=self.asked_by,
+                        asked_at=utc_now(),
+                    )
+                )
+            except MailboxConflictError as error:
+                raise ToolError(str(error)) from error
+            if identifier not in self.queued:
+                self.queued.append(identifier)
+        return QueueQuestionsOutput(
+            question_ids=composed,
+            already_answered=[name for name in composed if name in answered],
+            pending=[name for name in composed if name not in answered],
+        )
+
+    async def settled(self, question_ids: list[str]) -> AwaitAnswersOutput:
+        """Wait for the named answers, or for everything this asker queued."""
+        wanted = question_ids or list(self.queued)
+        if not wanted:
+            raise ToolError("queue a question before waiting for an answer")
+        known = self.prompts()
+        unknown = [name for name in wanted if name not in known]
+        if unknown:
+            raise ToolError(
+                "no question is queued under "
+                + ", ".join(repr(name) for name in unknown)
+                + "; call queue_questions first and pass the ids it returns"
+            )
+        result = await wait_for_answers(
+            self.mailbox,
+            wanted,
+            wait_seconds=self.wait_seconds,
+            poll_interval_seconds=self.poll_interval_seconds,
+            wake=self.wake,
+        )
+        answers = [
+            AnsweredQuestion(
+                id=record.answer.question_id,
+                prompt=known[record.answer.question_id],
+                value=record.answer.value,
+            )
+            for record in result.answered
+        ]
+        if not result.unanswered:
+            return AwaitAnswersOutput(
+                status="answered",
+                answers=answers,
+                unanswered=[],
+                instruction="Act on these answers and finish your work.",
+            )
+        return AwaitAnswersOutput(
+            status="parked",
+            answers=answers,
+            unanswered=result.unanswered,
+            instruction=(
+                f"No answer arrived ({result.reason}). {self.parked_instruction}"
+            ),
+        )
+
+    async def ask(self, asked: list[AskedQuestion]) -> AwaitAnswersOutput:
+        """Queue and wait in one call, for a caller that has nothing else to do.
+
+        Here rather than only in the tool, so a consumer's own tool that needs
+        a decision — an allowance request, a gate — reaches the same path an
+        agent's question takes rather than reimplementing it beside it.
+        """
+        return await self.settled(self.queue(asked).question_ids)
+
+
+def create_cohort_tools[Q: Question](
+    cohort: ActorCohort,
+    *,
+    roster: bool = False,
+    steer: bool = False,
+    report: bool = True,
+    questions: QuestionDesk[Q] | None = None,
+    door: Door = Door.AGENT,
 ) -> list[LupMcpTool]:
-    """The three verbs an agent needs to stay in contact, bound to one cohort."""
+    """The common verbs, bound to one cohort, in whatever mix a consumer wants.
+
+    Reporting is on by default because it is the one every population needs:
+    an agent with no way to say anything has only a blocking question, so
+    everything it notices costs somebody a decision they were never asked for.
+
+    Steering is off by default, because handing every member the power to
+    redirect its siblings is a real grant. A session that spawned its agents
+    holds it naturally; a run whose members each hold a lease should not.
+    """
 
     @lup_tool(
         "List the agents you have spawned and what each was asked, with the "
@@ -126,21 +352,72 @@ def create_cohort_tools(
         )
 
     @lup_tool(
-        "Tell whoever spawned you something, without waiting for a reply. "
-        "Use it to volunteer what you have found, to flag a consequence for "
-        "whoever picks your work up, to answer something you were asked, or "
-        "to say that you are blocked on something you cannot do yourself — "
-        "a gate that refused you, a file you cannot remove.\n\n"
-        "This never blocks and never stops anything. If you need a decision "
-        "before you can continue, that is a question and not a message; ask "
-        "it as one. What this is for is everything that is worth someone "
-        "knowing and is not worth stalling you.\n\n"
-        "It goes to one address that a person reads, not to the other agents "
-        "working alongside you.",
-        name="tell_spawner",
+        "Tell whoever is watching — or one other actor working alongside you "
+        "— something, without waiting for a reply. Use this to volunteer what "
+        "you have found, to flag a consequence for whoever picks your work "
+        "up, to answer something you were asked by naming the actor that "
+        "asked, or to say that you are stuck on something that is not a "
+        "decision: a gate that refused you, a file you cannot remove, an "
+        "environment you cannot repair.\n\n"
+        "That last case is worth naming, because the alternative is worse. A "
+        "question blocks you until a human answers it, so raising one over "
+        "housekeeping spends your turn and their attention on something that "
+        "was never a decision. Say it here instead and keep working on "
+        "whatever does not depend on it.\n\n"
+        "This never blocks and never stops anything. If you genuinely need a "
+        "decision before you can continue, that is a question, not a message.",
+        name="send_message",
     )
-    async def tell_spawner(params: TellSpawnerInput) -> TellSpawnerOutput:
-        cohort.tell_spawner(params.text, door=door, in_reply_to=params.in_reply_to)
-        return TellSpawnerOutput(delivered=True)
+    async def send_message(params: SendMessageInput) -> SendMessageOutput:
+        # An unaddressed message goes to the spawner, which is the address a
+        # person reads. Blank used to match every actor's own address list, so
+        # a report meant for the humans was delivered into every sibling's
+        # context, consumed there, and shown on no surface anyone watches.
+        cohort.post(
+            params.to_actor or cohort.spawner.label(),
+            params.text,
+            door=door,
+            in_reply_to=params.in_reply_to,
+        )
+        return SendMessageOutput(sent=True)
 
-    return [spawn_actors, spawn_say, tell_spawner]
+    def asking(desk: QuestionDesk[Q]) -> list[LupMcpTool]:
+        """The three question verbs, each a thin wrapper over one desk."""
+
+        @lup_tool(
+            "Ask the human one or more questions and return immediately. Use "
+            "this the moment you know a decision is not yours to make — queue "
+            "every question you have at once so a human can answer them in "
+            "one pass, keep working on whatever does not depend on them, then "
+            "call await_answers. Returns the ids to wait on.",
+            name="queue_questions",
+        )
+        async def queue_questions(
+            params: QueueQuestionsInput,
+        ) -> QueueQuestionsOutput:
+            return desk.queue(params.questions)
+
+        @lup_tool(
+            "Wait for the human's answers to questions you queued, then "
+            "return them. " + WAIT_CONTRACT,
+            name="await_answers",
+        )
+        async def await_answers(params: AwaitAnswersInput) -> AwaitAnswersOutput:
+            return await desk.settled(params.question_ids)
+
+        @lup_tool(
+            "Ask the human one or more questions and wait for the answers. "
+            "This is queue_questions followed by await_answers. " + WAIT_CONTRACT,
+            name="ask_questions",
+        )
+        async def ask_questions(params: QueueQuestionsInput) -> AwaitAnswersOutput:
+            return await desk.ask(params.questions)
+
+        return [queue_questions, await_answers, ask_questions]
+
+    return [
+        *([spawn_actors] if roster else []),
+        *([spawn_say] if steer else []),
+        *([send_message] if report else []),
+        *(asking(questions) if questions is not None else []),
+    ]

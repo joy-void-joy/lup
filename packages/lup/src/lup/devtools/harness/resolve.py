@@ -1701,6 +1701,7 @@ def run_resolve(
                     f"Its reason: {why}\n"
                     f"The refusal: {refusal}"
                 )
+
             # Grants are per-concern, and the environment names where this
             # lease's are written rather than carrying them: a gate granted
             # after this session starts reaches it, and one taken back stops
