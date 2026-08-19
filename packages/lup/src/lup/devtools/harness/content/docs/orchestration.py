@@ -148,6 +148,61 @@ which provider owns the injected factory.
 
 ---
 
+## Actor Cohort Pattern
+
+The three patterns above all end the same way: the delegated agent runs, and
+whatever anyone learns while it runs has nowhere to go. A subagent's task is
+fixed at dispatch, a nested agent is unreachable inside its tool call, and a
+background agent takes state on a wake rather than a sentence mid-turn. When
+several agents work at once and the facts move under them, that is the whole
+problem — an agent verifying a statement you have since disproved, or working
+a branch you closed, keeps going because nothing can tell it.
+
+An **actor cohort** (`lup.actors.cohort.ActorCohort`) is a population of
+agents that stay in contact while they work. Each holds one session across
+every turn it takes; anything addressed to one lands in front of its next tool
+call through a hook it never chooses to check; and the spawner is itself an
+address, so an agent can say something back.
+
+| Aspect | Actor Cohort |
+| --- | --- |
+| Lifetime | As long as the population is held; each member across many turns |
+| Runtime | One held session per member, from a recipe the cohort configures |
+| Initiation | `ask` (awaited) or `start` (detached, caller keeps its turn) |
+| Communication | Mail both ways, mid-turn; questions through a `QuestionMailbox` |
+| Use case | Several agents at once, over work whose facts move under them |
+
+**`ask` versus `start` is the load-bearing distinction.** A caller blocked
+inside an awaited call cannot make another, so a cohort whose members are all
+`ask`ed has steering tools that can never fire. `start` returns immediately
+and the caller keeps its turn — which is what makes saying anything possible
+at all.
+
+**The cohort owns the wiring.** Delivery works only if the inbox hook is in
+the options the session opened with, so callers pass an `ActorRecipe`
+(`(ActorRef, LupHooksConfig) -> SessionFactory`) and the cohort hands it the
+hooks. A recipe that had to fetch them could be written once without them,
+producing an agent that looks spawned and reads nothing anyone sends it.
+
+**Addresses are supplied or minted.** `cohort.actor(kind, id)` with an id
+derived from durable state is stable across a restart, which is what lets a
+resumed run reattach to conversations rather than open new ones;
+`cohort.actor(kind)` mints one for a spawn nobody declared. That is the only
+difference between the two cases.
+
+**The population is a record, not a dict.** `live()`, `members()` and
+`reaching()` fold `roster.jsonl`, so a console in another process resolves the
+same address the cohort's own tools do, and a restart rebuilds the roster.
+
+**Library support:** `lup.actors.tools.create_cohort_tools` serves the three
+verbs an agent needs — list what I spawned, say something to one of them, say
+something back to whoever spawned me. `lup.actors.mailbox.QuestionMailbox`
+adds decisions that park a run, on the same storage; messages ride a stream
+and never park anything, which is why "a message stalled the run" is not
+expressible rather than merely avoided.
+
+---
+
 ## Deferred Tool Schemas (Tool Search)
 
 Claude harnesses (the CLI and the Agent SDK alike) stop loading every tool schema upfront once the combined schemas exceed a threshold — by default 10% of the model's context window (roughly 20k tokens at 200k). Beyond it, tools are **deferred**: the agent sees only names and must load a tool through the `ToolSearch` tool before calling it. This applies to built-in, MCP, and custom SDK tools.
