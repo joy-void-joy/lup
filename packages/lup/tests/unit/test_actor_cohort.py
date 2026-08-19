@@ -361,3 +361,144 @@ async def test_a_spawn_is_handed_the_hooks_that_reach_it(tmp_path: Path) -> None
 
     assert session.hooks is not None
     assert [matcher.tag for matcher in session.hooks.pre_tool_use] == ["inbox"]
+
+
+@pytest.mark.asyncio
+async def test_a_round_advances_an_agent_instead_of_finishing_it(
+    tmp_path: Path,
+) -> None:
+    """A turn and a lifetime coincide only for an agent asked once.
+
+    An agent that revises over several rounds is the same agent between
+    them. Recorded finished after each round, it reads as stopped to every
+    door while it is still working — and a caller that wanted the one-shot
+    behaviour has `ask`, which is this plus the finish.
+    """
+    cohort = ActorCohort(tmp_path)
+    session = HeldSession(summary="first pass")
+
+    await cohort.round(
+        cohort.actor("worker", "a-concern"),
+        turn_request(TurnInput(text="resolve it"), Finding),
+        recipe_for(session),
+    )
+
+    assert [member.running for member in cohort.live()] == [True]
+
+    await cohort.round(
+        cohort.actor("worker", "a-concern", round=2),
+        turn_request(TurnInput(text="revise it"), Finding),
+        recipe_for(session),
+    )
+
+    # One member advanced, not two: the second round is the same agent.
+    assert [member.actor.round for member in cohort.live()] == [2]
+    assert cohort.live()[0].running is True
+
+    await cohort.finish(cohort.actor("worker", "a-concern", round=2), summary="settled")
+
+    assert cohort.live()[0].running is False
+    assert cohort.live()[0].summary == "settled"
+
+
+@pytest.mark.asyncio
+async def test_a_round_records_one_start_however_often_it_is_announced(
+    tmp_path: Path,
+) -> None:
+    """Detaching work and opening its first round announce the same start.
+
+    Two records for one round leave a reader measuring how long that round
+    took with no way to say which start it ran from, so the roster keeps the
+    one and the fold stays a fold.
+    """
+    cohort = ActorCohort(tmp_path)
+    actor = cohort.actor("worker", "a-concern")
+    session = HeldSession(summary="done")
+
+    cohort.spawn(actor, "resolve it")
+    await cohort.round(
+        actor, turn_request(TurnInput(text="resolve it"), Finding), recipe_for(session)
+    )
+
+    starts = [
+        record for record in cohort.roster.stream.read_all() if record.type == "spawned"
+    ]
+    assert len(starts) == 1
+
+
+@pytest.mark.asyncio
+async def test_started_work_is_a_pipeline_rather_than_a_single_turn(
+    tmp_path: Path,
+) -> None:
+    """The unit a caller runs concurrently is rarely one turn.
+
+    A concern carried through a worker turn and a review is one agent's work
+    from the roster's side. A cohort that could only detach single turns
+    left every such caller to fan out for itself, with its own cap and its
+    own answer to who is running.
+    """
+    cohort = ActorCohort(tmp_path)
+    actor = cohort.actor("worker", "a-concern")
+    working = asyncio.Event()
+    session = HeldSession(summary="first pass", hold=working)
+    rounds: list[int] = []
+
+    async def pipeline(opened: ActorRef) -> str:
+        for number in (1, 2):
+            await cohort.round(
+                opened.model_copy(update={"round": number}),
+                turn_request(TurnInput(text="work"), Finding),
+                recipe_for(session),
+            )
+            rounds.append(number)
+        await cohort.finish(opened, summary="accepted")
+        return "accepted"
+
+    cohort.start_work(actor, pipeline, task="resolve the concern")
+
+    assert [member.running for member in cohort.live()] == [True]
+    cohort.say(actor, "the base moved under you")
+
+    working.set()
+    await cohort.wait_all()
+
+    assert rounds == [1, 2]
+    assert cohort.live()[0].running is False
+    assert cohort.live()[0].summary == "accepted"
+
+
+@pytest.mark.asyncio
+async def test_the_cohort_caps_how_many_of_its_agents_work_at_once(
+    tmp_path: Path,
+) -> None:
+    """The cap belongs to the population, not to each caller fanning out.
+
+    Three callers each holding their own semaphore around `start` is three
+    answers to how many agents this population runs, and the roster agrees
+    with none of them.
+    """
+    cohort = ActorCohort(tmp_path, parallel=2)
+    working = asyncio.Event()
+    peak = 0
+    inside = 0
+
+    async def work(_opened: ActorRef) -> None:
+        nonlocal peak, inside
+        inside += 1
+        peak = max(peak, inside)
+        await working.wait()
+        inside -= 1
+
+    for index in range(5):
+        cohort.start_work(cohort.actor("worker", f"concern-{index}"), work, task="work")
+
+    await asyncio.sleep(0)
+    # Every one of them is listed and addressable, and only two are running:
+    # mail is held by address, so steering never waits on a slot.
+    assert len(cohort.live()) == 5
+    assert peak == 2
+
+    working.set()
+    await cohort.wait_all()
+
+    assert peak == 2

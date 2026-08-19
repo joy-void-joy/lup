@@ -37,6 +37,7 @@ somewhere no resumed run would look for them.
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable
+from contextlib import AbstractAsyncContextManager, nullcontext
 from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
@@ -140,6 +141,7 @@ class ActorCohort:
         mail: ActorMail | None = None,
         run_id: str | None = None,
         spawner: ActorRef | None = None,
+        parallel: int | None = None,
     ) -> None:
         self.root = root
         self.run_id = run_id or root.name
@@ -158,6 +160,16 @@ class ActorCohort:
         self.sessions: dict[str, ActorSession] = {}
         self.inboxes: dict[str, ActorInbox] = {}
         self.running: dict[str, asyncio.Task[None]] = {}
+        # The cap belongs to the population rather than to each caller that
+        # fans out over it. An agent still waiting on it has been recorded
+        # nowhere and has opened no session, so an interruption leaves it
+        # exactly as it was before the fan-out — which is what makes a cut
+        # wave resumable rather than half-spent. A caller holding its own
+        # semaphore around `start` gets the opposite: the roster carries a
+        # spawn for an agent that never ran.
+        self.admitted: AbstractAsyncContextManager[object] = (
+            asyncio.Semaphore(parallel) if parallel else nullcontext()
+        )
 
     def actor(self, kind: str, id: str | None = None, round: int = 1) -> ActorRef:
         """An address in this cohort, derived from what a caller has or minted.
@@ -364,6 +376,32 @@ class ActorCohort:
         """
         return len(self.mail.waiting(actor).messages)
 
+    async def round[T: BaseModel | None](
+        self,
+        actor: ActorRef,
+        request: TurnRequest[T],
+        recipe: ActorRecipe,
+        task: str = "",
+    ) -> TurnResult[T]:
+        """Run one turn of an agent that is not finished by having taken it.
+
+        A turn and a lifetime coincide only for an agent asked once. An agent
+        that revises over several rounds is the same agent between them, and
+        recording it finished after each round says two false things at once:
+        every door reads a working agent as stopped, and the roster carries a
+        finish for work that is still moving.
+
+        So the round is recorded and the agent left live. A turn that raises
+        is the exception, because an agent whose turn died is not going to
+        take another — that finishes, with the error against its address.
+        """
+        self.spawn(actor, task or request.input.text)
+        try:
+            return await self.session(actor, recipe).turn(request)
+        except Exception as error:
+            await self.finish(actor, error=str(error))
+            raise
+
     async def ask[T: BaseModel | None](
         self,
         actor: ActorRef,
@@ -378,13 +416,11 @@ class ActorCohort:
         process, or by a sibling — because the mail is on disk and the hook is
         in the session either way. What it is not is steerable by *this*
         caller, who is inside the call.
+
+        One round and then done, which is the one-shot case of :meth:`round`
+        rather than the general one.
         """
-        self.spawn(actor, task or request.input.text)
-        try:
-            result = await self.session(actor, recipe).turn(request)
-        except Exception as error:
-            await self.finish(actor, error=str(error))
-            raise
+        result = await self.round(actor, request, recipe, task)
         await self.finish(actor, summary=submitted_summary(result.output))
         return result
 
@@ -407,20 +443,58 @@ class ActorCohort:
         roster carries it, the log carries the traceback, and the task keeps
         the exception for whoever gathers it.
         """
-        self.spawn(actor, task or request.input.text)
+        return self.start_work(
+            actor,
+            lambda opened: self.ask(opened, request, recipe, task),
+            task=task or request.input.text,
+            then=then,
+        )
 
-        async def work() -> None:
-            try:
-                result = await self.session(actor, recipe).turn(request)
-            except Exception as error:
-                logger.exception("%s failed", actor.label())
-                await self.finish(actor, error=str(error))
-                raise
-            await self.finish(actor, summary=submitted_summary(result.output))
-            if then is not None:
-                await then(result)
+    def start_work[T](
+        self,
+        actor: ActorRef,
+        work: Callable[[ActorRef], Awaitable[T]],
+        task: str = "",
+        then: Callable[[T], Awaitable[None]] | None = None,
+    ) -> ActorRef:
+        """Set a whole piece of work going under one address, keeping the turn.
 
-        self.running[actor.conversation()] = asyncio.create_task(work())
+        Work rather than a turn, because the unit a caller runs concurrently
+        is rarely a single turn. A concern carried through a worker turn, a
+        commit, a review and a revision round is one agent's work from the
+        roster's side, and a cohort that could only detach single turns left
+        every such caller to fan out for itself — with its own cap, its own
+        task set, and its own answer to who is running. Three copies of what
+        the population already is.
+
+        The work itself says whether it finishes the agent: what it runs is
+        rounds, and only it knows which round was the last. What is recorded
+        here is the failure, because an agent whose work raised takes no
+        further round whatever it intended.
+
+        The address is recorded before the cap rather than behind it, so an
+        agent queued behind a full cap is one the caller can already list and
+        say something to. Mail is held by address and read at a session's
+        first tool call, so nothing about that needs the work to have
+        started — and a caller that had to wait for a slot before it could
+        steer what it started would be back to a caller that cannot steer.
+        The round this opens announces the same round again and the roster
+        keeps one record of it.
+        """
+        self.spawn(actor, task)
+
+        async def admitted_work() -> None:
+            async with self.admitted:
+                try:
+                    result = await work(actor)
+                except Exception as error:
+                    logger.exception("%s failed", actor.label())
+                    await self.finish(actor, error=str(error))
+                    raise
+                if then is not None:
+                    await then(result)
+
+        self.running[actor.conversation()] = asyncio.create_task(admitted_work())
         return actor
 
     async def wait_all(self) -> None:

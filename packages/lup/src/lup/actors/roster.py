@@ -146,7 +146,22 @@ class Roster:
         self.stream: Stream[RosterEntry] = Stream(path, ENTRY_ADAPTER)
 
     def spawned(self, actor: ActorRef, task: str) -> None:
-        """Record that this address is live, before anything is said to it."""
+        """Record that this address is live, unless the record already says so.
+
+        Idempotent per round, because two callers legitimately announce one
+        start: work detached under an address announces it so the caller can
+        steer it immediately, and the round that work then opens announces
+        the same round again. Appending both would give that round two starts
+        and leave a reader measuring how long it took with no way to say
+        which of them it ran from.
+        """
+        if any(
+            member.actor.conversation() == actor.conversation()
+            and member.actor.round == actor.round
+            and member.running
+            for member in self.standing()
+        ):
+            return
         self.stream.append(ActorSpawned(actor=actor, task=task, at=utc_now()))
 
     def finished(self, actor: ActorRef, summary: str = "", error: str = "") -> None:
