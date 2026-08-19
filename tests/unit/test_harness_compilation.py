@@ -100,6 +100,7 @@ from lup.harness.reconciliation import (
 from lup.policy.bundle import policy_kernel_modules
 from lup.policy.dispatcher import (
     SHARED_MEMBER,
+    DECISIONS_MEMBER,
     SPLICED_MEMBERS,
     SHARED_PACKAGE,
     DispatcherDeclaration,
@@ -107,6 +108,7 @@ from lup.policy.dispatcher import (
     compile_dispatcher,
     resolvable,
     source_half,
+    stranded_breaches,
 )
 from lup.types import EnvVars
 from lup_template.agent.toolsets import EXAMPLE_GROUP, NOTES_GROUP, tool_group_names
@@ -1801,6 +1803,43 @@ def test_static_checking_reaches_every_shipped_dispatcher() -> None:
     for source in [*halves, *[item.script for item in SHIPPED_DISPATCHERS.values()]]:
         assert any(source.is_relative_to(root) for root in config.include)
         assert not any(source.is_relative_to(root) for root in config.exclude)
+
+
+def test_a_spliced_half_declares_nothing_splicing_would_leave_behind() -> None:
+    """What ships must not depend on a name the script never receives.
+
+    Splicing emits functions, so a constant beside them is read where it is
+    written, passes every check in the workspace, and is absent only from the
+    generated script — where the function reading it raises `NameError` on the
+    first edit, inside a hook whose failure a session sees as a decision that
+    never happened.
+    """
+    assert not [
+        name
+        for member in SPLICED_MEMBERS
+        for name in source_half(SHARED_PACKAGE, member).stranded()
+    ]
+
+
+def test_a_stranded_name_is_refused_at_generation_rather_than_shipped() -> None:
+    """The compiler is the only reader placed to catch it.
+
+    A name declared beside the functions resolves everywhere it is read and
+    nowhere it is used, so no type checker downstream is looking at both. This
+    turns that into a construction error, which is what the rest of the
+    compiler's proofs already are.
+    """
+    written = source_half(SHARED_PACKAGE, SHARED_MEMBER)
+    beside = SourceHalf(
+        module=written.module,
+        text=f"DEFAULT_ENVIRONMENT = '.venv'\n{written.text}",
+        tree=ast.parse(f"DEFAULT_ENVIRONMENT = '.venv'\n{written.text}"),
+    )
+
+    assert beside.stranded() == ["DEFAULT_ENVIRONMENT"]
+    assert stranded_breaches(beside, source_half(SHARED_PACKAGE, DECISIONS_MEMBER)) == [
+        f"{written.module} declares DEFAULT_ENVIRONMENT, which splicing leaves behind"
+    ]
 
 
 def test_both_dispatchers_are_compiled_from_one_shared_host_half() -> None:
