@@ -25,15 +25,14 @@ detector for the TypeScript table, which this grammar is not for. Neither
 gate reaches for a lint engine to do it: ruff has no plugin API, and the ones
 that do — flake8, pylint, semgrep — could not run inside the hook.
 
-Refiners sharpen individual rules on top of that floor, and what a refiner
-needs decides who can run it. `refined_exempt_lines` reads the AST alone, so
-the hook applies it too and both gates judge a line the same way — a broad
-regex the kernel keeps flagging while the audit calls its marker spurious is
-a change one gate demands and the other refuses. `lup.codescan.grammar` goes
-further and resolves what a matched receiver is declared on, so `dict-get` can
-distinguish a mapping from an HTTP client; that needs a type checker, which
-both gates reach — the audit through an oracle it holds, the hook through the
-resolver its dispatcher runs over the text it is about to write. Both return
+A matcher reads the tree, which both gates have, so both judge a line the
+same way — a rule the kernel keeps flagging while the audit calls its marker
+spurious is a change one gate demands and the other refuses. What no tree
+settles is what a bare receiver *is*: `lup.codescan.grammar` resolves the
+declaration behind a selected site, so `dict-get` can distinguish a mapping
+from an HTTP client. That needs a type checker, which both gates reach — the
+audit through an oracle it holds, the hook through the resolver its
+dispatcher runs over the text it is about to write. It returns
 `Refutation` rows this module drops — and reports the
 surviving directives for. Regex alone remains where a rule is text-shaped. The
 `lup.codescan.registry` index and the generated `docs/rules.md` reference list
@@ -483,10 +482,10 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         "set-shaped value add `# lup: ignore[set-shape]`",
     ),
     AntiPattern(
-        # The refiner clears every factory that does work a literal cannot say,
+        # The matcher clears every factory that does work a literal cannot say,
         # so what reaches a verdict is the empty collection the annotation
         # already names. A pydantic field is an annotated class declaration,
-        # which empty-collection's refiner exempts, so no line trips both:
+        # which `empty_collection_exempt_lines` clears, so no line trips both:
         # this rule owns the factory spelling and that one owns the seed.
         id="default-factory",
         pattern=re.compile(r"\bdefault_factory\s*="),
@@ -513,7 +512,7 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         "own, and a marker there is reported spurious",
     ),
     AntiPattern(
-        # The refiner exempts deliberate defaults — __init__ state, call
+        # The matcher exempts deliberate defaults — __init__ state, call
         # kwargs, annotated module and class declarations — so what reaches a
         # verdict is the build-then-append seed. The annotated class
         # declaration among those is a pydantic field, whose factory spelling
@@ -528,7 +527,7 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
             ),
             RuleExample(code="names = [row.name for row in rows]", verdict="cleared"),
             # An annotated class declaration is a pydantic field, which the
-            # refiner exempts — default-factory owns that spelling instead.
+            # matcher exempts — default-factory owns that spelling instead.
             RuleExample(
                 code="class Run(BaseModel):\n    steps: list[Step] = []",
                 verdict="cleared",
@@ -659,7 +658,7 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         # `results[:limit]` a request rather than a truncation and keeps it out
         # of the net. Single digits go with it: `rest[:1]` and `data[:2]` are
         # parser bounds, never a cut artifact. What is left is a size somebody
-        # chose for content, which is the shape this names — the refiner clears
+        # chose for content, which is the shape this names — the matcher clears
         # the digests, splits, and sniffs that also wear it.
         id="silent-truncation",
         pattern=re.compile(r"\[\s*:\s*(?:\d[\d_]*\d|[A-Z][A-Z0-9_]{2,})\s*\]"),
@@ -1250,32 +1249,6 @@ reports it spurious — while an id no scanner owns still is.
 """
 
 
-def refined_refutations(text: str, patterns: list[AntiPattern]) -> list[Refutation]:
-    """Every AST refiner's exemptions, as refutations.
-
-    Projecting them here means the audit has exactly one notion of "matched,
-    but refuted", whether the proof came from the AST alone or from the typed
-    grammar's type oracle. The exemptions are the kernel's own, so a line the
-    hook stops flagging is the same line the audit stops demanding a marker
-    for — which is what keeps one gate from requiring a change the other
-    refuses. Each rule carries its own refiner, so nothing here maps an id
-    back to a function that lives elsewhere.
-    """
-    lines = text.splitlines()
-    return [
-        Refutation(
-            rule_id=rule.id,
-            line=line,
-            subject=lines[line - 1].strip(),
-            evidence=rule.refiner.evidence,
-        )
-        for rule in patterns
-        if rule.refiner is not None
-        for line in sorted(rule.refiner.exempt(text))
-        if line <= len(lines)
-    ]
-
-
 class AntiPatternSet(BaseModel, frozen=True, arbitrary_types_allowed=True):
     """Which anti-patterns a project checks, by the language they read.
 
@@ -1452,26 +1425,24 @@ def audit_text(
     scans nothing else. A typed file-level `# lup: ignore[id]` opts out only
     the named rule file-wide — and when nothing in the file still needs an
     id (no line trips it that an inline directive would not already cover),
-    that id reports "spurious" at the directive line, so refiner and rule
-    evolution cannot leave dead file-wide opt-outs behind. Docstring lines are skipped
+    that id reports "spurious" at the directive line, so rule evolution
+    cannot leave dead file-wide opt-outs behind. Docstring lines are skipped
     entirely: prose is not code, and no inline directive could ever guard it —
-    a comment cannot open inside a string. (The hook still scans docstring
-    lines at edit time; it sees only text fragments it cannot tokenize, so the
-    hook stays strictly stricter than this audit.) Then, per line and per rule:
+    a comment cannot open inside a string. (The hook skips them by the same
+    token masking wherever the text tokenizes, and falls back to scanning the
+    raw line only where it does not.) Then, per line and per rule:
 
     - a tripped rule with no covering ignore -> "missing";
     - a typed `# lup: ignore[id]` naming a rule the line does not trip, or a
       bare ignore on a line that trips nothing -> "spurious";
     - a bare `# lup: ignore` that does silence the line -> "untyped".
 
-    A hit a refiner refuted is not a trip at all, so a directive naming that
-    rule there reports "spurious" — the audit drives the cleanup of markers
-    refinement made unnecessary. Two sources feed this: the kernel's own AST
-    exemptions (see :func:`refined_exempt_lines`), computed here, and
-    whatever `refutations` the caller resolved — the typed grammar in
-    `lup.codescan.grammar` passes the sites whose receiver a type oracle
-    proved outside the rule's family. With no refutations supplied and no
-    oracle behind them, every broad regex verdict stands.
+    A hit a resolution refuted is not a trip at all, so a directive naming
+    that rule there reports "spurious" — the audit drives the cleanup of
+    markers the refinement made unnecessary. These arrive as `refutations`
+    the caller resolved: the typed grammar in `lup.codescan.grammar` passes
+    the sites whose receiver a type oracle proved outside the rule's family.
+    With none supplied and no oracle behind them, every selected line stands.
 
     An ignore counts as a guard only where a comment actually starts (per the
     tokenizer), so a docstring or string literal that merely *mentions*
@@ -1503,8 +1474,7 @@ def audit_text(
 
     context = PythonContext.parse(text)
     refuted = {
-        (refutation.rule_id, refutation.line)
-        for refutation in refined_refutations(text, patterns) + (refutations or [])
+        (refutation.rule_id, refutation.line) for refutation in refutations or []
     }
 
     file_ignore_line = file_ignore.line if file_ignore is not None else 0

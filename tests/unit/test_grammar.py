@@ -344,7 +344,6 @@ def test_the_hook_row_declares_that_its_verdict_needs_a_declaration() -> None:
             pattern=r"\.get\s*\(",
             message=rows[0]["message"],
             context="code",
-            refiner="",
             matcher="dict_get_lines",
             strength="soft",
             resolution="required",

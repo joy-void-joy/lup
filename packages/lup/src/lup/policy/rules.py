@@ -276,7 +276,6 @@ def antipattern_row(rule: AntiPattern) -> AntiPatternRow:
         pattern=rule.pattern.pattern,
         message=rule.message,
         context=rule.context,
-        refiner="" if rule.refiner is None else rule.refiner.exempt.__name__,
         matcher="" if rule.matcher is None else rule.matcher.select.__name__,
         strength=rule.strength,
         # Derived from the grammar rather than declared beside it: a gate has
