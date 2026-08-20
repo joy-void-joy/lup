@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "0a1ef5edfe0ca6c6e9e546335d55ceaf00f04e5ffe9b27bb1ab3524daaa0e1c5",
+  "source_digest": "d5a5c7cb0310959a8fdd51c929cf6dde4ccf93a432b364a426d2b62108ee593f",
   "target_requirements": [
     "claude-code"
   ],
@@ -121,7 +121,7 @@
     {
       "path": ".claude/plugins/lup/commands/fb-analyze.md",
       "category": "generated",
-      "sha256": "b6bc6c7e980207270126ac9825831bc3f984e7348268d57e8b2246eccb44b40f",
+      "sha256": "8d7041ae45541e85dbe3c91b00143a95c22d3be639eab3360910ac60ad602d78",
       "semantic_id": "skill.fb-analyze",
       "executable": false
     },
@@ -163,7 +163,7 @@
     {
       "path": ".claude/plugins/lup/commands/hooks.md",
       "category": "generated",
-      "sha256": "edc9db8b0655a2f3ff9325c296b2c6eee7393b28df292f4066dc4eb3508c2f51",
+      "sha256": "3a711784fef2759af3bda295ae717e7ab37fce633366584af8785dfef304c57d",
       "semantic_id": "skill.hooks",
       "executable": false
     },

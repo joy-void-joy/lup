@@ -58,7 +58,16 @@ generated artifacts. Never edit them as the source of a policy change.
    doc source above; a verdict that moved without its page moving leaves the
    page describing a policy nobody runs.
 6. Run `uv run pytest -q tests/unit/test_semantic_policy.py`.
-7. Run `uv run lup-devtools harness generate all` and
+7. Sweep the commands this project actually runs, because the fixtures cover
+   what the change was aimed at and say nothing about what it caught by
+   accident. `uv run lup-devtools hooks sweep <file>` classifies a list one
+   per line and exits non-zero on anything not allowed, so a rule that
+   tightened something it did not mean to tighten fails here instead of in
+   somebody's session. Keep that list in a file rather than retyping it, and
+   when the sweep newly denies an everyday command, decide whether the denial
+   was intended before moving on — then pin the answer as a fixture either
+   way.
+8. Run `uv run lup-devtools harness generate all` and
    `uv run lup-devtools harness check all`.
 
 Denial must win over approval across batches and shell segments. Unsupported
