@@ -10,7 +10,7 @@ SPELLING = provenance.Provenance(
 )
 """One checkout, unqualified: this skill turns the library's clone into the project."""
 
-# lup: Initialization never configures the seams. It interviews the domain,
+# lup: solved: Initialization never configures the seams. It interviews the domain,
 # prunes scaffolding, and walks the `# lup: template:` markers, but the points a
 # project is meant to settle about *itself* — the `DevProject` declaration, the
 # `HookSet` in its catalog, its path roles, and above all which of the library's
@@ -22,7 +22,7 @@ SPELLING = provenance.Provenance(
 # answers: a domain that does not want them should be able to say so once at
 # init rather than retire thirty ids one at a time, or discover the whole family
 # only when an edit is denied by a rule it never agreed to.
-# lup: `/lup:init` never asks who owns README.md. `human_owned_files` in
+# lup: solved: `/lup:init` never asks who owns README.md. `human_owned_files` in
 # src/lup_template/devtools/harness/catalog.py locks it, so an initialized
 # domain inherits an approval gate on the one file it most wants the agent to
 # write, and no phase surfaces the choice. Ask it here alongside the other
@@ -144,6 +144,17 @@ Ask extensively -- don't make assumptions about the domain. Ask open-ended quest
 
 Let the conversation flow naturally. The goal is to understand the domain well enough to customize the template files below.
 
+Open-ended exploration is ordinary conversation, but every answer that *forks
+the scaffolding* — the package name, what a run is, whether ground truth
+resolves later — decides which files exist at the end. """
+            ),
+            models.AskUser(
+                question="each identity answer that decides what gets generated, "
+                "with the reading you would pick offered first"
+            ),
+            models.TextPart(
+                text=r""" rather than leaving it in prose the user has to notice and correct.
+
 ## Phase 1.5: Prune Scaffolding
 
 Before customizing, decide which optional patterns this domain actually needs. The template ships them all wired; most domains use a subset, and **deleting the rest is the goal, not a failure** (see the guidance file's § Scaffolding Is a Menu, Not a Mandate). From the interview answers, classify each as KEEP-and-customize or DELETE-the-files:
@@ -153,7 +164,16 @@ Before customizing, decide which optional patterns this domain actually needs. T
 - **Feedback loop** (the `feedback` sub-app this project inherits from `lup.devtools`, and the feedback-loop skill) — keep only if ground truth or a feedback signal resolves over time. Dropping it is a line in `devtools/subapps.py`, not a directory to delete: the commands are the library's.
 - **Commit loop** (auto-commit in `environment/cli/__main__.py`) — keep only if each run yields a data artifact worth versioning. Session data is gitignored by default (the `notes/*` lines in `.gitignore`), so traces and outputs stay local; keeping this pattern means removing those two lines so session data can be committed. When deleting the pattern, leave the ignore lines in place.
 
-Confirm the keep/delete set with the user, then **delete the files and their wiring** for everything not kept before proceeding. The customization steps below apply only to what you kept.
+"""
+            ),
+            models.AskUser(
+                question="which of these four patterns this domain keeps, "
+                "one option per pattern"
+            ),
+            models.TextPart(
+                text=r""" — deleting is the expected answer for most of them, so say which you would
+delete and why. Then **delete the files and their wiring** for everything not
+kept before proceeding. The customization steps below apply only to what you kept.
 
 ## Phase 2: Rename Package
 
@@ -253,6 +273,98 @@ uv run pytest
 <project> --help
 ```
 
+## Phase 2.5: Settle the Seams
+
+Everything above customizes what the project *is*. This phase settles what it
+holds *itself* to, and it exists because a default nobody was shown is not a
+decision. The library ships each of these as a starting point, and a domain
+that would have answered differently never finds out it could until an edit is
+denied by a rule it never agreed to.
+
+Put each one to the user rather than letting the default stand by silence.
+
+### 1. Which rules this domain holds itself to
+
+`RuleSelection` names which of the rules the library ships this project keeps.
+Its own docstring is the point: a rule is a convention written down and a
+convention is a judgement, so a repository that settled one differently "is not
+answering it wrongly — it is answering a question this library had no standing
+to close." The selection is subtractive, so a project that disagrees with three
+rules names those three rather than restating the thirty it keeps.
+
+Show the families before asking — `uv run lup-devtools dev rules` writes the
+generated index, and every rule in it carries the shape it matches and the
+diagnostic it prints. Then """
+            ),
+            models.AskUser(
+                question="which rule families this domain keeps, "
+                "with retiring the anti-pattern family altogether as one answer"
+            ),
+            models.TextPart(
+                text=r""". Offer the whole-family answer explicitly: a domain that does not want the
+anti-pattern rules should be able to say so once, here, rather than retire
+thirty ids one at a time as it meets them.
+
+### 2. Who owns which files
+
+A human-owned file surfaces every agent edit as an approval, so the agent
+proposes rather than writes. The template ships `README.md` that way, which is
+right for a file whose words are the author's and wrong for a project that
+wants its README kept current by the agent.
+
+```bash
+uv run lup-devtools dev init ownership
+```
+
+"""
+            ),
+            models.AskUser(
+                question="which files the human author owns, "
+                "starting from whether README.md stays locked"
+            ),
+            models.TextPart(
+                text=r""" — then apply the answer with `--lock` / `--unlock` on that same command,
+which rewrites the declaration and regenerates the native trees. Never
+hand-edit `human_owned_files` in the catalog.
+
+### 3. What each path role means here
+
+`HookPathRole` says which roots are scratch, which are source, and which are
+tests. The template's roles describe the template's own tree, and a domain that
+keeps its data somewhere else, or vendors a dependency, has roots the shipped
+list does not mention. Read the declared roles, then """
+            ),
+            models.AskUser(
+                question="whether any root this domain adds needs a path role, "
+                "and which"
+            ),
+            models.TextPart(
+                text=r""".
+
+### 4. Whether tests are held still
+
+An **acceptance guard** asks an ordinary session before it edits a test and
+refuses an autonomous one outright, because for an autonomous worker those
+tests are the specification it implements against. It is worth having exactly
+when this domain will run unattended sessions against a test suite it must not
+rewrite, and worth skipping when it will not. """
+            ),
+            models.AskUser(
+                question="whether this domain declares an acceptance guard "
+                "over its test roots"
+            ),
+            models.TextPart(
+                text=r"""
+
+Record each answer in the catalog, then regenerate and confirm the trees moved:
+
+```bash
+uv run lup-devtools harness generate all
+```
+
+An answer left at the default is fine — but it should be an answer, not a
+silence. Where the user defers one, say which default now stands.
+
 ## Phase 3: Generate Scaffolding
 
 **Start by gathering every customization point.** Each decision the template leaves to a domain carries a `# lup: template:` marker with a one-line description of the decision. Collect them all:
@@ -343,11 +455,16 @@ Customize the interactive setup wizard for the domain's integrations:
 
 The framework (env helpers, status table, mask, clipboard, browser open, wizard flow) is reusable — only the integration functions and registry need customization.
 
-Ask the user:
-
-- What external services does the agent use? (APIs, databases, messaging platforms)
-- Which require OAuth flows vs simple API keys?
-- Are there any credentials files to manage? (JSON tokens, certificates)
+The registry is a list of services, and which ones this domain has is the
+domain's answer rather than a guess from the code — so """
+            ),
+            models.AskUser(
+                question="which external services the agent uses, "
+                "and for each whether it authenticates by OAuth flow, "
+                "API key, or a credentials file"
+            ),
+            models.TextPart(
+                text=r""" before rewriting `INTEGRATIONS`.
 
 ### 11. Update `feedback-loop.md`
 
