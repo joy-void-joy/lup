@@ -186,6 +186,21 @@ MAPPING_FAMILY = TypeFamily(
 )
 """Declarations that make a `.get` receiver a keyed lookup rather than a client."""
 
+TEXT_FAMILY = TypeFamily(
+    name="text",
+    classes=["str", "bytes", "bytearray", "UserString"],
+)
+"""Declarations that make a `.replace` receiver text rather than something else.
+
+The rule is about substituting one piece of text for another inside a string.
+The tree already tells that from the rename wearing the same name, by arity —
+a bound `Path.replace` takes only the destination. What arity cannot reach is
+a two-argument `replace` on a value that is not text at all: a dataframe
+filling missing values, an AST node rebuilt with a field changed. Those spell
+the rule's shape exactly and are not its subject, and only the receiver's own
+declaration says so.
+"""
+
 
 def attribute_call_sites(attribute: str) -> SiteSelector:
     """Select every `receiver.<attribute>(...)` call, keyed on the receiver.
@@ -233,6 +248,24 @@ GRAMMAR_RULES: list[GrammarRule] = [
             "Route decorators and calls on an imported module never reach the "
             "checker: the tree settles those without types. Where no checker "
             "answers at all the gate asks instead of refusing."
+        ),
+    ),
+    GrammarRule(
+        id="string-replace",
+        select=attribute_call_sites("replace"),
+        family=TEXT_FAMILY,
+        refinement=(
+            "The hook decides this one by arity, which tells text surgery from "
+            "the file rename wearing the same name and reaches no further. The "
+            "audit resolves what the receiver's `replace` is declared on and "
+            "keeps the finding only where that class is text. A dataframe "
+            "filling missing values, an AST node rebuilt with one field "
+            "changed, a vendor object carrying a `replace` of its own all "
+            "spell this rule's shape and none of them is its subject, so each "
+            "is refuted — as is a receiver that resolves to nothing at all, "
+            "since a rule about strings has nothing to say about a value "
+            "nobody can show is one. Where no checker answers, the arity "
+            "verdict stands alone and the gate asks rather than refusing."
         ),
     ),
 ]

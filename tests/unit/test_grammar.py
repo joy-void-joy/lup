@@ -52,6 +52,21 @@ def post(url, **kwargs): ...
 """
 """What a module-qualified `httpx.get` resolves to: a `def` inside no class."""
 
+TEXT_STUB = """
+class str(Sequence[str]):
+    def replace(self, old, new): ...
+"""
+
+FRAME_STUB = """
+class DataFrame(NDFrame):
+    def replace(self, to_replace, value): ...
+"""
+"""A two-argument `replace` on something that is not text.
+
+Arity is what the hook tells the file rename by, and it says nothing here:
+this spells the rule's shape exactly and substitutes no text at all.
+"""
+
 STUB_DECLARATION_LINE = 3
 """The `def get` line in the two class stubs above."""
 
@@ -88,10 +103,16 @@ def stubs(tmp_path: Path) -> dict[str, DefinitionSite]:
     client.write_text(CLIENT_STUB, encoding="utf-8")
     api = tmp_path / "_api.py"
     api.write_text(MODULE_API_STUB, encoding="utf-8")
+    text = tmp_path / "strings.pyi"
+    text.write_text(TEXT_STUB, encoding="utf-8")
+    frame = tmp_path / "frame.py"
+    frame.write_text(FRAME_STUB, encoding="utf-8")
     return {
         "mapping": DefinitionSite(path=mapping, line=STUB_DECLARATION_LINE),
         "client": DefinitionSite(path=client, line=STUB_DECLARATION_LINE),
         "module": DefinitionSite(path=api, line=MODULE_DECLARATION_LINE),
+        "text": DefinitionSite(path=text, line=STUB_DECLARATION_LINE),
+        "frame": DefinitionSite(path=frame, line=STUB_DECLARATION_LINE),
     }
 
 
@@ -124,6 +145,41 @@ def test_non_mapping_receiver_is_refuted_with_evidence(tmp_path: Path) -> None:
     assert refuted[0].subject == "client"
     assert "`Client`" in refuted[0].evidence
     assert "outside the mapping family" in refuted[0].evidence
+    assert audit_text(text, PYTHON_ANTI_PATTERNS, refuted) == []
+
+
+def test_text_receiver_keeps_its_replace_finding(tmp_path: Path) -> None:
+    """A `.replace` declared on `str` is the string surgery the rule means."""
+    declaring = stubs(tmp_path)
+    text = "name = source.replace('.py', '.pyi')\n"
+    refutations = refute(
+        [source(text)], TableOracle({1: [declaring["text"]]}), GRAMMAR_RULES
+    )
+    assert refutations == {}
+    findings = audit_text(text, PYTHON_ANTI_PATTERNS)
+    assert [finding.rule_id for finding in findings] == ["string-replace"]
+
+
+def test_a_two_argument_replace_on_a_non_text_receiver_is_refuted(
+    tmp_path: Path,
+) -> None:
+    """What arity cannot reach, the receiver's own declaration does.
+
+    A bound `Path.replace` takes only the destination, so the hook tells that
+    rename from string surgery without types. A dataframe filling missing
+    values takes two arguments and spells this rule's shape exactly — and
+    substitutes no text, which only the declaration says.
+    """
+    declaring = stubs(tmp_path)
+    text = "frame = frame.replace(missing, default)\n"
+    refutations = refute(
+        [source(text)], TableOracle({1: [declaring["frame"]]}), GRAMMAR_RULES
+    )
+    refuted = refutations["sample.py"]
+    assert [row.rule_id for row in refuted] == ["string-replace"]
+    assert refuted[0].subject == "frame"
+    assert "`DataFrame`" in refuted[0].evidence
+    assert "outside the text family" in refuted[0].evidence
     assert audit_text(text, PYTHON_ANTI_PATTERNS, refuted) == []
 
 
