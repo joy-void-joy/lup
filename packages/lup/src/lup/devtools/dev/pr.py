@@ -224,7 +224,6 @@ class CreateResult(PRResult):
 
 
 # The result already answers how to print itself; what is left is the flag.
-# lup: ignore[model-free-function] — subject is the CLI's --json choice
 def output_result(result: PRResult, as_json: bool) -> None:
     if as_json:
         output_json(result)

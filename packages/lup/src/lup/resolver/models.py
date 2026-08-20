@@ -1350,11 +1350,6 @@ class RunTally(BaseModel, frozen=True):
         return line
 
 
-# lup: ignore[model-free-function] — dead: every caller uses ResolveState.tally,
-# which computes the same aggregate. It should be deleted, and cannot be: it
-# carries a copy of an open note, and the removal gate counts open notes across
-# the file rather than checking the text survives, so removing either copy reads
-# as destroying feedback. Delete both once that check compares text.
 def run_tally(state: ResolveState) -> RunTally:
     """Fold one persisted state into the aggregate a watcher wants."""
     statuses = [item.status for item in state.progress]

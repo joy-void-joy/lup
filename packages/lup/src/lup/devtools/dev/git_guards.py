@@ -366,8 +366,6 @@ def hooks_directory(root: Path) -> Path:
     return root / named
 
 
-# lup: ignore[model-free-function] — driver: it reads the hook file on disk, and
-# HookScript is the declaration of which hook rather than the thing that reads
 def guard_state(script: HookScript, directory: Path) -> GuardState:
     """Read what is installed at this moment's hook path."""
     path = directory / script.hook
@@ -481,7 +479,6 @@ def read_hooks(guards: list[GitGuard], root: Path) -> HooksReading:
     )
 
 
-# lup: ignore[model-free-function] — driver: it writes the hook file
 def install_script(
     script: HookScript, root: Path, *, force: bool = False
 ) -> GuardState:
@@ -514,7 +511,6 @@ def install_guards(
     ]
 
 
-# lup: ignore[model-free-function] — driver: it removes the hook file
 def uninstall_script(script: HookScript, root: Path) -> GuardState:
     """Remove one moment's hook, leaving one written elsewhere alone."""
     state = guard_state(script, hooks_directory(root))

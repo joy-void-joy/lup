@@ -252,7 +252,6 @@ def server_tool_names(server: McpServerEntry) -> list[str]:
             return []
 
 
-# lup: ignore[model-free-function] — a process entrypoint owning signals and transport
 def serve_stdio(config: LupMcpServerConfig) -> None:
     """Serve an in-process MCP server over stdio (blocking).
 

@@ -36,7 +36,6 @@ from lup.codescan.antipatterns import (
     audit_text,
     patterns_for_suffix,
 )
-from lup.codescan.behaviour import audit_model_free_functions
 from lup.codescan.boundaries import audit_constant_declarations, audit_path_boundaries
 from lup.codescan.capabilities import audit_capabilities
 from lup.codescan.common import (
@@ -196,7 +195,6 @@ def scan_antipatterns(
         )
         for finding in [
             *audit_capabilities(sources),
-            *audit_model_free_functions(sources),
             *audit_own_model_dispatch(sources),
             *audit_isinstance_chains(sources),
             *audit_constant_declarations(sources, project.roots),

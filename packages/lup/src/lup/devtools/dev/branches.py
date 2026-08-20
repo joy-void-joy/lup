@@ -462,7 +462,6 @@ forking the functions that consult this one.
 """
 
 
-# lup: ignore[model-free-function] — subject is the branch; the PR is one signal
 def disposition_for(
     name: str,
     *,
@@ -1027,8 +1026,6 @@ def git_ran(launcher: ProcessLauncher, root: Path, arguments: list[str]) -> str:
     return f"`git {' '.join(arguments)}` exited {status.code}"
 
 
-# lup: ignore[model-free-function] — driver: it writes to the checkout, where
-# UpstreamMeasure is only the reading that says whether there is anything to write
 def sync_upstream(
     launcher: ProcessLauncher, root: Path, measure: UpstreamMeasure, *, publish: bool
 ) -> Iterator[str]:
@@ -1142,8 +1139,6 @@ def admit_an_unread_base() -> None:
         raise typer.Abort()
 
 
-# lup: ignore[model-free-function] — driver: it ends the command, so what it
-# does is refuse an invocation rather than answer anything about the reading
 def require_fresh_base(freshness: BaseFreshness) -> None:
     """Refuse to start work that pins this base for everything it hands out.
 
@@ -1686,7 +1681,6 @@ def plan_deletion(name: str, force: bool, remote: bool | None = None) -> Deletio
     )
 
 
-# lup: ignore[model-free-function] — driver: it prunes, reports, and exits
 def abort_deletion(plan: DeletionPlan, completed: list[str], failure: str) -> NoReturn:
     """Report a mid-deletion failure, repairing a stranded registration first.
 
@@ -1721,7 +1715,6 @@ def abort_deletion(plan: DeletionPlan, completed: list[str], failure: str) -> No
     raise typer.Exit(1)
 
 
-# lup: ignore[model-free-function] — driver: the plan describes, this runs git
 def run_deletion(plan: DeletionPlan, force: bool) -> None:
     """Carry out a plan whose preflight passed, reporting what actually ran."""
     completed: list[str] = []
@@ -1936,7 +1929,6 @@ def plan_retirement(name: str, integration: str) -> RetirementPlan:
     )
 
 
-# lup: ignore[model-free-function] — driver: the plan describes, this runs gh
 def run_retirement(plan: RetirementPlan, reason: str) -> int:
     """Carry out a plan whose preflight passed, returning the request's number.
 
