@@ -74,6 +74,7 @@ from lup.codescan.common import (
     RuleSelection,
     RULE_CONTEXTS,
     RuleContext,
+    TypeFamily,
     file_level_ignore,
     ignore_rule_ids,
 )
@@ -133,6 +134,43 @@ from lup.policy.kernel.edit import (
     tuple_shape_sites,
 )
 
+
+MAPPING_FAMILY = TypeFamily(
+    name="mapping",
+    classes=[
+        "dict",
+        "Mapping",
+        "MutableMapping",
+        "MappingProxyType",
+        "UserDict",
+        "Counter",
+        "OrderedDict",
+        "defaultdict",
+        "ChainMap",
+    ],
+)
+"""Declarations that make a `.get` receiver a keyed lookup rather than a client.
+
+A `TypedDict` is deliberately absent. It is a mapping at runtime, and reading
+an optional key out of one with `.get` is how the language says to — but it
+is also the modelling `dict-get` exists to ask for, so a site that resolves
+to one has already done what the rule wanted and is refuted by saying so.
+"""
+
+TEXT_FAMILY = TypeFamily(
+    name="text",
+    classes=["str", "bytes", "bytearray", "UserString"],
+)
+"""Declarations that make a `.replace` receiver text rather than something else.
+
+The rule is about substituting one piece of text for another inside a string.
+The tree already tells that from the rename wearing the same name, by arity —
+a bound `Path.replace` takes only the destination. What arity cannot reach is
+a two-argument `replace` on a value that is not text at all: a dataframe
+filling missing values, a datetime rebuilt with a field changed. Those spell
+the rule's shape exactly and are not its subject, and only the receiver's own
+declaration says so.
+"""
 
 PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
     AntiPattern(
@@ -348,6 +386,23 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         id="dict-get",
         pattern=re.compile(r"\.get\s*\("),
         matcher=Matcher(select=dict_get_sites),
+        family=MAPPING_FAMILY,
+        refinement=(
+            "The audit resolves what each site's receiver is and keeps the "
+            "finding only where that class is in the mapping family. An HTTP "
+            "client, an SDK object, a vendor type carrying a `get` of its own "
+            "are each refuted, and so is a receiver nothing can be shown "
+            "about — an unannotated parameter, a value the checker infers "
+            "nothing for — because a rule about mappings has nothing to say "
+            "about a value nobody can show is one, and a denial nobody can "
+            "substantiate leaves a directive as the only way past it. A "
+            "`TypedDict` resolves to its own class and is refuted there: it "
+            "is already the modelling this rule asks for. What the tree "
+            "settles it settles alone, so route decorators and calls on an "
+            "imported module never become sites and never reach a checker. "
+            "Where no checker answers at all every finding keeps its "
+            "unresolved verdict and the gate asks instead of refusing."
+        ),
         examples=[
             RuleExample(code='name = payload.get("name")', verdict="flagged"),
             # Reached *through* a module rather than on one, so still a keyed
@@ -590,6 +645,20 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         id="string-replace",
         pattern=re.compile(r"(?<!\bos)(?<![Pp]ath)\.replace\s*\("),
         matcher=Matcher(select=string_replace_sites),
+        family=TEXT_FAMILY,
+        refinement=(
+            "The hook decides this one by arity, which tells text surgery "
+            "from the file rename wearing the same name and reaches no "
+            "further. The audit resolves what each site's receiver is and "
+            "keeps the finding only where that class is text. A dataframe "
+            "filling missing values, a datetime rebuilt with one field "
+            "changed, a vendor object carrying a `replace` of its own all "
+            "spell this rule's shape and none of them is its subject, so "
+            "each is refuted — as is a receiver nothing can be shown about, "
+            "since a rule about strings has nothing to say about a value "
+            "nobody can show is one. Where no checker answers, the arity "
+            "verdict stands alone and the gate asks rather than refusing."
+        ),
         examples=[
             RuleExample(code='name = source.replace(".py", ".pyi")', verdict="flagged"),
             RuleExample(

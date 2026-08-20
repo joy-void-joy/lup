@@ -12,12 +12,14 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
+from lup.codescan.antipatterns import PYTHON_ANTI_PATTERNS
 from lup.codescan.common import PythonSource, Refutation
 from lup.codescan.oracle import (
-    DefinitionOracle,
-    DefinitionSite,
+    Declaration,
     SourceBuffer,
-    SourcePosition,
+    SymbolQuery,
+    TypeOracle,
+    UnknownDeclaration,
 )
 from lup.devtools.dev.refutations import (
     FileRefutations,
@@ -31,19 +33,19 @@ from lup.devtools.dev.refutations import (
 from lup.types import StringMap
 
 
-class SilentOracle(DefinitionOracle):
+class SilentOracle(TypeOracle):
     """Resolves nothing, and counts what it was asked."""
 
     def __init__(self) -> None:
-        self.asked: list[SourcePosition] = []
+        self.asked: list[SymbolQuery] = []
 
-    def definitions(
+    def declarations(
         self,
-        positions: list[SourcePosition],
+        queries: list[SymbolQuery],
         buffers: list[SourceBuffer] | None = None,
-    ) -> list[list[DefinitionSite]]:
-        self.asked.extend(positions)
-        return [[] for _ in positions]
+    ) -> list[Declaration]:
+        self.asked.extend(queries)
+        return [UnknownDeclaration(reason="nothing was resolved") for _ in queries]
 
 
 class Tree(BaseModel):
@@ -124,8 +126,12 @@ def test_a_second_run_asks_the_checker_nothing(tmp_path: Path) -> None:
     store = tmp_path / "refutations.json"
     first, second = SilentOracle(), SilentOracle()
 
-    remembered_refutations(CHAIN.sources(), first, store, tmp_path)
-    remembered_refutations(CHAIN.sources(), second, store, tmp_path)
+    remembered_refutations(
+        CHAIN.sources(), first, PYTHON_ANTI_PATTERNS, store, tmp_path
+    )
+    remembered_refutations(
+        CHAIN.sources(), second, PYTHON_ANTI_PATTERNS, store, tmp_path
+    )
 
     assert first.asked, "the cold run has to reach the checker"
     assert second.asked == [], "the warm run must not"
@@ -133,11 +139,15 @@ def test_a_second_run_asks_the_checker_nothing(tmp_path: Path) -> None:
 
 def test_a_changed_file_is_asked_about_again(tmp_path: Path) -> None:
     store = tmp_path / "refutations.json"
-    remembered_refutations(CHAIN.sources(), SilentOracle(), store, tmp_path)
+    remembered_refutations(
+        CHAIN.sources(), SilentOracle(), PYTHON_ANTI_PATTERNS, store, tmp_path
+    )
 
     changed = CHAIN.with_text("leaf", "class Schema:\n    def fetch(self): ...\n")
     again = SilentOracle()
-    remembered_refutations(changed.sources(), again, store, tmp_path)
+    remembered_refutations(
+        changed.sources(), again, PYTHON_ANTI_PATTERNS, store, tmp_path
+    )
 
     assert again.asked, "a changed dependency has to be re-resolved"
 
@@ -146,7 +156,12 @@ def test_no_oracle_remembers_nothing(tmp_path: Path) -> None:
     """A run that could not ask must not teach the next one its silence."""
     store = tmp_path / "refutations.json"
 
-    assert remembered_refutations(CHAIN.sources(), None, store, tmp_path) == {}
+    assert (
+        remembered_refutations(
+            CHAIN.sources(), None, PYTHON_ANTI_PATTERNS, store, tmp_path
+        )
+        == {}
+    )
     assert not store.exists()
 
 
@@ -165,7 +180,9 @@ def test_a_remembered_refutation_comes_back_unasked(tmp_path: Path) -> None:
     # Keyed under the environment the reader will compute, not a stand-in:
     # the fingerprint is part of what an entry rests on, so an entry written
     # under a different one is correctly a miss.
-    written = entry_keys(CHAIN.sources(), environment_fingerprint(tmp_path))
+    written = entry_keys(
+        CHAIN.sources(), environment_fingerprint(PYTHON_ANTI_PATTERNS, tmp_path)
+    )
     RefutationStore(
         entries={
             path: FileRefutations(
@@ -176,7 +193,9 @@ def test_a_remembered_refutation_comes_back_unasked(tmp_path: Path) -> None:
     ).write(store)
 
     oracle = SilentOracle()
-    found = remembered_refutations(CHAIN.sources(), oracle, store, tmp_path)
+    found = remembered_refutations(
+        CHAIN.sources(), oracle, PYTHON_ANTI_PATTERNS, store, tmp_path
+    )
 
     assert found == {"top.py": [kept]}
     assert oracle.asked == []

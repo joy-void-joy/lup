@@ -18,7 +18,6 @@ from lup.codescan.antipatterns import (
     python_anti_patterns,
 )
 from lup.codescan.common import AntiPattern, RuleExample
-from lup.codescan.grammar import GRAMMAR_RULES
 from lup.harness.contracts import Spelled, Unsupported
 from lup.policy.bundle import bundled_antipattern_rows
 from lup.policy.kernel.edit import (
@@ -1318,15 +1317,20 @@ def test_each_rule_answers_its_own_examples(
             assert reported == [], f"the audit reports {rule.id} at: {example.code}"
 
 
-def test_a_refuted_example_belongs_to_a_rule_the_grammar_resolves() -> None:
+def test_a_refuted_example_belongs_to_a_rule_that_declares_a_family() -> None:
     """Only a rule with a type oracle behind it may claim the third verdict.
 
-    ``refuted`` says the sweep will take this finding back. A rule the
-    grammar does not refine has nothing that could, so the claim would leave
-    a contributor waiting for a verdict that never changes — and a directive
-    is the only thing that would have helped.
+    ``refuted`` says the sweep will take this finding back. A rule declaring
+    no family has nothing that could, so the claim would leave a contributor
+    waiting for a verdict that never changes — and a directive is the only
+    thing that would have helped.
     """
-    refined = {rule.id for rule in GRAMMAR_RULES}
+    refined = {
+        rule.id
+        for table in (PYTHON_ANTI_PATTERNS, TS_ANTI_PATTERNS)
+        for rule in table
+        if rule.family is not None
+    }
     claiming = {
         rule.id
         for table in (PYTHON_ANTI_PATTERNS, TS_ANTI_PATTERNS)

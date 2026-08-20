@@ -9,10 +9,10 @@ that defines and enforces it. `uv run lup-devtools dev rules` renders this
 registry into the checked-in `docs/rules.md` reference that deny messages
 point at, so no rule is discoverable only through the scanner that owns it.
 
-A rule the typed grammar refines carries that refinement on its card, because
-the reference is where the two surfaces are reconciled: the edit hook decides
-on the spelling alone and the whole-file audit may decide otherwise once a
-type oracle has resolved what the spelling refers to.
+A rule whose verdict a type oracle sharpens carries that refinement on its
+card, read off the rule's own declaration — the reference is where the two
+surfaces are reconciled: the edit hook decides on the spelling alone and the
+whole-file audit may decide otherwise once the subject is resolved.
 """
 
 from typing import Literal
@@ -24,7 +24,6 @@ import lup.codescan.behaviour as behaviour
 import lup.codescan.boundaries as boundaries
 import lup.codescan.capabilities as capabilities
 import lup.codescan.dispatch as dispatch
-import lup.codescan.grammar as grammar
 import lup.codescan.narrowing as narrowing
 import lup.codescan.portable as portable
 from lup.codescan.common import AntiPattern, RuleSelection, RuleStrength
@@ -234,7 +233,6 @@ def anti_pattern_rules(
     the page had copied the pattern correctly.
     """
     declared = rules or antipatterns.AntiPatternSet()
-    refined = {rule.id: rule.refinement for rule in grammar.GRAMMAR_RULES}
 
     def showable(rule: AntiPattern, verdict: str) -> list[str]:
         """This rule's examples of one verdict that survive a table cell.
@@ -276,7 +274,7 @@ def anti_pattern_rules(
             cleared=spared(rule),
             message=rule.message,
             defined_in=antipatterns.__name__,
-            refinement=refined[rule.id] if rule.id in refined else "",
+            refinement=rule.refinement,
             strength=rule.strength,
         )
         for scope, scoped in (

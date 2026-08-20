@@ -112,6 +112,25 @@ class Matcher(BaseModel, arbitrary_types_allowed=True):
     select: Callable[[str], list[MatchSite]]
 
 
+class TypeFamily(BaseModel, frozen=True):
+    """A named set of declaring classes a resolved subject is measured against.
+
+    ``classes`` names the declarations that constitute the family. A subject
+    belongs when the class it resolves to is one of them, or inherits one —
+    which is what carries `os._Environ(MutableMapping[AnyStr, AnyStr])` and a
+    project's own `dict` subclass into the mapping family without listing
+    either.
+
+    Named classes rather than rendered type strings, because a name a checker
+    prints for display is not a contract and a declaration is: `dict` in
+    typeshed's `builtins.pyi` is the same declaration however the type
+    holding it is spelled at the site.
+    """
+
+    name: str
+    classes: list[str]
+
+
 type ExampleVerdict = Literal["flagged", "cleared", "refuted"]
 """What the gates say about one example, in the three answers they can give.
 
@@ -203,6 +222,34 @@ class AntiPattern(BaseModel, arbitrary_types_allowed=True):
     context: RuleContext = "code"
     refiner: Refiner | None = None
     matcher: Matcher | None = None
+    family: TypeFamily | None = None
+    """The classes a site's subject must resolve into for this rule to stand.
+
+    Present when the shape alone cannot settle the rule and only the type of
+    what it is written on can: `.get` on a mapping hides a schema, the same
+    spelling on an HTTP client is a request. The sites the ``matcher`` chose
+    carry the positions, this names what they must resolve to, and
+    `lup.codescan.resolution` refutes every site shown to be outside it.
+
+    Declared here rather than in a table keyed by rule id, because a rule is
+    one thing. A second list saying which rules resolve is a list that can
+    disagree with the rules it describes, and every gate that needed to know
+    — the hermetic row, the reference page, the audit — had to perform the
+    same join to find out.
+
+    A rule with no family never reaches a checker at all, which is most of
+    them: nothing about a bare `except` or an `import re` turns on a type.
+    """
+
+    refinement: str = ""
+    """How resolution sharpens this rule, in the words the reference shows.
+
+    Beside the family it explains, so a change to what the gate resolves and
+    a change to what the page claims it resolves are one edit. This is the
+    prose a contributor reads after a denial, and the failure it guards
+    against is the page describing a verdict the gate stopped giving.
+    """
+
     strength: RuleStrength = "soft"
     """Whether a `# lup: ignore` may silence this rule at all.
 
@@ -232,6 +279,44 @@ class AntiPattern(BaseModel, arbitrary_types_allowed=True):
             raise ValueError(
                 f"rule {self.id} needs at least one example it flags and one it "
                 f"clears — the cleared one is what says where the rule stops"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def a_family_reaches_the_sites_it_judges(self) -> Self:
+        """Refuse a family declared on a rule whose sites carry no symbol.
+
+        A family is measured against what a site's subject resolves to, and
+        only a selector that recorded a position has given anything to
+        resolve. Declared on a rule whose matcher yields bare lines, it is
+        silently inert: nothing is asked, nothing is refuted, and the rule
+        goes on giving the broad verdict while its reference page describes
+        the narrowing that never happens.
+
+        Checked against the rule's own flagged examples, which is the one
+        thing on hand that is guaranteed to be a site this rule fires on.
+        """
+        if self.family is None:
+            return self
+        if self.matcher is None:
+            raise ValueError(
+                f"rule {self.id} declares the {self.family.name} family but no "
+                f"matcher — a family is measured against sites, and only a "
+                f"matcher selects them"
+            )
+        flagged = [
+            example.code for example in self.examples if example.verdict == "flagged"
+        ]
+        if not any(
+            "member" in site
+            for code in flagged
+            for site in self.matcher.select(f"{code}\n")
+        ):
+            raise ValueError(
+                f"rule {self.id} declares the {self.family.name} family, but its "
+                f"matcher records no symbol to resolve on any example it flags "
+                f"— nothing would ever be asked about, and the refinement its "
+                f"reference page promises would never happen"
             )
         return self
 

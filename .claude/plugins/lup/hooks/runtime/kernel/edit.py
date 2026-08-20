@@ -365,6 +365,21 @@ def python_nodes_by_type(tree: ast.Module) -> dict[str, list[ast.AST]]:
     return grouped
 
 
+class SitePosition(TypedDict):
+    """Where one symbol sits, in the coordinates `ast` reports.
+
+    A TypedDict rather than a model because this is the hermetic kernel and
+    there is no pydantic here; a pair rather than two loose fields because
+    both halves of a position are meaningless apart.
+    """
+
+    line: int
+    """1-based, as `ast` reports `lineno`."""
+
+    column: int
+    """0-based UTF-8 offset, as `ast` reports `col_offset`."""
+
+
 class MatchSite(TypedDict):
     """One place a rule fires, in the terms every gate reads it in.
 
@@ -393,8 +408,8 @@ class MatchSite(TypedDict):
     """
 
     line: int
-    member: NotRequired[tuple[int, int]]
-    receiver: NotRequired[tuple[int, int]]
+    member: NotRequired[SitePosition]
+    receiver: NotRequired[SitePosition]
     subject: NotRequired[str]
 
 
@@ -414,7 +429,7 @@ def lines_of(sites: list[MatchSite]) -> set[int]:
     return {site["line"] for site in sites}
 
 
-def name_position(node: ast.expr) -> tuple[int, int] | None:
+def name_position(node: ast.expr) -> SitePosition | None:
     """Where the last name of an expression sits, or None if it ends in none.
 
     A checker answers about the symbol a position denotes, and only a name
@@ -424,11 +439,13 @@ def name_position(node: ast.expr) -> tuple[int, int] | None:
     """
     match node:
         case ast.Name(id=name):
-            return (node.lineno, (node.end_col_offset or len(name)) - 1)
+            return SitePosition(
+                line=node.lineno, column=(node.end_col_offset or len(name)) - 1
+            )
         case ast.Attribute(attr=attribute):
-            return (
-                node.end_lineno or node.lineno,
-                (node.end_col_offset or len(attribute)) - 1,
+            return SitePosition(
+                line=node.end_lineno or node.lineno,
+                column=(node.end_col_offset or len(attribute)) - 1,
             )
     return None
 
@@ -450,7 +467,9 @@ def attribute_call_site(read: ast.Attribute) -> MatchSite:
     line = read.end_lineno or read.value.lineno
     site = MatchSite(
         line=line,
-        member=(line, (read.end_col_offset or 0) - len(read.attr)),
+        member=SitePosition(
+            line=line, column=(read.end_col_offset or 0) - len(read.attr)
+        ),
         subject=ast.unparse(read.value),
     )
     position = name_position(read.value)

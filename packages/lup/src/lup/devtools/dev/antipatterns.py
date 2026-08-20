@@ -15,7 +15,7 @@ fact:
   typed `# lup: ignore[id]` directives is gradual.
 
 The set is shared with the hook; the verdicts need not be. This sweep reads
-whole parseable files, so it hands `lup.codescan.grammar` a type oracle and
+whole parseable files, so it hands `lup.codescan.resolution` a type oracle and
 decides some rules more narrowly than a hook judging an untyped edit fragment
 ever could. Every finding that narrowing drops is reported as a **refuted**
 row carrying the declaration that settled it, and the directive that used to
@@ -53,7 +53,7 @@ from lup.codescan.common import (
     module_name,
 )
 from lup.codescan.dispatch import audit_own_model_dispatch
-from lup.codescan.grammar import refute
+from lup.codescan.resolution import refute
 from lup.devtools.dev.refutations import remembered_refutations
 from lup.workspace.paths import project_root, refutation_cache_path
 from lup.codescan.narrowing import audit_isinstance_chains
@@ -128,6 +128,20 @@ def within_scope(rel: str, paths: Sequence[str] | None) -> bool:
     )
 
 
+def declared_rules(project: DevProject) -> AntiPatternSet:
+    """The rule set this project actually holds itself to, in one place.
+
+    The tables this library ships plus whatever the project added, less
+    whatever it turned off. Both the walk that decides which rules a file is
+    read against and the resolution that decides which of them a checker is
+    asked about read this, because a rule the project switched off is one no
+    language server should be spending a session on.
+    """
+    return AntiPatternSet(
+        python=[*PYTHON_ANTI_PATTERNS, *project.anti_patterns]
+    ).selected(project.rules)
+
+
 def scanned_files(
     project: DevProject, paths: Sequence[str] | None = None
 ) -> list[ScannedFile]:
@@ -140,9 +154,7 @@ def scanned_files(
     never enforces in a test or scratch tree is not read there either.
     """
     roles = project.path_roles
-    declared = AntiPatternSet(
-        python=[*PYTHON_ANTI_PATTERNS, *project.anti_patterns]
-    ).selected(project.rules)
+    declared = declared_rules(project)
 
     def found() -> Iterator[ScannedFile]:
         for rel in git.lines("ls-files", "--cached", "--others", "--exclude-standard"):
@@ -203,16 +215,18 @@ def scan_antipatterns(
     # asked about, so that key would be blind to a module it resolves through
     # and could not notice one changing — and a scoped run is the cheap one
     # anyway, since asking only about what changed is what remembering is for.
+    resolved_rules = declared_rules(project).python
     resolving_refutations = (
         partial(
             remembered_refutations,
             sources,
             default_oracle(),
+            resolved_rules,
             refutation_cache_path(),
             project_root(),
         )
         if paths is None
-        else partial(refute, sources, default_oracle())
+        else partial(refute, sources, default_oracle(), resolved_rules)
     )
     # The resolve spends most of its time waiting on a language server, and
     # every audit below waits on nothing, so the sweep reads while it waits
@@ -549,7 +563,7 @@ def report(
 
 
 def report_refutations(project: DevProject, path: Path, text: str) -> None:
-    """Emit what the typed grammar refutes in one file's proposed content.
+    """Emit what resolution refutes in one file's proposed content.
 
     The edit gate's answer for a rule whose verdict turns on a declaration.
     It holds the text before anything is written, so what is on disk is not
@@ -569,7 +583,7 @@ def report_refutations(project: DevProject, path: Path, text: str) -> None:
     source = PythonSource(
         path=path, module=module_name(path, scanned_roots(project)), text=text
     )
-    found = refute([source], oracle)
+    found = refute([source], oracle, declared_rules(project).python)
     rows = found[path.as_posix()] if path.as_posix() in found else []
     output_json(
         {
