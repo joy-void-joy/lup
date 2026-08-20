@@ -27,6 +27,7 @@ import cProfile
 import pstats
 from collections.abc import Iterator, Sequence, Set as AbstractSet
 from concurrent.futures import ThreadPoolExecutor
+from functools import partial
 from pathlib import Path
 
 import typer
@@ -53,6 +54,8 @@ from lup.codescan.common import (
 )
 from lup.codescan.dispatch import audit_own_model_dispatch
 from lup.codescan.grammar import refute
+from lup.devtools.dev.refutations import remembered_refutations
+from lup.workspace.paths import project_root, refutation_cache_path
 from lup.codescan.narrowing import audit_isinstance_chains
 from lup.codescan.registry import RULE_REFERENCE
 from lup.policy.kernel.edit import (
@@ -194,12 +197,29 @@ def scan_antipatterns(
         for item in scanned
         if item.path.suffix.lower() in {".py", ".pyi"}
     ]
+    # A whole-repository sweep remembers what the checker said, because it
+    # holds every module a refutation could resolve through and can therefore
+    # key an answer by all of them. A scoped sweep holds only the files it was
+    # asked about, so that key would be blind to a module it resolves through
+    # and could not notice one changing — and a scoped run is the cheap one
+    # anyway, since asking only about what changed is what remembering is for.
+    resolving_refutations = (
+        partial(
+            remembered_refutations,
+            sources,
+            default_oracle(),
+            refutation_cache_path(),
+            project_root(),
+        )
+        if paths is None
+        else partial(refute, sources, default_oracle())
+    )
     # The resolve spends most of its time waiting on a language server, and
     # every audit below waits on nothing, so the sweep reads while it waits
     # rather than after it. Only the text audit reads a refutation; the rest
     # are assembled in their own order once both halves are in.
     with ThreadPoolExecutor(max_workers=1) as pool:
-        resolving = pool.submit(refute, sources, default_oracle())
+        resolving = pool.submit(resolving_refutations)
         declared = [
             *audit_capabilities(sources),
             *audit_model_free_functions(sources),
