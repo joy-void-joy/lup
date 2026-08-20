@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "d7d9038549b5fff4c513a45fd44b3cc55fafac11450f70f796415b57e9555e51",
+  "source_digest": "01b560491ce0b9bd8898f6a935fde98ffce857a3af6c2f7dd22775a6d7e55ee4",
   "target_requirements": [
     "claude-code"
   ],
@@ -9,7 +9,7 @@
     {
       "path": ".claude/CLAUDE.md",
       "category": "generated",
-      "sha256": "1022aacf1a0b8db97703ff7de4a3094fa207a45e2f286c884ed8d57591fb9a3d",
+      "sha256": "5b83a7f62916ad499cc7bf890530c334a5d1f417074e35c56f083cc6c871b768",
       "semantic_id": "harness.guidance",
       "executable": false
     },
@@ -37,7 +37,7 @@
     {
       "path": ".claude/plugins/lup/TEMPLATE_CLAUDE.md",
       "category": "generated",
-      "sha256": "bac02866d4c1837489130f155c5f9d044917308796f2c3a3e5ad748711898c41",
+      "sha256": "06ee1836c0345aa160a94fd025d4af70b4bfb82b79825210f4343a86fc1e9268",
       "semantic_id": "harness.template-guidance",
       "executable": false
     },
@@ -198,7 +198,7 @@
     {
       "path": ".claude/plugins/lup/commands/land.md",
       "category": "generated",
-      "sha256": "0e824722d22d9c11594526805ce8247216aed73a973cb10e158d714f00c223b0",
+      "sha256": "c8bfc7e3f2f6cd52322b2751cf5ecb7cd25f8f32853ed1511004d778379101bc",
       "semantic_id": "skill.land",
       "executable": false
     },
@@ -436,7 +436,7 @@
     {
       "path": "docs/contributing.md",
       "category": "generated",
-      "sha256": "931b3240dec8fd5d8820d59120c04bb4d18114a2270cec52dac182be20efe24f",
+      "sha256": "ed17695008cb78fe3fd42f13ce41fd862ec3ffefe7ae7345d44b678f73f84829",
       "semantic_id": "docs.contributing",
       "executable": false
     },
@@ -471,7 +471,7 @@
     {
       "path": "docs/native-capabilities.md",
       "category": "generated",
-      "sha256": "210bea53bc1f69281d2281ef787daedcbafe3f0f493d99ac2e37e70ad7f722fb",
+      "sha256": "f6df707a56b8ead53499dee6683d85eb1803701b47dcef78c8f7c9bcd2d14535",
       "semantic_id": "docs.native-capabilities",
       "executable": false
     },
@@ -536,6 +536,13 @@
       "category": "generated",
       "sha256": "bd12684f75049366b956a4c008e035293c193ad68cdd717db78881b4b680cab7",
       "semantic_id": "docs.template",
+      "executable": false
+    },
+    {
+      "path": "docs/upstream-reports.md",
+      "category": "generated",
+      "sha256": "54ba437bf17108177cc9893e5e467087401a95cb02172c997cf44f0b90df7ada",
+      "semantic_id": "docs.upstream-reports",
       "executable": false
     }
   ]

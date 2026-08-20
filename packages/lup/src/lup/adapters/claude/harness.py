@@ -110,9 +110,30 @@ class ClaudeSpellings(NativeSpellings):
         )
 
     def relocate_session(self, path: str) -> Instruction:
+        """Spell all three routes, cheapest first, with the cost of the last.
+
+        This runtime can move a running session, and moving one arms its
+        worktree isolation -- a separate check on command *shape* that refuses
+        any command carrying one of fifteen shell words as an argv element,
+        in any position, whether or not git appears anywhere in it. A session
+        *launched* already rooted in the worktree is never isolated, so it
+        does the same work and keeps `grep -c hash`.
+
+        All three are spelled because the cheapest one is not always
+        available. Launching belongs to whoever is starting work; an agent
+        already mid-session cannot launch anything, and telling it to would
+        be instructing it to do what it cannot -- so the fallback that
+        reaches the same branch from where it stands is named second, and
+        the move that works everywhere is named last with its price on it.
+        """
         return Instruction(
-            f"`EnterWorktree(path=<{path}>)`, returning afterwards "
-            'with `ExitWorktree(action="keep")`'
+            f"work in <{path}> by whichever of these you can reach: launch a "
+            f"session rooted there; or, already running, keep working where "
+            f"you are and address files under <{path}> by absolute path; or "
+            f"`EnterWorktree(path=<{path}>)`, returning with "
+            '`ExitWorktree(action="keep")` — which reaches any worktree from '
+            "anywhere and is last because it arms worktree isolation, whose "
+            "refusals cover ordinary read-only commands"
         )
 
     def escape_sandbox(self, reason: str) -> Spelling:

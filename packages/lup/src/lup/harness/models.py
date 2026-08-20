@@ -399,7 +399,11 @@ class RelocateSession(SemanticPart, frozen=True):
 
     Runtimes differ on whether a running session can move: one relocates in
     place, another can only be replaced by a session started there. Naming
-    the intent lets each adapter spell the move it actually supports.
+    the intent lets each adapter spell the move it actually supports -- and
+    lets one that supports both spell the cheaper of them, which is why every
+    adapter currently answers with a launch. Relocation is not free where it
+    exists: it arms a runtime's own worktree isolation, whose refusals are
+    about command shape rather than about anything this policy judges.
     """
 
     type: Literal["relocate_session"] = "relocate_session"

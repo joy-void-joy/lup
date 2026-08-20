@@ -21,7 +21,9 @@ import typer
 from pydantic import BaseModel, Field
 
 from lup.runtime.profiles import ProfileDirectory
+from lup.adapters.claude.harness import ClaudeSpellings
 from lup.adapters.claude.transcripts import ClaudeTranscripts
+from lup.adapters.codex.harness import CodexSpellings
 from lup.adapters.codex.harness_runtime import (
     CodexPluginInstaller,
     PluginCacheConfig,
@@ -63,17 +65,24 @@ def relocation_hint(worktree_path: Path) -> RelocationHint:
     reached here through one of them is told the move it actually supports.
     Anything else gets the portable shell form alone rather than the name of
     a tool that runtime may not have.
+
+    The wording is asked of the same spelling the guidance is rendered from
+    rather than written again here. Restating it is how the two came to
+    disagree: the guidance named the move a runtime supports, this named a
+    tool, and a workflow change had to find both to land. One of them being
+    an adapter method makes that impossible.
     """
     environ = os.environ  # lup: ignore[os-environ]
     move = f"cd /; cd {worktree_path}"
+    here = "the path above"
     if "CLAUDE_CONFIG_DIR" in environ:
         return RelocationHint(
-            agent="EnterWorktree(path=<the path above>)",
+            agent=ClaudeSpellings().relocate_session(here),
             shell=f"{move}; claude",
         )
     if "CODEX_HOME" in environ:
         return RelocationHint(
-            agent="start a session there — this runtime cannot relocate a running one",
+            agent=CodexSpellings().relocate_session(here),
             shell=f"{move}; codex",
         )
     return RelocationHint(agent="", shell=move)

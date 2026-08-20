@@ -72,9 +72,9 @@ Resolve open feedback by fixing what it points at, or, for a question, by answer
 
 ## Development Workflow
 
-Work in a **git worktree**, not a branch switched in place, and never commit _code_ directly to `dev`. Create one with `uv run lup-devtools dev worktree create feat-name` — it lands as a sibling under `tree/`, never nested inside another checkout — and then `EnterWorktree(path=<the path it prints>)`, returning afterwards with `ExitWorktree(action="keep")`, because creating a worktree does not move the session, and edits left in the old checkout never reach the branch.
+Work in a **git worktree**, not a branch switched in place, and never commit _code_ directly to `dev`. Creating one does not move the session, and edits left in the old checkout never reach the branch — so create it with `uv run lup-devtools dev worktree create feat-name`, which lands it as a sibling under `tree/` and never nested inside another checkout, and then work in <the path it prints> by whichever of these you can reach: launch a session rooted there; or, already running, keep working where you are and address files under <the path it prints> by absolute path; or `EnterWorktree(path=<the path it prints>)`, returning with `ExitWorktree(action="keep")` — which reaches any worktree from anywhere and is last because it arms worktree isolation, whose refusals cover ordinary read-only commands
 
-`docs/contributing.md` carries the two-tier branch model, the commit-type table, and the loop from a fresh worktree to a merged pull request.
+The order matters. Relocating a running session is the route that always works and the one to reach for last, because on some runtimes it arms a worktree-isolation check that then refuses fifteen ordinary shell words — `hash`, `let`, `complete`, `source` and others — in *any* argv position, in read-only commands, for the rest of the session. `docs/contributing.md` carries the two-tier branch model, the commit-type table, the loop from a fresh worktree to a merged pull request, and the full set.
 
 ### Merge Conflict Resolution
 

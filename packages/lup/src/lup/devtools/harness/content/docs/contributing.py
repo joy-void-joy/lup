@@ -102,6 +102,26 @@ current directory in place; `git worktree add` gives the branch a directory
 of its own, which is what keeps several live at once. `worktrees/` and
 `refs/` are gitignored, the latter holding symlinks to downstream projects.
 
+The command prints the path and does not move whoever ran it. **Launch a
+session rooted at that path**; do not relocate a running one. The difference
+is not style. A runtime that can move a running session arms its own
+worktree isolation when it does — a check on command *shape*, separate from
+this project's policy and owned by nobody here, which refuses a command
+carrying any of fifteen shell words as an argv element in any position:
+
+    eval  source  .  fc  coproc  trap  enable  mapfile  readarray
+    hash  bind  complete  compgen  alias  let
+
+Only `.` is gated to first position; the other fourteen match anywhere, and
+none of them is gated on the command being a git command. So an isolated
+session loses `grep -c hash`, `rg complete src/`, and
+`uv run lup-devtools py eval '1+1'` — read-only commands with no git in
+them — for as long as it lasts, and no approval marker reaches the refusal.
+A session launched already rooted in the worktree is never isolated and
+keeps all of them, which is why the workflow asks for a launch. Staying put
+and editing through absolute paths works too. Measured against Claude Code
+2.1.237; `docs/native-capabilities.md` carries the evidence.
+
 Commit early, commit often, and keep commits atomic — if the message needs an
 "and", it is two commits. The format is `type(scope): description`:
 
