@@ -381,6 +381,7 @@ class ResolverCore:
             mail=self.mailbox.mail,
             spawner=self.journal.run,
             parallel=config.max_parallel_workers,
+            settles=lambda error: settles_the_actor(error, environmental_fault),
         )
         self.run_state = ResolveRun(self.repository, self.journal, observer)
         self.rebaser = BaseRefresher(self.run_state, self.worktrees, self.journal)
@@ -980,7 +981,6 @@ class ResolverCore:
                 results = await self.actors.work_all(
                     execute_for,
                     [ActorRef(kind="worker", id=concern.id) for concern in runnable],
-                    settles=settles_the_actor,
                 )
                 failures = [
                     result for result in results if isinstance(result, BaseException)

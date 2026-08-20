@@ -545,7 +545,7 @@ async def test_a_wave_leaves_a_suspended_agent_standing(tmp_path: Path) -> None:
     class Parked(Exception):
         """The consumer's own way of saying "waiting on a human"."""
 
-    cohort = ActorCohort(tmp_path)
+    cohort = ActorCohort(tmp_path, settles=lambda error: not isinstance(error, Parked))
 
     async def work(opened: ActorRef) -> None:
         raise Parked("waiting") if opened.id == "parked" else RuntimeError("died")
@@ -553,7 +553,6 @@ async def test_a_wave_leaves_a_suspended_agent_standing(tmp_path: Path) -> None:
     results = await cohort.work_all(
         work,
         [cohort.actor("worker", name) for name in ("parked", "failed")],
-        settles=lambda error: not isinstance(error, Parked),
     )
 
     assert [type(result) for result in results] == [Parked, RuntimeError]
@@ -561,3 +560,34 @@ async def test_a_wave_leaves_a_suspended_agent_standing(tmp_path: Path) -> None:
     assert standing["parked"].running is True
     assert standing["failed"].running is False
     assert standing["failed"].error == "died"
+
+
+@pytest.mark.asyncio
+async def test_a_suspension_out_of_a_turn_leaves_its_agent_standing(
+    tmp_path: Path,
+) -> None:
+    """The judgement has to reach the turn, not only the work around it.
+
+    A suspension is raised in both places a raise can happen. A drain checked
+    between rounds comes out of the work, and a host fault comes out of the
+    turn itself — and the turn's own failure path ran first, finishing the
+    agent before anything else was consulted. So of the three suspensions a
+    consumer names, the one that arrives through a turn was the one that did
+    not stand, and the retry it exists for opened a fresh conversation.
+    """
+
+    class Faulted(Exception):
+        """The consumer's own way of saying "the host failed, not the work"."""
+
+    cohort = ActorCohort(tmp_path, settles=lambda error: not isinstance(error, Faulted))
+    session = HeldSession(fails=Faulted("credential revoked"))
+    actor = cohort.actor("worker", "faulted")
+
+    with pytest.raises(Faulted):
+        await cohort.round(
+            actor, turn_request(TurnInput(text="go"), Finding), recipe_for(session)
+        )
+
+    standing = {member.actor.id: member for member in cohort.live()}
+    assert standing["faulted"].running is True, "the host said nothing about it"
+    assert standing["faulted"].error == ""

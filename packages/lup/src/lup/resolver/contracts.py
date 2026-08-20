@@ -1,8 +1,10 @@
 """The independently replaceable resolver capability contracts."""
 
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from pathlib import Path
 
+from lup.runtime.errors import TurnError
 from lup.resolver.models import (
     ConcernProgress,
     MaterialQuestion,
@@ -67,7 +69,9 @@ class ResolverDrained(Exception):
         self.concerns = concerns
 
 
-def settles_the_actor(error: BaseException) -> bool:
+def settles_the_actor(
+    error: BaseException, environmental: Callable[[str], bool] = lambda _: False
+) -> bool:
     """Whether a raise out of an agent's work means that agent is done.
 
     Three of this run's failures stop a piece of work without ending the
@@ -86,7 +90,19 @@ def settles_the_actor(error: BaseException) -> bool:
     vocabulary is declared here and both waves answer to it. A worker's and a
     reviewer's are the same judgement, and two copies of it agree only for as
     long as somebody keeps them agreeing.
+
+    A host fault is asked of the raw :class:`TurnError` as well as of the
+    resolver exception it eventually becomes. That promotion happens in the
+    executor, one frame above the turn — so by the time a fault is spelled
+    ``ResolverEnvironmentFault`` the agent has already met its turn's own
+    failure path, and testing only for the resolver spelling protects the one
+    place the fault has already left. ``environmental`` is the same classifier
+    the executor consults, defaulting to answering no: a library with no
+    adapter attributes a fault to the work, since treating a real failure as
+    the host's would retry it forever.
     """
+    if isinstance(error, TurnError):
+        return not (error.failure.environmental or environmental(error.failure.message))
     return not isinstance(
         error, ResolverAwaitingAnswers | ResolverDrained | ResolverEnvironmentFault
     )

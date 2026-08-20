@@ -27,7 +27,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from lup.channels.models import utc_now
-from lup.resolver.contracts import ResolverDrained, settles_the_actor
+from lup.resolver.contracts import ResolverDrained
 from lup.resolver.dag import ConcernGraph
 from lup.resolver.journal import (
     JoinAuditEvent,
@@ -635,7 +635,6 @@ class Joiner:
             asked = await self.runner.actors.work_all(
                 examine,
                 [ActorRef(kind="reviewer", id=concern.id) for concern in asking],
-                settles=settles_the_actor,
             )
 
         def reported() -> Iterator[MaterialQuestion]:

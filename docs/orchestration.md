@@ -179,13 +179,21 @@ positionally — a result or the exception it raised, faithfully, so a caller
 that classifies failures can still tell a park from a host fault from a
 cancellation.
 
-**A raise does not always finish an agent.** A turn that dies settles the
-agent that took it, but *work* can stop because it was suspended — parked on
-a question, drained at a boundary, stopped by a failing host — and every one
-of those expects the same agent to carry on. `settles` is how a consumer says
+**A raise does not always finish an agent.** A raise usually settles the agent
+it came out of, but work can stop because it was suspended — parked on a
+question, drained at a boundary, stopped by a failing host — and every one of
+those expects the same agent to carry on. `settles` is how a consumer says
 which of its own failures suspend; recorded finished instead, the resume opens
 a fresh conversation rather than reattaching to the one holding the context,
 and every door reads a waiting agent as a stopped one.
+
+It belongs to the cohort, passed once at construction, rather than to each
+wave. A suspension is raised in both places a raise can happen — a drain
+checked between rounds comes out of the work, a host fault out of the turn
+itself — so a judgement held by the wave answers for one and not the other,
+and the turn's own failure path finishes the agent before the wave is ever
+consulted. Which failures suspend is a fact about the consumer's vocabulary,
+and a consumer has one.
 
 **The cohort owns the wiring.** Delivery works only if the inbox hook is in
 the options the session opened with, so callers pass an `ActorRecipe`

@@ -45,6 +45,7 @@ from lup.resolver.contracts import (
     ResolverEnvironmentFault,
     ResolverObserver,
     WorktreePreparer,
+    settles_the_actor,
 )
 from lup.runtime.errors import ProviderTurnError, TurnFailure
 from lup.resolver.core import (
@@ -394,6 +395,37 @@ def running_on(statuses: dict[str, ConcernStatus]) -> ResolveState:
             for name, status in statuses.items()
         ],
     )
+
+
+def test_a_host_fault_suspends_its_agent_in_the_spelling_the_turn_raises() -> None:
+    """The fault has to be recognised before the executor renames it.
+
+    A revoked credential leaves the provider as a `TurnError` and only becomes
+    a `ResolverEnvironmentFault` one frame above the turn, in the executor that
+    classifies it. The population sees the first spelling, so a judgement
+    testing only for the second finishes the worker on exactly the failure that
+    says nothing about its work — and the retry the fault exists for reattaches
+    to nothing, because the conversation it wanted was recorded finished.
+
+    Both halves of the classification, too: the adapter's flag and the message
+    the executor's own classifier reads, since the flag is set where the
+    exception is first caught and several layers re-wrap it on the way up.
+    """
+    flagged = ProviderTurnError(TurnFailure(message="401", environmental=True))
+    by_message = ProviderTurnError(TurnFailure(message="429 quota exhausted"))
+    refused = ProviderTurnError(TurnFailure(message="the tests do not pass"))
+
+    assert settles_the_actor(flagged) is False
+    assert settles_the_actor(by_message, lambda text: "429" in text) is False
+    assert settles_the_actor(by_message) is True, "unclassified is the work's"
+    assert settles_the_actor(refused, lambda text: "429" in text) is True
+
+    # The three the executor raises in its own vocabulary still suspend, and
+    # an ordinary failure still settles.
+    assert settles_the_actor(ResolverAwaitingAnswers([], [])) is False
+    assert settles_the_actor(ResolverDrained("operator asked", [])) is False
+    assert settles_the_actor(ResolverEnvironmentFault("revoked", [])) is False
+    assert settles_the_actor(RuntimeError("died")) is True
 
 
 def test_a_concern_is_stamped_with_the_moment_it_settles(tmp_path: Path) -> None:

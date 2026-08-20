@@ -86,20 +86,28 @@ holds.
 type WorkSettles = Callable[[BaseException], bool]
 """Whether a raise out of an agent's work means that agent is done.
 
-A turn that raises settles the agent that took it, because an agent whose turn
-died is not going to take another. Work is the case where that stops holding:
-a whole piece of work can stop because it was *suspended* — parked on a
-question, drained at a boundary, or stopped by a host that failed — and every
-one of those expects the same agent to carry on once the reason is gone. An
-agent recorded finished while its work is merely suspended is the report that
-sends somebody looking for a failure that did not happen, and what resumes
-opens a fresh conversation instead of reattaching to the one that was already
-holding the context.
+A raise usually settles the agent it came out of, because an agent whose turn
+died is not going to take another. Suspension is the case where that stops
+holding: a piece of work can stop because it was *parked* on a question,
+*drained* at a boundary, or stopped by a *host* that failed — and every one of
+those expects the same agent to carry on once the reason is gone. An agent
+recorded finished while its work is merely suspended is the report that sends
+somebody looking for a failure that did not happen, and what resumes opens a
+fresh conversation instead of reattaching to the one that was already holding
+the context.
 
 Only the consumer knows which of its own failures suspend, so the judgement
 reaches it as a default rather than a fixed rule: everything settles unless a
 caller says otherwise, which is what a caller with no suspension of its own
 already meant.
+
+It is the population's, not each wave's. A suspension is raised in both places
+a raise can happen — a drain checked between rounds comes out of the work, and
+a host fault comes out of the turn itself — so a judgement held by the wave
+answers for one and not the other, and the agent is finished by the turn's own
+failure path before the wave is ever consulted. One per cohort is also the
+truth of it: which failures suspend is a fact about the consumer's vocabulary,
+and a consumer has one.
 """
 
 
@@ -162,8 +170,10 @@ class ActorCohort:
         run_id: str | None = None,
         spawner: ActorRef | None = None,
         parallel: int | None = None,
+        settles: WorkSettles = lambda _: True,
     ) -> None:
         self.root = root
+        self.settles = settles
         self.run_id = run_id or root.name
         self.journal = journal or CohortJournal(self.root)
         # Taken rather than always built, because a consumer that already has
@@ -412,14 +422,23 @@ class ActorCohort:
         finish for work that is still moving.
 
         So the round is recorded and the agent left live. A turn that raises
-        is the exception, because an agent whose turn died is not going to
-        take another — that finishes, with the error against its address.
+        is usually the exception, because an agent whose turn died is not
+        going to take another — that finishes, with the error against its
+        address.
+
+        Usually, because a suspension is raised here too. A host fault comes
+        out of the turn rather than out of the work around it, and finishing
+        on it unconditionally settled the agent before the population's
+        judgement was ever asked — costing the retry the conversation it
+        meant to reattach to, which is the one thing that judgement exists to
+        protect.
         """
         self.spawn(actor, task or request.input.text)
         try:
             return await self.session(actor, recipe).turn(request)
         except Exception as error:
-            await self.finish(actor, error=str(error))
+            if self.settles(error):
+                await self.finish(actor, error=str(error))
             raise
 
     async def ask[T: BaseModel | None](
@@ -476,7 +495,6 @@ class ActorCohort:
         work: Callable[[ActorRef], Awaitable[T]],
         task: str = "",
         then: Callable[[T], Awaitable[None]] | None = None,
-        settles: WorkSettles = lambda _: True,
     ) -> ActorRef:
         """Set a whole piece of work going under one address, keeping the turn.
 
@@ -491,9 +509,10 @@ class ActorCohort:
         The work itself says whether it finishes the agent: what it runs is
         rounds, and only it knows which round was the last. What is recorded
         here is the failure — but only where the raise settles the agent,
-        which ``settles`` decides. Work that stopped because it was suspended
-        expects the same agent to carry on, so recording it finished would
-        cost the resume the conversation it meant to reattach to.
+        which the population's :data:`WorkSettles` decides. Work that stopped
+        because it was suspended expects the same agent to carry on, so
+        recording it finished would cost the resume the conversation it meant
+        to reattach to.
 
         The address is recorded before the cap rather than behind it, so an
         agent queued behind a full cap is one the caller can already list and
@@ -512,7 +531,7 @@ class ActorCohort:
                     result = await work(actor)
                 except Exception as error:
                     logger.exception("%s failed", actor.label())
-                    if settles(error):
+                    if self.settles(error):
                         await self.finish(actor, error=str(error))
                     raise
                 if then is not None:
@@ -526,7 +545,6 @@ class ActorCohort:
         work: Callable[[ActorRef], Awaitable[T]],
         over: list[ActorRef],
         task: str = "",
-        settles: WorkSettles = lambda _: True,
     ) -> list[T | BaseException]:
         """Run one piece of work per address at once, and hand back each answer.
 
@@ -563,9 +581,7 @@ class ActorCohort:
             return kept
 
         for actor in over:
-            self.start_work(
-                actor, remembering(work), task=task or actor.id, settles=settles
-            )
+            self.start_work(actor, remembering(work), task=task or actor.id)
         await self.wait_all()
         return [caught[actor.conversation()] for actor in over]
 
