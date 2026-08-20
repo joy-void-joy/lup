@@ -154,6 +154,7 @@ def dispatch(payload):
             # A call's sandbox is an argument of the call here, so a verdict
             # that has to leave the sandbox is carried out rather than refused.
             escapable=True,
+            cwd=Path(payload["cwd"]) if "cwd" in payload else None,
         )
     if name == "WebFetch":
         return fetch_decision(tool_input["url"])

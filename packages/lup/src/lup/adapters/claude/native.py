@@ -94,6 +94,9 @@ class ClaudeHookPayload(BaseModel, frozen=True):
 
     tool_name: str
     tool_input: JsonObject = {}
+    cwd: Path | None = None
+    """Where the calling session is, which a shell command's operands resolve
+    against. The hook itself does not always run there."""
 
 
 # lup: ignore[model-free-function] — boundary decoder off Claude's wire payload
@@ -111,9 +114,11 @@ def parse_claude_before_tool(payload: ClaudeHookPayload) -> ClaudeBeforeToolEven
         case "Write", {"file_path": str(path), "content": str(content)}:
             operation = ClaudeWriteOperation(path=Path(path), content=content)
         case "Bash", {"command": str(command), "dangerouslyDisableSandbox": True}:
-            operation = ClaudeShellOperation(command=command, unsandboxed=True)
+            operation = ClaudeShellOperation(
+                command=command, cwd=payload.cwd, unsandboxed=True
+            )
         case "Bash", {"command": str(command)}:
-            operation = ClaudeShellOperation(command=command)
+            operation = ClaudeShellOperation(command=command, cwd=payload.cwd)
         case "WebFetch", {"url": str(url)}:
             operation = ClaudeFetchOperation(url=url)
         case "WebSearch", {"query": str(query)}:

@@ -9,6 +9,8 @@ other events answer on the decision channel, and per-event matcher
 registration survives the mapping.
 """
 
+from pathlib import Path
+
 from claude_agent_sdk import types as claude_types
 from pydantic import AnyHttpUrl
 
@@ -58,6 +60,16 @@ def test_semantic_decode_reads_the_same_names_the_dispatcher_reads() -> None:
     )
     assert shell == ShellCommand(command="git status")
 
+    placed = claude_hook_semantic_tool(
+        LupHookInput(
+            event="PreToolUse",
+            tool_name="Bash",
+            tool_input={"command": "rm notes.txt"},
+            cwd="/repo/docs",
+        )
+    )
+    assert placed == ShellCommand(command="rm notes.txt", cwd=Path("/repo/docs"))
+
     unclassified = claude_hook_semantic_tool(
         LupHookInput(event="PreToolUse", tool_name="mcp__notes__write", tool_input={})
     )
@@ -102,6 +114,7 @@ async def test_handler_delivers_normalized_input_and_native_denial() -> None:
             tool_name="Write",
             tool_input={"file_path": "/ro/file.txt"},
             tool_path="/ro/file.txt",
+            cwd="/cwd",
         )
     ]
     assert output == {
