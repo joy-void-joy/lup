@@ -222,13 +222,17 @@ GRAMMAR_RULES: list[GrammarRule] = [
         select=attribute_call_sites("get"),
         family=MAPPING_FAMILY,
         refinement=(
-            "The whole-file audit resolves what the receiver's `get` is declared "
-            "on and drops the finding when that class is proven outside the "
-            "mapping family — an HTTP client, an SDK object. Both gates already "
-            "pass over a route decorator and a call on an imported module, which "
-            "the tree settles without types; what needs the oracle is a receiver "
-            "whose class is declared somewhere else, and the hermetic kernel may "
-            "not reach a checker to ask."
+            "Both gates resolve what the receiver's `get` is declared on and "
+            "keep the finding only where that class is in the mapping family. "
+            "A receiver resolved outside it is refuted — an HTTP client, an "
+            "SDK object — and so is one that resolves to nothing at all: an "
+            "unannotated parameter, a `**kwargs`, a `json.loads` result, a "
+            "`TypedDict` whose `get` is synthesized and declared nowhere. "
+            "Membership is shown rather than assumed, because a denial nobody "
+            "can substantiate leaves a directive as the only way past it. "
+            "Route decorators and calls on an imported module never reach the "
+            "checker: the tree settles those without types. Where no checker "
+            "answers at all the gate asks instead of refusing."
         ),
     ),
 ]
@@ -333,7 +337,21 @@ def refute(
     oracle: DefinitionOracle | None,
     rules: list[GrammarRule] | None = None,
 ) -> dict[str, list[Refutation]]:
-    """Refute every line whose sites all resolve outside their rule's family.
+    """Refute every line no site of which is shown to be in its rule's family.
+
+    Membership is established, never merely left undisproven. A receiver the
+    checker resolves into the family keeps its finding; one it resolves
+    outside it, and one it cannot resolve at all, are both refuted — a rule
+    about mappings has nothing to say about a value nobody can show is one,
+    and denying there is denying on a guess with a directive as the only way
+    past. The two carry different evidence, so a reader can tell which
+    happened.
+
+    The reading this replaced denied on the second: no declaration read as
+    "not refuted", and "not refuted" read as "confirmed mapping". An
+    unannotated parameter, a `**kwargs`, a `json.loads` result and an object
+    from a package with no stubs were all refused on that, and a typed
+    directive was the only way past each.
 
     Returns the surviving refutations per repository-relative posix path, for
     `lup.codescan.antipatterns.audit_text` to drop and for the auditor to
@@ -378,10 +396,19 @@ def refute(
             for definition in definitions
             if (origin := origin_of(definition, trees)) is not None
         ]
-        if not origins or any(
-            origin.in_family(chosen.rule.family) for origin in origins
-        ):
+        if any(origin.in_family(chosen.rule.family) for origin in origins):
             return None
+        if not origins:
+            return Refutation(
+                rule_id=chosen.rule.id,
+                line=chosen.site.line,
+                subject=chosen.site.subject,
+                evidence=(
+                    f"the checker resolved no declaration for "
+                    f"`{chosen.site.subject}`, so nothing puts it in the "
+                    f"{chosen.rule.family.name} family"
+                ),
+            )
         foreign = origins[0]
         return Refutation(
             rule_id=chosen.rule.id,

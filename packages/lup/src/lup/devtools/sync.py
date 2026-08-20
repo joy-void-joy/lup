@@ -1,6 +1,3 @@
-# lup: ignore[dict-get]
-# Every read here probes ProjectEntry/config payloads whose keys are all
-# optional, so dict-get is opted out file-wide.
 """Track repos to sync with and review their commits since the last sync.
 
 These commands are the read/fetch half of ``/lup:update`` — the workflow that

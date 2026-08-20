@@ -78,7 +78,7 @@ def response_text(response: ToolResponse) -> str:
     result's text means two narrowings no caller should repeat — and one that
     skips them reads an image block's absent ``text``.
     """
-    content = response.get("content", [])  # lup: ignore[dict-get] — optional key
+    content = response.get("content", [])
     return "\n".join(block["text"] for block in content if block["type"] == "text")
 
 

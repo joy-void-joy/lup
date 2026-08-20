@@ -217,11 +217,13 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         id="dict-get",
         pattern=re.compile(r"\.get\s*\("),
         matcher=Matcher(select=dict_get_lines),
-        message="`.get(` on payload/TypedDict-shaped data hides the schema — use typed "
-        "attribute access (BaseModel/TypedDict). On a genuinely open dict (registry, cache) "
-        "add `# lup: ignore[dict-get]`. On a typed non-mapping receiver (an SDK client, a "
-        "route decorator) add nothing — the audit resolves the declaration and refutes it, "
-        "and a marker here is reported spurious",
+        message="`.get(` on a dict-shaped payload hides the schema — model it and "
+        "read the fields (BaseModel/TypedDict). On a genuinely open dict (registry, "
+        "cache) add `# lup: ignore[dict-get]`. On a receiver the checker resolves "
+        "outside the mapping family, or cannot resolve at all, add nothing — the "
+        "audit refutes it and a marker there is reported spurious. A `TypedDict` is "
+        "already the modelling this asks for, and `.get` is how an optional key is "
+        "read out of one, so it is not this rule's subject",
     ),
     AntiPattern(
         id="bare-object",

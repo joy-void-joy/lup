@@ -151,26 +151,45 @@ def test_module_qualified_receiver_is_refuted_too(tmp_path: Path) -> None:
     assert audit_text(text, PYTHON_ANTI_PATTERNS, refuted) == []
 
 
-def test_a_declaration_that_is_neither_resolves_nothing(tmp_path: Path) -> None:
-    """A site that is no declaration must not be read as one outside the family.
+def test_a_declaration_that_is_neither_puts_nothing_in_the_family(
+    tmp_path: Path,
+) -> None:
+    """A site that is no declaration cannot be what puts a receiver in a family.
 
-    Refuting on "not a class" alone would clear a finding whenever the checker
-    pointed anywhere this cannot read — which is the broad rule's job to keep,
-    not the refinement's to take away.
+    Membership is shown, never assumed: the checker pointed somewhere this
+    cannot read a class out of, so nothing established that `payload` is a
+    mapping and the finding is refuted rather than kept on a guess.
     """
     assignment = tmp_path / "constants.py"
     assignment.write_text("get = 1\n", encoding="utf-8")
     text = "value = payload.get('name')\n"
     answers = {1: [DefinitionSite(path=assignment, line=1)]}
 
-    assert refute([source(text)], TableOracle(answers), GRAMMAR_RULES) == {}
+    refuted = refute([source(text)], TableOracle(answers), GRAMMAR_RULES)
+
+    assert [r.rule_id for r in refuted["sample.py"]] == ["dict-get"]
 
 
-def test_unresolved_receiver_keeps_the_broad_verdict(tmp_path: Path) -> None:
-    """A receiver the checker cannot resolve is no evidence, so nothing drops."""
+def test_an_unresolved_receiver_is_refuted_rather_than_denied(
+    tmp_path: Path,
+) -> None:
+    """Nothing resolved means nothing established, which is not a mapping.
+
+    The reading this replaced denied here: no declaration read as "not
+    refuted", and "not refuted" read as "confirmed mapping". An unannotated
+    parameter, a `json.loads` result, an object out of a package with no
+    stubs, and a `TypedDict` whose `get` is synthesized and declared nowhere
+    were all refused on that, with a typed directive the only way past each.
+    """
     stubs(tmp_path)
     text = "value = whatever.get('name')\n"
-    assert refute([source(text)], TableOracle({}), GRAMMAR_RULES) == {}
+
+    refuted = refute([source(text)], TableOracle({}), GRAMMAR_RULES)
+
+    assert [r.evidence for r in refuted["sample.py"]] == [
+        "the checker resolved no declaration for `whatever`, so nothing puts "
+        "it in the mapping family"
+    ]
 
 
 def test_the_oracle_is_told_the_text_being_audited(tmp_path: Path) -> None:

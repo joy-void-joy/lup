@@ -634,7 +634,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
         {
             "id": "dict-get",
             "pattern": "\\.get\\s*\\(",
-            "message": "`.get(` on payload/TypedDict-shaped data hides the schema \u2014 use typed attribute access (BaseModel/TypedDict). On a genuinely open dict (registry, cache) add `# lup: ignore[dict-get]`. On a typed non-mapping receiver (an SDK client, a route decorator) add nothing \u2014 the audit resolves the declaration and refutes it, and a marker here is reported spurious",
+            "message": "`.get(` on a dict-shaped payload hides the schema \u2014 model it and read the fields (BaseModel/TypedDict). On a genuinely open dict (registry, cache) add `# lup: ignore[dict-get]`. On a receiver the checker resolves outside the mapping family, or cannot resolve at all, add nothing \u2014 the audit refutes it and a marker there is reported spurious. A `TypedDict` is already the modelling this asks for, and `.get` is how an optional key is read out of one, so it is not this rule's subject",
             "context": "code",
             "refiner": "",
             "matcher": "dict_get_lines",
@@ -1096,7 +1096,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
         {
             "id": "dict-get",
             "pattern": "\\.get\\s*\\(",
-            "message": "`.get(` on payload/TypedDict-shaped data hides the schema \u2014 use typed attribute access (BaseModel/TypedDict). On a genuinely open dict (registry, cache) add `# lup: ignore[dict-get]`. On a typed non-mapping receiver (an SDK client, a route decorator) add nothing \u2014 the audit resolves the declaration and refutes it, and a marker here is reported spurious",
+            "message": "`.get(` on a dict-shaped payload hides the schema \u2014 model it and read the fields (BaseModel/TypedDict). On a genuinely open dict (registry, cache) add `# lup: ignore[dict-get]`. On a receiver the checker resolves outside the mapping family, or cannot resolve at all, add nothing \u2014 the audit refutes it and a marker there is reported spurious. A `TypedDict` is already the modelling this asks for, and `.get` is how an optional key is read out of one, so it is not this rule's subject",
             "context": "code",
             "refiner": "",
             "matcher": "dict_get_lines",
