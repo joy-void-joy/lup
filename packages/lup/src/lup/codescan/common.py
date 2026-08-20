@@ -21,6 +21,7 @@ reason attached.
 
 import re
 from collections.abc import Callable, Set as AbstractSet
+from functools import cache
 from pathlib import Path, PurePosixPath
 from typing import Literal, Self
 
@@ -285,7 +286,20 @@ class PythonContext(BaseModel):
     docstring_lines: set[int]
 
     @classmethod
+    @cache
     def parse(cls, text: str) -> Self:
+        """One file's prose map, remembered for the audits that follow.
+
+        Where prose lives is a pure function of the text, and a sweep asks
+        several audits about the same file — so computed per caller it
+        tokenizes every file once per audit that reads it. The instance is
+        shared rather than copied, which is safe because both queries below
+        only read it and nothing else reaches the fields.
+
+        Unbounded because a bound would save nothing: the key is text a sweep
+        is already holding for every file it walks, so evicting an entry
+        keeps no memory that the caller was not keeping anyway.
+        """
         return cls(
             comment_columns=python_comment_columns(text),
             docstring_lines=python_docstring_lines(text),

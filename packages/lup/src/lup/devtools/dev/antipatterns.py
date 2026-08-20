@@ -23,6 +23,8 @@ guard it turns up as spurious on the next line of the report.
 """
 
 from collections import Counter, defaultdict
+import cProfile
+import pstats
 from collections.abc import Iterator, Sequence, Set as AbstractSet
 from pathlib import Path
 
@@ -364,6 +366,30 @@ def report_directives(
     )
     for site in sorted(overflow, key=lambda site: site.inline_width, reverse=True):
         typer.echo(f"{site.file}:{site.line} [{site.inline_width}] {site.text}")
+
+
+PROFILE_ROWS = 40
+"""Rows a profile prints, as a default a caller may raise."""
+
+
+def profile(
+    project: DevProject,
+    paths: Sequence[str] | None = None,
+    rows: int = PROFILE_ROWS,
+) -> None:
+    """Run one sweep under a profiler and report where its time went.
+
+    The sweep reads every production file several times over — a parse per
+    audit, then a walk per rule, then a language server resolving what the
+    walk selected — and which of those dominates decides whether the answer
+    is to parse once, to read fewer files, or to remember the last answer.
+    A stopwatch around the whole command cannot tell them apart; this can.
+    """
+    profiler = cProfile.Profile()
+    profiler.enable()
+    scan_antipatterns(project, paths)
+    profiler.disable()
+    pstats.Stats(profiler).sort_stats("cumulative").print_stats(rows)
 
 
 ADVISORY_KINDS = {"untyped"}

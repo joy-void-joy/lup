@@ -81,6 +81,20 @@ def standalone_suppression(line: str) -> re.Match[str] | None:
     return None if match is None or line[: match.start()].strip() else match
 
 
+def continues_comment_block(line: str) -> bool:
+    """Whether a line carries a directive's reason onward rather than ending it.
+
+    A plain comment continues the block a directive heads. A directive of its
+    own ends it — two markers cannot share a block, and the nearer takes its
+    lines — and so does anything that is not a comment at all.
+
+    Named rather than spelled twice because it is also what bounds a search
+    for the directive guarding a line: the first line that does not continue
+    the block ends every reach from above it.
+    """
+    return line.lstrip().startswith(("#", "//")) and IGNORE_RE.search(line) is None
+
+
 def suppression_reaches(
     lines: list[str], directive_line: int, violation_line: int
 ) -> bool:
@@ -108,8 +122,7 @@ def suppression_reaches(
     if standalone_suppression(lines[directive_line - 1]) is None:
         return False
     return all(
-        lines[number - 1].lstrip().startswith(("#", "//"))
-        and IGNORE_RE.search(lines[number - 1]) is None
+        continues_comment_block(lines[number - 1])
         for number in range(directive_line + 1, violation_line)
     )
 
