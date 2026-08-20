@@ -16,7 +16,7 @@ This is distinct from `/lup:add-command` which creates general-purpose commands.
 
 The first word is the **command name**. Everything after is a **brief description** of what the command investigates.
 
-If `$ARGUMENTS` is empty, ask the user what the command should be called and what it investigates.
+If `$ARGUMENTS` is empty, Ask the user with the AskUserQuestion tool, offering concrete options plus a free-text choice: what the command should be called and what it investigates
 
 ## Step 1: Understand the domain
 

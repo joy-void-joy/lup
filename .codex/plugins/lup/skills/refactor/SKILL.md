@@ -85,7 +85,10 @@ Present prompt content changes as a review with findings — prompt changes affe
 
 After rewriting:
 
-- Run `uv run lup-devtools dev check` to verify types, lint, and tests
+- Verify types, lint, and tests:
+
+Open `uv run lup-devtools dev check` with `exec_command`, which holds a live PTY, and read what it has emitted with `write_stdin` carrying no keystrokes. Keep the one session for as long as the command runs: re-running it starts over and loses everything it already reported
+
 - Report any issues found and fix them
 
 ### 7. Summary

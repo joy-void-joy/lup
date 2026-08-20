@@ -84,7 +84,10 @@ uv run lup-devtools harness generate all
 After regenerating:
 
 1. Show the user the declaration module, and confirm the generated artifacts appeared for both harnesses
-2. Run `uv run lup-devtools dev check` — the ownership manifest must record the new artifacts
+2. Check the tree — the ownership manifest must record the new artifacts:
+
+Open `uv run lup-devtools dev check` with `exec_command`, which holds a live PTY, and read what it has emitted with `write_stdin` carrying no keystrokes. Keep the one session for as long as the command runs: re-running it starts over and loses everything it already reported
+
 3. Explain how to invoke it: `$lup:<command-name>`
 4. Ask if any adjustments are needed
 

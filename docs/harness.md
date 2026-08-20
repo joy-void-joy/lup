@@ -198,7 +198,7 @@ regenerate.
 
 **Agents:**
 
-- `implementer` — Implement production changes against established acceptance tests
+- `tdd-implementer` — Write production code against failing tests, without editing the tests
 - `trace-explorer` — Investigate trace evidence without changing production files
 - `version-explorer` — Inventory version-impact evidence across the repository
 - `version-reviewer` — Independently review a proposed version change

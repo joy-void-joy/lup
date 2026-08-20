@@ -354,11 +354,18 @@ Customize the feedback loop command for the domain's specific:
 After generating files:
 
 1. Run `uv run lup-devtools dev todos` -- any remaining `# lup: template:` marker is a decision not yet made; resolve or consciously defer each one. Resolving one means writing this domain's code where the placeholder stood and deleting the marker: it is not feedback, so it takes no `solved:` claim. Renaming the package cleared `[tool.lup] template`, so from here on `dev check` lists every marker still standing -- park one you mean to leave with `# lup: defer:` rather than letting it sit unexplained
-2. Run `uv run pyright` to check types
-3. Run `uv run ruff check .` to check lint
-4. Run `uv run lup --help` to verify CLI
-5. Verify the feedback loop command references the right scripts
-6. Regenerate both harnesses and check that the rendered guidance accurately describes the domain
+2. Run the pre-flight bar, which is ruff, pyright and the suite in one pass and
+   reports as it goes:
+
+"""
+            ),
+            models.WatchOutput(command="uv run lup-devtools dev check"),
+            models.TextPart(
+                text=r"""
+
+3. Run `uv run lup --help` to verify CLI
+4. Verify the feedback loop command references the right scripts
+5. Regenerate both harnesses and check that the rendered guidance accurately describes the domain
 
 ## After Initialization
 

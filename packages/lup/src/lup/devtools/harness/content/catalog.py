@@ -17,8 +17,8 @@ whether the prose has an application path in it.
 """
 
 import lup.harness.models as models
-from lup.devtools.harness.content.agents.implementer import (
-    AGENT as AGENT_IMPLEMENTER,
+from lup.devtools.harness.content.agents.tdd_implementer import (
+    AGENT as AGENT_TDD_IMPLEMENTER,
 )
 from lup.devtools.harness.content.agents.trace_explorer import (
     agent as build_trace_explorer,
@@ -125,7 +125,7 @@ def library_agents(layout: ApplicationLayout) -> list[models.Agent]:
     """Every agent lup ships, each a generic role over library machinery."""
     # lup: ignore[library-default] — the agents this library authors, so the list is what it ships rather than a choice made for an adopter
     return [
-        AGENT_IMPLEMENTER,
+        AGENT_TDD_IMPLEMENTER,
         build_trace_explorer(layout),
         build_version_explorer(layout),
         build_version_reviewer(layout),

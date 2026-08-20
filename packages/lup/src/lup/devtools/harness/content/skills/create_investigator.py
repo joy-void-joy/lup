@@ -45,8 +45,12 @@ The first word is the **command name**. Everything after is a **brief descriptio
 If `"""
                 ),
                 models.ArgumentsRef(),
+                models.TextPart(text=r"""` is empty, """),
+                models.AskUser(
+                    question="what the command should be called and what it investigates"
+                ),
                 models.TextPart(
-                    text=r"""` is empty, ask the user what the command should be called and what it investigates.
+                    text=r"""
 
 ## Step 1: Understand the domain
 

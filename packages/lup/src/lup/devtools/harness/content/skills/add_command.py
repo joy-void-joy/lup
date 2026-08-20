@@ -129,7 +129,14 @@ uv run lup-devtools harness generate all
 After regenerating:
 
 1. Show the user the declaration module, and confirm the generated artifacts appeared for both harnesses
-2. Run `uv run lup-devtools dev check` — the ownership manifest must record the new artifacts
+2. Check the tree — the ownership manifest must record the new artifacts:
+
+"""
+                ),
+                models.WatchOutput(command="uv run lup-devtools dev check"),
+                models.TextPart(
+                    text=r"""
+
 3. Explain how to invoke it: `"""
                 ),
                 models.SkillPattern(plugin="lup", placeholder="<command-name>"),

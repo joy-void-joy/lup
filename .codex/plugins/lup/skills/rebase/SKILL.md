@@ -49,9 +49,10 @@ Classify each entry:
 
 ### 4. Run checks
 
-```bash
-uv run lup-devtools dev check
-```
+Open `uv run lup-devtools dev check` with `exec_command`, which holds a live PTY, and read what it has emitted with `write_stdin` carrying no keystrokes. Keep the one session for as long as the command runs: re-running it starts over and loses everything it already reported
+
+It runs ruff, pyright, and the test suite, and reports as it goes rather than
+only at the end.
 
 Fix any failure this branch introduced. A failure the base already carries is not this branch's to fix: confirm it by running the same check on `<base>`, name it and its origin when reporting, and continue. Fixing it here buries an unrelated change in this PR; staying silent about it lets the next run inherit it as though it were yours.
 

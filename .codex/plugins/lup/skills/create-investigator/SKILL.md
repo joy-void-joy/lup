@@ -15,7 +15,7 @@ This is distinct from `$lup:add-command` which creates general-purpose commands.
 
 The first word is the **command name**. Everything after is a **brief description** of what the command investigates.
 
-If `the arguments supplied with this skill invocation` is empty, ask the user what the command should be called and what it investigates.
+If `the arguments supplied with this skill invocation` is empty, Ask the user directly, offering concrete options, and wait for the answer: what the command should be called and what it investigates
 
 ## Step 1: Understand the domain
 

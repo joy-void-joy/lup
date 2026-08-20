@@ -103,9 +103,14 @@ Classify each entry:
 
 ### 4. Run checks
 
-```bash
-uv run lup-devtools dev check
-```
+"""
+            ),
+            models.WatchOutput(command="uv run lup-devtools dev check"),
+            models.TextPart(
+                text=r"""
+
+It runs ruff, pyright, and the test suite, and reports as it goes rather than
+only at the end.
 
 Fix any failure this branch introduced. A failure the base already carries is not this branch's to fix: confirm it by running the same check on `<base>`, name it and its origin when reporting, and continue. Fixing it here buries an unrelated change in this PR; staying silent about it lets the next run inherit it as though it were yours.
 

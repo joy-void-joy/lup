@@ -27,14 +27,11 @@ The first word is the **command name** to modify. Everything after is the **delt
 - Delta: "Add verbose flag"
 - New argument hints: `[error] [--verbose]`
 
-When `--args` is provided, update the command's `argument-hint` frontmatter to the specified hints and ensure `$ARGUMENTS` is handled in the command body.
+When `--args` is provided, set `argument_hint` on the declaration to the specified hints — the `argument-hint` frontmatter is what generation renders from it, never a place to edit — and ensure `$ARGUMENTS` is handled in the command body.
 
 ### If No Arguments Provided
 
-If `$ARGUMENTS` is empty, ask the user:
-
-- Which command should be modified?
-- What changes should be made?
+If `$ARGUMENTS` is empty, Ask the user with the AskUserQuestion tool, offering concrete options plus a free-text choice: which command to modify, and what changes to make to it
 
 ### Steps
 

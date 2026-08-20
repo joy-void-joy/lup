@@ -120,7 +120,14 @@ Present prompt content changes as a review with findings — prompt changes affe
 
 After rewriting:
 
-- Run `uv run lup-devtools dev check` to verify types, lint, and tests
+- Verify types, lint, and tests:
+
+"""
+            ),
+            models.WatchOutput(command="uv run lup-devtools dev check"),
+            models.TextPart(
+                text=r"""
+
 - Report any issues found and fix them
 
 ### 7. Summary

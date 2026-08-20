@@ -102,18 +102,15 @@ For approved imports:
    - Remove domain-specific logic, replace with generic scaffolding or placeholders
 3. Write or edit files in the current project
 4. Verify:
-   ```bash
-   uv run lup-devtools dev check
-   ```
+
+Start a `Monitor` over `uv run lup-devtools dev check` and leave it live. Each line it emits arrives as an event, and the watch ends when the command does. Do not run it through `Bash`, whose long timeout returns once at the end, and do not read a backgrounded session on a loop — both are polling, however patient
+
+It runs ruff, pyright, and the test suite, and reports as it goes rather than
+only at the end.
 
 ### 7. Optionally commit
 
-Offer to commit the imported pattern:
-
-```bash
-git add <changed-files>
-git commit -m "feat(<scope>): port <pattern> from <project>"
-```
+Offer to commit the imported pattern, through `/lup:commit` as in step 1 — it groups the change and writes the message in a form the permission policy allows, which a hand-rolled `git commit` here would have to get right again.
 
 ## Guidelines
 
@@ -121,4 +118,4 @@ git commit -m "feat(<scope>): port <pattern> from <project>"
 - **Preserve intent** — Understand _why_ the downstream repo built this pattern, not just _what_ it does. The adaptation should serve the same purpose.
 - **Check for existing work** — Before porting, search the current project for similar patterns that could be extended instead of duplicated.
 - **Minimal dependencies** — If the pattern pulls in new packages, flag this to the user and ask whether to proceed.
-- **Test after porting** — Always run pyright/ruff/pytest after applying changes.
+- **Test after porting** — `dev check` in step 6 is that bar; it runs ruff, pyright and the suite together, so reaching for them one at a time only makes it easier to stop after the first.
