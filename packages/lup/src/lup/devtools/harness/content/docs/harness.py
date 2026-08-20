@@ -7,6 +7,18 @@ from lup.devtools.harness.content.catalog import (
     agent_roster_text,
     skill_roster_parts,
 )
+from lup.policy.bundle import policy_kernel_modules
+
+
+def kernel_module_count() -> int:
+    """How many modules the generated policy runtime carries, from the copier.
+
+    Asked of :func:`policy_kernel_modules` rather than counted here, because
+    that is the function whose output lands in the tree. The row this feeds
+    once described a single `kernel.py`, and went on describing it after the
+    kernel became a package — a source path that no longer resolved.
+    """
+    return len(policy_kernel_modules())
 
 
 def document(
@@ -112,7 +124,7 @@ of the two halves owns the declaration's subject.
 | `.claude/plugins/lup/.claude-plugin/plugin.json`, `.claude/plugins/.claude-plugin/marketplace.json` | `catalog.py` via `lup.adapters.claude.harness` |
 | `.codex/plugins/lup/.codex-plugin/plugin.json`, `.agents/plugins/marketplace.json` | `catalog.py` via `lup.adapters.codex.harness` |
 | `.claude/plugins/lup/hooks/`, `.codex/plugins/lup/hooks/` (`hooks.json`, `scripts/policy.py`, `runtime/policy_data.py`, `runtime/evidence.json`) | `catalog.py` `HookSet` (with `lup.policy.shell_rules` and `lup.codescan.antipatterns`) via the adapter hook renderers and `lup.policy.bundle` |
-| `.claude/plugins/lup/hooks/runtime/kernel.py`, `.codex/plugins/lup/hooks/runtime/kernel.py` | verbatim copy of `packages/lup/src/lup/policy/kernel.py`, kept byte-identical so it can be diffed against the canonical module |
+| `.claude/plugins/lup/hooks/runtime/kernel/`, `.codex/plugins/lup/hooks/runtime/kernel/` ({kernel_module_count()} modules) | verbatim copy of `lup/policy/kernel/`, read by `policy_kernel_modules()` and kept byte-identical so it can be diffed against the canonical package |
 | `.codex/config.toml` | `lup.adapters.codex.harness` |
 | `.claude/.lup-ownership.json`, `.codex/.lup-ownership.json` | written by `lup.harness.ownership` from the generation result |
 

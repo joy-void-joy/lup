@@ -36,20 +36,26 @@ DOCS_ROOT = f"{CONTENT_ROOT}/docs"
 GENERATED_GUIDE = "docs/harness.md"
 """Document that explains what generated output is and how to change it."""
 
-REFERENCE = library_documents(
-    SKILLS,
-    AGENTS,
-    PLUGIN_NAME,
-    CLAUDE_DISPATCHER.routed_tools,
-    CODEX_DISPATCHER.routed_tools,
-    LAYOUT,
-)
-"""The pages lup publishes about the machinery this repository is built on.
+def reference_pages(root: Path) -> list[models.Document]:
+    """The pages lup publishes about the machinery this repository is built on.
 
-The parity audit reads what each runtime decodes from the runtime itself, so
-composing them is what this root is for: the pages stay portable while the
-table they publish cannot claim a decoded set that stopped being true.
-"""
+    The parity audit reads what each runtime decodes from the runtime itself,
+    so composing them is what this root is for: the pages stay portable while
+    the table they publish cannot claim a decoded set that stopped being true.
+
+    Takes the checkout because the library page walks it for its own package
+    roster — the same reason :func:`project_pages` does, and the same reason
+    neither is a module-level constant.
+    """
+    return library_documents(
+        SKILLS,
+        AGENTS,
+        PLUGIN_NAME,
+        CLAUDE_DISPATCHER.routed_tools,
+        CODEX_DISPATCHER.routed_tools,
+        LAYOUT,
+        root,
+    )
 
 
 def project_pages(root: Path) -> list[models.Document]:
@@ -70,9 +76,10 @@ def project_pages(root: Path) -> list[models.Document]:
 
 def documents(root: Path) -> list[models.Document]:
     """Every document under ``docs/``, the index first because it teaches the rest."""
+    reference = reference_pages(root)
     project = project_pages(root)
     return [
-        published("index", "README.md", index.document(REFERENCE, project), DOCS_ROOT),
-        *REFERENCE,
+        published("index", "README.md", index.document(reference, project), DOCS_ROOT),
+        *reference,
         *project,
     ]

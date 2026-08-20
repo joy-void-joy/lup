@@ -20,6 +20,7 @@ from lup.devtools.harness.content.docs.catalog import library_documents
 from lup.devtools.roster import LIBRARY_ROSTER, LIBRARY_SPECS
 from lup.devtools.subapps import SubApp, SubAppSelection, subapp
 from lup.harness.models import ContentSelection
+from lup.workspace.paths import project_root
 from lup_template.devtools.harness.content.catalog import project_skills
 from lup_template.devtools.subapps import APPLICATION_SPECS, SELECTION, SUBAPP_SPECS
 
@@ -155,6 +156,7 @@ def test_no_published_page_names_the_template_package() -> None:
         [],
         [],
         ApplicationLayout(package="worked_example"),
+        project_root(),
     )
     leaked = {
         page.semantic_id

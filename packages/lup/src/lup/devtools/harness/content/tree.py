@@ -66,6 +66,34 @@ def summary(source: Path) -> str | None:
     return " ".join(opening.split())
 
 
+def top_level_names(
+    root: Path,
+    subtree: str,
+    skipped_names: tuple[str, ...] = DEFAULT_SKIPPED_NAMES,
+) -> list[str]:
+    """Every import name directly beneath ``subtree``, packages and modules alike.
+
+    A page that lists what a tree contains is making a claim about the tree,
+    and prose cannot check it — which is how a roster promising "every
+    remaining top-level entry" came to omit six of them. Walking the names
+    here lets the page hold its own authored description of each one while
+    the *set* it describes is the tree's to decide.
+
+    Names rather than paths, because a caller keying authored prose by import
+    name should not have to strip a suffix to match `foo.py` to `foo`.
+    """
+    base = root / subtree
+    if not base.is_dir():
+        raise ValueError(f"no directory at {subtree!r} beneath {root} to enumerate")
+    return sorted(
+        entry.stem if entry.is_file() else entry.name
+        for entry in base.iterdir()
+        if entry.name not in skipped_names
+        and not entry.name.endswith(DEFAULT_SKIPPED_SUFFIXES)
+        and (entry.is_dir() or entry.suffix == ".py")
+    )
+
+
 def annotated_tree(
     root: Path,
     subtree: str,
