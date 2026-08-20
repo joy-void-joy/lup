@@ -18,6 +18,7 @@ rather than reporting a refutation it cannot support.
 """
 
 import asyncio
+import os
 import shutil
 import sys
 from pathlib import Path
@@ -43,20 +44,24 @@ SERVER_NAME = "pyright-langserver"
 RESOLVE_TIMEOUT_SECONDS = 600.0
 """Budget for a whole sweep. Exhausting it degrades to the broad rule."""
 
-RESOLVE_WORKERS = 2
+RESOLVE_WORKERS = min(8, max(2, (os.process_cpu_count() or 8) // 4))
 """Language servers a sweep drives at once, as a default a caller may raise.
 
-Pyright answers one question at a time in one process, so a sweep pinned to a
-single server is one core busy on a host that has many. Servers are what
+Pyright answers one question at a time in one process, so a sweep pinned to
+a single server is one core busy on a host that has many. Servers are what
 parallelize it, and each one costs a process that builds its own picture of
-the whole workspace — so the second server buys most of what there is to buy
-and the fourth mostly duplicates that analysis.
+the whole workspace — so the returns fall away once the sweep stops waiting
+and the analyses start competing.
 
-Small rather than the core count because the sweep is not alone: its caller
-overlaps the resolve with audits that need no server, and the gate around it
-runs a type checker and two test suites at the same time. Measured across a
-whole gate on a 32-core host, four servers cost 40.1s where two cost 36.3s —
-the extra analyses are paid for by whatever else was running.
+Derived from the host rather than pinned, because both ends of that trade
+are the host's: a count that suits a large machine oversubscribes a laptop,
+and one that suits a laptop leaves a large machine idle. Measured on a
+32-core host, a cold whole-repository resolve took 20.5s under two servers,
+17.8s under four and 16.0s under eight; across the whole gate, where the
+servers compete with two test suites and a type checker, the same run took
+41.1s, 36.2s and 33.5s, with six and eight indistinguishable and sixteen
+back up at 36.1s. A quarter of the cores, capped, sits at that knee from
+both directions.
 """
 
 
