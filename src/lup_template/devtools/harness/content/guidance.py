@@ -102,7 +102,7 @@ Use existing libraries from PyPI before writing raw HTTP or rebuilding a wheel.
 
 **Error handling.** A `@lup_tool` handler takes a validated model and returns one; raise `ToolError` to send a recoverable failure back as an MCP error, with a message saying what to do about it. The `is_error` envelope and the input-validation reply are the decorator's, not yours to assemble. Elsewhere, agent code raises for unrecoverable errors, wraps transient failures in `with_retry`, and validates inputs early with Pydantic. Never swallow one silently — log it, handle it, or re-raise. A catch-all `except Exception` is fine at a boundary that does one of those, such as a task loop or subagent delegation, which is why no rule refuses it.
 
-**Placement, in this repository.** Reusable utilities belong in `packages/lup/`; what only this application needs belongs in `src/lup_template/`. If logic already exists in `lup`, import it rather than copying it. `docs/library.md` carries the criterion and the target layout.
+**Placement, in this repository.** Reusable utilities belong in `packages/lup/`; what only this application needs belongs in `src/lup_template/`. If logic already exists in `lup`, import it rather than copying it. `docs/library.md` carries the criterion and the target layout. Deciding a module belongs on the other side is one line of judgement and a hundred lines of consequence, which is where the judgement usually gets abandoned — so the consequence is a command: `uv run lup-devtools dev relocate old.module=new.module` repoints every import of what moved and reports the mentions it deliberately left for you to read.
 
 """
         ),

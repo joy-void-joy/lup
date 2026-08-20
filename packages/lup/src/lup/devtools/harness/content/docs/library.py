@@ -432,6 +432,14 @@ so it is part of the harness subject rather than a sibling of it, and the
 downward question stops it at the library edge — following the driver into
 `devtools/` would move provider-neutral code into the tooling layer.
 
+Acting on one of these answers is a command rather than an afternoon.
+`uv run lup-devtools dev relocate old.module=new.module` repoints every import
+of what moved, locating each module path by Python's own grammar rather than
+by pattern, and reports the mentions it deliberately did not touch — a log
+line, a docstring naming the old home — for a human to read. That the
+mechanical half is cheap is what keeps the placement question answerable
+instead of perpetually deferred.
+
 `usage/` and the `usage/` beside each adapter are worth naming next to it as
 the placement rule worked all the way through. What an account publishes is
 the only thing that differs between runtimes — which windows it meters,

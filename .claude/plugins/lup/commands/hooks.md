@@ -43,7 +43,14 @@ generated artifacts. Never edit them as the source of a policy change.
 1. Classify the request as a semantic rule, an application policy input, or a
    native decoding/rendering capability.
 2. Read the relevant canonical source and its cross-native fixtures.
-3. Show the current behavior and propose the smallest semantic change. When
+3. Show the current behavior — `uv run lup-devtools dev policy '<command>'`
+   prints the live verdict and the sentence explaining it, and
+   `uv run lup-devtools dev vocabulary --provenance` prints every form the
+   vocabulary judges with the rule each came from. Read the verdict from
+   those rather than from the declaration, so what you show the user is what
+   a session would actually meet. Then propose the smallest semantic change,
+   and re-run `dev policy` on the same command afterwards so the before and
+   the after are the same measurement. When
    the request did not already settle the decision, Request explicit user approval before changing policy behavior. Reason: a policy change alters what every later session may do.
 4. Edit the canonical source and add fixtures for safe, denied, approval, and
    malformed variants as applicable.

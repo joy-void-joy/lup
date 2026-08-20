@@ -180,6 +180,24 @@ The guidance spells both; this is what each one does.
 Each rule id is shown in the deny message that cites it, and indexed in
 [rules.md](rules.md).
 
+## Asking before spending a turn on it
+
+A denial is the ordinary way to learn a verdict, and it costs a turn. Two
+commands answer the same question up front, against the declared policy
+rather than a reading of this page:
+
+```bash
+uv run lup-devtools dev policy '<the command as you would run it>'
+uv run lup-devtools dev vocabulary --provenance
+```
+
+`dev policy` prints the decision and the sentence explaining it — the same
+sentence the hook would have shown — for a shell command, and takes the same
+lattice through the same segments, so a pipeline or a `$(...)` answers as it
+actually would. `dev vocabulary` prints every shell form the vocabulary
+judges and where each rule came from, which is the one to reach for when the
+question is "what *would* be allowed here" rather than "is this".
+
 ## How one decision reaches two runtimes
 
 The generated plugins enforce permissions without importing lup, yet decide
