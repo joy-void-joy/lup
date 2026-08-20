@@ -85,6 +85,7 @@ def read_only_rules(
         "join",
         "paste",
         "column",
+        "col",
         "uniq",
         "grep",
         "egrep",
@@ -105,6 +106,7 @@ def read_only_rules(
         "md5sum",
         "sha256sum",
         "which",
+        "man",
         "true",
         "false",
         "set",
@@ -169,6 +171,13 @@ def judged_ask_rules(
         JudgedCommand(name="truncate", reason="truncating files requires approval"),
         JudgedCommand(name="kill", reason="terminating processes requires approval"),
         JudgedCommand(name="pkill", reason="terminating processes requires approval"),
+        JudgedCommand(
+            name="command",
+            # Reached only in the query shape: every other spelling runs the
+            # program after it, which `effective_command` unwraps to instead.
+            read_verbs=["-v", "-V"],
+            reason="'command' runs a program through a modified lookup — name it directly",
+        ),
         JudgedCommand(
             name="tar",
             # Named whole rather than scanned for a `t`, which a bundled
