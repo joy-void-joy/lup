@@ -29,7 +29,12 @@ from lup.policy.shell_rules import (
     ShellOperationRule,
     ShellSubcommandRule,
 )
-from lup.policy.vocabulary import git_rule, runner_target_rules
+from lup.policy.vocabulary import (
+    bun_rule,
+    git_rule,
+    runner_target_rules,
+    typescript_rule,
+)
 from lup.selection import Selection
 
 
@@ -92,15 +97,22 @@ SHELL_RULES: Selection[ShellCommandRule] = Selection[ShellCommandRule](
     overrides=[
         lup_devtools_rule(),
         git_rule(guard_force_push=False, redirect_checkout=True),
+        # The TypeScript half of this project's toolchain. Composed here
+        # rather than inherited, because whether a project has a JS toolchain
+        # at all is that project's fact — and until `bun` is named by some
+        # rule, the kernel refuses every one of its subcommands as inline
+        # code, `bun install` included.
+        bun_rule(),
+        *typescript_rule(),
     ]
 )
 """Where this project's shell vocabulary differs from the one lup offers.
 
-Two entries, because two entries is the whole of the difference. `git` is
-declared again to carry the two arguments above; it replaces the offered rule
-rather than sitting beside it, so nothing has to reason about which of two
-rules named `git` a walk reaches first. `lup-devtools` is this project's own
-and has no library rule to replace.
+`git` is declared again to carry the two arguments above; it replaces the
+offered rule rather than sitting beside it, so nothing has to reason about
+which of two rules named `git` a walk reaches first. `lup-devtools`, `bun`
+and the TypeScript compiler are this project's own and have no library rule
+to replace.
 
 Everything else — `ls`, `grep`, `gh`, `docker`, the guarded tools, the
 redirected verbs — arrives from `default_vocabulary()` and is not restated

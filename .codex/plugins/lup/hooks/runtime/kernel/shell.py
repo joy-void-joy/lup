@@ -38,6 +38,7 @@ from .words import (
 )
 from .lex import parse_shell_words
 from .commands import (
+    declares_command,
     decide_awk_words,
     decide_command_rows,
     decide_curl_words,
@@ -189,7 +190,7 @@ def decide_shell_segment(segment: list[str], context: ShellContext) -> KernelDec
     executable = posixpath.basename(words[0])
     if is_help_probe(words[1:]):
         return KernelDecision("allow", "a help probe only prints usage")
-    if executable in INTERPRETERS:
+    if executable in INTERPRETERS and not declares_command(executable, context["rows"]):
         if len(words) > 1 and is_trusted_script(
             words[1], context["trusted_script_roots"]
         ):
