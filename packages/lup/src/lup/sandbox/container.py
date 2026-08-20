@@ -98,6 +98,11 @@ from lup.sandbox.models import (
     SandboxNotInitializedError,
     SandboxReplayInput,
 )
+from lup.sandbox.attribution import (
+    Attribution,
+    attribute_egress,
+    attribute_filesystem,
+)
 from lup.sandbox.egress import EgressPolicy
 from lup.sandbox.models import DockerDaemonInfo, RootfulDaemonError
 from lup.types import EnvVars
@@ -945,6 +950,62 @@ class Sandbox:
             duration_ms=round((time.time() - started) * 1000),
         )
 
+    def proxy_log(self) -> list[str]:
+        """What the egress proxy wrote, or nothing when no proxy is running.
+
+        Absent in every mode but ``filtered``, where there is no proxy to have
+        refused anything -- so nothing is the correct answer rather than a
+        failure, and a caller attributing a network error gets "not the
+        boundary" instead of an exception about a container that was never
+        supposed to exist.
+        """
+        if self.egress_proxy is None:
+            return []
+        try:
+            written = self.egress_proxy.logs(stdout=True, stderr=True)
+        except (APIError, DockerException, NotFound):
+            logger.warning("Egress proxy log unavailable for attribution")
+            return []
+        return decode_output(written).splitlines()
+
+    def attribute(self, failure: str) -> Attribution:
+        """Say whether this boundary caused a failure, or decline to say.
+
+        The mount table and the proxy log are asked in that order because the
+        filesystem answer is the more specific: a refused write names a path
+        this topology made unwritable, where a proxy denial is about the
+        session rather than about this command. Neither is guessed at -- a
+        failure matching nothing comes back unattributed, which is a real
+        answer and the one that stops an agent hunting a wall that was not
+        involved.
+        """
+        on_disk = attribute_filesystem(failure, self.topology())
+        if on_disk.explains():
+            return on_disk
+        refused = attribute_egress(self.proxy_log())
+        return refused[-1] if refused else on_disk
+
+    def explained(self, ran: ExecuteCodeResult) -> ExecuteCodeResult:
+        """One cell's outcome, with the boundary's own account appended to it.
+
+        Only ever adds, and only to a failure the boundary can be shown to
+        have caused. A cell that failed on its own merits comes back exactly
+        as it was, because a note saying "this was not confinement" on every
+        ordinary traceback is noise that would make the real one invisible.
+
+        Appended to stderr rather than replacing it: the original message is
+        what the agent will search for, and the attribution is what tells it
+        not to. Both are wanted, in that order.
+        """
+        if ran.exit_code == 0:
+            return ran
+        found = self.attribute(f"{ran.stderr}\n{ran.stdout}")
+        if not found.explains():
+            return ran
+        return ran.model_copy(
+            update={"stderr": f"{ran.stderr}\n\n[boundary] {found.sentence()}"}
+        )
+
     def run_install(self, packages: list[str]) -> InstallPackageResult:
         """Install Python packages using uv.
 
@@ -1072,7 +1133,7 @@ class Sandbox:
                 self.journal.record(
                     JournalCell(kind=kind, source=source, ok=ran.exit_code == 0)
                 )
-                return ran
+                return self.explained(ran)
             except UnreadableJournalError as e:
                 raise ToolError(str(e)) from e
             except PathNotMountedError as e:
