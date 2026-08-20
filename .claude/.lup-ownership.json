@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "c688645d3f89ddc46de539282b3851a699376246da5f7265c89d9117f686cc65",
+  "source_digest": "0629bd5333b5322b8a119d9e183db64c9e908d4eac5b705af5c29adf25937bb4",
   "target_requirements": [
     "claude-code"
   ],
@@ -226,7 +226,7 @@
     {
       "path": ".claude/plugins/lup/commands/principle.md",
       "category": "generated",
-      "sha256": "0d931e3780acbabac977cf9046731673b9615dd2e28f75c5d81105bcf158ca64",
+      "sha256": "1ec12ac83928b9deddb8a333d138c0ed05669effcc404dd0d17c2f492daed58c",
       "semantic_id": "skill.principle",
       "executable": false
     },

@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "c688645d3f89ddc46de539282b3851a699376246da5f7265c89d9117f686cc65",
+  "source_digest": "0629bd5333b5322b8a119d9e183db64c9e908d4eac5b705af5c29adf25937bb4",
   "target_requirements": [
     "codex-cli>=0.144"
   ],
@@ -338,7 +338,7 @@
     {
       "path": ".codex/plugins/lup/skills/principle/SKILL.md",
       "category": "generated",
-      "sha256": "1a6b4da5d674528980c9df41831202cd10fb080430035e6673f204af3bd908a2",
+      "sha256": "8ecb5f4234d65d2dc880e6cabd9ffe36ae6fd5c3f2ebb28d655a11f54c2c52d7",
       "semantic_id": "skill.principle",
       "executable": false
     },

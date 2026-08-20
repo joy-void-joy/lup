@@ -55,7 +55,7 @@ Read every relevant file and categorize findings into three buckets:
 
 3. **All skill modules** (`src/lup_template/devtools/harness/content/skills/*.py`,
    and `lup.devtools.harness.content.skills` for the library's own — both
-   halves, or the sweep misses the twenty-six the library holds. Where lup is
+   halves, or the sweep misses every skill the library holds. Where lup is
    not vendored here, reach its modules with `uv run lup-devtools py source`
    rather than a path; `dev library status` says which mode this project is in)
    - Read each skill's instructions, guidelines, and anti-patterns

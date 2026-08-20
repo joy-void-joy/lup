@@ -1,5 +1,3 @@
-# lup: ignore[native-spelling]
-# This portable orchestration guide names the hook event it teaches adopters to use.
 """Canonical agent-orchestration patterns guidance."""
 
 import lup.harness.models as models

@@ -1,5 +1,3 @@
-# lup: ignore[native-spelling]
-# The harness guide's subject matter is the generated native trees themselves.
 """Guide to the harness: authoring typed declarations and generating trees."""
 
 import lup.harness.models as models
