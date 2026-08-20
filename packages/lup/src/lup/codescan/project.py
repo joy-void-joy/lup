@@ -17,6 +17,7 @@ bare, or guarding nothing at all.
 """
 
 import ast
+from functools import cache
 from pathlib import Path
 from typing import Literal
 
@@ -264,8 +265,15 @@ def descendants_of(symbols: dict[str, ClassSymbol], ancestors: set[str]) -> set[
         reached = expanded
 
 
+@cache
 def directives_for(source: PythonSource) -> list[Directive]:
-    """Collect actual inline and file-level suppression comments."""
+    """Collect actual inline and file-level suppression comments.
+
+    Remembered per source because :func:`audit_suppressions` gathers every
+    file's directives once for each rule it grades, and which comments a file
+    carries is a property of the file rather than of the rule asking. The
+    list is read and never rewritten, so the one instance is shared.
+    """
     context = PythonContext.parse(source.text)
     file_ignore = file_level_ignore(source.text)
     directives: list[Directive] = []
