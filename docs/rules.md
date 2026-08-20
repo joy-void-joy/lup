@@ -96,7 +96,9 @@ cache: dict[str, int] = {}  # lup: ignore[empty-collection] — mutable fold
 
 ## Audit-side refinements
 
-The edit hook sees a fragment of a proposed edit: no parse tree, no types, and a hermetic kernel that may not reach a type checker. So it decides on the spelling alone, and every rule above means exactly its matching example there. The whole-file audit reads finished source and resolves what a matched name refers to through the type oracle in `lup.codescan.oracle`, so the rules below decide more narrowly in `lup-devtools dev check` than they do at edit time — a hook denial you believe is wrong is answered by the audit, which reports the declaration that settled it. Where the oracle is unavailable the audit falls back to the hook's broad verdict, and a `# lup: ignore` left guarding a refuted line is reported as a dead directive.
+Both gates read the same finished source and both parse it, so a rule that names a shape the grammar has a word for decides identically at edit time and in `lup-devtools dev check`. What separates them is types: the hermetic kernel may not reach a type checker, while the whole-file audit resolves what a matched name refers to through the type oracle in `lup.codescan.oracle`. So the rules below — and only these — decide more narrowly in the audit than at edit time. A hook denial you believe is wrong is answered by the audit, which reports the declaration that settled it. Where the oracle is unavailable the audit falls back to the hook's verdict, and a `# lup: ignore` left guarding a refuted line is reported as a dead directive.
+
+Source that will not parse has no shapes to read. There a rule that declares a matcher falls back to its pattern where a directive could still answer it, and reports nothing at all where none could — a **refused** rule admits no suppression, so a verdict its matcher never confirmed would be a denial with no way past.
 
 ### `constant-declaration`
 
@@ -104,4 +106,4 @@ The library's own multi-entry tables are library-default's instead, so the two p
 
 ### `dict-get`
 
-The whole-file audit resolves what the receiver's `get` is declared on and drops the finding when that class is proven outside the mapping family — an HTTP client, a route decorator. The edit hook keeps flagging every `.get(`, because an edit fragment carries no types and the hermetic kernel may not reach a checker.
+The whole-file audit resolves what the receiver's `get` is declared on and drops the finding when that class is proven outside the mapping family — an HTTP client, an SDK object. Both gates already pass over a route decorator and a call on an imported module, which the tree settles without types; what needs the oracle is a receiver whose class is declared somewhere else, and the hermetic kernel may not reach a checker to ask.

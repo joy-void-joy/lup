@@ -224,9 +224,11 @@ GRAMMAR_RULES: list[GrammarRule] = [
         refinement=(
             "The whole-file audit resolves what the receiver's `get` is declared "
             "on and drops the finding when that class is proven outside the "
-            "mapping family — an HTTP client, a route decorator. The edit hook "
-            "keeps flagging every `.get(`, because an edit fragment carries no "
-            "types and the hermetic kernel may not reach a checker."
+            "mapping family — an HTTP client, an SDK object. Both gates already "
+            "pass over a route decorator and a call on an imported module, which "
+            "the tree settles without types; what needs the oracle is a receiver "
+            "whose class is declared somewhere else, and the hermetic kernel may "
+            "not reach a checker to ask."
         ),
     ),
 ]

@@ -7,7 +7,7 @@ import io
 import posixpath
 import re
 import tokenize
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Set as AbstractSet
 from functools import cache
 from typing import TypedDict
 
@@ -837,6 +837,140 @@ def slice_exempt_lines(source: str) -> set[int]:
     return set(tested()) | set(settled())
 
 
+def imports_of(tree: ast.Module, modules: AbstractSet[str]) -> set[int]:
+    """Lines importing one of `modules`, by either spelling.
+
+    ``import re``, ``import re as r``, ``from re import sub`` and
+    ``from re.x import y`` all name ``re``, and a dotted module is named by
+    its root as well as by itself — ``rich.progress`` is reached by importing
+    ``rich`` and by importing ``rich.progress``, and a rule about the latter
+    means both. A relative import names no module and is never one of these.
+    """
+
+    def names(target: str) -> bool:
+        return target in modules or any(
+            target.startswith(f"{module}.") for module in modules
+        )
+
+    def found() -> Iterator[int]:
+        for node in python_nodes(tree):
+            match node:
+                case ast.Import(names=aliases):
+                    if any(names(alias.name) for alias in aliases):
+                        yield node.lineno
+                case ast.ImportFrom(module=str() as module, level=0):
+                    if names(module):
+                        yield node.lineno
+
+    return set(found())
+
+
+def imported_symbols_of(
+    tree: ast.Module, module: str, symbols: AbstractSet[str]
+) -> set[int]:
+    """Lines taking one of `symbols` out of `module` by name."""
+    return {
+        node.lineno
+        for node in python_nodes(tree)
+        if isinstance(node, ast.ImportFrom)
+        and node.module == module
+        and any(alias.name in symbols for alias in node.names)
+    }
+
+
+PDF_LIBRARIES = frozenset(  # lup: ignore[frozenset-shape] — a membership test, no keys
+    {
+        "fitz",
+        "pymupdf",
+        "pypdf",
+        "PyPDF2",
+        "PyPDF4",
+        "pdfplumber",
+        "pdfminer",
+        "pypdfium2",
+    }
+)
+"""Every PDF text-extraction library the rule names, by import root."""
+
+
+def import_re_lines(source: str) -> set[int]:
+    """Lines importing the regex module."""
+    tree = python_tree(source)
+    return set() if tree is None else imports_of(tree, {"re"})
+
+
+def subprocess_lines(source: str) -> set[int]:
+    """Lines importing the subprocess module."""
+    tree = python_tree(source)
+    return set() if tree is None else imports_of(tree, {"subprocess"})
+
+
+def argparse_lines(source: str) -> set[int]:
+    """Lines importing argparse."""
+    tree = python_tree(source)
+    return set() if tree is None else imports_of(tree, {"argparse"})
+
+
+def pdf_extraction_lines(source: str) -> set[int]:
+    """Lines importing a PDF text-extraction library."""
+    tree = python_tree(source)
+    return set() if tree is None else imports_of(tree, PDF_LIBRARIES)
+
+
+def rich_progress_lines(source: str) -> set[int]:
+    """Lines importing `rich.progress` or reaching it through `rich`.
+
+    Both spellings, because the module is the subject either way: taken out
+    of `rich` by name, or reached as an attribute of it.
+    """
+    tree = python_tree(source)
+    if tree is None:
+        return set()
+    return imports_of(tree, {"rich.progress"}) | {
+        node.lineno
+        for node in python_nodes(tree)
+        if isinstance(node, ast.Attribute)
+        and node.attr == "progress"
+        and isinstance(node.value, ast.Name)
+        and node.value.id == "rich"
+    }
+
+
+def suppress_import_lines(source: str) -> set[int]:
+    """Lines taking `suppress` out of contextlib."""
+    tree = python_tree(source)
+    if tree is None:
+        return set()
+    return imported_symbols_of(tree, "contextlib", {"suppress"})
+
+
+def dataclass_lines(source: str) -> set[int]:
+    """Lines importing dataclasses, or decorating a class with `@dataclass`.
+
+    Two spellings of one subject: the module a project reaches for, and the
+    decorator that is the whole reason to. The decorator is selected wherever
+    it is written, bare or called, and through an attribute of the module.
+    """
+    tree = python_tree(source)
+    if tree is None:
+        return set()
+
+    def decorates(node: ast.expr) -> bool:
+        target = node.func if isinstance(node, ast.Call) else node
+        match target:
+            case ast.Name(id="dataclass") | ast.Attribute(attr="dataclass"):
+                return True
+        return False
+
+    return imports_of(tree, {"dataclasses"}) | {
+        decorator.lineno
+        for node in python_nodes(tree)
+        if isinstance(node, ast.ClassDef)
+        for decorator in node.decorator_list
+        if decorates(decorator)
+    }
+
+
 def tuple_shape_lines(source: str) -> set[int]:
     """Return the lines carrying a fixed-arity ``tuple[...]`` annotation.
 
@@ -1069,6 +1203,20 @@ def matcher_named(name: str) -> Callable[[str], set[int]] | None:
     someone also remembering to widen a list of ids here.
     """
     match name:
+        case "import_re_lines":
+            return import_re_lines
+        case "subprocess_lines":
+            return subprocess_lines
+        case "argparse_lines":
+            return argparse_lines
+        case "pdf_extraction_lines":
+            return pdf_extraction_lines
+        case "rich_progress_lines":
+            return rich_progress_lines
+        case "suppress_import_lines":
+            return suppress_import_lines
+        case "dataclass_lines":
+            return dataclass_lines
         case "tuple_shape_lines":
             return tuple_shape_lines
         case "default_factory_lines":

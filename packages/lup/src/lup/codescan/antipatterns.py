@@ -78,6 +78,13 @@ from lup.codescan.common import (
 )
 from lup.harness.contracts import Spelling, Unsupported
 from lup.policy.kernel.edit import (
+    argparse_lines,
+    dataclass_lines,
+    import_re_lines,
+    pdf_extraction_lines,
+    rich_progress_lines,
+    subprocess_lines,
+    suppress_import_lines,
     IGNORE_RE,
     continues_comment_block,
     python_tree,
@@ -270,6 +277,7 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
     AntiPattern(
         id="import-re",
         pattern=re.compile(r"\bimport\s+re\b|\bfrom\s+re\s+import\b"),
+        matcher=Matcher(select=import_re_lines),
         message="`import re` / `from re import` is a code smell — parse structured data with "
         "its own API instead: JSON -> json.loads, paths -> pathlib.Path, URLs -> urllib.parse, "
         "XML/HTML -> xml.etree.ElementTree / lxml, dates -> datetime",
@@ -357,6 +365,7 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
     AntiPattern(
         id="suppress-import",
         pattern=re.compile(r"\bfrom\s+contextlib\s+import\b.*\bsuppress\b"),
+        matcher=Matcher(select=suppress_import_lines),
         message="contextlib.suppress silently swallows exceptions — log, handle, or re-raise",
     ),
     AntiPattern(
@@ -364,6 +373,7 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         pattern=re.compile(
             r"@dataclass|\bimport\s+dataclasses\b|\bfrom\s+dataclasses\s+import\b"
         ),
+        matcher=Matcher(select=dataclass_lines),
         message="Use Pydantic BaseModel (or TypedDict) instead of dataclasses",
     ),
     AntiPattern(
@@ -390,6 +400,7 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
     AntiPattern(
         id="subprocess",
         pattern=re.compile(r"\bimport\s+subprocess\b|\bfrom\s+subprocess\s+import\b"),
+        matcher=Matcher(select=subprocess_lines),
         message="Use the `sh` library instead of subprocess",
     ),
     AntiPattern(
@@ -400,11 +411,13 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
     AntiPattern(
         id="argparse",
         pattern=re.compile(r"\bimport\s+argparse\b|\bfrom\s+argparse\s+import\b"),
+        matcher=Matcher(select=argparse_lines),
         message="Use `typer` instead of argparse",
     ),
     AntiPattern(
         id="rich-progress",
         pattern=re.compile(r"\brich\.progress\b|\bfrom\s+rich\.progress\s+import\b"),
+        matcher=Matcher(select=rich_progress_lines),
         message="Use `tqdm` instead of rich progress bars",
     ),
     AntiPattern(
@@ -506,6 +519,7 @@ def pdf_extraction_rule(document_reader: Spelling) -> AntiPattern:
             r"\b(?:import|from)\s+"
             r"(?:fitz|pymupdf|pypdf|PyPDF2|PyPDF4|pdfplumber|pdfminer|pypdfium2)\b"
         ),
+        matcher=Matcher(select=pdf_extraction_lines),
         message=" ".join(
             words
             for words in (

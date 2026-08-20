@@ -338,7 +338,7 @@
     {
       "path": ".claude/plugins/lup/hooks/runtime/kernel/edit.py",
       "category": "generated",
-      "sha256": "e2ced19d29a38b7e580625c8fc0a9ada640fdc544866193c229c3efed5114fca",
+      "sha256": "aa3878692c62beb86f18a29e9da89a222b6bc923b5357914ba1cfa988ad93f6e",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -394,7 +394,7 @@
     {
       "path": ".claude/plugins/lup/hooks/runtime/policy_data.py",
       "category": "generated",
-      "sha256": "3e9030ac629460f59c515948c0bbad6c148dac61a67204589af90251a591eed0",
+      "sha256": "7cbaab1b44de3e1fd91cb414198b8fdb976995a7ddc4fd2d02d3b079d6f6e84f",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
