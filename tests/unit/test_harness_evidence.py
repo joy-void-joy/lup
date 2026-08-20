@@ -16,6 +16,7 @@ from lup.devtools.harness.evidence import (
     EvidenceEntry,
     SchemaDigest,
     accepted_version,
+    cited_fixture,
     digest_drift,
     evidence_drift,
     parse_version,
@@ -136,6 +137,21 @@ def test_accepted_version_refuses_a_capability_no_row_carries() -> None:
     )
     with pytest.raises(KeyError):
         accepted_version("gemini-cli")
+
+
+def test_a_cited_fixture_that_moved_fails_generation(tmp_path: Path) -> None:
+    """The citation is checked against the tree, not retyped beside it.
+
+    A suite that moves leaves prose citing it reading exactly as it did while
+    pointing at nothing, which is the one failure a reader cannot see. Asking
+    the tree turns it into a generation error naming the path to repoint.
+    """
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_present.py").write_text("", encoding="utf-8")
+
+    assert cited_fixture(tmp_path, "tests/test_present.py") == "tests/test_present.py"
+    with pytest.raises(ValueError, match="cited as evidence"):
+        cited_fixture(tmp_path, "tests/test_moved_away.py")
 
 
 def test_native_workflow_probes_even_when_strict_evidence_fails() -> None:

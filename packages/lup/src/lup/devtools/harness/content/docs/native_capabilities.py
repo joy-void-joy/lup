@@ -1,13 +1,14 @@
-# lup: ignore[native-spelling]
-# The ledger names the native trees each probed contract writes to.
 """The evidence ledger of accepted native contracts.
 
-Every version this page names, and every schema digest it publishes, is read
-from :mod:`lup.devtools.harness.evidence` rather than spelled here. That module
-is what the doctor compares an installed CLI against, so a refreshed probe
-moves the warning and the page together instead of leaving the page asserting
-a version nothing was probed on.
+Every version this page names, every schema digest it publishes, and every
+fixture it cites is read from :mod:`lup.devtools.harness.evidence` rather than
+spelled here. That module is what the doctor compares an installed CLI
+against, so a refreshed probe moves the warning and the page together instead
+of leaving the page asserting a version nothing was probed on, and a fixture
+that moves fails generation instead of being published as a dead citation.
 """
+
+from pathlib import Path
 
 import lup.harness.models as models
 from lup.devtools.harness.evidence import (
@@ -15,15 +16,22 @@ from lup.devtools.harness.evidence import (
     SCHEMA_COMMAND,
     SCHEMA_DIGESTS,
     accepted_version,
+    cited_fixture,
 )
 from lup.markdown import CodeCell
 
 
-def document() -> models.PromptDocument:
+def document(checkout: Path) -> models.PromptDocument:
     """This page, with every version read from the ledger the doctor uses."""
     claude_cli = accepted_version("claude-cli")
     claude_sdk = accepted_version("claude-agent-sdk")
     codex_cli = accepted_version("codex-cli")
+    runtime_fixtures = cited_fixture(
+        checkout, "packages/lup/tests/unit/test_adapter_runtime.py"
+    )
+    dispatcher_fixtures = cited_fixture(
+        checkout, "tests/unit/test_harness_compilation.py"
+    )
     return models.PromptDocument(
         source=__name__,
         parts=[
@@ -45,9 +53,9 @@ so this page cannot come to name a version nothing was probed on.
 | Contract | Version | Evidence | Accepted fact |
 |---|---:|---|---|
 | Claude plugin package | Claude Code {claude_cli} | `claude plugin validate .claude/plugins/lup` passed, warning only that the manifest declares no author; [Claude plugin documentation](https://docs.anthropic.com/en/docs/claude-code/plugins) | The generated manifest, commands, agents, and bundled hooks are loadable. |
-| Claude runtime | Claude Agent SDK {claude_sdk} | Lazy option construction plus direct SDK block, usage, cost, hook, partial-event, fork, and subagent fixtures in `tests/unit/test_adapter_runtime.py`; [Claude SDK documentation](https://platform.claude.com/docs/en/agent-sdk/overview) | Live partial events, interruption, and latest-turn transcript forking are exposed. Steering is absent. Turn output uses only Lup's MCP `submit_output` tool. **Resume is offered but not honoured**: re-verified on Claude Code {claude_cli}, `claude --session-id <uuid> -p` exits 0 and writes no transcript under `~/.claude/projects`, and `--resume` on that same id answers `No conversation found with session ID`. So a session holds one live connection across every turn that does not change its submission schema, and treats a refused resume as losing that turn's context rather than the run. |
+| Claude runtime | Claude Agent SDK {claude_sdk} | Lazy option construction plus direct SDK block, usage, cost, hook, partial-event, fork, and subagent fixtures in `{runtime_fixtures}`; [Claude SDK documentation](https://platform.claude.com/docs/en/agent-sdk/overview) | Live partial events, interruption, and latest-turn transcript forking are exposed. Steering is absent. Turn output uses only Lup's MCP `submit_output` tool. **Resume is offered but not honoured**: re-verified on Claude Code {claude_cli}, `claude --session-id <uuid> -p` exits 0 and writes no transcript under `~/.claude/projects`, and `--resume` on that same id answers `No conversation found with session ID`. So a session holds one live connection across every turn that does not change its submission schema, and treats a refused resume as losing that turn's context rather than the run. |
 | Codex plugin package | Codex CLI {codex_cli} | Generated manifest/marketplace fixtures and cache-digest tests; [Codex plugin structure](https://developers.openai.com/codex/plugins/build#plugin-structure) | Skills, project agents, hooks, marketplace metadata, and installed-cache separation use documented locations. |
-| Codex hooks | Codex CLI {codex_cli} | `codex --enable hooks features list` reported hooks stable; hermetic dispatcher fixtures in `tests/unit/test_harness_compilation.py`; [Codex hooks](https://developers.openai.com/codex/hooks) | Plugin hook commands receive `PLUGIN_ROOT`. Non-allow policy decisions fail closed because the command-hook boundary has no portable ask effect. Hook trust is never *generated*, but a worktree-scoped home seeds it from the account. Seeding is confirmed to work and is **not** sufficient: a live `codex exec` in a scoped home whose config carries `lup@...:hooks/hooks.json:pre_tool_use:0:0` as trusted and enabled, against an installed plugin, ran a command the policy denies. The same installed dispatcher fed that command as a `PreToolUse` payload denies it and exits 2, so the gap is that `codex exec` does not reach the hook, not the dispatcher or the seeding. `exec` also reports `approval: never`, which alone means the `PermissionRequest` half can never fire. **Treat a non-interactive Codex session as ungoverned until this is resolved.** |
+| Codex hooks | Codex CLI {codex_cli} | `codex --enable hooks features list` reported hooks stable; hermetic dispatcher fixtures in `{dispatcher_fixtures}`; [Codex hooks](https://developers.openai.com/codex/hooks) | Plugin hook commands receive `PLUGIN_ROOT`. Non-allow policy decisions fail closed because the command-hook boundary has no portable ask effect. Hook trust is never *generated*, but a worktree-scoped home seeds it from the account. Seeding is confirmed to work and is **not** sufficient: a live `codex exec` in a scoped home whose config carries `lup@...:hooks/hooks.json:pre_tool_use:0:0` as trusted and enabled, against an installed plugin, ran a command the policy denies. The same installed dispatcher fed that command as a `PreToolUse` payload denies it and exits 2, so the gap is that `codex exec` does not reach the hook, not the dispatcher or the seeding. `exec` also reports `approval: never`, which alone means the `PermissionRequest` half can never fire. **Treat a non-interactive Codex session as ungoverned until this is resolved.** |
 | Codex blocked edit | Codex CLI {codex_cli} | Scheduled `test_codex_plugin_blocks_a_forbidden_apply_patch` installs the generated plugin in an isolated home and requests an anti-pattern edit through the real CLI | The `apply_patch` call is rejected, the target file remains unchanged, and the native session stays alive to report the rejection. A CLI version drift makes the nightly doctor fail until this observation is repeated. |
 | Codex app-server lifecycle | Codex CLI {codex_cli} | Version-generated JSON Schema plus routed-notification fixtures; [Codex app server](https://developers.openai.com/codex/app-server) | `thread/start`, `thread/resume`, `thread/fork`, `turn/start`, `turn/steer`, and `turn/interrupt` exist; live notifications are distinct from completed replay. |
 | Codex turn tool binding | Codex CLI {codex_cli} | Version-generated `ThreadStartParams`, `TurnStartParams`, `ThreadResumeParams`, and dynamic-tool call/response schemas | `dynamicTools` exists only on `thread/start`. A typed resume or schema transition that would need a new handler is rejected before input to preserve conversation identity. Native `outputSchema` is not enabled alongside Lup submission. |

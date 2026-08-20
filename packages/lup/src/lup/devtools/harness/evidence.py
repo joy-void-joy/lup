@@ -52,6 +52,23 @@ def accepted_version(capability: str, ledger: list[EvidenceEntry] | None = None)
     raise KeyError(f"no evidence row accepts a version for {capability!r}")
 
 
+def cited_fixture(root: Path, path: str) -> str:
+    """A fixture path the ledger cites, refused when it resolves to nothing.
+
+    Naming a file as evidence is a claim about the tree, and prose cannot
+    check it: a suite that moves leaves the citation reading exactly as it
+    did while pointing at nothing, which is how this page came to cite an
+    adapter-runtime fixture after it had moved into the library's own suite.
+    Asking here fails generation instead, naming the citation to repoint.
+    """
+    if not (root / path).exists():
+        raise ValueError(
+            f"{path!r} is cited as evidence but does not exist beneath {root}: "
+            "point the citation at where the fixtures moved, or drop the claim"
+        )
+    return path
+
+
 class SchemaDigest(BaseModel, frozen=True):
     """One app-server schema file, and the content this evidence accepted.
 

@@ -72,8 +72,9 @@ def library_documents(
     native implementation behind every page this module publishes.
 
     ``checkout`` is the tree the library page walks for its own package
-    roster, threaded in for the same reason the project pages take one: no
-    module here may read a filesystem at import.
+    roster and the capability page resolves its cited fixtures against,
+    threaded in for the same reason the project pages take one: no module
+    here may read a filesystem at import.
     """
     return [
         published("library", "library.md", library.document(layout, checkout), root),
@@ -98,7 +99,7 @@ def library_documents(
         published(
             "native_capabilities",
             "native-capabilities.md",
-            native_capabilities.document(),
+            native_capabilities.document(checkout),
             root,
         ),
         published(
