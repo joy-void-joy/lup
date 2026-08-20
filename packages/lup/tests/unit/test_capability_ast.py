@@ -1,10 +1,16 @@
-"""Project-indexed capability architecture rule tests."""
+"""Project-indexed tests for both rules that read a class's base list.
+
+`abc-capability` reads it to tell a capability seam from a variant union;
+`abstract-declaration` requires it to carry that answer at all. They are
+tested together because they are one reading — a change to what either takes
+a base to mean is a change to what the other sees.
+"""
 
 from pathlib import Path
 
 import pytest
 
-from lup.codescan.capabilities import audit_capabilities
+from lup.codescan.capabilities import audit_abstract_declarations, audit_capabilities
 from lup.codescan.common import PythonSource
 
 
@@ -272,3 +278,204 @@ def test_a_seam_declaring_only_abc_is_still_judged() -> None:
 
     assert len(findings) == 1
     assert "capability Renderer has concrete callable helper" in findings[0].message
+
+
+def test_a_model_declaring_an_abstract_member_has_to_name_abc() -> None:
+    """The shape this rule exists for: abstract by metaclass, silent in prose.
+
+    Pydantic's metaclass is an `ABCMeta`, so the member binds and the class
+    turns uninstantiable while the base list says nothing about it — which is
+    how thirteen unions in this library came to be abstract without anywhere
+    saying so.
+    """
+    findings = audit_abstract_declarations(
+        [
+            source(
+                "from abc import abstractmethod\n"
+                "from pydantic import BaseModel\n"
+                "class Part(BaseModel):\n"
+                "    @abstractmethod\n"
+                "    def spell(self) -> str: ...\n"
+            )
+        ]
+    )
+
+    assert len(findings) == 1
+    assert findings[0].kind == "missing"
+    assert findings[0].line == 3
+    assert "Part declares abstract spell" in findings[0].message
+
+
+def test_a_declared_abstract_base_is_left_alone() -> None:
+    findings = audit_abstract_declarations(
+        [
+            source(
+                "from abc import ABC, abstractmethod\n"
+                "from pydantic import BaseModel\n"
+                "class Part(BaseModel, ABC):\n"
+                "    @abstractmethod\n"
+                "    def spell(self) -> str: ...\n"
+            )
+        ]
+    )
+
+    assert findings == []
+
+
+@pytest.mark.parametrize("spelling", ["ABC", "abc.ABC"])
+def test_either_spelling_of_the_base_declares_it(spelling: str) -> None:
+    findings = audit_abstract_declarations(
+        [
+            source(
+                "import abc\n"
+                "from abc import ABC, abstractmethod\n"
+                f"class Seam({spelling}):\n"
+                "    @abstractmethod\n"
+                "    def run(self) -> None: ...\n"
+            )
+        ]
+    )
+
+    assert findings == []
+
+
+def test_an_abstract_property_counts_as_a_declaration() -> None:
+    findings = audit_abstract_declarations(
+        [
+            source(
+                "from abc import abstractmethod\n"
+                "from pydantic import BaseModel\n"
+                "class Part(BaseModel):\n"
+                "    @property\n"
+                "    @abstractmethod\n"
+                "    def value(self) -> int: ...\n"
+            )
+        ]
+    )
+
+    assert len(findings) == 1
+    assert "declares abstract value" in findings[0].message
+
+
+def test_every_member_is_named_at_the_one_line_the_remedy_edits() -> None:
+    """One finding per class, because one edit to the base list answers them all."""
+    findings = audit_abstract_declarations(
+        [
+            source(
+                "from abc import abstractmethod\n"
+                "from pydantic import BaseModel\n"
+                "class Part(BaseModel):\n"
+                "    @abstractmethod\n"
+                "    def spell(self) -> str: ...\n"
+                "    @abstractmethod\n"
+                "    def audited(self) -> str: ...\n"
+            )
+        ]
+    )
+
+    assert len(findings) == 1
+    assert findings[0].line == 3
+    assert "abstract audited, spell" in findings[0].message
+
+
+def test_a_subclass_adding_an_abstract_member_states_it_too() -> None:
+    """Inheriting abstractness is the inference this rule refuses to accept.
+
+    `LocatedPart` is the worked case: abstract through `SemanticPart` and
+    abstract again on its own account, and a reader should not have to walk a
+    hierarchy to learn either.
+    """
+    findings = audit_abstract_declarations(
+        [
+            source(
+                "from abc import ABC, abstractmethod\n"
+                "from pydantic import BaseModel\n"
+                "class Part(BaseModel, ABC):\n"
+                "    @abstractmethod\n"
+                "    def spell(self) -> str: ...\n"
+                "class Located(Part):\n"
+                "    @abstractmethod\n"
+                "    def where(self) -> str: ...\n"
+            )
+        ]
+    )
+
+    assert len(findings) == 1
+    assert findings[0].line == 6
+    assert "Located declares abstract where" in findings[0].message
+
+
+def test_a_variant_answering_the_base_is_not_reported() -> None:
+    """Abstractness is read off the class's own body, not its effective set."""
+    findings = audit_abstract_declarations(
+        [
+            source(
+                "from abc import ABC, abstractmethod\n"
+                "from pydantic import BaseModel\n"
+                "class Part(BaseModel, ABC):\n"
+                "    @abstractmethod\n"
+                "    def spell(self) -> str: ...\n"
+                "class Text(Part):\n"
+                "    def spell(self) -> str:\n"
+                "        return ''\n"
+            )
+        ]
+    )
+
+    assert findings == []
+
+
+def test_a_protocol_is_satisfied_structurally_and_declares_nothing() -> None:
+    """`ABC` beside `Protocol` would claim implementers register, and they do not."""
+    findings = audit_abstract_declarations(
+        [
+            source(
+                "from abc import abstractmethod\n"
+                "from typing import Protocol\n"
+                "class Journal(Protocol):\n"
+                "    @abstractmethod\n"
+                "    def append(self, event: str) -> None: ...\n"
+            )
+        ]
+    )
+
+    assert findings == []
+
+
+def test_a_typed_suppression_is_used_and_a_spurious_one_is_reported() -> None:
+    used = source(
+        "from abc import abstractmethod\n"
+        "from pydantic import BaseModel\n"
+        "class Part(BaseModel):  # lup: ignore[abstract-declaration]\n"
+        "    @abstractmethod\n"
+        "    def spell(self) -> str: ...\n",
+        "used",
+    )
+    spurious = source(
+        "from pydantic import BaseModel\n"
+        "class Plain(BaseModel):  # lup: ignore[abstract-declaration]\n"
+        "    value: int\n",
+        "spurious",
+    )
+
+    findings = audit_abstract_declarations([used, spurious])
+
+    assert len(findings) == 1
+    assert findings[0].kind == "spurious"
+
+
+def test_the_two_rules_reading_the_base_list_do_not_report_each_other() -> None:
+    """A union and a seam, each correctly declared, are silent to both rules."""
+    declared = source(
+        "from abc import ABC, abstractmethod\n"
+        "from pydantic import BaseModel\n"
+        "class Part(BaseModel, ABC):\n"
+        "    @abstractmethod\n"
+        "    def spell(self) -> str: ...\n"
+        "class Renderer(ABC):\n"
+        "    @abstractmethod\n"
+        "    def render(self) -> str: ...\n"
+    )
+
+    assert audit_capabilities([declared]) == []
+    assert audit_abstract_declarations([declared]) == []

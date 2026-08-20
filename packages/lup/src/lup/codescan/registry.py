@@ -74,6 +74,23 @@ STRUCTURAL_RULES: list[RegisteredRule] = [
         defined_in=capabilities.__name__,
     ),
     RegisteredRule(
+        id=capabilities.ABSTRACT_DECLARATION_RULE_ID,
+        family="architecture",
+        scope="Python architecture",
+        example="class Part(BaseModel):  # an @abstractmethod inside, no ABC in the bases",
+        message=(
+            "A class declaring an abstract member cannot be constructed, and its "
+            "bases are where it says so. Pydantic's metaclass is an ABCMeta, so on "
+            "a model the member binds and the class turns abstract while the word "
+            "ABC never appears — leaving the fact readable only to whoever knows "
+            "that about the dependency. Name ABC among the bases: nothing changes "
+            "at runtime, and abc-capability reads the same list to tell a "
+            "capability seam from a variant union. A Protocol is exempt, being "
+            "satisfied structurally rather than by declaration."
+        ),
+        defined_in=capabilities.__name__,
+    ),
+    RegisteredRule(
         id=dispatch.RULE_ID,
         family="architecture",
         scope="Python architecture",
