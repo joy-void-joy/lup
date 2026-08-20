@@ -33,6 +33,7 @@ import lup.devtools.dev.relocate as relocate_mod
 import lup.devtools.dev.resolve_review as resolve_review
 import lup.devtools.dev.rules as rules
 import lup.devtools.dev.worktree as worktree
+import lup.devtools.harness.content.docs.upstream_reports as upstream_reports
 from lup.codescan.markers import NoteKind
 from lup.codescan.registry import all_rules
 from lup.devtools.dev.conflict_app import create_conflict_app
@@ -822,6 +823,38 @@ def create_dev_app(
             typer.echo(str(failure), err=True)
             raise typer.Exit(1) from failure
         typer.echo(url)
+
+    @app.command("upstream")
+    def upstream_cmd(
+        slug: Annotated[
+            str,
+            typer.Argument(help="Which report to print; omit to list what is declared"),
+        ] = "",
+    ) -> None:
+        """Print a measured upstream defect, or list the ones declared.
+
+        The body goes to stdout alone so it pipes: each report's own section
+        in `docs/upstream-reports.md` carries the `gh issue create` line that
+        consumes it. Filing is deliberately not done here — an account is the
+        person's, not the tooling's.
+        """
+        roster = upstream_reports.ROSTER
+        if not slug:
+            for report in roster.reports:
+                typer.echo(
+                    f"{report.slug}  ({report.component} {report.version}, "
+                    f"{report.status()})"
+                )
+                typer.echo(f"    {report.title}")
+            return
+        report = roster.named(slug)
+        if report is None:
+            typer.echo(
+                f"No upstream report named {slug!r}; declared: {roster.handles()}",
+                err=True,
+            )
+            raise typer.Exit(1)
+        typer.echo(report.body)
 
     @app.command("issues")
     def issues_cmd(
