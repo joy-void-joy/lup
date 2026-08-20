@@ -8,6 +8,7 @@ import posixpath
 import re
 import tokenize
 from collections.abc import Callable, Iterator
+from functools import cache
 from typing import TypedDict
 
 from .decision import KernelDecision
@@ -305,8 +306,55 @@ def suppression_placement(violation_line: int) -> str:
     return f"line {violation_line}, or line {violation_line - 1} directly above it"
 
 
+@cache
+def python_tree(source: str) -> ast.Module | None:
+    """One file's parsed syntax tree, or ``None`` where it does not parse.
+
+    Every AST refiner below asks the same question of the same text, and a
+    parse costs more than the walk that follows it — so the tree is built
+    once per source and handed to each of them rather than rebuilt per
+    caller. A whole-repository sweep runs five refiners and four other
+    readers over each file, and parsed per caller that is nine parses of
+    every file in the tree.
+
+    Unbounded for the reason the prose map is: the key is text the caller is
+    already holding, so evicting an entry frees nothing it was not keeping.
+    A source that will not parse is remembered as ``None``, which is the same
+    answer every caller had been computing separately.
+    """
+    try:
+        return ast.parse(source)
+    except (SyntaxError, ValueError):
+        return None
+
+
+@cache
+def python_nodes(tree: ast.Module) -> list[ast.AST]:
+    """Every node under one module, walked once for all of its readers.
+
+    `ast.walk` is a generic breadth-first generator: it allocates a queue and
+    reads each node's fields through `getattr` to find the children, and a
+    whole-repository sweep runs about ten of those over every file — the
+    refiners, the boundary scans and the import readers all asking the same
+    tree for the same nodes. The walk is a pure function of the tree, so it
+    happens once and the list is what each of them reads.
+
+    Keyed on the tree because that is what a reader holds, and `python_tree`
+    above is the only thing that builds one — so an entry lives exactly as
+    long as the tree it belongs to was already going to.
+    """
+    return list(ast.walk(tree))
+
+
+@cache
 def python_tokens(source: str) -> list[tokenize.TokenInfo] | None:
-    """Tokenize Python source, returning ``None`` for incomplete syntax."""
+    """Tokenize Python source, returning ``None`` for incomplete syntax.
+
+    Remembered per source for the reason the tree above is: the four maskers
+    and column maps below each tokenize the same text, and one of them
+    tokenizes it twice. Callers read the list and never rewrite it, so the
+    one instance is shared rather than copied.
+    """
     try:
         return list(tokenize.generate_tokens(io.StringIO(source).readline))
     except (tokenize.TokenError, IndentationError, SyntaxError):
@@ -327,12 +375,11 @@ def python_comment_columns(source: str) -> dict[int, int] | None:
 
 def docstring_lines(source: str) -> set[int]:
     """Return lines occupied by bare string-expression documentation."""
-    try:
-        tree = ast.parse(source)
-    except (SyntaxError, ValueError):
+    tree = python_tree(source)
+    if tree is None:
         return set()
     lines: set[int] = set()
-    for node in ast.walk(tree):
+    for node in python_nodes(tree):
         if (
             isinstance(node, ast.Expr)
             and isinstance(node.value, ast.Constant)
@@ -562,9 +609,8 @@ def empty_collection_literal(node: ast.expr | None) -> bool:
 
 def empty_collection_exempt_lines(source: str) -> set[int]:
     """Return empty-collection lines whose AST context makes the seed deliberate."""
-    try:
-        tree = ast.parse(source)
-    except SyntaxError:
+    tree = python_tree(source)
+    if tree is None:
         return set()
 
     def is_self_attribute(node: ast.expr) -> bool:
@@ -641,7 +687,7 @@ def empty_collection_exempt_lines(source: str) -> set[int]:
 
         visit(scope, False)
 
-    for node in ast.walk(tree):
+    for node in python_nodes(tree):
         match node:
             case ast.Call(keywords=keywords):
                 for keyword in keywords:
@@ -695,13 +741,12 @@ def default_factory_exempt_lines(source: str) -> set[int]:
     reads another declaration, stamps a value, or constructs a model does work
     no literal expresses, so its line is cleared rather than suppressed.
     """
-    try:
-        tree = ast.parse(source)
-    except (SyntaxError, ValueError):
+    tree = python_tree(source)
+    if tree is None:
         return set()
     return {
         keyword.lineno
-        for node in ast.walk(tree)
+        for node in python_nodes(tree)
         if isinstance(node, ast.Call)
         for keyword in node.keywords
         if keyword.arg == "default_factory"
@@ -725,18 +770,17 @@ def dict_get_exempt_lines(source: str) -> set[int]:
     a genuine keyed lookup reached *through* a module, so only a name bound
     directly by ``import`` counts, never an attribute of one.
     """
-    try:
-        tree = ast.parse(source)
-    except (SyntaxError, ValueError):
+    tree = python_tree(source)
+    if tree is None:
         return set()
     modules = {
         alias.asname or alias.name.partition(".")[0]
-        for node in ast.walk(tree)
+        for node in python_nodes(tree)
         if isinstance(node, ast.Import)
         for alias in node.names
     }
     exempt: set[int] = set()
-    for node in ast.walk(tree):
+    for node in python_nodes(tree):
         if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
             for decorator in node.decorator_list:
                 last = decorator.end_lineno or decorator.lineno
@@ -771,9 +815,8 @@ def tuple_shape_exempt_lines(source: str) -> set[int]:
     tell" must fail toward silence — the audit sees the site again as soon as
     the file parses.
     """
-    try:
-        tree = ast.parse(source)
-    except (SyntaxError, ValueError):
+    tree = python_tree(source)
+    if tree is None:
         return set(range(1, len(source.splitlines()) + 2))
 
     def is_ellipsis(node: ast.expr) -> bool:
@@ -781,7 +824,7 @@ def tuple_shape_exempt_lines(source: str) -> set[int]:
 
     variadic: set[int] = set()
     fixed: set[int] = set()
-    for node in ast.walk(tree):
+    for node in python_nodes(tree):
         match node:
             case ast.Subscript(
                 value=ast.Name(id="tuple"), slice=ast.Tuple(elts=elts)
@@ -823,9 +866,8 @@ def slice_exempt_lines(source: str) -> set[int]:
     Source that does not parse clears nothing. The rule is soft, so the most an
     unrefined finding costs is a directive carrying a reason.
     """
-    try:
-        tree = ast.parse(source)
-    except (SyntaxError, ValueError):
+    tree = python_tree(source)
+    if tree is None:
         return set()
 
     def prefix_slices(node: ast.AST) -> Iterator[ast.Subscript]:
@@ -864,7 +906,7 @@ def slice_exempt_lines(source: str) -> set[int]:
 
     split_lines = {
         node.lineno
-        for node in ast.walk(tree)
+        for node in python_nodes(tree)
         if isinstance(node, ast.Subscript)
         and isinstance(node.slice, ast.Slice)
         and node.slice.lower is not None
@@ -873,7 +915,7 @@ def slice_exempt_lines(source: str) -> set[int]:
 
     def tested() -> Iterator[int]:
         """Lines whose prefix slice is read by a comparison rather than kept."""
-        for node in ast.walk(tree):
+        for node in python_nodes(tree):
             match node:
                 case (
                     ast.Compare()
@@ -1043,11 +1085,10 @@ def non_real_lines(source: str) -> set[int]:
         for number, line in enumerate(code, start=1)
         if not line or line.isspace()
     }
-    try:
-        tree = ast.parse(source)
-    except (SyntaxError, ValueError):
+    tree = python_tree(source)
+    if tree is None:
         return excluded
-    for node in ast.walk(tree):
+    for node in python_nodes(tree):
         if isinstance(node, ast.Import | ast.ImportFrom) and node.end_lineno:
             excluded.update(range(node.lineno, node.end_lineno + 1))
         if isinstance(node, ast.ClassDef) and is_record_class(node):
@@ -1544,9 +1585,8 @@ def documentation_only(source: str) -> bool:
     Source that does not parse is not a marker either: what it says is exactly
     what could not be established.
     """
-    try:
-        tree = ast.parse(source)
-    except (SyntaxError, ValueError):
+    tree = python_tree(source)
+    if tree is None:
         return False
     match tree.body:
         case [] | [ast.Expr(value=ast.Constant(value=str()))]:

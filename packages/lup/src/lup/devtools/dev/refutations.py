@@ -29,6 +29,7 @@ from pydantic import BaseModel, ValidationError
 from lup.codescan.common import PythonSource, Refutation
 from lup.codescan.grammar import GRAMMAR_RULES, refute
 from lup.codescan.oracle import DefinitionOracle
+from lup.policy.kernel.edit import python_nodes, python_tree
 from lup.types import StringMap
 
 
@@ -71,7 +72,7 @@ def imported_modules(tree: ast.Module, module: str) -> list[str]:
     package = module.split(".")
     return [
         named
-        for node in ast.walk(tree)
+        for node in python_nodes(tree)
         for named in (
             [alias.name for alias in node.names]
             if isinstance(node, ast.Import)
@@ -99,9 +100,8 @@ def first_party_imports(sources: list[PythonSource]) -> dict[str, list[str]]:
     known = dict.fromkeys(source.module for source in sources)
 
     def named(source: PythonSource) -> list[str]:
-        try:
-            tree = ast.parse(source.text)
-        except (SyntaxError, ValueError):
+        tree = python_tree(source.text)
+        if tree is None:
             return []
         return sorted(
             {

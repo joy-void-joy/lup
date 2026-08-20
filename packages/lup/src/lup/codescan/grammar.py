@@ -42,6 +42,7 @@ from pathlib import Path
 from pydantic import BaseModel
 
 from lup.codescan.common import PythonSource, Refutation
+from lup.policy.kernel.edit import python_nodes, python_tree
 from lup.codescan.oracle import (
     DefinitionOracle,
     DefinitionSite,
@@ -206,7 +207,7 @@ def attribute_call_sites(attribute: str) -> SiteSelector:
     def select(tree: ast.Module) -> list[MatchSite]:
         return [
             site_of(node.func)
-            for node in ast.walk(tree)
+            for node in python_nodes(tree)
             if isinstance(node, ast.Call)
             and isinstance(node.func, ast.Attribute)
             and node.func.attr == attribute
@@ -236,7 +237,7 @@ def class_at(tree: ast.Module, line: int) -> ast.ClassDef | None:
     """The innermost class whose body spans `line`, or None outside any class."""
     enclosing = [
         node
-        for node in ast.walk(tree)
+        for node in python_nodes(tree)
         if isinstance(node, ast.ClassDef)
         and node.lineno <= line <= (node.end_lineno or node.lineno)
     ]
@@ -314,9 +315,8 @@ def selected_sites(
     """Run every rule's selector over every parseable source, in file order."""
     selected: list[SelectedSite] = []
     for source in sources:
-        try:
-            tree = ast.parse(source.text)
-        except (SyntaxError, ValueError):
+        tree = python_tree(source.text)
+        if tree is None:
             continue  # the audit's regex pass still covers text that will not parse
         selected.extend(
             SelectedSite(file=source.path.as_posix(), rule=rule, site=site)

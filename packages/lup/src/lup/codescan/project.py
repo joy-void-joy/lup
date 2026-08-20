@@ -31,6 +31,7 @@ from lup.codescan.common import (
 )
 from lup.policy.kernel.edit import (
     IGNORE_RE,
+    python_tree,
     suppression_placement,
     suppression_reaches,
 )
@@ -185,9 +186,8 @@ def build_symbol_index(sources: list[PythonSource]) -> dict[str, ClassSymbol]:
     """Build import-resolved class symbols for all parseable supplied modules."""
     symbols: dict[str, ClassSymbol] = {}
     for source in sources:
-        try:
-            tree = ast.parse(source.text)
-        except SyntaxError:
+        tree = python_tree(source.text)
+        if tree is None:
             continue
         aliases = imported_names(tree, source.module)
         for node in tree.body:

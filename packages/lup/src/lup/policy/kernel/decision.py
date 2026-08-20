@@ -140,6 +140,7 @@ KERNEL_IMPORT_ALLOWLIST = (
     "ast",
     "collections.abc",
     "fnmatch",
+    "functools",
     "io",
     "pathlib",
     "posixpath",

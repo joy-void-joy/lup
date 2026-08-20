@@ -38,6 +38,8 @@ from lup.codescan.common import (
 from lup.codescan.project import RuleFinding, RuleViolation, audit_suppressions
 from lup.policy.kernel.edit import (
     IGNORE_RE,
+    python_nodes,
+    python_tree,
     suppression_placement,
     suppression_reaches,
 )
@@ -324,13 +326,12 @@ def native_module(name: str) -> bool:
 
 def import_violations(text: str) -> list[SourceViolation]:
     """Find native adapter imports through Python syntax before suppression."""
-    try:
-        tree = ast.parse(text)
-    except SyntaxError:
+    tree = python_tree(text)
+    if tree is None:
         return []
     lines = text.splitlines()
     violations: list[SourceViolation] = []  # lup: ignore[empty-collection]
-    for node in ast.walk(tree):
+    for node in python_nodes(tree):
         modules: list[str]
         match node:
             case ast.Import(names=names):
@@ -354,13 +355,12 @@ def import_violations(text: str) -> list[SourceViolation]:
 
 def kernel_import_violations(text: str) -> list[SourceViolation]:
     """Find imports outside the hermetic policy kernel's pinned stdlib set."""
-    try:
-        tree = ast.parse(text)
-    except SyntaxError:
+    tree = python_tree(text)
+    if tree is None:
         return []
     lines = text.splitlines()
     violations: list[SourceViolation] = []  # lup: ignore[empty-collection]
-    for node in ast.walk(tree):
+    for node in python_nodes(tree):
         modules: list[str]
         match node:
             case ast.Import(names=names):
@@ -434,9 +434,8 @@ def unfolded_nodes(tree: ast.AST) -> Iterator[ast.AST]:
 
 def native_spelling_violations(text: str) -> list[SourceViolation]:
     """Find provider wire spellings in code strings outside native ownership."""
-    try:
-        tree = ast.parse(text)
-    except SyntaxError:
+    tree = python_tree(text)
+    if tree is None:
         return []
     lines = text.splitlines()
     context = PythonContext.parse(text)
@@ -513,9 +512,8 @@ def frozen_literal(node: ast.expr) -> bool:
 
 def constant_declarations(text: str) -> list[ConstantDeclaration]:
     """Every module-level shouty constant whose value is a choice made here."""
-    try:
-        tree = ast.parse(text)
-    except SyntaxError:
+    tree = python_tree(text)
+    if tree is None:
         return []
     lines = text.splitlines()
 
@@ -579,9 +577,8 @@ def default_position_names(
     the two shapes a mutable default is written as, the ``TABLE if argument is
     None else argument`` sentinel and the ``argument or TABLE`` fallback.
     """
-    try:
-        tree = ast.parse(text)
-    except SyntaxError:
+    tree = python_tree(text)
+    if tree is None:
         return set()  # lup: ignore[set-shape] — an unparseable module names nothing
 
     def reached(node: ast.expr | None) -> list[str]:
@@ -625,7 +622,7 @@ def default_position_names(
 
     return {
         name
-        for node in ast.walk(tree)
+        for node in python_nodes(tree)
         for default in defaults(node)
         for name in reached(default)
     }
@@ -658,9 +655,8 @@ def carved_names(
     nicer name, so the rule steers these to the parser that already knows the
     format instead.
     """
-    try:
-        tree = ast.parse(text)
-    except SyntaxError:
+    tree = python_tree(text)
+    if tree is None:
         return set()  # lup: ignore[set-shape] — an unparseable module carves nothing
 
     def carved(node: ast.AST) -> list[str]:
@@ -673,7 +669,7 @@ def carved_names(
                 ]
         return []
 
-    return {name for node in ast.walk(tree) for name in carved(node)}
+    return {name for node in python_nodes(tree) for name in carved(node)}
 
 
 def library_default_violations(

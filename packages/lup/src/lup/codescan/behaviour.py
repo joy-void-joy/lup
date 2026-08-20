@@ -49,6 +49,7 @@ on is not thereby endorsed.
 import ast
 
 from lup.codescan.common import PythonSource
+from lup.policy.kernel.edit import python_tree
 from lup.codescan.project import (
     RuleFinding,
     RuleViolation,
@@ -118,9 +119,8 @@ def free_function_violations(
     """Find every module-level function taking a model its own module declares."""
     violations: list[RuleViolation] = []
     for source in sources:
-        try:
-            tree = ast.parse(source.text)
-        except SyntaxError:
+        tree = python_tree(source.text)
+        if tree is None:
             continue
         aliases = imported_names(tree, source.module)
         own = {name for name in models if name.startswith(f"{source.module}.")}
