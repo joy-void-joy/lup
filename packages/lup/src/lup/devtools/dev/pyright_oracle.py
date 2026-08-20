@@ -40,6 +40,7 @@ rather than reporting a refutation it cannot support.
 
 import ast
 import asyncio
+from collections import deque
 import os
 import shutil
 import sys
@@ -61,6 +62,7 @@ from lup.codescan.oracle import (
     TypeOracle,
     UnknownDeclaration,
 )
+from lup.policy.kernel.edit import name_position, nodes_of
 from lup.types import JsonValue
 from lup.workspace.paths import project_root
 
@@ -149,12 +151,17 @@ def base_name(node: ast.expr) -> str | None:
 
 
 def class_at(tree: ast.Module, line: int) -> ast.ClassDef | None:
-    """The innermost class whose body spans `line`, or None outside any class."""
+    """The innermost class whose body spans `line`, or None outside any class.
+
+    Read off the grouped node index rather than walked, because the files
+    asked about most are the largest: every mapping in the repository
+    resolves into typeshed's `builtins.pyi`, and walking it once per site is
+    that file walked hundreds of times to answer the same question.
+    """
     enclosing = [
         node
-        for node in ast.walk(tree)
-        if isinstance(node, ast.ClassDef)
-        and node.lineno <= line <= (node.end_lineno or node.lineno)
+        for node in nodes_of(tree, ast.ClassDef)
+        if node.lineno <= line <= (node.end_lineno or node.lineno)
     ]
     return max(enclosing, key=lambda node: node.lineno) if enclosing else None
 
@@ -246,6 +253,54 @@ class Workspace:
         return self.trees[key]
 
 
+class ClassRecord(BaseModel, frozen=True):
+    """One class declaration as its own file states it, before anything is asked.
+
+    ``base_names`` is what this class writes in its own bases, unqualified.
+    ``base_positions`` is where each of those names sits, so a later round can
+    ask what they lead to — a stub writes `MutableMapping` for a class
+    declared somewhere else entirely.
+    """
+
+    key: str
+    name: str
+    path: Path
+    line: int
+    base_names: list[str]
+    base_positions: list[SourcePosition]
+
+
+def declaring_place(path: Path, line: int) -> str:
+    """How one declaring place is named, so two answers about it meet."""
+    return f"{path.as_posix()}:{line}"
+
+
+def asked_place(position: SourcePosition) -> str:
+    """How one queried position is named, column included.
+
+    `class Holder(Mapping, Sized)` writes two bases on one line, so a key
+    without the column would file both answers under the first.
+    """
+    return f"{position.path.as_posix()}:{position.line}:{position.column}"
+
+
+def base_position(path: Path, node: ast.expr) -> SourcePosition | None:
+    """Where the name of one base class sits, or None where it names none.
+
+    A subscripted base is asked about at the name it subscripts:
+    `dict[str, int]` ends at a bracket, and the class it is about is `dict`.
+    """
+    match node:
+        case ast.Subscript(value=value):
+            return base_position(path, value)
+    written = name_position(node)
+    return (
+        None
+        if written is None
+        else SourcePosition(path=path, line=written["line"], column=written["column"])
+    )
+
+
 class Resolver:
     """One language-server session, answering what subjects are declared as."""
 
@@ -258,6 +313,20 @@ class Resolver:
         self.session = session
         self.workspace = workspace
         self.depth_limit = depth_limit
+        self.classes: dict[str, ClassRecord] = {}
+        """Every class declaration this session has read, by the place it sits.
+
+        A whole sweep's mappings resolve to the same `dict` in the same stub,
+        and every supertype walk from there re-asks the same questions about
+        the same bases. What a place declares is a function of the place, so
+        it is read once and the rest are lookups.
+        """
+
+        # lup: ignore[dict-str-payload] — the keys are positions in whatever
+        # files a checker happened to answer about, which is as open as a
+        # key set gets; both sides are places, and neither has other fields
+        self.leads: dict[str, str] = {}
+        """Which class each queried base name led to, by the position asked."""
 
     async def sites_at(
         self, method: str, positions: list[SourcePosition | None]
@@ -291,41 +360,14 @@ class Resolver:
         replies = iter(answered)
         return [[] if position is None else next(replies) for position in positions]
 
-    async def bases_of(self, node: ast.ClassDef, path: Path, depth: int) -> list[str]:
-        """Every class one declaration descends from, named as declarations name it.
+    def record_at(self, sites: list[DeclarationSite]) -> str | None:
+        """Read the first of these places that is a class, and remember it.
 
-        Each base is resolved by asking where the name written in this file
-        leads, because a stub writes `MutableMapping` for a class declared
-        somewhere else entirely. The walk stops at a depth bound, at a class
-        with no bases, and at anything that resolves to something other than
-        a class.
+        Nothing is asked here: a class's own bases are written in its own
+        file, and where they lead is the next round's question rather than
+        this one's. Keeping the two apart is what lets a whole level of the
+        supertype walk go out in one batch.
         """
-        named = [
-            (name, base) for base in node.bases if (name := base_name(base)) is not None
-        ]
-        if not named or depth >= self.depth_limit:
-            return [name for name, _ in named]
-        positions = [
-            SourcePosition(
-                path=path,
-                line=base.end_lineno or base.lineno,
-                column=max((base.end_col_offset or 1) - 1, 0),
-            )
-            for _, base in named
-        ]
-        resolved = await self.sites_at("textDocument/definition", list(positions))
-        inherited = [
-            await self.class_declaration(sites, depth + 1) for sites in resolved
-        ]
-        return [
-            *(name for name, _ in named),
-            *(base for declaration in inherited for base in declaration.supertypes()),
-        ]
-
-    async def class_declaration(
-        self, sites: list[DeclarationSite], depth: int = 0
-    ) -> Declaration:
-        """Read the first of these places that is a class, with its supertypes."""
         for site in sites:
             tree = self.workspace.tree_of(site.path)
             if tree is None:
@@ -333,25 +375,32 @@ class Resolver:
             node = class_at(tree, site.line)
             if node is None:
                 continue
-            return ClassDeclaration(
-                name=node.name,
-                bases=await self.bases_of(node, site.path, depth),
-                path=site.path,
-                line=node.lineno,
-            )
-        return UnknownDeclaration()
+            key = declaring_place(site.path, node.lineno)
+            if key not in self.classes:
+                named = [
+                    (name, position)
+                    for base in node.bases
+                    if (name := base_name(base)) is not None
+                    and (position := base_position(site.path, base)) is not None
+                ]
+                self.classes[key] = ClassRecord(
+                    key=key,
+                    name=node.name,
+                    path=site.path,
+                    line=node.lineno,
+                    base_names=[name for name, _ in named],
+                    base_positions=[position for _, position in named],
+                )
+            return key
+        return None
 
-    async def member_declaration(self, sites: list[DeclarationSite]) -> Declaration:
-        """What a resolved member says its owner is: a class, or a bare `def`.
+    def function_at(self, sites: list[DeclarationSite]) -> Declaration:
+        """A module-level function at one of these places, or no answer at all.
 
-        A class first, since a method inside one is the receiver's own type. A
-        module-level function otherwise, which is what a module-qualified call
-        resolves to and is just as much an answer. Anything else is no answer
-        at all, and the receiver is asked instead.
+        What a module-qualified call resolves to, and just as much an answer
+        as a class is. Anything else — an assignment, a stub the parse could
+        not place — stays unanswered rather than being read as evidence.
         """
-        declaration = await self.class_declaration(sites)
-        if declaration.settled():
-            return declaration
         for site in sites:
             tree = self.workspace.tree_of(site.path)
             if tree is None:
@@ -363,41 +412,103 @@ class Resolver:
                 )
         return UnknownDeclaration()
 
-    async def resolve(self, queries: list[SymbolQuery]) -> list[Declaration]:
-        """Answer every query, asking the receiver only where the member failed.
+    async def close_supertypes(self, frontier: list[str]) -> None:
+        """Follow every class's bases outward, one whole level per batch.
 
-        Two batches rather than one per site: the members go out together,
-        and the receivers of whatever they left unanswered go out together
-        after. A sweep where every member resolves — which is most of them —
-        never sends the second batch at all.
+        A supertype chain is a sequence of questions each depending on the
+        answer before it, so walking one class at a time is a round trip per
+        link — and a sweep walks hundreds of chains through the same few
+        stubs. Level by level, every chain advances together: at most one
+        batch per level of the deepest hierarchy, rather than one per link
+        per chain.
+        """
+        seen = dict.fromkeys(frontier)
+        for _ in range(self.depth_limit):
+            positions = [
+                position
+                for key in frontier
+                for position in self.classes[key].base_positions
+                if asked_place(position) not in self.leads
+            ]
+            if not positions:
+                return
+            resolved = await self.sites_at("textDocument/definition", list(positions))
+            for position, sites in zip(positions, resolved, strict=True):
+                found = self.record_at(sites)
+                if found is not None:
+                    self.leads[asked_place(position)] = found
+            reached = [
+                self.leads[asked_place(position)]
+                for position in positions
+                if asked_place(position) in self.leads
+            ]
+            frontier = [key for key in dict.fromkeys(reached) if key not in seen]
+            seen.update(dict.fromkeys(frontier))
+            if not frontier:
+                return
+
+    def supertypes_of(self, key: str) -> list[str]:
+        """Every class name one declaration descends from, however far up.
+
+        Read off what the closure already recorded. A base whose own
+        declaration was reached contributes its name and everything above it;
+        one that resolved to nothing still contributes the name its subclass
+        wrote, which is the whole answer wherever a checker declined to
+        follow it.
+        """
+        reached = dict.fromkeys([key])
+        pending = deque([key])
+        while pending:
+            record = self.classes[pending.popleft()]
+            for position in record.base_positions:
+                asked = asked_place(position)
+                found = self.leads[asked] if asked in self.leads else None
+                if found is not None and found not in reached:
+                    reached[found] = None
+                    pending.append(found)
+        return list(
+            dict.fromkeys(
+                name for above in reached for name in self.classes[above].base_names
+            )
+        )
+
+    def declaration_for(self, key: str) -> Declaration:
+        """What one recorded place is, in the terms a family is read in."""
+        record = self.classes[key]
+        return ClassDeclaration(
+            name=record.name,
+            bases=self.supertypes_of(key),
+            path=record.path,
+            line=record.line,
+        )
+
+    async def resolve(self, queries: list[SymbolQuery]) -> list[Declaration]:
+        """Answer every query, in as few batches as the questions allow.
+
+        Three phases, each one batch rather than one per site: the members,
+        the receivers of whatever the members left unanswered, and then the
+        supertype closure over every class either phase reached.
         """
         members = await self.sites_at(
             "textDocument/definition", [query.member for query in queries]
         )
-        answered = [await self.member_declaration(sites) for sites in members]
+        found = [self.record_at(sites) for sites in members]
         pending = [
-            None if found.settled() else query.receiver
-            for query, found in zip(queries, answered, strict=True)
+            query.receiver if key is None else None
+            for query, key in zip(queries, found, strict=True)
         ]
-        if not any(position is not None for position in pending):
-            return answered
         receivers = await self.sites_at("textDocument/typeDefinition", pending)
-        return [
-            found
-            if found.settled() or not sites
-            else await self.receiver_declaration(sites)
-            for found, sites in zip(answered, receivers, strict=True)
+        settled = [
+            key if key is not None else self.record_at(sites)
+            for key, sites in zip(found, receivers, strict=True)
         ]
-
-    async def receiver_declaration(self, sites: list[DeclarationSite]) -> Declaration:
-        """What a resolved receiver is, where the place named is a class at all.
-
-        Pyright answers `typeDefinition` on a subject it could not type with
-        the subject's own declaration — the `def` a parameter is written in.
-        That is not a type, so anything but a class is read as the checker
-        having nothing to say rather than as a declaration outside the family.
-        """
-        return await self.class_declaration(sites)
+        await self.close_supertypes(
+            [key for key in dict.fromkeys(settled) if key is not None]
+        )
+        return [
+            self.function_at(sites) if key is None else self.declaration_for(key)
+            for key, sites in zip(settled, members, strict=True)
+        ]
 
 
 class Shard(BaseModel, frozen=True):

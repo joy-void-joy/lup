@@ -206,6 +206,15 @@ type Declaration = ClassDeclaration | FunctionDeclaration | UnknownDeclaration
 """What a subject resolves to, in the terms family membership is read in."""
 
 
+# lup: solved: a rule whose subject is a member no source declares wants
+# `textDocument/typeDefinition` on the receiver rather than the query below.
+# A synthesized member — a `TypedDict`'s `get`, a dataclass `__init__` —
+# resolves to nothing here, which is indistinguishable from a receiver the
+# checker could not type at all. That query is asked at the *last name* in
+# the receiver (`self.spawned`, never `self`, which answers with the
+# enclosing class), and has no answer for a call receiver, whose result no
+# position denotes. No rule needs it today: `dict-get` does not, because
+# `.get` on a `TypedDict` is how an optional key is read and is not a defect.
 class TypeOracle(ABC):
     """Resolves what the subjects named at source positions are declared as."""
 
