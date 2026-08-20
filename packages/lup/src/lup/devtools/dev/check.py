@@ -15,7 +15,7 @@ from lup.codescan.markers import find_feedback
 from lup.harness.models import GUIDANCE_BYTE_BUDGET, PromptDocument, document_byte_size
 from lup.workspace.paths import is_template_scaffold, project_root
 
-from lup.devtools.dev.antipatterns import FoundAntiPattern, scan_antipatterns
+from lup.devtools.dev.antipatterns import scan_antipatterns
 from lup.devtools.project import DevProject
 from lup.devtools.dev.boundaries import (
     scan_boundaries,
@@ -93,13 +93,6 @@ def ruff_lint_check(fix: bool) -> CheckReport:
 def pyright_check() -> CheckReport:
     """Whether the workspace type-checks."""
     return ran("pyright", lambda: uv("run", "pyright"))
-
-
-class ScopedFindings(BaseModel):
-    """A sweep split into what a check answers for, and what it only reports."""
-
-    owned: list[FoundAntiPattern]
-    outside: list[FoundAntiPattern]
 
 
 class TestRoot(BaseModel):
@@ -202,27 +195,6 @@ def owned_comments(
     return [item for item in found if str(item.file) in owned]
 
 
-def owned_findings(
-    findings: list[FoundAntiPattern], scope: list[str] | None
-) -> ScopedFindings:
-    """Which anti-pattern findings this check is answerable for.
-
-    A lease holds one concern's changes, so its gate answers "is this change
-    good?". Answering "is the whole repository clean?" makes every lease's
-    verdict depend on state no worker in the run controls, and one pre-existing
-    finding then blocks every lease at once with nothing a revision can do
-    about it. What lies outside is still named, so a worker learns the tree has
-    an issue rather than reading it as clean.
-    """
-    if scope is None:
-        return ScopedFindings(owned=findings, outside=[])
-    owned = dict.fromkeys(scope)
-    return ScopedFindings(
-        owned=[item for item in findings if item.file in owned],
-        outside=[item for item in findings if item.file not in owned],
-    )
-
-
 def scan_reports(
     project: DevProject,
     scope: list[str] | None,
@@ -246,29 +218,26 @@ def scan_reports(
             else ["inline notes: none"],
         )
 
-        scan = scan_antipatterns(project)
-        scoped = owned_findings(scan.findings, scope)
-        blocking = [f for f in scoped.owned if f.kind != "untyped"]
+        # Scoped where a scope was given, so the sweep reads the files this
+        # tree is answerable for rather than reading every file and setting
+        # most of the findings aside. A lease holds one concern's changes and
+        # its gate answers "is this change good?" — a whole-repository read
+        # made every lease's verdict depend on state no worker controls, and
+        # cost the whole repository's resolve to reach it.
+        scan = scan_antipatterns(project, scope)
+        blocking = [f for f in scan.findings if f.kind != "untyped"]
         refined = f", {len(scan.refuted)} refuted" if scan.refuted else ""
-        advisory = len(scoped.owned) - len(blocking)
+        advisory = len(scan.findings) - len(blocking)
         tail = f" ({advisory} untyped, advisory{refined})" if advisory else refined
         yield CheckReport(
             name="antipatterns",
             passed=not blocking,
             lines=[
-                *(
-                    [
-                        f"antipatterns: FAIL ({len(blocking)} finding(s){refined})",
-                        *(f"  {f.file}:{f.line} [{f.kind}]" for f in blocking),
-                    ]
-                    if blocking
-                    else [f"antipatterns: ok{tail}"]
-                ),
-                *(
-                    f"  outside this scope: {f.file}:{f.line} [{f.kind}]"
-                    for f in scoped.outside
-                ),
-            ],
+                f"antipatterns: FAIL ({len(blocking)} finding(s){refined})",
+                *(f"  {f.file}:{f.line} [{f.kind}]" for f in blocking),
+            ]
+            if blocking
+            else [f"antipatterns: ok{tail}"],
         )
 
         breaches = scan_boundaries(project)

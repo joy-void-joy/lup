@@ -106,6 +106,25 @@ class AntiPatternScan(BaseModel):
     refuted: list[FoundRefutation]
 
 
+def within_scope(rel: str, paths: Sequence[str] | None) -> bool:
+    """Whether one repository-relative path is inside a sweep's scope.
+
+    ``None`` is the whole repository. An empty scope is a scope rather than an
+    absent one, so a tree that changed nothing is read for nothing rather than
+    read entirely. A named path covers itself and everything beneath it, so a
+    caller scopes by file or by directory without having to say which it meant.
+
+    This is what keeps a lease answerable for its own concern. A lease holds
+    one concern's changes and `dev check` judges it; reading the whole
+    repository made that verdict depend on state no worker in the run
+    controls, so one finding nobody introduced blocked every lease at once
+    with no revision able to converge on it.
+    """
+    return paths is None or any(
+        rel == path or rel.startswith(f"{path}/") for path in paths
+    )
+
+
 def scanned_files(
     project: DevProject, paths: Sequence[str] | None = None
 ) -> list[ScannedFile]:
@@ -128,9 +147,7 @@ def scanned_files(
             patterns = patterns_for_suffix(path.suffix.lower(), declared)
             if patterns is None or path_role(rel, roles) != "production":
                 continue
-            if paths is not None and not any(
-                rel == p or rel.startswith(f"{p}/") for p in paths
-            ):
+            if not within_scope(rel, paths):
                 continue
             try:
                 text = path.read_text(encoding="utf-8")
