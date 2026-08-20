@@ -14,7 +14,7 @@ prompt part like any other, which lays these out without looking inside them.
 """
 
 import html
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, Discriminator
@@ -49,7 +49,7 @@ def escaped(value: str) -> str:
     return contained(html.escape(value))
 
 
-class MarkdownCell(BaseModel, frozen=True):
+class MarkdownCell(BaseModel, ABC, frozen=True):
     """One cell of a generated table, holding the value it displays.
 
     Every kind answers :meth:`render`, and every answer runs the value it

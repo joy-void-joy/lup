@@ -1,7 +1,7 @@
 """Immutable semantic values shared by all runtime implementations."""
 
 import json
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
 from datetime import timedelta
 from typing import Annotated, Literal, Self, overload
@@ -61,7 +61,7 @@ class TurnInput(BaseModel, frozen=True):
     text: str
 
 
-class TurnBlock(BaseModel, frozen=True):
+class TurnBlock(BaseModel, ABC, frozen=True):
     """One completed block of a turn, answering every question about itself.
 
     Whatever a caller needs to know about a block is declared here and

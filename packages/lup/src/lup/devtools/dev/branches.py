@@ -3,7 +3,7 @@
 import json
 import logging
 import sys
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 from collections import defaultdict
 from collections.abc import Iterator
 from collections.abc import Set as AbstractSet
@@ -742,7 +742,7 @@ def detect_base_branch(branch: str | None = None) -> BaseCandidate:
     return best
 
 
-class RemoteMeasure(BaseModel, frozen=True):
+class RemoteMeasure(BaseModel, ABC, frozen=True):
     """One remote branch, and how many of its commits this checkout is missing.
 
     The commits arrive by a different route depending on which remote was

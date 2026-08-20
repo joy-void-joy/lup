@@ -1,6 +1,6 @@
 """Immutable, schema-versioned semantic resolver records."""
 
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
 from datetime import datetime
 from enum import StrEnum
@@ -945,7 +945,7 @@ type InventoryPlanner = Callable[["ResolveRequest"], Awaitable["ResolveInventory
 """How a source carrying raw evidence has it organized into concerns."""
 
 
-class ResolverSource(BaseModel, frozen=True):
+class ResolverSource(BaseModel, ABC, frozen=True):
     """What a resolver run starts from, able to yield the inventory it runs.
 
     A run begins either from concerns already organized or from the review

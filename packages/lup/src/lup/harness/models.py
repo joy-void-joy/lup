@@ -8,7 +8,7 @@ beside its managing module instead (see the package docstring).
 """
 
 import re  # lup: ignore[import-re] — prose has no parser; its shape is the rule
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Annotated, Literal
 
@@ -86,7 +86,7 @@ invariant is answered where an author writes the words rather than by a scan
 over the harness they eventually compose into."""
 
 
-class SemanticPart(BaseModel, frozen=True):
+class SemanticPart(BaseModel, ABC, frozen=True):
     """One element of a prompt document, answering every question about itself.
 
     Whatever the rest of the harness needs to know about a part is declared
@@ -286,7 +286,7 @@ type PathMember = Annotated[
 """One leaf inside a location: a name, a ``<placeholder>``, or ``*``."""
 
 
-class LocatedPart(SemanticPart, frozen=True):
+class LocatedPart(SemanticPart, ABC, frozen=True):
     """One path a prompt names, spelled by whichever adapter renders it.
 
     Scope is the same question for every location — whether the reader's own
@@ -652,7 +652,7 @@ class ContentRoster(BaseModel, frozen=True):
         )
 
 
-class McpWord(BaseModel, frozen=True):
+class McpWord(BaseModel, ABC, frozen=True):
     """One word of the command line that starts an MCP server.
 
     A server the harness offers has to be reachable from wherever the runtime

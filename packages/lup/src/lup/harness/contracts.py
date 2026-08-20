@@ -50,7 +50,7 @@ class SkillInvocationRenderer(ABC):
         """Render qualification, escaping, and arguments together."""
 
 
-class Spelling(BaseModel, frozen=True):
+class Spelling(BaseModel, ABC, frozen=True):
     """What one runtime says for a portable idea, or why it has nothing to say.
 
     A portable idea one runtime cannot express is the case absence handles
