@@ -51,6 +51,7 @@ from lup.codescan.common import (
 from lup.codescan.dispatch import audit_own_model_dispatch
 from lup.codescan.grammar import refute
 from lup.codescan.narrowing import audit_isinstance_chains
+from lup.codescan.project import retired_suppressions
 from lup.codescan.registry import RULE_REFERENCE
 from lup.policy.kernel.edit import (
     IGNORE_RE,
@@ -315,6 +316,42 @@ def place_directives(
             yield item.rel
 
     return list(moved())
+
+
+class RetiredDirectiveFile(BaseModel, frozen=True):
+    """One file a rule's retirement changed, and where it changed it."""
+
+    rel: str
+    removed: list[int] = []
+
+
+def retire_directives(project: DevProject, rule_id: str) -> list[RetiredDirectiveFile]:
+    """Stop every tracked file from naming a rule this project has retired.
+
+    A rule that stops running leaves its directives covering nothing, and the
+    audit reports each one as spurious — so retiring a rule and sweeping its
+    directives are one operation rather than two, and doing the second by
+    hand across a tree is how a reason gets deleted along with the id that
+    justified it. Each file reports the lines it lost, so the sweep can be
+    read rather than trusted.
+    """
+
+    def swept() -> Iterator[RetiredDirectiveFile]:
+        for item in scanned_files(project):
+            if item.path.suffix.lower() not in {".py", ".pyi"}:
+                continue
+            source = PythonSource(
+                path=item.path,
+                module=module_name(item.path, scanned_roots(project)),
+                text=item.text,
+            )
+            revised = retired_suppressions(source, rule_id)
+            if revised.text == item.text:
+                continue
+            item.path.write_text(revised.text, encoding="utf-8")
+            yield RetiredDirectiveFile(rel=item.rel, removed=revised.removed)
+
+    return list(swept())
 
 
 def report_directives(
