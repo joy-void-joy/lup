@@ -1069,6 +1069,102 @@ def docker_rule() -> ShellCommandRule:
     )
 
 
+def bun_rule() -> ShellCommandRule:
+    """Compile the bun surface, which is a package manager wearing a runtime.
+
+    `bun` is in the kernel's interpreter set, so without a rule naming it
+    every invocation is refused as inline code — including `bun install`,
+    which carries none. Declaring the safe forms is what separates the two,
+    and it separates them the safe way round: the default is `deny`, so an
+    eval spelling this table never anticipated is refused by falling through
+    rather than by being listed. That matters more than usual, because the
+    ways of handing an interpreter a program are many and growing — `-e`,
+    `--eval`, `-p`, a bare `-` reading stdin, and on a sibling runtime an
+    `eval` *subcommand* that no flag list could have caught.
+
+    The split between allow and ask is what a verb does to the manifest
+    rather than to the filesystem: restoring dependencies somebody already
+    declared is the ordinary case, while adding one, removing one, or
+    fetching a package that is not declared at all changes what this project
+    depends on and is worth a question.
+    """
+    return ShellCommandRule(
+        name="bun",
+        default_effect="deny",
+        # The version banner is not a subcommand and would otherwise fall to
+        # the default deny, which is the wrong answer for a pure read.
+        allow_flags=["--version", "--revision"],
+        subcommands=[
+            ShellSubcommandRule(
+                name="install",
+                effect="allow",
+                sandbox="outside",
+                reason="restoring declared dependencies reaches the registry",
+            ),
+            ShellSubcommandRule(name="run", effect="allow"),
+            ShellSubcommandRule(name="test", effect="allow"),
+            ShellSubcommandRule(name="build", effect="allow"),
+            ShellSubcommandRule(
+                name="add",
+                effect="ask",
+                sandbox="outside",
+                reason="adding a dependency changes what this project needs",
+            ),
+            ShellSubcommandRule(
+                name="remove",
+                effect="ask",
+                reason="removing a dependency changes what this project needs",
+            ),
+            ShellSubcommandRule(
+                name="x",
+                effect="ask",
+                sandbox="outside",
+                reason="running a package that is not a declared dependency",
+            ),
+        ],
+        reason="bare interpreters and inline code are not allowed",
+    )
+
+
+def typescript_rule() -> list[ShellCommandRule]:
+    """Compile the TypeScript compiler: checking allows, emitting asks.
+
+    `--noEmit` is the whole of the read-only form and it still takes
+    operands, so no all-flags test recognizes it — which is what
+    ``read_verbs`` exists for. A bare invocation writes output at paths a
+    configuration file chooses, so nothing in the command bounds what it
+    touches, which is the shape this table asks about everywhere else.
+
+    `bunx` is declared alongside it because reaching a project-local compiler
+    through the package runner is how a pinned version gets used, and a
+    globally installed `tsc` checks against whatever somebody last installed.
+    Its own default asks, since the runner will fetch a package that is not a
+    declared dependency rather than report that it is missing.
+    """
+    checking = ShellSubcommandRule(
+        name="tsc",
+        effect="ask",
+        read_verbs=["--noEmit", "--version"],
+        reason="emitting compiler output writes files the command does not bound",
+    )
+    return [
+        ShellCommandRule(
+            name="tsc",
+            default_effect="ask",
+            allow_flags=["--version"],
+            read_verbs=["--noEmit"],
+            reason="emitting compiler output writes files the command does not bound",
+        ),
+        ShellCommandRule(
+            name="bunx",
+            default_effect="ask",
+            subcommands=[checking],
+            sandbox="outside",
+            reason="the package runner fetches what is not already a dependency",
+        ),
+    ]
+
+
 def default_vocabulary() -> list[ShellCommandRule]:
     """Every group at its offered defaults — the batteries-included table.
 

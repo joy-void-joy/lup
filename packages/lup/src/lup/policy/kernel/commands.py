@@ -132,6 +132,27 @@ def split_subcommand(
     return Subcommand(word="", remainder=[])
 
 
+def declares_command(executable: str, rows: list[ShellRuleRow]) -> bool:
+    """Whether the vocabulary says anything at all about this executable.
+
+    Asked of an interpreter, which is otherwise refused outright for having
+    an eval mode at all. That blanket refusal denied `bun install` -- a
+    package operation carrying no code -- in the vocabulary of inline code,
+    which is judging a token rather than an effect.
+
+    A positive test, rather than a list of the flags that mean "inline code".
+    Such a list is a denylist carrying a security guarantee, so it has to be
+    complete to be worth anything -- and a first draft of one already missed
+    ``php -r``, the ``-s`` that takes a program on stdin, the bare ``-`` that
+    does the same, and ``deno eval``, which is a subcommand no flag list
+    could catch. Asking whether the vocabulary declares the executable fails
+    the right way instead: an interpreter nothing declares keeps denying
+    entirely, and one a project does declare still denies everything outside
+    the forms it named, including spellings nobody thought of.
+    """
+    return any(row["command"] == executable for row in rows)
+
+
 def decide_command_rows(words: list[str], rows: list[ShellRuleRow]) -> KernelDecision:
     """Classify a command against the erased vocabulary rows by name and depth."""
     executable = posixpath.basename(words[0])

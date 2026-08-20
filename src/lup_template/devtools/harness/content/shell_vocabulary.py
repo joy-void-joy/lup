@@ -25,6 +25,7 @@ from lup.policy.shell_rules import (
     ShellSubcommandRule,
 )
 from lup.policy.vocabulary import (
+    bun_rule,
     docker_rule,
     gh_rule,
     git_rule,
@@ -33,6 +34,7 @@ from lup.policy.vocabulary import (
     read_only_rules,
     redirected_rules,
     runner_target_rules,
+    typescript_rule,
 )
 
 
@@ -102,4 +104,11 @@ SHELL_RULES: list[ShellCommandRule] = [
     git_rule(guard_force_push=False, redirect_checkout=True),
     gh_rule(),
     docker_rule(),
+    # The TypeScript half of this project's toolchain. Composed here rather
+    # than inherited, because whether a project has a JS toolchain at all is
+    # that project's fact — and until `bun` is named by some rule, the kernel
+    # refuses every one of its subcommands as inline code, `bun install`
+    # included.
+    bun_rule(),
+    *typescript_rule(),
 ]
