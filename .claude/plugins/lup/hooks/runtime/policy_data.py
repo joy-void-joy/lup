@@ -749,7 +749,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "refiner": "",
             "matcher": "string_replace_lines",
             "strength": "soft",
-            "resolution": "",
+            "resolution": "required",
         },
         {
             "id": "string-split",
@@ -1211,7 +1211,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "refiner": "",
             "matcher": "string_replace_lines",
             "strength": "soft",
-            "resolution": "",
+            "resolution": "required",
         },
         {
             "id": "string-split",

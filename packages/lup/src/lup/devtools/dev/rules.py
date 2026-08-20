@@ -22,9 +22,13 @@ INTRODUCTION = (
     "module that defines and enforces each rule. An edit-hook denial cites its "
     "rule id and this reference. Lup rules enforce repository-specific "
     "architecture and editing conventions; Ruff remains the source of standard "
-    "Python diagnostics. The matching examples for anti-patterns are their "
-    "canonical regular-expression shapes, so this reference cannot drift from "
-    "the edit hook or repository auditor.\n\n"
+    "Python diagnostics. Each anti-pattern's examples are declared on the rule "
+    "itself and run through both the edit hook and the repository auditor by "
+    "the suite, so a shape shown here is one both gates decide that way. The "
+    "cleared column is the neighbouring shape a rule spares — a one-argument "
+    "`.replace` renaming a file, an argless `.split` tokenizing prose — which "
+    "is what says whether a site a denial named is really this rule's "
+    "subject.\n\n"
     "## Typed suppressions\n\n"
     "Suppress one deliberate site with `# lup: ignore[rule-id]` and a reason. "
     "Comma-separated ids cover a line that intentionally matches several rules. "
@@ -92,6 +96,7 @@ def rule_table(rules: list[RegisteredRule]) -> models.MarkdownTable:
             "Family",
             "Scope",
             "Matching example",
+            "Cleared instead",
             "Diagnostic",
             "Suppression",
             "Defined in",
@@ -101,9 +106,11 @@ def rule_table(rules: list[RegisteredRule]) -> models.MarkdownTable:
                 CodeCell(text=rule.id),
                 PlainCell(text=rule.family),
                 PlainCell(text=rule.scope),
-                # A matching shape is a regular expression that may quote a
-                # backtick, which no fence survives.
+                # An example may quote a backtick, which no fence survives.
                 HtmlCodeCell(text=rule.example),
+                HtmlCodeCell(text=rule.cleared)
+                if rule.cleared
+                else PlainCell(text="—"),
                 PlainCell(text=rule.message),
                 suppression_cell(rule.strength),
                 CodeCell(text=rule.defined_in),

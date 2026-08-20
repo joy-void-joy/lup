@@ -27,7 +27,7 @@ import lup.codescan.dispatch as dispatch
 import lup.codescan.grammar as grammar
 import lup.codescan.narrowing as narrowing
 import lup.codescan.portable as portable
-from lup.codescan.common import RuleSelection, RuleStrength
+from lup.codescan.common import AntiPattern, RuleSelection, RuleStrength
 
 type RuleFamily = Literal["anti-pattern", "boundary", "spelling", "architecture"]
 
@@ -36,6 +36,11 @@ type RuleFamily = Literal["anti-pattern", "boundary", "spelling", "architecture"
 # writer and every deny message that cites it must name the same file
 RULE_REFERENCE = "docs/rules.md"
 """Repository-relative path of the generated reference deny messages cite."""
+
+# lup: ignore[constant-declaration] — a rendering of the reference's own table,
+# declared with the projection that writes it rather than chosen per caller
+CLEARED_SEPARATOR = "  ·  "
+"""What separates the near-misses sharing one table cell."""
 
 
 class RegisteredRule(BaseModel, frozen=True):
@@ -52,6 +57,15 @@ class RegisteredRule(BaseModel, frozen=True):
     family: RuleFamily
     scope: str
     example: str
+    cleared: str = ""
+    """The near-miss this rule spares, where it has one written down.
+
+    Empty for the structural scanners, whose cards predate the anti-patterns
+    carrying their own examples. For an anti-pattern it is the neighbouring
+    shape that keeps the same spelling and is not the defect — which is the
+    half of the rule a reader meeting a denial most needs, because it says
+    whether their site is one the gate will go on refusing.
+    """
     message: str
     defined_in: str
     refinement: str = ""
@@ -210,15 +224,56 @@ STRUCTURAL_RULES: list[RegisteredRule] = [
 def anti_pattern_rules(
     rules: antipatterns.AntiPatternSet | None = None,
 ) -> list[RegisteredRule]:
-    """Project every anti-pattern rule into its registry card."""
+    """Project every anti-pattern rule into its registry card.
+
+    The examples are the rule's own, which is what keeps this page from
+    drifting: the same snippets are run through the edit hook and the audit
+    by ``test_each_rule_answers_its_own_examples``, so a card showing a
+    shape either gate no longer decides that way fails the suite. Rendering
+    the regex here said nothing a reader could act on and pinned only that
+    the page had copied the pattern correctly.
+    """
     declared = rules or antipatterns.AntiPatternSet()
     refined = {rule.id: rule.refinement for rule in grammar.GRAMMAR_RULES}
+
+    def showable(rule: AntiPattern, verdict: str) -> list[str]:
+        """This rule's examples of one verdict that survive a table cell.
+
+        A row is one line, and a snippet spanning several — a class body, a
+        try/except — arrives there with its newlines flattened into spaces,
+        which reads as a rendering fault rather than as code. Those examples
+        exist for the suite, which runs them whole; a rule with nothing but
+        multi-line examples of a verdict shows its first one flattened rather
+        than showing nothing at all.
+        """
+        declared = [
+            example.code for example in rule.examples if example.verdict == verdict
+        ]
+        single = [code for code in declared if "\n" not in code]
+        return single or declared[:1]
+
+    def first(rule: AntiPattern, verdict: str) -> str:
+        """The rule's own leading example of one verdict, as a reader sees it."""
+        shown = showable(rule, verdict)
+        return shown[0] if shown else ""
+
+    def spared(rule: AntiPattern) -> str:
+        """Every near-miss the rule clears, in the order it declares them.
+
+        All of them rather than the first, because the replacement and the
+        neighbours that keep the same spelling answer different questions —
+        the message already says what to write instead, while only these say
+        whether the site a denial named is this rule's subject at all.
+        """
+        return CLEARED_SEPARATOR.join(showable(rule, "cleared"))
+
     return [
         RegisteredRule(
             id=rule.id,
             family="anti-pattern",
             scope=scope,
-            example=rule.pattern.pattern,
+            example=first(rule, "flagged"),
+            cleared=spared(rule),
             message=rule.message,
             defined_in=antipatterns.__name__,
             refinement=refined[rule.id] if rule.id in refined else "",
