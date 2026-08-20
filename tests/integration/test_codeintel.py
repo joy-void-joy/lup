@@ -239,13 +239,15 @@ def test_the_oracle_resolves_a_buffer_that_disk_does_not_hold(tmp_path: Path) ->
     server = langserver_path()
     assert server is not None
     (tmp_path / "pyproject.toml").write_text("[project]\nname = 'other'\n")
-    (tmp_path / "vendor.py").write_text(
-        "class Client:\n    def get(self, url): ...\n\n\ndef get(url): ...\n",
-        encoding="utf-8",
-    )
+    # A submodule rather than `vendor.get`, whose receiver is the bare name an
+    # `import` bound: the tree rules that one out without a checker, so it
+    # selects no site and could not show what the buffer reached.
+    (tmp_path / "vendor").mkdir()
+    (tmp_path / "vendor" / "__init__.py").write_text("", encoding="utf-8")
+    (tmp_path / "vendor" / "api.py").write_text("def get(url): ...\n", encoding="utf-8")
     edited = tmp_path / "caller.py"
     edited.write_text("x = 1\n", encoding="utf-8")
-    proposed = 'import vendor\n\nresponse = vendor.get("https://example.com")\n'
+    proposed = 'import vendor.api\n\nresponse = vendor.api.get("https://example.com")\n'
 
     refutations = refute(
         [PythonSource(path=edited, module="caller", text=proposed)],

@@ -1541,8 +1541,48 @@ and so wears exactly the arity of ``str.replace(old, new)``.
 """
 
 
-def string_replace_lines(source: str) -> set[int]:
-    """Lines substituting one piece of text for another inside a string.
+class MatchSite(TypedDict):
+    """One site a selector chose, and the symbol that can settle its fate.
+
+    ``line`` is where the finding and any `# lup: ignore` guarding it sit.
+    ``query_line``/``query_column`` point at the symbol whose declaration
+    would settle the site for a rule whose verdict turns on one — usually on
+    that same line, but not necessarily. ``subject`` is the unparsed source
+    of the expression the verdict is about, quoted back as evidence.
+
+    A rule states the shape it refuses exactly once, here, and both gates
+    read that one statement: :func:`matched_lines` projects the lines out of
+    it, and `lup.codescan.grammar` sends the query coordinates to a type
+    checker. Selecting twice — once for the lines and once for the
+    resolution — is how the two ended up meaning different things.
+    """
+
+    line: int
+    query_line: int
+    query_column: int
+    subject: str
+
+
+def attribute_site(node: ast.Attribute) -> MatchSite:
+    """One `receiver.member` access, keyed on the member rather than the receiver.
+
+    Asking where ``get`` is declared resolves through the receiver's type to
+    the class that defines it, which is the fact a family test needs and the
+    one a checker answers most directly. It also answers where nothing else
+    can: a call expression has no position denoting its result, so
+    ``make().get(k)`` is typed by ``get`` or not at all.
+    """
+    line = node.end_lineno or node.lineno
+    return MatchSite(
+        line=line,
+        query_line=line,
+        query_column=(node.end_col_offset or 0) - len(node.attr),
+        subject=ast.unparse(node.value),
+    )
+
+
+def string_replace_sites(source: str) -> list[MatchSite]:
+    """Sites substituting one piece of text for another inside a string.
 
     Arity is what separates this from the rename that wears the same name:
     ``str.replace`` takes the old text and the new, while a bound
@@ -1552,19 +1592,27 @@ def string_replace_lines(source: str) -> set[int]:
     replace through whenever the variable holding the string was called one.
 
     The unbound spellings in `RENAME_CALLS` are the exception arity cannot
-    reach, and they are named rather than guessed at.
+    reach, and they are named rather than guessed at. What arity cannot reach
+    at all is a two-argument ``replace`` on a value that is not text — a
+    dataframe filling missing values, an AST node rebuilt with one field
+    changed — and that is what the query coordinates are for.
     """
     tree = python_tree(source)
     if tree is None:
-        return set()
-    return {
-        node.func.end_lineno or node.func.value.lineno
+        return []
+    return [
+        attribute_site(node.func)
         for node in nodes_of(tree, ast.Call)
         if isinstance(node.func, ast.Attribute)
         and node.func.attr == "replace"
         and len(node.args) >= 2
         and dotted_of(node.func) not in RENAME_CALLS
-    }
+    ]
+
+
+def string_replace_lines(source: str) -> set[int]:
+    """The lines :func:`string_replace_sites` selects."""
+    return {site["line"] for site in string_replace_sites(source)}
 
 
 def string_split_lines(source: str) -> set[int]:
@@ -1736,8 +1784,8 @@ def default_factory_lines(source: str) -> set[int]:
     }
 
 
-def dict_get_lines(source: str) -> set[int]:
-    """Return the lines where ``.get(`` reads a key out of a mapping.
+def dict_get_sites(source: str) -> list[MatchSite]:
+    """Return the sites where ``.get(`` reads a key out of a mapping.
 
     Two shapes the tree alone rules out, both decidable without types — which
     is what lets a suppression at either be retired rather than demanded by
@@ -1752,13 +1800,13 @@ def dict_get_lines(source: str) -> set[int]:
     a genuine keyed lookup reached *through* a module, so only a name bound
     directly by ``import`` is ruled out, never an attribute of one.
 
-    A receiver whose declared type settles it is the type oracle's to refute
-    in `lup.codescan.grammar`, not this function's — no tree says what an
-    imported class is.
+    What no tree says is what an imported class is, so a receiver whose
+    declared type settles it is left to a checker — reached through the query
+    coordinates each site carries, and refuted in `lup.codescan.grammar`.
     """
     tree = python_tree(source)
     if tree is None:
-        return set()
+        return []
     modules: set[str] = set()
     decorated: set[int] = set()
     reads: list[ast.Attribute] = []
@@ -1782,12 +1830,17 @@ def dict_get_lines(source: str) -> set[int]:
                 )
             case ast.Call(func=ast.Attribute(attr="get") as read):
                 reads.append(read)
-    return {
-        line
+    return [
+        site
         for read in reads
         if not (isinstance(read.value, ast.Name) and read.value.id in modules)
-        and (line := read.end_lineno or read.value.lineno) not in decorated
-    }
+        and (site := attribute_site(read))["line"] not in decorated
+    ]
+
+
+def dict_get_lines(source: str) -> set[int]:
+    """The lines :func:`dict_get_sites` selects."""
+    return {site["line"] for site in dict_get_sites(source)}
 
 
 def empty_collection_lines(source: str) -> set[int]:

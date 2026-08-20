@@ -24,8 +24,17 @@ pytestmark = pytest.mark.skipif(
 
 RESOLUTION_COMMAND = [".venv/bin/lup-devtools", "dev", "refutations"]
 
-PROPOSED = 'import httpx\n\nresponse = httpx.get("https://example.com")\n'
-"""A module-qualified receiver, which resolves outside the mapping family."""
+PROPOSED = (
+    "import queue\n\npending: queue.Queue[str] = queue.Queue()\nvalue = pending.get()\n"
+)
+"""A receiver only a checker settles, declaring a `get` outside the mapping family.
+
+A module-qualified `httpx.get` would not do: the tree rules that out on its
+own, so no site is selected and nothing is asked of a checker — which is the
+point of ruling it out, and the reason it cannot stand in for one that is.
+`queue.Queue` declares a real `get` and is no mapping, so a refutation here
+is evidence the chain resolved a declaration and read a class out of it.
+"""
 
 
 def unwritten(root: Path) -> str:
@@ -43,7 +52,7 @@ def test_the_host_resolves_a_receiver_the_gate_could_not() -> None:
 
     refuted = resolved_refutations(unwritten(root), PROPOSED, RESOLUTION_COMMAND)
 
-    assert refuted == {"dict-get": [3]}
+    assert refuted == {"dict-get": [4]}
     assert not Path(unwritten(root)).exists(), "resolving wrote the file"
 
 

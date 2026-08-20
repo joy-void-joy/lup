@@ -7,7 +7,10 @@ line rule, the dead directives the refinement exposes, and the pyright client
 that implements the port when one is installed.
 """
 
+import ast
 from pathlib import Path
+
+import pytest
 
 from lup.codescan.antipatterns import PYTHON_ANTI_PATTERNS, audit_text
 from lup.codescan.common import PythonSource
@@ -15,7 +18,6 @@ from lup.codescan.grammar import (
     GRAMMAR_RULES,
     GrammarRule,
     TypeFamily,
-    attribute_call_sites,
     refute,
 )
 from lup.codescan.oracle import (
@@ -25,7 +27,7 @@ from lup.codescan.oracle import (
     SourcePosition,
 )
 from lup.policy.bundle import bundled_antipattern_rows
-from lup.policy.kernel.edit import antipattern_decision
+from lup.policy.kernel.edit import MatchSite, antipattern_decision, attribute_site
 from lup.policy.kernel.rows import AntiPatternRow
 
 from lup.codeintel.client import utf16_column
@@ -307,11 +309,25 @@ def test_unparseable_source_refutes_nothing(tmp_path: Path) -> None:
 
 
 def test_engine_carries_a_rule_it_was_not_written_for(tmp_path: Path) -> None:
-    """A new rule is a selector and a family, not a change to the engine."""
+    """A new rule is a selector and a family, not a change to the engine.
+
+    The selector is written here rather than borrowed from a shipped rule, so
+    what this pins is that the engine takes any `str -> list[MatchSite]` and
+    asks its family about whatever it yields.
+    """
+
+    def calls_on_a_name(text: str) -> list[MatchSite]:
+        tree = ast.parse(text)
+        return [
+            attribute_site(node.func)
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+        ]
+
     declaring = stubs(tmp_path)
     rule = GrammarRule(
         id="string-replace",
-        select=attribute_call_sites("replace"),
+        select=calls_on_a_name,
         family=TypeFamily(name="text", classes=["str"]),
         refinement="only text receivers are string surgery",
     )
@@ -362,6 +378,44 @@ def test_an_unrefined_rule_declares_no_resolution() -> None:
     rows = bundled_antipattern_rows()[".py"]
     refined = {rule.id for rule in GRAMMAR_RULES}
     assert {row["id"] for row in rows if row["resolution"] == "required"} == refined
+
+
+DIVERGENCES = [
+    "import httpx\n\nreply = httpx.get(url)\n",
+    '@app.get("/x")\ndef read() -> None: ...\n',
+    "moved = Path(source).replace(destination)\n",
+    "value = payload.get('name')\n",
+    "name = source.replace('.py', '.pyi')\n",
+    "value = client.get(payload.get('url'))\n",
+]
+"""Every shape the two readings of these rules used to disagree about.
+
+The first three are settled by the tree and were selected by the grammar
+anyway; the last three are the rules' real subjects. A rule stated once
+cannot tell them apart differently on the two sides, which is what the test
+below asks rather than assumes.
+"""
+
+
+@pytest.mark.parametrize("text", DIVERGENCES)
+def test_a_refined_rule_selects_exactly_what_its_matcher_flags(text: str) -> None:
+    """One selector per rule, so the two gates cannot mean different sites.
+
+    The lines the kernel flags are projected out of the same function the
+    grammar sends to a checker. Stated twice, the wider reading spends a
+    checker session on sites no finding rests on, and the narrower refutes
+    lines nothing ever flagged — a marker one gate demands and the other
+    reports dead, which is the deadlock this whole family exists to avoid.
+    """
+    matchers = {
+        rule.id: rule.matcher.select
+        for rule in PYTHON_ANTI_PATTERNS
+        if rule.matcher is not None
+    }
+
+    for rule in GRAMMAR_RULES:
+        selected = {site["line"] for site in rule.select(text)}
+        assert selected == matchers[rule.id](text), rule.id
 
 
 def test_the_gate_asks_where_nothing_resolved_the_receiver() -> None:

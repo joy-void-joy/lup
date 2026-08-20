@@ -16,11 +16,18 @@ dispatcher shells out to `lup-devtools dev refutations` with the text it is
 about to write and passes the answer into the kernel as a fact. Both arrive
 as the same `Refutation` rows, so the two gates decide these rules alike.
 
-A rule here is three things: a **selector** that walks an AST and yields the
-sites it is about, a **family** of classes the site's subject must belong to
-for the rule to stand, and the prose explaining the refinement in the rule
-reference. Selectors are typed callables rather than a matcher mini-language,
-so a new rule is a function over `ast` rather than an extension to a schema —
+A rule here adds one thing to the anti-pattern rule it shares an id with: a
+**family** of classes the site's subject must belong to for the rule to
+stand. The **selector** is the anti-pattern's own — the same function the
+kernel projects its violating lines out of — so the shape is stated once, in
+`lup.policy.kernel.edit`, and what this module contributes is the question to
+ask about it. A rule stating its sites twice, once for the lines and once for
+the resolution, is two rules wearing one id: the wider reading spends checker
+sessions on sites no finding rests on, and the narrower refutes lines nothing
+ever flagged.
+
+Selectors stay typed callables rather than a matcher mini-language, so a new
+rule is a function over `ast` rather than an extension to a schema —
 `isinstance` narrowing over a project model union, for instance, selects call
 arguments where this rule selects call receivers, and reuses everything else.
 
@@ -33,8 +40,8 @@ receiver whose declaration the checker cannot find yields no verdict at all.
 
 That last case is the engine's default. A rule refutes a line only when every
 site on it resolves to a declaration proven outside the family; unresolved,
-unparseable, and oracle-less runs all leave the broad regex verdict standing,
-so the refinement can only ever remove false positives and never hide a real
+unparseable, and oracle-less runs all leave the selected verdict standing, so
+the refinement can only ever remove false positives and never hide a real
 one.
 """
 
@@ -45,7 +52,12 @@ from pathlib import Path
 from pydantic import BaseModel
 
 from lup.codescan.common import PythonSource, Refutation
-from lup.policy.kernel.edit import python_nodes, python_tree
+from lup.policy.kernel.edit import (
+    MatchSite,
+    dict_get_sites,
+    python_nodes,
+    string_replace_sites,
+)
 from lup.codescan.oracle import (
     DefinitionOracle,
     DefinitionSite,
@@ -54,24 +66,15 @@ from lup.codescan.oracle import (
 )
 
 
-class MatchSite(BaseModel, frozen=True):
-    """One AST site a selector chose, and the symbol that decides its fate.
+type SiteSelector = Callable[[str], list[MatchSite]]
+"""Reads one module's source and yields every site a rule is about.
 
-    ``line`` is where the finding and any `# lup: ignore` guarding it sit —
-    the line the broad regex would flag. ``query_line``/``query_column`` point
-    at the symbol whose declaration settles the site, which is usually on that
-    same line but need not be. ``subject`` is the unparsed source of the
-    expression the verdict is about, quoted back as evidence.
-    """
-
-    line: int
-    query_line: int
-    query_column: int
-    subject: str
-
-
-type SiteSelector = Callable[[ast.Module], list[MatchSite]]
-"""Walks one parsed module and yields every site a rule is about."""
+The rule's own selector, the same object the kernel projects lines out of —
+not a second reading of the same rule written in the terms this side needs.
+A selector that admitted more than its rule flags would spend a checker
+session on sites no finding rests on; one that admitted less would refute
+lines the audit was never asked about. Both are what sharing removes.
+"""
 
 
 class TypeFamily(BaseModel, frozen=True):
@@ -205,39 +208,10 @@ declaration says so.
 """
 
 
-def attribute_call_sites(attribute: str) -> SiteSelector:
-    """Select every `receiver.<attribute>(...)` call, keyed on the receiver.
-
-    The queried symbol is the attribute itself: asking where `get` is declared
-    resolves through the receiver's type to the class that defines it, which
-    is the fact the rule needs and the one a checker answers most directly.
-    """
-
-    def site_of(node: ast.Attribute) -> MatchSite:
-        line = node.end_lineno or node.lineno
-        return MatchSite(
-            line=line,
-            query_line=line,
-            query_column=(node.end_col_offset or 0) - len(attribute),
-            subject=ast.unparse(node.value),
-        )
-
-    def select(tree: ast.Module) -> list[MatchSite]:
-        return [
-            site_of(node.func)
-            for node in python_nodes(tree)
-            if isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Attribute)
-            and node.func.attr == attribute
-        ]
-
-    return select
-
-
 GRAMMAR_RULES: list[GrammarRule] = [
     GrammarRule(
         id="dict-get",
-        select=attribute_call_sites("get"),
+        select=dict_get_sites,
         family=MAPPING_FAMILY,
         refinement=(
             "Both gates resolve what the receiver's `get` is declared on and "
@@ -255,7 +229,7 @@ GRAMMAR_RULES: list[GrammarRule] = [
     ),
     GrammarRule(
         id="string-replace",
-        select=attribute_call_sites("replace"),
+        select=string_replace_sites,
         family=TEXT_FAMILY,
         refinement=(
             "Arity is what selects the site: `str.replace` takes the old text "
@@ -357,18 +331,17 @@ class SelectedSite(BaseModel, frozen=True):
 def selected_sites(
     sources: list[PythonSource], rules: list[GrammarRule]
 ) -> list[SelectedSite]:
-    """Run every rule's selector over every parseable source, in file order."""
-    selected: list[SelectedSite] = []
-    for source in sources:
-        tree = python_tree(source.text)
-        if tree is None:
-            continue  # the audit's regex pass still covers text that will not parse
-        selected.extend(
-            SelectedSite(file=source.path.as_posix(), rule=rule, site=site)
-            for rule in rules
-            for site in rule.select(tree)
-        )
-    return selected
+    """Run every rule's selector over every source, in file order.
+
+    Text that will not parse selects nothing, because that is what a kernel
+    selector answers for it — and the audit's pattern pass still covers it.
+    """
+    return [
+        SelectedSite(file=source.path.as_posix(), rule=rule, site=site)
+        for source in sources
+        for rule in rules
+        for site in rule.select(source.text)
+    ]
 
 
 def refute(
@@ -417,8 +390,8 @@ def refute(
         [
             SourcePosition(
                 path=Path(chosen.file),
-                line=chosen.site.query_line,
-                column=chosen.site.query_column,
+                line=chosen.site["query_line"],
+                column=chosen.site["query_column"],
             )
             for chosen in selected
         ],
@@ -440,21 +413,21 @@ def refute(
         if not origins:
             return Refutation(
                 rule_id=chosen.rule.id,
-                line=chosen.site.line,
-                subject=chosen.site.subject,
+                line=chosen.site["line"],
+                subject=chosen.site["subject"],
                 evidence=(
                     f"the checker resolved no declaration for "
-                    f"`{chosen.site.subject}`, so nothing puts it in the "
+                    f"`{chosen.site['subject']}`, so nothing puts it in the "
                     f"{chosen.rule.family.name} family"
                 ),
             )
         foreign = origins[0]
         return Refutation(
             rule_id=chosen.rule.id,
-            line=chosen.site.line,
-            subject=chosen.site.subject,
+            line=chosen.site["line"],
+            subject=chosen.site["subject"],
             evidence=(
-                f"`{chosen.site.subject}` resolves to {foreign.describe()} declared "
+                f"`{chosen.site['subject']}` resolves to {foreign.describe()} declared "
                 f"at {foreign.path.as_posix()}:{foreign.line}, outside the "
                 f"{chosen.rule.family.name} family"
             ),
@@ -465,7 +438,7 @@ def refute(
         for chosen, definitions in zip(selected, resolved, strict=True)
     ]
     standing = {
-        (chosen.file, chosen.rule.id, chosen.site.line)
+        (chosen.file, chosen.rule.id, chosen.site["line"])
         for chosen, refutation in judged
         if refutation is None
     }
@@ -474,7 +447,7 @@ def refute(
     for chosen, refutation in judged:
         if refutation is None:
             continue
-        if (chosen.file, chosen.rule.id, chosen.site.line) in standing:
+        if (chosen.file, chosen.rule.id, chosen.site["line"]) in standing:
             continue
         refutations.setdefault(chosen.file, []).append(refutation)
     return {
