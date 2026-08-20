@@ -1141,6 +1141,167 @@ def set_shape_lines(source: str) -> set[int]:
     )
 
 
+def bare_except_lines(source: str) -> set[int]:
+    """Lines opening an `except:` that names no exception."""
+    tree = python_tree(source)
+    if tree is None:
+        return set()
+    return {
+        node.lineno
+        for node in python_nodes(tree)
+        if isinstance(node, ast.ExceptHandler) and node.type is None
+    }
+
+
+def except_baseexception_lines(source: str) -> set[int]:
+    """Lines catching `BaseException`, alone or among others."""
+    tree = python_tree(source)
+    if tree is None:
+        return set()
+
+    def caught(node: ast.expr | None) -> Iterator[str]:
+        match node:
+            case ast.Tuple(elts=elts):
+                for element in elts:
+                    yield from caught(element)
+            case ast.expr():
+                yield dotted_of(node).rsplit(".", 1)[-1]
+
+    return {
+        node.lineno
+        for node in python_nodes(tree)
+        if isinstance(node, ast.ExceptHandler)
+        and "BaseException" in set(caught(node.type))
+    }
+
+
+def global_statement_lines(source: str) -> set[int]:
+    """Lines declaring a name `global`."""
+    tree = python_tree(source)
+    if tree is None:
+        return set()
+    return {node.lineno for node in python_nodes(tree) if isinstance(node, ast.Global)}
+
+
+def all_export_lines(source: str) -> set[int]:
+    """Lines binding `__all__`.
+
+    A module's export list wherever it is bound — assigned, annotated, or
+    appended to — rather than wherever those eight characters sit next to an
+    equals sign.
+    """
+    tree = python_tree(source)
+    if tree is None:
+        return set()
+
+    def binds(node: ast.AST) -> Iterator[ast.expr]:
+        match node:
+            case ast.Assign(targets=targets):
+                yield from targets
+            case ast.AnnAssign(target=target) | ast.AugAssign(target=target):
+                yield target
+
+    return {
+        target.lineno
+        for node in python_nodes(tree)
+        for target in binds(node)
+        if dotted_of(target) == "__all__"
+    }
+
+
+def model_config_lines(source: str) -> set[int]:
+    """Lines binding `model_config` in a class body.
+
+    The class body is what makes it pydantic's configuration rather than an
+    ordinary name, and the tree says which statements are in one — where the
+    pattern had to settle for the name sitting at the start of a line.
+    """
+    tree = python_tree(source)
+    if tree is None:
+        return set()
+
+    def bound(node: ast.stmt) -> Iterator[ast.expr]:
+        match node:
+            case ast.Assign(targets=targets):
+                yield from targets
+            case ast.AnnAssign(target=target):
+                yield target
+
+    return {
+        target.lineno
+        for node in python_nodes(tree)
+        if isinstance(node, ast.ClassDef)
+        for statement in node.body
+        for target in bound(statement)
+        if dotted_of(target) == "model_config"
+    }
+
+
+def private_function_lines(source: str) -> set[int]:
+    """Lines defining a function whose name claims to be private.
+
+    A dunder is the language's own protocol rather than a privacy claim, and
+    a lone underscore names something deliberately unused, so neither is one
+    of these.
+    """
+    tree = python_tree(source)
+    if tree is None:
+        return set()
+    return {
+        node.lineno
+        for node in python_nodes(tree)
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
+        and node.name.startswith("_")
+        and not node.name.startswith("__")
+        and len(node.name) > 1
+    }
+
+
+def private_class_lines(source: str) -> set[int]:
+    """Lines defining a class whose name claims to be private."""
+    tree = python_tree(source)
+    if tree is None:
+        return set()
+    return {
+        node.lineno
+        for node in python_nodes(tree)
+        if isinstance(node, ast.ClassDef)
+        and node.name.startswith("_")
+        and not node.name.startswith("__")
+        and len(node.name) > 1
+    }
+
+
+def private_variable_lines(source: str) -> set[int]:
+    """Lines binding a module-level name that claims to be private.
+
+    Module level, because that is the scope a name is published from: a local
+    called ``_seen`` is nobody's interface, and the pattern reached for the
+    same thing by requiring the name to start its line. A tuple unpacking
+    binds several names at once and is not a declaration of any one of them.
+    """
+    tree = python_tree(source)
+    if tree is None:
+        return set()
+
+    def bound(node: ast.stmt) -> Iterator[ast.expr]:
+        match node:
+            case ast.Assign(targets=[ast.Name() as target]):
+                yield target
+            case ast.AnnAssign(target=ast.Name() as target):
+                yield target
+
+    return {
+        target.lineno
+        for statement in tree.body
+        for target in bound(statement)
+        if isinstance(target, ast.Name)
+        and target.id.startswith("_")
+        and not target.id.startswith("__")
+        and len(target.id) > 1
+    }
+
+
 def generic_base_lines(source: str) -> set[int]:
     """Lines declaring a `Generic[...]` base."""
     tree = python_tree(source)
@@ -1718,6 +1879,22 @@ def matcher_named(name: str) -> Callable[[str], set[int]] | None:
             return frozenset_shape_lines
         case "set_shape_lines":
             return set_shape_lines
+        case "bare_except_lines":
+            return bare_except_lines
+        case "except_baseexception_lines":
+            return except_baseexception_lines
+        case "global_statement_lines":
+            return global_statement_lines
+        case "all_export_lines":
+            return all_export_lines
+        case "model_config_lines":
+            return model_config_lines
+        case "private_function_lines":
+            return private_function_lines
+        case "private_class_lines":
+            return private_class_lines
+        case "private_variable_lines":
+            return private_variable_lines
         case "tuple_shape_lines":
             return tuple_shape_lines
         case "default_factory_lines":

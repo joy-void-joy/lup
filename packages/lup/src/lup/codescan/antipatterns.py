@@ -78,6 +78,14 @@ from lup.codescan.common import (
 )
 from lup.harness.contracts import Spelling, Unsupported
 from lup.policy.kernel.edit import (
+    all_export_lines,
+    bare_except_lines,
+    except_baseexception_lines,
+    global_statement_lines,
+    model_config_lines,
+    private_class_lines,
+    private_function_lines,
+    private_variable_lines,
     any_type_lines,
     bare_basemodel_lines,
     bare_object_lines,
@@ -170,6 +178,7 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
     AntiPattern(
         id="all-export",
         pattern=re.compile(r"__all__\s*[=:]"),
+        matcher=Matcher(select=all_export_lines),
         message="No __all__ — import directly from the defining module",
     ),
     AntiPattern(
@@ -387,11 +396,13 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
     AntiPattern(
         id="bare-except",
         pattern=re.compile(r"\bexcept\s*:"),
+        matcher=Matcher(select=bare_except_lines),
         message="Bare `except:` catches SystemExit/KeyboardInterrupt — name the exception",
     ),
     AntiPattern(
         id="except-baseexception",
         pattern=re.compile(r"\bexcept\s+BaseException\b"),
+        matcher=Matcher(select=except_baseexception_lines),
         message="except BaseException catches KeyboardInterrupt — use Exception or narrower",
     ),
     AntiPattern(
@@ -429,6 +440,7 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         # inside a docstring or comment is already blank by the time it matches.
         id="model-config",
         pattern=re.compile(r"^\s*model_config\s*[:=]"),
+        matcher=Matcher(select=model_config_lines),
         message="Declare pydantic configuration as class keywords — "
         "class A(BaseModel, frozen=True, extra='forbid') — instead of assigning "
         "model_config, so the configuration reads in the header beside the class "
@@ -503,22 +515,26 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
     AntiPattern(
         id="global-statement",
         pattern=re.compile(r"^global\s+\w"),
+        matcher=Matcher(select=global_statement_lines),
         message="No `global` statements — mutate a module-level holder object or pass "
         "state explicitly",
     ),
     AntiPattern(
         id="private-function",
         pattern=re.compile(r"\bdef\s+_[a-zA-Z]"),
+        matcher=Matcher(select=private_function_lines),
         message="No `_` prefix on functions/methods — nothing is private (nest inside caller if needed)",
     ),
     AntiPattern(
         id="private-class",
         pattern=re.compile(r"\bclass\s+_[A-Z]"),
+        matcher=Matcher(select=private_class_lines),
         message="No `_` prefix on classes — nothing is private",
     ),
     AntiPattern(
         id="private-variable",
         pattern=re.compile(r"^_[a-zA-Z]\w*\s*(?::[^=]*)?=(?!=)(?!.*,\s*$)"),
+        matcher=Matcher(select=private_variable_lines),
         message="No `_` prefix on variables/constants — nothing is private "
         "(unused `_` function parameters are exempt)",
     ),
