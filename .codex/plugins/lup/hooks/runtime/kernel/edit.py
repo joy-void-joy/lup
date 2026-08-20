@@ -1007,6 +1007,203 @@ OS_FILE_CALLS = frozenset(  # lup: ignore[frozenset-shape] — a membership test
 """Every `os` filesystem call `pathlib` has its own spelling for."""
 
 
+def subscripts_of(tree: ast.Module, names: AbstractSet[str]) -> set[int]:
+    """Lines subscripting one of `names`, however the name was reached.
+
+    ``Generic[T]`` and ``typing.Generic[T]`` are the same declaration, so the
+    terminal name is what decides rather than the path taken to it.
+    """
+    return {
+        node.lineno
+        for node in python_nodes(tree)
+        if isinstance(node, ast.Subscript)
+        and dotted_of(node.value).rsplit(".", 1)[-1] in names
+    }
+
+
+# lup: ignore[library-default] — the typing aliases PEP 604 and PEP 585 replaced; the kernel carries no config
+CAPITALIZED_GENERICS = frozenset(  # lup: ignore[frozenset-shape] — a membership test
+    {"List", "Dict", "Tuple", "Set"}
+)
+"""The capitalized `typing` aliases the builtin generics replaced."""
+
+# lup: ignore[library-default] — the scalar builtins a payload map's value would be; the kernel carries no config
+SCALAR_TYPES = frozenset(  # lup: ignore[frozenset-shape] — a membership test, no keys
+    {"str", "int", "float", "bool", "bytes", "complex"}
+)
+"""Every builtin whose values carry no fields of their own."""
+
+
+def annotations_of(tree: ast.Module) -> Iterator[ast.expr]:
+    """Every expression written where a type annotation goes.
+
+    A variable's declared type, a parameter's, and a return — the three
+    places a name means "the type of this" rather than a value. Reading them
+    is what separates ``x: object`` from a dict entry keyed ``"x"`` whose
+    value is the builtin, which a colon in a character class cannot do.
+
+    An unused parameter is not one of these. Its annotation belongs to
+    somebody else's callback signature rather than to a value this code was
+    going to narrow, and the leading underscore is this repository's own mark
+    for one — the same convention that exempts it from the privacy rule.
+    """
+    for node in python_nodes(tree):
+        match node:
+            case ast.AnnAssign(annotation=annotation):
+                yield annotation
+            case ast.arg(arg=name, annotation=ast.expr() as annotation) if (
+                not name.startswith("_")
+            ):
+                yield annotation
+            case (
+                ast.FunctionDef(returns=ast.expr() as annotation)
+                | ast.AsyncFunctionDef(returns=ast.expr() as annotation)
+            ):
+                yield annotation
+
+
+def annotated_exactly(tree: ast.Module, names: AbstractSet[str]) -> set[int]:
+    """Lines annotating something as exactly one of `names`.
+
+    Exactly, so a name that is only a member of the annotation does not
+    count: ``list[object]`` says what it holds, and ``X | BaseModel`` names a
+    union that the bare form does not. That is the reach the patterns bought
+    with a lookahead for a closing bracket or a pipe, said directly.
+    """
+    return {
+        annotation.lineno
+        for annotation in annotations_of(tree)
+        if dotted_of(annotation).rsplit(".", 1)[-1] in names
+    }
+
+
+def any_type_lines(source: str) -> set[int]:
+    """Lines reaching `Any`, as an annotation, inside one, or by import.
+
+    Every use, because the rule refuses the type rather than one position of
+    it: `list[Any]` and `cast(Any, x)` say exactly what `x: Any` says, and
+    importing it is reaching for it too.
+    """
+    tree = python_tree(source)
+    if tree is None:
+        return set()
+    return imported_symbols_of(tree, "typing", {"Any"}) | {
+        node.lineno
+        for node in python_nodes(tree)
+        if isinstance(node, ast.Name) and node.id == "Any"
+    }
+
+
+def bare_object_lines(source: str) -> set[int]:
+    """Lines annotating something as bare `object`."""
+    tree = python_tree(source)
+    return set() if tree is None else annotated_exactly(tree, {"object"})
+
+
+def bare_basemodel_lines(source: str) -> set[int]:
+    """Lines annotating a parameter or return as exactly `BaseModel`."""
+    tree = python_tree(source)
+    return set() if tree is None else annotated_exactly(tree, {"BaseModel"})
+
+
+def frozenset_shape_lines(source: str) -> set[int]:
+    """Lines declaring or constructing a frozenset.
+
+    The annotation, the subscripted shape, and the constructor alike — each
+    one is the declaration the rule is about, and a comprehension handed to
+    the constructor is still a frozenset being declared.
+    """
+    tree = python_tree(source)
+    if tree is None:
+        return set()
+    return (
+        annotated_exactly(tree, {"frozenset"})
+        | subscripts_of(tree, {"frozenset"})
+        | calls_of(tree, {"frozenset"})
+    )
+
+
+def set_shape_lines(source: str) -> set[int]:
+    """Lines declaring or constructing a `set`.
+
+    The declaration is the subject, so an annotation, a subscripted shape and
+    a call to the constructor all count, while a set comprehension does not —
+    the rule's own remedy is to reach for one of those locally instead of
+    declaring the set as the interface.
+    """
+    tree = python_tree(source)
+    if tree is None:
+        return set()
+    return (
+        annotated_exactly(tree, {"set"})
+        | subscripts_of(tree, {"set"})
+        | calls_of(tree, {"set"})
+    )
+
+
+def generic_base_lines(source: str) -> set[int]:
+    """Lines declaring a `Generic[...]` base."""
+    tree = python_tree(source)
+    return set() if tree is None else subscripts_of(tree, {"Generic"})
+
+
+def typing_union_lines(source: str) -> set[int]:
+    """Lines spelling a union as `Optional[...]` or `Union[...]`."""
+    tree = python_tree(source)
+    if tree is None:
+        return set()
+    return subscripts_of(tree, {"Optional", "Union"})
+
+
+def typing_generics_lines(source: str) -> set[int]:
+    """Lines subscripting a capitalized `typing` alias."""
+    tree = python_tree(source)
+    return set() if tree is None else subscripts_of(tree, CAPITALIZED_GENERICS)
+
+
+def mapping_value_lines(source: str, values: AbstractSet[str]) -> set[int]:
+    """Lines declaring a string-keyed mapping whose values are in `values`.
+
+    A union counts as its members: ``dict[str, str | None]`` is the same open
+    map of scalars that ``dict[str, str]`` is, and the annotation reaching a
+    scalar through a union is what the pattern's word boundary happened to
+    catch and what reading the tree states outright.
+    """
+    tree = python_tree(source)
+    if tree is None:
+        return set()
+
+    def reaches(node: ast.expr) -> bool:
+        match node:
+            case ast.BinOp(left=left, right=right):
+                return reaches(left) or reaches(right)
+            case ast.Constant(value=None):
+                return False
+        return dotted_of(node).rsplit(".", 1)[-1] in values
+
+    return {
+        node.lineno
+        for node in python_nodes(tree)
+        if isinstance(node, ast.Subscript)
+        and dotted_of(node.value).rsplit(".", 1)[-1]
+        in ("dict", "Mapping", "MutableMapping")
+        and isinstance(node.slice, ast.Tuple)
+        and len(node.slice.elts) == 2
+        and dotted_of(node.slice.elts[0]).rsplit(".", 1)[-1] == "str"
+        and reaches(node.slice.elts[1])
+    }
+
+
+def dict_str_object_lines(source: str) -> set[int]:
+    """Lines declaring a string-keyed map of bare `object`."""
+    return mapping_value_lines(source, {"object"})
+
+
+def dict_str_payload_lines(source: str) -> set[int]:
+    """Lines declaring a string-keyed map of scalars."""
+    return mapping_value_lines(source, SCALAR_TYPES)
+
+
 def re_call_lines(source: str) -> set[int]:
     """Lines calling a regex-module entry point."""
     tree = python_tree(source)
@@ -1501,6 +1698,26 @@ def matcher_named(name: str) -> Callable[[str], set[int]] | None:
             return string_split_lines
         case "string_strip_lines":
             return string_strip_lines
+        case "generic_base_lines":
+            return generic_base_lines
+        case "typing_union_lines":
+            return typing_union_lines
+        case "typing_generics_lines":
+            return typing_generics_lines
+        case "dict_str_object_lines":
+            return dict_str_object_lines
+        case "dict_str_payload_lines":
+            return dict_str_payload_lines
+        case "any_type_lines":
+            return any_type_lines
+        case "bare_object_lines":
+            return bare_object_lines
+        case "bare_basemodel_lines":
+            return bare_basemodel_lines
+        case "frozenset_shape_lines":
+            return frozenset_shape_lines
+        case "set_shape_lines":
+            return set_shape_lines
         case "tuple_shape_lines":
             return tuple_shape_lines
         case "default_factory_lines":

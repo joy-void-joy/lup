@@ -78,6 +78,16 @@ from lup.codescan.common import (
 )
 from lup.harness.contracts import Spelling, Unsupported
 from lup.policy.kernel.edit import (
+    any_type_lines,
+    bare_basemodel_lines,
+    bare_object_lines,
+    frozenset_shape_lines,
+    set_shape_lines,
+    dict_str_object_lines,
+    dict_str_payload_lines,
+    generic_base_lines,
+    typing_generics_lines,
+    typing_union_lines,
     cast_lines,
     eval_exec_lines,
     os_environ_lines,
@@ -114,6 +124,7 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
     AntiPattern(
         id="any-type",
         pattern=re.compile(r"\bAny\b"),
+        matcher=Matcher(select=any_type_lines),
         message="Never use Any — use specific types, TypedDict, or BaseModel",
     ),
     AntiPattern(
@@ -136,18 +147,21 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
     ),
     AntiPattern(
         id="generic-base",
+        matcher=Matcher(select=generic_base_lines),
         strength="strong",
         pattern=re.compile(r"\bGeneric\["),
         message="Use Python 3.12+ class[T] syntax instead of Generic[T]",
     ),
     AntiPattern(
         id="typing-union",
+        matcher=Matcher(select=typing_union_lines),
         strength="strong",
         pattern=re.compile(r"\b(?:Optional|Union)\["),
         message="Use PEP 604 unions — X | None instead of Optional, X | Y instead of Union",
     ),
     AntiPattern(
         id="typing-generics",
+        matcher=Matcher(select=typing_generics_lines),
         strength="strong",
         pattern=re.compile(r"\b(?:List|Dict|Tuple|Set)\["),
         message="Use lowercase builtin generics — list, dict, tuple, set — "
@@ -161,6 +175,7 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
     AntiPattern(
         id="dict-str-object",
         pattern=re.compile(r"\b(?:dict|Mapping)\[\s*str\s*,\s*object\s*\]"),
+        matcher=Matcher(select=dict_str_object_lines),
         message="Never use dict[str, object] or Mapping[str, object] — use TypedDict or BaseModel",
     ),
     AntiPattern(
@@ -177,6 +192,7 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
             r"\b(?:dict|Mapping|MutableMapping)\[\s*str\s*,"
             r"\s*(?:str|int|float|bool|bytes|complex)\b"
         ),
+        matcher=Matcher(select=dict_str_payload_lines),
         message="String-keyed dict with a scalar value hides shape when the keys are a "
         "CLOSED, enumerable set — use a BaseModel or dict[Literal[...], V]. When the keys "
         "are open and data-driven (a registry/cache/counter keyed by external data) this is "
@@ -200,12 +216,14 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
     AntiPattern(
         id="bare-object",
         pattern=re.compile(r"(?:(?<!\w)(?!_)\w+\s*:|->)\s*object\b"),
+        matcher=Matcher(select=bare_object_lines),
         message="Bare `object` says nothing about the value — use a concrete type, "
         "TypedDict, or BaseModel, and narrow at untyped boundaries",
     ),
     AntiPattern(
         id="bare-basemodel",
         pattern=re.compile(r"(?:(?<!\[)\b\w+\s*:|->)\s*BaseModel\b(?!\s*[\]|])"),
+        matcher=Matcher(select=bare_basemodel_lines),
         message="A parameter or return annotated exactly BaseModel accepts any model — "
         "name the concrete union of models or make the function generic",
     ),
@@ -227,6 +245,7 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         # legitimate site — `# lup: ignore[frozenset-shape]` marks it.
         id="frozenset-shape",
         pattern=re.compile(r"\bfrozenset\b"),
+        matcher=Matcher(select=frozenset_shape_lines),
         message="A declared `frozenset[...]` shape or constant collapses structure a "
         "`dict[...]` keeps — each member is a bare name, and whatever it keyed has nowhere "
         "left to live. Use a dict, frozen once 3.15 ships `frozendict`, or a purpose-built "
@@ -242,6 +261,7 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         # its "set" is not a standalone word.
         id="set-shape",
         pattern=re.compile(r"(?<!\.)\bset[\[(]|(?::|->)\s*set\b"),
+        matcher=Matcher(select=set_shape_lines),
         message="A declared `set` collapses structure a `dict[...]` keeps — a bare set "
         "of strings is a record that lost its other fields, so whatever each member "
         "keyed has nowhere left to live. Use a dict when the members key something, or "
