@@ -22,7 +22,8 @@ offending line or as a file-level directive, with a reason.
 """
 
 import ast
-from collections.abc import Collection, Sequence
+from collections import deque
+from collections.abc import Collection, Iterator, Sequence
 from pathlib import Path
 from typing import get_args
 
@@ -410,6 +411,27 @@ def literal_string(node: ast.AST) -> str | None:
     return None
 
 
+def unfolded_nodes(tree: ast.AST) -> Iterator[ast.AST]:
+    """Every node, never descending into one its parent already reads whole.
+
+    `literal_string` folds a `BinOp` or a `JoinedStr` into the single string
+    the source writes, so that node's descendants are parts of a value already
+    judged rather than values of their own. Declining to descend says that
+    once. Walking in and marking each descendant folded says it once per
+    ancestor above it, and a concatenation chain has an ancestor per line —
+    which is quadratic in exactly the long messages this rule exists to read.
+
+    Breadth-first, like the `ast.walk` it stands in for, so a file's
+    violations come back in the order they always did.
+    """
+    pending = deque([tree])
+    while pending:
+        node = pending.popleft()
+        yield node
+        if not isinstance(node, ast.BinOp | ast.JoinedStr):
+            pending.extend(ast.iter_child_nodes(node))
+
+
 def native_spelling_violations(text: str) -> list[SourceViolation]:
     """Find provider wire spellings in code strings outside native ownership."""
     try:
@@ -419,14 +441,7 @@ def native_spelling_violations(text: str) -> list[SourceViolation]:
     lines = text.splitlines()
     context = PythonContext.parse(text)
     violations: list[SourceViolation] = []  # lup: ignore[empty-collection]
-    folded_children: set[int] = set()  # lup: ignore[set-shape,empty-collection]
-    for node in ast.walk(tree):
-        if isinstance(node, ast.BinOp | ast.JoinedStr):
-            folded_children.update(
-                id(child) for child in ast.walk(node) if child is not node
-            )
-        if id(node) in folded_children:
-            continue
+    for node in unfolded_nodes(tree):
         value = literal_string(node)
         line_number = getattr(node, "lineno", 0)
         if value is None or line_number in context.docstring_lines:
