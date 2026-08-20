@@ -21,6 +21,8 @@ lup never heard of -- which is the whole of the extension story, exactly as
 it is for shell rules.
 """
 
+from pathlib import Path
+
 from lup.harness.requirements import (
     Advisory,
     AnyOf,
@@ -108,6 +110,74 @@ def container_requirement(
     )
 
 
+def same_path_mount_requirement(
+    where: Side = "host",
+    install: list[str] = [],
+    image: str = "docker.io/library/busybox:latest",
+    probe: Path = Path("/tmp/lup-same-path-probe"),
+    witness: str = "pyproject.toml",
+) -> Requirement:
+    """Whether this host can bind-mount a directory at its own absolute path.
+
+    The prerequisite the worktree rail rests on, and one that has already been
+    found false. A linked worktree's `.git` is a file holding an *absolute*
+    `gitdir:` pointer, so a container that mounted the tree anywhere else
+    would hold a checkout pointing at a path that does not exist there --
+    same-path mounting is forced rather than preferred, and where it does not
+    work the rail does not work.
+
+    How this is asked matters more than that it is asked, and the first
+    version got it wrong in the direction that manufactures findings. Asking
+    ``test -d`` about the mounted directory answered *false* on rootless
+    podman for every worktree this rail leases -- which reads exactly like an
+    absent mount, and is not one. Reading a file through the same mount, in
+    the same container, succeeded: the mount was present and `stat` on the
+    mount point was simply not answerable under that user-namespace mapping.
+    A presence check had answered a different question than the one asked,
+    and its wrong answer was shaped like a real defect.
+
+    So the exercise reads a file across the boundary. That cannot succeed
+    unless the mount both happened and carried content, and it cannot fail
+    for a reason that has nothing to do with mounting.
+
+    ``probe`` should be pointed at a directory the project actually leases
+    rather than left at its default, and ``witness`` at a file that exists
+    inside it. A probe aimed somewhere else answers about somewhere else.
+
+    Checked at setup rather than at every launch, because it starts a
+    container. That is a statement about the probe's cost and not about the
+    requirement's importance -- which is why the two are separate fields.
+    """
+    return Requirement(
+        capability="same-path bind mounts",
+        purpose="the worktree rail, which confines a worker by mounting",
+        where=where,
+        checked="setup",
+        # Read a file that only exists on the host side, rather than asking
+        # whether the directory is there. Asking about the directory is what a
+        # first draft did, and it can pass without the mount having happened
+        # at all: the container creates an empty directory at any mount target
+        # it was given, so `test -d` answers yes about a directory the mount
+        # left behind. Reading a file through it cannot.
+        exercise=Run(
+            command=[
+                "docker",
+                "run",
+                "--rm",
+                "-v",
+                f"{probe}:{probe}:ro",
+                image,
+                "cat",
+                str(probe / witness),
+            ]
+        ),
+        absence=LostCapability(
+            capability="the worktree rail, and so multi-worker resolve"
+        ),
+        install=install,
+    )
+
+
 def github_requirement(
     where: Side = "both",
     install: list[str] = ["gh"],
@@ -191,6 +261,7 @@ def clipboard_requirement(
         capability="clipboard",
         purpose="handing a printed command straight to the shell that runs it",
         where=where,
+        checked="setup",
         exercise=AnyOf(
             alternatives=[
                 Run(command=["wl-copy", "--version"]),
