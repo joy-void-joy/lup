@@ -1,48 +1,111 @@
 ---
-description: "Review upstream template commits and apply improvements"
-allowed-tools: Bash(git:*, uv run lup-devtools:*), Read, Edit, Write, AskUserQuestion, Skill(lup:commit)
+description: "Upgrade the lup dependency, then review upstream commits and apply improvements"
+allowed-tools: Bash(git:*, uv run lup-devtools:*, uv sync:*, uv lock:*), Read, Edit, Write, AskUserQuestion, Skill(lup:commit)
 argument-hint: "[focus area]"
 ---
 
 # Update from Upstream
 
-Review commits from tracked downstream repositories since the last sync. Generalize domain-specific patterns back into the template as domain-neutral scaffolding, then apply selected improvements.
+Bringing a project up to date with lup is two separate jobs, and only one of
+them is about reading commits.
 
-**This repo is both a template and a scaffold.** Downstream repos customize the template (prompts, tools, models) but inherit the scaffold (agents, commands, hooks, workflows). When reviewing downstream changes, ask: "Did this pattern emerge from real use?" If yes, it probably belongs in the template — generalized, with domain-specific details removed.
+**The dependency** is the library this project runs on. Upgrading it is a
+version change plus a regeneration, and it is where almost all of upstream's
+work arrives — every fix to the runtime, the policy kernel, the resolver, and
+the shipped skills reaches this project by taking a newer `lup`, not by being
+copied in. Do this first, because everything the review step reads is measured
+against the version now installed.
+
+**The scaffolding** is what this project forked rather than imported: its
+prompts, its tools, its models, its own half of the harness declarations. No
+version bump touches those, so patterns that emerged downstream have to be
+read, generalized, and applied by hand. That is the second half.
 
 **Optional focus argument:** When a focus area is provided (e.g., `/lup:update hooks`, `/lup:update lib/cache`), only review and port commits that touch the specified area. **Do not mark as synced** — the sync pointer stays unchanged so a future `/lup:update` (without args) still reviews all commits from the same checkpoint.
 
-## Setup
+## 1. Commit pending changes
 
-If `sync.json` does not exist, help the user set it up. Never modify the committed `sync.json` — it is template scaffold, and every personal registration belongs in the gitignored `sync.json.local`.
+Invoke `/lup:commit` to commit any uncommitted work first. Both halves below rewrite files, and a dirty tree makes it impossible to tell what this run changed.
+
+## 2. Upgrade the lup dependency
+
+Read how this project obtains the library before changing anything — the
+upgrade is a different command in each mode, and one of the four is not an
+upgrade at all:
+
+```
+uv run lup-devtools dev library status
+```
+
+| Mode | What "up to date" means | How |
+| --- | --- | --- |
+| published | The newest release on the index | `uv run lup-devtools dev library release` to read what is published, then `uv lock --upgrade-package lup` |
+| git | The tip of the ref it pins | `uv lock --upgrade-package lup` re-resolves the same ref; `dev library git --branch <branch>` moves to a different one |
+| linked | Whatever the linked checkout holds | Pull in that checkout; the editable install follows it |
+| local | Nothing — `packages/lup/` is a fork of the library, so upstream arrives through the commit review below rather than through a version | — |
+
+`dev library release` asks the index rather than guessing, and reports one of
+three answers: a released version, that none is published yet, or that it
+could not reach the index. Treat the third as an answer about the probe and
+not about the world — a look-up that did not land settles nothing, so retry or
+proceed in the mode this project already knows it wants, rather than re-pinning
+on a dropped connection.
+
+Then, in every mode that changed anything:
+
+```
+uv sync
+uv run lup-devtools harness generate all
+```
+
+The regeneration is not optional. A newer lup ships newer skill, agent, and
+policy declarations, and this project's native trees are compiled from them —
+so until it runs, the upgrade is installed but not in effect, and `harness
+check all` will say the trees are stale.
+
+Report the version moved from and to, then Ask the user with the AskUserQuestion tool, offering concrete options plus a free-text choice: whether to continue into the commit review, given what the upgrade already brought in — for a project that only consumes the library, the dependency bump is frequently the whole update, and reading downstream commits afterward is work with nothing to find.
+
+## 3. Set up the tracked repositories
+
+This half reviews commits from repositories registered in `sync.json`. If none
+is registered, set one up now. Never modify the committed `sync.json` — it is
+template scaffold, and every personal registration belongs in the gitignored
+`sync.json.local`.
 
 **Self-referencing repos:** When the current repo IS the upstream (e.g., the lup template itself), set `"ignore": true` in `sync.json.local` to skip it during updates. The committed `sync.json` still ships the URL so downstream users can sync from it.
 
-```bash
-# Set a local path for the lup template repo
-uv run lup-devtools sync setup lup /path/to/lup-template.git/tree/main
+Baseline the upstream checkpoint at *the recorded commit*, not at whatever the
+remote's default branch points to. `--synced` reads the checkpoint from the
+named checkout's HEAD, so that checkout has to be standing at the recorded
+commit when this runs:
 
-# Or mark it as already synced at current HEAD (skip old history)
-uv run lup-devtools sync setup lup /path/to/lup-template.git/tree/main --synced
+```
+uv run lup-devtools sync setup lup <lup-checkout> --branch <branch> --synced
 ```
 
-Ask the user for the path to their lup template repo if not already tracked.
+`setup` records that checkout, the branch settled on above, and its HEAD as the checkpoint, so `/lup:update` only shows commits that land afterward. Plain `sync mark-synced lup` is wrong here: the shipped `sync.json` entry carries a URL and no branch, so it clones the remote's default branch and checkpoints *that* HEAD — so every commit the project already carries comes back as unported work once the branch merges.
 
-## Process
+A project that already consumed the library, and knows which commit it took, names it rather than moving a checkout to stand on it:
 
-### 1. Commit pending changes
+```
+uv run lup-devtools sync mark-synced lup --at <commit>
+```
 
-Invoke `/lup:commit` to commit any uncommitted work before applying upstream changes.
+That is the case an adoption mid-stream is always in — the code is already here, and what is missing is only the record of how far it reached. Without the commit, marking synced claims every commit that landed afterward as reviewed, which is the one thing the checkpoint exists to prevent.
 
-### 2. Check for new commits
+## 4. Check for new commits
+
+`status` reads what is already cached, so fetch before trusting it or a quiet
+answer may only mean nothing new has been downloaded:
 
 ```bash
+uv run lup-devtools sync fetch
 uv run lup-devtools sync status
 ```
 
 If no projects have new commits, report that everything is up to date and stop.
 
-### 3. Read all diffs and build inventory
+## 5. Read all diffs and build inventory
 
 For each project with new commits:
 
@@ -62,11 +125,13 @@ Do not classify during this step. Cross-commit patterns only become visible afte
 
 **If a focus area was provided:** Also skip commits whose messages clearly don't relate to the focus area. But when in doubt, keep them — the diff might touch relevant code.
 
-### 4. Classify inventory
+## 6. Classify inventory
 
 For each item in the inventory, ask: **"What would this look like with a generic data source?"** If you can describe a generic version, it's portable. If the item IS the domain data (model fields, API-specific calls, scoring formulas), it's domain-specific.
 
 **Do not confuse the data a tool operates on with the tool itself.** Visualization commands, CLI watch modes, analysis pipelines, and formatting utilities are infrastructure — portable even when they currently display domain-specific data. The data source is a parameter; the infrastructure is the portable piece.
+
+**Ask where each portable piece belongs.** A piece that any project on lup would want belongs to the library, and a library this project does not vendor is one it cannot edit here — that piece becomes a change sent upstream rather than applied locally. `dev library status` already said which mode this is. Only what is genuinely this project's own is applied in this checkout.
 
 Classify as:
 
@@ -94,20 +159,13 @@ Examples of what gets missed when you classify by domain keywords instead of by 
 - A "sandbox tools" commit adds `run_code` *and* a new error-handling pattern in the tool wrapper. The tool is domain-specific; the error-handling pattern is portable.
 - A "score visualization" commit adds strip plots, trend charts, color selection, and watch mode. The scoring formula is domain-specific; the visualization pipeline is portable devtools infrastructure.
 
-### 5. Present improvements
+## 7. Present improvements
 
-Present every extracted portable piece to the user, one decision each:
-
-- The upstream commit(s) it comes from
-- What the portable piece is (function, pattern, infrastructure, etc.)
-- Where it maps to in the template
-- Whether to apply it
-
-Group related pieces when they form a logical unit (e.g., strip plot + trend plot + watch mode = "devtools visualization scaffold").
+Present every extracted portable piece, one decision each. For each, give the upstream commit(s) it comes from, what the piece is, where it maps to in this project, and whether it can be applied here or has to go upstream. Group related pieces when they form a logical unit (e.g. strip plot + trend plot + watch mode = "devtools visualization scaffold"), then Ask the user with the AskUserQuestion tool, offering concrete options plus a free-text choice: which of the extracted pieces to apply, one option per piece or group.
 
 **Default: present.** When uncertain whether something is portable, present it with your reasoning and let the user decide. The user can always say "skip" — but you cannot un-skip something you never showed them.
 
-### 6. Apply selected changes
+## 8. Apply selected changes
 
 For approved improvements:
 
@@ -116,13 +174,20 @@ For approved improvements:
    - Adapt Python import paths between upstream and current project package names (`from lup.*` ↔ `from <project>.*`)
    - Framework vocabulary stays as `lup` in both directions — do not rename `lup_tool`, `LupMcpTool`, `lup-devtools`, `.lup/`, `lup-tools`, `lup-sandbox-*`, etc.
    - Keep the current project's coding conventions
-3. **Wire new utilities into consumers.** When porting a library function (e.g., a helper in `packages/lup/`), don't stop at the function itself — also wire it into the devtools commands, hooks, or agents that should use it. A utility without consumers is dead code.
-4. Run verification after applying:
-   ```bash
-   uv run lup-devtools dev check
-   ```
+3. **Wire new utilities into consumers.** When porting a library function, don't stop at the function itself — also wire it into the devtools commands, hooks, or agents that should use it. A utility without consumers is dead code.
+4. **Regenerate if a declaration moved.** Anything ported into `harness/content/` is a source that compiles into the native trees, so it does not take effect until:
 
-### 7. Mark as synced
+```bash
+uv run lup-devtools harness generate all
+```
+
+5. Verify:
+
+Start a `Monitor` over `uv run lup-devtools dev check` and leave it live. Each line it emits arrives as an event, and the watch ends when the command does. Do not run it through `Bash`, whose long timeout returns once at the end, and do not read a backgrounded session on a loop — both are polling, however patient
+
+It runs ruff, pyright, and the test suite, and it reports as it goes rather than only at the end.
+
+## 9. Mark as synced
 
 **Skip this step if a focus area was provided** — the sync pointer must stay unchanged so unreviewed commits are still visible in the next full `/lup:update`.
 
@@ -132,22 +197,19 @@ After a full review is complete (whether or not changes were applied):
 uv run lup-devtools sync mark-synced <project>
 ```
 
-### 8. Optionally commit
+## 10. Optionally commit
 
-If changes were applied, offer to commit them:
-
-```bash
-git add <changed-files>
-git commit -m "feat(lib): apply improvements from <project>"
-```
+If changes were applied, offer to commit them. Keep the dependency upgrade and
+the ported scaffolding as separate commits — they are separate claims, and a
+reader bisecting a regression needs to know which one carried it.
 
 ## Guidelines
 
+- **The dependency first** — a piece ported by hand that the newer library already ships is work spent to produce a conflict.
 - **Commit-level review preserves intent** — review commits, not flat diffs, so you understand why each change was made
 - **File diffs provide context** — use full file diffs alongside commit diffs to understand how changes fit into the codebase
 - **Generalize, don't dismiss** — when a downstream repo adds something domain-specific, ask "what pattern does this represent?" and port the pattern as scaffold. A forecasting-specific agent becomes a domain-neutral agent scaffold.
 - **Ask, don't skip** — when uncertain about a change, present it to the user with your reasoning and let them decide
 - **Adapt, don't copy** — downstream code uses domain-specific naming, paths, and models. Replace these with template-appropriate equivalents (`lup` package paths, generic metrics, placeholder descriptions).
-- **Re-evaluate file placement** — after generalizing, re-check: can this module be used as-is without templating or source modification? If yes, it belongs in `packages/lup/`, not `agent/`. A quick proxy: does it import from `agent/`? Downstream repos may have had domain-specific reasons for a different placement.
-- **Test after applying** — always run pyright/ruff/pytest after applying changes
+- **Re-evaluate file placement** — after generalizing, re-check: can this module be used as-is without templating or source modification? If yes, it belongs to the library rather than to the application. A quick proxy: does it import from `agent/`? Downstream repos may have had domain-specific reasons for a different placement.
 - **Mark synced even if nothing applied** — this advances the sync pointer so you don't re-review the same commits next time

@@ -193,7 +193,7 @@ regenerate.
 - /lup:resolve — Resolve inline feedback through isolated work
 - /lup:resolve-reviewer — Review one resolver concern against its acceptance criteria
 - /lup:review — Review a session trace for workflow quality, tool usage, and improvement opportunities
-- /lup:update — Review upstream template commits and apply improvements
+- /lup:update — Upgrade the lup dependency, then review upstream commits and apply improvements
 - /lup:verify-solved — Check every claimed-resolved note and stale open issue against what it actually asked
 
 **Agents:**

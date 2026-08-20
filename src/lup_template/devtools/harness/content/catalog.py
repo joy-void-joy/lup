@@ -22,14 +22,14 @@ import lup.harness.models as models
 from lup.devtools.harness.content.application import ApplicationLayout
 from lup.devtools.harness.content.catalog import library_content
 from lup_template.devtools.harness.content.skills.brainstorm import (
-    SKILL as SKILL_BRAINSTORM,
+    skill as build_brainstorm,
 )
 from lup_template.devtools.harness.content.skills.import_skill import (
     SKILL as SKILL_IMPORT,
 )
 from lup_template.devtools.harness.content.skills.init import SKILL as SKILL_INIT
 from lup_template.devtools.harness.content.skills.install import SKILL as SKILL_INSTALL
-from lup_template.devtools.harness.content.skills.meta import SKILL as SKILL_META
+from lup_template.devtools.harness.content.skills.meta import skill as build_meta
 from lup_template.devtools.harness.content.skills.update import SKILL as SKILL_UPDATE
 
 LAYOUT = ApplicationLayout(package=Path(__file__).resolve().parents[3].name)
@@ -40,20 +40,32 @@ reason ``DevProject.package`` derives its own: initialization renames the
 package, and a literal would go on naming one that is gone.
 """
 
-PROJECT_SKILLS = [
-    SKILL_BRAINSTORM,
-    SKILL_IMPORT,
-    SKILL_INIT,
-    SKILL_INSTALL,
-    SKILL_META,
-    SKILL_UPDATE,
-]
-"""The skills only this repository has, because only it is a template.
 
-Each one's subject is standing up or maintaining a lup-based project — they
-have nothing to say inside one, which is why they stay behind when the rest
-of the roster becomes the library's.
-"""
+def project_skills(layout: ApplicationLayout) -> list[models.Skill]:
+    """The skills only this repository has, because only it is a template.
+
+    Each one's subject is standing up or maintaining a lup-based project — they
+    have nothing to say inside one, which is why they stay behind when the rest
+    of the roster becomes the library's.
+
+    Built from a layout for the reason the library's half is, and so the
+    invariant can be checked: under this repository's own package the literal
+    and the rendered path are the same string, so only a roster built under
+    some other package can tell a skill that took the layout from one that
+    wrote `lup_template` down.
+    """
+    return [
+        build_brainstorm(layout),
+        SKILL_IMPORT,
+        SKILL_INIT,
+        SKILL_INSTALL,
+        build_meta(layout),
+        SKILL_UPDATE,
+    ]
+
+
+PROJECT_SKILLS = project_skills(LAYOUT)
+"""This repository's own half of the roster, under its own package."""
 
 PROJECT_AGENTS: list[models.Agent] = []
 """No agent here is about being a template; the whole roster is the library's."""

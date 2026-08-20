@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "86d4741ae6eec58f5fd2d20bcf784a7bdee8bf0a557ad4af599c299a1ddeeaf3",
+  "source_digest": "b703eb585910873a85397a65fa87941dbd284fd80a0f66c8b897e7019173a9ab",
   "target_requirements": [
     "claude-code"
   ],
@@ -79,7 +79,7 @@
     {
       "path": ".claude/plugins/lup/commands/brainstorm.md",
       "category": "generated",
-      "sha256": "dd15e7525d31fba52214da0c835f1f94f13b577abd20e099d1112667f3523071",
+      "sha256": "f36a4970c09967ede18cbcf558b00ae4143da3296c692f539e8ef291f7cd39e6",
       "semantic_id": "skill.brainstorm",
       "executable": false
     },
@@ -212,7 +212,7 @@
     {
       "path": ".claude/plugins/lup/commands/meta.md",
       "category": "generated",
-      "sha256": "caa9ae3f1a7c462b92dc96385eec56018147dd536fb5e87668fd60061fef7b62",
+      "sha256": "0564ad81bccaa64ca1ab97b66d698832bc1639bb7bec396e9768e3bca2b6d0c0",
       "semantic_id": "skill.meta",
       "executable": false
     },
@@ -282,7 +282,7 @@
     {
       "path": ".claude/plugins/lup/commands/update.md",
       "category": "generated",
-      "sha256": "7a2f30fc29e79fa66b8a01dc077daf1a9c647f06be09fa299267f4b44722b0e6",
+      "sha256": "8a72740d1e1f099b84f5b2c9b7d05fe9c87f0d9a9bcd03a9e2101ebcb04e18bd",
       "semantic_id": "skill.update",
       "executable": false
     },
@@ -457,7 +457,7 @@
     {
       "path": "docs/harness.md",
       "category": "generated",
-      "sha256": "8586f75f11e590bd1a7a92f15a0c6f7b0eb6794e5f4aeb9486f16580acebbaa1",
+      "sha256": "f40db0a3bcf2e3a29e68e84dbdb63c73ccdd993d8b730099fbdbeff41ed18f57",
       "semantic_id": "docs.harness",
       "executable": false
     },

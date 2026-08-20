@@ -19,6 +19,7 @@ from lup.devtools.harness.content.catalog import library_content
 from lup.devtools.roster import LIBRARY_ROSTER, LIBRARY_SPECS
 from lup.devtools.subapps import SubApp, SubAppSelection, subapp
 from lup.harness.models import ContentSelection
+from lup_template.devtools.harness.content.catalog import project_skills
 from lup_template.devtools.subapps import APPLICATION_SPECS, SELECTION, SUBAPP_SPECS
 
 LIBRARY_CONTENT = library_content(ApplicationLayout(package="worked_example"))
@@ -136,6 +137,26 @@ def test_no_library_declaration_names_the_template_package() -> None:
     }
 
     assert leaked == set()
+
+
+def test_only_the_skills_about_renaming_name_the_template_package() -> None:
+    """This repository's own skills answer for the literal the same way.
+
+    Two of them may keep it, because for those the literal is the subject
+    rather than a path: `/lup:init` renames `src/lup_template/` and `/lup:install`
+    teaches that rename, so both have to spell the directory they are about.
+    Every other declaration names a path a renamed project still has to find,
+    and takes it from the layout.
+    """
+    allowed = {"skill.init", "skill.install"}
+    named = {
+        skill.id
+        for skill in project_skills(ApplicationLayout(package="worked_example"))
+        for part in skill.prompt.parts
+        if "lup_template" in (part.text_payload or "")
+    }
+
+    assert named == allowed
 
 
 def test_this_repository_declines_nothing_without_saying_so() -> None:
