@@ -1,5 +1,6 @@
 """Unified pre-flight checks: ruff, pyright, pytest."""
 
+import os
 from pathlib import Path
 
 import sh
@@ -33,9 +34,12 @@ from lup.devtools.utils import decode_stderr, git, uv
 # The suite waits on git subprocesses and hook scripts far more than it
 # computes, so it parallelizes well — but each worker pays a full interpreter
 # boot and package import, and past roughly this many that startup costs more
-# than the concurrency returns. `-n auto` on a large host is slower than serial
-# arithmetic suggests, so the count is bounded rather than derived from cores.
-TEST_WORKERS = 8
+# than the concurrency returns. Measured on a 32-core host, the root suite ran
+# in 19.1s under 8 workers, 15.7s under 16, and back up at 18.0s under 24: so
+# `-n auto` on a large host is slower than serial arithmetic suggests, and the
+# count is capped rather than derived from cores. It is bounded by them too,
+# because a cap that suits a large host oversubscribes a laptop.
+TEST_WORKERS = min(16, os.process_cpu_count() or 8)
 
 
 class CheckOutcome(BaseModel):
