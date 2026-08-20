@@ -19,9 +19,11 @@ The set is a syntax-aware linter pass, not a raw grep: every rule declares the
 syntactic ``context`` it inspects, and Python source is tokenized once (via
 `lup.codescan.common.LineProjections`) so "code" rules scan lines with string
 literals and comments blanked while "comment" directive rules see comments
-intact. The detectors themselves stay regexes because that is the primitive
-form the hermetic hook runtime can carry (ruff has no plugin API, and engines
-that do — flake8, pylint, semgrep — could not run inside the hook).
+intact. Every Python rule selects its violations from the tree; the regex it
+also carries is the fallback for source no tree can be had from, and the sole
+detector for the TypeScript table, which this grammar is not for. Neither
+gate reaches for a lint engine to do it: ruff has no plugin API, and the ones
+that do — flake8, pylint, semgrep — could not run inside the hook.
 
 Refiners sharpen individual rules on top of that floor, and what a refiner
 needs decides who can run it. `refined_exempt_lines` reads the AST alone, so
@@ -29,8 +31,10 @@ the hook applies it too and both gates judge a line the same way — a broad
 regex the kernel keeps flagging while the audit calls its marker spurious is
 a change one gate demands and the other refuses. `lup.codescan.grammar` goes
 further and resolves what a matched receiver is declared on, so `dict-get` can
-distinguish a mapping from an HTTP client; that needs a type oracle and stays
-audit-side. Both return `Refutation` rows this module drops — and reports the
+distinguish a mapping from an HTTP client; that needs a type checker, which
+both gates reach — the audit through an oracle it holds, the hook through the
+resolver its dispatcher runs over the text it is about to write. Both return
+`Refutation` rows this module drops — and reports the
 surviving directives for. Regex alone remains where a rule is text-shaped. The
 `lup.codescan.registry` index and the generated `docs/rules.md` reference list
 this family beside the boundary, spelling, and architecture rules.

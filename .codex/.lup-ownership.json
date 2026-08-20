@@ -142,7 +142,7 @@
     {
       "path": ".codex/plugins/lup/hooks/runtime/kernel/rows.py",
       "category": "generated",
-      "sha256": "a3a992614f835ec4690330eed7374213819a39d284518055c1a50dfea8b755aa",
+      "sha256": "1bec294c799f3c913487e9a6d57c7e023440b945e188986b350d302c380027ce",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },

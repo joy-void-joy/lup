@@ -3,15 +3,18 @@
 # cannot be expressed as a comprehension.
 """Typed AST grammar: rules that judge a site by what its subject resolves to.
 
-The anti-pattern set detects *spellings*. A spelling is all the hermetic edit
-hook can see — it classifies fragments of a proposed edit, which carry no
-types and often do not parse — so `.get(` there means every `.get(` on every
-receiver. The whole-file audit reads finished, parseable source and can do
-better: it knows the AST, and through the `lup.codescan.oracle` port it can
-ask a type checker what a name actually resolves to. `payload.get(...)` on a
-mapping is the schema-hiding access the rule is about; the identical spelling
-on an HTTP client or a route decorator is not, and the audit should say so
-instead of leaving a contributor to suppress by reflex.
+The anti-pattern set selects *shapes*: its rules read the tree, so `.get(` on
+a module and `.get(` in a decorator are already settled without types. What
+no tree settles is what a bare receiver *is*. `payload.get(...)` on a mapping
+is the schema-hiding access the rule is about; the identical shape on an HTTP
+client is not, and a gate should say so instead of leaving a contributor to
+suppress by reflex.
+
+Answering that needs a type checker, which reaches the two gates by different
+routes: the audit holds an oracle and passes it here, while the edit hook's
+dispatcher shells out to `lup-devtools dev refutations` with the text it is
+about to write and passes the answer into the kernel as a fact. Both arrive
+as the same `Refutation` rows, so the two gates decide these rules alike.
 
 A rule here is three things: a **selector** that walks an AST and yields the
 sites it is about, a **family** of classes the site's subject must belong to
@@ -255,17 +258,20 @@ GRAMMAR_RULES: list[GrammarRule] = [
         select=attribute_call_sites("replace"),
         family=TEXT_FAMILY,
         refinement=(
-            "The hook decides this one by arity, which tells text surgery from "
-            "the file rename wearing the same name and reaches no further. The "
-            "audit resolves what the receiver's `replace` is declared on and "
-            "keeps the finding only where that class is text. A dataframe "
+            "Arity is what selects the site: `str.replace` takes the old text "
+            "and the new, where a bound `Path.replace` takes a destination and "
+            "moves a file, so the rename wearing the same name is settled by "
+            "the tree and never reaches a checker. Both gates then resolve "
+            "what the receiver's `replace` is declared on and keep the finding "
+            "only where that class is text. A dataframe "
             "filling missing values, an AST node rebuilt with one field "
             "changed, a vendor object carrying a `replace` of its own all "
             "spell this rule's shape and none of them is its subject, so each "
             "is refuted — as is a receiver that resolves to nothing at all, "
             "since a rule about strings has nothing to say about a value "
-            "nobody can show is one. Where no checker answers, the arity "
-            "verdict stands alone and the gate asks rather than refusing."
+            "nobody can show is one. Where no checker answers at all the "
+            "arity verdict stands alone in the audit, and the hook asks "
+            "instead of refusing."
         ),
     ),
 ]

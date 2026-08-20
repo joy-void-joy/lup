@@ -112,13 +112,14 @@ doing something else — a one-argument `.replace` that renames a file, an
 argless `.split` tokenizing prose, a `tuple[X, ...]` that is a sequence. Both
 gates stay silent and a directive there would be reported spurious.
 
-``refuted`` is the case no tree can decide, so the two surfaces answer
-differently on purpose: the edit hook flags the spelling, and the whole-file
-audit takes it back once a type oracle resolves what the receiver actually is.
-`.get` on an HTTP client is the one this exists for. It is a third answer
-rather than a cleared example, because a contributor who meets the denial
-needs to know that waiting for the sweep is the way past it — and that adding
-a directive is not.
+``refuted`` is the case no tree can decide, so both surfaces reach a type
+checker for it and neither refuses on the shape alone. `.get` on an HTTP
+client is the one this exists for: resolved, the receiver's declaration
+settles it and no marker is wanted; unresolved, the audit keeps the broad
+verdict and the hook asks instead of denying. It is a third answer rather
+than a cleared example, because what clears it is a fact about the receiver
+rather than anything the snippet says — and because a contributor who meets
+the question needs to know that adding a directive is not the way past it.
 """
 
 

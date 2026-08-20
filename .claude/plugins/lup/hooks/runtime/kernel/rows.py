@@ -137,9 +137,12 @@ class AntiPatternRow(TypedDict):
     resolution: str
     """"required" when this rule's verdict turns on a resolved declaration.
 
-    The regex is wider than the defect for these, and what settles the
-    difference is what a receiver's declaration resolves to — which the audit
-    has a checker for and this gate may not. Denying one unresolved states a
+    The tree is wider than the defect for these, and what settles the
+    difference is what a receiver's declaration resolves to. The kernel never
+    resolves anything itself — it is a pure function of its inputs — so the
+    answer arrives as an input, from whatever the dispatcher was able to run.
+    This flag is what tells the dispatcher an answer is worth paying for, and
+    almost no edit trips a rule carrying it. Denying one unresolved states a
     verdict the audit then contradicts, and the two block on opposite states
     with no version of the file passing both. So the gate says what it knows:
     resolved, it decides; unresolved, it asks.
