@@ -139,7 +139,7 @@ Land one branch at a time, oldest divergence first — rebase, merge, and push b
 
 Ask the user, per branch, which route to take:
 
-- **Open a PR** — relocate into that branch's worktree: """
+- **Open a PR** — get into that branch's worktree: """
             ),
             models.RelocateSession(path="the survey's worktree field"),
             models.TextPart(
