@@ -3,12 +3,13 @@
 Add fixtures here that are used across multiple test files.
 """
 
+import warnings
 from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 
-from lup.gitguard import TEST_IDENTITY, guard_report, repository_state
+from lup.gitguard import TEST_IDENTITY, ForeignCheckouts, repository_state
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -36,8 +37,11 @@ def enclosing_repository_untouched() -> Iterator[None]:
     was found here, and what it cost.
     """
     root = Path(__file__).resolve().parent.parent
+    foreign = ForeignCheckouts.beside(root)
     before = repository_state(root)
     yield
-    report = guard_report(before, repository_state(root))
-    if report:
-        pytest.fail(report, pytrace=False)
+    verdict = foreign.verdict(before, repository_state(root))
+    if verdict.notice:
+        warnings.warn(verdict.notice, stacklevel=1)
+    if verdict.failure:
+        pytest.fail(verdict.failure, pytrace=False)
