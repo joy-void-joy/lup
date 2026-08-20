@@ -25,6 +25,7 @@ import lup.devtools.dev.git_guards as git_guards_mod
 import lup.devtools.dev.conflicts as conflicts
 import lup.devtools.dev.issues as issues_mod
 import lup.devtools.dev.traces as traces
+import lup.devtools.dev.undo as undo
 import lup.devtools.dev.model_config as model_config_mod
 import lup.devtools.dev.plugin as plugin_mod
 import lup.devtools.dev.policy_explain as policy_explain
@@ -787,6 +788,42 @@ def create_dev_app(
             )
             raise typer.Exit(1)
         typer.echo(report.body)
+
+    @app.command("undo")
+    def undo_cmd(
+        take: Annotated[
+            str,
+            typer.Option("--take", help="Snapshot the tree now, naming why"),
+        ] = "",
+        expire_days: Annotated[
+            int | None,
+            typer.Option("--expire", help="Drop snapshots older than this many days"),
+        ] = None,
+    ) -> None:
+        """List the recoverable snapshots of this tree, or take and expire them.
+
+        Restoring is deliberately not offered here. Putting a snapshot back
+        overwrites present work with past work -- the same class of act as
+        the destruction it undoes -- so each entry prints the command that
+        would do it and leaves running it to somebody who can see what is
+        currently there.
+        """
+        root = project_root()
+        if take:
+            taken = undo.snapshot(root, take)
+            typer.echo(f"{taken.ref}  {taken.commit[:12]}")
+            return
+        if expire_days is not None:
+            for gone in undo.expire(root, expire_days):
+                typer.echo(f"expired {gone.ref}")
+            return
+        found = undo.points(root)
+        if not found:
+            typer.echo("No snapshots. `--take <reason>` writes one.")
+            return
+        for item in found:
+            typer.echo(f"{item.taken_at:%Y-%m-%d %H:%M}  {item.reason}")
+            typer.echo(f"    {item.restore_command()}")
 
     @app.command("issues")
     def issues_cmd(
