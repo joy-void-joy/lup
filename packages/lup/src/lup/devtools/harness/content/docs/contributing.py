@@ -1,5 +1,6 @@
 """How to contribute to this repository, whichever component you land in."""
 
+import lup.devtools.harness.content.conventions as conventions
 import lup.harness.models as models
 from lup.devtools.harness.content.application import ApplicationLayout
 
@@ -109,17 +110,11 @@ of its own, which is what keeps several live at once. `worktrees/` and
 Commit early, commit often, and keep commits atomic — if the message needs an
 "and", it is two commits. The format is `type(scope): description`:
 
-| Type | Use |
-| --- | --- |
-| `feat` | New feature or capability |
-| `fix` | Bug fix |
-| `refactor` | Neither fixes a bug nor adds a feature |
-| `docs` | Documentation only |
-| `test` | Adding or updating tests |
-| `chore` | Maintenance — dependencies, build config |
-| `meta` | Harness content and the trees it generates: guidance, settings, skills, hooks |
-| `data` | Generated data and outputs |
-
+"""
+            ),
+            *conventions.COMMIT_TYPES,
+            models.TextPart(
+                text=r"""
 A `data` commit of generated outputs may go straight to `dev`; code never
 does. Session data under `notes/` is gitignored here, so such commits arise
 only in a repository that opted into the commit-loop pattern at init.

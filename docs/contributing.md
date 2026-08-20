@@ -110,6 +110,7 @@ Commit early, commit often, and keep commits atomic — if the message needs an
 | `meta` | Harness content and the trees it generates: guidance, settings, skills, hooks |
 | `data` | Generated data and outputs |
 
+
 A `data` commit of generated outputs may go straight to `dev`; code never
 does. Session data under `notes/` is gitignored here, so such commits arise
 only in a repository that opted into the commit-loop pattern at init.

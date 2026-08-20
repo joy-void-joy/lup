@@ -33,6 +33,7 @@ from pydantic import BaseModel
 
 import lup.harness.models as models
 from lup.codescan.common import RuleSelection
+from lup.markdown import CodeCell, PlainCell
 
 PLAN_AT_AGENT_SPEED: list[models.PromptPart] = [
     models.TextPart(
@@ -235,6 +236,45 @@ Use `"""
     ),
 ]
 
+COMMIT_TYPES: list[models.PromptPart] = [
+    models.MarkdownTable(
+        headers=["Type", "Use"],
+        rows=[
+            [CodeCell(text="feat"), PlainCell(text="New feature or capability")],
+            [CodeCell(text="fix"), PlainCell(text="Bug fix")],
+            [
+                CodeCell(text="refactor"),
+                PlainCell(text="Neither fixes a bug nor adds a feature"),
+            ],
+            [CodeCell(text="docs"), PlainCell(text="Documentation only")],
+            [CodeCell(text="test"), PlainCell(text="Adding or updating tests")],
+            [
+                CodeCell(text="chore"),
+                PlainCell(text="Maintenance — dependencies, build config"),
+            ],
+            [
+                CodeCell(text="meta"),
+                PlainCell(
+                    text="Harness content and the trees it generates: guidance,"
+                    " settings, skills, hooks"
+                ),
+            ],
+            [CodeCell(text="data"), PlainCell(text="Generated data and outputs")],
+        ],
+    ),
+    models.TextPart(text="\n"),
+]
+"""The commit vocabulary, held once because three documents state it.
+
+A skill telling an agent how to commit, the contributing page a human reads,
+and the guidance both compose from were each carrying their own copy of this
+table, worded differently — `refactor` was "code restructuring without
+behavior change" in one and "neither fixes a bug nor adds a feature" in the
+other, for a row that is supposed to say one thing. Rows rather than prose so
+the escaping is the table's, and so a type added here reaches every reader at
+once.
+"""
+
 COMMIT_GUIDELINES: list[models.PromptPart] = [
     models.TextPart(
         text=r"""### Commit Guidelines
@@ -249,4 +289,5 @@ COMMIT_GUIDELINES: list[models.PromptPart] = [
 
 """
     ),
+    *COMMIT_TYPES,
 ]
