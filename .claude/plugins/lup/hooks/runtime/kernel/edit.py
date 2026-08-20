@@ -347,6 +347,37 @@ def python_nodes(tree: ast.Module) -> list[ast.AST]:
 
 
 @cache
+def python_nodes_by_type(tree: ast.Module) -> dict[str, list[ast.AST]]:
+    """Every node under one module, grouped by the name of its own type.
+
+    A matcher asks about one shape — subscripts, calls, imports — and a
+    sweep runs forty of them over each file. Scanning the whole node list per
+    matcher is that file walked forty times to answer forty narrow questions;
+    grouped once, each of them is a lookup and a short list.
+
+    Keyed on the tree for the reason the walk above is: `python_tree` is the
+    only thing that builds one, so an entry lives exactly as long as the tree
+    it belongs to already does.
+    """
+    grouped: dict[str, list[ast.AST]] = {}
+    for node in python_nodes(tree):
+        grouped.setdefault(type(node).__name__, []).append(node)
+    return grouped
+
+
+def nodes_of[NodeT: ast.AST](tree: ast.Module, kind: type[NodeT]) -> list[NodeT]:
+    """Every node of one type under a module, read off the grouped index.
+
+    The bucket is keyed by the exact type name, so the narrowing below always
+    holds — it is there to say so to the checker rather than to filter.
+    """
+    grouped = python_nodes_by_type(tree)
+    name = kind.__name__
+    found = grouped[name] if name in grouped else []
+    return [node for node in found if isinstance(node, kind)]
+
+
+@cache
 def python_tokens(source: str) -> list[tokenize.TokenInfo] | None:
     """Tokenize Python source, returning ``None`` for incomplete syntax.
 
@@ -806,9 +837,8 @@ def slice_exempt_lines(source: str) -> set[int]:
 
     split_lines = {
         node.lineno
-        for node in python_nodes(tree)
-        if isinstance(node, ast.Subscript)
-        and isinstance(node.slice, ast.Slice)
+        for node in nodes_of(tree, ast.Subscript)
+        if isinstance(node.slice, ast.Slice)
         and node.slice.lower is not None
         and node.slice.upper is None
     }
@@ -871,10 +901,8 @@ def imported_symbols_of(
     """Lines taking one of `symbols` out of `module` by name."""
     return {
         node.lineno
-        for node in python_nodes(tree)
-        if isinstance(node, ast.ImportFrom)
-        and node.module == module
-        and any(alias.name in symbols for alias in node.names)
+        for node in nodes_of(tree, ast.ImportFrom)
+        if node.module == module and any(alias.name in symbols for alias in node.names)
     }
 
 
@@ -904,8 +932,8 @@ def calls_of(tree: ast.Module, dotted: AbstractSet[str]) -> set[int]:
     """
     return {
         node.func.lineno
-        for node in python_nodes(tree)
-        if isinstance(node, ast.Call) and dotted_of(node.func) in dotted
+        for node in nodes_of(tree, ast.Call)
+        if dotted_of(node.func) in dotted
     }
 
 
@@ -918,10 +946,8 @@ def methods_of(tree: ast.Module, attrs: AbstractSet[str]) -> set[int]:
     """
     return {
         node.func.end_lineno or node.func.value.lineno
-        for node in python_nodes(tree)
-        if isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Attribute)
-        and node.func.attr in attrs
+        for node in nodes_of(tree, ast.Call)
+        if isinstance(node.func, ast.Attribute) and node.func.attr in attrs
     }
 
 
@@ -934,8 +960,8 @@ def attributes_of(tree: ast.Module, dotted: AbstractSet[str]) -> set[int]:
     """
     return {
         node.lineno
-        for node in python_nodes(tree)
-        if isinstance(node, ast.Attribute) and dotted_of(node) in dotted
+        for node in nodes_of(tree, ast.Attribute)
+        if dotted_of(node) in dotted
     }
 
 
@@ -1015,9 +1041,8 @@ def subscripts_of(tree: ast.Module, names: AbstractSet[str]) -> set[int]:
     """
     return {
         node.lineno
-        for node in python_nodes(tree)
-        if isinstance(node, ast.Subscript)
-        and dotted_of(node.value).rsplit(".", 1)[-1] in names
+        for node in nodes_of(tree, ast.Subscript)
+        if dotted_of(node.value).rsplit(".", 1)[-1] in names
     }
 
 
@@ -1088,9 +1113,7 @@ def any_type_lines(source: str) -> set[int]:
     if tree is None:
         return set()
     return imported_symbols_of(tree, "typing", {"Any"}) | {
-        node.lineno
-        for node in python_nodes(tree)
-        if isinstance(node, ast.Name) and node.id == "Any"
+        node.lineno for node in nodes_of(tree, ast.Name) if node.id == "Any"
     }
 
 
@@ -1147,9 +1170,7 @@ def bare_except_lines(source: str) -> set[int]:
     if tree is None:
         return set()
     return {
-        node.lineno
-        for node in python_nodes(tree)
-        if isinstance(node, ast.ExceptHandler) and node.type is None
+        node.lineno for node in nodes_of(tree, ast.ExceptHandler) if node.type is None
     }
 
 
@@ -1169,9 +1190,8 @@ def except_baseexception_lines(source: str) -> set[int]:
 
     return {
         node.lineno
-        for node in python_nodes(tree)
-        if isinstance(node, ast.ExceptHandler)
-        and "BaseException" in set(caught(node.type))
+        for node in nodes_of(tree, ast.ExceptHandler)
+        if "BaseException" in set(caught(node.type))
     }
 
 
@@ -1180,7 +1200,7 @@ def global_statement_lines(source: str) -> set[int]:
     tree = python_tree(source)
     if tree is None:
         return set()
-    return {node.lineno for node in python_nodes(tree) if isinstance(node, ast.Global)}
+    return {node.lineno for node in nodes_of(tree, ast.Global)}
 
 
 def all_export_lines(source: str) -> set[int]:
@@ -1229,8 +1249,7 @@ def model_config_lines(source: str) -> set[int]:
 
     return {
         target.lineno
-        for node in python_nodes(tree)
-        if isinstance(node, ast.ClassDef)
+        for node in nodes_of(tree, ast.ClassDef)
         for statement in node.body
         for target in bound(statement)
         if dotted_of(target) == "model_config"
@@ -1249,9 +1268,11 @@ def private_function_lines(source: str) -> set[int]:
         return set()
     return {
         node.lineno
-        for node in python_nodes(tree)
-        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
-        and node.name.startswith("_")
+        for node in [
+            *nodes_of(tree, ast.FunctionDef),
+            *nodes_of(tree, ast.AsyncFunctionDef),
+        ]
+        if node.name.startswith("_")
         and not node.name.startswith("__")
         and len(node.name) > 1
     }
@@ -1264,9 +1285,8 @@ def private_class_lines(source: str) -> set[int]:
         return set()
     return {
         node.lineno
-        for node in python_nodes(tree)
-        if isinstance(node, ast.ClassDef)
-        and node.name.startswith("_")
+        for node in nodes_of(tree, ast.ClassDef)
+        if node.name.startswith("_")
         and not node.name.startswith("__")
         and len(node.name) > 1
     }
@@ -1317,8 +1337,8 @@ def namedtuple_lines(source: str) -> set[int]:
         | imported_symbols_of(tree, "collections", {"namedtuple"})
         | {
             node.lineno
-            for node in python_nodes(tree)
-            if isinstance(node, ast.Name) and node.id in ("NamedTuple", "namedtuple")
+            for node in nodes_of(tree, ast.Name)
+            if node.id in ("NamedTuple", "namedtuple")
         }
     )
 
@@ -1365,9 +1385,8 @@ def mapping_value_lines(source: str, values: AbstractSet[str]) -> set[int]:
 
     return {
         node.lineno
-        for node in python_nodes(tree)
-        if isinstance(node, ast.Subscript)
-        and dotted_of(node.value).rsplit(".", 1)[-1]
+        for node in nodes_of(tree, ast.Subscript)
+        if dotted_of(node.value).rsplit(".", 1)[-1]
         in ("dict", "Mapping", "MutableMapping")
         and isinstance(node.slice, ast.Tuple)
         and len(node.slice.elts) == 2
@@ -1483,9 +1502,8 @@ def string_replace_lines(source: str) -> set[int]:
         return set()
     return {
         node.func.end_lineno or node.func.value.lineno
-        for node in python_nodes(tree)
-        if isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Attribute)
+        for node in nodes_of(tree, ast.Call)
+        if isinstance(node.func, ast.Attribute)
         and node.func.attr == "replace"
         and len(node.args) >= 2
         and dotted_of(node.func) not in RENAME_CALLS
@@ -1503,9 +1521,8 @@ def string_split_lines(source: str) -> set[int]:
         return set()
     return {
         node.func.end_lineno or node.func.value.lineno
-        for node in python_nodes(tree)
-        if isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Attribute)
+        for node in nodes_of(tree, ast.Call)
+        if isinstance(node.func, ast.Attribute)
         and (
             node.func.attr in ("partition", "rpartition")
             or (node.func.attr in ("split", "rsplit") and bool(node.args))
@@ -1524,9 +1541,8 @@ def string_strip_lines(source: str) -> set[int]:
         return set()
     return {
         node.func.end_lineno or node.func.value.lineno
-        for node in python_nodes(tree)
-        if isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Attribute)
+        for node in nodes_of(tree, ast.Call)
+        if isinstance(node.func, ast.Attribute)
         and node.func.attr in ("strip", "lstrip", "rstrip")
         and node.args
     }
@@ -1567,9 +1583,8 @@ def rich_progress_lines(source: str) -> set[int]:
         return set()
     return imports_of(tree, {"rich.progress"}) | {
         node.lineno
-        for node in python_nodes(tree)
-        if isinstance(node, ast.Attribute)
-        and node.attr == "progress"
+        for node in nodes_of(tree, ast.Attribute)
+        if node.attr == "progress"
         and isinstance(node.value, ast.Name)
         and node.value.id == "rich"
     }
@@ -1603,8 +1618,7 @@ def dataclass_lines(source: str) -> set[int]:
 
     return imports_of(tree, {"dataclasses"}) | {
         decorator.lineno
-        for node in python_nodes(tree)
-        if isinstance(node, ast.ClassDef)
+        for node in nodes_of(tree, ast.ClassDef)
         for decorator in node.decorator_list
         if decorates(decorator)
     }
@@ -1637,9 +1651,8 @@ def tuple_shape_lines(source: str) -> set[int]:
 
     return {
         node.lineno
-        for node in python_nodes(tree)
-        if isinstance(node, ast.Subscript)
-        and isinstance(node.value, ast.Name)
+        for node in nodes_of(tree, ast.Subscript)
+        if isinstance(node.value, ast.Name)
         and node.value.id == "tuple"
         and not variadic(node)
     }
@@ -1660,8 +1673,7 @@ def default_factory_lines(source: str) -> set[int]:
         return set()
     return {
         keyword.lineno
-        for node in python_nodes(tree)
-        if isinstance(node, ast.Call)
+        for node in nodes_of(tree, ast.Call)
         for keyword in node.keywords
         if keyword.arg == "default_factory" and empty_collection_factory(keyword.value)
     }
@@ -1741,10 +1753,8 @@ def empty_collection_lines(source: str) -> set[int]:
         return set()
     seeded = {
         node.value.lineno
-        for node in python_nodes(tree)
-        if isinstance(node, ast.Assign | ast.AnnAssign)
-        and node.value is not None
-        and empty_collection_literal(node.value)
+        for node in [*nodes_of(tree, ast.Assign), *nodes_of(tree, ast.AnnAssign)]
+        if node.value is not None and empty_collection_literal(node.value)
     }
     return seeded - empty_collection_exempt_lines(source)
 
@@ -1776,9 +1786,8 @@ def silent_truncation_lines(source: str) -> set[int]:
 
     sliced = {
         line
-        for node in python_nodes(tree)
-        if isinstance(node, ast.Subscript)
-        and isinstance(node.slice, ast.Slice)
+        for node in nodes_of(tree, ast.Subscript)
+        if isinstance(node.slice, ast.Slice)
         and node.slice.lower is None
         and chosen_size(node.slice.upper)
         for line in range(node.lineno, (node.end_lineno or node.lineno) + 1)
