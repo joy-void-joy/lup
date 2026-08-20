@@ -200,6 +200,25 @@ def test_origin_s_copy_of_unmerged_work_goes_only_when_named(
     assert "the work is in no branch" in capsys.readouterr().err
 
 
+def test_work_a_caller_already_parked_is_not_mourned(
+    pushed: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`dev retire` deletes only after a closed request holds the commits.
+
+    Warning there says the work is in no branch immediately after the step
+    that put it in one, and tells the operator to run the command they are
+    already inside — so the reader has to go and check whether the retirement
+    they just watched succeed actually preserved anything.
+    """
+    monkeypatch.chdir(pushed)
+    branches.delete_branch(
+        "solo", dry_run=False, force=True, remote=True, preserved="refs/pull/7/head"
+    )
+
+    assert "solo" not in remote_branch_names(pushed)
+    assert "the work is in no branch" not in capsys.readouterr().err
+
+
 def test_a_merged_branch_can_still_keep_its_remote(
     pushed: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

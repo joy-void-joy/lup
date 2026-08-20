@@ -1772,8 +1772,15 @@ def delete_branch(
     dry_run: bool,
     force: bool,
     remote: bool | None = None,
+    preserved: str = "",
 ) -> None:
-    """Delete a branch and its worktree, and origin's copy if it is spent."""
+    """Delete a branch and its worktree, and origin's copy if it is spent.
+
+    ``preserved`` names the ref a caller has already parked the commits at,
+    for the one path — :func:`run_retirement` — that preserves them before
+    deleting. Empty means nobody has, which is the case the warning below is
+    written for.
+    """
     cur = git.out("branch", "--show-current")
     if name == cur:
         typer.echo(f"Error: cannot delete the current branch ({name})", err=True)
@@ -1796,7 +1803,7 @@ def delete_branch(
         typer.echo("Use --force to override.", err=True)
         raise typer.Exit(1)
 
-    if plan.delete_remote and not is_ancestor(name, "HEAD"):
+    if plan.delete_remote and not is_ancestor(name, "HEAD") and not preserved:
         typer.echo(
             f"Warning: {name} holds commits HEAD does not, and origin/{name} "
             "is going with it — after this the work is in no branch. To keep "
@@ -2044,7 +2051,13 @@ def retire_branch(
         raise typer.Exit(1)
 
     number = run_retirement(plan, reason)
-    delete_branch(name, dry_run=False, force=True, remote=True)
+    delete_branch(
+        name,
+        dry_run=False,
+        force=True,
+        remote=True,
+        preserved=f"refs/pull/{number}/head",
+    )
     typer.echo(
         f"Retired {name}: recover with `git fetch origin refs/pull/{number}/head`"
     )
