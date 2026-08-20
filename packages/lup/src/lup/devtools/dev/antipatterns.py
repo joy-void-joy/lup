@@ -26,6 +26,7 @@ from collections import Counter, defaultdict
 import cProfile
 import pstats
 from collections.abc import Iterator, Sequence, Set as AbstractSet
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import typer
@@ -176,7 +177,28 @@ def scan_antipatterns(
         for item in scanned
         if item.path.suffix.lower() in {".py", ".pyi"}
     ]
-    refuted = refute(sources, default_oracle())
+    # The resolve spends most of its time waiting on a language server, and
+    # every audit below waits on nothing, so the sweep reads while it waits
+    # rather than after it. Only the text audit reads a refutation; the rest
+    # are assembled in their own order once both halves are in.
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        resolving = pool.submit(refute, sources, default_oracle())
+        declared = [
+            *audit_capabilities(sources),
+            *audit_model_free_functions(sources),
+            *audit_own_model_dispatch(sources),
+            *audit_isinstance_chains(sources),
+            *audit_constant_declarations(sources, project.roots),
+        ]
+        boundary_findings = [
+            (source.path, finding)
+            for source in sources
+            for finding in audit_path_boundaries(
+                source.path, source.text, project.roots
+            )
+        ]
+        refuted = resolving.result()
+
     results = [
         FoundAntiPattern(file=item.rel, **finding.model_dump())
         for item in scanned
@@ -195,19 +217,8 @@ def scan_antipatterns(
             message=finding.message,
             rule_id=finding.rule_id,
         )
-        for finding in [
-            *audit_capabilities(sources),
-            *audit_model_free_functions(sources),
-            *audit_own_model_dispatch(sources),
-            *audit_isinstance_chains(sources),
-            *audit_constant_declarations(sources, project.roots),
-        ]
+        for finding in declared
     )
-    boundary_findings = [
-        (source.path, finding)
-        for source in sources
-        for finding in audit_path_boundaries(source.path, source.text, project.roots)
-    ]
     foreign_untyped = {
         (path.as_posix(), finding.line)
         for path, finding in boundary_findings

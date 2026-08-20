@@ -43,14 +43,20 @@ SERVER_NAME = "pyright-langserver"
 RESOLVE_TIMEOUT_SECONDS = 600.0
 """Budget for a whole sweep. Exhausting it degrades to the broad rule."""
 
-RESOLVE_WORKERS = 4
+RESOLVE_WORKERS = 2
 """Language servers a sweep drives at once, as a default a caller may raise.
 
 Pyright answers one question at a time in one process, so a sweep pinned to a
 single server is one core busy on a host that has many. Servers are what
-parallelize it, and each one costs a process holding its own picture of the
-workspace — memory rather than time, which is why this is a small number and
-not the core count.
+parallelize it, and each one costs a process that builds its own picture of
+the whole workspace — so the second server buys most of what there is to buy
+and the fourth mostly duplicates that analysis.
+
+Small rather than the core count because the sweep is not alone: its caller
+overlaps the resolve with audits that need no server, and the gate around it
+runs a type checker and two test suites at the same time. Measured across a
+whole gate on a 32-core host, four servers cost 40.1s where two cost 36.3s —
+the extra analyses are paid for by whatever else was running.
 """
 
 
