@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Awaitable, Callable
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from lup.adapters.claude.native import (
@@ -53,7 +54,11 @@ def claude_hook_semantic_tool(event: LupHookInput) -> SemanticTool:
     subprocess hook; this is that decode for a session whose hooks run
     in-process, so both enforcement paths judge one vocabulary.
     """
-    payload = ClaudeHookPayload(tool_name=event.tool_name, tool_input=event.tool_input)
+    payload = ClaudeHookPayload(
+        tool_name=event.tool_name,
+        tool_input=event.tool_input,
+        cwd=Path(event.cwd) if event.cwd else None,
+    )
     return ClaudeEventDecoder().decode(parse_claude_before_tool(payload)).tool
 
 
@@ -114,6 +119,7 @@ def build_claude_hook_handler(
             if "stop_hook_active" in input_data
             else False
         )
+        cwd = input_data["cwd"] if "cwd" in input_data else ""
         output = await matcher.hook(
             LupHookInput(
                 event=event,
@@ -121,6 +127,7 @@ def build_claude_hook_handler(
                 tool_input=tool_input,
                 tool_path=claude_hook_tool_path(tool_name, tool_input),
                 tool_result=tool_result,
+                cwd=cwd,
                 stop_hook_active=stop_hook_active,
             )
         )

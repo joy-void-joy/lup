@@ -428,14 +428,15 @@ def resolved_refutations(
         return None
 
 
-def existing_write_targets(targets: list[str]) -> list[str]:
+def existing_write_targets(targets: list[str], root: Path | None = None) -> list[str]:
     """Report which of a command's write targets already exist on disk.
 
     The kernel never reads the filesystem, so it cannot tell creating a file
     from overwriting one. Resolving that here keeps the decision itself a
     pure function of the command text and this list.
     """
-    return [target for target in targets if (Path.cwd() / target).exists()]
+    where = Path.cwd() if root is None else root
+    return [target for target in targets if (where / target).exists()]
 
 
 def git_answers(arguments: list[str], root: Path) -> list[str] | None:
@@ -582,6 +583,7 @@ def bash_decision(
     sandboxed: bool,
     interactive: bool,
     escapable: bool,
+    cwd: Path | None,
 ) -> KernelDecision:
     """Judge one shell command against the declared vocabulary.
 
@@ -596,6 +598,11 @@ def bash_decision(
     replacing it would cost. Resolving them for only one of the two writing
     forms is what left ``rm f`` granted while ``echo x > f`` asked about the
     same clean, tracked file.
+
+    ``cwd`` is where the calling session is, which the command's relative
+    operands resolve against. It is a parameter rather than a read of this
+    process, because a hook is promised nothing about where it runs, and
+    resolving a target against the wrong tree answers a different question.
 
     ``escapable`` is the one thing here a runtime answers rather than the host:
     whether it can put a single call outside its own sandbox. It arrives as an
@@ -614,13 +621,13 @@ def bash_decision(
         path_roles=PATH_ROLES,
         path_rules=PATH_RULES,
         existing_targets=existing_write_targets(
-            [*shell_write_targets(command), *acted_on]
+            [*shell_write_targets(command), *acted_on], cwd
         ),
         recoverable_targets=recoverable_write_targets(
-            [*shell_write_targets(command), *acted_on]
+            [*shell_write_targets(command), *acted_on], cwd
         ),
-        directory_targets=directory_write_targets(acted_on),
-        empty_directories=empty_directory_targets(acted_on),
+        directory_targets=directory_write_targets(acted_on, cwd),
+        empty_directories=empty_directory_targets(acted_on, cwd),
         recoverable_target_limit=RECOVERABLE_TARGET_LIMIT,
         runner_targets=RUNNER_TARGETS,
         target_tables=RUNNER_TARGET_TABLES,
@@ -826,6 +833,7 @@ def dispatch(payload, permission_request=False):
             # request is the other supported route. Both are checked against
             # semantic placement before the hook lets the native boundary act.
             escapable=escaped,
+            cwd=Path(payload["cwd"]) if "cwd" in payload else None,
         )
         # PreToolUse can neither see nor place every native escape. Let Codex's
         # sandbox run a confined call or raise the PermissionRequest where this
