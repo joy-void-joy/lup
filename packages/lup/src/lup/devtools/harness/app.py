@@ -135,6 +135,48 @@ def create_harness_app(
         """Report installed native runtime evidence without updating either CLI."""
         doctor.run_doctor(targets.resolve(target, project_root()), strict_evidence)
 
+    @app.command("requirements")
+    def requirements_command(
+        target: Annotated[str, typer.Argument(help=selector)] = targets.every,
+        launch_only: Annotated[
+            bool,
+            typer.Option(
+                "--launch-only",
+                help="Skip the conveniences, exactly as a launch does",
+            ),
+        ] = False,
+    ) -> None:
+        """Exercise the external programs this project expects on this machine.
+
+        The roster a launch runs, plus the conveniences it stays quiet about
+        -- so somebody setting a machine up hears everything once, where they
+        can act on it, and every session afterwards hears only what it lost.
+
+        Only host-side requirements are exercised. What the container image
+        is expected to carry is checked where it is needed rather than here,
+        because a machine that will never run a TypeScript toolchain outside
+        a container is not a machine with a problem.
+
+        Exits nonzero when something a launch would report is not working.
+        An advisory alone never fails this: it is advice, and a machine that
+        declines it is finished being set up.
+        """
+        findings = [
+            finding
+            for composition in targets.resolve(target, project_root())
+            for finding in launch.report_requirements(
+                composition.recipe.source.requirements, advisory=not launch_only
+            )
+        ]
+        if not findings:
+            typer.echo("No host requirements declared.")
+            return
+        if any(
+            not finding.working and finding.requirement.absence.at_launch()
+            for finding in findings
+        ):
+            raise typer.Exit(1)
+
     @app.command("serve-resolver-tools")
     def serve_resolver_tools_command() -> None:
         """Serve one worker's question tools over stdio, for out-of-process runtimes."""

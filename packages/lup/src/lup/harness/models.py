@@ -25,6 +25,7 @@ from pydantic import (
 from lup.codescan.common import AntiPattern, RuleSelection
 from lup.devtools.launcher import DEFAULT_ENVIRONMENT
 from lup.harness.banner import ArtifactBanner, GeneratedBanner
+from lup.harness.requirements import Manifest
 from lup.markdown import CodeCell, PlainCell, TableCell, escaped
 from lup.mcp import ToolDeclaration
 from lup.policy.kernel.rows import AcceptanceGuardRow, PathRoleName
@@ -1046,6 +1047,16 @@ class Harness(BaseModel, frozen=True):
     plugins: list[Plugin]
     guidance: PromptDocument
     resolver: ResolveSpec
+    requirements: Manifest = Manifest()
+    """The external programs this project needs, exercised before a launch.
+
+    Empty declares no requirement and checks nothing, which is right for a
+    project whose toolchain is entirely Python: a preflight that invented
+    prerequisites would refuse machines that were fine. What a project does
+    declare here is checked by the launch, printed by the standalone command,
+    and installed into any image built from this harness -- one roster, so
+    the three cannot describe different toolchains.
+    """
 
     @property
     def declared_hooks(self) -> HookSet:

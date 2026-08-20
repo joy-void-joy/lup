@@ -8,7 +8,6 @@ native CLI with the non-interactive environment applied.
 import json
 import logging
 import os
-import shutil
 from collections.abc import Callable
 from contextlib import AbstractContextManager, nullcontext
 from datetime import UTC, datetime
@@ -31,6 +30,14 @@ from lup.adapters.codex.harness_runtime import (
 from lup.adapters.codex.transcripts import CodexTranscripts
 from lup.harness.environment import non_interactive_environment
 from lup.harness.models import NativeName, Plugin
+from lup.harness.requirements import (
+    Finding,
+    LostCapability,
+    Manifest,
+    Requirement,
+    Run,
+    refused,
+)
 from lup.harness.process import LocalProcessLauncher
 from lup.telemetry.journal import (
     ArgvRedaction,
@@ -373,7 +380,16 @@ def start_harness_transcript(
 
 
 def runtime_preflight(composition: NativeHarnessComposition) -> None:
-    """Verify each claimed native requirement immediately before launch."""
+    """Verify each claimed native requirement immediately before launch.
+
+    Two rosters, asked in the order their failures matter. The native probes
+    answer whether this runtime can host a session at all, and a gap there
+    stops the launch. The declared requirements answer what the session will
+    be able to *do*, and almost every gap there costs a capability rather
+    than the session -- so those are named and the launch continues, which is
+    the only posture that works on a machine without a display, a container,
+    or an editor attached.
+    """
     target = composition.recipe.label
     evidence = composition.readiness()
     for item in evidence:
@@ -381,6 +397,33 @@ def runtime_preflight(composition: NativeHarnessComposition) -> None:
         typer.echo(f"{target} {item.capability}: {state} ({item.version})")
     if any(not item.supported for item in evidence):
         raise typer.BadParameter(f"{target} runtime preflight failed")
+    report_requirements(composition.recipe.source.requirements)
+
+
+def report_requirements(manifest: Manifest, advisory: bool = False) -> list[Finding]:
+    """Exercise the host-side requirements, printing what each one found.
+
+    Printed on the way past rather than only when something is wrong: a
+    capability that is *absent* is exactly the fact a session needs at the
+    top of its scrollback, because it is the one the agent inside cannot
+    discover except by failing at it.
+
+    *advisory* widens this to the conveniences, and is off for a launch. A
+    nicety reported before every session becomes a line people learn to skip,
+    and the line above it is the one that mattered -- so those are saved for
+    whoever is setting a machine up and can act on them.
+    """
+    environ: EnvVars = dict(os.environ)  # lup: ignore[os-environ]
+    findings = manifest.check(environ, advisory=advisory)
+    for finding in findings:
+        for line in finding.lines():
+            typer.echo(line)
+    stopping = refused(findings)
+    if stopping:
+        raise typer.BadParameter(
+            "; ".join(item.requirement.absence.consequence() for item in stopping)
+        )
+    return findings
 
 
 def codex_login_preflight(home: Path, environment: EnvVars) -> None:
@@ -422,15 +465,34 @@ def apply_sandbox_environment(
     The dispatchers defer unjudged shell only under this flag, so it is set
     exactly when the launch verified the OS boundary; without it the deny
     lattice keeps carrying the escalation recipe.
+
+    Verified by exercising each tool rather than by finding it on PATH. The
+    two answers differ exactly where it matters: a confinement binary that is
+    installed and cannot start a namespace on this kernel is present and
+    useless, and a flag set on its presence tells every dispatcher downstream
+    to relax into a boundary that will not be there. Absence and breakage
+    both leave the lattice standing, which is the safe direction, and the
+    message says which of the two was found rather than only that one was.
     """
     hooks = plugin.hooks
     if hooks is None or hooks.sandbox is None:
         return
-    missing = [tool for tool in required_tools if shutil.which(tool) is None]
-    if missing:
-        typer.echo(
-            f"{label} sandbox: missing {', '.join(missing)} — deny lattice stays active"
-        )
+    findings = [
+        Requirement(
+            capability=tool,
+            purpose="the OS boundary this launch claims",
+            exercise=Run(command=[tool, "--version"]),
+            absence=LostCapability(capability="OS confinement"),
+        ).check(environment)
+        for tool in required_tools
+    ]
+    unusable = [finding for finding in findings if not finding.working]
+    if unusable:
+        for finding in unusable:
+            typer.echo(
+                f"{label} sandbox: {finding.requirement.capability} — {finding.detail}"
+            )
+        typer.echo(f"{label} sandbox: deny lattice stays active")
         return
     environment["LUP_SANDBOX_ACTIVE"] = "1"
     typer.echo(f"{label} sandbox: active — unjudged shell defers to the OS boundary")
