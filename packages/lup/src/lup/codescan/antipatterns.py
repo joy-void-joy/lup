@@ -79,6 +79,9 @@ from lup.codescan.common import (
 from lup.harness.contracts import Spelling, Unsupported
 from lup.policy.kernel.edit import (
     namedtuple_lines,
+    noqa_lines,
+    pyright_ignore_lines,
+    type_ignore_lines,
     all_export_lines,
     bare_except_lines,
     except_baseexception_lines,
@@ -139,18 +142,21 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
     AntiPattern(
         id="type-ignore",
         pattern=re.compile(r"#\s*type:\s*ignore"),
+        matcher=Matcher(select=type_ignore_lines),
         message="Never use # type: ignore — fix the type error properly",
         context="comment",
     ),
     AntiPattern(
         id="pyright-ignore",
         pattern=re.compile(r"#\s*pyright:\s*ignore"),
+        matcher=Matcher(select=pyright_ignore_lines),
         message="Never use # pyright: ignore — fix the type error properly",
         context="comment",
     ),
     AntiPattern(
         id="noqa",
         pattern=re.compile(r"#\s*noqa\b"),
+        matcher=Matcher(select=noqa_lines),
         message="Never use # noqa — fix the lint issue properly",
         context="comment",
     ),

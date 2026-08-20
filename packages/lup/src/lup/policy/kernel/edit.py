@@ -1471,6 +1471,63 @@ def suppress_lines(source: str) -> set[int]:
     return set() if tree is None else attributes_of(tree, {"contextlib.suppress"})
 
 
+def comment_directive_lines(source: str, directive: re.Pattern[str]) -> set[int]:
+    """Lines whose own comment opens with one suppression directive.
+
+    A comment is the one construct the parser drops, so the three rules about
+    suppression spellings read the token stream instead. That is the same
+    lexer the parser runs, kept per source here, so it answers what a `#`
+    actually opens: characters inside a string literal are a STRING token and
+    were never a comment to begin with.
+
+    The pattern is anchored at the comment's own opening, which is what tells
+    a suppression from prose about one. `# never write # noqa` is a sentence
+    with the spelling in it and silences nothing; searching the whole line
+    reported it, and the only way past a denial like that was a directive
+    guarding a line that guarded nothing.
+    """
+    tokens = python_tokens(source)
+    if tokens is None:
+        return set()
+    return {
+        token.start[0]
+        for token in tokens
+        if token.type == tokenize.COMMENT and directive.match(token.string) is not None
+    }
+
+
+# The three below bind one directive each to the one-argument shape a matcher
+# is resolved and called through. `functools.partial` would say the same thing
+# and lose the name, which is what a row carries a matcher as.
+TYPE_IGNORE_DIRECTIVE_RE = re.compile(r"#\s*type:\s*ignore\b")
+PYRIGHT_IGNORE_DIRECTIVE_RE = re.compile(r"#\s*pyright:\s*ignore\b")
+NOQA_DIRECTIVE_RE = re.compile(r"#\s*noqa\b")
+
+
+def type_ignore_lines(source: str) -> set[int]:
+    """Lines carrying a `# type: ignore` suppression.
+
+    Python does model this one — `ast.parse(source, type_comments=True)`
+    reports it as `Module.type_ignores` — and reading it there is worse than
+    reading the comment. That flag makes the parser stricter than the one
+    every other matcher here shares: `class A:  # type: int` parses normally
+    and raises under it, so a single misplaced type comment anywhere would
+    make this rule silently blind for the whole file. The token carries the
+    same answer with nothing to trip over.
+    """
+    return comment_directive_lines(source, TYPE_IGNORE_DIRECTIVE_RE)
+
+
+def pyright_ignore_lines(source: str) -> set[int]:
+    """Lines carrying a `# pyright: ignore` suppression."""
+    return comment_directive_lines(source, PYRIGHT_IGNORE_DIRECTIVE_RE)
+
+
+def noqa_lines(source: str) -> set[int]:
+    """Lines carrying a `# noqa` suppression."""
+    return comment_directive_lines(source, NOQA_DIRECTIVE_RE)
+
+
 # lup: ignore[library-default] — Python's own two spellings of a file rename; the kernel carries no config
 RENAME_CALLS = frozenset(  # lup: ignore[frozenset-shape] — a membership test, no keys
     {"os.replace", "Path.replace", "pathlib.Path.replace", "PurePath.replace"}
@@ -1937,6 +1994,12 @@ def matcher_named(name: str) -> Callable[[str], set[int]] | None:
             return empty_collection_lines
         case "silent_truncation_lines":
             return silent_truncation_lines
+        case "type_ignore_lines":
+            return type_ignore_lines
+        case "pyright_ignore_lines":
+            return pyright_ignore_lines
+        case "noqa_lines":
+            return noqa_lines
     return None
 
 
