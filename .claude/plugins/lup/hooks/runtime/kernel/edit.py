@@ -657,8 +657,12 @@ def empty_collection_exempt_lines(source: str) -> set[int]:
         for loop in ast.walk(scope):
             if not is_loop(loop):
                 continue
-            tolerant = any(isinstance(inner, ast.Try) for inner in ast.walk(loop))
-            for inner in ast.walk(loop):
+            # One walk answers both questions the loop is asked — whether it
+            # tolerates a failure, and which names it feeds — and a nested
+            # loop is walked once per ancestor already.
+            inside = list(ast.walk(loop))
+            tolerant = any(isinstance(inner, ast.Try) for inner in inside)
+            for inner in inside:
                 name = mutated_name(inner)
                 if name is not None:
                     feeding.setdefault(name, []).append(tolerant)

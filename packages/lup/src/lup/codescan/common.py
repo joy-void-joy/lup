@@ -23,7 +23,7 @@ import re
 from collections.abc import Callable, Set as AbstractSet
 from functools import cache
 from pathlib import Path, PurePosixPath
-from typing import Literal, Self
+from typing import Literal, Self, get_args
 
 from pydantic import BaseModel
 
@@ -54,6 +54,14 @@ on it. Those are refused, and the message says to write the replacement.
 
 type RuleContext = Literal["code", "comment"]
 """The syntactic surface a scan rule inspects: masked code, or comment text."""
+
+RULE_CONTEXTS: tuple[RuleContext, ...] = get_args(RuleContext.__value__)
+"""Every context a rule may declare, read off the alias that names them.
+
+Taken from the alias rather than spelled again beside it, so a context added
+there reaches every scan that projects a line per context without anyone
+having to widen a second list.
+"""
 
 
 class Refiner(BaseModel, arbitrary_types_allowed=True):

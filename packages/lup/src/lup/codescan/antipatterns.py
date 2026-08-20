@@ -71,6 +71,7 @@ from lup.codescan.common import (
     Refiner,
     Refutation,
     RuleSelection,
+    RULE_CONTEXTS,
     file_level_ignore,
     ignore_rule_ids,
 )
@@ -772,16 +773,21 @@ def line_hits(
     line included. Untokenized text (a non-Python file, a fragment) keeps the
     conservative whole-line scan, skipping blank lines and pure comments that
     carry no `type:` directive — aligned with what the hook would decide.
+
+    There are two contexts and forty-odd rules, so both projections of the
+    line are taken once and the table reads whichever one it declared —
+    stripping the line per rule made the same two strings forty times over.
     """
     if not lines.tokenized:
         raw = lines.commented[line_no - 1].strip()
         if not raw or (raw.startswith("#") and "type:" not in raw):
             return []
         return [ap for ap in patterns if ap.pattern.search(raw)]
+    scanned = {context: lines.scan_text(line_no, context) for context in RULE_CONTEXTS}
     return [
         ap
         for ap in patterns
-        if (text := lines.scan_text(line_no, ap.context)) and ap.pattern.search(text)
+        if (text := scanned[ap.context]) and ap.pattern.search(text)
     ]
 
 
