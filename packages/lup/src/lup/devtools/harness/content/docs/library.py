@@ -46,7 +46,106 @@ class Roster(BaseModel, frozen=True):
     forking the check that reads them.
     """
 
-    entries: list[RosterEntry]
+    entries: list[RosterEntry] = [
+        RosterEntry(
+            package="devtools",
+            solves="The development CLI an adopter inherits rather than forks: worktrees and branches, trace and Python introspection, the resolver supervisor, the sync registry, version bookkeeping. Ships the whole roster — `roster.py` wires every sub-app over one `DevtoolsDeclarations`, and an application declares only what it retires and what only it has, so a sub-app added here reaches it on the next lock refresh instead of waiting to be noticed. Requires the `web` extra for the supervisor.",
+        ),
+        RosterEntry(
+            package="channels",
+            solves="File-backed channels — a value that settles, an ordered log, and the atomic publish under both. The widest dependency here: `harness`, `resolver`, `runtime`, `realtime`, `telemetry`, and `adapters` all write through it, which is what makes it a package rather than a helper inside any one of them.",
+        ),
+        RosterEntry(
+            package="journal",
+            solves="One ordered record file, sequenced and durably appended, read back from a byte offset or a sequence number and paged backwards from either. Two products ride it — the resolver's typed decision log and the observable transcript's hash-chained provider payloads — and neither collapses into the other. Sharing the mechanism is what lets any reader tail either record the same way, and what stops the next thing needing a record from arriving with a third implementation.",
+        ),
+        RosterEntry(
+            package="codeintel",
+            solves="An LSP client and the tools built on it, so a name is resolved rather than grepped. Serves an agent's toolset and the pyright oracle behind `dev check` — two consumers on opposite sides of the library, neither of which owns it.",
+        ),
+        RosterEntry(
+            package="gitlocks",
+            solves="Why git cannot take the lock its config writes need. A confinement owning the path and a lock some git left behind when it died both surface as `File exists`, and the remedies are opposite, so telling them apart reads the mount state and the lock's age rather than the message. The same two-consumers shape as `codeintel`: the resolver's orchestrator and `devtools/utils` both diagnose it, and neither owns it.",
+        ),
+        RosterEntry(
+            package="gitguard",
+            solves="Catching a suite that wrote into the checkout it was running inside. A test that forgets to bind git to its throwaway repository inherits the process working directory instead, and nothing fails — git finds a repository, commits succeed, and the suite passes green while the developer's branch has moved. Found the slow way, by a `dev pr sync-base` merging a `dev` whose tip had become a fixture's commit deleting the application source. The suite cannot be trusted to notice, because noticing is exactly what it failed at, so the refs are read around it.",
+        ),
+        RosterEntry(
+            package="actors",
+            solves="Addressable agents: one held session each, reachable while they work. An agent opened for a single turn and closed cannot be talked to, because there is nothing to talk to between the call and the result. An actor holds its session across turns, takes mail mid-turn through a hook it never chooses to check, and asks questions that settle without stalling the asker. Nothing here knows what the actors are for — the resolver names its own kinds over this mechanism, and a research session names different ones.",
+        ),
+        RosterEntry(
+            package="jobs",
+            solves="Durable containerized work that outlives the process that submitted it. A sandbox cell runs inside the caller's process, so the agent waits and a crash takes the work with it; a job is submitted, left running, and asked about later — possibly by a process started after that crash. Everything durable is on the filesystem, and the scheduler's atomically-replaced view is deliberately separate from the terminal result the container writes, so a job cannot forge its own completion.",
+        ),
+        RosterEntry(
+            package="replay",
+            solves="A durable journal of executed cells and the divergence check on replaying one: state is reconstructed by re-running the record rather than by serializing objects. What differs between users is the contract attached. An environment claiming determinism says a replay must reproduce its outcomes, so a divergence there is a defect in a claim; an environment claiming nothing still gets the report, and there the divergence *is* the finding — the result depended on something outside the journal. Both are replayable; only the first is certifiable.",
+        ),
+        RosterEntry(
+            package="subagents",
+            solves="Spec-driven delegation for engines with no native subagents, dispatching the same `SubagentSpec` roster the native path uses.",
+        ),
+        RosterEntry(
+            package="tool_policy",
+            solves="Tool-availability filtering: the mechanism, not the policy. A project subclasses `BaseToolPolicy` and maps its own settings onto it, which is the placement rule in miniature — the machinery is the library's, every exclusion is the adopter's.",
+        ),
+        RosterEntry(
+            package="tool_routes",
+            solves="Which tool answers a URL better than fetching it would. Behind a prediction-market URL is a market tool and behind a paper URL is a paper tool, and the rendered page is a poorer answer than either API. This is the table that says so — a URL shape, the tool it stands for, and how to build that tool's arguments from what the shape matched. The same placement split as `tool_policy`: the matching and dispatch are the library's, the table's content belongs to the only thing that knows its own tools.",
+        ),
+        RosterEntry(
+            package="markdown",
+            solves="Rendering Markdown that is generated rather than authored, escaping at the leaf where data enters the document. Only `devtools` renders such tables today, but nothing in it is about development tooling.",
+        ),
+        RosterEntry(
+            package="web",
+            solves="What a page served on this machine does to stay local-only: the loopback bind refusal, the `Host` check that DNS rebinding would otherwise walk past, and the browser round-trip an installed OAuth client needs. One subject — a local HTTP surface a browser reaches — and the OAuth half is reached by a downstream project rather than by anything here, which is the outward test answering in the affirmative. The two user-facing pages, `devtools/dashboard` and `devtools/supervisor`, sit *on* this; it does not belong beside them.",
+        ),
+        RosterEntry(
+            package="workspace",
+            solves="Where a run's data lives: version-aware paths, the `SessionContext` that crosses a process boundary, session history, and the note directories a session may touch.",
+        ),
+        RosterEntry(
+            package="realtime",
+            solves="The wake/act/sleep lifecycle for persistent agents. `scheduler.py` stands alone; `relay.py` layers a subprocess mailbox transport on top and is never imported by it.",
+        ),
+        RosterEntry(
+            package="telemetry",
+            solves="What a run records about itself: markdown trace plus machine-readable sidecar, console rendering, per-tool metrics with a file-backed flush for subprocess tools.",
+        ),
+        RosterEntry(
+            package="usage",
+            solves="One account's metered usage, whichever runtime billed it: the windows a plan meters and when each clears, where the tokens went day by day, and the display that draws both. Ships no roster — each adapter declares the entry that reads its own runtime into this shape, so a runtime joins the display by being read rather than by growing a command beside it.",
+        ),
+        RosterEntry(
+            package="sandbox",
+            solves="A Docker-isolated Python REPL — mount topology, container lifecycle, and the exec-multiplexed socket protocol. Requires the `docker` extra.",
+        ),
+        RosterEntry(
+            package="resilience",
+            solves="`throttle` bounds concurrency and minimum call interval; `retry` re-runs a coroutine with exponential backoff.",
+        ),
+        RosterEntry(
+            package="hooks",
+            solves="SDK-agnostic hook models and factories: permission hooks, tool allowlists, gates, nudges, capture.",
+        ),
+        RosterEntry(
+            package="mcp",
+            solves="The `lup_tool` decorator and `create_mcp_server`, with typed input models and error propagation that actually reaches the caller.",
+        ),
+        RosterEntry(
+            package="reflect",
+            solves="Reflect-before-output gates: a flag-based `ReflectionGate` and a verdict-aware `ReviewGate`.",
+        ),
+    ]
+    """What each remaining top-level entry solves, in the order the page reads them.
+
+    Authored rather than walked, because "what makes this a package" is a
+    judgement. Which entries need one is not: :meth:`table` walks the tree and
+    refuses to render a roster that has drifted from it in either direction.
+    """
 
     subtree: str = "packages/lup/src/lup"
     """Where the package this describes lives, relative to a checkout."""
@@ -100,109 +199,7 @@ class Roster(BaseModel, frozen=True):
         )
 
 
-ROSTER = [
-    RosterEntry(
-        package="devtools",
-        solves="The development CLI an adopter inherits rather than forks: worktrees and branches, trace and Python introspection, the resolver supervisor, the sync registry, version bookkeeping. Ships the whole roster — `roster.py` wires every sub-app over one `DevtoolsDeclarations`, and an application declares only what it retires and what only it has, so a sub-app added here reaches it on the next lock refresh instead of waiting to be noticed. Requires the `web` extra for the supervisor.",
-    ),
-    RosterEntry(
-        package="channels",
-        solves="File-backed channels — a value that settles, an ordered log, and the atomic publish under both. The widest dependency here: `harness`, `resolver`, `runtime`, `realtime`, `telemetry`, and `adapters` all write through it, which is what makes it a package rather than a helper inside any one of them.",
-    ),
-    RosterEntry(
-        package="journal",
-        solves="One ordered record file, sequenced and durably appended, read back from a byte offset or a sequence number and paged backwards from either. Two products ride it — the resolver's typed decision log and the observable transcript's hash-chained provider payloads — and neither collapses into the other. Sharing the mechanism is what lets any reader tail either record the same way, and what stops the next thing needing a record from arriving with a third implementation.",
-    ),
-    RosterEntry(
-        package="codeintel",
-        solves="An LSP client and the tools built on it, so a name is resolved rather than grepped. Serves an agent's toolset and the pyright oracle behind `dev check` — two consumers on opposite sides of the library, neither of which owns it.",
-    ),
-    RosterEntry(
-        package="gitlocks",
-        solves="Why git cannot take the lock its config writes need. A confinement owning the path and a lock some git left behind when it died both surface as `File exists`, and the remedies are opposite, so telling them apart reads the mount state and the lock's age rather than the message. The same two-consumers shape as `codeintel`: the resolver's orchestrator and `devtools/utils` both diagnose it, and neither owns it.",
-    ),
-    RosterEntry(
-        package="gitguard",
-        solves="Catching a suite that wrote into the checkout it was running inside. A test that forgets to bind git to its throwaway repository inherits the process working directory instead, and nothing fails — git finds a repository, commits succeed, and the suite passes green while the developer's branch has moved. Found the slow way, by a `dev pr sync-base` merging a `dev` whose tip had become a fixture's commit deleting the application source. The suite cannot be trusted to notice, because noticing is exactly what it failed at, so the refs are read around it.",
-    ),
-    RosterEntry(
-        package="actors",
-        solves="Addressable agents: one held session each, reachable while they work. An agent opened for a single turn and closed cannot be talked to, because there is nothing to talk to between the call and the result. An actor holds its session across turns, takes mail mid-turn through a hook it never chooses to check, and asks questions that settle without stalling the asker. Nothing here knows what the actors are for — the resolver names its own kinds over this mechanism, and a research session names different ones.",
-    ),
-    RosterEntry(
-        package="jobs",
-        solves="Durable containerized work that outlives the process that submitted it. A sandbox cell runs inside the caller's process, so the agent waits and a crash takes the work with it; a job is submitted, left running, and asked about later — possibly by a process started after that crash. Everything durable is on the filesystem, and the scheduler's atomically-replaced view is deliberately separate from the terminal result the container writes, so a job cannot forge its own completion.",
-    ),
-    RosterEntry(
-        package="replay",
-        solves="A durable journal of executed cells and the divergence check on replaying one: state is reconstructed by re-running the record rather than by serializing objects. What differs between users is the contract attached. An environment claiming determinism says a replay must reproduce its outcomes, so a divergence there is a defect in a claim; an environment claiming nothing still gets the report, and there the divergence *is* the finding — the result depended on something outside the journal. Both are replayable; only the first is certifiable.",
-    ),
-    RosterEntry(
-        package="subagents",
-        solves="Spec-driven delegation for engines with no native subagents, dispatching the same `SubagentSpec` roster the native path uses.",
-    ),
-    RosterEntry(
-        package="tool_policy",
-        solves="Tool-availability filtering: the mechanism, not the policy. A project subclasses `BaseToolPolicy` and maps its own settings onto it, which is the placement rule in miniature — the machinery is the library's, every exclusion is the adopter's.",
-    ),
-    RosterEntry(
-        package="tool_routes",
-        solves="Which tool answers a URL better than fetching it would. Behind a prediction-market URL is a market tool and behind a paper URL is a paper tool, and the rendered page is a poorer answer than either API. This is the table that says so — a URL shape, the tool it stands for, and how to build that tool's arguments from what the shape matched. The same placement split as `tool_policy`: the matching and dispatch are the library's, the table's content belongs to the only thing that knows its own tools.",
-    ),
-    RosterEntry(
-        package="markdown",
-        solves="Rendering Markdown that is generated rather than authored, escaping at the leaf where data enters the document. Only `devtools` renders such tables today, but nothing in it is about development tooling.",
-    ),
-    RosterEntry(
-        package="web",
-        solves="What a page served on this machine does to stay local-only: the loopback bind refusal, the `Host` check that DNS rebinding would otherwise walk past, and the browser round-trip an installed OAuth client needs. One subject — a local HTTP surface a browser reaches — and the OAuth half is reached by a downstream project rather than by anything here, which is the outward test answering in the affirmative. The two user-facing pages, `devtools/dashboard` and `devtools/supervisor`, sit *on* this; it does not belong beside them.",
-    ),
-    RosterEntry(
-        package="workspace",
-        solves="Where a run's data lives: version-aware paths, the `SessionContext` that crosses a process boundary, session history, and the note directories a session may touch.",
-    ),
-    RosterEntry(
-        package="realtime",
-        solves="The wake/act/sleep lifecycle for persistent agents. `scheduler.py` stands alone; `relay.py` layers a subprocess mailbox transport on top and is never imported by it.",
-    ),
-    RosterEntry(
-        package="telemetry",
-        solves="What a run records about itself: markdown trace plus machine-readable sidecar, console rendering, per-tool metrics with a file-backed flush for subprocess tools.",
-    ),
-    RosterEntry(
-        package="usage",
-        solves="One account's metered usage, whichever runtime billed it: the windows a plan meters and when each clears, where the tokens went day by day, and the display that draws both. Ships no roster — each adapter declares the entry that reads its own runtime into this shape, so a runtime joins the display by being read rather than by growing a command beside it.",
-    ),
-    RosterEntry(
-        package="sandbox",
-        solves="A Docker-isolated Python REPL — mount topology, container lifecycle, and the exec-multiplexed socket protocol. Requires the `docker` extra.",
-    ),
-    RosterEntry(
-        package="resilience",
-        solves="`throttle` bounds concurrency and minimum call interval; `retry` re-runs a coroutine with exponential backoff.",
-    ),
-    RosterEntry(
-        package="hooks",
-        solves="SDK-agnostic hook models and factories: permission hooks, tool allowlists, gates, nudges, capture.",
-    ),
-    RosterEntry(
-        package="mcp",
-        solves="The `lup_tool` decorator and `create_mcp_server`, with typed input models and error propagation that actually reaches the caller.",
-    ),
-    RosterEntry(
-        package="reflect",
-        solves="Reflect-before-output gates: a flag-based `ReflectionGate` and a verdict-aware `ReviewGate`.",
-    ),
-]
-"""What each remaining top-level entry solves, in the order the page reads them.
-
-Authored rather than walked, because "what makes this a package" is a
-judgement. Which entries need one is not: :func:`roster_table` walks the tree
-and refuses to render a roster that has drifted from it in either direction.
-"""
-
-
-LIBRARY = Roster(entries=ROSTER)
+LIBRARY = Roster()
 """This library's own roster, checked against this library's own tree."""
 
 

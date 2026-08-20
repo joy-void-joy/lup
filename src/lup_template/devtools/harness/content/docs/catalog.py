@@ -36,6 +36,7 @@ DOCS_ROOT = f"{CONTENT_ROOT}/docs"
 GENERATED_GUIDE = "docs/harness.md"
 """Document that explains what generated output is and how to change it."""
 
+
 def reference_pages(root: Path) -> list[models.Document]:
     """The pages lup publishes about the machinery this repository is built on.
 
