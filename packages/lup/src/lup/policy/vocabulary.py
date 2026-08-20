@@ -432,12 +432,13 @@ def runner_target_rules(
     works around it, or reports success from a session that never ran a
     command; one planning run finished that way and looked normal.
 
-    Measured rather than assumed, because the deny looks like the runtime
-    protecting its own configuration directory: under one ``~/.claude`` parent,
-    ``debug`` — a path the sandbox grants — accepts a directory, while
-    ``session-env`` and a per-session configuration directory beside it, which
-    it does not grant, both refuse one with ``EROFS``. So the deny is the
-    ordinary write allowlist and a grant would lift it. It is still not the
+    The deny is the runtime protecting its own configuration directory, and a
+    grant does not lift it. A live session's filesystem policy shows the shape:
+    the repository root sits in ``allowOnly`` while the configuration home
+    below it — ``session-env`` and its neighbours — is listed again under
+    ``denyWithinAllow``, a carve-out applied within the grant. The runtime
+    enumerates that directory itself, so the entries appear whether or not a
+    project declares them. Nor would lifting it be the
     remedy: the runtime chooses that path per session, so the grant is a family
     rather than a path; deriving a private configuration home does not move it,
     because every entry such a home does not own links back to the shared one;
