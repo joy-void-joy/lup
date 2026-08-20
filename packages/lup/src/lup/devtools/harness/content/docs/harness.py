@@ -4,6 +4,7 @@
 
 import lup.harness.models as models
 
+from lup.devtools.harness.content.application import ApplicationLayout
 from lup.devtools.harness.content.catalog import (
     agent_roster_text,
     skill_roster_parts,
@@ -14,6 +15,7 @@ def document(
     skills: list[models.Skill],
     agents: list[models.Agent],
     plugin: models.NativeName,
+    layout: ApplicationLayout,
 ) -> models.PromptDocument:
     """The harness guide, carrying the roster the plugin it describes ships.
 
@@ -25,7 +27,7 @@ def document(
         source=__name__,
         parts=[
             models.TextPart(
-                text=r"""# The harness
+                text=rf"""# The harness
 
 The committed `.claude/`, `.codex/`, `.agents/`, and root `AGENTS.md` trees are
 build products. Skills, agents, guidance, permission policy, and this
@@ -91,10 +93,10 @@ prove which bytes it owns, so it would refuse to replace anything.
 
 ### Every generated path and its source
 
-Canonical sources live in `packages/lup/src/lup/devtools/harness/content/`
-(the declarations lup ships), `src/lup_template/devtools/harness/content/`
-(the ones only this repository has), `src/lup_template/devtools/harness/catalog.py`
-(plugin, hook, and resolver composition), and `packages/lup/src/lup/`
+Canonical sources live in `lup.devtools.harness.content`
+(the declarations lup ships), `{layout.directory("devtools", "harness", "content")}`
+(the ones only this repository has), `{layout.path("devtools", "harness", "catalog.py")}`
+(plugin, hook, and resolver composition), and the `lup` package itself
 (adapter renderers and the policy bundle). Below, `content/` names whichever
 of the two halves owns the declaration's subject.
 
@@ -180,9 +182,9 @@ repository's, because its whole job is to be this project's own harness:
 ## What the plugin ships
 
 Both rosters are rendered from the typed declarations: the ones about agent
-work in `packages/lup/src/lup/devtools/harness/content/catalog.py`, the ones
+work in `lup.devtools.harness.content.catalog`, the ones
 about being a template in
-`src/lup_template/devtools/harness/content/catalog.py`, which composes both
+`{layout.path("devtools", "harness", "content", "catalog.py")}`, which composes both
 into what the plugin ships. Change the catalog that owns the subject, then
 regenerate.
 
@@ -247,7 +249,7 @@ Then run the authoring loop:
 ```bash
 uv run lup-devtools harness generate all
 uv run lup-devtools harness check all
-uv run ruff check packages/lup/src/lup src/lup_template
+uv run ruff check packages/lup/src/lup {layout.directory()}
 uv run pyright
 uv run pytest tests/unit/test_harness_compilation.py -q
 ```
@@ -272,16 +274,16 @@ leaving a link that resolves to nothing.
 ### Change the fetch allowlist
 
 The application-owned `HookSet` is constructed by `portable_harness()` in
-`src/lup_template/devtools/harness/catalog.py`. Add the narrowest origin and
+`{layout.path("devtools", "harness", "catalog.py")}`. Add the narrowest origin and
 path prefix that supports the workflow:
 
 ```python
 allowed_fetch=[
     HookUrlScope.model_validate(
-        {
+        {{
             "origin": "https://docs.example.com",
             "path_prefix": "/agent-api/",
-        }
+        }}
     ),
 ]
 ```

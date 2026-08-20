@@ -13,6 +13,7 @@ is a type-checking error rather than a page that quietly stopped publishing.
 from pathlib import Path
 
 import lup.harness.models as models
+from lup.devtools.harness.content.application import ApplicationLayout
 from lup.devtools.harness.content.docs import (
     architecture,
     contributing,
@@ -57,6 +58,7 @@ def library_documents(
     plugin: models.NativeName,
     claude_decodes: list[str],
     codex_decodes: list[str],
+    layout: ApplicationLayout,
     root: str = LIBRARY_DOCS_ROOT,
 ) -> list[models.Document]:
     """Every page lup publishes, in the order the index teaches them.
@@ -69,9 +71,12 @@ def library_documents(
     native implementation behind every page this module publishes.
     """
     return [
-        published("library", "library.md", library.DOCUMENT, root),
+        published("library", "library.md", library.document(layout), root),
         published(
-            "harness", "harness.md", harness.document(skills, agents, plugin), root
+            "harness",
+            "harness.md",
+            harness.document(skills, agents, plugin, layout),
+            root,
         ),
         published("architecture", "architecture.md", architecture.DOCUMENT, root),
         published("permissions", "permissions.md", permissions.DOCUMENT, root),
@@ -81,7 +86,7 @@ def library_documents(
             "platform_differentiation",
             "platform-differentiation.md",
             platform_differentiation.document(
-                skills, agents, claude_decodes, codex_decodes
+                skills, agents, claude_decodes, codex_decodes, layout
             ),
             root,
         ),
@@ -94,11 +99,15 @@ def library_documents(
         published(
             "self_improvement", "self-improvement.md", self_improvement.DOCUMENT, root
         ),
-        published("contributing", "contributing.md", contributing.DOCUMENT, root),
+        published(
+            "contributing", "contributing.md", contributing.document(layout), root
+        ),
         published("conventions", "conventions.md", conventions.DOCUMENT, root),
         published(
             "quality_pipeline", "quality-pipeline.md", quality_pipeline.DOCUMENT, root
         ),
-        published("orchestration", "orchestration.md", orchestration.DOCUMENT, root),
+        published(
+            "orchestration", "orchestration.md", orchestration.document(layout), root
+        ),
         published("patterns", "patterns.md", patterns.DOCUMENT, root),
     ]

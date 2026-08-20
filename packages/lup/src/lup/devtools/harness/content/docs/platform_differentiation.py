@@ -4,6 +4,7 @@
 
 import lup.harness.models as models
 
+from lup.devtools.harness.content.application import ApplicationLayout
 from lup.markdown import contained
 
 
@@ -12,6 +13,7 @@ def document(
     agents: list[models.Agent],
     claude_decodes: list[str],
     codex_decodes: list[str],
+    layout: ApplicationLayout,
 ) -> models.PromptDocument:
     """The parity audit, counted against the roster it is auditing.
 
@@ -28,10 +30,10 @@ def document(
         source=__name__,
         parts=[
             models.TextPart(
-                text=r"""# Platform differentiation and parity
+                text=rf"""# Platform differentiation and parity
 
 One portable declaration, two native renderings. `portable_harness()` in
-`src/lup_template/devtools/harness/catalog.py` is deliberately singular: the
+`{layout.path("devtools", "harness", "catalog.py")}` is deliberately singular: the
 settled architecture is **portable-declaration-plus-adapter-rendering**, not
 per-platform declarations with a shared default. Everything a platform does
 differently lives in exactly two places — the adapter renderers

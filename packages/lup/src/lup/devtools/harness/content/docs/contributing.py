@@ -1,12 +1,16 @@
 """How to contribute to this repository, whichever component you land in."""
 
 import lup.harness.models as models
+from lup.devtools.harness.content.application import ApplicationLayout
 
-DOCUMENT = models.PromptDocument(
-    source=__name__,
-    parts=[
-        models.TextPart(
-            text=r"""# Contributing
+
+def document(layout: ApplicationLayout) -> models.PromptDocument:
+    """The contribution guide, naming this project's own half by its own name."""
+    return models.PromptDocument(
+        source=__name__,
+        parts=[
+            models.TextPart(
+                text=rf"""# Contributing
 
 This page is for a contributor arriving cold. It covers getting a working
 checkout, deciding where a change belongs, and what has to be green before it
@@ -39,7 +43,7 @@ uv run lup-devtools harness codex
 | If you are changing… | It belongs in | And you should read |
 | --- | --- | --- |
 | Anything another project built on lup would want | `packages/lup/` | [library.md](library.md) |
-| Anything only this application needs | `src/lup_template/` | [template.md](template.md) |
+| Anything only this application needs | `{layout.directory()}` | [template.md](template.md) |
 | A skill, agent, guidance, permission policy, or a page under `docs/` | the `devtools/harness/content/` of whichever half owns its subject | [harness.md](harness.md) |
 | Repeated shell incantations | a new `lup-devtools` command | [template.md](template.md) |
 | A one-off computation | `lup-devtools py eval`, or a new command | below |
@@ -48,7 +52,7 @@ The placement question between the first two rows is the one that matters, and
 it has a single test: *would another project built on lup want this?* If yes,
 it goes in the library even if only this application uses it today. The
 library never imports the application, so a utility placed wrongly in
-`src/lup_template/` is unreachable from `packages/lup/` and will have to move
+`{layout.directory()}` is unreachable from the library and will have to move
 later.
 
 `tmp/` is scratch: gitignored, so nothing written there reaches a diff, a
@@ -125,18 +129,18 @@ Two branches: `dev` is the integration branch feature work merges into, and
 commit code directly to `dev`.
 
 """
-        ),
-        models.SkillInvocation(plugin="lup", skill="rebase"),
-        models.TextPart(
-            text=r""" pushes, opens the pull request, and rebuilds history
+            ),
+            models.SkillInvocation(plugin="lup", skill="rebase"),
+            models.TextPart(
+                text=r""" pushes, opens the pull request, and rebuilds history
 with `git reset --soft main` and a force-push; re-run it after each round of
 review fixes. """
-        ),
-        models.SkillInvocation(plugin="lup", skill="close"),
-        models.TextPart(text=r""" merges the approved one and cleans up. """),
-        models.SkillInvocation(plugin="lup", skill="merge"),
-        models.TextPart(
-            text=r""" guides conflict
+            ),
+            models.SkillInvocation(plugin="lup", skill="close"),
+            models.TextPart(text=r""" merges the approved one and cleans up. """),
+            models.SkillInvocation(plugin="lup", skill="merge"),
+            models.TextPart(
+                text=r""" guides conflict
 resolution — and during a merge the bias is toward inclusion: audit the result
 against both parents and confirm every removed function, parameter, or command
 was removed deliberately rather than lost to a conflict side.
@@ -265,10 +269,10 @@ pass, through `dev comments --retire`; the edit gate refuses a hand-deletion
 or rewording for everyone, agent and human alike. `defer:` notes park work
 at the site until deliberately resumed, and `ignore[<rule-id>]` hatches are
 not feedback at all — they come out with the violation they cover. """
-        ),
-        models.SkillInvocation(plugin="lup", skill="resolve"),
-        models.TextPart(
-            text=r""" runs that pass;
+            ),
+            models.SkillInvocation(plugin="lup", skill="resolve"),
+            models.TextPart(
+                text=r""" runs that pass;
 [resolver.md](resolver.md) describes what it does.
 
 ## Native evidence and the release gate
@@ -292,6 +296,6 @@ consecutive scheduled nightly runs in which:
 Review the probe output together with the evidence ledger rather than updating
 the ledger mechanically.
 """
-        ),
-    ],
-)
+            ),
+        ],
+    )

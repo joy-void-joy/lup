@@ -1,12 +1,16 @@
 """Guide to ``packages/lup``, the reusable provider-neutral library."""
 
 import lup.harness.models as models
+from lup.devtools.harness.content.application import ApplicationLayout
 
-DOCUMENT = models.PromptDocument(
-    source=__name__,
-    parts=[
-        models.TextPart(
-            text=r"""# The lup library
+
+def document(layout: ApplicationLayout) -> models.PromptDocument:
+    """The library guide, naming the application half by its own name."""
+    return models.PromptDocument(
+        source=__name__,
+        parts=[
+            models.TextPart(
+                text=rf"""# The lup library
 
 `packages/lup` is the reusable half of this repository: a standalone published
 package that knows how to run an agent turn, compile a harness, decide a
@@ -78,7 +82,7 @@ Three questions place every module, and they point in different directions.
 
 **Outward — would another project built on lup want this?** If yes it belongs
 in `packages/lup/` even when only this application uses it today, because the
-library never imports the application: a utility left in `src/lup_template/`
+library never imports the application: a utility left in `{layout.directory()}`
 is unreachable from here and has to move later. The same test applies to
 values. The library may declare one only when it could not have chosen
 otherwise — a language's file suffixes, a provider's wire spelling, a closed
@@ -271,9 +275,9 @@ read `TurnResult.output`. A missing submission raises a typed error carrying
 the blocks, usage, duration, and validation history — it cannot arrive as an
 empty success.
 
-`src/lup_template` is the worked example of all three; see
+`{layout.path()}` is the worked example of all three; see
 [template.md](template.md).
 """
-        )
-    ],
-)
+            )
+        ],
+    )

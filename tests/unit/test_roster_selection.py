@@ -16,6 +16,7 @@ import typer
 
 from lup.devtools.harness.content.application import ApplicationLayout
 from lup.devtools.harness.content.catalog import library_content
+from lup.devtools.harness.content.docs.catalog import library_documents
 from lup.devtools.roster import LIBRARY_ROSTER, LIBRARY_SPECS
 from lup.devtools.subapps import SubApp, SubAppSelection, subapp
 from lup.harness.models import ContentSelection
@@ -133,6 +134,32 @@ def test_no_library_declaration_names_the_template_package() -> None:
         declaration.id
         for declaration in declarations
         for part in declaration.prompt.parts
+        if "lup_template" in (part.text_payload or "")
+    }
+
+    assert leaked == set()
+
+
+def test_no_published_page_names_the_template_package() -> None:
+    """The pages lup publishes answer for the literal the same way its skills do.
+
+    `docs/` is generated into whichever repository runs generation, so a page
+    naming `src/lup_template/` sends every downstream reader to a directory
+    that is not theirs — the same defect as in a skill, and invisible in this
+    repository for the same reason.
+    """
+    pages = library_documents(
+        LIBRARY_CONTENT.skills,
+        LIBRARY_CONTENT.agents,
+        "lup",
+        [],
+        [],
+        ApplicationLayout(package="worked_example"),
+    )
+    leaked = {
+        page.semantic_id
+        for page in pages
+        for part in page.document.parts
         if "lup_template" in (part.text_payload or "")
     }
 

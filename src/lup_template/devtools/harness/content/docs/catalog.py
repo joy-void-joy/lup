@@ -17,10 +17,15 @@ import lup.harness.models as models
 from lup.adapters.claude.harness import CLAUDE_DISPATCHER
 from lup.adapters.codex.harness import CODEX_DISPATCHER
 from lup.devtools.harness.content.docs.catalog import library_documents, published
-from lup_template.devtools.harness.content.catalog import AGENTS, PLUGIN_NAME, SKILLS
+from lup_template.devtools.harness.content.catalog import (
+    AGENTS,
+    LAYOUT,
+    PLUGIN_NAME,
+    SKILLS,
+)
 from lup_template.devtools.harness.content.docs import decisions, index, template
 
-CONTENT_ROOT = "src/lup_template/devtools/harness/content"
+CONTENT_ROOT = LAYOUT.path("devtools", "harness", "content")
 """Directory every content module this repository authors lives beneath."""
 
 DOCS_ROOT = f"{CONTENT_ROOT}/docs"
@@ -35,6 +40,7 @@ REFERENCE = library_documents(
     PLUGIN_NAME,
     CLAUDE_DISPATCHER.routed_tools,
     CODEX_DISPATCHER.routed_tools,
+    LAYOUT,
 )
 """The pages lup publishes about the machinery this repository is built on.
 
