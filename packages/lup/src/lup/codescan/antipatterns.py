@@ -78,6 +78,7 @@ from lup.codescan.common import (
 )
 from lup.harness.contracts import Spelling, Unsupported
 from lup.policy.kernel.edit import (
+    namedtuple_lines,
     all_export_lines,
     bare_except_lines,
     except_baseexception_lines,
@@ -431,6 +432,7 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         # collections.namedtuple factory alike.
         id="namedtuple",
         pattern=re.compile(r"\bNamedTuple\b|\bnamedtuple\b"),
+        matcher=Matcher(select=namedtuple_lines),
         message="Use Pydantic BaseModel (or TypedDict) instead of NamedTuple/namedtuple",
     ),
     AntiPattern(

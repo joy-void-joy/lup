@@ -1302,6 +1302,27 @@ def private_variable_lines(source: str) -> set[int]:
     }
 
 
+def namedtuple_lines(source: str) -> set[int]:
+    """Lines reaching a named tuple, by either spelling.
+
+    `typing.NamedTuple` is subclassed and `collections.namedtuple` is called,
+    so the rule is about the name wherever it is reached — the base, the
+    call, and the import that brings either in.
+    """
+    tree = python_tree(source)
+    if tree is None:
+        return set()
+    return (
+        imported_symbols_of(tree, "typing", {"NamedTuple"})
+        | imported_symbols_of(tree, "collections", {"namedtuple"})
+        | {
+            node.lineno
+            for node in python_nodes(tree)
+            if isinstance(node, ast.Name) and node.id in ("NamedTuple", "namedtuple")
+        }
+    )
+
+
 def generic_base_lines(source: str) -> set[int]:
     """Lines declaring a `Generic[...]` base."""
     tree = python_tree(source)
@@ -1895,6 +1916,8 @@ def matcher_named(name: str) -> Callable[[str], set[int]] | None:
             return private_class_lines
         case "private_variable_lines":
             return private_variable_lines
+        case "namedtuple_lines":
+            return namedtuple_lines
         case "tuple_shape_lines":
             return tuple_shape_lines
         case "default_factory_lines":
