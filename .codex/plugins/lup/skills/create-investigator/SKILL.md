@@ -1,6 +1,6 @@
 ---
 name: create-investigator
-description: "Create a new diagnostic/investigator command (like /debug)"
+description: "Create a new diagnostic command that traces pasted output to a root cause, like the debug skill"
 ---
 
 # Create Investigator Command

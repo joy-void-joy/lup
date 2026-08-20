@@ -9,7 +9,7 @@ def skill(layout: ApplicationLayout) -> models.Skill:
     return models.Skill(
         id="skill.create-investigator",
         name="create-investigator",
-        description="Create a new diagnostic/investigator command (like /debug)",
+        description="Create a new diagnostic command that traces pasted output to a root cause, like the debug skill",
         arguments=[
             models.Argument(
                 name="arguments",

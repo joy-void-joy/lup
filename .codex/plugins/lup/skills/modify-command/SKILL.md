@@ -53,7 +53,7 @@ If `the arguments supplied with this skill invocation` is empty, ask the user:
    before/after for key sections if helpful, then Request explicit user approval before writing the changed declaration. Reason: the change reaches every tree the declaration renders into.
 6. **Apply** the changes -- edit the declaration's prompt parts
 7. **Update the `tools` list** if needed (e.g., new grants for added functionality)
-8. **Regenerate** with `uv run lup-devtools harness claude` and `harness codex` when the source was a lup skill
+8. **Regenerate** with `uv run lup-devtools harness generate all` when the source was a lup skill — not `harness claude` or `harness codex`, which regenerate one target and then launch it
 9. **Confirm** the modification and show a summary
 
 ### Guidelines

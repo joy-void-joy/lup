@@ -209,9 +209,12 @@ Present findings and proposed changes one layer at a time. For each layer:
 For each approved group, make the edits. Every layer above is Python source, so regenerate both native plugins afterwards to bring the artifacts back in step:
 
 ```bash
-uv run lup-devtools harness claude
-uv run lup-devtools harness codex
+uv run lup-devtools harness generate all
 ```
+
+`generate all` is the regenerating command. `harness claude` and `harness codex`
+regenerate one target and then *launch* it, which from inside a session starts a
+second one rather than finishing this one's work.
 
 After all changes:
 

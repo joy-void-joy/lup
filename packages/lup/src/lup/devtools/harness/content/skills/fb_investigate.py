@@ -15,7 +15,7 @@ def skill(layout: ApplicationLayout) -> models.Skill:
             "Read",
             "Grep",
             "Glob",
-            "Task",
+            "Agent",
             "AskUserQuestion",
         ],
         argument_hint="<session_id1> [session_id2 ...]",

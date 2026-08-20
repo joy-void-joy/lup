@@ -168,7 +168,7 @@ regenerate.
 - /lup:bump — Review changes since last bump and bump agent version
 - /lup:close — Check PR review status, merge if approved, and clean up branches
 - /lup:commit — Review all diffs and create atomic commits
-- /lup:create-investigator — Create a new diagnostic/investigator command (like /debug)
+- /lup:create-investigator — Create a new diagnostic command that traces pasted output to a root cause, like the debug skill
 - /lup:debug — Trace an error through logs to find root cause
 - /lup:fb-analyze — Aggregate tool health, capability gaps, and reasoning patterns across sessions
 - /lup:fb-implement — Implement prioritized changes from feedback loop analysis

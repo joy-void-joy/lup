@@ -1,6 +1,6 @@
 ---
 description: "Aggregate tool health, capability gaps, and reasoning patterns across sessions"
-allowed-tools: Bash(uv run lup-devtools:*), Read, Task, AskUserQuestion
+allowed-tools: Bash(uv run lup-devtools:*), Read, Agent, AskUserQuestion
 ---
 
 # Analyze: Tool Health & Capability Gaps

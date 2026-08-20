@@ -11,7 +11,7 @@ SKILL = models.Skill(
         "Read",
         "Grep",
         "Glob",
-        "Task",
+        "Agent",
         "AskUserQuestion",
     ],
     prompt=models.PromptDocument(

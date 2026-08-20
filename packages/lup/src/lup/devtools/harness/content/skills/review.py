@@ -22,7 +22,7 @@ def skill(layout: ApplicationLayout) -> models.Skill:
             "Grep",
             "Glob",
             "Bash(ls:*, wc:*, sort:*, tail:*, stat:*, uv run lup-devtools:*)",
-            "Task",
+            "Agent",
         ],
         argument_hint="[session ID, file path, or pasted trace]",
         prompt=models.PromptDocument(
