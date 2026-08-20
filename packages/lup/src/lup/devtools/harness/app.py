@@ -157,22 +157,22 @@ def create_harness_app(
         because a machine that will never run a TypeScript toolchain outside
         a container is not a machine with a problem.
 
-        Exits nonzero when something a launch would report is not working.
-        An advisory alone never fails this: it is advice, and a machine that
-        declines it is finished being set up.
+        Exits nonzero when something whose absence costs a capability is not
+        working. An advisory alone never fails this: it is advice, and a
+        machine that declines it is finished being set up.
         """
         findings = [
             finding
             for composition in targets.resolve(target, project_root())
             for finding in launch.report_requirements(
-                composition.recipe.source.requirements, advisory=not launch_only
+                composition.recipe.source.requirements, setting_up=not launch_only
             )
         ]
         if not findings:
             typer.echo("No host requirements declared.")
             return
         if any(
-            not finding.working and finding.requirement.absence.at_launch()
+            not finding.working and finding.requirement.absence.costly()
             for finding in findings
         ):
             raise typer.Exit(1)

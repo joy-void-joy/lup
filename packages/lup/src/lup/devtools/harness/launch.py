@@ -400,7 +400,7 @@ def runtime_preflight(composition: NativeHarnessComposition) -> None:
     report_requirements(composition.recipe.source.requirements)
 
 
-def report_requirements(manifest: Manifest, advisory: bool = False) -> list[Finding]:
+def report_requirements(manifest: Manifest, setting_up: bool = False) -> list[Finding]:
     """Exercise the host-side requirements, printing what each one found.
 
     Printed on the way past rather than only when something is wrong: a
@@ -408,13 +408,15 @@ def report_requirements(manifest: Manifest, advisory: bool = False) -> list[Find
     top of its scrollback, because it is the one the agent inside cannot
     discover except by failing at it.
 
-    *advisory* widens this to the conveniences, and is off for a launch. A
-    nicety reported before every session becomes a line people learn to skip,
-    and the line above it is the one that mattered -- so those are saved for
-    whoever is setting a machine up and can act on them.
+    *setting_up* widens this to everything checked only at setup, and is off
+    for a launch. Two different things live there and both would be wrong to
+    repeat: a nicety reported before every session becomes a line people learn
+    to skip, along with the line above it that mattered; and an exercise that
+    starts a container is a cost no session should pay to be told something
+    that was equally true yesterday.
     """
     environ: EnvVars = dict(os.environ)  # lup: ignore[os-environ]
-    findings = manifest.check(environ, advisory=advisory)
+    findings = manifest.check(environ, setting_up=setting_up)
     for finding in findings:
         for line in finding.lines():
             typer.echo(line)

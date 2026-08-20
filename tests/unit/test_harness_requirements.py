@@ -168,7 +168,7 @@ def test_an_image_requirement_is_not_exercised_on_the_host() -> None:
         ]
     )
     assert manifest.check({}) == []
-    assert manifest.on_the_host(advisory=True) == []
+    assert manifest.on_the_host(setting_up=True) == []
 
 
 def test_an_advisory_is_silent_at_launch_and_spoken_at_setup() -> None:
@@ -176,14 +176,38 @@ def test_an_advisory_is_silent_at_launch_and_spoken_at_setup() -> None:
     convenience = Requirement(
         capability="clipboard",
         purpose="pasting the next command",
+        checked="setup",
         exercise=Run(command=["lup-no-such-program"]),
         absence=Advisory(improves="copying a command to the clipboard"),
     )
     manifest = Manifest(requirements=[convenience])
     assert manifest.check({}) == []
-    spoken = manifest.check({}, advisory=True)
+    spoken = manifest.check({}, setting_up=True)
     assert [item.requirement.capability for item in spoken] == ["clipboard"]
     assert not spoken[0].refuses()
+    assert not spoken[0].requirement.absence.costly()
+
+
+def test_an_expensive_check_of_an_important_thing_is_expressible() -> None:
+    """The two axes the first draft conflated, and the case that exposed it.
+
+    Same-path bind mounting is a prerequisite of the worktree rail -- its
+    absence costs a real capability -- and exercising it starts a container,
+    which is far too slow to pay before every session. One field could say
+    "important" or "cheap to check" but not both.
+    """
+    expensive = Requirement(
+        capability="same-path bind mounts",
+        purpose="the worktree rail",
+        checked="setup",
+        exercise=Run(command=["lup-no-such-program"]),
+        absence=LostCapability(capability="multi-worker resolve"),
+    )
+    manifest = Manifest(requirements=[expensive])
+    assert manifest.check({}) == []
+    at_setup = manifest.check({}, setting_up=True)
+    assert len(at_setup) == 1
+    assert at_setup[0].requirement.absence.costly()
 
 
 def test_an_empty_manifest_checks_nothing_and_installs_nothing() -> None:
@@ -207,7 +231,9 @@ def test_the_declared_manifest_names_only_programs_this_project_invokes() -> Non
     an ordinary edit, while the roster staying small stays deliberate: an
     earlier draft declared ripgrep, which this project never invokes.
     """
-    from lup_template.devtools.harness.content.requirements import MANIFEST
+    from lup_template.devtools.harness.content.requirements import manifest
+
+    MANIFEST = manifest()
 
     declared = [item.capability for item in MANIFEST.requirements]
     assert "ripgrep" not in declared
@@ -243,9 +269,11 @@ def test_every_offered_requirement_lets_a_project_place_and_install_it() -> None
 
 def test_the_declared_manifest_asks_the_host_for_nothing_image_side() -> None:
     """bun and typescript live in the image, so a bare host is never faulted."""
-    from lup_template.devtools.harness.content.requirements import MANIFEST
+    from lup_template.devtools.harness.content.requirements import manifest
 
-    on_host = [item.capability for item in MANIFEST.on_the_host(advisory=True)]
+    MANIFEST = manifest()
+
+    on_host = [item.capability for item in MANIFEST.on_the_host(setting_up=True)]
     assert "bun" not in on_host and "typescript" not in on_host
     assert {"bun", "typescript"} <= set(MANIFEST.packages())
 

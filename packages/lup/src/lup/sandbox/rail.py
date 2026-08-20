@@ -107,6 +107,23 @@ def same_path(roots: list[Path]) -> dict[Path, str]:
     Deduplicated by construction, since a dict is what comes back: the shared
     directory and a path beneath it can both be named without the second
     silently becoming a second mount of the first.
+
+    Whether a host can actually do this is not assumed. It is a declared
+    requirement, exercised by ``same_path_mount_requirement`` -- because a
+    rail whose mounts silently do not happen is not a loosened rail, it is an
+    absent one reporting success, and nothing else in this module would
+    notice.
+
+    How that probe has to be written was learned the hard way. Asking
+    ``test -d`` about the mounted directory reported *false* on rootless
+    podman for every worktree this rail leases, which reads exactly like an
+    absent mount and is not one: reading a file through the same mount in the
+    same container succeeded. The mount was there; `stat` on the mount point
+    itself was not answerable under that user-namespace mapping. So the probe
+    reads a file across the boundary rather than asking whether a directory
+    is present, and the general lesson is the one this whole design keeps
+    relearning -- a presence check answers a different question than the one
+    being asked, and its wrong answer is shaped like a real finding.
     """
     return {root: root.as_posix() for root in roots}
 

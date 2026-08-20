@@ -68,7 +68,8 @@ class Advisory(BaseModel, frozen=True):
     def refuses(self) -> bool:
         return False
 
-    def at_launch(self) -> bool:
+    def costly(self) -> bool:
+        """No. Advice declined is a finished setup, not an unfinished one."""
         return False
 
     def consequence(self) -> str:
@@ -90,7 +91,8 @@ class LostCapability(BaseModel, frozen=True):
     def refuses(self) -> bool:
         return False
 
-    def at_launch(self) -> bool:
+    def costly(self) -> bool:
+        """Yes. Something this machine could do, it now cannot."""
         return True
 
     def consequence(self) -> str:
@@ -112,7 +114,7 @@ class RefusedLaunch(BaseModel, frozen=True):
     def refuses(self) -> bool:
         return True
 
-    def at_launch(self) -> bool:
+    def costly(self) -> bool:
         return True
 
     def consequence(self) -> str:
@@ -324,6 +326,18 @@ class Requirement(BaseModel, frozen=True):
             "was never meant to carry"
         ),
     )
+    checked: Literal["always", "setup"] = Field(
+        default="always",
+        description=(
+            "How often this is exercised, which is a fact about the probe's "
+            "cost and not about the requirement's importance. `setup` is for "
+            "an exercise too slow to pay before every session -- one that "
+            "starts a container, reaches a network, or builds something -- "
+            "and says nothing about what absence costs, which `absence` "
+            "answers on its own. Conflating the two made an expensive check "
+            "of an important thing inexpressible"
+        ),
+    )
     exercise: Exercise
     absence: Absence
     diagnoses: list[Diagnosis] = Field(
@@ -401,7 +415,7 @@ class Manifest(BaseModel, frozen=True):
 
     requirements: list[Requirement] = []
 
-    def on_the_host(self, advisory: bool = False) -> list[Requirement]:
+    def on_the_host(self, setting_up: bool = False) -> list[Requirement]:
         """The requirements this machine is expected to satisfy itself.
 
         Image-side entries are excluded outright rather than exercised and
@@ -410,19 +424,21 @@ class Manifest(BaseModel, frozen=True):
         saying otherwise is the false report this whole module exists to
         stop.
 
-        *advisory* widens the answer to the conveniences as well, which is
-        what somebody setting a machine up wants and what a session opening
-        for the hundredth time does not.
+        *setting_up* widens the answer to everything checked only at setup --
+        the conveniences, and the exercises too slow to pay for before every
+        session. Both are things somebody configuring a machine wants to hear
+        once and a session opening for the hundredth time does not.
         """
         return [
             item
             for item in self.requirements
-            if item.where in ("host", "both") and (advisory or item.absence.at_launch())
+            if item.where in ("host", "both")
+            and (setting_up or item.checked == "always")
         ]
 
-    def check(self, environment: EnvVars, advisory: bool = False) -> list["Finding"]:
+    def check(self, environment: EnvVars, setting_up: bool = False) -> list["Finding"]:
         """Exercise every host-side requirement, in declaration order."""
-        return [item.check(environment) for item in self.on_the_host(advisory)]
+        return [item.check(environment) for item in self.on_the_host(setting_up)]
 
     def packages(self) -> list[str]:
         """Everything an image installs to satisfy this manifest, deduplicated.
