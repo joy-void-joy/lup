@@ -303,12 +303,16 @@ class AnyOf(BaseModel, frozen=True):
 type Exercise = Annotated[Run | AnyOf, Discriminator("kind")]
 
 
+type Side = Literal["host", "image", "both"]
+"""Which side of the boundary is expected to satisfy a requirement."""
+
+
 class Requirement(BaseModel, frozen=True):
     """One external program or condition, with the cost of not having it."""
 
     capability: str = Field(description="Short handle, e.g. 'docker' or 'clipboard'")
     purpose: str = Field(description="What this project uses it for")
-    where: Literal["host", "image", "both"] = Field(
+    where: Side = Field(
         default="host",
         description=(
             "Which side needs this. A host requirement is exercised here and "

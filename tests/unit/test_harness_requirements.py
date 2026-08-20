@@ -215,13 +215,30 @@ def test_the_declared_manifest_names_only_programs_this_project_invokes() -> Non
     assert [item for item in MANIFEST.requirements if item.absence.refuses()]
 
 
-def test_the_declared_manifest_keeps_a_container_runtime_out_of_the_image() -> None:
-    """A container holding a runtime socket can mount the whole host into a sibling."""
-    from lup_template.devtools.harness.content.requirements import CONTAINER, MANIFEST
+def test_the_offered_container_requirement_defaults_out_of_the_image() -> None:
+    """A container holding a runtime socket can mount the whole host into a sibling.
 
-    assert CONTAINER.where == "host"
-    assert CONTAINER.install == []
-    assert not any("docker" in package for package in MANIFEST.packages())
+    Asked of the offered default rather than of one composition, because the
+    default is what protects every project that never thought about it. A
+    project may still overrule it -- that is what the parameter is for -- but
+    it has to say so.
+    """
+    from lup.harness.toolchain import container_requirement, default_manifest
+
+    offered = container_requirement()
+    assert offered.where == "host"
+    assert offered.install == []
+    assert not any("docker" in package for package in default_manifest().packages())
+
+
+def test_every_offered_requirement_lets_a_project_place_and_install_it() -> None:
+    """The seams are parameters, so an adopter overrules without forking lup."""
+    from lup.harness.toolchain import bun_requirement, container_requirement
+
+    moved = bun_requirement(where="both", install=["bun-bin"])
+    assert moved.where == "both" and moved.install == ["bun-bin"]
+    inside = container_requirement(where="image", install=["docker.io"])
+    assert inside.where == "image" and inside.install == ["docker.io"]
 
 
 def test_the_declared_manifest_asks_the_host_for_nothing_image_side() -> None:
