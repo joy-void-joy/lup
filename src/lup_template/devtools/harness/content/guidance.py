@@ -94,7 +94,7 @@ Work in a **git worktree**, not a branch switched in place, and never commit _co
 
 ## Code Conventions
 
-Build on claude-agent-sdk and pydantic; `docs/conventions.md` names each library and what it is for, and puts each typed form beside the raw dict it replaces — including tool inputs, which are BaseModel classes with `Field(description=...)` that give both the `@tool` schema and the validation.
+Build on `lup` and pydantic. The runtime an application composes against is provider-neutral — `SessionFactory`, `Session`, `TurnRequest`, `TurnResult` — and each provider's SDK is one adapter's dependency behind an extra (`lup[claude]`, `lup[codex]`), not a framework the application talks to: no module under `src/lup_template/` imports one, and `seam-boundary` keeps concrete adapter imports to the composition roots that name them. `docs/conventions.md` names each library and what it is for, and puts each typed form beside the raw dict it replaces — including tool inputs, which are BaseModel classes with `Field(description=...)` that give both the `@lup_tool` schema and the validation.
 
 Use existing libraries from PyPI before writing raw HTTP or rebuilding a wheel.
 
@@ -114,6 +114,8 @@ Use existing libraries from PyPI before writing raw HTTP or rebuilding a wheel.
 ## Tooling
 
 `uv` is the package manager — `uv add <package>`, never edit pyproject.toml directly. Formatting and linting are ruff, type checking is pyright; `docs/contributing.md` carries the commands that have to be green.
+
+`lup` itself is the one dependency not added that way. How a project obtains it — vendored here, from the package index, from git, or from a checkout on the same disk — is a mode `dev library` reads and rewrites, and the mode decides what upgrading even means. Ask `dev library status` before assuming lup's source is on disk to edit: in three of the four modes it is not. `docs/library.md` carries the modes and the move between them.
 
 When policy says a command genuinely has to run outside the sandbox, put that command through the runtime's native per-call sandbox escalation on its first attempt. Do not replace the whole session with an unsandboxed one; the semantic policy still judges the escalated call, so an allowed command can be approved at that narrower boundary.
 

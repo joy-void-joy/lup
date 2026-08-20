@@ -286,7 +286,7 @@ Edit `src/<project>/agent/subagents.py`:
 
 - Create specialized subagents for focused tasks
 - Define which tools each subagent can use
-- Choose models per subagent (Opus-class by default — see Model Selection; cheaper only with an explicit reason)
+- Choose a model tier per subagent (strongest by default — see Model Selection; cheaper only with an explicit reason)
 
 ### Step 4: Configure Tools
 
@@ -543,7 +543,9 @@ src/
 
 ## Model Selection
 
-Default to **Opus 5** (`claude-opus-5`) — or **Fable** (`claude-fable-5`) — for the main agent, every subagent, reviewer, and background agent. This runs on a subscription where the best model is the point: reach for Sonnet only when latency or cost provably dominates and quality is non-critical, and for Haiku almost never. A role that genuinely warrants a cheaper model declares it explicitly with a reason; otherwise it inherits the Opus-class default.
+Default to the **strongest** tier for the main agent, every subagent, reviewer, and background agent. This runs on a subscription where the best model is the point: reach for **balanced** only when latency or cost provably dominates and quality is non-critical, and for **fast** almost never. A role that genuinely warrants a cheaper model declares that tier explicitly with a reason; otherwise it inherits the strongest default.
+
+State the tier, not a model id. A declaration says what the role needs and each runtime spells whichever model in its own lineup honors it, so a role pinned to one provider's model name is a role that only works on one runtime and stops being right the next time that lineup moves. The one place a concrete model belongs is the runtime configuration a deployment sets (`AGENT_MODEL`), where naming a specific model is the whole point.
 
 ## Type Safety Requirements
 
@@ -551,10 +553,8 @@ Default to **Opus 5** (`claude-opus-5`) — or **Fable** (`claude-fable-5`) — 
 - **Every function must specify input and output types**
 - **Never use `Any`, `dict[str, Any]`, or `dict[str, object]`** -- Use `TypedDict` for dict-like data, `BaseModel` for validated models, or specific types. These erase type information and defeat static analysis.
   - **JSON-shaped data**: use `JsonValue` / `JsonObject` from `lup.types` for data whose schema lives elsewhere (tool arguments, JSON Schemas, structured outputs, vendor payloads).
-  - **MCP tool inputs**: The SDK types `@tool` handler args as `dict[str, Any]`. Always `BaseModel.model_validate(args)` immediately — don't pass around the raw dict.
-  - **MCP tool outputs**: Define a `TypedDict` for the return dict (the SDK types it as `dict[str, Any]` but we use our own typed wrapper).
-  - **SDK hooks**: Return `SyncHookJSONOutput` (TypedDict from `claude_agent_sdk.types`) — don't hand-build `dict[str, Any]`. Use the typed hook inputs (`PreToolUseHookInput`, etc.) and specific output types (`PreToolUseHookSpecificOutput`, etc.).
-  - **SDK types to prefer**: Use the SDK's own typed classes instead of raw dicts — `HookMatcher`, `AgentDefinition`, `ClaudeAgentOptions`, `McpServerConfig`, `PermissionResultAllow`/`Deny`, `ContentBlock`, `Message`, `TextBlock`, `ToolUseBlock`, `ToolResultBlock`. Import from top-level `claude_agent_sdk` when available; `SyncHookJSONOutput`, `HookEvent`, and hook-specific output types require `claude_agent_sdk.types`.
+  - **Tool inputs and outputs**: A `@lup_tool` handler takes a validated `BaseModel` and returns one — the decorator infers both schemas from the annotations, validates the input, and serializes the output. Never `model_validate` the arguments yourself and never assemble the response envelope; raise `ToolError` for a recoverable failure instead.
+  - **Provider SDKs are the adapter's, not yours**: application code composes against `lup`'s provider-neutral runtime — `SessionFactory`, `Session`, `TurnRequest`, `TurnResult` — and never imports a provider SDK. Each SDK is one adapter's dependency behind an extra, so importing it here pins the application to one runtime and trips `seam-boundary` outside a composition root that names it.
 - **Use Python 3.12+ generics syntax**: `class A[T]`, not `Generic[T]`
 - Use `TypedDict` and Pydantic models for structured data
 - Never manually parse Claude/agent output -- use structured outputs via Pydantic

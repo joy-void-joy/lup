@@ -12,7 +12,7 @@ DOCUMENT = models.PromptDocument(
 
 How work is delegated across agents in this project — what runs where, and who sees it. The recurring *code* shapes live in [docs/patterns.md](patterns.md); daily development guidance is in the agent guidance document your runtime loads.
 
-**Model selection:** every pattern below — subagents, reviewers, nested and background agents — defaults to Opus 5 (`claude-opus-5`) or Fable (`claude-fable-5`). Drop to a cheaper model only with an explicit, justified reason (see § Model Selection in the agent guidance).
+**Model selection:** every pattern below — subagents, reviewers, nested and background agents — defaults to the **strongest** tier. Drop to `balanced` or `fast` only with an explicit, justified reason (see § Model Selection in the agent guidance). A declaration states the tier and each runtime spells whichever model it can honor, so naming a model id here would pin one provider's lineup into a library that is provider-neutral, and pin it to a lineup that moves.
 
 **Vocabulary:** two kinds of delegated agents look alike and must not be conflated:
 
