@@ -415,7 +415,7 @@
     {
       "path": ".claude/settings.json",
       "category": "generated",
-      "sha256": "409232d5d85a3f2bd5651467105f395d5516f11fe00de79b9eefd195caffe149",
+      "sha256": "48494c6b122e3558754976330ef91edd6307d9f61c241afb3dd933a03fb04c7c",
       "semantic_id": "harness.project-settings",
       "executable": false
     },
