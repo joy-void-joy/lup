@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "b9ff0fce72bb599b73557e9f6d4f0ee0f300fbcb0c6e3712b0365ba6844eb516",
+  "source_digest": "9b7f9d47476ea5efba6630fd32c44fca6d5df1fa4bf47419af8be0d79bafcf1a",
   "target_requirements": [
     "claude-code"
   ],
@@ -128,7 +128,7 @@
     {
       "path": ".claude/plugins/lup/commands/fb-implement.md",
       "category": "generated",
-      "sha256": "61c1315041350b92c8003d17cac281733a6e084e7ecc6dd04832785a0419fe5b",
+      "sha256": "34af3af5b182426590a86e558c152f9015020de8e19cec3cc2171a0b18844baa",
       "semantic_id": "skill.fb-implement",
       "executable": false
     },
@@ -149,7 +149,7 @@
     {
       "path": ".claude/plugins/lup/commands/fb-status.md",
       "category": "generated",
-      "sha256": "ab01f20c47e39bd07b836acf787ba52d4a2c326207ba0e90ce9f464dab2ed835",
+      "sha256": "00a339d2daef4b56a6740425966e7a630222a473ecc79ed90644354f0b25ba28",
       "semantic_id": "skill.fb-status",
       "executable": false
     },

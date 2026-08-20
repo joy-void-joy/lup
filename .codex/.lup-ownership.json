@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "b9ff0fce72bb599b73557e9f6d4f0ee0f300fbcb0c6e3712b0365ba6844eb516",
+  "source_digest": "9b7f9d47476ea5efba6630fd32c44fca6d5df1fa4bf47419af8be0d79bafcf1a",
   "target_requirements": [
     "codex-cli>=0.144"
   ],
@@ -240,7 +240,7 @@
     {
       "path": ".codex/plugins/lup/skills/fb-implement/SKILL.md",
       "category": "generated",
-      "sha256": "464b4a58b47a47958ab1d443d892d7a65ad68b897cdc780fba9aa76685467d31",
+      "sha256": "c79ed0f59fb2a0f192e642b4180cf6d397b666b1de447bfc8736337808ab0848",
       "semantic_id": "skill.fb-implement",
       "executable": false
     },
@@ -261,7 +261,7 @@
     {
       "path": ".codex/plugins/lup/skills/fb-status/SKILL.md",
       "category": "generated",
-      "sha256": "8ab47a8a1af6654c38f3a5b44ee399c9e4785f31850dc3d03df2c72dc176606a",
+      "sha256": "9bc621e3f2ff09e6774a03f1ed4afe4348f17cbe8b3d4f0861775ea03c39bd7c",
       "semantic_id": "skill.fb-status",
       "executable": false
     },
