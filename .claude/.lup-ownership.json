@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "6d78dbd4b27051e3680c498041c4861f7fc0804ef32193fd3d46eb99a8e535e3",
+  "source_digest": "3975c9c36e156372f6cfe8fd26efc18e14b2658ca8727ba56aa7c915c5a2d61c",
   "target_requirements": [
     "claude-code"
   ],
@@ -198,7 +198,7 @@
     {
       "path": ".claude/plugins/lup/commands/land.md",
       "category": "generated",
-      "sha256": "0e824722d22d9c11594526805ce8247216aed73a973cb10e158d714f00c223b0",
+      "sha256": "4d384cf6cfa6f0254bff5a4c57a75d4979f5649edd85075a923652ac8efba641",
       "semantic_id": "skill.land",
       "executable": false
     },
