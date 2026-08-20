@@ -127,7 +127,7 @@ If you find yourself running the same command repeatedly, **add a command** — 
 
 `tmp/` is scratch: gitignored, so nothing written there reaches a diff, a reviewer, or the human — which is why it does not execute. Match the rung to the question: to **read** code, `py info`/`py source`/`py search`/`py imports` plus the codeintel tools answer without running anything; to **compute** something, `lup-devtools py eval '<expression>'` auto-imports and evaluates in the sandbox; with no sandbox available, add a devtools command. `docs/contributing.md` carries the rest of the ladder, down to a heredoc behind a `# lup: escalate: <why>` marker. The argument is reviewability, not power — an agent may already edit `devtools/` and run it.
 
-Run `uv run lup-devtools --help` for the command tree; `docs/template.md` lists the sub-apps, rendered from the same typed roster the CLI itself wires.
+`docs/commands.md` carries every command the CLI serves with a line on what each does, walked from the wired app at generation time rather than listed by hand — so a command exists there by existing, and reading it is how you find one you did not know to look for. `uv run lup-devtools <command> --help` gives its arguments and options; `docs/template.md` lists the sub-apps, rendered from the same typed roster the CLI itself wires.
 
 ### Generated Trees
 

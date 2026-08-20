@@ -33,6 +33,7 @@ from lup.adapters.harness import (
     compile_codex,
 )
 from lup.codescan.registry import RULE_REFERENCE
+from lup.devtools.dev.commands import COMMAND_REFERENCE
 from lup.devtools.harness.drift import roster_gaps
 from lup.harness.banner import (
     ARTIFACT_COMMENT_ROUTER,
@@ -305,7 +306,10 @@ def test_every_published_document_is_generated_and_banners_itself() -> None:
         path for path in Path("docs").glob("*.md") if path not in published
     )
 
-    assert unmanaged == [Path(RULE_REFERENCE)]
+    # The two pages a repository writer produces rather than the docs roster:
+    # both render from something walked at generation time — the rule registry
+    # and the composed CLI — so neither has a declaring content module.
+    assert unmanaged == [Path(COMMAND_REFERENCE), Path(RULE_REFERENCE)]
     for document in roster:
         banner = GeneratedBanner(
             source=document.document.declared_source(), command=REGENERATE_COMMAND

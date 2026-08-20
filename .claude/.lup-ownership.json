@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "6e3695fdfd68ea8c0c659151405200aaf3e7765398e1815799605f40c8b3eb5c",
+  "source_digest": "051f9dd1347d776d5eae7b8b93565637fa18290947c2eb72f9815937319769a9",
   "target_requirements": [
     "claude-code"
   ],
@@ -9,7 +9,7 @@
     {
       "path": ".claude/CLAUDE.md",
       "category": "generated",
-      "sha256": "96d8eeff0136c72f41aafa60f6bf9341d004a4cd30584a5b47eac7aae030428a",
+      "sha256": "50c8db7ccc989be010f563968e0dbba319c5668bc7cdef63f0eb9cb762852e66",
       "semantic_id": "harness.guidance",
       "executable": false
     },
@@ -422,7 +422,7 @@
     {
       "path": "docs/README.md",
       "category": "generated",
-      "sha256": "c40d0df8ea065671f38bac4aaf72d6799980b7fd816f4006986b5eee092478fa",
+      "sha256": "32fe21dae0973b56d471a684d834c8aa74e23809e08e86841c0aadc1d87dc0ae",
       "semantic_id": "docs.README",
       "executable": false
     },
