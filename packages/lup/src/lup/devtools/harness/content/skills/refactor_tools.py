@@ -1,24 +1,28 @@
 """Canonical declaration for the refactor-tools skill."""
 
 import lup.harness.models as models
+from lup.devtools.harness.content.application import ApplicationLayout
 
-SKILL = models.Skill(
-    id="skill.refactor-tools",
-    name="refactor-tools",
-    description="Audit SDK agent tools and subagents \u2014 find gaps, overlaps, and refactoring opportunities",
-    tools=[
-        "Read",
-        "Grep",
-        "Glob",
-        "Bash(ls:*, uv run lup-devtools:*)",
-        "Agent",
-        "WebSearch",
-        "AskUserQuestion",
-    ],
-    prompt=models.PromptDocument(
-        parts=[
-            models.TextPart(
-                text=r"""# Tool Review: Tools, Servers & Pipeline
+
+def skill(layout: ApplicationLayout) -> models.Skill:
+    """Audit this project's own tool surface, wherever its package sits."""
+    return models.Skill(
+        id="skill.refactor-tools",
+        name="refactor-tools",
+        description="Audit SDK agent tools and subagents \u2014 find gaps, overlaps, and refactoring opportunities",
+        tools=[
+            "Read",
+            "Grep",
+            "Glob",
+            "Bash(ls:*, uv run lup-devtools:*)",
+            "Agent",
+            "WebSearch",
+            "AskUserQuestion",
+        ],
+        prompt=models.PromptDocument(
+            parts=[
+                models.TextPart(
+                    text=rf"""# Tool Review: Tools, Servers & Pipeline
 
 Review all MCP servers, tools, and subagents. Draw an outline of the pipeline and each tool, then assess: does it make sense? What's good? What's missing?
 
@@ -26,14 +30,14 @@ Review all MCP servers, tools, and subagents. Draw an outline of the pipeline an
 
 Before cataloging individual tools, map the **end-to-end flow**:
 
-1. Read `src/lup_template/agent/core.py` to understand:
+1. Read `{layout.path("agent", "core.py")}` to understand:
    - How a request enters the agent
    - Which MCP servers are configured and how they're launched
    - How tools are exposed to the agent (in-process vs remote)
    - How subagents are spawned and what tools they receive
    - How the final output is produced and returned
 
-2. Read `src/lup_template/agent/tool_policy.py` to understand:
+2. Read `{layout.path("agent", "tool_policy.py")}` to understand:
    - Which tools are gated by conditions (API keys, modes, etc.)
    - Are there tools registered but conditionally unavailable?
 
@@ -45,7 +49,7 @@ Before cataloging individual tools, map the **end-to-end flow**:
 
 ## Phase 2: Tool Inventory
 
-Read every file in `src/lup_template/agent/tools/` and build a **tool outline** — not just a table, but a readable summary of each tool's purpose.
+Read every file in `{layout.directory("agent", "tools")}` and build a **tool outline** — not just a table, but a readable summary of each tool's purpose.
 
 For each tool file:
 1. Read the file
@@ -54,8 +58,8 @@ For each tool file:
 4. Note external dependencies (APIs, config keys, packages)
 
 For remote/external MCP servers:
-- Read `src/lup_template/agent/core.py` for `McpServerConfig` or server lists
-- Read `src/lup_template/agent/config.py` for MCP-related settings
+- Read `{layout.path("agent", "core.py")}` for `McpServerConfig` or server lists
+- Read `{layout.path("agent", "config.py")}` for MCP-related settings
 - Check `pyproject.toml` for MCP server dependencies
 - Search with `grep` for `npx`, `uvx`, or other MCP server launch patterns
 
@@ -150,7 +154,7 @@ Present findings as:
 - **Propose, don't implement.** This is a review, not a refactoring session. Present findings and let the user decide what to act on.
 - **Put decisions and prioritization to the user** rather than settling them yourself.
 """
-            ),
-        ]
-    ),
-)
+                ),
+            ]
+        ),
+    )

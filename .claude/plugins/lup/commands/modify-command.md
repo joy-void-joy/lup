@@ -40,7 +40,7 @@ If `$ARGUMENTS` is empty, ask the user:
 
 1. **Parse** the command name and delta from the arguments
 2. **Find** the source -- search in these locations, in order:
-   - `packages/lup/src/lup/devtools/harness/content/skills/<name>.py`, then `src/lup_template/devtools/harness/content/skills/<name>.py` (lup skills, including every `lup:name` variant -- the underscored module name; the library half holds the skills about agent work, this repository's the ones about being a template)
+   - `lup.devtools.harness.content.skills.<name>`, then `src/lup_template/devtools/harness/content/skills/<name>.py` (lup skills, including every `lup:name` variant -- the underscored module name; the library half holds the skills about agent work, this project's the ones about being a template). Where lup is not vendored here, read its modules with `uv run lup-devtools py source` rather than by path
    - a command the project or the person defined natively, outside any plugin
 
    Files under .claude/plugins/lup/commands/ under Claude Code, .codex/plugins/lup/skills/ under Codex are generated from the declarations -- read them to see the rendered result, never to edit.

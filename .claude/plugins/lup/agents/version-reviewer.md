@@ -2,7 +2,7 @@
 name: version-reviewer
 description: "Independently review a proposed version change"
 tools: Read, Bash
-model: sonnet
+model: opus
 color: yellow
 ---
 

@@ -1,33 +1,37 @@
 """Canonical declaration for the hooks skill."""
 
 import lup.harness.models as models
+from lup.devtools.harness.content.application import ApplicationLayout
 
-SKILL = models.Skill(
-    id="skill.hooks",
-    name="hooks",
-    description="Inspect and modify the canonical semantic permission policy",
-    arguments=[
-        models.Argument(
-            name="arguments",
-            description="Optional arguments supplied with the skill invocation",
-            required=False,
-        ),
-    ],
-    tools=["Read", "Edit", "Grep", "Glob", "AskUserQuestion", "Bash"],
-    prompt=models.PromptDocument(
-        parts=[
-            models.TextPart(
-                text=r"""# Hooks: Semantic Permission Policy
+
+def skill(layout: ApplicationLayout) -> models.Skill:
+    """Edit the policy, naming the catalog this project keeps its HookSet in."""
+    return models.Skill(
+        id="skill.hooks",
+        name="hooks",
+        description="Inspect and modify the canonical semantic permission policy",
+        arguments=[
+            models.Argument(
+                name="arguments",
+                description="Optional arguments supplied with the skill invocation",
+                required=False,
+            ),
+        ],
+        tools=["Read", "Edit", "Grep", "Glob", "AskUserQuestion", "Bash"],
+        prompt=models.PromptDocument(
+            parts=[
+                models.TextPart(
+                    text=r"""# Hooks: Semantic Permission Policy
 
 Update the canonical policy and regenerate its hermetic native dispatchers.
 
 ## User's Request
 
 """
-            ),
-            models.ArgumentsRef(),
-            models.TextPart(
-                text=r"""
+                ),
+                models.ArgumentsRef(),
+                models.TextPart(
+                    text=rf"""
 
 ## Sources of truth
 
@@ -39,7 +43,7 @@ Update the canonical policy and regenerate its hermetic native dispatchers.
   (`antipatterns.py`), boundary/spelling seams (`boundaries.py`), capability
   architecture (`capabilities.py`) — indexed by `registry.py` and rendered
   into `docs/rules.md` by `uv run lup-devtools dev rules`.
-- `src/lup_template/devtools/harness/catalog.py` owns application URL scopes,
+- `{layout.path("devtools", "harness", "catalog.py")}` owns application URL scopes,
   protected roots, policy IDs, and other composition inputs; the readable
   shell table it declares is `content/shell_vocabulary.py`.
 - `tests/unit/test_semantic_policy.py` is the shared canonical/bundled fixture
@@ -50,10 +54,10 @@ Update the canonical policy and regenerate its hermetic native dispatchers.
   never the rendered file.
 
 Files beneath """
-            ),
-            models.PluginPath(plugin="lup", location="hooks", scope="every_tree"),
-            models.TextPart(
-                text=r""" are
+                ),
+                models.PluginPath(plugin="lup", location="hooks", scope="every_tree"),
+                models.TextPart(
+                    text=r""" are
 generated artifacts. Never edit them as the source of a policy change.
 
 ## Workflow
@@ -63,13 +67,13 @@ generated artifacts. Never edit them as the source of a policy change.
 2. Read the relevant canonical source and its cross-native fixtures.
 3. Show the current behavior and propose the smallest semantic change. When
    the request did not already settle the decision, """
-            ),
-            models.RequestApproval(
-                action="changing policy behavior",
-                reason="a policy change alters what every later session may do",
-            ),
-            models.TextPart(
-                text=r"""
+                ),
+                models.RequestApproval(
+                    action="changing policy behavior",
+                    reason="a policy change alters what every later session may do",
+                ),
+                models.TextPart(
+                    text=r"""
 4. Edit the canonical source and add fixtures for safe, denied, approval, and
    malformed variants as applicable.
 5. Where the change moves what the lattice does, say so in the permissions
@@ -88,7 +92,7 @@ With no arguments, summarize the canonical URL scopes, shell classifications,
 protected edit rules, threshold, resolver-editor exceptions, and each native
 boundary's approval behavior, then ask what should change.
 """
-            ),
-        ]
-    ),
-)
+                ),
+            ]
+        ),
+    )

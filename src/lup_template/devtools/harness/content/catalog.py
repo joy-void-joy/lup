@@ -10,10 +10,17 @@ six whose subject is a lup-based project rather than the work inside one —
 standing one up, installing the plugin into it, importing from a downstream
 repo, and keeping the whole thing in step with upstream — plus the composed
 rosters every document and the compiled plugin read.
+
+This is also where the library learns what this application is called. Several
+of its skills name a path inside the reading project's own package, and only
+the project knows that name, so it is supplied here rather than assumed there.
 """
 
+from pathlib import Path
+
 import lup.harness.models as models
-from lup.devtools.harness.content.catalog import LIBRARY_CONTENT
+from lup.devtools.harness.content.application import ApplicationLayout
+from lup.devtools.harness.content.catalog import library_content
 from lup_template.devtools.harness.content.skills.brainstorm import (
     SKILL as SKILL_BRAINSTORM,
 )
@@ -24,6 +31,14 @@ from lup_template.devtools.harness.content.skills.init import SKILL as SKILL_INI
 from lup_template.devtools.harness.content.skills.install import SKILL as SKILL_INSTALL
 from lup_template.devtools.harness.content.skills.meta import SKILL as SKILL_META
 from lup_template.devtools.harness.content.skills.update import SKILL as SKILL_UPDATE
+
+LAYOUT = ApplicationLayout(package=Path(__file__).resolve().parents[3].name)
+"""Where this application's own code sits, for the library prose that names it.
+
+Derived from where this file actually sits rather than written down, for the
+reason ``DevProject.package`` derives its own: initialization renames the
+package, and a literal would go on naming one that is gone.
+"""
 
 PROJECT_SKILLS = [
     SKILL_BRAINSTORM,
@@ -52,7 +67,9 @@ so a project adopting this scaffold states its delta in one line instead of
 restating the roster it inherits — and so `dev check` can name what it
 declined, which a rewritten list could never surface."""
 
-CONTENT = LIBRARY_CONTENT.selected(RETIRED).extended(PROJECT_SKILLS, PROJECT_AGENTS)
+CONTENT = (
+    library_content(LAYOUT).selected(RETIRED).extended(PROJECT_SKILLS, PROJECT_AGENTS)
+)
 """Everything this repository's plugin ships, inherited half first."""
 
 SKILLS = CONTENT.skills

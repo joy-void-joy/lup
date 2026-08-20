@@ -1,24 +1,28 @@
 """Canonical declaration for the fb-reflect skill."""
 
 import lup.harness.models as models
+from lup.devtools.harness.content.application import ApplicationLayout
 
-SKILL = models.Skill(
-    id="skill.fb-reflect",
-    name="fb-reflect",
-    description="Meta and meta-meta reflection on the feedback loop process itself",
-    tools=[
-        "Bash(uv run lup-devtools:*)",
-        "Read",
-        "Grep",
-        "Glob",
-        "Edit",
-        "Write",
-        "AskUserQuestion",
-    ],
-    prompt=models.PromptDocument(
-        parts=[
-            models.TextPart(
-                text=r"""# Reflect: Process Quality Assessment
+
+def skill(layout: ApplicationLayout) -> models.Skill:
+    """Reflect on the loop itself, naming the prompt this project actually has."""
+    return models.Skill(
+        id="skill.fb-reflect",
+        name="fb-reflect",
+        description="Meta and meta-meta reflection on the feedback loop process itself",
+        tools=[
+            "Bash(uv run lup-devtools:*)",
+            "Read",
+            "Grep",
+            "Glob",
+            "Edit",
+            "Write",
+            "AskUserQuestion",
+        ],
+        prompt=models.PromptDocument(
+            parts=[
+                models.TextPart(
+                    text=rf"""# Reflect: Process Quality Assessment
 
 Two levels of reflection: is the agent tracking enough data (meta), and is the feedback loop itself working (meta-meta)?
 
@@ -48,7 +52,7 @@ Common gaps:
 
 ### 4. Prompt health
 
-Read the full system prompt (`src/lup_template/agent/prompts.py`). Is it accumulating patches? Count conditional exceptions added since the last rewrite. If >3, flag for structural rewrite.
+Read the full system prompt (`{layout.path("agent", "prompts.py")}`). Is it accumulating patches? Count conditional exceptions added since the last rewrite. If >3, flag for structural rewrite.
 
 ### 5. Subcommand assessment
 
@@ -56,9 +60,9 @@ Were the `/fb-*` subcommands helpful? Anything confusing, missing, or redundant?
 
 ### 6. Devtools assessment
 
-Any repetitive analysis that should be automated as a devtools command? Add it to `packages/lup/src/lup/devtools/` when another project on lup would want it, to `src/lup_template/devtools/` when only this one would.
+Any repetitive analysis that should be automated as a devtools command? Add it to `{layout.directory("devtools")}` when only this project would want it. When another project on lup would want it, it belongs to the library instead — `docs/library.md` carries the criterion and how to reach lup's own source in whichever mode this project obtains it.
 """
-            ),
-        ]
-    ),
-)
+                ),
+            ]
+        ),
+    )

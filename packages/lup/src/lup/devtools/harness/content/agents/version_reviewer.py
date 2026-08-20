@@ -1,15 +1,19 @@
 """Canonical declaration for the version-reviewer agent."""
 
 import lup.harness.models as models
+from lup.devtools.harness.content.application import ApplicationLayout
 
-AGENT = models.Agent(
-    id="agent.version-reviewer",
-    name="version-reviewer",
-    description="Independently review a proposed version change",
-    prompt=models.PromptDocument(
-        parts=[
-            models.TextPart(
-                text=r"""You are the **Version Reviewer Agent**, specialized in producing a comprehensive assessment of a single agent version. You analyze the prompt, performance data, and traces for one version to create a frozen-in-time report.
+
+def agent(layout: ApplicationLayout) -> models.Agent:
+    """Review one version against the prompt this project actually ships."""
+    return models.Agent(
+        id="agent.version-reviewer",
+        name="version-reviewer",
+        description="Independently review a proposed version change",
+        prompt=models.PromptDocument(
+            parts=[
+                models.TextPart(
+                    text=rf"""You are the **Version Reviewer Agent**, specialized in producing a comprehensive assessment of a single agent version. You analyze the prompt, performance data, and traces for one version to create a frozen-in-time report.
 
 ## Your Purpose
 
@@ -41,7 +45,7 @@ git log --oneline v<VERSION> -1
 This is the most important step. Read the full system prompt that was active for this version:
 
 ```bash
-git show v<VERSION>:src/lup_template/agent/prompts.py
+git show v<VERSION>:{layout.path("agent", "prompts.py")}
 ```
 
 Read it carefully. Note:
@@ -174,10 +178,10 @@ What the agent explicitly said it needed (from session outputs and trace reasoni
 - **Flag absence.** Sometimes the most important finding is what the prompt DOESN'T say. If the worst traces share a pattern the prompt never addresses, that's a key insight.
 - **Trust the scores.** Don't second-guess outcome metrics. A session that scored well worked; one that scored poorly didn't. Investigate why, don't rationalize.
 """
-            ),
-        ]
-    ),
-    tools=["Read", "Grep", "Glob", "Bash"],
-    model="balanced",
-    color="yellow",
-)
+                ),
+            ]
+        ),
+        tools=["Read", "Grep", "Glob", "Bash"],
+        model="strongest",
+        color="yellow",
+    )
