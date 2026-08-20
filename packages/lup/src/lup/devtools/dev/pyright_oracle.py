@@ -24,7 +24,7 @@ from pathlib import Path
 from urllib.parse import unquote, urlparse
 
 import typer
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from lup.codeintel.client import Call, lsp_session
 from lup.codeintel.replies import LOCATIONS
@@ -42,6 +42,16 @@ SERVER_NAME = "pyright-langserver"
 
 RESOLVE_TIMEOUT_SECONDS = 600.0
 """Budget for a whole sweep. Exhausting it degrades to the broad rule."""
+
+RESOLVE_WORKERS = 4
+"""Language servers a sweep drives at once, as a default a caller may raise.
+
+Pyright answers one question at a time in one process, so a sweep pinned to a
+single server is one core busy on a host that has many. Servers are what
+parallelize it, and each one costs a process holding its own picture of the
+workspace — memory rather than time, which is why this is a small number and
+not the core count.
+"""
 
 
 def langserver_path() -> Path | None:
@@ -104,28 +114,90 @@ async def resolve(
         return [locations_of(answer) for answer in await session.requests(asked)]
 
 
+class Shard(BaseModel, frozen=True):
+    """One server's share of a sweep, and where in the sweep each answer goes."""
+
+    offsets: list[int]
+    positions: list[SourcePosition]
+
+
+def sharded(positions: list[SourcePosition], workers: int) -> list[Shard]:
+    """Split a sweep across servers, keeping every file whole in one share.
+
+    A server pays to open a document and to follow what it imports, so the
+    same file asked about from two servers is that cost paid twice. Files are
+    the unit the split is made of, dealt largest first so the heaviest one
+    cannot land on a share that is already the fullest.
+    """
+    grouped = {
+        path: [
+            offset
+            for offset, position in enumerate(positions)
+            if position.path.as_posix() == path
+        ]
+        for path in {position.path.as_posix() for position in positions}
+    }
+    ranked = sorted(grouped.values(), key=len, reverse=True)
+    shares = [
+        [offset for group in ranked[worker::workers] for offset in group]
+        for worker in range(min(workers, len(ranked)))
+    ]
+    return [
+        Shard(offsets=share, positions=[positions[offset] for offset in share])
+        for share in shares
+    ]
+
+
+async def resolve_sharded(
+    server: Path,
+    root: Path,
+    shards: list[Shard],
+    buffers: list[SourceBuffer] | None = None,
+) -> list[list[DefinitionSite]]:
+    """Run every shard's session at once and put the answers back in order."""
+    resolved = await asyncio.gather(
+        *(resolve(server, root, shard.positions, buffers) for shard in shards)
+    )
+    found = {
+        offset: sites
+        for shard, answers in zip(shards, resolved, strict=True)
+        for offset, sites in zip(shard.offsets, answers, strict=True)
+    }
+    return [found[offset] for offset in range(len(found))]
+
+
 class PyrightOracle(DefinitionOracle):
     """Answers declaration queries by driving `pyright-langserver` over stdio."""
 
     def __init__(
-        self, server: Path, root: Path, timeout: float = RESOLVE_TIMEOUT_SECONDS
+        self,
+        server: Path,
+        root: Path,
+        timeout: float = RESOLVE_TIMEOUT_SECONDS,
+        workers: int = RESOLVE_WORKERS,
     ) -> None:
         self.server = server
         self.root = root
         self.timeout = timeout
+        self.workers = workers
 
     def definitions(
         self,
         positions: list[SourcePosition],
         buffers: list[SourceBuffer] | None = None,
     ) -> list[list[DefinitionSite]]:
-        """Resolve a whole sweep in one server session, degrading on failure."""
+        """Resolve a whole sweep across server sessions, degrading on failure."""
         if not positions:
             return []
         try:
             return asyncio.run(
                 asyncio.wait_for(
-                    resolve(self.server, self.root, positions, buffers),
+                    resolve_sharded(
+                        self.server,
+                        self.root,
+                        sharded(positions, self.workers),
+                        buffers,
+                    ),
                     timeout=self.timeout,
                 )
             )
