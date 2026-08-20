@@ -422,6 +422,21 @@ def count_outside_examples(pattern: re.Pattern[str], text: str) -> int:
     )
 
 
+def texts_outside_examples(pattern: re.Pattern[str], text: str) -> list[str]:
+    """Each match's own line from the marker on, skipping quoted examples.
+
+    One line rather than the whole note: a note's later lines are separate
+    comment tokens carrying no marker, and the marker line is what tells two
+    notes apart. Identity, not content — enough to say which note this is.
+    """
+    return [
+        line[match.start() :].strip()
+        for line in text.splitlines()
+        for match in pattern.finditer(line)
+        if not quoted_example(line, match.start())
+    ]
+
+
 def count_in_prose(
     source: str, pattern: re.Pattern[str], python_source: bool = False
 ) -> int | None:
@@ -461,14 +476,45 @@ def review_marker_count(source: str, python_source: bool = False) -> int | None:
     return count_in_prose(source, NOTE_RE, python_source)
 
 
-def open_note_count(source: str, python_source: bool = False) -> int | None:
-    """Count notes still owed an answer, excluding resolution claims."""
-    return count_in_prose(source, OPEN_NOTE_RE, python_source)
+def texts_in_prose(
+    source: str, pattern: re.Pattern[str], python_source: bool = False
+) -> list[str] | None:
+    """Marker lines where prose belongs, not inside ordinary strings.
+
+    ``None`` where a Python source does not tokenize, for the reason
+    :func:`count_in_prose` returns it: there is then no way to tell a comment
+    from a string, and a set gathered under one regime differenced against
+    one gathered under the other measures the regime change.
+    """
+    if not python_source:
+        return texts_outside_examples(pattern, source)
+    tokens = python_tokens(source)
+    if tokens is None:
+        return None
+    documentation = docstring_lines(source)
+    return [
+        text
+        for token in tokens
+        if token.type == tokenize.COMMENT
+        or (
+            token.type == tokenize.STRING
+            and any(
+                line in documentation
+                for line in range(token.start[0], token.end[0] + 1)
+            )
+        )
+        for text in texts_outside_examples(pattern, token.string)
+    ]
 
 
-def solved_note_count(source: str, python_source: bool = False) -> int | None:
-    """Count resolution claims waiting to be checked."""
-    return count_in_prose(source, SOLVED_NOTE_RE, python_source)
+def open_note_texts(source: str, python_source: bool = False) -> list[str] | None:
+    """The marker line of every note still owed an answer."""
+    return texts_in_prose(source, OPEN_NOTE_RE, python_source)
+
+
+def solved_note_texts(source: str, python_source: bool = False) -> list[str] | None:
+    """The marker line of every resolution claim waiting to be checked."""
+    return texts_in_prose(source, SOLVED_NOTE_RE, python_source)
 
 
 def marker_decision(
@@ -489,15 +535,24 @@ def marker_decision(
     `--restore`, which touches only `solved:` claims. No session's edits are
     exempt here: an environment cannot carry this authority, so a grant that
     claims to is ignored.
+
+    What is compared is which notes a file carries, not how many. A tally
+    cannot tell a deleted note from a duplicated one being tidied, so it
+    denied both — and a file holding the same note twice could lose neither
+    copy, which froze the code around them: a dead function keeping a
+    verbatim copy of its neighbour's claim could not be removed, because
+    removing it dropped a count. Reading the marker lines answers the
+    question the tally was standing in for, which is whether the feedback
+    still stands somewhere for a reader to find.
     """
-    # A revision whose note count could not be established has not been shown
-    # to have lost anything, and denying on an unmeasurable difference is
-    # what blocked the completing step of every merge resolution: removing a
+    # A revision whose notes could not be established has not been shown to
+    # have lost anything, and denying on an unmeasurable difference is what
+    # blocked the completing step of every merge resolution: removing a
     # file's last conflict marker is what makes it parse for the first time.
-    opened_now = open_note_count(updated, python_source)
-    opened_before = open_note_count(previous, python_source)
-    claimed_now = solved_note_count(updated, python_source)
-    claimed_before = solved_note_count(previous, python_source)
+    opened_now = open_note_texts(updated, python_source)
+    opened_before = open_note_texts(previous, python_source)
+    claimed_now = solved_note_texts(updated, python_source)
+    claimed_before = solved_note_texts(previous, python_source)
     if (
         opened_now is None
         or opened_before is None
@@ -505,11 +560,24 @@ def marker_decision(
         or claimed_before is None
     ):
         return None
-    opened = opened_now - opened_before
-    claimed = claimed_now - claimed_before
-    if opened < 0 and opened + claimed == 0:
-        return None
-    if opened < 0:
+    # Which notes survive, not how many. A file holding the same note twice
+    # is one piece of feedback written in two places, so dropping one copy
+    # loses nothing a reader could have wanted — and under a tally it read
+    # as deletion, which left duplicated notes undeletable and the code
+    # carrying them frozen in place around them.
+    lost_open = [text for text in opened_before if text not in opened_now]
+    lost_claims = [text for text in claimed_before if text not in claimed_now]
+    # Converting a note is what resolution looks like: the open marker goes
+    # and the same words come back under `solved:`, so the text is gone from
+    # one population and present in the other.
+    resolved = {text.split(":", 1)[-1].strip() for text in lost_open} & {
+        text.split(":", 2)[-1].strip() for text in claimed_now
+    }
+    unresolved = [
+        text for text in lost_open if text.split(":", 1)[-1].strip() not in resolved
+    ]
+    added_open = [text for text in opened_now if text not in opened_before]
+    if unresolved:
         return KernelDecision(
             "deny",
             "this edit removes inline review feedback. Resolving a note means "
@@ -517,7 +585,7 @@ def marker_decision(
             "the claim can be checked against what was asked; deleting it "
             "leaves nothing to check",
         )
-    if claimed < 0:
+    if lost_claims:
         return KernelDecision(
             "deny",
             "this edit removes a `# lup: solved:` claim. Only the review pass "
@@ -525,7 +593,7 @@ def marker_decision(
             "(`dev comments --retire file:line`), or restores it to open "
             "feedback (`dev comments --restore file:line`)",
         )
-    if opened > 0:
+    if added_open:
         return KernelDecision("ask", "edit adds inline review feedback")
     return None
 

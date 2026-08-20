@@ -3304,3 +3304,75 @@ def test_a_vendored_program_may_still_be_declared_by_path() -> None:
     )
 
     assert hooks.diagnostics_command[0] == "tools/mychecker"
+
+
+def test_one_copy_of_a_duplicated_note_may_go_while_the_text_survives() -> None:
+    """A note written twice is one piece of feedback, not two.
+
+    A tally cannot tell a deleted note from a duplicated one being tidied,
+    so it denied both — which left a file holding the same note twice unable
+    to lose either copy, and froze whatever code carried them.
+    """
+    decision = decide_edit(
+        "a.py",
+        "def a() -> None:\n    pass  # lup: solved: check the total\n"
+        "def b() -> None:\n    pass  # lup: solved: check the total\n",
+        "def a() -> None:\n    pass  # lup: solved: check the total\n",
+        path_exists=True,
+        path_rules=[],
+        antipattern_rows=[],
+        allowances=[],
+        python_source=True,
+    )
+
+    assert "removes a `# lup: solved:` claim" not in decision.reason
+
+
+def test_losing_the_last_copy_of_a_claim_is_still_denied() -> None:
+    """The relaxation is about duplicates, not about claims going missing."""
+    decision = decide_edit(
+        "a.py",
+        "def a() -> None:\n    pass  # lup: solved: check the total\n",
+        "def a() -> None:\n    pass\n",
+        path_exists=True,
+        path_rules=[],
+        antipattern_rows=[],
+        allowances=[],
+        python_source=True,
+    )
+
+    assert decision.effect == "deny"
+    assert "removes a `# lup: solved:` claim" in decision.reason
+
+
+def test_dropping_one_of_two_different_notes_is_still_denied() -> None:
+    """Two notes that merely sit together are two pieces of feedback."""
+    decision = decide_edit(
+        "a.py",
+        "x = 1  # lup: reconsider this\ny = 2  # lup: and this\n",
+        "x = 1  # lup: reconsider this\ny = 2\n",
+        path_exists=True,
+        path_rules=[],
+        antipattern_rows=[],
+        allowances=[],
+        python_source=True,
+    )
+
+    assert decision.effect == "deny"
+    assert "removes inline review feedback" in decision.reason
+
+
+def test_resolving_a_note_into_a_claim_is_still_not_a_deletion() -> None:
+    """The open marker goes and the same words return under `solved:`."""
+    decision = decide_edit(
+        "a.py",
+        "x = 1  # lup: reconsider this\n",
+        "x = 1  # lup: solved: reconsider this\n",
+        path_exists=True,
+        path_rules=[],
+        antipattern_rows=[],
+        allowances=[],
+        python_source=True,
+    )
+
+    assert "removes inline review feedback" not in decision.reason
