@@ -9,6 +9,7 @@ projection and audit missing, untyped, and spurious suppressions.
 import re
 
 import pytest
+from pydantic import ValidationError
 
 from lup.codescan.antipatterns import (
     PYTHON_ANTI_PATTERNS,
@@ -16,7 +17,8 @@ from lup.codescan.antipatterns import (
     audit_text,
     python_anti_patterns,
 )
-from lup.codescan.common import AntiPattern
+from lup.codescan.common import AntiPattern, RuleExample
+from lup.codescan.grammar import GRAMMAR_RULES
 from lup.harness.contracts import Spelled, Unsupported
 from lup.policy.bundle import bundled_antipattern_rows
 from lup.policy.kernel.edit import (
@@ -1058,6 +1060,10 @@ def test_a_strong_rule_refuses_every_suppression() -> None:
     strong = AntiPattern(
         id="probe-strong",
         pattern=re.compile(r"\bforbidden\b"),
+        examples=[
+            RuleExample(code="value = forbidden()", verdict="flagged"),
+            RuleExample(code="value = allowed()", verdict="cleared"),
+        ],
         message="use the replacement",
         strength="strong",
     )
@@ -1084,6 +1090,10 @@ def test_a_soft_rule_still_honours_its_suppression() -> None:
     soft = AntiPattern(
         id="probe-soft",
         pattern=re.compile(r"\bforbidden\b"),
+        examples=[
+            RuleExample(code="value = forbidden()", verdict="flagged"),
+            RuleExample(code="value = allowed()", verdict="cleared"),
+        ],
         message="prefer something else",
     )
 
@@ -1237,3 +1247,102 @@ def test_pdf_extraction_names_no_tool_until_a_runtime_spells_one() -> None:
     assert neutral.message == declined.message
     assert spelled.message.endswith("Hand the path to the Read tool.")
     assert spelled.message.startswith(declined.message)
+
+
+# Every rule carries the snippets it is about, so this covers the whole table
+# by construction: a rule added without examples does not import, and one
+# added with examples arrives here without anyone widening a list of ids.
+EXAMPLE_CASES = [
+    pytest.param(
+        rule,
+        example,
+        python,
+        id=f"{rule.id}-{index}-{example.verdict}",
+    )
+    for table, python in ((PYTHON_ANTI_PATTERNS, True), (TS_ANTI_PATTERNS, False))
+    for rule in table
+    for index, example in enumerate(rule.examples)
+]
+
+
+def hook_denies(rule: AntiPattern, code: str, python: bool) -> bool:
+    """Whether the edit hook refuses this snippet over this one rule.
+
+    ``refuted={}`` says a checker ran and took nothing back, which is what
+    separates the two answers a resolution-required rule can give: without it
+    the gate asks rather than denying, and every `dict-get` example would
+    read the same whatever its receiver was.
+    """
+    decision = antipattern_decision(
+        None, f"{code}\n", [antipattern_row(rule)], python, refuted={}
+    )
+    return decision is not None and decision.effect == "deny"
+
+
+def audit_reports(rule: AntiPattern, code: str) -> list[str]:
+    """The rule ids the whole-file audit reports as unguarded in this snippet."""
+    return [
+        finding.rule_id
+        for finding in audit_text(f"{code}\n", [rule])
+        if finding.kind == "missing"
+    ]
+
+
+@pytest.mark.parametrize(("rule", "example", "python"), EXAMPLE_CASES)
+def test_each_rule_answers_its_own_examples(
+    rule: AntiPattern, example: RuleExample, python: bool
+) -> None:
+    """Both gates say about each snippet what its rule declared they would.
+
+    The two surfaces are checked together because the split between them is
+    the failure this guards: a shape the hook denies and the audit calls a
+    spurious marker is a change one gate demands and the other refuses, and
+    nothing in a single-surface test would show it.
+
+    ``refuted`` is the one verdict where they differ on purpose — the hook
+    sees a spelling it cannot decide and the audit resolves the receiver — so
+    the hook side is asserted here and `test_grammar` carries the resolution.
+    """
+    denied = hook_denies(rule, example.code, python)
+    reported = audit_reports(rule, example.code)
+
+    match example.verdict:
+        case "flagged" | "refuted":
+            assert denied, f"the hook admits {rule.id} at: {example.code}"
+            assert reported == [rule.id], (
+                f"the audit missed {rule.id} at: {example.code}"
+            )
+        case "cleared":
+            assert not denied, f"the hook refuses {rule.id} at: {example.code}"
+            assert reported == [], f"the audit reports {rule.id} at: {example.code}"
+
+
+def test_a_refuted_example_belongs_to_a_rule_the_grammar_resolves() -> None:
+    """Only a rule with a type oracle behind it may claim the third verdict.
+
+    ``refuted`` says the sweep will take this finding back. A rule the
+    grammar does not refine has nothing that could, so the claim would leave
+    a contributor waiting for a verdict that never changes — and a directive
+    is the only thing that would have helped.
+    """
+    refined = {rule.id for rule in GRAMMAR_RULES}
+    claiming = {
+        rule.id
+        for table in (PYTHON_ANTI_PATTERNS, TS_ANTI_PATTERNS)
+        for rule in table
+        if any(example.verdict == "refuted" for example in rule.examples)
+    }
+
+    assert claiming, "the third verdict has no customer"
+    assert claiming <= refined, sorted(claiming - refined)
+
+
+def test_a_rule_stating_only_what_it_catches_does_not_import() -> None:
+    """The near-miss is half the rule, so a declaration missing it is refused."""
+    with pytest.raises(ValidationError, match="one it clears"):
+        AntiPattern(
+            id="one-sided",
+            pattern=re.compile(r"\bnope\b"),
+            examples=[RuleExample(code="nope = 1", verdict="flagged")],
+            message="states only what it catches",
+        )

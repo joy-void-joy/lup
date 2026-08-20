@@ -70,6 +70,7 @@ from lup.codescan.common import (
     PythonContext,
     Matcher,
     Refutation,
+    RuleExample,
     RuleSelection,
     RULE_CONTEXTS,
     RuleContext,
@@ -137,12 +138,41 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         id="any-type",
         pattern=re.compile(r"\bAny\b"),
         matcher=Matcher(select=any_type_lines),
+        examples=[
+            RuleExample(
+                code="def handle(payload: Any) -> None: ...", verdict="flagged"
+            ),
+            RuleExample(code="from typing import Any", verdict="flagged"),
+            RuleExample(
+                code="def handle(payload: Payload) -> None: ...", verdict="cleared"
+            ),
+            RuleExample(
+                code="failed = any(row.failed for row in rows)", verdict="cleared"
+            ),
+        ],
         message="Never use Any — use specific types, TypedDict, or BaseModel",
     ),
     AntiPattern(
         id="type-ignore",
         pattern=re.compile(r"#\s*type:\s*ignore"),
         matcher=Matcher(select=type_ignore_lines),
+        examples=[
+            RuleExample(
+                code="total = count + label  # type: ignore", verdict="flagged"
+            ),
+            RuleExample(
+                code="total = count + label  # type: ignore[operator]",
+                verdict="flagged",
+            ),
+            RuleExample(
+                code="total = count + int(label)  # the operands agree",
+                verdict="cleared",
+            ),
+            RuleExample(
+                code="total = count + int(label)  # never # type: ignore it away",
+                verdict="cleared",
+            ),
+        ],
         message="Never use # type: ignore — fix the type error properly",
         context="comment",
     ),
@@ -150,6 +180,19 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         id="pyright-ignore",
         pattern=re.compile(r"#\s*pyright:\s*ignore"),
         matcher=Matcher(select=pyright_ignore_lines),
+        examples=[
+            RuleExample(
+                code="total = count + label  # pyright: ignore", verdict="flagged"
+            ),
+            RuleExample(
+                code="total = count + label  # pyright: ignore[reportOperatorIssue]",
+                verdict="flagged",
+            ),
+            RuleExample(
+                code="total = count + int(label)  # the operands agree",
+                verdict="cleared",
+            ),
+        ],
         message="Never use # pyright: ignore — fix the type error properly",
         context="comment",
     ),
@@ -157,6 +200,17 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         id="noqa",
         pattern=re.compile(r"#\s*noqa\b"),
         matcher=Matcher(select=noqa_lines),
+        examples=[
+            RuleExample(code="import json  # noqa", verdict="flagged"),
+            RuleExample(
+                code="summary = describe(run)  # noqa: E501", verdict="flagged"
+            ),
+            RuleExample(code="summary = describe(run)", verdict="cleared"),
+            RuleExample(
+                code='code = "# noqa is a forbidden shape, not a suppression"',
+                verdict="cleared",
+            ),
+        ],
         message="Never use # noqa — fix the lint issue properly",
         context="comment",
     ),
@@ -165,6 +219,10 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         matcher=Matcher(select=generic_base_lines),
         strength="strong",
         pattern=re.compile(r"\bGeneric\["),
+        examples=[
+            RuleExample(code="class Box(Generic[T]): ...", verdict="flagged"),
+            RuleExample(code="class Box[T]: ...", verdict="cleared"),
+        ],
         message="Use Python 3.12+ class[T] syntax instead of Generic[T]",
     ),
     AntiPattern(
@@ -172,6 +230,17 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         matcher=Matcher(select=typing_union_lines),
         strength="strong",
         pattern=re.compile(r"\b(?:Optional|Union)\["),
+        examples=[
+            RuleExample(
+                code="def find(name: str) -> Optional[User]: ...", verdict="flagged"
+            ),
+            RuleExample(
+                code="def find(name: str) -> Union[User, Team]: ...", verdict="flagged"
+            ),
+            RuleExample(
+                code="def find(name: str) -> User | None: ...", verdict="cleared"
+            ),
+        ],
         message="Use PEP 604 unions — X | None instead of Optional, X | Y instead of Union",
     ),
     AntiPattern(
@@ -179,6 +248,18 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         matcher=Matcher(select=typing_generics_lines),
         strength="strong",
         pattern=re.compile(r"\b(?:List|Dict|Tuple|Set)\["),
+        examples=[
+            RuleExample(
+                code="def labels(rows: List[str]) -> None: ...", verdict="flagged"
+            ),
+            RuleExample(
+                code="def labels(rows: list[str]) -> None: ...", verdict="cleared"
+            ),
+            # An alias with no builtin to lower-case is not one of these.
+            RuleExample(
+                code="def labels(rows: Sequence[str]) -> None: ...", verdict="cleared"
+            ),
+        ],
         message="Use lowercase builtin generics — list, dict, tuple, set — "
         "instead of the capitalized typing aliases",
     ),
@@ -186,12 +267,31 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         id="all-export",
         pattern=re.compile(r"__all__\s*[=:]"),
         matcher=Matcher(select=all_export_lines),
+        examples=[
+            RuleExample(
+                code='__all__ = ["Session", "SessionOpener"]', verdict="flagged"
+            ),
+            RuleExample(code='__all__ += ["SessionOpener"]', verdict="flagged"),
+            RuleExample(
+                code='PUBLIC_NAMES = ["Session", "SessionOpener"]', verdict="cleared"
+            ),
+            # Reading somebody else's export list binds nothing here.
+            RuleExample(code="exported = module.__all__", verdict="cleared"),
+        ],
         message="No __all__ — import directly from the defining module",
     ),
     AntiPattern(
         id="dict-str-object",
         pattern=re.compile(r"\b(?:dict|Mapping)\[\s*str\s*,\s*object\s*\]"),
         matcher=Matcher(select=dict_str_object_lines),
+        examples=[
+            RuleExample(
+                code="def load(row: dict[str, object]) -> None: ...", verdict="flagged"
+            ),
+            RuleExample(
+                code="def load(row: SessionRow) -> None: ...", verdict="cleared"
+            ),
+        ],
         message="Never use dict[str, object] or Mapping[str, object] — use TypedDict or BaseModel",
     ),
     AntiPattern(
@@ -209,6 +309,30 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
             r"\s*(?:str|int|float|bool|bytes|complex)\b"
         ),
         matcher=Matcher(select=dict_str_payload_lines),
+        examples=[
+            RuleExample(
+                code="def render(fields: dict[str, str]) -> None: ...",
+                verdict="flagged",
+            ),
+            # A union reaching a scalar is the same open map of scalars.
+            RuleExample(
+                code="def render(fields: dict[str, str | None]) -> None: ...",
+                verdict="flagged",
+            ),
+            RuleExample(
+                code="def render(fields: SessionFields) -> None: ...", verdict="cleared"
+            ),
+            # A registry: the value is a concrete class, and the open key set
+            # keyed by external data is the whole point.
+            RuleExample(
+                code="def render(fields: dict[str, SessionFactory]) -> None: ...",
+                verdict="cleared",
+            ),
+            RuleExample(
+                code="def render(fields: dict[SessionId, str]) -> None: ...",
+                verdict="cleared",
+            ),
+        ],
         message="String-keyed dict with a scalar value hides shape when the keys are a "
         "CLOSED, enumerable set — use a BaseModel or dict[Literal[...], V]. When the keys "
         "are open and data-driven (a registry/cache/counter keyed by external data) this is "
@@ -223,6 +347,21 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         id="dict-get",
         pattern=re.compile(r"\.get\s*\("),
         matcher=Matcher(select=dict_get_lines),
+        examples=[
+            RuleExample(code='name = payload.get("name")', verdict="flagged"),
+            # Reached *through* a module rather than on one, so still a keyed
+            # lookup — which is why the tree rules out the bare name only.
+            RuleExample(code='token = os.environ.get("LUP_TOKEN")', verdict="flagged"),
+            RuleExample(code="name = payload.name", verdict="cleared"),
+            RuleExample(code="import httpx; reply = httpx.get(url)", verdict="cleared"),
+            RuleExample(
+                code='@app.get("/runs")\ndef runs() -> list[Run]: ...',
+                verdict="cleared",
+            ),
+            # No tree says what an imported class is, so the hook flags this
+            # and the sweep takes it back once the receiver resolves.
+            RuleExample(code="reply = client.get(url)", verdict="refuted"),
+        ],
         message="`.get(` on a dict-shaped payload hides the schema — model it and "
         "read the fields (BaseModel/TypedDict). On a genuinely open dict (registry, "
         "cache) add `# lup: ignore[dict-get]`. On a receiver the checker resolves "
@@ -235,6 +374,16 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         id="bare-object",
         pattern=re.compile(r"(?:(?<!\w)(?!_)\w+\s*:|->)\s*object\b"),
         matcher=Matcher(select=bare_object_lines),
+        examples=[
+            RuleExample(
+                code="def store(value: object) -> None: ...", verdict="flagged"
+            ),
+            RuleExample(
+                code="def store(value: SessionId) -> None: ...", verdict="cleared"
+            ),
+            # The annotation is the subject, so constructing a sentinel is not.
+            RuleExample(code="MISSING = object()", verdict="cleared"),
+        ],
         message="Bare `object` says nothing about the value — use a concrete type, "
         "TypedDict, or BaseModel, and narrow at untyped boundaries",
     ),
@@ -242,6 +391,19 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         id="bare-basemodel",
         pattern=re.compile(r"(?:(?<!\[)\b\w+\s*:|->)\s*BaseModel\b(?!\s*[\]|])"),
         matcher=Matcher(select=bare_basemodel_lines),
+        examples=[
+            RuleExample(
+                code="def render(part: BaseModel) -> str: ...", verdict="flagged"
+            ),
+            RuleExample(
+                code="def render(part: TextPart | ImagePart) -> str: ...",
+                verdict="cleared",
+            ),
+            # Inheriting it is the shape this steers toward, not away from.
+            RuleExample(
+                code="class Session(BaseModel):\n    name: str", verdict="cleared"
+            ),
+        ],
         message="A parameter or return annotated exactly BaseModel accepts any model — "
         "name the concrete union of models or make the function generic",
     ),
@@ -250,6 +412,15 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         strength="strong",
         pattern=re.compile(r"\btuple\["),
         matcher=Matcher(select=tuple_shape_lines),
+        examples=[
+            RuleExample(
+                code="def span(text: str) -> tuple[int, int]: ...", verdict="flagged"
+            ),
+            RuleExample(code="def span(text: str) -> Span: ...", verdict="cleared"),
+            RuleExample(
+                code="def spans(text: str) -> tuple[Span, ...]: ...", verdict="cleared"
+            ),
+        ],
         message="A fixed-arity `tuple[...]` hides what each position means — name the "
         "fields with a BaseModel. Fall back to a TypedDict only where a model cannot go: "
         "the hermetic kernel, which has no pydantic, or a field that must stay the caller's "
@@ -264,6 +435,14 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         id="frozenset-shape",
         pattern=re.compile(r"\bfrozenset\b"),
         matcher=Matcher(select=frozenset_shape_lines),
+        examples=[
+            RuleExample(
+                code='ROLES: frozenset[str] = frozenset({"worker"})', verdict="flagged"
+            ),
+            RuleExample(
+                code='ROLES: dict[str, Role] = {"worker": WORKER}', verdict="cleared"
+            ),
+        ],
         message="A declared `frozenset[...]` shape or constant collapses structure a "
         "`dict[...]` keeps — each member is a bare name, and whatever it keyed has nowhere "
         "left to live. Use a dict, frozen once 3.15 ships `frozendict`, or a purpose-built "
@@ -280,6 +459,17 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         id="set-shape",
         pattern=re.compile(r"(?<!\.)\bset[\[(]|(?::|->)\s*set\b"),
         matcher=Matcher(select=set_shape_lines),
+        examples=[
+            RuleExample(
+                code="def known(names: set[str]) -> None: ...", verdict="flagged"
+            ),
+            RuleExample(
+                code="def known(names: dict[str, Role]) -> None: ...", verdict="cleared"
+            ),
+            # The rule's own remedy: reach for membership locally instead of
+            # declaring the set as the interface.
+            RuleExample(code="seen = {row.name for row in rows}", verdict="cleared"),
+        ],
         message="A declared `set` collapses structure a `dict[...]` keeps — a bare set "
         "of strings is a record that lost its other fields, so whatever each member "
         "keyed has nowhere left to live. Use a dict when the members key something, or "
@@ -297,6 +487,21 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         id="default-factory",
         pattern=re.compile(r"\bdefault_factory\s*="),
         matcher=Matcher(select=default_factory_lines),
+        examples=[
+            RuleExample(
+                code="class Run(BaseModel):\n    steps: list[Step] = Field(default_factory=list)",
+                verdict="flagged",
+            ),
+            RuleExample(
+                code="class Run(BaseModel):\n    steps: list[Step] = []",
+                verdict="cleared",
+            ),
+            # A factory doing work no literal expresses is not a site at all.
+            RuleExample(
+                code="class Run(BaseModel):\n    run_id: str = Field(default_factory=new_run_id)",
+                verdict="cleared",
+            ),
+        ],
         message="`Field(default_factory=list)` states in a factory what the annotation "
         "already declares — write the default as a literal, `items: list[B] = []`, which "
         "pydantic copies per instance. A factory that does real work (reads another "
@@ -312,6 +517,19 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         id="empty-collection",
         pattern=re.compile(r"(?<![=!<>])=\s*(?:\{\}|\[\]|set\(\))"),
         matcher=Matcher(select=empty_collection_lines),
+        examples=[
+            RuleExample(
+                code="names = []\nfor row in rows:\n    names.append(row.name)",
+                verdict="flagged",
+            ),
+            RuleExample(code="names = [row.name for row in rows]", verdict="cleared"),
+            # An annotated class declaration is a pydantic field, which the
+            # refiner exempts — default-factory owns that spelling instead.
+            RuleExample(
+                code="class Run(BaseModel):\n    steps: list[Step] = []",
+                verdict="cleared",
+            ),
+        ],
         message="Empty-collection literals (`= {}`, `= []`, `= set()`) usually seed an "
         "append/mutate loop — build the collection with a comprehension, or, when the "
         "loop carries control flow a comprehension cannot, `yield` the items from a "
@@ -322,6 +540,14 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         id="cast",
         pattern=re.compile(r"\bcast\s*\("),
         matcher=Matcher(select=cast_lines),
+        examples=[
+            RuleExample(code="value = cast(str, raw)", verdict="flagged"),
+            RuleExample(
+                code='value = raw if isinstance(raw, str) else ""', verdict="cleared"
+            ),
+            # A `cast` method belongs to somebody else's API, not to `typing`.
+            RuleExample(code="values = column.cast(int)", verdict="cleared"),
+        ],
         message="`cast(...)` is a code smell — narrow with isinstance or a type guard, "
         "or fix the annotation so the cast is unnecessary",
     ),
@@ -329,6 +555,11 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         id="import-re",
         pattern=re.compile(r"\bimport\s+re\b|\bfrom\s+re\s+import\b"),
         matcher=Matcher(select=import_re_lines),
+        examples=[
+            RuleExample(code="import re", verdict="flagged"),
+            RuleExample(code="from re import compile", verdict="flagged"),
+            RuleExample(code="import json", verdict="cleared"),
+        ],
         message="`import re` / `from re import` is a code smell — parse structured data with "
         "its own API instead: JSON -> json.loads, paths -> pathlib.Path, URLs -> urllib.parse, "
         "XML/HTML -> xml.etree.ElementTree / lxml, dates -> datetime",
@@ -339,6 +570,12 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
             r"\bre\.(compile|search|match|fullmatch|sub|findall|split)\s*\("
         ),
         matcher=Matcher(select=re_call_lines),
+        examples=[
+            RuleExample(code="host = re.search(pattern, url)", verdict="flagged"),
+            RuleExample(code="host = urlparse(url).netloc", verdict="cleared"),
+            # A compiled pattern's own method is not the module entry point.
+            RuleExample(code="found = matcher.search(text)", verdict="cleared"),
+        ],
         message="Avoid regex for structured data — reach for its parser instead: "
         "JSON -> json.loads, paths -> pathlib.Path, URLs -> urllib.parse, "
         "XML/HTML -> xml.etree.ElementTree / lxml, dates -> datetime",
@@ -352,6 +589,22 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         id="string-replace",
         pattern=re.compile(r"(?<!\bos)(?<![Pp]ath)\.replace\s*\("),
         matcher=Matcher(select=string_replace_lines),
+        examples=[
+            RuleExample(code='name = source.replace(".py", ".pyi")', verdict="flagged"),
+            RuleExample(
+                code='name = Path(source).with_suffix(".pyi")', verdict="cleared"
+            ),
+            # The two the tree settles by arity: a bound rename takes only the
+            # destination, and the unbound spelling is named outright.
+            RuleExample(code="Path(source).replace(destination)", verdict="cleared"),
+            RuleExample(code="os.replace(source, destination)", verdict="cleared"),
+            # What arity cannot reach: a two-argument `replace` on something
+            # that is not text at all, which only a resolved receiver tells
+            # from the string surgery this rule is about.
+            RuleExample(
+                code="frame = frame.replace(missing, default)", verdict="refuted"
+            ),
+        ],
         message="Avoid .replace() for structured data — edit it through its parser instead "
         "(pathlib.Path for paths, urllib.parse for URLs, json for JSON)",
     ),
@@ -366,6 +619,14 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         id="string-split",
         pattern=re.compile(r"\.r?split\s*\((?!\s*\))|\.r?partition\s*\("),
         matcher=Matcher(select=string_split_lines),
+        examples=[
+            RuleExample(code='host = url.split("/")[2]', verdict="flagged"),
+            # Partition always takes a separator, so the variant is no dodge.
+            RuleExample(code='key, _, value = line.partition(":")', verdict="flagged"),
+            RuleExample(code="host = urlparse(url).netloc", verdict="cleared"),
+            # Argless splitting is whitespace tokenizing, which has no parser.
+            RuleExample(code="words = sentence.split()", verdict="cleared"),
+        ],
         message="Avoid .split(sep)/.rsplit/.partition for structured data — parse it "
         "instead (urllib.parse for URLs, pathlib.Path for paths, json for JSON, "
         "datetime for dates)",
@@ -379,6 +640,11 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         id="string-strip",
         pattern=re.compile(r"\.[lr]?strip\s*\((?!\s*\))"),
         matcher=Matcher(select=string_strip_lines),
+        examples=[
+            RuleExample(code='name = field.strip("<>")', verdict="flagged"),
+            # Argless stripping is whitespace framing, which has no parser.
+            RuleExample(code="name = field.strip()", verdict="cleared"),
+        ],
         message="Avoid .strip(chars)/.lstrip/.rstrip for structured data — parse it "
         "instead (urllib.parse for URLs, pathlib.Path for paths, json for JSON, "
         "datetime for dates)",
@@ -394,6 +660,15 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         id="silent-truncation",
         pattern=re.compile(r"\[\s*:\s*(?:\d[\d_]*\d|[A-Z][A-Z0-9_]{2,})\s*\]"),
         matcher=Matcher(select=silent_truncation_lines),
+        examples=[
+            RuleExample(code="preview = body[:200]", verdict="flagged"),
+            RuleExample(code="preview = body[:SNIPPET_LENGTH]", verdict="flagged"),
+            RuleExample(code="preview = body", verdict="cleared"),
+            # A lowercase name is a bound the caller passed, so this is a
+            # request rather than a cut; a small literal is a parser bound.
+            RuleExample(code="page = rows[:limit]", verdict="cleared"),
+            RuleExample(code="head = rest[:2]", verdict="cleared"),
+        ],
         message="Slicing a prefix discards the rest with nothing said, and a cut artifact "
         "looks exactly like a complete one. Emit the whole value: the container grows to "
         "fit what it holds, not the reverse. Cut only for a hard limit a document format "
@@ -406,24 +681,60 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         id="bare-except",
         pattern=re.compile(r"\bexcept\s*:"),
         matcher=Matcher(select=bare_except_lines),
+        examples=[
+            RuleExample(code="try:\n    load()\nexcept:\n    pass", verdict="flagged"),
+            RuleExample(
+                code="try:\n    load()\nexcept FileNotFoundError:\n    raise",
+                verdict="cleared",
+            ),
+        ],
         message="Bare `except:` catches SystemExit/KeyboardInterrupt — name the exception",
     ),
     AntiPattern(
         id="except-baseexception",
         pattern=re.compile(r"\bexcept\s+BaseException\b"),
         matcher=Matcher(select=except_baseexception_lines),
+        examples=[
+            RuleExample(
+                code="try:\n    load()\nexcept BaseException:\n    raise",
+                verdict="flagged",
+            ),
+            RuleExample(
+                code="try:\n    load()\nexcept Exception:\n    raise", verdict="cleared"
+            ),
+        ],
         message="except BaseException catches KeyboardInterrupt — use Exception or narrower",
     ),
     AntiPattern(
         id="suppress",
         pattern=re.compile(r"\bcontextlib\.suppress\b"),
         matcher=Matcher(select=suppress_lines),
+        examples=[
+            RuleExample(
+                code="with contextlib.suppress(KeyError):\n    load()",
+                verdict="flagged",
+            ),
+            RuleExample(
+                code="try:\n    load()\nexcept KeyError:\n    logger.warning(...)",
+                verdict="cleared",
+            ),
+            # The bare name is `suppress-import`'s subject, not this one's.
+            RuleExample(code="with suppress(KeyError):\n    load()", verdict="cleared"),
+        ],
         message="contextlib.suppress silently swallows exceptions — log, handle, or re-raise",
     ),
     AntiPattern(
         id="suppress-import",
         pattern=re.compile(r"\bfrom\s+contextlib\s+import\b.*\bsuppress\b"),
         matcher=Matcher(select=suppress_import_lines),
+        examples=[
+            RuleExample(code="from contextlib import suppress", verdict="flagged"),
+            RuleExample(
+                code="from contextlib import asynccontextmanager", verdict="cleared"
+            ),
+            # The qualified spelling is `suppress`'s subject at its use site.
+            RuleExample(code="import contextlib", verdict="cleared"),
+        ],
         message="contextlib.suppress silently swallows exceptions — log, handle, or re-raise",
     ),
     AntiPattern(
@@ -432,6 +743,13 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
             r"@dataclass|\bimport\s+dataclasses\b|\bfrom\s+dataclasses\s+import\b"
         ),
         matcher=Matcher(select=dataclass_lines),
+        examples=[
+            RuleExample(code="from dataclasses import dataclass", verdict="flagged"),
+            RuleExample(
+                code="@dataclass\nclass Span:\n    start: int", verdict="flagged"
+            ),
+            RuleExample(code="from pydantic import BaseModel", verdict="cleared"),
+        ],
         message="Use Pydantic BaseModel (or TypedDict) instead of dataclasses",
     ),
     AntiPattern(
@@ -441,6 +759,17 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         id="namedtuple",
         pattern=re.compile(r"\bNamedTuple\b|\bnamedtuple\b"),
         matcher=Matcher(select=namedtuple_lines),
+        examples=[
+            RuleExample(
+                code="class Span(NamedTuple):\n    start: int", verdict="flagged"
+            ),
+            RuleExample(
+                code='Span = namedtuple("Span", "start end")', verdict="flagged"
+            ),
+            RuleExample(
+                code="class Span(BaseModel):\n    start: int", verdict="cleared"
+            ),
+        ],
         message="Use Pydantic BaseModel (or TypedDict) instead of NamedTuple/namedtuple",
     ),
     AntiPattern(
@@ -451,6 +780,21 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         id="model-config",
         pattern=re.compile(r"^\s*model_config\s*[:=]"),
         matcher=Matcher(select=model_config_lines),
+        examples=[
+            RuleExample(
+                code="class Run(BaseModel):\n    model_config = ConfigDict(frozen=True)",
+                verdict="flagged",
+            ),
+            RuleExample(
+                code="class Run(BaseModel, frozen=True):\n    name: str",
+                verdict="cleared",
+            ),
+            # A class body is what makes the name pydantic's configuration, so
+            # the same word as a call keyword is an ordinary argument.
+            RuleExample(
+                code="session = Session(model_config=config)", verdict="cleared"
+            ),
+        ],
         message="Declare pydantic configuration as class keywords — "
         "class A(BaseModel, frozen=True, extra='forbid') — instead of assigning "
         "model_config, so the configuration reads in the header beside the class "
@@ -461,30 +805,55 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         id="subprocess",
         pattern=re.compile(r"\bimport\s+subprocess\b|\bfrom\s+subprocess\s+import\b"),
         matcher=Matcher(select=subprocess_lines),
+        examples=[
+            RuleExample(code="import subprocess", verdict="flagged"),
+            RuleExample(code="import sh", verdict="cleared"),
+        ],
         message="Use the `sh` library instead of subprocess",
     ),
     AntiPattern(
         id="os-shell",
         pattern=re.compile(r"\bos\.(?:system|popen|exec[lv]\w*)\s*\("),
         matcher=Matcher(select=os_shell_lines),
+        examples=[
+            RuleExample(code='os.system("git status")', verdict="flagged"),
+            RuleExample(code="sh.git.status()", verdict="cleared"),
+            # A method of that name on somebody's object is not the os call.
+            RuleExample(code="runner.system(command)", verdict="cleared"),
+        ],
         message="Use the `sh` library instead of os.system()/os.popen()/os.exec*()",
     ),
     AntiPattern(
         id="argparse",
         pattern=re.compile(r"\bimport\s+argparse\b|\bfrom\s+argparse\s+import\b"),
         matcher=Matcher(select=argparse_lines),
+        examples=[
+            RuleExample(code="import argparse", verdict="flagged"),
+            RuleExample(code="import typer", verdict="cleared"),
+        ],
         message="Use `typer` instead of argparse",
     ),
     AntiPattern(
         id="rich-progress",
         pattern=re.compile(r"\brich\.progress\b|\bfrom\s+rich\.progress\s+import\b"),
         matcher=Matcher(select=rich_progress_lines),
+        examples=[
+            RuleExample(code="from rich.progress import track", verdict="flagged"),
+            RuleExample(code="from tqdm import tqdm", verdict="cleared"),
+            # Rich itself is fine; it is the progress bar that is not.
+            RuleExample(code="from rich.console import Console", verdict="cleared"),
+        ],
         message="Use `tqdm` instead of rich progress bars",
     ),
     AntiPattern(
         id="os-path",
         pattern=re.compile(r"\bos\.path\b"),
         matcher=Matcher(select=os_path_lines),
+        examples=[
+            RuleExample(code="parent = os.path.dirname(source)", verdict="flagged"),
+            RuleExample(code="parent = Path(source).parent", verdict="cleared"),
+            RuleExample(code="import os", verdict="cleared"),
+        ],
         message="Use pathlib.Path instead of os.path",
     ),
     AntiPattern(
@@ -499,6 +868,12 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
             r"readlink|stat|lstat|chmod|chown)\s*\("
         ),
         matcher=Matcher(select=os_file_ops_lines),
+        examples=[
+            RuleExample(code="os.mkdir(destination)", verdict="flagged"),
+            RuleExample(code="Path(destination).mkdir()", verdict="cleared"),
+            # An os call `pathlib` has no equivalent for is outside the list.
+            RuleExample(code="owner = os.getpid()", verdict="cleared"),
+        ],
         message="Use pathlib.Path for file/dir operations instead of os.* "
         "(Path.iterdir/mkdir/unlink/rename/replace/stat/...)",
     ),
@@ -506,12 +881,24 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         id="os-environ",
         pattern=re.compile(r"\bos\.(?:environ|getenv)\b"),
         matcher=Matcher(select=os_environ_lines),
+        examples=[
+            RuleExample(code='token = os.environ["LUP_TOKEN"]', verdict="flagged"),
+            RuleExample(code='token = os.getenv("LUP_TOKEN")', verdict="flagged"),
+            RuleExample(code="token = settings.token", verdict="cleared"),
+        ],
         message="Read configuration through pydantic-settings, not os.environ/os.getenv",
     ),
     AntiPattern(
         id="eval-exec",
         pattern=re.compile(r"(?<![.\w])(?:eval|exec)\s*\("),
         matcher=Matcher(select=eval_exec_lines),
+        examples=[
+            RuleExample(code="value = eval(source)", verdict="flagged"),
+            RuleExample(code="value = ast.literal_eval(source)", verdict="cleared"),
+            # A method of that name is somebody else's API — a database
+            # cursor, a template engine — never the builtin this refuses.
+            RuleExample(code="rows = cursor.exec(statement)", verdict="cleared"),
+        ],
         message="Never use eval()/exec() — parse the data (ast.literal_eval for "
         "literals) or dispatch explicitly",
     ),
@@ -520,12 +907,32 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         matcher=Matcher(select=utcnow_lines),
         strength="strong",
         pattern=re.compile(r"\butcnow\s*\("),
+        examples=[
+            RuleExample(code="stamp = datetime.utcnow()", verdict="flagged"),
+            RuleExample(code="stamp = datetime.now(timezone.utc)", verdict="cleared"),
+        ],
         message="datetime.utcnow() is naive and deprecated — use datetime.now(timezone.utc)",
     ),
     AntiPattern(
         id="global-statement",
         pattern=re.compile(r"^global\s+\w"),
         matcher=Matcher(select=global_statement_lines),
+        examples=[
+            RuleExample(
+                code="def install(session):\n    global CURRENT\n    CURRENT = session",
+                verdict="flagged",
+            ),
+            RuleExample(
+                code="def install(session):\n    STATE.current = session",
+                verdict="cleared",
+            ),
+            # `nonlocal` closes over an enclosing scope rather than publishing
+            # into the module's, so it is not what this refuses.
+            RuleExample(
+                code="def outer():\n    total = 0\n\n    def inner():\n        nonlocal total",
+                verdict="cleared",
+            ),
+        ],
         message="No `global` statements — mutate a module-level holder object or pass "
         "state explicitly",
     ),
@@ -533,18 +940,37 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         id="private-function",
         pattern=re.compile(r"\bdef\s+_[a-zA-Z]"),
         matcher=Matcher(select=private_function_lines),
+        examples=[
+            RuleExample(code="def _resolve(name: str) -> str: ...", verdict="flagged"),
+            RuleExample(code="def resolve(name: str) -> str: ...", verdict="cleared"),
+            RuleExample(code="def __enter__(self) -> Self: ...", verdict="cleared"),
+        ],
         message="No `_` prefix on functions/methods — nothing is private (nest inside caller if needed)",
     ),
     AntiPattern(
         id="private-class",
         pattern=re.compile(r"\bclass\s+_[A-Z]"),
         matcher=Matcher(select=private_class_lines),
+        examples=[
+            RuleExample(code="class _Cache: ...", verdict="flagged"),
+            RuleExample(code="class Cache: ...", verdict="cleared"),
+        ],
         message="No `_` prefix on classes — nothing is private",
     ),
     AntiPattern(
         id="private-variable",
         pattern=re.compile(r"^_[a-zA-Z]\w*\s*(?::[^=]*)?=(?!=)(?!.*,\s*$)"),
         matcher=Matcher(select=private_variable_lines),
+        examples=[
+            RuleExample(code="_CACHE = Cache()", verdict="flagged"),
+            RuleExample(code="CACHE = Cache()", verdict="cleared"),
+            # Module level is the scope a name is published from, so a local
+            # is nobody's interface and a tuple unpacking declares no one name.
+            RuleExample(
+                code="def read(rows):\n    _first = rows[0]", verdict="cleared"
+            ),
+            RuleExample(code="_head, tail = rows", verdict="cleared"),
+        ],
         message="No `_` prefix on variables/constants — nothing is private "
         "(unused `_` function parameters are exempt)",
     ),
@@ -590,6 +1016,13 @@ def pdf_extraction_rule(document_reader: Spelling) -> AntiPattern:
             r"(?:fitz|pymupdf|pypdf|PyPDF2|PyPDF4|pdfplumber|pdfminer|pypdfium2)\b"
         ),
         matcher=Matcher(select=pdf_extraction_lines),
+        examples=[
+            RuleExample(code="import pypdf", verdict="flagged"),
+            RuleExample(code="from pdfminer import high_level", verdict="flagged"),
+            # A writer is not an extractor: nothing here comes back empty from
+            # a scanned page, because nothing here reads one.
+            RuleExample(code="import pdfkit", verdict="cleared"),
+        ],
         message=" ".join(
             words
             for words in (
@@ -626,62 +1059,128 @@ TS_ANTI_PATTERNS: list[AntiPattern] = [
     AntiPattern(
         id="as-any",
         pattern=re.compile(r"\bas\s+any\b"),
+        examples=[
+            RuleExample(code="const session = raw as any;", verdict="flagged"),
+            RuleExample(
+                code="const session = raw as SessionPayload;", verdict="cleared"
+            ),
+        ],
         message="Never use `as any` — use proper types or type guards",
     ),
     AntiPattern(
         id="as-unknown",
         pattern=re.compile(r"\bas\s+unknown\b"),
+        examples=[
+            RuleExample(code="const session = raw as unknown;", verdict="flagged"),
+            RuleExample(
+                code="const session = isSession(raw) ? raw : null;", verdict="cleared"
+            ),
+        ],
         message="Never use `as unknown` — use type guards or proper types",
     ),
     AntiPattern(
         id="any-annotation",
         pattern=re.compile(r":\s*any\b"),
+        examples=[
+            RuleExample(code="function load(payload: any) {}", verdict="flagged"),
+            RuleExample(
+                code="function load(payload: SessionPayload) {}", verdict="cleared"
+            ),
+            RuleExample(code="function load(payload: unknown) {}", verdict="cleared"),
+        ],
         message="Never use `any` type annotation — use specific types, generics, or `unknown`",
     ),
     AntiPattern(
         id="any-assertion",
         pattern=re.compile(r"<any>"),
+        examples=[
+            RuleExample(code="const session = <any>raw;", verdict="flagged"),
+            RuleExample(code="const session = <SessionPayload>raw;", verdict="cleared"),
+        ],
         message="Never use `<any>` type assertion — use proper types",
     ),
     AntiPattern(
         id="ts-ignore",
         pattern=re.compile(r"@ts-ignore"),
+        examples=[
+            RuleExample(code="// @ts-ignore", verdict="flagged"),
+            RuleExample(
+                code="// the parameter was widened so the call checks",
+                verdict="cleared",
+            ),
+        ],
         message="Never use @ts-ignore — fix the type error properly",
         context="comment",
     ),
     AntiPattern(
         id="ts-expect-error",
         pattern=re.compile(r"@ts-expect-error"),
+        examples=[
+            RuleExample(code="// @ts-expect-error", verdict="flagged"),
+            RuleExample(code="// the overload now covers this call", verdict="cleared"),
+        ],
         message="Never use @ts-expect-error — fix the type error properly",
         context="comment",
     ),
     AntiPattern(
         id="ts-nocheck",
         pattern=re.compile(r"@ts-nocheck"),
+        examples=[
+            RuleExample(code="// @ts-nocheck", verdict="flagged"),
+            RuleExample(
+                code="// every export in this module is typed", verdict="cleared"
+            ),
+        ],
         message="Never use @ts-nocheck — fix the type errors in the file",
         context="comment",
     ),
     AntiPattern(
         id="eslint-disable",
         pattern=re.compile(r"//\s*eslint-disable"),
+        examples=[
+            RuleExample(
+                code="// eslint-disable-next-line no-console", verdict="flagged"
+            ),
+            RuleExample(
+                code="// the console call routes through the logger", verdict="cleared"
+            ),
+        ],
         message="Never use eslint-disable — fix the lint issue properly",
         context="comment",
     ),
     AntiPattern(
         id="eslint-disable-block",
         pattern=re.compile(r"/\*\s*eslint-disable"),
+        examples=[
+            RuleExample(code="/* eslint-disable no-console */", verdict="flagged"),
+            RuleExample(
+                code="/* the rule is satisfied, not switched off */", verdict="cleared"
+            ),
+        ],
         message="Never use eslint-disable — fix the lint issue properly",
         context="comment",
     ),
     AntiPattern(
         id="tslint-disable",
         pattern=re.compile(r"//\s*tslint:disable"),
+        examples=[
+            RuleExample(code="// tslint:disable:no-console", verdict="flagged"),
+            RuleExample(
+                code="// migrated to eslint and the finding fixed", verdict="cleared"
+            ),
+        ],
         message="Never use tslint:disable — migrate to eslint and fix the issue",
         context="comment",
     ),
     AntiPattern(
         id="non-null-assertion",
         pattern=re.compile(r"[\w\)\]]!\."),
+        examples=[
+            RuleExample(code="const name = session!.name;", verdict="flagged"),
+            RuleExample(code='const name = session?.name ?? "";', verdict="cleared"),
+            # A negation is not an assertion: the rule is about the postfix.
+            RuleExample(code="if (!session.name) { return; }", verdict="cleared"),
+        ],
         message="Postfix `!.` non-null assertion hides a possible null/undefined — "
         "narrow the type or handle the missing case",
     ),
@@ -689,17 +1188,32 @@ TS_ANTI_PATTERNS: list[AntiPattern] = [
         id="var-declaration",
         strength="strong",
         pattern=re.compile(r"\bvar\s+[A-Za-z_$]"),
+        examples=[
+            RuleExample(code="var count = 0;", verdict="flagged"),
+            RuleExample(code="const count = 0;", verdict="cleared"),
+            RuleExample(code="const variance = spread(rows);", verdict="cleared"),
+        ],
         message="Use `const` or `let` instead of `var` — var is function-scoped and hoisted",
     ),
     AntiPattern(
         id="function-object-type",
         pattern=re.compile(r":\s*(?:Function|Object)\b"),
+        examples=[
+            RuleExample(code="let handler: Function;", verdict="flagged"),
+            RuleExample(
+                code="let handler: (event: SessionEvent) => void;", verdict="cleared"
+            ),
+        ],
         message="Never use `Function` or `Object` as a type — declare the call "
         "signature or the object shape",
     ),
     AntiPattern(
         id="console-log",
         pattern=re.compile(r"\bconsole\.log\s*\("),
+        examples=[
+            RuleExample(code="console.log(session);", verdict="flagged"),
+            RuleExample(code="logger.debug(session);", verdict="cleared"),
+        ],
         message="console.log is a debug leftover — remove it or route through a logger",
     ),
 ]

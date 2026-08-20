@@ -25,7 +25,7 @@ from functools import cache
 from pathlib import Path, PurePosixPath
 from typing import Literal, Self, get_args
 
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 from lup.policy.kernel.edit import (
     FILE_IGNORE_RE,
@@ -102,6 +102,45 @@ class Matcher(BaseModel, arbitrary_types_allowed=True):
     select: Callable[[str], set[int]]
 
 
+type ExampleVerdict = Literal["flagged", "cleared", "refuted"]
+"""What the gates say about one example, in the three answers they can give.
+
+``flagged`` is the shape the rule refuses, reported by every surface.
+
+``cleared`` is the near-miss the tree settles on its own: the same spelling
+doing something else — a one-argument `.replace` that renames a file, an
+argless `.split` tokenizing prose, a `tuple[X, ...]` that is a sequence. Both
+gates stay silent and a directive there would be reported spurious.
+
+``refuted`` is the case no tree can decide, so the two surfaces answer
+differently on purpose: the edit hook flags the spelling, and the whole-file
+audit takes it back once a type oracle resolves what the receiver actually is.
+`.get` on an HTTP client is the one this exists for. It is a third answer
+rather than a cleared example, because a contributor who meets the denial
+needs to know that waiting for the sweep is the way past it — and that adding
+a directive is not.
+"""
+
+
+class RuleExample(BaseModel, frozen=True):
+    """One snippet a rule is checked against, and the verdict it must return.
+
+    A rule declares near-misses as well as violations, because one stated only
+    by what it catches is one whose reach nobody wrote down — and every false
+    positive this set has produced was a near-miss nobody had named. Most of
+    these rules turn on what the subject *is* rather than on how it is spelled,
+    so the cleared examples are where that is written down: `.replace` renaming
+    a path, `.get` reaching a module's own function, `Field(default_factory=…)`
+    doing work no literal expresses.
+
+    A cleared snippet is often the replacement the rule's message asks for, so
+    the set bounds the rule and shows the way out of it at once.
+    """
+
+    code: str
+    verdict: ExampleVerdict
+
+
 class AntiPattern(BaseModel, arbitrary_types_allowed=True):
     """One forbidden code shape: a stable id, the regex that detects it, and why.
 
@@ -137,10 +176,19 @@ class AntiPattern(BaseModel, arbitrary_types_allowed=True):
     where no tree can be had — a file mid-edit that will not parse, or the
     TypeScript-family table, which this grammar is not for. A rule carrying
     one needs no ``refiner``, because there is no excess to take back out.
+
+    ``examples`` are the snippets the rule is checked against, and carrying
+    them on the declaration is what makes a rule impossible to add untested:
+    a table-driven test runs every one of them through the gate, so there is
+    no separate list of covered ids for a new rule to be missing from. The
+    generated reference renders them too, which is why they are written as
+    code somebody could paste rather than as the regex that happens to catch
+    them.
     """
 
     id: str
     pattern: re.Pattern[str]
+    examples: list[RuleExample]
     message: str
     context: RuleContext = "code"
     refiner: Refiner | None = None
@@ -154,6 +202,28 @@ class AntiPattern(BaseModel, arbitrary_types_allowed=True):
     every time — then a suppression is not a reasoned exception but the defect
     with a comment on it, and this refuses to be silenced.
     """
+
+    @model_validator(mode="after")
+    def examples_bound_the_rule(self) -> Self:
+        """Refuse a rule whose examples state only one half of its reach.
+
+        A rule is two claims — this shape is refused, and that neighbouring
+        one is not — and a declaration carrying only violations asserts the
+        first while leaving the second to whatever the pattern happens to do.
+        Requiring both here rather than in the test is what keeps the answer
+        at the declaration: a rule with one polarity missing does not import.
+
+        ``refuted`` is not one of the two. It says the gates answer this site
+        differently on purpose, which presumes both of them already have an
+        answer to state.
+        """
+        verdicts = {example.verdict for example in self.examples}
+        if not {"flagged", "cleared"} <= verdicts:
+            raise ValueError(
+                f"rule {self.id} needs at least one example it flags and one it "
+                f"clears — the cleared one is what says where the rule stops"
+            )
+        return self
 
 
 class RuleSelection(BaseModel, frozen=True):
