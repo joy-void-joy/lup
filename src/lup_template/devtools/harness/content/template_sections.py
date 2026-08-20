@@ -70,7 +70,7 @@ The single most important principle for improving this agent: **give it more too
 | Apply general principles                              | Apply specific pattern patches                     |
 | Communicate principles and the _why_                  | Prescribe rigid mechanical procedures              |
 | Provide state/context via tools                       | Use f-string prompt engineering                    |
-| Set `model=opus 5`, `max_thinking_tokens=128_000-1`   | Compensate for weak reasoning with complex prompts |
+| Ask for the `strongest` tier and a high `effort`      | Compensate for weak reasoning with complex prompts |
 | See what went wrong from first principles             | Make small edits to patch one mistake              |
 | Create subagents for specialized work                 | Build complex pipelines in main agent              |
 
@@ -591,9 +591,14 @@ src/
 
 ## Primary Libraries
 
-- **claude-agent-sdk**: Primary framework for building agents (use `query()` for one-shot LLM calls with structured output)
+- **lup**: The runtime this project composes against, and it is provider-neutral. `SessionFactory` opens a `Session`; a `TurnRequest` carries the prompt and the type the answer must arrive as; a strict `TurnResult[T]` hands back `.output` already validated. `SessionFactory.query(prompt, Model)` is the whole of a one-shot.
 - **pydantic**: For data validation and settings
 - **pydantic-settings**: For configuration (not dotenv)
+
+Which runtimes this project drives is an extra rather than a rewrite —
+`lup[claude]`, `lup[codex]`, or both — and the same declarations render into
+each. A provider's own SDK is that adapter's dependency, never this
+application's.
 
 ## Model Selection
 
@@ -611,7 +616,7 @@ State the tier, not a model id. A declaration says what the role needs and each 
   - **Provider SDKs are the adapter's, not yours**: application code composes against `lup`'s provider-neutral runtime — `SessionFactory`, `Session`, `TurnRequest`, `TurnResult` — and never imports a provider SDK. Each SDK is one adapter's dependency behind an extra, so importing it here pins the application to one runtime and trips `seam-boundary` outside a composition root that names it.
 - **Use Python 3.12+ generics syntax**: `class A[T]`, not `Generic[T]`
 - Use `TypedDict` and Pydantic models for structured data
-- Never manually parse Claude/agent output -- use structured outputs via Pydantic
+- Never manually parse an agent's output -- ask for it as a type. `TurnRequest(output_type=Model)` binds that turn's own `submit_output` to the schema, and `TurnResult[Model].output` arrives validated
 - **Never use `# type: ignore`** -- Ask the user how to properly fix type errors
 - **`# lup: ignore` escape hatch** -- When `Any` or another anti-pattern is genuinely needed (untyped library boundaries, MCP), add an inline ignore to request user approval. Prefer the typed, pyright-style `# lup: ignore[rule-id]` so a site silences exactly the rule it needs and still trips the others; the bare `# lup: ignore` stays valid but the auditor flags it as untyped. A standalone ignore in the first 10 lines applies file-wide. Each rule id is shown in its deny message; the generated `docs/rules.md` (`uv run lup-devtools dev rules`) indexes every rule family with the `lup.codescan` module that defines it.
 - **Use Pydantic BaseModel instead of dataclasses**
@@ -619,13 +624,14 @@ State the tier, not a model id. A declaration says what the role needs and each 
 
 ## Tool Input Schemas
 
-Define tool inputs as BaseModel classes with `Field(description=...)`. This gives you validation, type-safe access, defaults, and rich JSON Schema generation in one place.
+Define tool inputs as BaseModel classes with `Field(description=...)`. This gives you validation, type-safe access, defaults, and rich JSON Schema generation in one place. `@lup_tool` infers each schema from the handler's annotations, validates the input before the handler runs, and serializes the returned model — so validating arguments or assembling a response envelope by hand is work already done for you.
 
 | Do This                                                               | Not This                       |
 | --------------------------------------------------------------------- | ------------------------------ |
 | `class SearchInput(BaseModel): query: str = Field(description="...")` | `{"query": str, "limit": int}` |
-| `SearchInput.model_json_schema()` for `@tool` schema                  | Hand-written dict schemas      |
-| `SearchInput.model_validate(args)` then `params.query`                | `args.get("query", "")`        |
+| Annotate the handler's parameter and let `@lup_tool` infer the schema | Hand-written dict schemas, or splicing `model_json_schema()` in yourself |
+| Take the validated model as the parameter, then `params.query`        | `SearchInput.model_validate(args)`, or `args.get("query", "")` |
+| `raise ToolError("what to do about it")`                              | Returning a string that describes the failure |
 
 ## No String Manipulation on Structured Data
 

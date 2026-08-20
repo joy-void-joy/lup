@@ -45,9 +45,10 @@ uv run lup-devtools agent inspect --json
 This shows tools, subagents, model, and prompt info. For deeper inspection, read:
 
 - **System prompt**: `src/lup_template/agent/prompts.py`
+- **Tool groups**: `src/lup_template/agent/toolsets.py` — the registry, and so the list of what the agent actually had
 - **Tool policy**: `src/lup_template/agent/tool_policy.py`
 - **Tools**: `src/lup_template/agent/tools/`
-- **Core wiring**: `src/lup_template/agent/core.py`
+- **Core wiring**: `src/lup_template/agent/core.py` — the factory, the wrapper layers around it, and the `effort` and `autonomy` the turn asked for
 
 This is the baseline for evaluating whether the agent used its capabilities well.
 
@@ -84,7 +85,7 @@ For each tool call in the trace:
 **Patterns to flag:**
 - **Underused tools**: Tools that were available and would have helped but weren't called
 - **Overused tools**: Repetitive calls that could have been batched or avoided
-- **Poor tool descriptions**: If the agent misused a tool, check whether the tool's description was unclear (read the actual `@tool` decorator and `Field(description=...)` in the source)
+- **Poor tool descriptions**: If the agent misused a tool, check whether the tool's description was unclear (read the actual `@lup_tool` decorator and the `Field(description=...)` on each input field in the source — that text is the agent's only documentation for the field)
 - **Missing tools**: Situations where the agent worked around a gap that a new tool could fill
 
 ### 5. Assess the reflection (if present)

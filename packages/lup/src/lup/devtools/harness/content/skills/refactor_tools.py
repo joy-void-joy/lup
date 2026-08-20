@@ -30,18 +30,36 @@ Review all MCP servers, tools, and subagents. Draw an outline of the pipeline an
 
 Before cataloging individual tools, map the **end-to-end flow**:
 
-1. Read `{layout.path("agent", "core.py")}` to understand:
-   - How a request enters the agent
-   - Which MCP servers are configured and how they're launched
-   - How tools are exposed to the agent (in-process vs remote)
-   - How subagents are spawned and what tools they receive
+1. Read `{layout.path("agent", "toolsets.py")}` first. It is the tool-group
+   registry — the one place a group is added — so it, not `core.py`, is the
+   inventory of what exists. Each group becomes one MCP server, which is also
+   the unit the permission policy can withhold whole.
+
+2. Read `{layout.path("agent", "core.py")}` to understand:
+   - How a session is opened: which `SessionFactory` is built, and which
+     wrapper layers `decorated_session_factory` puts around it (budget,
+     timeout, correction, display, persistence, tracing)
+   - How the registered groups become servers, and which run in-process
+     versus in a subprocess
+   - What one turn asks for — the `TurnRequest`, its `output_type`, and the
+     `effort` and `autonomy` it carries
    - How the final output is produced and returned
 
-2. Read `{layout.path("agent", "tool_policy.py")}` to understand:
+3. Read `{layout.path("agent", "tool_policy.py")}` to understand:
    - Which tools are gated by conditions (API keys, modes, etc.)
    - Are there tools registered but conditionally unavailable?
 
-3. Draw a pipeline diagram (ASCII or markdown) showing:
+4. Read `{layout.path("agent", "subagents.py")}` and
+   `{layout.path("agent", "tools", "nested.py")}`. Delegation comes in four
+   shapes that are not interchangeable, and an audit that conflates them
+   cannot say whether a job is in the right one: a **native subagent** the
+   harness dispatches inside this session, a **nested agent** opened inside a
+   tool handler and invisible to the harness, a **background agent**
+   coalescing state changes into debounced turns, and a **persistent** agent
+   that lives over time and wakes on events. `docs/orchestration.md` carries
+   the catalog.
+
+5. Draw a pipeline diagram (ASCII or markdown) showing:
    ```
    Input → Agent → [MCP Servers / Tools / Subagents] → Output
    ```
@@ -53,12 +71,18 @@ Read every file in `{layout.directory("agent", "tools")}` and build a **tool out
 
 For each tool file:
 1. Read the file
-2. List every `@tool`-decorated function with its name and a one-line description
-3. Note which MCP server it belongs to (look for `create_mcp_server` calls)
-4. Note external dependencies (APIs, config keys, packages)
+2. List every `@lup_tool`-decorated handler with its name and a one-line
+   description. The input and output models are the contract — read the
+   `Field(description=...)` on each, because that text is the agent's only
+   documentation for the field
+3. Note which group it belongs to, from the registry read in Phase 1
+4. Note whether a recoverable failure raises `ToolError` with something the
+   agent can act on, or returns prose describing the problem
+5. Note external dependencies (APIs, config keys, packages)
 
 For remote/external MCP servers:
-- Read `{layout.path("agent", "core.py")}` for `McpServerConfig` or server lists
+- Read `{layout.path("agent", "core.py")}` for `LupMcpServerConfig` values and
+  the server list they are assembled into
 - Read `{layout.path("agent", "config.py")}` for MCP-related settings
 - Check `pyproject.toml` for MCP server dependencies
 - Search with `grep` for `npx`, `uvx`, or other MCP server launch patterns

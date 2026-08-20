@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "4cfcde26bb7bfd78e63cf9a5950db194c63b3caf025b2de7665b2e50099968dd",
+  "source_digest": "da9ef08e3979a47edd537efbb2c087e1b48aeda8166388a5a86c37c62e66c902",
   "target_requirements": [
     "codex-cli>=0.144"
   ],
@@ -58,7 +58,7 @@
     {
       "path": ".codex/plugins/lup/TEMPLATE_AGENTS.md",
       "category": "generated",
-      "sha256": "4e6248737b42b0881e7c0e6807406f823e4f8e51e991d5adc5be03a85dced8c7",
+      "sha256": "4e9995bbc0e8a034f005e61d869680e2a7444dbb146d1973050e643a18f9aabd",
       "semantic_id": "harness.template-guidance",
       "executable": false
     },
@@ -352,7 +352,7 @@
     {
       "path": ".codex/plugins/lup/skills/refactor-tools/SKILL.md",
       "category": "generated",
-      "sha256": "463a6e2b39ddba41fc336ea1f7a6caf896facacfe620fa32e6899f77648f1c67",
+      "sha256": "1157e3bd71a6505140bb7ccd19d45e82ee89ec223b3b4e0d073c53b95d043c83",
       "semantic_id": "skill.refactor-tools",
       "executable": false
     },
@@ -387,7 +387,7 @@
     {
       "path": ".codex/plugins/lup/skills/review/SKILL.md",
       "category": "generated",
-      "sha256": "5be9ac16cc9227efae76f855bf2f0b95185a66af245087445062c3479329cda5",
+      "sha256": "6e25a9d9cd69bff23337cf233ad0eefc20141a72edaa0ef46aa1d7b385163f9c",
       "semantic_id": "skill.review",
       "executable": false
     },
