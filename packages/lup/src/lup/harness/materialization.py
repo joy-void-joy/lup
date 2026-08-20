@@ -164,7 +164,7 @@ class AtomicMaterializer(Materializer):
             temporary = path.with_name(f".{path.name}.{proposal.id}.tmp")
             temporary.write_text(artifact.content, encoding="utf-8", newline="\n")
             temporary.chmod(0o755 if artifact.executable else 0o644)
-            temporary.replace(path)  # lup: ignore[string-replace] — atomic Path rename
+            temporary.replace(path)
             changed.append(artifact.path)
 
         removed: list[Path] = []  # lup: ignore[empty-collection]

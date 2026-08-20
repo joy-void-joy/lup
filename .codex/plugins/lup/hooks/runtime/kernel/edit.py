@@ -878,6 +878,68 @@ def imported_symbols_of(
     }
 
 
+def dotted_of(node: ast.expr) -> str:
+    """The dotted spelling of a name or attribute chain, or ``""``.
+
+    ``os.path.join`` reads back as it was written, which is what lets a rule
+    name the function it refuses in the words its diagnostic uses. Anything
+    with a call or a subscript in the chain has no dotted spelling and is not
+    one of these.
+    """
+    match node:
+        case ast.Name(id=name):
+            return name
+        case ast.Attribute(value=value, attr=attr):
+            root = dotted_of(value)
+            return f"{root}.{attr}" if root else ""
+    return ""
+
+
+def calls_of(tree: ast.Module, dotted: AbstractSet[str]) -> set[int]:
+    """Lines calling one of `dotted`, by the spelling the call was written in.
+
+    The call's own line rather than the enclosing statement's: an argument
+    list spanning lines reports where the callee is, which is where a reader
+    looks and where a directive goes.
+    """
+    return {
+        node.func.lineno
+        for node in python_nodes(tree)
+        if isinstance(node, ast.Call) and dotted_of(node.func) in dotted
+    }
+
+
+def methods_of(tree: ast.Module, attrs: AbstractSet[str]) -> set[int]:
+    """Lines calling one of `attrs` as a method on something.
+
+    The receiver is whatever it is — no tree says whether it is a string —
+    so this selects the call shape and leaves the receiver's type to the
+    oracle where a rule asks for one.
+    """
+    return {
+        node.func.end_lineno or node.func.value.lineno
+        for node in python_nodes(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr in attrs
+    }
+
+
+def attributes_of(tree: ast.Module, dotted: AbstractSet[str]) -> set[int]:
+    """Lines reaching one of `dotted` as an attribute path, called or not.
+
+    ``os.environ`` is the subject wherever it is written — subscripted,
+    passed, or only read — so this selects the path itself rather than a call
+    around it.
+    """
+    return {
+        node.lineno
+        for node in python_nodes(tree)
+        if isinstance(node, ast.Attribute) and dotted_of(node) in dotted
+    }
+
+
+# lup: ignore[library-default] — the extraction libraries the rule's own pattern already named; the kernel carries no config
 PDF_LIBRARIES = frozenset(  # lup: ignore[frozenset-shape] — a membership test, no keys
     {
         "fitz",
@@ -891,6 +953,204 @@ PDF_LIBRARIES = frozenset(  # lup: ignore[frozenset-shape] — a membership test
     }
 )
 """Every PDF text-extraction library the rule names, by import root."""
+
+
+# lup: ignore[library-default] — the regex module's own entry points, fixed by what it exports; the kernel carries no config
+RE_FUNCTIONS = frozenset(  # lup: ignore[frozenset-shape] — a membership test, no keys
+    {"compile", "search", "match", "fullmatch", "sub", "findall", "split"}
+)
+"""The regex-module entry points the rule names, unqualified."""
+
+# lup: ignore[library-default] — os's own spellings for handing a command to a shell; the kernel carries no config
+OS_SHELL_CALLS = frozenset(  # lup: ignore[frozenset-shape] — a membership test, no keys
+    {
+        "os.system",
+        "os.popen",
+        "os.execl",
+        "os.execle",
+        "os.execlp",
+        "os.execlpe",
+        "os.execv",
+        "os.execve",
+        "os.execvp",
+        "os.execvpe",
+    }
+)
+"""Every `os` entry point that hands a command to a shell or replaces the process."""
+
+# lup: ignore[library-default] — os's own filesystem calls, fixed by what pathlib re-spells; the kernel carries no config
+OS_FILE_CALLS = frozenset(  # lup: ignore[frozenset-shape] — a membership test, no keys
+    {
+        "getcwd",
+        "chdir",
+        "listdir",
+        "scandir",
+        "walk",
+        "mkdir",
+        "makedirs",
+        "rmdir",
+        "removedirs",
+        "remove",
+        "unlink",
+        "rename",
+        "renames",
+        "replace",
+        "link",
+        "symlink",
+        "readlink",
+        "stat",
+        "lstat",
+        "chmod",
+        "chown",
+    }
+)
+"""Every `os` filesystem call `pathlib` has its own spelling for."""
+
+
+def re_call_lines(source: str) -> set[int]:
+    """Lines calling a regex-module entry point."""
+    tree = python_tree(source)
+    if tree is None:
+        return set()
+    return calls_of(tree, {f"re.{name}" for name in RE_FUNCTIONS})
+
+
+def cast_lines(source: str) -> set[int]:
+    """Lines calling `cast`."""
+    tree = python_tree(source)
+    return set() if tree is None else calls_of(tree, {"cast", "typing.cast"})
+
+
+def eval_exec_lines(source: str) -> set[int]:
+    """Lines calling `eval` or `exec` as builtins.
+
+    A method of the same name is somebody else's API — a database cursor, a
+    template engine — and never the builtin this refuses.
+    """
+    tree = python_tree(source)
+    return set() if tree is None else calls_of(tree, {"eval", "exec"})
+
+
+def utcnow_lines(source: str) -> set[int]:
+    """Lines calling `utcnow`, however the module is spelled."""
+    tree = python_tree(source)
+    if tree is None:
+        return set()
+    return methods_of(tree, {"utcnow"}) | calls_of(tree, {"utcnow"})
+
+
+def os_shell_lines(source: str) -> set[int]:
+    """Lines handing a command to a shell through `os`."""
+    tree = python_tree(source)
+    return set() if tree is None else calls_of(tree, OS_SHELL_CALLS)
+
+
+def os_file_ops_lines(source: str) -> set[int]:
+    """Lines reaching a filesystem operation `pathlib` already spells."""
+    tree = python_tree(source)
+    if tree is None:
+        return set()
+    return calls_of(tree, {f"os.{name}" for name in OS_FILE_CALLS})
+
+
+def os_path_lines(source: str) -> set[int]:
+    """Lines reaching `os.path`, called or only named."""
+    tree = python_tree(source)
+    return set() if tree is None else attributes_of(tree, {"os.path"})
+
+
+def os_environ_lines(source: str) -> set[int]:
+    """Lines reaching the process environment through `os`."""
+    tree = python_tree(source)
+    if tree is None:
+        return set()
+    return attributes_of(tree, {"os.environ", "os.getenv"})
+
+
+def suppress_lines(source: str) -> set[int]:
+    """Lines reaching `contextlib.suppress` by its qualified name."""
+    tree = python_tree(source)
+    return set() if tree is None else attributes_of(tree, {"contextlib.suppress"})
+
+
+# lup: ignore[library-default] — Python's own two spellings of a file rename; the kernel carries no config
+RENAME_CALLS = frozenset(  # lup: ignore[frozenset-shape] — a membership test, no keys
+    {"os.replace", "Path.replace", "pathlib.Path.replace", "PurePath.replace"}
+)
+"""The two-argument `replace` spellings that move a file rather than edit text.
+
+A bound rename takes one argument — the destination — so arity tells it from
+string surgery on its own. Only the unbound spellings need naming, because
+``Path.replace(instance, target)`` passes the receiver as the first argument
+and so wears exactly the arity of ``str.replace(old, new)``.
+"""
+
+
+def string_replace_lines(source: str) -> set[int]:
+    """Lines substituting one piece of text for another inside a string.
+
+    Arity is what separates this from the rename that wears the same name:
+    ``str.replace`` takes the old text and the new, while a bound
+    ``Path.replace`` takes a destination and moves a file. Reading the call's
+    shape decides that for every receiver, where the spelling the rule used
+    to look for — a name not ending in ``path`` — let a genuine string
+    replace through whenever the variable holding the string was called one.
+
+    The unbound spellings in `RENAME_CALLS` are the exception arity cannot
+    reach, and they are named rather than guessed at.
+    """
+    tree = python_tree(source)
+    if tree is None:
+        return set()
+    return {
+        node.func.end_lineno or node.func.value.lineno
+        for node in python_nodes(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "replace"
+        and len(node.args) >= 2
+        and dotted_of(node.func) not in RENAME_CALLS
+    }
+
+
+def string_split_lines(source: str) -> set[int]:
+    """Lines splitting or partitioning a string on a separator.
+
+    A bare `.split()` on whitespace is the tokenizing the rule allows, so an
+    empty argument list is not one of these; a separator passed to it is.
+    """
+    tree = python_tree(source)
+    if tree is None:
+        return set()
+    return {
+        node.func.end_lineno or node.func.value.lineno
+        for node in python_nodes(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and (
+            node.func.attr in ("partition", "rpartition")
+            or (node.func.attr in ("split", "rsplit") and bool(node.args))
+        )
+    }
+
+
+def string_strip_lines(source: str) -> set[int]:
+    """Lines stripping named characters off a string.
+
+    A bare `.strip()` takes whitespace off and is what the rule leaves alone;
+    an argument names characters, which is the shape that hides a parser.
+    """
+    tree = python_tree(source)
+    if tree is None:
+        return set()
+    return {
+        node.func.end_lineno or node.func.value.lineno
+        for node in python_nodes(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr in ("strip", "lstrip", "rstrip")
+        and node.args
+    }
 
 
 def import_re_lines(source: str) -> set[int]:
@@ -1217,6 +1477,30 @@ def matcher_named(name: str) -> Callable[[str], set[int]] | None:
             return suppress_import_lines
         case "dataclass_lines":
             return dataclass_lines
+        case "re_call_lines":
+            return re_call_lines
+        case "cast_lines":
+            return cast_lines
+        case "eval_exec_lines":
+            return eval_exec_lines
+        case "utcnow_lines":
+            return utcnow_lines
+        case "os_shell_lines":
+            return os_shell_lines
+        case "os_file_ops_lines":
+            return os_file_ops_lines
+        case "os_path_lines":
+            return os_path_lines
+        case "os_environ_lines":
+            return os_environ_lines
+        case "suppress_lines":
+            return suppress_lines
+        case "string_replace_lines":
+            return string_replace_lines
+        case "string_split_lines":
+            return string_split_lines
+        case "string_strip_lines":
+            return string_strip_lines
         case "tuple_shape_lines":
             return tuple_shape_lines
         case "default_factory_lines":

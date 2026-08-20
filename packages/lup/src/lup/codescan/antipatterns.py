@@ -78,6 +78,18 @@ from lup.codescan.common import (
 )
 from lup.harness.contracts import Spelling, Unsupported
 from lup.policy.kernel.edit import (
+    cast_lines,
+    eval_exec_lines,
+    os_environ_lines,
+    os_file_ops_lines,
+    os_path_lines,
+    os_shell_lines,
+    re_call_lines,
+    string_replace_lines,
+    string_split_lines,
+    string_strip_lines,
+    suppress_lines,
+    utcnow_lines,
     argparse_lines,
     dataclass_lines,
     import_re_lines,
@@ -271,6 +283,7 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
     AntiPattern(
         id="cast",
         pattern=re.compile(r"\bcast\s*\("),
+        matcher=Matcher(select=cast_lines),
         message="`cast(...)` is a code smell — narrow with isinstance or a type guard, "
         "or fix the annotation so the cast is unnecessary",
     ),
@@ -287,6 +300,7 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         pattern=re.compile(
             r"\bre\.(compile|search|match|fullmatch|sub|findall|split)\s*\("
         ),
+        matcher=Matcher(select=re_call_lines),
         message="Avoid regex for structured data — reach for its parser instead: "
         "JSON -> json.loads, paths -> pathlib.Path, URLs -> urllib.parse, "
         "XML/HTML -> xml.etree.ElementTree / lxml, dates -> datetime",
@@ -299,6 +313,7 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         # rules stay coherent: this one is only about string surgery.
         id="string-replace",
         pattern=re.compile(r"(?<!\bos)(?<![Pp]ath)\.replace\s*\("),
+        matcher=Matcher(select=string_replace_lines),
         message="Avoid .replace() for structured data — edit it through its parser instead "
         "(pathlib.Path for paths, urllib.parse for URLs, json for JSON)",
     ),
@@ -312,6 +327,7 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         # lookahead exempts it.
         id="string-split",
         pattern=re.compile(r"\.r?split\s*\((?!\s*\))|\.r?partition\s*\("),
+        matcher=Matcher(select=string_split_lines),
         message="Avoid .split(sep)/.rsplit/.partition for structured data — parse it "
         "instead (urllib.parse for URLs, pathlib.Path for paths, json for JSON, "
         "datetime for dates)",
@@ -324,6 +340,7 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         # negative lookahead exempts it, mirroring string-split's argless rule.
         id="string-strip",
         pattern=re.compile(r"\.[lr]?strip\s*\((?!\s*\))"),
+        matcher=Matcher(select=string_strip_lines),
         message="Avoid .strip(chars)/.lstrip/.rstrip for structured data — parse it "
         "instead (urllib.parse for URLs, pathlib.Path for paths, json for JSON, "
         "datetime for dates)",
@@ -360,6 +377,7 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
     AntiPattern(
         id="suppress",
         pattern=re.compile(r"\bcontextlib\.suppress\b"),
+        matcher=Matcher(select=suppress_lines),
         message="contextlib.suppress silently swallows exceptions — log, handle, or re-raise",
     ),
     AntiPattern(
@@ -406,6 +424,7 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
     AntiPattern(
         id="os-shell",
         pattern=re.compile(r"\bos\.(?:system|popen|exec[lv]\w*)\s*\("),
+        matcher=Matcher(select=os_shell_lines),
         message="Use the `sh` library instead of os.system()/os.popen()/os.exec*()",
     ),
     AntiPattern(
@@ -423,6 +442,7 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
     AntiPattern(
         id="os-path",
         pattern=re.compile(r"\bos\.path\b"),
+        matcher=Matcher(select=os_path_lines),
         message="Use pathlib.Path instead of os.path",
     ),
     AntiPattern(
@@ -436,22 +456,26 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
             r"removedirs|remove|unlink|rename|renames|replace|link|symlink|"
             r"readlink|stat|lstat|chmod|chown)\s*\("
         ),
+        matcher=Matcher(select=os_file_ops_lines),
         message="Use pathlib.Path for file/dir operations instead of os.* "
         "(Path.iterdir/mkdir/unlink/rename/replace/stat/...)",
     ),
     AntiPattern(
         id="os-environ",
         pattern=re.compile(r"\bos\.(?:environ|getenv)\b"),
+        matcher=Matcher(select=os_environ_lines),
         message="Read configuration through pydantic-settings, not os.environ/os.getenv",
     ),
     AntiPattern(
         id="eval-exec",
         pattern=re.compile(r"(?<![.\w])(?:eval|exec)\s*\("),
+        matcher=Matcher(select=eval_exec_lines),
         message="Never use eval()/exec() — parse the data (ast.literal_eval for "
         "literals) or dispatch explicitly",
     ),
     AntiPattern(
         id="utcnow",
+        matcher=Matcher(select=utcnow_lines),
         strength="strong",
         pattern=re.compile(r"\butcnow\s*\("),
         message="datetime.utcnow() is naive and deprecated — use datetime.now(timezone.utc)",
