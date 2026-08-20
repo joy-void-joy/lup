@@ -134,7 +134,7 @@ class Unsupported(Spelling, frozen=True):
         return f"unsupported — {self.reason}"
 
 
-class NativeSpellings(SkillInvocationRenderer):  # lup: ignore[abc-capability]
+class NativeSpellings(SkillInvocationRenderer, ABC):  # lup: ignore[abc-capability]
     """Own one native runtime's spelling of everything portable prose names.
 
     Deliberately wider than the three-method shape the capability rule wants: a
