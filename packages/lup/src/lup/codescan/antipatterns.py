@@ -77,6 +77,7 @@ from lup.codescan.common import (
 from lup.harness.contracts import Spelling, Unsupported
 from lup.policy.kernel.edit import (
     IGNORE_RE,
+    continues_comment_block,
     default_factory_exempt_lines,
     dict_get_exempt_lines,
     empty_collection_exempt_lines,
@@ -905,16 +906,25 @@ def audit_text(
         fixed pair of candidates was exactly complete while the policy was
         capped at the line directly above, and stopped being the moment it
         widened.
+
+        The head of the block is also where the search stops. A line that
+        does not continue the block ends every reach from above it, so
+        reading further can only re-derive the same nothing — and reading
+        further is reading to the top of the file, once per audited line,
+        which is the whole file walked once per line it contains.
         """
-        return next(
-            (
-                match
-                for candidate in range(line_no, 0, -1)
-                if (match := written_directive(candidate)) is not None
-                and suppression_reaches(original_lines, candidate, line_no)
-            ),
-            None,
-        )
+        inline = written_directive(line_no)
+        if inline is not None:
+            return inline
+        for candidate in range(line_no - 1, 0, -1):
+            match = written_directive(candidate)
+            if match is not None and suppression_reaches(
+                original_lines, candidate, line_no
+            ):
+                return match
+            if not continues_comment_block(original_lines[candidate - 1]):
+                return None
+        return None
 
     def guarded_lines(line_no: int) -> list[int]:
         """Every audited line the directive written on `line_no` reaches.
