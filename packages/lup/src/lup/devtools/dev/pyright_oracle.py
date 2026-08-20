@@ -26,7 +26,7 @@ from urllib.parse import unquote, urlparse
 import typer
 from pydantic import ValidationError
 
-from lup.codeintel.client import lsp_session
+from lup.codeintel.client import Call, lsp_session
 from lup.codeintel.replies import LOCATIONS
 from lup.codescan.oracle import (
     DefinitionOracle,
@@ -77,25 +77,31 @@ async def resolve(
     positions: list[SourcePosition],
     buffers: list[SourceBuffer] | None = None,
 ) -> list[list[DefinitionSite]]:
-    """Run one language-server session and answer every queried position."""
+    """Run one language-server session and answer every queried position.
+
+    Every document opens before the first question is asked, and the whole
+    sweep goes out before the first answer is read. Asking one position at a
+    time leaves the server idle for a round trip per site, and a sweep is
+    hundreds of sites: the questions are independent, so nothing is owed the
+    ordering that costs bought.
+    """
     held = {buffer.path.as_posix(): buffer.text for buffer in buffers or []}
     async with lsp_session(server, root, name=SERVER_NAME) as session:
-        return [
-            locations_of(
-                await session.request(
-                    "textDocument/definition",
-                    await session.position_in(
-                        position.path,
-                        position.line,
-                        position.column,
-                        held[position.path.as_posix()]
-                        if position.path.as_posix() in held
-                        else None,
-                    ),
-                )
+        asked = [
+            Call(
+                method="textDocument/definition",
+                params=await session.position_in(
+                    position.path,
+                    position.line,
+                    position.column,
+                    held[position.path.as_posix()]
+                    if position.path.as_posix() in held
+                    else None,
+                ),
             )
             for position in positions
         ]
+        return [locations_of(answer) for answer in await session.requests(asked)]
 
 
 class PyrightOracle(DefinitionOracle):
