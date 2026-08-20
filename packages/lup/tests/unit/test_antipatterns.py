@@ -21,8 +21,8 @@ from lup.harness.contracts import Spelled, Unsupported
 from lup.policy.bundle import bundled_antipattern_rows
 from lup.policy.kernel.edit import (
     antipattern_decision,
-    default_factory_exempt_lines,
-    dict_get_exempt_lines,
+    default_factory_lines,
+    dict_get_lines,
     empty_collection_exempt_lines,
     refiner_named,
     slice_exempt_lines,
@@ -553,12 +553,12 @@ os.environ.get("PATH")
 """
 
 
-def test_refiner_exempts_route_decorators() -> None:
+def test_the_matcher_passes_over_route_decorators() -> None:
     """`.get(` on a decorator names a route; the call below it is real."""
-    assert dict_get_exempt_lines(ROUTE_DECORATOR) == {1, 6, 7, 8}
+    assert dict_get_lines(ROUTE_DECORATOR) == {3}
 
 
-def test_refiner_exempts_a_call_on_an_imported_module() -> None:
+def test_the_matcher_passes_over_a_call_on_an_imported_module() -> None:
     """A module is not a mapping, and which names are modules is in the tree.
 
     The audit resolves `httpx.get` to a function declared inside no class and
@@ -566,21 +566,26 @@ def test_refiner_exempts_a_call_on_an_imported_module() -> None:
     opposite states: the kernel demands a directive the audit then reports
     spurious, and no version of the file passes both.
     """
-    assert dict_get_exempt_lines(MODULE_QUALIFIED_GET) == {5}
+    assert 5 not in dict_get_lines(MODULE_QUALIFIED_GET)
 
 
-def test_the_refiner_keeps_a_lookup_reached_through_a_module() -> None:
+def test_the_matcher_keeps_a_lookup_reached_through_a_module() -> None:
     """`os.environ.get` is a keyed lookup that a module only happens to hold.
 
     Only a name `import` binds directly is a module. Walking an attribute
-    chain back to its root would clear this one, which is exactly the access
+    chain back to its root would drop this one, which is exactly the access
     the rule exists for.
     """
-    assert 6 not in dict_get_exempt_lines(MODULE_QUALIFIED_GET)
+    assert dict_get_lines(MODULE_QUALIFIED_GET) == {6}
 
 
-def test_refiner_survives_a_fragment_it_cannot_parse() -> None:
-    assert dict_get_exempt_lines("@app.get(\n") == set()
+def test_the_matcher_selects_nothing_from_a_fragment_it_cannot_parse() -> None:
+    """No tree, no shapes. `dict-get` is soft, so the pattern still answers.
+
+    Which is what :func:`~lup.codescan.antipatterns.selected_lines` reads an
+    empty answer as: an absent entry rather than a rule that found nothing.
+    """
+    assert dict_get_lines("@app.get(\n") == set()
 
 
 def test_declared_refiners_are_the_kernel_refiners() -> None:
@@ -1130,8 +1135,8 @@ def test_default_factory_flags_the_empty_collection_form() -> None:
 def test_default_factory_clears_a_factory_that_does_work() -> None:
     """The near miss: a factory no annotated literal could have said."""
     assert audit_text(WORKING_FACTORY_FIELD, PYTHON_ANTI_PATTERNS) == []
-    assert default_factory_exempt_lines(WORKING_FACTORY_FIELD) == {5}
-    assert default_factory_exempt_lines(DEFAULT_FACTORY_FIELD) == set()
+    assert default_factory_lines(WORKING_FACTORY_FIELD) == set()
+    assert default_factory_lines(DEFAULT_FACTORY_FIELD) == {5}
 
 
 def test_default_factory_and_empty_collection_never_share_a_line() -> None:

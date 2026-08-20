@@ -2544,12 +2544,12 @@ def test_a_rule_another_scanner_owns_is_not_refused_over() -> None:
 
 
 def test_a_fragment_with_no_tree_is_not_refused_over_a_guess() -> None:
-    """A refiner reads an AST, and an exemption from a missing one is a guess.
+    """A matcher reads an AST, and a verdict from a missing one is a guess.
 
-    `tuple_shape_exempt_lines` clears every line where the source does not
-    parse, so a gate that read clearance as proof would refuse a directive for
-    its own blindness. With no tree there is no hit either, so what is left is
-    the ordinary ask.
+    `tuple-shape` is strong, so no directive may answer it and a denial from
+    the pattern alone would be one with no escape. Where the fragment will
+    not parse the rule fires nowhere, so what is left is the ordinary ask
+    about the directive itself.
     """
     policy = EditPolicy(protected=[])
     fragment = EditBatch(

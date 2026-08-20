@@ -338,7 +338,7 @@
     {
       "path": ".claude/plugins/lup/hooks/runtime/kernel/edit.py",
       "category": "generated",
-      "sha256": "43b0b1e35b72f9ca0efd01fba26f264f249b1bc0fa72b56e00c5b6c0940cb595",
+      "sha256": "e2ced19d29a38b7e580625c8fc0a9ada640fdc544866193c229c3efed5114fca",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },

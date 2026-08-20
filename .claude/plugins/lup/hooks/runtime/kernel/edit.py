@@ -736,110 +736,6 @@ def empty_collection_factory(node: ast.expr) -> bool:
     return False
 
 
-def default_factory_exempt_lines(source: str) -> set[int]:
-    """Return ``default_factory=`` lines an annotated literal could not replace.
-
-    The rule's replacement is ``items: list[B] = []``: the annotation carries
-    the type and pydantic copies the literal per instance. That says the same
-    thing only where the factory builds an empty collection — a factory that
-    reads another declaration, stamps a value, or constructs a model does work
-    no literal expresses, so its line is cleared rather than suppressed.
-    """
-    tree = python_tree(source)
-    if tree is None:
-        return set()
-    return {
-        keyword.lineno
-        for node in python_nodes(tree)
-        if isinstance(node, ast.Call)
-        for keyword in node.keywords
-        if keyword.arg == "default_factory"
-        and not empty_collection_factory(keyword.value)
-    }
-
-
-def dict_get_exempt_lines(source: str) -> set[int]:
-    """Return `.get(` lines the tree alone shows are not payload access.
-
-    Two shapes qualify, and both are decidable without types — which is what
-    lets a suppression here be retired instead of being demanded by the
-    kernel and reported spurious by the audit that resolves the receiver.
-
-    A decorator is not payload access: ``@app.get("/path")`` names a route on
-    a framework object, and no schema is read out of a dict.
-
-    Neither is a call on a module. ``httpx.get(url)`` reaches a function the
-    module declares, and a module is not a mapping whatever it contains. The
-    receiver has to be the bare imported name for this: ``os.environ.get`` is
-    a genuine keyed lookup reached *through* a module, so only a name bound
-    directly by ``import`` counts, never an attribute of one.
-    """
-    tree = python_tree(source)
-    if tree is None:
-        return set()
-    modules = {
-        alias.asname or alias.name.partition(".")[0]
-        for node in python_nodes(tree)
-        if isinstance(node, ast.Import)
-        for alias in node.names
-    }
-    exempt: set[int] = set()
-    for node in python_nodes(tree):
-        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
-            for decorator in node.decorator_list:
-                last = decorator.end_lineno or decorator.lineno
-                exempt.update(range(decorator.lineno, last + 1))
-        if (
-            isinstance(node, ast.Attribute)
-            and node.attr == "get"
-            and isinstance(node.value, ast.Name)
-            and node.value.id in modules
-        ):
-            exempt.add(node.end_lineno or node.lineno)
-    return exempt
-
-
-def tuple_shape_exempt_lines(source: str) -> set[int]:
-    """Return `tuple[` lines the tree shows to be variadic rather than positional.
-
-    ``tuple[X, ...]`` is not a shape whose positions want names — it is an
-    immutable sequence, and the rule's replacement says nothing about it:
-    ``extra_exceptions: tuple[type[Exception], ...]`` must be a tuple because
-    that is what ``except`` takes, and a list default would be a mutable-default
-    bug. Fixed arity is the defect the rule names, so a line is cleared only
-    when every ``tuple[`` on it is variadic — a line carrying both keeps its
-    finding rather than being cleared by its neighbour.
-
-    Nesting is why this needs the tree and not a wider regex: in
-    ``tuple[dict[str, int], ...]`` the trailing ellipsis sits behind a bracket
-    no character class can step over.
-
-    Source that does not parse clears every line. The rule is strong, so a
-    verdict it cannot justify would be a denial with no escape, and "cannot
-    tell" must fail toward silence — the audit sees the site again as soon as
-    the file parses.
-    """
-    tree = python_tree(source)
-    if tree is None:
-        return set(range(1, len(source.splitlines()) + 2))
-
-    def is_ellipsis(node: ast.expr) -> bool:
-        return isinstance(node, ast.Constant) and node.value is Ellipsis
-
-    variadic: set[int] = set()
-    fixed: set[int] = set()
-    for node in python_nodes(tree):
-        match node:
-            case ast.Subscript(
-                value=ast.Name(id="tuple"), slice=ast.Tuple(elts=elts)
-            ) if elts:
-                target = variadic if is_ellipsis(elts[-1]) else fixed
-                target.add(node.lineno)
-            case ast.Subscript(value=ast.Name(id="tuple")):
-                fixed.add(node.lineno)
-    return variadic - fixed
-
-
 def slice_exempt_lines(source: str) -> set[int]:
     """Return bounded-prefix-slice lines the tree shows to be something else.
 
@@ -1021,32 +917,34 @@ def dict_get_lines(source: str) -> set[int]:
     tree = python_tree(source)
     if tree is None:
         return set()
-    nodes = python_nodes(tree)
-    modules = {
-        alias.asname or alias.name.partition(".")[0]
-        for node in nodes
-        if isinstance(node, ast.Import)
-        for alias in node.names
-    }
-    decorated = {
-        line
-        for node in nodes
-        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef)
-        for decorator in node.decorator_list
-        for line in range(
-            decorator.lineno, (decorator.end_lineno or decorator.lineno) + 1
-        )
-    }
+    modules: set[str] = set()
+    decorated: set[int] = set()
+    reads: list[ast.Attribute] = []
+    for node in python_nodes(tree):
+        match node:
+            case ast.Import(names=names):
+                modules.update(
+                    alias.asname or alias.name.partition(".")[0] for alias in names
+                )
+            case (
+                ast.FunctionDef(decorator_list=decorators)
+                | ast.AsyncFunctionDef(decorator_list=decorators)
+                | ast.ClassDef(decorator_list=decorators)
+            ):
+                decorated.update(
+                    line
+                    for decorator in decorators
+                    for line in range(
+                        decorator.lineno, (decorator.end_lineno or decorator.lineno) + 1
+                    )
+                )
+            case ast.Call(func=ast.Attribute(attr="get") as read):
+                reads.append(read)
     return {
         line
-        for node in nodes
-        if isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Attribute)
-        and node.func.attr == "get"
-        and not (
-            isinstance(node.func.value, ast.Name) and node.func.value.id in modules
-        )
-        and (line := node.func.end_lineno or node.func.value.lineno) not in decorated
+        for read in reads
+        if not (isinstance(read.value, ast.Name) and read.value.id in modules)
+        and (line := read.end_lineno or read.value.lineno) not in decorated
     }
 
 
@@ -1124,16 +1022,16 @@ def refiner_named(name: str) -> Callable[[str], set[int]] | None:
     so this side holds only the functions a row may name — a rule that gains a
     refiner reaches the gate by construction rather than by someone also
     remembering to widen a list of ids here.
+
+    The two here are the exemptions a matcher still subtracts rather than
+    states: whether a seed is one a loop goes on to fill, and whether a
+    prefix leaves its tail somewhere, are properties of the surrounding
+    scope. A rule whose whole shape the grammar can name declares a matcher
+    instead and takes no refiner at all.
     """
     match name:
-        case "default_factory_exempt_lines":
-            return default_factory_exempt_lines
         case "empty_collection_exempt_lines":
             return empty_collection_exempt_lines
-        case "dict_get_exempt_lines":
-            return dict_get_exempt_lines
-        case "tuple_shape_exempt_lines":
-            return tuple_shape_exempt_lines
         case "slice_exempt_lines":
             return slice_exempt_lines
     return None
@@ -1660,10 +1558,10 @@ def antipattern_decision(
     # Which of them this gate may judge for suppressing nothing. The
     # whole-file form governs lines an edit's own text need not contain, so it
     # is asked about like any other and judged by none of what follows.
-    # Judging the rest rests on the refiners, and a refiner reads a tree:
-    # where the document has none, `tuple_shape_exempt_lines` clears every
-    # line by design, and reading a clearance as proof would refuse a
-    # directive for this gate's own blindness.
+    # Judging the rest rests on reading the tree: where the document has none
+    # a matched rule is answering from its pattern or not at all, and calling
+    # a directive dead on either would refuse it for this gate's own
+    # blindness.
     decidable = not declared or not python_source or python_parses(after)
     whole_file = file_level_line(after)
     judged = [
