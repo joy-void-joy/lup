@@ -68,10 +68,11 @@ from lup.codescan.common import (
     AntiPattern,
     LineProjections,
     PythonContext,
-    Refiner,
+    Matcher,
     Refutation,
     RuleSelection,
     RULE_CONTEXTS,
+    RuleContext,
     file_level_ignore,
     ignore_rule_ids,
 )
@@ -79,13 +80,14 @@ from lup.harness.contracts import Spelling, Unsupported
 from lup.policy.kernel.edit import (
     IGNORE_RE,
     continues_comment_block,
-    default_factory_exempt_lines,
-    dict_get_exempt_lines,
-    empty_collection_exempt_lines,
-    slice_exempt_lines,
+    python_tree,
+    default_factory_lines,
+    dict_get_lines,
+    empty_collection_lines,
+    silent_truncation_lines,
     suppression_placement,
     suppression_reaches,
-    tuple_shape_exempt_lines,
+    tuple_shape_lines,
 )
 
 
@@ -169,10 +171,7 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         # typed non-mapping receiver takes none, since the audit refutes it.
         id="dict-get",
         pattern=re.compile(r"\.get\s*\("),
-        refiner=Refiner(
-            exempt=dict_get_exempt_lines,
-            evidence="a decorator naming a route, not payload access",
-        ),
+        matcher=Matcher(select=dict_get_lines),
         message="`.get(` on payload/TypedDict-shaped data hides the schema — use typed "
         "attribute access (BaseModel/TypedDict). On a genuinely open dict (registry, cache) "
         "add `# lup: ignore[dict-get]`. On a typed non-mapping receiver (an SDK client, a "
@@ -195,10 +194,7 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         id="tuple-shape",
         strength="strong",
         pattern=re.compile(r"\btuple\["),
-        refiner=Refiner(
-            exempt=tuple_shape_exempt_lines,
-            evidence="an immutable sequence, not a positional shape",
-        ),
+        matcher=Matcher(select=tuple_shape_lines),
         message="A fixed-arity `tuple[...]` hides what each position means — name the "
         "fields with a BaseModel. Fall back to a TypedDict only where a model cannot go: "
         "the hermetic kernel, which has no pydantic, or a field that must stay the caller's "
@@ -243,10 +239,7 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         # this rule owns the factory spelling and that one owns the seed.
         id="default-factory",
         pattern=re.compile(r"\bdefault_factory\s*="),
-        refiner=Refiner(
-            exempt=default_factory_exempt_lines,
-            evidence="a factory doing work no annotated literal expresses",
-        ),
+        matcher=Matcher(select=default_factory_lines),
         message="`Field(default_factory=list)` states in a factory what the annotation "
         "already declares — write the default as a literal, `items: list[B] = []`, which "
         "pydantic copies per instance. A factory that does real work (reads another "
@@ -261,10 +254,7 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         # default-factory owns. The lookbehind keeps `==`/`!=`/`<=`/`>=` out.
         id="empty-collection",
         pattern=re.compile(r"(?<![=!<>])=\s*(?:\{\}|\[\]|set\(\))"),
-        refiner=Refiner(
-            exempt=empty_collection_exempt_lines,
-            evidence="a deliberate default, not a build-then-append seed",
-        ),
+        matcher=Matcher(select=empty_collection_lines),
         message="Empty-collection literals (`= {}`, `= []`, `= set()`) usually seed an "
         "append/mutate loop — build the collection with a comprehension, or, when the "
         "loop carries control flow a comprehension cannot, `yield` the items from a "
@@ -340,10 +330,7 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         # the digests, splits, and sniffs that also wear it.
         id="silent-truncation",
         pattern=re.compile(r"\[\s*:\s*(?:\d[\d_]*\d|[A-Z][A-Z0-9_]{2,})\s*\]"),
-        refiner=Refiner(
-            exempt=slice_exempt_lines,
-            evidence="a digest, a split, or a sniff, not a cut artifact",
-        ),
+        matcher=Matcher(select=silent_truncation_lines),
         message="Slicing a prefix discards the rest with nothing said, and a cut artifact "
         "looks exactly like a complete one. Emit the whole value: the container grows to "
         "fit what it holds, not the reverse. Cut only for a hard limit a document format "
@@ -762,10 +749,42 @@ def patterns_for_suffix(
     return (rules or AntiPatternSet()).for_suffix(suffix)
 
 
+def selected_lines(text: str, patterns: list[AntiPattern]) -> dict[str, set[int]]:
+    """Which lines each matched rule selects in this text, computed once.
+
+    Where a tree can be had, the selector answers and the pattern is not
+    consulted. Where none can — a TypeScript file, a fragment that will not
+    parse — what happens next is the rule's own strength, because that is
+    what decides the cost of guessing: a soft rule falls back to its pattern,
+    where guessing wide costs a directive carrying a reason; a strong rule
+    fires nowhere, because no directive may silence one and a verdict the
+    tree never confirmed would be a denial with no escape.
+
+    The declaration holds the function here, where the kernel's
+    :func:`~lup.policy.kernel.edit.matched_lines` has to resolve a name out
+    of a primitive row. Same answer, reached the short way.
+    """
+    parses = python_tree(text) is not None
+    return {
+        pattern.id: pattern.matcher.select(text) if parses else set()
+        for pattern in patterns
+        if pattern.matcher is not None and (parses or pattern.strength == "strong")
+    }
+
+
 def line_hits(
-    lines: LineProjections, line_no: int, patterns: list[AntiPattern]
+    lines: LineProjections,
+    line_no: int,
+    patterns: list[AntiPattern],
+    selected: dict[str, set[int]] | None = None,
 ) -> list[AntiPattern]:
     """Every anti-pattern one line trips, each matched in its declared context.
+
+    A rule that selected its lines from the tree is decided by that: the
+    grammar already said which lines carry the shape, and re-reading the text
+    could only disagree with it. ``selected`` carries no entry for a rule
+    whose text would not parse, which is what puts that rule back on its
+    pattern.
 
     Tokenized Python is scanned per rule context: a "code" rule sees string
     literals and comments blanked, so identifiers in prose never match, while
@@ -778,17 +797,23 @@ def line_hits(
     line are taken once and the table reads whichever one it declared —
     stripping the line per rule made the same two strings forty times over.
     """
+    matched = selected or {}
+
+    def trips(pattern: AntiPattern, scanned: dict[RuleContext, str]) -> bool:
+        if pattern.id in matched:
+            return line_no in matched[pattern.id]
+        text = scanned[pattern.context]
+        return bool(text) and pattern.pattern.search(text) is not None
+
     if not lines.tokenized:
         raw = lines.commented[line_no - 1].strip()
         if not raw or (raw.startswith("#") and "type:" not in raw):
             return []
-        return [ap for ap in patterns if ap.pattern.search(raw)]
-    scanned = {context: lines.scan_text(line_no, context) for context in RULE_CONTEXTS}
-    return [
-        ap
-        for ap in patterns
-        if (text := scanned[ap.context]) and ap.pattern.search(text)
-    ]
+        return [ap for ap in patterns if trips(ap, dict.fromkeys(RULE_CONTEXTS, raw))]
+    scanned: dict[RuleContext, str] = {
+        context: lines.scan_text(line_no, context) for context in RULE_CONTEXTS
+    }
+    return [ap for ap in patterns if trips(ap, scanned)]
 
 
 class AntiPatternFinding(BaseModel):
@@ -883,6 +908,7 @@ def audit_text(
     file_ignore_line = file_ignore.line if file_ignore is not None else 0
     original_lines = text.splitlines()
     projections = LineProjections.parse(text)
+    selected = selected_lines(text, patterns)
 
     def written_directive(line_no: int) -> re.Match[str] | None:
         """The directive actually written on one line, if a comment opens it.
@@ -955,7 +981,7 @@ def audit_text(
     hits_by_line = {
         number: [
             ap
-            for ap in line_hits(projections, number, patterns)
+            for ap in line_hits(projections, number, patterns, selected)
             if (ap.id, number) not in refuted
         ]
         for number in range(1, len(original_lines) + 1)

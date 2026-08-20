@@ -941,6 +941,180 @@ def slice_exempt_lines(source: str) -> set[int]:
     return set(tested()) | set(settled())
 
 
+def tuple_shape_lines(source: str) -> set[int]:
+    """Return the lines carrying a fixed-arity ``tuple[...]`` annotation.
+
+    Fixed arity is the whole of what the rule names: positions with no names
+    on them. ``tuple[X, ...]`` is an immutable sequence and was never the
+    subject, so it is not netted and then cleared — it simply is not selected.
+
+    A line carrying both keeps its finding, which falls out of selecting the
+    fixed ones rather than having to be said: the variadic neighbour is not
+    in the set to begin with, so it cannot clear anything.
+
+    Nesting is why this wants the tree. In ``tuple[dict[str, int], ...]`` the
+    trailing ellipsis sits behind a bracket no character class can step over.
+    """
+    tree = python_tree(source)
+    if tree is None:
+        return set()
+
+    def variadic(node: ast.Subscript) -> bool:
+        """Whether the last position is the ellipsis that makes it a sequence."""
+        if not isinstance(node.slice, ast.Tuple) or not node.slice.elts:
+            return False
+        last = node.slice.elts[-1]
+        return isinstance(last, ast.Constant) and last.value is Ellipsis
+
+    return {
+        node.lineno
+        for node in python_nodes(tree)
+        if isinstance(node, ast.Subscript)
+        and isinstance(node.value, ast.Name)
+        and node.value.id == "tuple"
+        and not variadic(node)
+    }
+
+
+def default_factory_lines(source: str) -> set[int]:
+    """Return ``default_factory=`` lines an annotated literal would replace.
+
+    The rule's replacement is ``items: list[B] = []``: the annotation carries
+    the type and pydantic copies the literal per instance. That says the same
+    thing exactly where the factory builds an empty collection, so those are
+    the lines selected — a factory that reads another declaration, stamps a
+    value, or constructs a model does work no literal expresses and is not a
+    site of this rule at all.
+    """
+    tree = python_tree(source)
+    if tree is None:
+        return set()
+    return {
+        keyword.lineno
+        for node in python_nodes(tree)
+        if isinstance(node, ast.Call)
+        for keyword in node.keywords
+        if keyword.arg == "default_factory" and empty_collection_factory(keyword.value)
+    }
+
+
+def dict_get_lines(source: str) -> set[int]:
+    """Return the lines where ``.get(`` reads a key out of a mapping.
+
+    Two shapes the tree alone rules out, both decidable without types — which
+    is what lets a suppression at either be retired rather than demanded by
+    the kernel and reported spurious by the audit that resolves the receiver.
+
+    A decorator is not payload access: ``@app.get("/path")`` names a route on
+    a framework object, and no schema is read out of a dict.
+
+    Neither is a call on a module. ``httpx.get(url)`` reaches a function the
+    module declares, and a module is not a mapping whatever it contains. The
+    receiver has to be the bare imported name for that: ``os.environ.get`` is
+    a genuine keyed lookup reached *through* a module, so only a name bound
+    directly by ``import`` is ruled out, never an attribute of one.
+
+    A receiver whose declared type settles it is the type oracle's to refute
+    in `lup.codescan.grammar`, not this function's — no tree says what an
+    imported class is.
+    """
+    tree = python_tree(source)
+    if tree is None:
+        return set()
+    nodes = python_nodes(tree)
+    modules = {
+        alias.asname or alias.name.partition(".")[0]
+        for node in nodes
+        if isinstance(node, ast.Import)
+        for alias in node.names
+    }
+    decorated = {
+        line
+        for node in nodes
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef)
+        for decorator in node.decorator_list
+        for line in range(
+            decorator.lineno, (decorator.end_lineno or decorator.lineno) + 1
+        )
+    }
+    return {
+        line
+        for node in nodes
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "get"
+        and not (
+            isinstance(node.func.value, ast.Name) and node.func.value.id in modules
+        )
+        and (line := node.func.end_lineno or node.func.value.lineno) not in decorated
+    }
+
+
+def empty_collection_lines(source: str) -> set[int]:
+    """Return the lines seeding an empty collection a loop then fills.
+
+    Every empty-collection binding the tree carries, less the ones
+    :func:`empty_collection_exempt_lines` shows to be deliberate defaults —
+    ``__init__`` state, call keywords, annotated module and class
+    declarations, and a seed whose every feeding loop tolerates a failure.
+
+    Stated as a difference because that is what it is: the defect is a seed
+    the code goes on to append to, and "goes on to append to" is a property
+    of the surrounding scope rather than of the assignment. What the
+    conversion buys is that the first half is now the tree's answer too, so a
+    ``= []`` written inside a string or spelled across a line break is
+    counted exactly as the language reads it.
+    """
+    tree = python_tree(source)
+    if tree is None:
+        return set()
+    seeded = {
+        node.value.lineno
+        for node in python_nodes(tree)
+        if isinstance(node, ast.Assign | ast.AnnAssign)
+        and node.value is not None
+        and empty_collection_literal(node.value)
+    }
+    return seeded - empty_collection_exempt_lines(source)
+
+
+def silent_truncation_lines(source: str) -> set[int]:
+    """Return the prefix slices that keep a chosen size of somebody's content.
+
+    A bound is this rule's subject when it is a size somebody chose: a literal
+    of two digits or more, or a shouty constant naming one. A single digit is
+    a parser bound — ``rest[:1]``, ``data[:2]`` — and a lowercase name is what
+    a caller passed, which makes ``results[:limit]`` a request rather than a
+    cut. Reading the bound is what makes this decidable at all: no type says
+    whether the receiver held content.
+
+    Less what :func:`slice_exempt_lines` settles — a digest, a split, an
+    abbreviation, or a prefix a comparison only asks a question of.
+    """
+    tree = python_tree(source)
+    if tree is None:
+        return set()
+
+    def chosen_size(bound: ast.expr | None) -> bool:
+        match bound:
+            case ast.Constant(value=int() as size):
+                return not isinstance(bound.value, bool) and size >= 10
+            case ast.Name(id=name):
+                return len(name) >= 3 and name == name.upper() and name[0].isalpha()
+        return False
+
+    sliced = {
+        line
+        for node in python_nodes(tree)
+        if isinstance(node, ast.Subscript)
+        and isinstance(node.slice, ast.Slice)
+        and node.slice.lower is None
+        and chosen_size(node.slice.upper)
+        for line in range(node.lineno, (node.end_lineno or node.lineno) + 1)
+    }
+    return sliced - slice_exempt_lines(source)
+
+
 def refiner_named(name: str) -> Callable[[str], set[int]] | None:
     """The AST context one row names, where the row names one.
 
@@ -983,6 +1157,66 @@ def refined_exempt_lines(
         refiner = refiner_named(row["refiner"] if "refiner" in row else "")
         if refiner is not None:
             found[row["id"]] = refiner(source)
+    return found
+
+
+def matcher_named(name: str) -> Callable[[str], set[int]] | None:
+    """The AST selector one row names, where the row names one.
+
+    A rule earns a matcher when the shape it refuses is one the grammar has a
+    word for, which is most of them. Which rule has which lives at the
+    declaration in `lup.codescan.antipatterns` and travels in the row, for the
+    reason the refiners do: this side holds only the functions a row may name,
+    so a rule that gains one reaches the gate by construction rather than by
+    someone also remembering to widen a list of ids here.
+    """
+    match name:
+        case "tuple_shape_lines":
+            return tuple_shape_lines
+        case "default_factory_lines":
+            return default_factory_lines
+        case "dict_get_lines":
+            return dict_get_lines
+        case "empty_collection_lines":
+            return empty_collection_lines
+        case "silent_truncation_lines":
+            return silent_truncation_lines
+    return None
+
+
+def matched_lines(source: str, rows: list[AntiPatternRow]) -> dict[str, set[int]]:
+    """Which lines each matched rule selects in this source, computed once.
+
+    Where a tree can be had, the selector answers and the pattern is not
+    consulted. Where none can — a file caught mid-edit, an indented fragment —
+    what happens next is the rule's own strength, because that is what decides
+    the cost of guessing.
+
+    A soft rule falls back to its pattern. Guessing wide there costs a
+    directive carrying a reason, which is a sentence somebody writes and the
+    audit then grades, so the conservative net is affordable.
+
+    A strong rule fires nowhere, which is what the empty entry says. No
+    directive may silence one, so a verdict from a pattern the tree never
+    confirmed would be a denial with no escape — and "cannot tell" has to
+    fail toward silence. The site is seen again the moment the file parses.
+
+    A row without the field reads as declaring no matcher, which is what an
+    empty name already means here — the tolerance `refined_exempt_lines`
+    keeps, and for the same reason: this gate is compiled into the dispatcher
+    that decides every edit, and a table from an older branch has to leave
+    that dispatcher able to regenerate it.
+    """
+    parses = python_tree(source) is not None
+    found: dict[str, set[int]] = {}
+    for row in rows:
+        matcher = matcher_named(row["matcher"] if "matcher" in row else "")
+        if matcher is None:
+            continue
+        if parses:
+            found[row["id"]] = matcher(source)
+        elif row["strength"] == "strong":
+            found[row["id"]] = set()
     return found
 
 
@@ -1219,23 +1453,35 @@ def anti_pattern_hits(
     scanned_lines: list[str],
     exempt: dict[str, set[int]],
     tokenized: bool,
+    matched: dict[str, set[int]] | None = None,
 ) -> Iterator[AntiPatternHit]:
     """Every added line and the rule it matches, before suppressions apply.
 
     Separating matching from deciding is what lets the strong rules be
     consulted ahead of the suppression gate without the match logic existing
     twice — two copies being how a gate starts disagreeing with itself.
+
+    A rule the caller resolved a selector for is decided by that selector and
+    its pattern is not consulted: the tree already said which lines carry the
+    shape, and re-reading the text could only disagree with it. ``matched``
+    carries no entry for a rule whose source would not parse, which is what
+    puts that rule back on its pattern.
     """
+    selected = matched or {}
     for number in added:
         masked = scanned_lines[number - 1].strip()
         if not tokenized and masked.startswith("#") and "type:" not in masked:
             continue
         code = code_lines[number - 1].strip()
         for row in rows:
+            if row["id"] in exempt and number in exempt[row["id"]]:
+                continue
+            if row["id"] in selected:
+                if number in selected[row["id"]]:
+                    yield AntiPatternHit(line=number, row=row)
+                continue
             stripped = code if tokenized and row["context"] == "code" else masked
             if not stripped:
-                continue
-            if row["id"] in exempt and number in exempt[row["id"]]:
                 continue
             if re.search(row["pattern"], stripped) is not None:
                 yield AntiPatternHit(line=number, row=row)
@@ -1284,6 +1530,7 @@ def awaits_resolution(
             mask_python_string_literals(after),
             refined_exempt_lines(after, rows),
             python_comment_columns(after) is not None,
+            matched_lines(after, rows),
         )
         if hit["line"] <= len(original_lines)
     )
@@ -1383,6 +1630,7 @@ def antipattern_decision(
     )
     code_lines = python_code_lines(after) if python_source else original_lines
     exempt = refined_exempt_lines(after, rows) if python_source else {}
+    matched = matched_lines(after, rows) if python_source else {}
     for rule_id, lines in (refuted or {}).items():
         exempt[rule_id] = (
             exempt[rule_id] | set(lines) if rule_id in exempt else set(lines)
@@ -1423,7 +1671,9 @@ def antipattern_decision(
     ]
     tokenized = comment_columns is not None
     hits = list(
-        anti_pattern_hits(added, rows, code_lines, scanned_lines, exempt, tokenized)
+        anti_pattern_hits(
+            added, rows, code_lines, scanned_lines, exempt, tokenized, matched
+        )
     )
 
     def guarded_hits(number: int) -> list[AntiPatternHit]:
@@ -1447,7 +1697,7 @@ def antipattern_decision(
         }
         return list(
             anti_pattern_hits(
-                guarded, rows, code_lines, scanned_lines, exempt, tokenized
+                guarded, rows, code_lines, scanned_lines, exempt, tokenized, matched
             )
         )
 

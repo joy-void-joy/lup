@@ -78,6 +78,30 @@ class Refiner(BaseModel, arbitrary_types_allowed=True):
     evidence: str
 
 
+class Matcher(BaseModel, arbitrary_types_allowed=True):
+    """The AST shape one rule selects, where the source parses.
+
+    ``select`` returns the lines carrying the shape — the violations
+    themselves, not a net around them. A rule that declares one is decided by
+    the tree, and its ``pattern`` becomes the fallback for source no tree can
+    be had from: a file mid-edit that will not parse, or a language this
+    grammar is not for.
+
+    This is the shape a :class:`Refiner` was reaching for from the other
+    side. A refiner exists because a rule's regex nets more than the defect
+    it names, so a second pass reads the tree and takes the excess back out —
+    which means the rule is stated twice, once too widely and once as the
+    correction, and a reader has to hold both to know what it refuses. A
+    matcher states it once, in the terms the language actually has.
+
+    The kernel owns these functions for the reason it owns the refiners: the
+    hook applies them with no types and no dependencies to hand, and the rule
+    holds the same object so what it selects is visible where it is declared.
+    """
+
+    select: Callable[[str], set[int]]
+
+
 class AntiPattern(BaseModel, arbitrary_types_allowed=True):
     """One forbidden code shape: a stable id, the regex that detects it, and why.
 
@@ -107,6 +131,12 @@ class AntiPattern(BaseModel, arbitrary_types_allowed=True):
     carry a callable; ``test_declared_refiners_are_the_kernel_refiners`` pins
     the two to the same objects, since a rule refined on one side only is
     exactly the split that makes a marker unremovable.
+
+    ``matcher`` is present when the tree decides the rule outright: it selects
+    the violating lines itself, and ``pattern`` is what the gate falls back to
+    where no tree can be had — a file mid-edit that will not parse, or the
+    TypeScript-family table, which this grammar is not for. A rule carrying
+    one needs no ``refiner``, because there is no excess to take back out.
     """
 
     id: str
@@ -114,6 +144,7 @@ class AntiPattern(BaseModel, arbitrary_types_allowed=True):
     message: str
     context: RuleContext = "code"
     refiner: Refiner | None = None
+    matcher: Matcher | None = None
     strength: RuleStrength = "soft"
     """Whether a `# lup: ignore` may silence this rule at all.
 

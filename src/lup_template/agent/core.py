@@ -461,7 +461,7 @@ def build_session_factory(
     allowed_tools: list[str] = []
     submission_gate: SubmissionGate[AgentOutput] | None = None
     hooks = create_permission_hooks(notes.rw, notes.ro)
-    tools: list[str] | None = [] if toolless else None  # lup: ignore[empty-collection]
+    tools: list[str] | None = [] if toolless else None
     sandbox: Sandbox | None = None
     engine = engine_for_settings()
     if not toolless and engine in ("claude", "claude-compat"):
