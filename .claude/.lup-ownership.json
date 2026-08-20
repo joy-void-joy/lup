@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "216bd7c551bfcee27fbe2e56d064a46865665d141ae465c1be9ab3036fc03bea",
+  "source_digest": "1e96743431cd7896832371f446fc91e94b3cd303cf012cf269ccb68b57edfd71",
   "target_requirements": [
     "claude-code"
   ],
@@ -184,7 +184,7 @@
     {
       "path": ".claude/plugins/lup/commands/init.md",
       "category": "generated",
-      "sha256": "ddadbb32706ebc2c505e60cf4699cdf7b4fa37fae9d881db2b335ae3cc5dbd05",
+      "sha256": "eb1ee4dbe11a482ad149624f31369e9e14253e4adebc08410ef0c8a8d5539cb1",
       "semantic_id": "skill.init",
       "executable": false
     },

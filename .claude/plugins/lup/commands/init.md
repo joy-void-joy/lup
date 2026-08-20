@@ -111,7 +111,7 @@ Before customizing, decide which optional patterns this domain actually needs. T
 
 - **Reflection** (`agent/tools/reflect.py` + the gate wiring in `core.py`) — keep only if the agent commits a consequential, judgment-bearing output where self-critique helps.
 - **Realtime / persistent mode** (`agent/tools/realtime.py`, `lup.realtime*`, the Stop-hook/sleep-wake wiring) — keep only for agents that live over time (chat, monitoring, games); delete for one-shot agents.
-- **Feedback loop** (`devtools/feedback/`, the feedback-loop command) — keep only if ground truth or a feedback signal resolves over time.
+- **Feedback loop** (the `feedback` sub-app this project inherits from `lup.devtools`, and the feedback-loop skill) — keep only if ground truth or a feedback signal resolves over time. Dropping it is a line in `devtools/subapps.py`, not a directory to delete: the commands are the library's.
 - **Commit loop** (auto-commit in `environment/cli/__main__.py`) — keep only if each run yields a data artifact worth versioning. Session data is gitignored by default (the `notes/*` lines in `.gitignore`), so traces and outputs stay local; keeping this pattern means removing those two lines so session data can be committed. When deleting the pattern, leave the ignore lines in place.
 
 Confirm the keep/delete set with the user, then **delete the files and their wiring** for everything not kept before proceeding. The customization steps below apply only to what you kept.
@@ -369,12 +369,10 @@ Once the scaffolding is generated, guide the user to:
 
 ## Key Files to Customize
 
-- `src/<project>/agent/models.py` -- Output schemas (AgentOutput, SessionResult)
-- `src/<project>/agent/subagents.py` -- Specialized subagents
-- `src/<project>/agent/tool_policy.py` -- Tool availability and MCP servers
-- `src/<project>/agent/core.py` -- Options building and orchestration
-- `src/<project>/agent/tools/reflect.py` -- Reflection tool and nested reviewer agent
-- `src/<project>/agent/prompts.py` -- System prompt templates
-- `src/<project>/environment/cli/__main__.py` -- CLI with loop + auto-commit
-- `src/<project>/devtools/setup.py` -- Setup wizard (integrations, env vars)
-- `src/<project>/devtools/feedback/` -- Feedback collection
+`docs/template.md` answers this from the checkout rather than from a list that
+has to be maintained: it draws the package as it actually stands, captions each
+module with its own docstring, and carries a table of what to adapt in each.
+
+The order they usually get touched in: `agent/models.py` for the result the
+domain produces, `agent/prompts.py` for what the agent is told, then
+`agent/toolsets.py` and `agent/tools/` for what it can do.
