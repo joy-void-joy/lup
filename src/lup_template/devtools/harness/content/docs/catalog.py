@@ -13,6 +13,8 @@ declared here does not exist and a file under ``docs/`` that is not produced
 from here is deleted as unowned. Nothing beneath ``docs/`` is hand-written.
 """
 
+from pathlib import Path
+
 import lup.harness.models as models
 from lup.adapters.claude.harness import CLAUDE_DISPATCHER
 from lup.adapters.codex.harness import CODEX_DISPATCHER
@@ -49,15 +51,28 @@ composing them is what this root is for: the pages stay portable while the
 table they publish cannot claim a decoded set that stopped being true.
 """
 
-PROJECT = [
-    published("template", "template.md", template.DOCUMENT, DOCS_ROOT),
-    published("decisions", "dev-tooling-decisions.md", decisions.DOCUMENT, DOCS_ROOT),
-]
-"""The pages only this repository has, because only it has their subject."""
 
-DOCUMENTS: list[models.Document] = [
-    published("index", "README.md", index.document(REFERENCE, PROJECT), DOCS_ROOT),
-    *REFERENCE,
-    *PROJECT,
-]
-"""Every document under ``docs/``, the index first because it teaches the rest."""
+def project_pages(root: Path) -> list[models.Document]:
+    """The pages only this repository has, because only it has their subject.
+
+    Built against a checkout rather than declared, because one of them draws
+    the application's layout by walking it. Importing this module therefore
+    reads no filesystem — which is what lets the CLI be imported from a
+    directory that is not this repository at all.
+    """
+    return [
+        published("template", "template.md", template.document(root), DOCS_ROOT),
+        published(
+            "decisions", "dev-tooling-decisions.md", decisions.DOCUMENT, DOCS_ROOT
+        ),
+    ]
+
+
+def documents(root: Path) -> list[models.Document]:
+    """Every document under ``docs/``, the index first because it teaches the rest."""
+    project = project_pages(root)
+    return [
+        published("index", "README.md", index.document(REFERENCE, project), DOCS_ROOT),
+        *REFERENCE,
+        *project,
+    ]

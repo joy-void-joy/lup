@@ -19,6 +19,70 @@ Keeping the agent free of I/O is what makes it improvable: the self-improvement
 loop reads traces and changes prompts, tools, and models, and it never has to
 reason about where a session came from.
 
+```
+src/lup_template/
+├── agent/                   # Agent module for the self-improving loop.
+│   ├── config.py            # Configuration management using pydantic-settings.
+│   ├── core.py              # Application composition roots over Lup's provider-neutral runtime.
+│   ├── models.py            # Output models for the agent.
+│   ├── prompts.py           # The standing prose the agent is told: its task, its guidelines, and how to deliver a result.
+│   ├── subagents.py         # Subagent definitions.
+│   ├── tool_policy.py       # Decide which tools the agent is allowed to use this session.
+│   ├── tools/               # Tools package - MCP tools and domain-specific utilities.
+│   │   ├── example.py       # Example MCP tools showing the tool pattern and Data Augmentation.
+│   │   ├── nested.py        # Nested Agent pattern (template).
+│   │   ├── realtime.py      # Real-time MCP tools for persistent agents.
+│   │   └── reflect.py       # Reflection tool — forced self-assessment before output finalization.
+│   └── toolsets.py          # Single source of truth for the agent's MCP tool groups.
+├── devtools/                # Development and analysis CLI tools for lup.
+│   ├── agent/               # Agent introspection and interactive debugging tools.
+│   │   ├── inspect_agent.py # Agent configuration inspection: tools, schemas, prompt, subagents.
+│   │   ├── repl.py          # Interactive REPL with the agent via the SDK (continuous session).
+│   │   └── serve.py         # Tool collection and the MCP stdio tool server (``serve-tools``).
+│   ├── dev/                 # Dev operations: worktrees, branches, and pre-flight checks.
+│   │   ├── app.py           # What only a template adds to the `dev` tree the library already builds.
+│   │   ├── init.py          # Package renaming for downstream project initialization.
+│   │   └── library.py       # How this project obtains the ``lup`` library.
+│   ├── harness/             # Canonical harness generation and native launch commands.
+│   │   ├── catalog.py       # Root of the project-owned harness declaration graph.
+│   │   ├── composition.py   # What this project publishes through each native target, and what writes it.
+│   │   └── content/         # Declaration leaves of the harness graph.
+│   │       ├── assets/      # Typed harness content declarations.
+│   │       ├── catalog.py   # This repository's harness content: what it inherits, and what only it has.
+│   │       ├── docs/        # Typed source for every document under ``docs/``.
+│   │       │   ├── catalog.py # Every document this repository publishes under ``docs/``.
+│   │       │   ├── decisions.py # Architectural decisions behind the development tooling.
+│   │       │   ├── index.py # The documentation index: what this repository is, and where each part is.
+│   │       │   └── template.py # Guide to ``src/lup_template``, the application built on the library.
+│   │       ├── guidance.py  # Canonical repository guidance.
+│   │       ├── provenance.py # What a project settles about where its lup came from.
+│   │       ├── settings.py  # What this repository grants, refuses, and enables for itself.
+│   │       ├── shell_vocabulary.py # This project's shell auto-allow vocabulary, composed from library groups.
+│   │       ├── skills/      # Typed harness content declarations.
+│   │       │   ├── brainstorm.py # Canonical declaration for the brainstorm skill.
+│   │       │   ├── import_skill.py # Canonical declaration for the import skill.
+│   │       │   ├── init.py  # Canonical declaration for the init skill.
+│   │       │   ├── install.py # Canonical declaration for the install skill.
+│   │       │   ├── meta.py  # Canonical declaration for the meta skill.
+│   │       │   └── update.py # Canonical declaration for the update skill.
+│   │       ├── template_claude.py # Canonical downstream template guidance in its Claude flavor.
+│   │       ├── template_codex.py # Canonical downstream template guidance in its Codex AGENTS.md flavor.
+│   │       └── template_sections.py # Portable downstream-template sections shared by every guidance flavor.
+│   ├── main.py              # Root CLI app composing all devtools sub-apps.
+│   ├── setup.py             # This project's setup integrations, over the reusable wizard framework.
+│   └── subapps.py           # This application's sub-app delta: what it declines, and what only it has.
+└── environment/             # Environment harness — how the outside world reaches the agent.
+    └── cli/                 # CLI package for the environment client.
+        └── __main__.py      # Environment CLI for running agent sessions.
+```
+
+Nothing above is written down. The structure is walked from the checkout when
+this page is generated, and each caption is the module's own docstring — a
+package's from its `__init__.py`. So a module that is renamed, moved, or
+re-described changes this page by being edited, and one that is deleted leaves
+it by being deleted. A module with no docstring simply has no caption, which
+is the only nudge this page gives about writing one.
+
 ## `agent/` — what you change first
 
 | Module | What it holds | Adapt it by |

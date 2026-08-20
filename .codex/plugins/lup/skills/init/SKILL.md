@@ -189,6 +189,14 @@ The merge lands in `src/<project>/devtools/harness/content/guidance.py`, never i
 6. Leave existing sections untouched -- don't overwrite content the project already has
 7. Regenerate with `uv run lup-devtools harness generate all`, which is what carries the merged sections into every tree
 
+The template is a menu, not a document to adopt whole. Guidance is loaded on
+every turn and is held to a byte budget for a reason a reader never sees
+otherwise: a runtime that caps how much project documentation it will load
+stops adding at the cap, so an over-budget guidance file is not an error, it is
+silent truncation. Generation enforces that ceiling and refuses the merged
+declaration, naming the overage — so take the sections this domain will act on,
+and leave the rest to the pages under `docs/` that already carry them.
+
 Which runtimes the project carries is not a choice made here: every tree
 arrives with the clone, and generation writes each one it finds. Dropping a
 runtime is a later removal somebody decides on its own terms.

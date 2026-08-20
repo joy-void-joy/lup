@@ -1,15 +1,23 @@
+# lup: ignore[constant-declaration]
+# The two constants here are this page's own prose, split so the layout diagram
+# can be drawn between them from a checkout the caller supplies. Prose is not a
+# judgement a caller could override with a different value; a project wanting
+# different words composes a different document.
 """Guide to ``src/lup_template``, the application built on the library."""
+
+from pathlib import Path
 
 import lup.harness.models as models
 
+from lup.devtools.harness.content.tree import annotated_tree
 from lup.devtools.subapps import subapp_bullets
+from lup_template.devtools.harness.content.catalog import LAYOUT
 from lup_template.devtools.subapps import SUBAPP_SPECS
 
-DOCUMENT = models.PromptDocument(
-    source=__name__,
-    parts=[
-        models.TextPart(
-            text=r"""# The application template
+
+HEAD_PARTS: list[models.PromptPart] = [
+    models.TextPart(
+        text=r"""# The application template
 
 `src/lup_template` is the half you fork. It is a complete working agent — an
 `lup` application, a development CLI, and the harness declarations that
@@ -27,6 +35,24 @@ Three packages, split by what changes and how often.
 Keeping the agent free of I/O is what makes it improvable: the self-improvement
 loop reads traces and changes prompts, tools, and models, and it never has to
 reason about where a session came from.
+
+```
+"""
+    ),
+]
+"""Everything before the layout diagram, which is drawn rather than declared."""
+
+TAIL_PARTS: list[models.PromptPart] = [
+    models.TextPart(
+        text=r"""
+```
+
+Nothing above is written down. The structure is walked from the checkout when
+this page is generated, and each caption is the module's own docstring — a
+package's from its `__init__.py`. So a module that is renamed, moved, or
+re-described changes this page by being edited, and one that is deleted leaves
+it by being deleted. A module with no docstring simply has no caption, which
+is the only nudge this page gives about writing one.
 
 ## `agent/` — what you change first
 
@@ -92,10 +118,10 @@ its own account call into the one report shape, and the roster composes the
 display around the readers it names.
 
 """
-        ),
-        models.TextPart(text=subapp_bullets(SUBAPP_SPECS)),
-        models.TextPart(
-            text=r"""
+    ),
+    models.TextPart(text=subapp_bullets(SUBAPP_SPECS)),
+    models.TextPart(
+        text=r"""
 Run `uv run lup-devtools --help` for the full command tree. The three you will
 use daily:
 
@@ -147,12 +173,12 @@ resolver's supervisor page; see [supervisor.md](supervisor.md).
 
 `lup-devtools sync` tracks the other repositories this project exchanges
 improvements with and reviews their commits since the last sync. The """
-        ),
-        models.SkillInvocation(plugin="lup", skill="update"),
-        models.TextPart(text=r""" and """),
-        models.SkillInvocation(plugin="lup", skill="import"),
-        models.TextPart(
-            text=r""" skills are built on it. Two files declare
+    ),
+    models.SkillInvocation(plugin="lup", skill="update"),
+    models.TextPart(text=r""" and """),
+    models.SkillInvocation(plugin="lup", skill="import"),
+    models.TextPart(
+        text=r""" skills are built on it. Two files declare
 what to track.
 
 **`sync.json` (committed)** is the template's default registry. It ships with
@@ -182,10 +208,10 @@ The registry has no direction in its name because direction depends on where
 you sit. A project built on the template keeps the shipped `lup` entry and
 pulls *from* it. The lup repository itself sets `"ignore": true` on its own
 entry and registers its downstream fleet in `sync.json.local`, so """
-        ),
-        models.SkillInvocation(plugin="lup", skill="update"),
-        models.TextPart(
-            text=r""" can generalize emerged patterns back into the template. Same
+    ),
+    models.SkillInvocation(plugin="lup", skill="update"),
+    models.TextPart(
+        text=r""" can generalize emerged patterns back into the template. Same
 registry, opposite seats.
 
 Repositories created before the rename may still carry
@@ -204,6 +230,24 @@ application it belongs here.
 `pyproject.toml`, so a checkout resolves the library from source and an edit to
 either half is immediately live in the other.
 """
-        ),
-    ],
-)
+    ),
+]
+"""Everything after the diagram, from the per-package guide onward."""
+
+
+def document(root: Path) -> models.PromptDocument:
+    """This page, with its layout diagram walked from ``root``.
+
+    Takes the checkout rather than finding one. A document that resolved its
+    own root would read the filesystem at import, which makes importing this
+    module — and so every CLI command that composes it — fail anywhere but
+    inside a lup project.
+    """
+    return models.PromptDocument(
+        source=__name__,
+        parts=[
+            *HEAD_PARTS,
+            models.TextPart(text=annotated_tree(root, LAYOUT.path())),
+            *TAIL_PARTS,
+        ],
+    )
