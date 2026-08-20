@@ -168,9 +168,16 @@ def environment_fingerprint(root: Path) -> str:
 
 
 def entry_keys(sources: list[PythonSource], fingerprint: str) -> StringMap:
-    """The digest each source's refutations rest on, by repository path."""
+    """The digest each source's refutations rest on, by repository path.
+
+    Each module's text is digested once and every closure keyed on those
+    digests rather than on the text again. A module near the root of the
+    import graph is reached from hundreds of closures, and stating it by its
+    text at each one hashed the repository over and over — the same
+    dependency, named at the size of a digest instead of the size of a file.
+    """
     imports = first_party_imports(sources)
-    texts = {source.module: source.text for source in sources}
+    texts = {source.module: digest_of([source.text]) for source in sources}
     return {
         source.path.as_posix(): digest_of(
             [
