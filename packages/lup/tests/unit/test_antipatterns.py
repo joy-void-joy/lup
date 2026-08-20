@@ -23,9 +23,10 @@ from lup.harness.contracts import Spelled, Unsupported
 from lup.policy.bundle import bundled_antipattern_rows
 from lup.policy.kernel.edit import (
     antipattern_decision,
-    default_factory_lines,
-    dict_get_lines,
+    default_factory_sites,
+    dict_get_sites,
     empty_collection_exempt_lines,
+    lines_of,
     refiner_named,
     slice_exempt_lines,
 )
@@ -557,7 +558,7 @@ os.environ.get("PATH")
 
 def test_the_matcher_passes_over_route_decorators() -> None:
     """`.get(` on a decorator names a route; the call below it is real."""
-    assert dict_get_lines(ROUTE_DECORATOR) == {3}
+    assert lines_of(dict_get_sites(ROUTE_DECORATOR)) == {3}
 
 
 def test_the_matcher_passes_over_a_call_on_an_imported_module() -> None:
@@ -568,7 +569,7 @@ def test_the_matcher_passes_over_a_call_on_an_imported_module() -> None:
     opposite states: the kernel demands a directive the audit then reports
     spurious, and no version of the file passes both.
     """
-    assert 5 not in dict_get_lines(MODULE_QUALIFIED_GET)
+    assert 5 not in lines_of(dict_get_sites(MODULE_QUALIFIED_GET))
 
 
 def test_the_matcher_keeps_a_lookup_reached_through_a_module() -> None:
@@ -578,7 +579,7 @@ def test_the_matcher_keeps_a_lookup_reached_through_a_module() -> None:
     chain back to its root would drop this one, which is exactly the access
     the rule exists for.
     """
-    assert dict_get_lines(MODULE_QUALIFIED_GET) == {6}
+    assert lines_of(dict_get_sites(MODULE_QUALIFIED_GET)) == {6}
 
 
 def test_the_matcher_selects_nothing_from_a_fragment_it_cannot_parse() -> None:
@@ -587,7 +588,7 @@ def test_the_matcher_selects_nothing_from_a_fragment_it_cannot_parse() -> None:
     Which is what :func:`~lup.codescan.antipatterns.selected_lines` reads an
     empty answer as: an absent entry rather than a rule that found nothing.
     """
-    assert dict_get_lines("@app.get(\n") == set()
+    assert dict_get_sites("@app.get(\n") == []
 
 
 def test_declared_refiners_are_the_kernel_refiners() -> None:
@@ -1145,8 +1146,8 @@ def test_default_factory_flags_the_empty_collection_form() -> None:
 def test_default_factory_clears_a_factory_that_does_work() -> None:
     """The near miss: a factory no annotated literal could have said."""
     assert audit_text(WORKING_FACTORY_FIELD, PYTHON_ANTI_PATTERNS) == []
-    assert default_factory_lines(WORKING_FACTORY_FIELD) == set()
-    assert default_factory_lines(DEFAULT_FACTORY_FIELD) == {5}
+    assert default_factory_sites(WORKING_FACTORY_FIELD) == []
+    assert lines_of(default_factory_sites(DEFAULT_FACTORY_FIELD)) == {5}
 
 
 def test_default_factory_and_empty_collection_never_share_a_line() -> None:

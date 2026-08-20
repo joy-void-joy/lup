@@ -345,7 +345,7 @@ def test_the_hook_row_declares_that_its_verdict_needs_a_declaration() -> None:
             message=rows[0]["message"],
             context="code",
             refiner="",
-            matcher="dict_get_lines",
+            matcher="dict_get_sites",
             strength="soft",
             resolution="required",
         )

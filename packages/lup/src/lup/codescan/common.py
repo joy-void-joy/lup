@@ -29,6 +29,7 @@ from pydantic import BaseModel, model_validator
 
 from lup.policy.kernel.edit import (
     FILE_IGNORE_RE,
+    MatchSite,
     file_level_line,
     docstring_lines as python_docstring_lines,
     mask_python_string_literals,
@@ -81,11 +82,20 @@ class Refiner(BaseModel, arbitrary_types_allowed=True):
 class Matcher(BaseModel, arbitrary_types_allowed=True):
     """The AST shape one rule selects, where the source parses.
 
-    ``select`` returns the lines carrying the shape — the violations
+    ``select`` returns the sites carrying the shape — the violations
     themselves, not a net around them. A rule that declares one is decided by
     the tree, and its ``pattern`` becomes the fallback for source no tree can
     be had from: a file mid-edit that will not parse, or a language this
     grammar is not for.
+
+    Sites rather than lines, because a rule is asked two questions and both
+    are about the same nodes. Every gate asks which line fires, which is what
+    :func:`~lup.policy.kernel.edit.lines_of` projects. A rule whose verdict
+    turns on a type is also asked which symbol settles it, and a site carries
+    the position for that — so a resolution pass reads the sites this already
+    chose instead of walking the tree again to rediscover them. A second
+    selector is the same rule stated twice, and two statements of one rule
+    are two that can disagree.
 
     This is the shape a :class:`Refiner` was reaching for from the other
     side. A refiner exists because a rule's regex nets more than the defect
@@ -99,7 +109,7 @@ class Matcher(BaseModel, arbitrary_types_allowed=True):
     holds the same object so what it selects is visible where it is declared.
     """
 
-    select: Callable[[str], set[int]]
+    select: Callable[[str], list[MatchSite]]
 
 
 type ExampleVerdict = Literal["flagged", "cleared", "refuted"]

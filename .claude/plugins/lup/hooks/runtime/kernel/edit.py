@@ -9,7 +9,7 @@ import re
 import tokenize
 from collections.abc import Callable, Iterator, Set as AbstractSet
 from functools import cache
-from typing import TypedDict
+from typing import NotRequired, TypedDict
 
 from .decision import KernelDecision
 from .roles import normalized_path, path_role, root_matches
@@ -365,6 +365,74 @@ def python_nodes_by_type(tree: ast.Module) -> dict[str, list[ast.AST]]:
     return grouped
 
 
+class MatchSite(TypedDict):
+    """One place a rule fires, in the terms every gate reads it in.
+
+    A rule is about sites, and a site is asked two different questions. The
+    hook and the audit ask *which line does this fire on*, which is ``line``
+    and is all a text-shaped rule ever has. A rule whose verdict turns on a
+    type is also asked *which symbol settles it*, and answering that needs a
+    position rather than a line — so the selector that already found the node
+    reports the positions too, instead of a second selector rediscovering the
+    same nodes to compute them.
+
+    ``member`` is the attribute the site is named for: ``get`` in
+    ``payload.get(key)``. Resolving it reaches the class that declares it,
+    which follows the inheritance chain for free — a receiver can only reach
+    ``dict.get`` by being a dict.
+
+    ``receiver`` is the last name of what the member is read from, and is the
+    fallback for the members no source declares: a ``TypedDict``'s ``get`` is
+    synthesized, so it resolves to nothing while the receiver still resolves
+    to the class. It is absent where the receiver ends in no name at all — a
+    subscript, a call — which is why it is the fallback rather than the
+    question.
+
+    ``subject`` is the unparsed receiver expression, quoted back as the
+    evidence for whatever verdict the resolution reaches.
+    """
+
+    line: int
+    member: NotRequired[tuple[int, int]]
+    receiver: NotRequired[tuple[int, int]]
+    subject: NotRequired[str]
+
+
+def sites_at(lines: AbstractSet[int]) -> list[MatchSite]:
+    """The sites of a rule that names lines and no symbol to resolve.
+
+    Most rules are one of these: a bare ``except``, an ``import re``, a
+    ``# noqa``. Nothing about them turns on what a name means, so they carry
+    no position for a checker to answer about, and a resolution pass finds
+    nothing to ask.
+    """
+    return [MatchSite(line=line) for line in sorted(lines)]
+
+
+def lines_of(sites: list[MatchSite]) -> set[int]:
+    """The lines a selector's sites fire on, which is what both gates grade."""
+    return {site["line"] for site in sites}
+
+
+def name_position(node: ast.expr) -> tuple[int, int] | None:
+    """Where the last name of an expression sits, or None if it ends in none.
+
+    A checker answers about the symbol a position denotes, and only a name
+    denotes one. ``payload`` and ``self.spawned`` end in a name and can be
+    asked about; ``payload['outer']`` and ``make()`` end in a bracket, and
+    the result they stand for has no position of its own to point at.
+    """
+    match node:
+        case ast.Name(id=name):
+            return (node.lineno, (node.end_col_offset or len(name)) - 1)
+        case ast.Attribute(attr=attribute):
+            return (
+                node.end_lineno or node.lineno,
+                (node.end_col_offset or len(attribute)) - 1,
+            )
+    return None
+
+
 def nodes_of[NodeT: ast.AST](tree: ast.Module, kind: type[NodeT]) -> list[NodeT]:
     """Every node of one type under a module, read off the grouped index.
 
@@ -375,6 +443,42 @@ def nodes_of[NodeT: ast.AST](tree: ast.Module, kind: type[NodeT]) -> list[NodeT]
     name = kind.__name__
     found = grouped[name] if name in grouped else []
     return [node for node in found if isinstance(node, kind)]
+
+
+def attribute_call_site(read: ast.Attribute) -> MatchSite:
+    """One ``receiver.<attribute>(...)`` call, as a site a checker can settle."""
+    line = read.end_lineno or read.value.lineno
+    site = MatchSite(
+        line=line,
+        member=(line, (read.end_col_offset or 0) - len(read.attr)),
+        subject=ast.unparse(read.value),
+    )
+    position = name_position(read.value)
+    if position is not None:
+        site["receiver"] = position
+    return site
+
+
+def attribute_call_sites(
+    tree: ast.Module,
+    attribute: str,
+    keep: Callable[[ast.Call, ast.Attribute], bool],
+) -> list[MatchSite]:
+    """The sites of every ``receiver.<attribute>(...)`` call a rule keeps.
+
+    The one place the shape "a call on a named member" is spelled. A rule
+    supplies the attribute and the condition that is its own — an arity, a
+    receiver the tree can already rule out — and takes back sites carrying
+    the positions a checker settles them at. Stating the shape once is what
+    keeps a resolution pass from asking about calls the rule discarded.
+    """
+    return [
+        attribute_call_site(node.func)
+        for node in nodes_of(tree, ast.Call)
+        if isinstance(node.func, ast.Attribute)
+        and node.func.attr == attribute
+        and keep(node, node.func)
+    ]
 
 
 @cache
@@ -1102,7 +1206,7 @@ def annotated_exactly(tree: ast.Module, names: AbstractSet[str]) -> set[int]:
     }
 
 
-def any_type_lines(source: str) -> set[int]:
+def any_type_sites(source: str) -> list[MatchSite]:
     """Lines reaching `Any`, as an annotation, inside one, or by import.
 
     Every use, because the rule refuses the type rather than one position of
@@ -1111,25 +1215,26 @@ def any_type_lines(source: str) -> set[int]:
     """
     tree = python_tree(source)
     if tree is None:
-        return set()
-    return imported_symbols_of(tree, "typing", {"Any"}) | {
-        node.lineno for node in nodes_of(tree, ast.Name) if node.id == "Any"
-    }
+        return []
+    return sites_at(
+        imported_symbols_of(tree, "typing", {"Any"})
+        | {node.lineno for node in nodes_of(tree, ast.Name) if node.id == "Any"}
+    )
 
 
-def bare_object_lines(source: str) -> set[int]:
+def bare_object_sites(source: str) -> list[MatchSite]:
     """Lines annotating something as bare `object`."""
     tree = python_tree(source)
-    return set() if tree is None else annotated_exactly(tree, {"object"})
+    return sites_at(set() if tree is None else annotated_exactly(tree, {"object"}))
 
 
-def bare_basemodel_lines(source: str) -> set[int]:
+def bare_basemodel_sites(source: str) -> list[MatchSite]:
     """Lines annotating a parameter or return as exactly `BaseModel`."""
     tree = python_tree(source)
-    return set() if tree is None else annotated_exactly(tree, {"BaseModel"})
+    return sites_at(set() if tree is None else annotated_exactly(tree, {"BaseModel"}))
 
 
-def frozenset_shape_lines(source: str) -> set[int]:
+def frozenset_shape_sites(source: str) -> list[MatchSite]:
     """Lines declaring or constructing a frozenset.
 
     The annotation, the subscripted shape, and the constructor alike — each
@@ -1138,15 +1243,17 @@ def frozenset_shape_lines(source: str) -> set[int]:
     """
     tree = python_tree(source)
     if tree is None:
-        return set()
-    return (
-        annotated_exactly(tree, {"frozenset"})
-        | subscripts_of(tree, {"frozenset"})
-        | calls_of(tree, {"frozenset"})
+        return []
+    return sites_at(
+        (
+            annotated_exactly(tree, {"frozenset"})
+            | subscripts_of(tree, {"frozenset"})
+            | calls_of(tree, {"frozenset"})
+        )
     )
 
 
-def set_shape_lines(source: str) -> set[int]:
+def set_shape_sites(source: str) -> list[MatchSite]:
     """Lines declaring or constructing a `set`.
 
     The declaration is the subject, so an annotation, a subscripted shape and
@@ -1156,29 +1263,31 @@ def set_shape_lines(source: str) -> set[int]:
     """
     tree = python_tree(source)
     if tree is None:
-        return set()
-    return (
-        annotated_exactly(tree, {"set"})
-        | subscripts_of(tree, {"set"})
-        | calls_of(tree, {"set"})
+        return []
+    return sites_at(
+        (
+            annotated_exactly(tree, {"set"})
+            | subscripts_of(tree, {"set"})
+            | calls_of(tree, {"set"})
+        )
     )
 
 
-def bare_except_lines(source: str) -> set[int]:
+def bare_except_sites(source: str) -> list[MatchSite]:
     """Lines opening an `except:` that names no exception."""
     tree = python_tree(source)
     if tree is None:
-        return set()
-    return {
-        node.lineno for node in nodes_of(tree, ast.ExceptHandler) if node.type is None
-    }
+        return []
+    return sites_at(
+        {node.lineno for node in nodes_of(tree, ast.ExceptHandler) if node.type is None}
+    )
 
 
-def except_baseexception_lines(source: str) -> set[int]:
+def except_baseexception_sites(source: str) -> list[MatchSite]:
     """Lines catching `BaseException`, alone or among others."""
     tree = python_tree(source)
     if tree is None:
-        return set()
+        return []
 
     def caught(node: ast.expr | None) -> Iterator[str]:
         match node:
@@ -1188,22 +1297,24 @@ def except_baseexception_lines(source: str) -> set[int]:
             case ast.expr():
                 yield dotted_of(node).rsplit(".", 1)[-1]
 
-    return {
-        node.lineno
-        for node in nodes_of(tree, ast.ExceptHandler)
-        if "BaseException" in set(caught(node.type))
-    }
+    return sites_at(
+        {
+            node.lineno
+            for node in nodes_of(tree, ast.ExceptHandler)
+            if "BaseException" in set(caught(node.type))
+        }
+    )
 
 
-def global_statement_lines(source: str) -> set[int]:
+def global_statement_sites(source: str) -> list[MatchSite]:
     """Lines declaring a name `global`."""
     tree = python_tree(source)
     if tree is None:
-        return set()
-    return {node.lineno for node in nodes_of(tree, ast.Global)}
+        return []
+    return sites_at({node.lineno for node in nodes_of(tree, ast.Global)})
 
 
-def all_export_lines(source: str) -> set[int]:
+def all_export_sites(source: str) -> list[MatchSite]:
     """Lines binding `__all__`.
 
     A module's export list wherever it is bound — assigned, annotated, or
@@ -1212,7 +1323,7 @@ def all_export_lines(source: str) -> set[int]:
     """
     tree = python_tree(source)
     if tree is None:
-        return set()
+        return []
 
     def binds(node: ast.AST) -> Iterator[ast.expr]:
         match node:
@@ -1221,15 +1332,17 @@ def all_export_lines(source: str) -> set[int]:
             case ast.AnnAssign(target=target) | ast.AugAssign(target=target):
                 yield target
 
-    return {
-        target.lineno
-        for node in python_nodes(tree)
-        for target in binds(node)
-        if dotted_of(target) == "__all__"
-    }
+    return sites_at(
+        {
+            target.lineno
+            for node in python_nodes(tree)
+            for target in binds(node)
+            if dotted_of(target) == "__all__"
+        }
+    )
 
 
-def model_config_lines(source: str) -> set[int]:
+def model_config_sites(source: str) -> list[MatchSite]:
     """Lines binding `model_config` in a class body.
 
     The class body is what makes it pydantic's configuration rather than an
@@ -1238,7 +1351,7 @@ def model_config_lines(source: str) -> set[int]:
     """
     tree = python_tree(source)
     if tree is None:
-        return set()
+        return []
 
     def bound(node: ast.stmt) -> Iterator[ast.expr]:
         match node:
@@ -1247,16 +1360,18 @@ def model_config_lines(source: str) -> set[int]:
             case ast.AnnAssign(target=target):
                 yield target
 
-    return {
-        target.lineno
-        for node in nodes_of(tree, ast.ClassDef)
-        for statement in node.body
-        for target in bound(statement)
-        if dotted_of(target) == "model_config"
-    }
+    return sites_at(
+        {
+            target.lineno
+            for node in nodes_of(tree, ast.ClassDef)
+            for statement in node.body
+            for target in bound(statement)
+            if dotted_of(target) == "model_config"
+        }
+    )
 
 
-def private_function_lines(source: str) -> set[int]:
+def private_function_sites(source: str) -> list[MatchSite]:
     """Lines defining a function whose name claims to be private.
 
     A dunder is the language's own protocol rather than a privacy claim, and
@@ -1265,34 +1380,38 @@ def private_function_lines(source: str) -> set[int]:
     """
     tree = python_tree(source)
     if tree is None:
-        return set()
-    return {
-        node.lineno
-        for node in [
-            *nodes_of(tree, ast.FunctionDef),
-            *nodes_of(tree, ast.AsyncFunctionDef),
-        ]
-        if node.name.startswith("_")
-        and not node.name.startswith("__")
-        and len(node.name) > 1
-    }
+        return []
+    return sites_at(
+        {
+            node.lineno
+            for node in [
+                *nodes_of(tree, ast.FunctionDef),
+                *nodes_of(tree, ast.AsyncFunctionDef),
+            ]
+            if node.name.startswith("_")
+            and not node.name.startswith("__")
+            and len(node.name) > 1
+        }
+    )
 
 
-def private_class_lines(source: str) -> set[int]:
+def private_class_sites(source: str) -> list[MatchSite]:
     """Lines defining a class whose name claims to be private."""
     tree = python_tree(source)
     if tree is None:
-        return set()
-    return {
-        node.lineno
-        for node in nodes_of(tree, ast.ClassDef)
-        if node.name.startswith("_")
-        and not node.name.startswith("__")
-        and len(node.name) > 1
-    }
+        return []
+    return sites_at(
+        {
+            node.lineno
+            for node in nodes_of(tree, ast.ClassDef)
+            if node.name.startswith("_")
+            and not node.name.startswith("__")
+            and len(node.name) > 1
+        }
+    )
 
 
-def private_variable_lines(source: str) -> set[int]:
+def private_variable_sites(source: str) -> list[MatchSite]:
     """Lines binding a module-level name that claims to be private.
 
     Module level, because that is the scope a name is published from: a local
@@ -1302,7 +1421,7 @@ def private_variable_lines(source: str) -> set[int]:
     """
     tree = python_tree(source)
     if tree is None:
-        return set()
+        return []
 
     def bound(node: ast.stmt) -> Iterator[ast.expr]:
         match node:
@@ -1311,18 +1430,20 @@ def private_variable_lines(source: str) -> set[int]:
             case ast.AnnAssign(target=ast.Name() as target):
                 yield target
 
-    return {
-        target.lineno
-        for statement in tree.body
-        for target in bound(statement)
-        if isinstance(target, ast.Name)
-        and target.id.startswith("_")
-        and not target.id.startswith("__")
-        and len(target.id) > 1
-    }
+    return sites_at(
+        {
+            target.lineno
+            for statement in tree.body
+            for target in bound(statement)
+            if isinstance(target, ast.Name)
+            and target.id.startswith("_")
+            and not target.id.startswith("__")
+            and len(target.id) > 1
+        }
+    )
 
 
-def namedtuple_lines(source: str) -> set[int]:
+def namedtuple_sites(source: str) -> list[MatchSite]:
     """Lines reaching a named tuple, by either spelling.
 
     `typing.NamedTuple` is subclassed and `collections.namedtuple` is called,
@@ -1331,36 +1452,40 @@ def namedtuple_lines(source: str) -> set[int]:
     """
     tree = python_tree(source)
     if tree is None:
-        return set()
-    return (
-        imported_symbols_of(tree, "typing", {"NamedTuple"})
-        | imported_symbols_of(tree, "collections", {"namedtuple"})
-        | {
-            node.lineno
-            for node in nodes_of(tree, ast.Name)
-            if node.id in ("NamedTuple", "namedtuple")
-        }
+        return []
+    return sites_at(
+        (
+            imported_symbols_of(tree, "typing", {"NamedTuple"})
+            | imported_symbols_of(tree, "collections", {"namedtuple"})
+            | {
+                node.lineno
+                for node in nodes_of(tree, ast.Name)
+                if node.id in ("NamedTuple", "namedtuple")
+            }
+        )
     )
 
 
-def generic_base_lines(source: str) -> set[int]:
+def generic_base_sites(source: str) -> list[MatchSite]:
     """Lines declaring a `Generic[...]` base."""
     tree = python_tree(source)
-    return set() if tree is None else subscripts_of(tree, {"Generic"})
+    return sites_at(set() if tree is None else subscripts_of(tree, {"Generic"}))
 
 
-def typing_union_lines(source: str) -> set[int]:
+def typing_union_sites(source: str) -> list[MatchSite]:
     """Lines spelling a union as `Optional[...]` or `Union[...]`."""
     tree = python_tree(source)
     if tree is None:
-        return set()
-    return subscripts_of(tree, {"Optional", "Union"})
+        return []
+    return sites_at(subscripts_of(tree, {"Optional", "Union"}))
 
 
-def typing_generics_lines(source: str) -> set[int]:
+def typing_generics_sites(source: str) -> list[MatchSite]:
     """Lines subscripting a capitalized `typing` alias."""
     tree = python_tree(source)
-    return set() if tree is None else subscripts_of(tree, CAPITALIZED_GENERICS)
+    return sites_at(
+        set() if tree is None else subscripts_of(tree, CAPITALIZED_GENERICS)
+    )
 
 
 def mapping_value_lines(source: str, values: AbstractSet[str]) -> set[int]:
@@ -1395,80 +1520,82 @@ def mapping_value_lines(source: str, values: AbstractSet[str]) -> set[int]:
     }
 
 
-def dict_str_object_lines(source: str) -> set[int]:
+def dict_str_object_sites(source: str) -> list[MatchSite]:
     """Lines declaring a string-keyed map of bare `object`."""
-    return mapping_value_lines(source, {"object"})
+    return sites_at(mapping_value_lines(source, {"object"}))
 
 
-def dict_str_payload_lines(source: str) -> set[int]:
+def dict_str_payload_sites(source: str) -> list[MatchSite]:
     """Lines declaring a string-keyed map of scalars."""
-    return mapping_value_lines(source, SCALAR_TYPES)
+    return sites_at(mapping_value_lines(source, SCALAR_TYPES))
 
 
-def re_call_lines(source: str) -> set[int]:
+def re_call_sites(source: str) -> list[MatchSite]:
     """Lines calling a regex-module entry point."""
     tree = python_tree(source)
     if tree is None:
-        return set()
-    return calls_of(tree, {f"re.{name}" for name in RE_FUNCTIONS})
+        return []
+    return sites_at(calls_of(tree, {f"re.{name}" for name in RE_FUNCTIONS}))
 
 
-def cast_lines(source: str) -> set[int]:
+def cast_sites(source: str) -> list[MatchSite]:
     """Lines calling `cast`."""
     tree = python_tree(source)
-    return set() if tree is None else calls_of(tree, {"cast", "typing.cast"})
+    return sites_at(set() if tree is None else calls_of(tree, {"cast", "typing.cast"}))
 
 
-def eval_exec_lines(source: str) -> set[int]:
+def eval_exec_sites(source: str) -> list[MatchSite]:
     """Lines calling `eval` or `exec` as builtins.
 
     A method of the same name is somebody else's API — a database cursor, a
     template engine — and never the builtin this refuses.
     """
     tree = python_tree(source)
-    return set() if tree is None else calls_of(tree, {"eval", "exec"})
+    return sites_at(set() if tree is None else calls_of(tree, {"eval", "exec"}))
 
 
-def utcnow_lines(source: str) -> set[int]:
+def utcnow_sites(source: str) -> list[MatchSite]:
     """Lines calling `utcnow`, however the module is spelled."""
     tree = python_tree(source)
     if tree is None:
-        return set()
-    return methods_of(tree, {"utcnow"}) | calls_of(tree, {"utcnow"})
+        return []
+    return sites_at(methods_of(tree, {"utcnow"}) | calls_of(tree, {"utcnow"}))
 
 
-def os_shell_lines(source: str) -> set[int]:
+def os_shell_sites(source: str) -> list[MatchSite]:
     """Lines handing a command to a shell through `os`."""
     tree = python_tree(source)
-    return set() if tree is None else calls_of(tree, OS_SHELL_CALLS)
+    return sites_at(set() if tree is None else calls_of(tree, OS_SHELL_CALLS))
 
 
-def os_file_ops_lines(source: str) -> set[int]:
+def os_file_ops_sites(source: str) -> list[MatchSite]:
     """Lines reaching a filesystem operation `pathlib` already spells."""
     tree = python_tree(source)
     if tree is None:
-        return set()
-    return calls_of(tree, {f"os.{name}" for name in OS_FILE_CALLS})
+        return []
+    return sites_at(calls_of(tree, {f"os.{name}" for name in OS_FILE_CALLS}))
 
 
-def os_path_lines(source: str) -> set[int]:
+def os_path_sites(source: str) -> list[MatchSite]:
     """Lines reaching `os.path`, called or only named."""
     tree = python_tree(source)
-    return set() if tree is None else attributes_of(tree, {"os.path"})
+    return sites_at(set() if tree is None else attributes_of(tree, {"os.path"}))
 
 
-def os_environ_lines(source: str) -> set[int]:
+def os_environ_sites(source: str) -> list[MatchSite]:
     """Lines reaching the process environment through `os`."""
     tree = python_tree(source)
     if tree is None:
-        return set()
-    return attributes_of(tree, {"os.environ", "os.getenv"})
+        return []
+    return sites_at(attributes_of(tree, {"os.environ", "os.getenv"}))
 
 
-def suppress_lines(source: str) -> set[int]:
+def suppress_sites(source: str) -> list[MatchSite]:
     """Lines reaching `contextlib.suppress` by its qualified name."""
     tree = python_tree(source)
-    return set() if tree is None else attributes_of(tree, {"contextlib.suppress"})
+    return sites_at(
+        set() if tree is None else attributes_of(tree, {"contextlib.suppress"})
+    )
 
 
 def comment_directive_lines(source: str, directive: re.Pattern[str]) -> set[int]:
@@ -1504,7 +1631,7 @@ PYRIGHT_IGNORE_DIRECTIVE_RE = re.compile(r"#\s*pyright:\s*ignore\b")
 NOQA_DIRECTIVE_RE = re.compile(r"#\s*noqa\b")
 
 
-def type_ignore_lines(source: str) -> set[int]:
+def type_ignore_sites(source: str) -> list[MatchSite]:
     """Lines carrying a `# type: ignore` suppression.
 
     Python does model this one — `ast.parse(source, type_comments=True)`
@@ -1515,17 +1642,17 @@ def type_ignore_lines(source: str) -> set[int]:
     make this rule silently blind for the whole file. The token carries the
     same answer with nothing to trip over.
     """
-    return comment_directive_lines(source, TYPE_IGNORE_DIRECTIVE_RE)
+    return sites_at(comment_directive_lines(source, TYPE_IGNORE_DIRECTIVE_RE))
 
 
-def pyright_ignore_lines(source: str) -> set[int]:
+def pyright_ignore_sites(source: str) -> list[MatchSite]:
     """Lines carrying a `# pyright: ignore` suppression."""
-    return comment_directive_lines(source, PYRIGHT_IGNORE_DIRECTIVE_RE)
+    return sites_at(comment_directive_lines(source, PYRIGHT_IGNORE_DIRECTIVE_RE))
 
 
-def noqa_lines(source: str) -> set[int]:
+def noqa_sites(source: str) -> list[MatchSite]:
     """Lines carrying a `# noqa` suppression."""
-    return comment_directive_lines(source, NOQA_DIRECTIVE_RE)
+    return sites_at(comment_directive_lines(source, NOQA_DIRECTIVE_RE))
 
 
 # lup: ignore[library-default] — Python's own two spellings of a file rename; the kernel carries no config
@@ -1541,8 +1668,8 @@ and so wears exactly the arity of ``str.replace(old, new)``.
 """
 
 
-def string_replace_lines(source: str) -> set[int]:
-    """Lines substituting one piece of text for another inside a string.
+def string_replace_sites(source: str) -> list[MatchSite]:
+    """Sites substituting one piece of text for another inside a string.
 
     Arity is what separates this from the rename that wears the same name:
     ``str.replace`` takes the old text and the new, while a bound
@@ -1553,21 +1680,24 @@ def string_replace_lines(source: str) -> set[int]:
 
     The unbound spellings in `RENAME_CALLS` are the exception arity cannot
     reach, and they are named rather than guessed at.
+
+    What arity cannot reach at all is a two-argument ``replace`` on a value
+    that is not text: a dataframe filling missing values, a vendor object
+    with a ``replace`` of its own. Only the receiver's own type says so, and
+    the sites carry the positions `lup.codescan.resolution` asks about.
     """
     tree = python_tree(source)
     if tree is None:
-        return set()
-    return {
-        node.func.end_lineno or node.func.value.lineno
-        for node in nodes_of(tree, ast.Call)
-        if isinstance(node.func, ast.Attribute)
-        and node.func.attr == "replace"
-        and len(node.args) >= 2
-        and dotted_of(node.func) not in RENAME_CALLS
-    }
+        return []
+
+    def substitutes_text(call: ast.Call, read: ast.Attribute) -> bool:
+        """Whether one ``.replace(`` has the arity and spelling of text surgery."""
+        return len(call.args) >= 2 and dotted_of(read) not in RENAME_CALLS
+
+    return attribute_call_sites(tree, "replace", substitutes_text)
 
 
-def string_split_lines(source: str) -> set[int]:
+def string_split_sites(source: str) -> list[MatchSite]:
     """Lines splitting or partitioning a string on a separator.
 
     A bare `.split()` on whitespace is the tokenizing the rule allows, so an
@@ -1575,19 +1705,21 @@ def string_split_lines(source: str) -> set[int]:
     """
     tree = python_tree(source)
     if tree is None:
-        return set()
-    return {
-        node.func.end_lineno or node.func.value.lineno
-        for node in nodes_of(tree, ast.Call)
-        if isinstance(node.func, ast.Attribute)
-        and (
-            node.func.attr in ("partition", "rpartition")
-            or (node.func.attr in ("split", "rsplit") and bool(node.args))
-        )
-    }
+        return []
+    return sites_at(
+        {
+            node.func.end_lineno or node.func.value.lineno
+            for node in nodes_of(tree, ast.Call)
+            if isinstance(node.func, ast.Attribute)
+            and (
+                node.func.attr in ("partition", "rpartition")
+                or (node.func.attr in ("split", "rsplit") and bool(node.args))
+            )
+        }
+    )
 
 
-def string_strip_lines(source: str) -> set[int]:
+def string_strip_sites(source: str) -> list[MatchSite]:
     """Lines stripping named characters off a string.
 
     A bare `.strip()` takes whitespace off and is what the rule leaves alone;
@@ -1595,41 +1727,43 @@ def string_strip_lines(source: str) -> set[int]:
     """
     tree = python_tree(source)
     if tree is None:
-        return set()
-    return {
-        node.func.end_lineno or node.func.value.lineno
-        for node in nodes_of(tree, ast.Call)
-        if isinstance(node.func, ast.Attribute)
-        and node.func.attr in ("strip", "lstrip", "rstrip")
-        and node.args
-    }
+        return []
+    return sites_at(
+        {
+            node.func.end_lineno or node.func.value.lineno
+            for node in nodes_of(tree, ast.Call)
+            if isinstance(node.func, ast.Attribute)
+            and node.func.attr in ("strip", "lstrip", "rstrip")
+            and node.args
+        }
+    )
 
 
-def import_re_lines(source: str) -> set[int]:
+def import_re_sites(source: str) -> list[MatchSite]:
     """Lines importing the regex module."""
     tree = python_tree(source)
-    return set() if tree is None else imports_of(tree, {"re"})
+    return sites_at(set() if tree is None else imports_of(tree, {"re"}))
 
 
-def subprocess_lines(source: str) -> set[int]:
+def subprocess_sites(source: str) -> list[MatchSite]:
     """Lines importing the subprocess module."""
     tree = python_tree(source)
-    return set() if tree is None else imports_of(tree, {"subprocess"})
+    return sites_at(set() if tree is None else imports_of(tree, {"subprocess"}))
 
 
-def argparse_lines(source: str) -> set[int]:
+def argparse_sites(source: str) -> list[MatchSite]:
     """Lines importing argparse."""
     tree = python_tree(source)
-    return set() if tree is None else imports_of(tree, {"argparse"})
+    return sites_at(set() if tree is None else imports_of(tree, {"argparse"}))
 
 
-def pdf_extraction_lines(source: str) -> set[int]:
+def pdf_extraction_sites(source: str) -> list[MatchSite]:
     """Lines importing a PDF text-extraction library."""
     tree = python_tree(source)
-    return set() if tree is None else imports_of(tree, PDF_LIBRARIES)
+    return sites_at(set() if tree is None else imports_of(tree, PDF_LIBRARIES))
 
 
-def rich_progress_lines(source: str) -> set[int]:
+def rich_progress_sites(source: str) -> list[MatchSite]:
     """Lines importing `rich.progress` or reaching it through `rich`.
 
     Both spellings, because the module is the subject either way: taken out
@@ -1637,25 +1771,28 @@ def rich_progress_lines(source: str) -> set[int]:
     """
     tree = python_tree(source)
     if tree is None:
-        return set()
-    return imports_of(tree, {"rich.progress"}) | {
-        node.lineno
-        for node in nodes_of(tree, ast.Attribute)
-        if node.attr == "progress"
-        and isinstance(node.value, ast.Name)
-        and node.value.id == "rich"
-    }
+        return []
+    return sites_at(
+        imports_of(tree, {"rich.progress"})
+        | {
+            node.lineno
+            for node in nodes_of(tree, ast.Attribute)
+            if node.attr == "progress"
+            and isinstance(node.value, ast.Name)
+            and node.value.id == "rich"
+        }
+    )
 
 
-def suppress_import_lines(source: str) -> set[int]:
+def suppress_import_sites(source: str) -> list[MatchSite]:
     """Lines taking `suppress` out of contextlib."""
     tree = python_tree(source)
     if tree is None:
-        return set()
-    return imported_symbols_of(tree, "contextlib", {"suppress"})
+        return []
+    return sites_at(imported_symbols_of(tree, "contextlib", {"suppress"}))
 
 
-def dataclass_lines(source: str) -> set[int]:
+def dataclass_sites(source: str) -> list[MatchSite]:
     """Lines importing dataclasses, or decorating a class with `@dataclass`.
 
     Two spellings of one subject: the module a project reaches for, and the
@@ -1664,7 +1801,7 @@ def dataclass_lines(source: str) -> set[int]:
     """
     tree = python_tree(source)
     if tree is None:
-        return set()
+        return []
 
     def decorates(node: ast.expr) -> bool:
         target = node.func if isinstance(node, ast.Call) else node
@@ -1673,15 +1810,18 @@ def dataclass_lines(source: str) -> set[int]:
                 return True
         return False
 
-    return imports_of(tree, {"dataclasses"}) | {
-        decorator.lineno
-        for node in nodes_of(tree, ast.ClassDef)
-        for decorator in node.decorator_list
-        if decorates(decorator)
-    }
+    return sites_at(
+        imports_of(tree, {"dataclasses"})
+        | {
+            decorator.lineno
+            for node in nodes_of(tree, ast.ClassDef)
+            for decorator in node.decorator_list
+            if decorates(decorator)
+        }
+    )
 
 
-def tuple_shape_lines(source: str) -> set[int]:
+def tuple_shape_sites(source: str) -> list[MatchSite]:
     """Return the lines carrying a fixed-arity ``tuple[...]`` annotation.
 
     Fixed arity is the whole of what the rule names: positions with no names
@@ -1697,7 +1837,7 @@ def tuple_shape_lines(source: str) -> set[int]:
     """
     tree = python_tree(source)
     if tree is None:
-        return set()
+        return []
 
     def variadic(node: ast.Subscript) -> bool:
         """Whether the last position is the ellipsis that makes it a sequence."""
@@ -1706,16 +1846,18 @@ def tuple_shape_lines(source: str) -> set[int]:
         last = node.slice.elts[-1]
         return isinstance(last, ast.Constant) and last.value is Ellipsis
 
-    return {
-        node.lineno
-        for node in nodes_of(tree, ast.Subscript)
-        if isinstance(node.value, ast.Name)
-        and node.value.id == "tuple"
-        and not variadic(node)
-    }
+    return sites_at(
+        {
+            node.lineno
+            for node in nodes_of(tree, ast.Subscript)
+            if isinstance(node.value, ast.Name)
+            and node.value.id == "tuple"
+            and not variadic(node)
+        }
+    )
 
 
-def default_factory_lines(source: str) -> set[int]:
+def default_factory_sites(source: str) -> list[MatchSite]:
     """Return ``default_factory=`` lines an annotated literal would replace.
 
     The rule's replacement is ``items: list[B] = []``: the annotation carries
@@ -1727,17 +1869,20 @@ def default_factory_lines(source: str) -> set[int]:
     """
     tree = python_tree(source)
     if tree is None:
-        return set()
-    return {
-        keyword.lineno
-        for node in nodes_of(tree, ast.Call)
-        for keyword in node.keywords
-        if keyword.arg == "default_factory" and empty_collection_factory(keyword.value)
-    }
+        return []
+    return sites_at(
+        {
+            keyword.lineno
+            for node in nodes_of(tree, ast.Call)
+            for keyword in node.keywords
+            if keyword.arg == "default_factory"
+            and empty_collection_factory(keyword.value)
+        }
+    )
 
 
-def dict_get_lines(source: str) -> set[int]:
-    """Return the lines where ``.get(`` reads a key out of a mapping.
+def dict_get_sites(source: str) -> list[MatchSite]:
+    """Return the sites where ``.get(`` reads a key out of a mapping.
 
     Two shapes the tree alone rules out, both decidable without types — which
     is what lets a suppression at either be retired rather than demanded by
@@ -1752,16 +1897,20 @@ def dict_get_lines(source: str) -> set[int]:
     a genuine keyed lookup reached *through* a module, so only a name bound
     directly by ``import`` is ruled out, never an attribute of one.
 
-    A receiver whose declared type settles it is the type oracle's to refute
-    in `lup.codescan.grammar`, not this function's — no tree says what an
-    imported class is.
+    Both exclusions are made once, here, and the sites that survive them are
+    the sites a type oracle is asked about. A resolution pass that selected
+    its own would be this rule stated twice, and would spend a checker
+    session deciding what the tree has already settled.
+
+    What no tree can settle is what an imported class *is*, and that is what
+    the sites carry positions for: `lup.codescan.resolution` resolves them
+    and refutes a receiver outside the mapping family.
     """
     tree = python_tree(source)
     if tree is None:
-        return set()
+        return []
     modules: set[str] = set()
     decorated: set[int] = set()
-    reads: list[ast.Attribute] = []
     for node in python_nodes(tree):
         match node:
             case ast.Import(names=names):
@@ -1780,17 +1929,18 @@ def dict_get_lines(source: str) -> set[int]:
                         decorator.lineno, (decorator.end_lineno or decorator.lineno) + 1
                     )
                 )
-            case ast.Call(func=ast.Attribute(attr="get") as read):
-                reads.append(read)
-    return {
-        line
-        for read in reads
-        if not (isinstance(read.value, ast.Name) and read.value.id in modules)
-        and (line := read.end_lineno or read.value.lineno) not in decorated
-    }
+
+    def keyed_lookup(call: ast.Call, read: ast.Attribute) -> bool:
+        """Whether one ``.get(`` is a keyed lookup rather than the two near-misses."""
+        return (
+            not (isinstance(read.value, ast.Name) and read.value.id in modules)
+            and (read.end_lineno or read.value.lineno) not in decorated
+        )
+
+    return attribute_call_sites(tree, "get", keyed_lookup)
 
 
-def empty_collection_lines(source: str) -> set[int]:
+def empty_collection_sites(source: str) -> list[MatchSite]:
     """Return the lines seeding an empty collection a loop then fills.
 
     Every empty-collection binding the tree carries, less the ones
@@ -1807,16 +1957,16 @@ def empty_collection_lines(source: str) -> set[int]:
     """
     tree = python_tree(source)
     if tree is None:
-        return set()
+        return []
     seeded = {
         node.value.lineno
         for node in [*nodes_of(tree, ast.Assign), *nodes_of(tree, ast.AnnAssign)]
         if node.value is not None and empty_collection_literal(node.value)
     }
-    return seeded - empty_collection_exempt_lines(source)
+    return sites_at(seeded - empty_collection_exempt_lines(source))
 
 
-def silent_truncation_lines(source: str) -> set[int]:
+def silent_truncation_sites(source: str) -> list[MatchSite]:
     """Return the prefix slices that keep a chosen size of somebody's content.
 
     A bound is this rule's subject when it is a size somebody chose: a literal
@@ -1831,7 +1981,7 @@ def silent_truncation_lines(source: str) -> set[int]:
     """
     tree = python_tree(source)
     if tree is None:
-        return set()
+        return []
 
     def chosen_size(bound: ast.expr | None) -> bool:
         match bound:
@@ -1849,7 +1999,7 @@ def silent_truncation_lines(source: str) -> set[int]:
         and chosen_size(node.slice.upper)
         for line in range(node.lineno, (node.end_lineno or node.lineno) + 1)
     }
-    return sliced - slice_exempt_lines(source)
+    return sites_at(sliced - slice_exempt_lines(source))
 
 
 def refiner_named(name: str) -> Callable[[str], set[int]] | None:
@@ -1897,7 +2047,7 @@ def refined_exempt_lines(
     return found
 
 
-def matcher_named(name: str) -> Callable[[str], set[int]] | None:
+def matcher_named(name: str) -> Callable[[str], list[MatchSite]] | None:
     """The AST selector one row names, where the row names one.
 
     A rule earns a matcher when the shape it refuses is one the grammar has a
@@ -1908,98 +2058,98 @@ def matcher_named(name: str) -> Callable[[str], set[int]] | None:
     someone also remembering to widen a list of ids here.
     """
     match name:
-        case "import_re_lines":
-            return import_re_lines
-        case "subprocess_lines":
-            return subprocess_lines
-        case "argparse_lines":
-            return argparse_lines
-        case "pdf_extraction_lines":
-            return pdf_extraction_lines
-        case "rich_progress_lines":
-            return rich_progress_lines
-        case "suppress_import_lines":
-            return suppress_import_lines
-        case "dataclass_lines":
-            return dataclass_lines
-        case "re_call_lines":
-            return re_call_lines
-        case "cast_lines":
-            return cast_lines
-        case "eval_exec_lines":
-            return eval_exec_lines
-        case "utcnow_lines":
-            return utcnow_lines
-        case "os_shell_lines":
-            return os_shell_lines
-        case "os_file_ops_lines":
-            return os_file_ops_lines
-        case "os_path_lines":
-            return os_path_lines
-        case "os_environ_lines":
-            return os_environ_lines
-        case "suppress_lines":
-            return suppress_lines
-        case "string_replace_lines":
-            return string_replace_lines
-        case "string_split_lines":
-            return string_split_lines
-        case "string_strip_lines":
-            return string_strip_lines
-        case "generic_base_lines":
-            return generic_base_lines
-        case "typing_union_lines":
-            return typing_union_lines
-        case "typing_generics_lines":
-            return typing_generics_lines
-        case "dict_str_object_lines":
-            return dict_str_object_lines
-        case "dict_str_payload_lines":
-            return dict_str_payload_lines
-        case "any_type_lines":
-            return any_type_lines
-        case "bare_object_lines":
-            return bare_object_lines
-        case "bare_basemodel_lines":
-            return bare_basemodel_lines
-        case "frozenset_shape_lines":
-            return frozenset_shape_lines
-        case "set_shape_lines":
-            return set_shape_lines
-        case "bare_except_lines":
-            return bare_except_lines
-        case "except_baseexception_lines":
-            return except_baseexception_lines
-        case "global_statement_lines":
-            return global_statement_lines
-        case "all_export_lines":
-            return all_export_lines
-        case "model_config_lines":
-            return model_config_lines
-        case "private_function_lines":
-            return private_function_lines
-        case "private_class_lines":
-            return private_class_lines
-        case "private_variable_lines":
-            return private_variable_lines
-        case "namedtuple_lines":
-            return namedtuple_lines
-        case "tuple_shape_lines":
-            return tuple_shape_lines
-        case "default_factory_lines":
-            return default_factory_lines
-        case "dict_get_lines":
-            return dict_get_lines
-        case "empty_collection_lines":
-            return empty_collection_lines
-        case "silent_truncation_lines":
-            return silent_truncation_lines
-        case "type_ignore_lines":
-            return type_ignore_lines
-        case "pyright_ignore_lines":
-            return pyright_ignore_lines
-        case "noqa_lines":
-            return noqa_lines
+        case "import_re_sites":
+            return import_re_sites
+        case "subprocess_sites":
+            return subprocess_sites
+        case "argparse_sites":
+            return argparse_sites
+        case "pdf_extraction_sites":
+            return pdf_extraction_sites
+        case "rich_progress_sites":
+            return rich_progress_sites
+        case "suppress_import_sites":
+            return suppress_import_sites
+        case "dataclass_sites":
+            return dataclass_sites
+        case "re_call_sites":
+            return re_call_sites
+        case "cast_sites":
+            return cast_sites
+        case "eval_exec_sites":
+            return eval_exec_sites
+        case "utcnow_sites":
+            return utcnow_sites
+        case "os_shell_sites":
+            return os_shell_sites
+        case "os_file_ops_sites":
+            return os_file_ops_sites
+        case "os_path_sites":
+            return os_path_sites
+        case "os_environ_sites":
+            return os_environ_sites
+        case "suppress_sites":
+            return suppress_sites
+        case "string_replace_sites":
+            return string_replace_sites
+        case "string_split_sites":
+            return string_split_sites
+        case "string_strip_sites":
+            return string_strip_sites
+        case "generic_base_sites":
+            return generic_base_sites
+        case "typing_union_sites":
+            return typing_union_sites
+        case "typing_generics_sites":
+            return typing_generics_sites
+        case "dict_str_object_sites":
+            return dict_str_object_sites
+        case "dict_str_payload_sites":
+            return dict_str_payload_sites
+        case "any_type_sites":
+            return any_type_sites
+        case "bare_object_sites":
+            return bare_object_sites
+        case "bare_basemodel_sites":
+            return bare_basemodel_sites
+        case "frozenset_shape_sites":
+            return frozenset_shape_sites
+        case "set_shape_sites":
+            return set_shape_sites
+        case "bare_except_sites":
+            return bare_except_sites
+        case "except_baseexception_sites":
+            return except_baseexception_sites
+        case "global_statement_sites":
+            return global_statement_sites
+        case "all_export_sites":
+            return all_export_sites
+        case "model_config_sites":
+            return model_config_sites
+        case "private_function_sites":
+            return private_function_sites
+        case "private_class_sites":
+            return private_class_sites
+        case "private_variable_sites":
+            return private_variable_sites
+        case "namedtuple_sites":
+            return namedtuple_sites
+        case "tuple_shape_sites":
+            return tuple_shape_sites
+        case "default_factory_sites":
+            return default_factory_sites
+        case "dict_get_sites":
+            return dict_get_sites
+        case "empty_collection_sites":
+            return empty_collection_sites
+        case "silent_truncation_sites":
+            return silent_truncation_sites
+        case "type_ignore_sites":
+            return type_ignore_sites
+        case "pyright_ignore_sites":
+            return pyright_ignore_sites
+        case "noqa_sites":
+            return noqa_sites
     return None
 
 
@@ -2033,7 +2183,7 @@ def matched_lines(source: str, rows: list[AntiPatternRow]) -> dict[str, set[int]
         if matcher is None:
             continue
         if parses:
-            found[row["id"]] = matcher(source)
+            found[row["id"]] = lines_of(matcher(source))
         elif row["strength"] == "strong":
             found[row["id"]] = set()
     return found
