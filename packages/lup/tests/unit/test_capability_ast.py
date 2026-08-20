@@ -182,3 +182,93 @@ def test_abstract_overloads_count_as_one_capability_operation() -> None:
     )
 
     assert findings == []
+
+
+def test_model_union_base_is_not_judged_as_a_capability() -> None:
+    """A `BaseModel + ABC` base declares a closed set of kinds, not a seam.
+
+    Its declining answers are the shape that lets a walk reach a kind written
+    after it, and are exactly what the capability rule refuses on a seam — so
+    reading them as concrete behaviour would report the pattern the
+    architecture asks for.
+    """
+    findings = audit_capabilities(
+        [
+            source(
+                "from abc import ABC, abstractmethod\n"
+                "from pydantic import BaseModel\n"
+                "class Part(BaseModel, ABC):\n"
+                "    @abstractmethod\n"
+                "    def spell(self) -> str: ...\n"
+                "    @property\n"
+                "    def text_payload(self) -> str | None:\n"
+                "        return None\n"
+                "    def invocation(self) -> str | None:\n"
+                "        return None\n"
+            )
+        ]
+    )
+
+    assert findings == []
+
+
+def test_settings_union_base_is_not_judged_as_a_capability() -> None:
+    findings = audit_capabilities(
+        [
+            source(
+                "from abc import ABC, abstractmethod\n"
+                "from pydantic_settings import BaseSettings\n"
+                "class Tuning(BaseSettings, ABC):\n"
+                "    @abstractmethod\n"
+                "    def resolve(self) -> str: ...\n"
+                "    def helper(self) -> None: pass\n"
+            )
+        ]
+    )
+
+    assert findings == []
+
+
+def test_variant_of_a_model_union_is_not_pulled_in_as_a_capability() -> None:
+    """A variant leaving a member unanswered is still a variant, not a seam."""
+    findings = audit_capabilities(
+        [
+            source(
+                "from abc import ABC, abstractmethod\n"
+                "from pydantic import BaseModel\n"
+                "class Part(BaseModel, ABC):\n"
+                "    @abstractmethod\n"
+                "    def spell(self) -> str: ...\n"
+                "    @abstractmethod\n"
+                "    def audited(self) -> str: ...\n"
+                "class LocatedPart(Part):\n"
+                "    def spell(self) -> str:\n"
+                "        return ''\n"
+            )
+        ]
+    )
+
+    assert findings == []
+
+
+def test_a_seam_declaring_only_abc_is_still_judged() -> None:
+    """Excluding unions must not stand a real capability down."""
+    findings = audit_capabilities(
+        [
+            source(
+                "from abc import ABC, abstractmethod\n"
+                "from pydantic import BaseModel\n"
+                "class Declaration(BaseModel, ABC):\n"
+                "    @abstractmethod\n"
+                "    def spell(self) -> str: ...\n"
+                "    def helper(self) -> None: pass\n"
+                "class Renderer(ABC):\n"
+                "    @abstractmethod\n"
+                "    def render(self) -> str: ...\n"
+                "    def helper(self) -> None: pass\n"
+            )
+        ]
+    )
+
+    assert len(findings) == 1
+    assert "capability Renderer has concrete callable helper" in findings[0].message

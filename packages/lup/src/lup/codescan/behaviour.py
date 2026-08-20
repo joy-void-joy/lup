@@ -64,7 +64,6 @@ from lup.codescan.project import (
 # directive and every deny message name it by
 RULE_ID = "model-free-function"
 
-# lup: ignore[constant-declaration] — the import path pydantic publishes
 MODEL_BASES = {"pydantic.BaseModel"}
 """Roots whose project-defined descendants count as models we declare."""
 

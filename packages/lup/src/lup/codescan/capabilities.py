@@ -9,6 +9,13 @@ concrete behavior, no multiple inheritance. The ``lup-devtools dev check
 --antipatterns`` auditor runs :func:`audit_capabilities` across the tree; the
 anti-pattern registry re-exports the rule id so deny messages name it.
 
+The scope is capability seams, not every abstract base — a distinction
+``docs/patterns.md`` already draws in prose and this rule reads off the base
+list. A union whose subtypes answer for themselves is Closed By Construction
+and is governed by ``own-model-dispatch``; it declares ``BaseModel`` beside
+``ABC`` and is not judged here. Nothing else separates the two shapes
+syntactically, which is why the declaration has to say which one it is.
+
 The tree reading, name resolution, and suppression grammar this rule works
 from live in :mod:`lup.codescan.project`, which it shares with
 :mod:`lup.codescan.dispatch`.
@@ -21,14 +28,20 @@ from lup.codescan.project import (
     RuleViolation,
     audit_suppressions,
     build_symbol_index,
+    descendants_of,
 )
 
 # lup: ignore[constant-declaration] — the rule's own identity, what a typed
 # directive and every deny message name it by
 RULE_ID = "abc-capability"
 
+MODEL_BASES = {"pydantic.BaseModel", "pydantic_settings.BaseSettings"}
+"""Roots whose project-defined descendants are variant unions, not capabilities."""
 
-def capability_names(symbols: dict[str, ClassSymbol]) -> set[str]:
+
+def capability_names(
+    symbols: dict[str, ClassSymbol], model_bases: set[str] = MODEL_BASES
+) -> set[str]:
     """Find direct and invalid inherited capability ABC declarations.
 
     A subclass that leaves one of its base capability's abstract operations
@@ -36,6 +49,15 @@ def capability_names(symbols: dict[str, ClassSymbol]) -> set[str]:
     ``@abstractmethod`` decorator.  The project index therefore computes the
     effective abstract member set instead of looking only at methods declared
     in the subclass body.
+
+    A class that also descends from ``pydantic.BaseModel`` is a variant union
+    rather than a capability, and is excluded. The two shapes want opposite
+    things from a base: a capability holds no concrete behaviour, because
+    shared behaviour belongs on the surface that composes it; a union's base
+    carries declining answers on purpose, because that is what lets a walk
+    reach a kind written after it. Reading the base list is what tells them
+    apart — ``BaseModel`` and ``ABC`` together say *closed set of kinds*,
+    ``ABC`` alone says *seam an implementation fills*.
     """
     effective_cache: dict[str, set[str]] = {}
 
@@ -62,10 +84,11 @@ def capability_names(symbols: dict[str, ClassSymbol]) -> set[str]:
         effective_cache[name] = result
         return result
 
+    unions = descendants_of(symbols, model_bases)
     capabilities = {
         name
         for name, symbol in symbols.items()
-        if "abc.ABC" in symbol.bases or "ABC" in symbol.bases
+        if ("abc.ABC" in symbol.bases or "ABC" in symbol.bases) and name not in unions
     }
     changed = True
     while changed:
@@ -74,6 +97,7 @@ def capability_names(symbols: dict[str, ClassSymbol]) -> set[str]:
             for name, symbol in symbols.items()
             if any(base in capabilities for base in symbol.bases)
             and effective_abstracts(name)
+            and name not in unions
         }
         expanded = capabilities | inherited
         changed = expanded != capabilities
