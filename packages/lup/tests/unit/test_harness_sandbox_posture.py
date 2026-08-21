@@ -1,0 +1,210 @@
+"""What a launch claims about the boundary it is opening a session behind.
+
+Three failures live here, and every one of them was silent. A probe spelled
+one flag for two programs and reported a working socat broken on every host.
+A launch that was about to hand the session a container printed a verdict
+about a sandbox it was not going to use. And a client that answers for one
+engine while driving another started containers that could not fork and could
+not write to the checkout they were opened on.
+
+None of the three raised anything. That is what these hold still: each asserts
+the shape of an argument list or an environment, because that is where the
+claim lives before anything has run.
+"""
+
+from pathlib import Path
+
+from lup.devtools.harness.launch import (
+    apply_sandbox_environment,
+    claude_sandbox_arguments,
+    codex_sandbox_arguments,
+)
+from lup.harness.image import ContainerClient, Image, detected_client
+from lup.harness.models import HookSandbox, HookSet, Plugin
+from lup.harness.requirements import LostCapability, Requirement, Run
+from lup.harness.toolchain import bubblewrap_requirement, socat_requirement
+from lup.types import EnvVars
+
+
+def confining_plugin() -> Plugin:
+    """A plugin declaring an OS sandbox, which is what all of this keys off."""
+    return Plugin(
+        id="plugin.probe",
+        name="probe",
+        description="a plugin declaring a boundary",
+        version="0.0.0",
+        marketplace="probe",
+        skills=[],
+        agents=[],
+        hooks=HookSet(id="hooks.probe", policy_ids=[], sandbox=HookSandbox()),
+    )
+
+
+def test_each_sandbox_dependency_carries_its_own_version_flag() -> None:
+    """socat has no `--version`, and a prober that assumed one broke everywhere.
+
+    Asked the long way socat prints `E unknown option "--version"` and exits
+    1, so a launcher that spelled one flag for every tool it checked read a
+    working socat as a broken one -- on every host, not on an unlucky one.
+    The flag belongs to the program, so it is declared beside the program.
+    """
+    assert socat_requirement().exercise == Run(command=["socat", "-V"])
+    assert bubblewrap_requirement().exercise == Run(command=["bwrap", "--version"])
+
+
+def test_a_contained_launch_probes_nothing_and_claims_nothing() -> None:
+    """The container is the boundary, so the flag would change no verdict.
+
+    `LUP_SANDBOX_ACTIVE` says the launcher verified an OS sandbox. A contained
+    session has one already and the kernel reads it from the image's own
+    `LUP_CONTAINED`, so probing here could only produce a sentence about a
+    boundary nothing was going to consult -- and on a failed probe, the
+    sentence was `deny lattice stays active` for a session whose lattice was
+    about to stand down behind the container.
+    """
+    environment: EnvVars = {}
+    refuses = Requirement(
+        capability="never",
+        purpose="a probe that cannot pass",
+        exercise=Run(command=["definitely-not-a-program-on-this-host"]),
+        absence=LostCapability(capability="OS confinement"),
+    )
+
+    apply_sandbox_environment(
+        confining_plugin(), environment, "claude", [refuses], contained=True
+    )
+
+    assert "LUP_SANDBOX_ACTIVE" not in environment
+
+
+def test_an_uncontained_launch_vouches_for_a_boundary_that_answers() -> None:
+    """The regression this file exists for, stated as the passing case.
+
+    Nothing raised when the probe was wrong. The flag simply never got set,
+    and every session on every host carried the deny lattice for want of a
+    hyphen. So the assertion that matters is the positive one: a tool that
+    answers has to reach the environment as a boundary the launch vouched
+    for.
+    """
+    environment: EnvVars = {}
+    answers = Requirement(
+        capability="always",
+        purpose="a probe that passes anywhere",
+        exercise=Run(command=["echo", "ok"]),
+        absence=LostCapability(capability="OS confinement"),
+    )
+
+    apply_sandbox_environment(
+        confining_plugin(), environment, "claude", [answers], contained=False
+    )
+
+    assert environment["LUP_SANDBOX_ACTIVE"] == "1"
+
+
+def test_an_uncontained_launch_still_refuses_to_vouch_for_a_broken_tool() -> None:
+    """The probe is not gone, only asked where its answer decides something."""
+    environment: EnvVars = {}
+    refuses = Requirement(
+        capability="never",
+        purpose="a probe that cannot pass",
+        exercise=Run(command=["definitely-not-a-program-on-this-host"]),
+        absence=LostCapability(capability="OS confinement"),
+    )
+
+    apply_sandbox_environment(
+        confining_plugin(), environment, "claude", [refuses], contained=False
+    )
+
+    assert "LUP_SANDBOX_ACTIVE" not in environment
+
+
+def test_a_contained_claude_session_turns_its_own_sandbox_off() -> None:
+    """Measured: bubblewrap cannot mount a fresh /proc in that container.
+
+    The settings artifact keeps saying `enabled: true`, because that is the
+    right answer for the uncontained launch the same file serves. Which one
+    this launch is, is the launch's to say.
+    """
+    arguments = claude_sandbox_arguments(confining_plugin(), contained=True)
+
+    assert arguments[0] == "--settings"
+    assert '"enabled": false' in arguments[1]
+
+
+def test_a_contained_codex_session_keeps_the_route_to_its_proxy() -> None:
+    """`workspace-write` turns network access off, which is fatal here.
+
+    A contained session reaches the world through one HTTP proxy on an
+    internal network. An envelope that cut network access would take that
+    route away, so the container's own isolation is the boundary and Codex is
+    told to stand down -- which is what its documentation prescribes once a
+    container provides the isolation.
+    """
+    environment: EnvVars = {}
+
+    arguments = codex_sandbox_arguments(
+        confining_plugin(), environment, [], contained=True
+    )
+
+    assert arguments == ["--sandbox", "danger-full-access"]
+    assert "LUP_SANDBOX_ACTIVE" not in environment
+
+
+def test_a_client_that_cannot_drive_its_server_is_passed_over() -> None:
+    """A Docker CLI on a podman socket cannot send the flag podman needs.
+
+    Both answer, so taking the first would take the one that cannot start a
+    usable session: podman remaps uids without `--userns=keep-id`, and a
+    Docker client rejects that flag before the daemon sees it.
+    """
+    versions = {"docker": "Docker version 29.7.2", "podman": "podman version 6.1.0"}
+    servers = {"docker": '[{"Name":"Podman Engine"}]', "podman": ""}
+
+    found = detected_client(ask=versions.__getitem__, ask_server=servers.__getitem__)
+
+    assert found is not None
+    assert found.binary == "podman"
+    assert found.engine().identity_arguments(1000, 1000)[-1] == "--userns=keep-id"
+
+
+def test_the_only_client_is_returned_even_when_it_cannot_drive_its_server() -> None:
+    """So the refusal names DOCKER_HOST rather than a host with no runtime.
+
+    Reporting absence here would send an operator to install the thing they
+    already have, which is the least useful true-sounding sentence available.
+    """
+    found = detected_client(
+        candidates=("docker",),
+        ask=lambda _: "Docker version 29.7.2",
+        ask_server=lambda _: '[{"Name":"Podman Engine"}]',
+    )
+
+    assert found is not None
+    assert not found.drives_its_server()
+    assert "DOCKER_HOST" in found.consequence()
+
+
+def test_a_session_container_is_given_a_process_bound_it_can_name() -> None:
+    """Absent the flag, that Docker-to-podman path is given `pids.max=1`.
+
+    A container that may hold one process cannot fork, so the entrypoint dies
+    on its first `mkdir` with `fork: Resource temporarily unavailable` and
+    nothing in the message names a limit.
+    """
+    arguments = Image().run_arguments(Path("/checkout"), 1000, 1000)
+
+    assert "--pids-limit" in arguments
+    assert arguments[arguments.index("--pids-limit") + 1] == "4096"
+
+
+def test_an_image_no_longer_installs_a_sandbox_it_cannot_start() -> None:
+    """Those two packages bought silence about a boundary that was not there."""
+    assert Image().inner_sandbox == []
+
+
+def test_a_client_and_the_engine_behind_it_are_read_separately() -> None:
+    """The podman-docker package is why the client is still asked at all."""
+    renamed = ContainerClient(binary="docker", client="podman", server="podman")
+
+    assert renamed.drives_its_server()
+    assert renamed.engine().identity_arguments(1, 1)[-1] == "--userns=keep-id"

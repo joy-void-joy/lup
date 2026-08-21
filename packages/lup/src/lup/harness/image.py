@@ -334,19 +334,24 @@ class Image(BaseModel, frozen=True):
         ),
     )
     inner_sandbox: list[str] = Field(
-        default=["bubblewrap", "socat"],
+        default=[],
         description=(
             "What the runtime's own sandbox needs in order to run inside "
-            "this one. Measured: without these the CLI prints 'Sandbox "
-            "disabled ... Commands will run WITHOUT sandboxing' and "
-            "continues. Under a real container boundary that warning is "
-            "true and harmless, which is exactly the problem -- a boundary "
-            "warning that fires every launch on purpose is one operators "
-            "learn to skip, and the next one will be real. Installing them "
-            "keeps the inner boundary and silences a cry of wolf. Emptying "
-            "this field is a posture a project may take, and it should then "
-            "turn the runtime's sandbox off by name rather than leave it "
-            "failing loudly"
+            "this one. Empty, because the launcher turns that sandbox off by "
+            "name for a contained session rather than leaving it to fail, "
+            "which is the posture this field's own earlier reasoning named "
+            "as the alternative to filling it. Filling it was tried and "
+            "measured on both halves of the claim. The false half: "
+            "bubblewrap cannot mount a fresh ``/proc`` in an unprivileged "
+            "container -- ``Can't mount proc on /newroot/proc: Operation not "
+            "permitted`` -- so the inner boundary did not stand up. The true "
+            "half: their presence silenced the CLI's 'Commands will run "
+            "WITHOUT sandboxing' notice, so two packages bought quiet about "
+            "a boundary that was not there, which is the cry of wolf they "
+            "were installed to prevent, moved rather than stopped. A project "
+            "that means to keep the inner sandbox fills this and sets the "
+            "runtime's own nested-sandbox option, and should read what that "
+            "option costs before it does"
         ),
     )
     project_environment: str = Field(

@@ -35,13 +35,12 @@ from lup.harness.environment import non_interactive_environment
 from lup.harness.models import NativeName, Plugin, Resumption
 from lup.harness.requirements import (
     Finding,
-    LostCapability,
     Manifest,
     Requirement,
-    Run,
     refused,
 )
 from lup.harness.process import LocalProcessLauncher
+from lup.harness.toolchain import bubblewrap_requirement, socat_requirement
 from lup.telemetry.journal import (
     ArgvRedaction,
     KeyRedaction,
@@ -463,7 +462,8 @@ def apply_sandbox_environment(
     plugin: Plugin,
     environment: EnvVars,
     label: str,
-    required_tools: list[str],
+    required_tools: list[Requirement],
+    contained: bool = False,
 ) -> None:
     """Export LUP_SANDBOX_ACTIVE when the declared sandbox can actually run.
 
@@ -471,26 +471,26 @@ def apply_sandbox_environment(
     exactly when the launch verified the OS boundary; without it the deny
     lattice keeps carrying the escalation recipe.
 
-    Verified by exercising each tool rather than by finding it on PATH. The
-    two answers differ exactly where it matters: a confinement binary that is
-    installed and cannot start a namespace on this kernel is present and
-    useless, and a flag set on its presence tells every dispatcher downstream
-    to relax into a boundary that will not be there. Absence and breakage
-    both leave the lattice standing, which is the safe direction, and the
-    message says which of the two was found rather than only that one was.
+    Asked only of an uncontained launch. A contained one has a boundary
+    already, and the kernel reads it from the image's own ``LUP_CONTAINED``
+    rather than from anything a launcher passes -- ``boundary = sandboxed or
+    contained``, so the flag would change no verdict. Probing anyway printed
+    a sandbox verdict about a session that was not going to rely on it, and
+    on a failed probe printed ``deny lattice stays active`` for a session
+    whose lattice was about to stand down behind the container. Saying
+    nothing is the honest report, and the container's own line says what the
+    boundary is.
+
+    Each tool carries its own exercise rather than being named here and
+    probed with a flag chosen by this function. That is not tidiness: the
+    one flag this spelled for every tool was ``--version``, socat has no
+    such option and exits 1 on it, and the OS boundary was therefore
+    reported unavailable on every host in the world.
     """
     hooks = plugin.hooks
-    if hooks is None or hooks.sandbox is None:
+    if contained or hooks is None or hooks.sandbox is None:
         return
-    findings = [
-        Requirement(
-            capability=tool,
-            purpose="the OS boundary this launch claims",
-            exercise=Run(command=[tool, "--version"]),
-            absence=LostCapability(capability="OS confinement"),
-        ).check(environment)
-        for tool in required_tools
-    ]
+    findings = [tool.check(environment) for tool in required_tools]
     unusable = [finding for finding in findings if not finding.working]
     if unusable:
         for finding in unusable:
@@ -514,21 +514,41 @@ CODEX_SANDBOX_OVERRIDES = (
 
 
 def codex_sandbox_arguments(
-    plugin: Plugin, environment: EnvVars, extra_args: list[str]
+    plugin: Plugin,
+    environment: EnvVars,
+    extra_args: list[str],
+    contained: bool = False,
 ) -> list[str]:
     """Compose the interactive Codex envelope that LUP_SANDBOX_ACTIVE vouches for.
 
-    The launcher establishes the boundary it announces: an explicit
-    workspace-write sandbox on the Codex command line, mirroring how the
-    Claude settings artifact compiles the same declaration into an OS wall.
-    Path-level write and credential denials have no Codex equivalent, and
-    neither does taking one command out of the envelope, so the envelope is
-    the declaration's strict subset (network stays off). The dispatcher still
-    reads the exclusions, judging those commands as though nothing confined
-    them — which is the strict direction here too, since an envelope with no
-    network is not a boundary they would have survived either. When the
-    caller supplies its own sandbox flag the launcher vouches for nothing:
-    the flag stays unset and the deny lattice keeps the escalation recipe.
+    Uncontained, the launcher establishes the boundary it announces: an
+    explicit workspace-write sandbox on the Codex command line, mirroring how
+    the Claude settings artifact compiles the same declaration into an OS
+    wall. Path-level write and credential denials have no Codex equivalent,
+    and neither does taking one command out of the envelope, so the envelope
+    is the declaration's strict subset (network stays off). The dispatcher
+    still reads the exclusions, judging those commands as though nothing
+    confined them — which is the strict direction here too, since an envelope
+    with no network is not a boundary they would have survived either. When
+    the caller supplies its own sandbox flag the launcher vouches for
+    nothing: the flag stays unset and the deny lattice keeps the escalation
+    recipe.
+
+    Contained, that same envelope is wrong in a way that has nothing to do
+    with strictness: ``workspace-write`` turns network access off, and a
+    contained session's only route out is an HTTP proxy on an internal
+    network. The strict subset would therefore cut the session off from the
+    egress boundary built for it, and the Codex documentation says so
+    directly for this case -- configure the container to provide the
+    isolation, then run with ``danger-full-access`` inside it. This is the
+    counterpart of Claude's ``enabled: false``, and it is what "every
+    runtime, in the same change" means for a posture: one concept, each
+    runtime's own word for it.
+
+    LUP_SANDBOX_ACTIVE stays unset either way here, because a contained
+    session does not need it -- the kernel reads the container from the
+    image's own ``LUP_CONTAINED``, and a boundary is a boundary whether the
+    launcher vouched for it or not.
     """
     hooks = plugin.hooks
     if hooks is None or hooks.sandbox is None:
@@ -544,6 +564,12 @@ def codex_sandbox_arguments(
             "deny lattice stays active"
         )
         return []
+    if contained:
+        typer.echo(
+            "codex sandbox: off inside the container — "
+            "the container is the boundary, and its proxy is the way out"
+        )
+        return ["--sandbox", "danger-full-access"]
     environment["LUP_SANDBOX_ACTIVE"] = "1"
     typer.echo(
         "codex sandbox: workspace-write envelope — "
@@ -623,14 +649,14 @@ def codex_resume_arguments(resume: Resumption) -> list[str]:
     return ["resume", "--last"] if resume.latest else []
 
 
-def claude_sandbox_arguments(plugin: Plugin) -> list[str]:
-    """Widen the Claude sandbox's writable set over the same sibling tree/.
+def claude_sandbox_arguments(plugin: Plugin, contained: bool = False) -> list[str]:
+    """Say what this launch means the Claude sandbox to be, in one settings merge.
 
-    Claude roots writes at the working directory just as Codex does, so a
-    second checkout is read-only to every command a session runs — and
-    running the toolchain over one is ordinary work here, which is why the
-    symptom arrives as pytest failing to write a cache and `ruff format`
-    refusing to save. Neither error names a sandbox.
+    Uncontained, that is a widening: Claude roots writes at the working
+    directory just as Codex does, so a second checkout is read-only to every
+    command a session runs — and running the toolchain over one is ordinary
+    work here, which is why the symptom arrives as pytest failing to write a
+    cache and `ruff format` refusing to save. Neither error names a sandbox.
 
     The path is this machine's, so it is resolved at launch and passed as
     settings rather than declared: an artifact carrying an absolute path
@@ -639,10 +665,34 @@ def claude_sandbox_arguments(plugin: Plugin) -> list[str]:
     surfaces document this key differently — arrays that merge across
     scopes, values that override per session — and a list carrying both is
     the same list under either reading.
+
+    Contained, it is an *off* switch, and the artifact still says ``enabled:
+    true`` because that is the right answer for the uncontained launch the
+    same file serves. Two reasons to turn it off, one measured and one
+    documented. Measured: in an unprivileged container bubblewrap cannot
+    mount a fresh ``/proc`` -- ``Can't mount proc on /newroot/proc:
+    Operation not permitted`` -- so the inner sandbox does not start, and
+    the packages installed to keep it quiet bought silence rather than a
+    boundary. Documented: Anthropic's remedy for that is
+    ``enableWeakerNestedSandbox``, which they describe as considerably
+    weaker and appropriate only where an outer container is already the
+    boundary -- and where that is true, the honest posture is the container
+    alone rather than a second wall that has to be weakened to stand up.
+
+    What is lost is narrower than it looks. The credential read denials name
+    paths this container never mounts; the human-owned write denials are
+    still surfaced as approvals by the semantic policy; ``excludedCommands``
+    was already inert here, because the container never agreed to leave any
+    command alone. The domain allowlist is not a wall either -- it
+    pre-approves rather than refuses, and ``strictAllowlist`` has no effect
+    from a repository's own settings — and what does refuse is the egress
+    proxy, which is untouched by this.
     """
     hooks = plugin.hooks
     if hooks is None or hooks.sandbox is None:
         return []
+    if contained:
+        return ["--settings", json.dumps({"sandbox": {"enabled": False}})]
     try:
         tree = get_tree_dir()
     except (typer.Exit, SystemExit):
@@ -766,13 +816,19 @@ def launch_claude(
     arguments.extend(
         [
             *[flag for directory in named for flag in ("--plugin-dir", str(directory))],
-            *claude_sandbox_arguments(plugin),
+            *claude_sandbox_arguments(plugin, contained=not unsandboxed),
             *(mode.command_words("claude") if mode is not None else []),
             *extra_args,
         ]
     )
     environment = non_interactive_environment(os.environ)  # lup: ignore[os-environ]
-    apply_sandbox_environment(plugin, environment, "claude", ["bwrap", "socat"])
+    apply_sandbox_environment(
+        plugin,
+        environment,
+        "claude",
+        [bubblewrap_requirement(), socat_requirement()],
+        contained=not unsandboxed,
+    )
     # A name no origin answers to reaches here from an explicit --profile, and
     # from an active selection whose profile has since gone; both are the
     # caller's to fix, so neither should arrive as a traceback.
@@ -846,7 +902,9 @@ def launch_codex(
     if not ready_to_open(composition, generate_only):
         return
     environment = non_interactive_environment(os.environ)  # lup: ignore[os-environ]
-    envelope = codex_sandbox_arguments(plugin, environment, extra_args)
+    envelope = codex_sandbox_arguments(
+        plugin, environment, extra_args, contained=not unsandboxed
+    )
     store = CodexWorktreeHomeStore()
     home = select_codex_home(codex_home, environment, project_root(), profile, store)
     selected_home = home.path

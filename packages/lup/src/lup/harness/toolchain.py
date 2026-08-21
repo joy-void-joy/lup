@@ -202,6 +202,52 @@ def github_requirement(
     )
 
 
+def bubblewrap_requirement(
+    where: Side = "host",
+    install: list[Package] = [Package(name="bubblewrap")],
+) -> Requirement:
+    """The unprivileged confinement a runtime's own Linux sandbox is built on.
+
+    Exercised rather than looked up on PATH, because the two answers differ
+    exactly where it matters: a confinement binary that is installed and
+    cannot start a namespace on this kernel is present and useless, and a
+    launcher that vouched for it on presence alone would tell every
+    dispatcher downstream to relax into a boundary that is not there.
+    """
+    return Requirement(
+        capability="bwrap",
+        purpose="the OS boundary an uncontained session's runtime confines with",
+        where=where,
+        exercise=Run(command=["bwrap", "--version"]),
+        absence=LostCapability(capability="OS confinement"),
+        install=install,
+    )
+
+
+def socat_requirement(
+    where: Side = "host",
+    install: list[Package] = [Package(name="socat")],
+) -> Requirement:
+    """The relay that carries a sandboxed command's traffic to its proxy.
+
+    ``-V`` rather than ``--version``, which socat does not have: asked the
+    long way it prints ``E unknown option "--version"`` and exits 1. A prober
+    that spelled one flag for every program it checked read that as a broken
+    socat on every host in the world, and the OS boundary was reported
+    unavailable on machines where it was installed and working -- which is
+    the whole argument for a probe travelling with the program it probes
+    rather than with the code that calls for it.
+    """
+    return Requirement(
+        capability="socat",
+        purpose="the OS boundary an uncontained session's runtime confines with",
+        where=where,
+        exercise=Run(command=["socat", "-V"]),
+        absence=LostCapability(capability="OS confinement"),
+        install=install,
+    )
+
+
 def bun_requirement(
     where: Side = "image",
     install: list[Package] = [Package(name="bun")],
