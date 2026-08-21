@@ -30,6 +30,7 @@ from lup.adapters.codex.harness_runtime import (
 from lup.adapters.codex.transcripts import CodexTranscripts
 from lup.harness.environment import non_interactive_environment
 from lup.harness.models import NativeName, Plugin, Resumption
+from lup.harness.notice import Notice
 from lup.harness.requirements import (
     Finding,
     LostCapability,
@@ -386,7 +387,10 @@ def start_harness_transcript(
     )
     diagnostics = capture_watcher_diagnostics(trace_path.parent)
     watcher.start()
-    typer.echo(f"{provider} observable transcript: {trace_path}")
+    Notice(
+        text=f"{provider} observable transcript: {trace_path}",
+        urgency="artifact",
+    ).say()
     return HarnessTranscript(journal=journal, watcher=watcher, diagnostics=diagnostics)
 
 
@@ -405,7 +409,10 @@ def runtime_preflight(composition: NativeHarnessComposition) -> None:
     evidence = composition.readiness()
     for item in evidence:
         state = "ready" if item.supported else "missing"
-        typer.echo(f"{target} {item.capability}: {state} ({item.version})")
+        Notice(
+            text=f"{target} {item.capability}: {state} ({item.version})",
+            urgency="ready" if item.supported else "refusal",
+        ).say()
     if any(not item.supported for item in evidence):
         raise typer.BadParameter(f"{target} runtime preflight failed")
     report_requirements(composition.recipe.source.requirements)
@@ -429,8 +436,8 @@ def report_requirements(manifest: Manifest, setting_up: bool = False) -> list[Fi
     environ: EnvVars = dict(os.environ)  # lup: ignore[os-environ]
     findings = manifest.check(environ, setting_up=setting_up)
     for finding in findings:
-        for line in finding.lines():
-            typer.echo(line)
+        for notice in finding.notices():
+            notice.say()
     stopping = refused(findings)
     if stopping:
         raise typer.BadParameter(
@@ -592,7 +599,10 @@ def announce_relaxed_rules(relaxed: bool, plugin: Plugin) -> None:
     if not relaxed:
         return
     retired = len(plugin.hooks.rules.retired if plugin.hooks is not None else [])
-    typer.echo(f"anti-patterns retired for this session: {retired} rules")
+    Notice(
+        text=f"anti-patterns retired for this session: {retired} rules",
+        urgency="warning",
+    ).say()
     typer.echo(
         "`dev check --antipatterns` still holds this repository to them; run "
         "`lup-devtools harness generate all` before committing, or the "
