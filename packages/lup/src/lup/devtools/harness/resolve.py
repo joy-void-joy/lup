@@ -1607,10 +1607,26 @@ def run_resolve(
         # rather than about any concern. Discovering it per worker instead
         # turned one environmental fault into an exception group of concern
         # failures and burned every lease the run had taken.
-        fault = (
-            selected_config_home(session_environment).configuration_fault()
-            if adapter == "claude"
-            else None
+        home = (
+            selected_config_home(session_environment) if adapter == "claude" else None
+        )
+        # Two facts about the same home, established before anything is
+        # leased: whether its document can be read, and whether a session
+        # opened under it would keep its shell. The second is the one a run
+        # used to discover by losing Bash in every worker at once, with each
+        # failure naming a read-only filesystem and none of them naming the
+        # boundary that made it one.
+        fault = next(
+            (
+                found
+                for found in (
+                    []
+                    if home is None
+                    else [home.configuration_fault(), home.shell_fault()]
+                )
+                if found is not None
+            ),
+            None,
         )
         if fault is not None:
             raise typer.BadParameter(fault)
@@ -1629,8 +1645,8 @@ def run_resolve(
                 for path in (declared.writable_paths if declared is not None else [])
             ]
 
-        # lup: Every session opened here loses Bash entirely. A session launched
-        # from inside sandboxed Bash cannot create its own
+        # lup: solved: Every session opened here loses Bash entirely. A session
+        # launched from inside sandboxed Bash cannot create its own
         # `~/.claude/session-env/<id>`, so each shell call dies on `EROFS:
         # read-only file system, mkdir`. The directory holds 508 entries, all
         # made at startup *outside* the sandbox, which is why an interactive

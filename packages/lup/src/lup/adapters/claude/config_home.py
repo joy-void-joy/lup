@@ -31,6 +31,13 @@ from lup.types import EnvVars, JsonObject
 CLAUDE_CONFIG_FILE = ".config.json"
 """What Claude Code calls its configuration document inside a config home."""
 
+CLAUDE_SESSION_ENV = "session-env"
+"""Where it keeps one entry per session's per-call environment.
+
+The runtime's own name for it, and the directory it carves out of the
+filesystem grants it computes — which is why a session that cannot write
+here loses every shell call to an error naming no boundary."""
+
 CLAUDE_HOME_DOCUMENT = ".claude.json"
 """What it calls the same document when no config home is named: a file in
 the user's home directory rather than an entry inside ``~/.claude``."""
@@ -85,6 +92,42 @@ class ClaudeConfigHome(BaseModel, frozen=True):
             load_document(self.document)
         except ClaudeConfigUnreadable as error:
             return f"{error}. {restoration_advice(self.directory)}"
+        return None
+
+    def shell_fault(self) -> str | None:
+        """Why a session opened under this home would lose every shell call.
+
+        A session keeps each Bash call's environment under ``session-env`` and
+        makes its own entry at startup. The runtime carves that directory out
+        of its own filesystem grants, so a launcher that is itself confined
+        opens sessions whose every shell call dies on
+        ``EROFS: read-only file system, mkdir`` — with nothing in that error
+        naming a boundary, which is the failure a session then debugs as a
+        broken repository.
+
+        Measured rather than inferred, twice over. The carve-out survives a
+        grant: a write here is refused inside the very repository root the
+        same declaration grants, so widening the declaration is not the
+        remedy. And the variable saying a sandbox is running is inherited by a
+        command placed outside it, so it answers a different question than
+        this one. Writing is the only thing that establishes writing.
+
+        Claude's alone: Codex keeps no per-call environment directory, so
+        there is nothing there to be carved out and nothing here to check.
+        """
+        probe = self.directory / CLAUDE_SESSION_ENV / "lup-writable-probe"
+        try:
+            probe.mkdir(parents=True)
+            probe.rmdir()
+        except OSError as error:
+            return (
+                f"{probe.parent} cannot be written ({error.strerror}), so every "
+                "shell call in a session opened here would fail as a read-only "
+                "filesystem. That is the boundary rather than the repository: "
+                "the runtime carves this directory out of its own grants, so "
+                "widening the declaration does not reach it. Open the session "
+                "from outside the sandbox instead."
+            )
         return None
 
 

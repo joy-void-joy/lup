@@ -11,6 +11,8 @@ from lup.adapters.claude.config_home import (
     CLAUDE_BACKUP_DIR,
     CLAUDE_CONFIG_FILE,
     CLAUDE_HOME_LAYOUT,
+    CLAUDE_SESSION_ENV,
+    ClaudeConfigHome,
     ClaudeConfigUnreadable,
     load_document,
     record_trust,
@@ -314,3 +316,37 @@ def test_a_readable_document_is_no_fault(tmp_path: Path) -> None:
     save_document(home.document, {})
 
     assert home.configuration_fault() is None
+
+
+def test_a_home_that_cannot_keep_a_session_environment_says_which_boundary(
+    tmp_path: Path,
+) -> None:
+    """The failure a run used to discover by losing Bash in every worker at once.
+
+    A session keeps each shell call's environment under `session-env` and
+    makes its own entry at startup, so a home that refuses a write there
+    opens sessions whose every Bash call dies as a read-only filesystem — an
+    error naming no boundary, which is then debugged as a broken repository.
+
+    Established by writing rather than by reading a permission or an
+    environment variable. The runtime carves this directory out of grants it
+    otherwise honours, and the variable saying a sandbox is running is
+    inherited by a command placed outside it, so neither tells a carved-out
+    path from a granted one.
+    """
+    home = ClaudeConfigHome(
+        directory=tmp_path / "home", document=tmp_path / "home" / CLAUDE_CONFIG_FILE
+    )
+    assert home.shell_fault() is None
+
+    refused = tmp_path / "home" / CLAUDE_SESSION_ENV
+    refused.chmod(0o500)
+    try:
+        fault = home.shell_fault()
+    finally:
+        refused.chmod(0o700)
+
+    assert fault is not None
+    assert CLAUDE_SESSION_ENV in fault
+    assert "boundary rather than the repository" in fault
+    assert "widening the declaration does not reach it" in fault
