@@ -330,3 +330,95 @@ def test_a_dead_proxy_is_read_before_it_is_cleared(
 
     assert any("Bungled" in item.text for item in said)
     assert [argv[1] for argv in issued] == ["inspect", "logs", "rm"]
+
+
+def test_the_state_asks_the_proxy_what_it_can_resolve(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A session resolving the proxy says nothing about the proxy resolving.
+
+    The two happen on different networks and only one of them is the
+    session's. Measured: `egress proxy resolves: working` beside a CONNECT
+    answered `503`, which is squid saying it could not reach the origin —
+    a failure entirely downstream of the alias everything had been about.
+    """
+
+    def spelled(binary: str):
+        def call(*words: str, **_: object) -> str:
+            if words[0] == "exec" and "getent" in words:
+                return "160.79.104.10   api.anthropic.com"
+            if words[0] == "exec":
+                return "nameserver 10.89.0.1\nsearch dns.podman"
+            if "DNSEnabled" in words:
+                return "true"
+            if words[0] == "inspect" and "{{.State.Status}}" in words:
+                return "running"
+            return "lup-egress-net-feat egress " if words[0] == "inspect" else ""
+
+        return call
+
+    monkeypatch.setattr(sh, "Command", spelled)
+    state = contained.egress_state(SessionEgress(), "feat", Docker())
+
+    assert state.reached
+    assert state.resolver == "10.89.0.1"
+    assert "api.anthropic.com" in state.upstream
+
+
+def test_a_proxy_that_resolves_nothing_is_reported_as_such(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The case a 503 on CONNECT actually poses, told apart from a denial.
+
+    Squid answers a request it refused with 403 and one it could not complete
+    with 503, and the second covers both a name it could not resolve and an
+    origin it could not reach. Only the proxy itself can say which.
+    """
+
+    def spelled(binary: str):
+        def call(*words: str, **_: object) -> str:
+            if words[0] == "exec" and "getent" in words:
+                # getent exits 2 on a name it cannot find and says nothing,
+                # which is the case this is about.
+                raise sh.ErrorReturnCode_2("getent", b"", b"")
+            if words[0] == "exec":
+                return "nameserver 10.89.0.1"
+            if "DNSEnabled" in words:
+                return "true"
+            if words[0] == "inspect" and "{{.State.Status}}" in words:
+                return "running"
+            return ""
+
+        return call
+
+    monkeypatch.setattr(sh, "Command", spelled)
+    state = contained.egress_state(SessionEgress(), "feat", Docker())
+
+    assert not state.reached
+    assert "api.anthropic.com" in state.upstream
+
+
+def test_a_reachable_proxy_that_reaches_nothing_is_not_called_working() -> None:
+    """The verdict has to cover both legs, and writing two answers did not.
+
+    Reaching the proxy and the proxy reaching the world fail separately. A
+    headline that reported only the first said the boundary was fine while
+    the proxy resolved nothing — which is the exact shape of failure this
+    whole report was written to catch, reproduced inside it.
+    """
+    standing = contained.EgressState(
+        network="net",
+        proxy="proxy",
+        alias="egress",
+        network_exists=True,
+        dns_enabled=True,
+        proxy_exists=True,
+        proxy_running=True,
+        attached=True,
+        aliases=["egress"],
+        reached=False,
+    )
+
+    assert standing.resolvable()
+    assert not any(item.urgency == "ready" for item in standing.verdict())
+    assert any("cannot reach the world" in item.text for item in standing.verdict())

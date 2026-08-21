@@ -483,6 +483,21 @@ def record_boundary(lease: Lease, egress: SessionEgress, root: Path) -> None:
     )
 
 
+class Spoken(BaseModel, frozen=True):
+    """What one command inside a container said, and whether it worked.
+
+    Two fields rather than one because reading the second out of the first is
+    what a first draft did and it was wrong within the hour: a lookup that
+    failed and a lookup that succeeded were told apart by sniffing the answer
+    for a phrase, and the phrase was one of three the failure could produce.
+    Whether a command worked is known exactly at the moment it runs, and
+    carrying it is cheaper than recovering it.
+    """
+
+    worked: bool = False
+    text: str = Field(default="", description="Its own words, either way")
+
+
 class EgressState(BaseModel, frozen=True):
     """What this project's egress infrastructure is actually doing, asked.
 
@@ -515,10 +530,43 @@ class EgressState(BaseModel, frozen=True):
     log: str = Field(
         default="",
         description=(
-            "What a proxy that is not running said before it stopped. Empty "
-            "for one that is running, where the question does not arise, and "
-            "empty for one that was removed on exit -- which is the state "
-            "``--rm`` used to guarantee and is why it is no longer passed"
+            "What the proxy last said. For a stopped one that is why it "
+            "stopped; for a running one it is the access and error lines "
+            "behind whatever a session is seeing, which is where a refusal "
+            "and a failure to reach an origin are told apart -- squid "
+            "answers a denied request and an unreachable one with different "
+            "codes and says which in its own log"
+        ),
+    )
+    resolver: str = Field(
+        default="",
+        description=(
+            "The nameservers the proxy itself is using. A proxy is the one "
+            "process that has to resolve the *destination*, and it does that "
+            "on its own network rather than the session's -- so a session "
+            "that resolves the proxy perfectly can still be answered 503 by "
+            "a proxy that cannot resolve anything"
+        ),
+    )
+    reached: bool = Field(
+        default=False,
+        description=(
+            "Whether the proxy turned a public name into an address of its "
+            "own. Separate from :meth:`resolvable`, which is the *session's* "
+            "question: the two happen on different networks and were "
+            "conflated by having only one, so a session resolving `egress` "
+            "perfectly and a proxy resolving nothing both read as the same "
+            "kind of failure"
+        ),
+    )
+    upstream: str = Field(
+        default="",
+        description=(
+            "What the proxy got when it looked a public name up, or what "
+            "went wrong. The question a 503 on CONNECT poses and nothing "
+            "else here answers: squid returns it both for a name it could "
+            "not resolve and for an origin it could not reach, and the "
+            "repairs for those are not the same"
         ),
     )
 
@@ -571,6 +619,27 @@ class EgressState(BaseModel, frozen=True):
                 urgency="ready" if self.attached else "refusal",
                 indent=1,
             ),
+            *(
+                [
+                    Notice(
+                        text=f"resolving through: {self.resolver or 'nothing it names'}",
+                        urgency="detail",
+                        indent=1,
+                    ),
+                    Notice(
+                        text=f"a public name resolves to: {self.upstream}",
+                        urgency="ready" if self.reached else "refusal",
+                        indent=1,
+                    ),
+                ]
+                if self.proxy_running
+                else []
+            ),
+            *(
+                [Notice(text="what it last said:", urgency="detail", indent=1)]
+                if self.log
+                else []
+            ),
             *[
                 Notice(text=line, urgency="detail", indent=2)
                 for line in self.log.splitlines()
@@ -579,36 +648,72 @@ class EgressState(BaseModel, frozen=True):
         ]
 
     def verdict(self) -> list[Notice]:
-        """What the facts above add up to, in the words a session would use."""
-        if self.resolvable():
+        """What the facts above add up to, in the words a session would use.
+
+        Three answers rather than two, and the third is here because writing
+        two reproduced the exact failure this whole report exists to catch: a
+        headline saying the boundary was fine, standing over a proxy that
+        could not resolve anything. Reaching the proxy and the proxy reaching
+        the world are separate legs, they fail separately, and a reader told
+        only about the first goes looking in the wrong place.
+        """
+        recovery = Notice(
+            text=(
+                "`harness egress --down` removes both pieces so the next "
+                "launch rebuilds them; `--unsandboxed` opens on the host."
+            ),
+            urgency="detail",
+            indent=1,
+        )
+        if not self.resolvable():
             return [
                 Notice(
-                    text=f"A session can resolve `{self.alias}` and reach the proxy.",
-                    urgency="ready",
-                )
+                    text=(
+                        f"A session cannot resolve `{self.alias}`, so every "
+                        "request in it fails at DNS — which the runtime "
+                        "reports as the operator's own internet or DNS being "
+                        "down."
+                    ),
+                    urgency="refusal",
+                ),
+                recovery,
+            ]
+        if not self.reached:
+            return [
+                Notice(
+                    text=(
+                        f"A session can reach `{self.alias}`, and the proxy "
+                        "cannot reach the world — so requests arrive and are "
+                        "answered 503 rather than refused. The boundary is "
+                        "standing; what is behind it is not."
+                    ),
+                    urgency="refusal",
+                ),
+                Notice(
+                    text=(
+                        "That is the proxy's own resolution or its route out, "
+                        "not the session's network. Its log above says which."
+                    ),
+                    urgency="detail",
+                    indent=1,
+                ),
             ]
         return [
             Notice(
                 text=(
-                    f"A session cannot resolve `{self.alias}`, so every request "
-                    "in it fails at DNS — which the runtime reports as the "
-                    "operator's own internet or DNS being down."
+                    f"A session can resolve `{self.alias}`, reach the proxy, "
+                    "and be carried out through it."
                 ),
-                urgency="refusal",
-            ),
-            Notice(
-                text=(
-                    "`harness egress --down` removes both pieces so the next "
-                    "launch rebuilds them; `--unsandboxed` opens on the host."
-                ),
-                urgency="detail",
-                indent=1,
-            ),
+                urgency="ready",
+            )
         ]
 
 
 def egress_state(
-    egress: SessionEgress, project: str, engine: ContainerEngine
+    egress: SessionEgress,
+    project: str,
+    engine: ContainerEngine,
+    resolving: str = "api.anthropic.com",
 ) -> EgressState:
     """Ask the engine what this project's boundary is, rather than what it declares.
 
@@ -652,9 +757,48 @@ def egress_state(
         "{{.IPAddress}}{{end}}",
         proxy,
     )
+
+    def within(*words: str) -> Spoken:
+        """One command run inside the proxy, answering in its own words either way.
+
+        Asked of the proxy rather than of the session, because the two
+        resolve on different networks and the interesting failure is the
+        proxy's: it is the one process that has to turn the *destination*
+        into an address, and a session can reach it perfectly while it
+        reaches nothing.
+
+        A failure returns what the engine said rather than the empty string
+        this module's other probes use. Empty is the right answer for an
+        inspect, where absence is the fact being reported; here it would put
+        a name that did not resolve and a program the image does not carry
+        into one indistinguishable answer.
+        """
+        if status != "running":
+            return Spoken()
+        try:
+            return Spoken(worked=True, text=str(client("exec", proxy, *words)).strip())
+        except sh.CommandNotFound:
+            return Spoken(text=f"{engine.binary} is not on PATH")
+        except sh.ErrorReturnCode as failure:
+            said = failure.stderr.decode("utf-8", "replace").strip()
+            return Spoken(
+                text=said or f"exited {failure.exit_code} with nothing to say"
+            )
+
+    # `getent` exits 2 on a name it cannot find and says nothing, so the
+    # question is carried into the answer and the verdict comes off `worked`.
+    looked = within("getent", "hosts", resolving)
+    nameservers = " ".join(
+        line.split()[1]
+        for line in within("cat", "/etc/resolv.conf").text.splitlines()
+        if line.startswith("nameserver ")
+    )
     return EgressState(
         network=network,
         proxy=proxy,
+        resolver=nameservers,
+        reached=looked.worked,
+        upstream=f"{resolving} -> {looked.text or 'no answer'}",
         alias=egress.alias,
         network_exists=bool(dns),
         dns_enabled=dns == "true",
@@ -664,7 +808,7 @@ def egress_state(
         attached=network in joined,
         aliases=names,
         address=address,
-        log="" if status == "running" else proxy_log(proxy, engine),
+        log=proxy_log(proxy, engine),
     )
 
 
