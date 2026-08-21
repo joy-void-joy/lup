@@ -166,12 +166,29 @@ def lease_for(worktree: Path, human_owned: list[Path] | None = None) -> Lease:
     writable = [worktree]
     read_only = list(sibling_worktrees(worktree))
     if layout.linked():
-        # The shared directory is mounted read-only as a whole, and the three
+        # The shared directory is mounted read-only as a whole, and the four
         # paths a commit genuinely needs are mounted writable back over it --
         # so every sibling's administrative entry stays present and
         # unwritable, which is what keeps `worktree prune` from removing it.
+        #
+        # `logs` is one of the four, and leaving it out took commits away
+        # entirely: a ref update appends to `logs/refs/heads/<branch>`
+        # wherever that file already exists, and git fails the whole update
+        # when it cannot -- `cannot update the ref 'refs/heads/x': unable to
+        # append to '.../logs/refs/heads/x'`. It also took the reflog with
+        # them, which is the undo layer this module's docstring rests on for
+        # the one thing it says it deliberately does not rail.
         read_only.append(layout.common)
-        writable += [layout.private, layout.common / "objects", layout.common / "refs"]
+        # Created rather than skipped when absent, because a mount whose
+        # target does not exist is one the engine invents as root -- the same
+        # refusal spelled as a permission instead of a read-only filesystem.
+        (layout.common / "logs").mkdir(exist_ok=True)
+        writable += [
+            layout.private,
+            layout.common / "objects",
+            layout.common / "refs",
+            layout.common / "logs",
+        ]
     else:
         writable.append(layout.common)
     read_only += [

@@ -78,7 +78,53 @@ def test_the_shared_directory_is_read_only_but_commits_still_work(
     assert layout.common in leased.read_only
     assert layout.common / "objects" in leased.writable
     assert layout.common / "refs" in leased.writable
+    assert layout.common / "logs" in leased.writable
     assert layout.private in leased.writable
+
+
+def test_a_commit_survives_everything_the_lease_leaves_unwritable(
+    repository: Path,
+) -> None:
+    """The claim above, run rather than asserted about a list of names.
+
+    `logs` was missing from the writable set for as long as this file only
+    compared paths. A ref update appends to `logs/refs/heads/<branch>`
+    wherever that file already exists, and git fails the whole update when it
+    cannot -- so a contained session could not commit at all, and the reflog
+    this module's docstring rests its case on was never written either.
+
+    Withholding write permission from exactly what the lease calls read-only
+    is the cheapest faithful model of the mount table, and it is the only
+    shape of test that could have caught a path nobody thought to name.
+    """
+    worktree = repository / "mine"
+    leased = lease_for(worktree)
+    layout = repository_layout(worktree)
+    roots = [layout.common] + [
+        entry for entry in layout.common.iterdir() if entry not in leased.writable
+    ]
+    # Every file too, not only the directories holding them. A directory with
+    # its write bit off still lets an existing file inside it be rewritten,
+    # which a read-only mount does not -- and modelling only the directories
+    # is what let a first version of this test pass against the very bug it
+    # was written for.
+    withheld = [
+        found
+        for root in roots
+        for found in ([root] if root.is_file() else [root, *root.rglob("*")])
+        if not any(kept == found or kept in found.parents for kept in leased.writable)
+    ]
+    restored = {entry: entry.stat().st_mode for entry in withheld}
+    try:
+        for entry in withheld:
+            entry.chmod(restored[entry] & ~0o222)
+        (worktree / "second.txt").write_text("second\n", encoding="utf-8")
+        git("-C", str(worktree), "add", "-A")
+        git("-C", str(worktree), "commit", "-qm", "second")
+    finally:
+        for entry, mode in restored.items():
+            entry.chmod(mode)
+    assert git.out("-C", str(worktree), "log", "-1", "--format=%s").strip() == "second"
 
 
 def test_a_plain_checkout_leases_its_own_git_directory(tmp_path: Path) -> None:
