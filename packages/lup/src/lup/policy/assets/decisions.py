@@ -74,6 +74,7 @@ def bash_decision(
     interactive: bool,
     escapable: bool,
     cwd: Path | None,
+    relayed: bool = False,
 ) -> KernelDecision:
     """Judge one shell command against the declared vocabulary.
 
@@ -122,6 +123,11 @@ def bash_decision(
         runner_targets=RUNNER_TARGETS,
         target_tables=RUNNER_TARGET_TABLES,
         interactive=interactive,
+        # A reviewed worker is non-interactive and not therefore alone: it
+        # holds a mailbox reaching the human supervising its run, and a
+        # refusal that named no route sent it to queue a blocking question
+        # instead.
+        relayed=relayed,
         escapable=escapable,
     )
     if verdict.effect == "deny":

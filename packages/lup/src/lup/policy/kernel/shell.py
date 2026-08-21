@@ -9,6 +9,7 @@ from typing import TypedDict
 from .decision import (
     ESCALATE_HINT,
     KernelDecision,
+    RELAY_HINT,
     RESHAPE_HINT,
     SUBSTITUTION_SENTINEL,
     SandboxPlacement,
@@ -898,6 +899,7 @@ def decide_shell(
     runner_targets: list[RunnerTargetRow] | None = None,
     target_tables: list[ShellRuleRow] | None = None,
     escapable: bool = False,
+    relayed: bool = False,
 ) -> KernelDecision:
     """Classify one command, honoring an escalation marker and hinting denies.
 
@@ -930,8 +932,17 @@ def decide_shell(
     to give a toolchain: where the escape is carried out it is unprompted,
     and where nothing can carry it out the refusal names the sandbox instead
     of a bare write error.
+
+    ``relayed`` says a non-interactive session is not therefore *alone*. A
+    reviewed worker holds a question mailbox reaching the human supervising
+    the run, so a refusal that told it to reshape the command was naming the
+    only route it had as unavailable — and measured, it did what anybody
+    would and queued a material question instead, parking the whole run on a
+    decision nobody needed to make. Three states rather than two, because
+    "nobody to ask" and "somebody, but not right now" are different answers
+    and were sharing one.
     """
-    hint = ESCALATE_HINT if interactive else RESHAPE_HINT
+    hint = ESCALATE_HINT if interactive else RELAY_HINT if relayed else RESHAPE_HINT
     confined = sandboxed and not sandbox_excluded(command, excluded_commands or [])
 
     marker = ESCALATE_RE.match(command)

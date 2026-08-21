@@ -160,6 +160,10 @@ def dispatch(payload):
             # that has to leave the sandbox is carried out rather than refused.
             escapable=True,
             cwd=session_directory,
+            # A reviewed worker's session has nobody at a keyboard and is not
+            # therefore alone: the run it belongs to carries a mailbox that
+            # reaches whoever is supervising it.
+            relayed=autonomous,
         )
     if name == "WebFetch":
         return fetch_decision(tool_input["url"])

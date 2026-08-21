@@ -49,6 +49,23 @@ Partial answers are legal. A question is answered by whoever knows that
 decision, whenever they know it, so answering one of six open questions is
 the normal case rather than a validation error.
 
+**Not everything a worker has to say is a question**, and reading only the
+row above is what makes it one. Three tools reach out of a worker and only
+one of them blocks:
+
+| What it is | Tool | Does it park the run? |
+| --- | --- | --- |
+| a decision you cannot continue without | `queue_questions` / `await_answers` | yes |
+| a gate your concern was not approved for | `request_allowance` | yes, and resumes where you stopped |
+| anything else worth saying | `send_message` | no |
+
+Measured, in #202: two workers in one run blocked on material questions that
+carried no decision — one needed to delete scratch files it had created
+itself, the other needed to fix its own virtual environment. Both were
+refusals of ordinary commands, and neither was a thing a human had an opinion
+about. A worker that reaches for the blocking tool because it is the only one
+it was told about spends the run's time on housekeeping.
+
 Assembling the review branch is not special: it is the reserved
 `integration-assembly` question with choices `approve` and `defer`, so every
 door records that decision the way it records any other answer.
