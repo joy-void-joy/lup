@@ -266,6 +266,16 @@ class ShellCommandRule(SelectableRule, frozen=True):
     ask_flags: list[str] = []
     allow_flags: list[str] = []
     read_verbs: list[str] = []
+    write_markers: list[str] = []
+    """Argument prefixes whose *absence* makes this command read-only.
+
+    Every other de-escalation here is a positive test: some word has to be
+    present for the rule to relax. A few commands are the other way round --
+    `dd` writes only when handed an `of=`, and with no `of=` it is a plain
+    read of `if=` to stdout. There is no verb to list, because the read-only
+    form is the one with nothing extra in it, so a membership test can never
+    recognize it and every such invocation stopped for approval as a write.
+    """
     value_flags: list[str] = []
     subcommands: list[ShellSubcommandRule] = []
     sandbox: SandboxPlacement = ROOT_SANDBOX
@@ -346,6 +356,7 @@ def erase_shell_rules(rules: list[ShellCommandRule]) -> list[ShellRuleRow]:
                 ask_flags=list(operation.ask_flags),
                 allow_flags=[],
                 read_verbs=[],
+                write_markers=[],
                 value_flags=[],
                 reason=operation.reason,
                 **axes.inherit(operation.declared(), "operation").row_fields(),
@@ -359,6 +370,7 @@ def erase_shell_rules(rules: list[ShellCommandRule]) -> list[ShellRuleRow]:
             ask_flags=list(subcommand.ask_flags),
             allow_flags=[],
             read_verbs=list(subcommand.read_verbs),
+            write_markers=[],
             value_flags=[],
             reason=subcommand.reason,
             **axes.row_fields(),
@@ -374,6 +386,7 @@ def erase_shell_rules(rules: list[ShellCommandRule]) -> list[ShellRuleRow]:
             ask_flags=list(command.ask_flags),
             allow_flags=list(command.allow_flags),
             read_verbs=list(command.read_verbs),
+            write_markers=list(command.write_markers),
             value_flags=list(command.value_flags),
             reason=command.reason,
             **axes.row_fields(),

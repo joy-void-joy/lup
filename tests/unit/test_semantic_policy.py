@@ -3489,3 +3489,63 @@ def test_resolving_a_note_into_a_claim_is_still_not_a_deletion() -> None:
     )
 
     assert "removes inline review feedback" not in decision.reason
+
+
+def test_a_read_only_form_defined_by_absence_is_recognized_as_a_read() -> None:
+    """The negative half of the effect-versus-token gap, closed.
+
+    Every other de-escalation here needs a word to be *present*. `dd` writes
+    when handed an `of=` and reads to stdout without one, so its read-only
+    form is the invocation carrying nothing extra -- which no membership test
+    can name, and which therefore stopped for approval every time.
+    """
+    policy = ShellPolicy(SHELL_RULES)
+
+    def effect(command: str) -> str:
+        return policy.decide(ShellCommand(command=command)).effect
+
+    assert effect("dd if=/etc/hosts") == "allow"
+    assert effect("dd if=disk.img bs=1M count=10") == "allow"
+    assert effect("dd if=a of=b") == "ask"
+    assert effect("dd if=a of=/dev/sda") == "ask"
+
+
+def test_absence_is_only_concluded_from_words_it_could_actually_read() -> None:
+    """A verdict reached from absence has to know it saw everything.
+
+    `dd if=$X` word-splits at expansion, so `$X` holding a space becomes a
+    second word that can be `of=`. A test asking whether a marker is missing
+    cannot tell that from a marker it could not read, so an illegible word
+    keeps the ask -- a stricter bar than the positive tests need, and
+    measured allowing until it was raised.
+    """
+    policy = ShellPolicy(SHELL_RULES)
+
+    def effect(command: str) -> str:
+        return policy.decide(ShellCommand(command=command)).effect
+
+    assert effect("dd if=$SOMEVAR") == "ask"
+    assert effect("dd if=a of=$X") == "ask"
+
+
+def test_asking_git_its_own_version_is_not_an_unclassified_subcommand() -> None:
+    """`git version` was allowed and `git --version` denied, for the same question.
+
+    The flag spelling carries no subcommand at all, so it reached the default
+    deny and answered "this git subcommand is not classified" about a command
+    line holding none.
+    """
+    policy = ShellPolicy(SHELL_RULES)
+
+    def effect(command: str) -> str:
+        return policy.decide(ShellCommand(command=command)).effect
+
+    assert effect("git --version") == "allow"
+    assert effect("git --help") == "allow"
+    assert effect("git version") == "allow"
+    # Still a subcommand-gated command everywhere else. The de-escalation
+    # needs *every* argument to be one of the declared flags, so a real
+    # subcommand standing beside one would not qualify either.
+    assert effect("git gc") == "deny"
+    assert effect("git filter-branch") == "deny"
+    assert effect("git --exec-path=/x status") == "ask"

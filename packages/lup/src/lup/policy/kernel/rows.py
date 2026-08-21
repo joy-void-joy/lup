@@ -194,7 +194,12 @@ class ShellRuleRow(TypedDict):
     action at a time (``git config --get``): a non-allow row de-escalates to
     allow when a declared verb appears among words that are all literal and
     free of guarded flags, because the verb pins the invocation to its query
-    action regardless of the other words.
+    action regardless of the other words. ``write_markers`` are the same
+    de-escalation stated negatively, for a command whose read-only form is the
+    one with nothing extra in it (``dd if=x`` with no ``of=``): a non-allow row
+    de-escalates when no literal word carries a declared marker. Stated as
+    absence because no membership test can recognize a form defined by what it
+    lacks -- the gap that stopped every read-only ``dd`` as a write.
 
     ``sandbox`` says where this command has to run, independently of who
     decides it: a verb that reaches a remote is unusable confined however the
@@ -217,6 +222,7 @@ class ShellRuleRow(TypedDict):
     ask_flags: list[str]
     allow_flags: list[str]
     read_verbs: list[str]
+    write_markers: list[str]
     value_flags: list[str]
     reason: str
 
