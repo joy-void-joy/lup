@@ -600,12 +600,6 @@ def decide_curl_words(
     return KernelDecision("allow", "read-only curl within declared scopes")
 
 
-# lup: (Re)-installing lup, or clearing the cache, should be auto-allowed.
-# `uv cache clean lup && uv lock --upgrade-package lup && uv sync --all-extras`
-# needed a leading escalate marker and *still* asked, on "dependency changes
-# fetch and execute external code" — for a refresh of a dependency the project
-# already declares. The gh block below sits between this note and `decide_uv`,
-# which is its subject.
 # lup: ignore[library-default] — gh's own value-taking flags; misreading one shifts the argument scan
 GH_API_VALUE_FLAGS = (
     "-H",
@@ -682,6 +676,56 @@ def decide_gh_api_words(words: list[str]) -> KernelDecision:
     return KernelDecision("allow", "read-only gh api call")
 
 
+UV_FOREIGN_SOURCE_FLAGS = (
+    "--index",
+    "--index-url",
+    "--extra-index-url",
+    "--default-index",
+    "--find-links",
+    "-f",
+    "--no-build-isolation",
+    "--no-build-isolation-package",
+    "--no-sources",
+    "--no-sources-package",
+)
+"""Where a uv invocation stops obeying what this project declared.
+
+The spellings are uv's; which of them count is a judgement, so this is the
+default a caller overrides rather than a table anybody has to fork. A project
+that pins its own index, or that has a reason to build without isolation,
+says so by naming a different set here.
+"""
+
+
+def uv_package_source(
+    arguments: list[str], guarded: tuple[str, ...] = UV_FOREIGN_SOURCE_FLAGS
+) -> str | None:
+    """The flag naming where packages come from, when one is present.
+
+    A verb obeying the project's own declaration is only obeying it while
+    nothing on the command line redirects where packages come from or removes
+    the isolation their build code runs in. Either makes it a different act
+    wearing the same verb, so it is named back rather than folded into an
+    allow.
+
+    An unreadable word answers too. What is being tested is the absence of a
+    flag, and a word this cannot read might be one, so the conservative
+    direction is to treat it as though it were.
+    """
+    for word in arguments:
+        if opaque_argument(word) or "$" in word or "`" in word:
+            return word
+        if flag_matches(word, list(guarded)):
+            return word
+    return None
+
+
+# lup: solved: (Re)-installing lup, or clearing the cache, should be auto-allowed.
+# `uv cache clean lup && uv lock --upgrade-package lup && uv sync --all-extras`
+# needed a leading escalate marker and *still* asked, on "dependency changes
+# fetch and execute external code" — for a refresh of a dependency the project
+# already declares. The gh block below sits between this note and `decide_uv`,
+# which is its subject.
 def decide_uv(
     words: list[str],
     runner_targets: list[RunnerTargetRow],
@@ -694,14 +738,43 @@ def decide_uv(
     than at each call site — and a target a project refuses is refused here
     rather than falling through to no judgment, which is a different answer:
     it leaves the verdict to the runtime rather than stating one.
+
+    Installing is where a decision was asked for and refused. Fetching a
+    package runs its build code, and that code is the escape a supply-chain
+    compromise arrives through — so `add` and `sync` both ask, and the fact
+    that the packages were declared earlier does not answer it, because the
+    thing that changed is not the declaration but what the index now serves
+    under it. What is written down here rather than re-argued: the verb that
+    reaches the network to install is a question, every time.
+
+    Two verbs sit below that line and one sat above it by omission. `lock`
+    and `remove` write files and fetch nothing to execute. A cache is
+    reproducible by the command that reads it, so clearing one destroys
+    nothing anybody has — and it was reaching no rule at all, which is why a
+    refresh line asked with the cache verb as one of its reasons.
+
+    A flag naming where packages come from, or dropping the isolation build
+    code runs in, is not the verb it rides on: it is a source nobody
+    declared, and it asks even where the bare verb would not.
     """
     subcommand = words[1]
     if subcommand in ("add", "sync"):
         return KernelDecision(
-            "ask", "dependency changes fetch and execute external code"
+            "ask", "installing a package fetches and runs its build code"
         )
     if subcommand in ("remove", "lock"):
-        return KernelDecision("allow")
+        redirect = uv_package_source(words[2:])
+        if redirect is not None:
+            return KernelDecision(
+                "ask",
+                f"{redirect} takes packages from somewhere this project does not"
+                " declare — requires approval",
+            )
+        return KernelDecision("allow", "writes what this project already declares")
+    if subcommand == "cache":
+        return KernelDecision(
+            "allow", "a package cache is rebuilt by the command that reads it"
+        )
     if subcommand == "run" and len(words) > 2:
         run_words = uv_run_words(words)
         if not run_words:

