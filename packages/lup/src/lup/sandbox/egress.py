@@ -179,6 +179,15 @@ class EgressPolicy(BaseModel, frozen=True):
                 yield "http_access allow all"
             # One run's fetch is never served to the next as though fresh.
             yield "cache deny all"
+            # The ICMP helper needs NET_RAW, which the proxy deliberately does
+            # not have — it is the one process bridged out of the session's
+            # network and is hardened accordingly. Left enabled it fails at
+            # startup with three lines reading `FATAL: Unable to open any ICMP
+            # sockets`, which is a helper dying rather than squid, and which
+            # cost a pass being read as the cause of something else. What it
+            # measures is round-trip time between cache peers, of which there
+            # are none here.
+            yield "pinger_enable off"
             yield "access_log stdio:/dev/stdout"
             yield "cache_log /dev/stderr"
             yield "pid_filename /tmp/squid.pid"

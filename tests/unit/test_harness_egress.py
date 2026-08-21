@@ -604,3 +604,54 @@ def test_squid_s_own_errors_are_kept_above_the_traffic_that_drowns_them() -> Non
         sh.Command = original  # pyright: ignore[reportAttributeAccessIssue]
 
     assert kept.splitlines()[0] == "FATAL: something went wrong"
+
+
+def test_the_proxy_is_given_the_host_s_own_nameservers() -> None:
+    """The repair for a resolver chain that answers "no" and hides the rest.
+
+    A container on an internal network is given that network's resolver
+    first, and it answers names on that network and refuses everything else
+    authoritatively — correctly, since that is what an internal network is.
+    glibc takes the first authoritative answer and stops, so the working
+    server listed after it is never consulted.
+    """
+    handed = SessionEgress().resolvers_for("nameserver 192.168.0.1\n")
+    argv = SessionEgress().proxy_arguments("feat", Path("e.conf"), handed)
+
+    assert handed == ["192.168.0.1"]
+    assert argv[argv.index("--dns") + 1] == "192.168.0.1"
+
+
+def test_a_loopback_nameserver_is_not_handed_to_a_container() -> None:
+    """`systemd-resolved` names 127.0.0.53, which is a different machine there.
+
+    The case this filter exists for rather than a tidy-up: handing it over
+    would replace a resolver that refuses public names with one that cannot
+    be reached at all, which is a worse failure and a quieter one.
+    """
+    assert SessionEgress().resolvers_for("nameserver 127.0.0.53\n") == []
+    assert SessionEgress().resolvers_for("nameserver ::1\nnameserver 1.1.1.1") == [
+        "1.1.1.1"
+    ]
+
+
+def test_a_host_with_nothing_usable_is_told_rather_than_left_to_find_out() -> None:
+    """Falling back to the engine's own resolv.conf is the broken state.
+
+    So it is announced at the launch that chooses it, not discovered later as
+    a boundary standing over a proxy that carries nothing.
+    """
+    assert contained.handed_resolvers(["192.168.0.1"]) == []
+    assert any("loopback" in item.text for item in contained.handed_resolvers([]))
+
+
+def test_a_declared_resolver_overrides_what_the_host_names() -> None:
+    """An adopter whose host answers badly says so once, in the declaration."""
+    declared = SessionEgress(resolvers=["9.9.9.9"])
+
+    assert declared.resolvers_for("nameserver 192.168.0.1") == ["9.9.9.9"]
+
+
+def test_no_resolvers_means_no_flag_rather_than_an_empty_one() -> None:
+    """An engine handed `--dns` with nothing after it refuses the whole run."""
+    assert "--dns" not in SessionEgress().proxy_arguments("feat", Path("e.conf"))

@@ -256,6 +256,53 @@ def running(name: str, engine: ContainerEngine) -> bool:
     return str(state).strip() == "true"
 
 
+def host_resolv_conf(path: Path = Path("/etc/resolv.conf")) -> str:
+    """What this machine names as its own nameservers, or nothing readable.
+
+    Absence answers empty rather than raising, because a launch is not the
+    place to fail over a file: what a missing one costs is that the proxy
+    keeps whatever the engine wrote, which :func:`handed_resolvers` says out
+    loud rather than leaving to be found later as a boundary carrying nothing.
+    """
+    try:
+        return path.read_text(encoding="utf-8")
+    except OSError:
+        return ""
+
+
+def handed_resolvers(resolvers: list[str]) -> list[Notice]:
+    """What a launch says about the nameservers the proxy is being given.
+
+    Silent when there are some, because a proxy that can resolve is a proxy
+    behaving as declared. Loud when there are none, because that is the state
+    the whole field exists to escape: the proxy falls back to the engine's own
+    resolv.conf, whose first entry on an internal network answers "no such
+    name" for every public destination and hides every server after it.
+    """
+    if resolvers:
+        return []
+    return [
+        Notice(
+            text=(
+                "No nameserver this host names is reachable from a container "
+                "— they are all loopback — so the proxy keeps whatever the "
+                "engine gives it."
+            ),
+            urgency="warning",
+        ),
+        Notice(
+            text=(
+                "On an internal network that is the network's own resolver, "
+                "which refuses public names authoritatively and hides every "
+                "server after it. Declare `resolvers` on the image's egress "
+                "if the proxy turns out unable to reach the world."
+            ),
+            urgency="detail",
+            indent=1,
+        ),
+    ]
+
+
 def default_route(table: str) -> str:
     """The default route in a kernel routing table, read as the kernel writes it.
 
@@ -436,8 +483,15 @@ def start_egress(
     scratch.mkdir(parents=True, exist_ok=True)
     configuration = scratch / "egress.conf"
     configuration.write_text(egress.enforced().render())
+    # Read here rather than declared, for the reason the terminal handoff and
+    # the container client are: this is a fact about the machine, and the
+    # declaration it would otherwise sit in is hashed into the ownership
+    # digest. A launch is the only place that can answer it.
+    resolvers = egress.resolvers_for(host_resolv_conf())
+    for notice in handed_resolvers(resolvers):
+        notice.say()
     try:
-        client(*egress.proxy_arguments(project, configuration))
+        client(*egress.proxy_arguments(project, configuration, resolvers))
         client(*egress.connect_arguments(project))
     except sh.ErrorReturnCode as error:
         raise typer.BadParameter(
@@ -744,12 +798,24 @@ class EgressState(BaseModel, frozen=True):
                         urgency="ready" if self.reached else "refusal",
                         indent=1,
                     ),
-                    Notice(
-                        text=(
-                            f"its own network's names resolve: {self.answers_locally}"
-                        ),
-                        urgency="ready" if self.answers_locally else "warning",
-                        indent=1,
+                    *(
+                        [
+                            Notice(
+                                text=(
+                                    "its own network's names resolve: "
+                                    f"{self.answers_locally}"
+                                ),
+                                urgency="detail",
+                                indent=1,
+                            )
+                        ]
+                        # Only where a public name failed. This tells two
+                        # failures apart and says nothing otherwise: a proxy
+                        # given its own nameservers stops holding the internal
+                        # network's, so `False` here is what success looks
+                        # like and calling it a fault would be a lie.
+                        if not self.reached
+                        else []
                     ),
                 ]
                 if self.proxy_running

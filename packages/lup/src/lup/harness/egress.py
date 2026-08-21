@@ -34,6 +34,8 @@ filtered session. That is not a gap to close later. It is the measurement
 §9.2's HTTPS credential exists because of.
 """
 
+from collections.abc import Iterator
+from ipaddress import ip_address
 from pathlib import Path
 
 from pydantic import BaseModel, Field, model_validator
@@ -178,6 +180,28 @@ class SessionEgress(BaseModel, frozen=True):
             "default names nothing the container could not already reach"
         ),
     )
+    resolvers: list[str] = Field(
+        default=[],
+        description=(
+            "Nameservers the *proxy* is given, overriding whatever the "
+            "engine would write into it. Empty asks the host for its own, "
+            "which is the right answer almost everywhere and is a fact about "
+            "the machine rather than the declaration -- so it is resolved at "
+            "launch and passed, never written here.\n\n"
+            "This exists because of what an internal network's resolver "
+            "correctly does. A container attached to one is given that "
+            "network's resolver first, and it answers names on that network "
+            "and refuses everything else *authoritatively* -- which is what "
+            "an internal network should do. glibc takes the first "
+            "authoritative answer and stops, so every server listed after it "
+            "is hidden, including the working one. Measured: a proxy with a "
+            "default route, `192.168.0.1` third in its list, resolving its "
+            "own network's names and answering `503` to every CONNECT.\n\n"
+            "Only the proxy is overridden. The session must go on resolving "
+            "the proxy's alias through the internal resolver, which is the "
+            "one name it needs and the one that resolver holds"
+        ),
+    )
     proxy_image: str = DEFAULT_PROXY_IMAGE
     alias: str = Field(
         default="egress",
@@ -282,7 +306,41 @@ class SessionEgress(BaseModel, frozen=True):
         """The argv creating the internal network, for a caller to run."""
         return ["network", "create", "--internal", self.network_name(project)]
 
-    def proxy_arguments(self, project: str, configuration: Path) -> list[str]:
+    def resolvers_for(self, resolv_conf: str) -> list[str]:
+        """The nameservers to hand the proxy, given what the host holds.
+
+        The declaration wins where it says anything; otherwise the host's own
+        are read out of the text a caller passes -- text rather than a path,
+        so the rule is testable without a machine that happens to be
+        configured the right way.
+
+        Loopback addresses are dropped, and that is the case this filter
+        exists for rather than a tidy-up: a host running `systemd-resolved`
+        names `127.0.0.53`, which resolves perfectly there and is a different
+        machine's loopback as far as a container is concerned. Handing it
+        over would replace a resolver that refuses public names with one that
+        cannot be reached at all.
+        """
+        if self.resolvers:
+            return self.resolvers
+
+        def named() -> Iterator[str]:
+            for line in resolv_conf.splitlines():
+                words = line.split()
+                if len(words) < 2 or words[0] != "nameserver":
+                    continue
+                try:
+                    address = ip_address(words[1])
+                except ValueError:
+                    continue
+                if not address.is_loopback:
+                    yield words[1]
+
+        return list(dict.fromkeys(named()))
+
+    def proxy_arguments(
+        self, project: str, configuration: Path, resolvers: list[str] | None = None
+    ) -> list[str]:
         """The argv starting the proxy, bridged out and stripped of everything else.
 
         Started on the engine's ordinary network, which is the half that
@@ -308,6 +366,7 @@ class SessionEgress(BaseModel, frozen=True):
             "--detach",
             "--name",
             self.proxy_name(project),
+            *[word for address in resolvers or [] for word in ("--dns", address)],
             "--network",
             "bridge",
             "-v",
