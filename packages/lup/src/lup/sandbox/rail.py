@@ -94,6 +94,26 @@ class RepositoryLayout(BaseModel, frozen=True):
         """Whether this is a linked worktree rather than a plain checkout."""
         return self.common != self.private
 
+    def name(self) -> str:
+        """What to call the repository, identically from any of its worktrees.
+
+        The shared directory is the one thing every worktree of a repository
+        has in common, so its name is the one string they all agree on --
+        which is what anything wanting to be per *repository* rather than per
+        checkout has to key on. A worktree directory's own name is the branch
+        somebody made it for.
+
+        Two spellings collapse into it. A bare repository conventionally ends
+        in `.git` and says nothing by it, and a plain checkout's shared
+        directory *is* `.git`, whose name is the convention rather than the
+        project.
+        """
+        return (
+            self.common.parent.name
+            if self.common.name == ".git"
+            else self.common.name.removesuffix(".git")
+        )
+
 
 def same_path(roots: list[Path]) -> dict[Path, str]:
     """Mount each host path at the identical path inside the container.

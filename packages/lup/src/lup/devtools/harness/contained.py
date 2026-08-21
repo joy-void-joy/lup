@@ -41,7 +41,7 @@ from lup.harness.notice import Notice
 from lup.harness.requirements import Manifest
 from lup.runtime.login import ProviderLogin
 from lup.sandbox.attribution import WRITE_REFUSAL_MARKERS
-from lup.sandbox.rail import Lease, lease_for
+from lup.sandbox.rail import Lease, lease_for, repository_layout
 
 
 def image_tag(dockerfile: str) -> str:
@@ -83,12 +83,78 @@ def checkout_tag(root: Path) -> str:
 def state_volume_name(root: Path) -> str:
     """The volume carrying this project's container-side config home.
 
-    Per repository for the same reason as the tag, and separate from the
-    caches because it holds decisions rather than artifacts: the trust a
-    fresh config home would otherwise discard, and the session state a
-    ``--continue`` reopens.
+    Per repository, and keyed on the shared git directory because that is the
+    only name every worktree of one repository agrees on. It used to be
+    ``root.name``, which reads as the repository right up until the checkout
+    is a linked worktree -- and the documented workflow makes one per feature.
+    What that cost was a config home created empty for every branch: the
+    theme back to default, trust re-seeded, each preference set by hand
+    again, and, now that a login can be made in here, a sign-in per feature.
+
+    Separate from the caches because it holds decisions rather than
+    artifacts: the trust a fresh config home would otherwise discard, the
+    session state a ``--continue`` reopens, and the stored login.
+
+    What it costs is that worktrees of one repository now share a config
+    home, so trust and session history are visible across them. That is the
+    arrangement a host home already has, and it is the trade the name was
+    claiming to have made all along.
+    """
+    return f"lup-cfg-{repository_layout(root).name()}"
+
+
+def superseded_volume_name(root: Path) -> str:
+    """What this checkout's config home was called while the name was per branch.
+
+    Kept so a launch can say where the settings went. A rename silently
+    hands back an empty config home, which is indistinguishable from the bug
+    it fixes -- and the operator is looking at the same default theme either
+    way.
     """
     return f"lup-cfg-{root.name}"
+
+
+def superseded_volume_notice(
+    root: Path, engine: ContainerEngine, existing: list[str]
+) -> list[Notice]:
+    """Say that a config home moved, in the one session that would notice.
+
+    Only when the old volume is still there and the new one is not, which is
+    exactly the launch where the settings appear to have been lost. Said
+    rather than migrated, because which of several per-branch homes should
+    become the repository's is a question only the operator can answer, and
+    a launcher that guessed would overwrite the answer.
+    """
+    superseded, current = superseded_volume_name(root), state_volume_name(root)
+    if superseded == current or superseded not in existing or current in existing:
+        return []
+    return [
+        Notice(
+            text=(
+                f"Config home: now `{current}`, one per repository rather "
+                f"than one per worktree. `{superseded}` still holds this "
+                "worktree's old settings and is not read any more — copy it "
+                f"over with `{engine.binary} run --rm -v "
+                f"{superseded}:/from -v {current}:/to alpine cp -a /from/. "
+                "/to/`, or set your preferences once and remove it."
+            ),
+            urgency="warning",
+        )
+    ]
+
+
+def existing_volumes(engine: ContainerEngine) -> list[str]:
+    """Every volume this engine holds, or nothing when it cannot be asked.
+
+    An engine that will not answer is not a reason to fail a launch that is
+    otherwise fine -- it costs one advisory notice, and the launch says the
+    rest of what it was going to say.
+    """
+    try:
+        listed = sh.Command(engine.binary)("volume", "ls", "--format", "{{.Name}}")
+    except (sh.CommandNotFound, sh.ErrorReturnCode):
+        return []
+    return str(listed).split()
 
 
 # lup: ignore[constant-declaration] — an identity this repository defines, not a
@@ -1414,6 +1480,8 @@ def contained_argv(
     name_for_checkout(tag, checkout_tag(root), client)
     reached_at = start_egress(image.egress, root.name, client, root)
     for notice in image.egress.notice(root.name):
+        notice.say()
+    for notice in superseded_volume_notice(root, client, existing_volumes(client)):
         notice.say()
     lease = lease_for(root, human_owned)
     record_boundary(lease, image.egress, root)

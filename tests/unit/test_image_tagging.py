@@ -8,11 +8,18 @@ two checkouts get, and what the sweep is willing to delete.
 
 from pathlib import Path
 
+import pytest
+
 from lup.devtools.harness.contained import (
     checkout_tag,
     finished_tags,
     image_tag,
+    state_volume_name,
+    superseded_volume_name,
+    superseded_volume_notice,
 )
+from lup.devtools.utils import git
+from lup.harness.image import Docker
 
 BASE = "FROM archlinux:base\nRUN pacman -Syu --noconfirm\n"
 
@@ -90,3 +97,92 @@ def test_a_line_the_engine_shaped_differently_is_skipped() -> None:
     listing = "abc123\nabc123 localhost/lup-agent:77d332d7914c extra\n\n"
 
     assert finished_tags(listing, keep="lup-agent:000000000000") == []
+
+
+@pytest.fixture
+def repository(tmp_path: Path) -> Path:
+    """A bare repository with two linked worktrees, which is the arrangement."""
+    bare = tmp_path / "project.git"
+    git("init", "--bare", "-q", str(bare))
+    git("-C", str(bare), "config", "user.email", "test@example.invalid")
+    git("-C", str(bare), "config", "user.name", "Test")
+    seed = tmp_path / "seed"
+    git("clone", "-q", str(bare), str(seed))
+    git("-C", str(seed), "config", "user.email", "test@example.invalid")
+    git("-C", str(seed), "config", "user.name", "Test")
+    (seed / "README.md").write_text("readme\n", encoding="utf-8")
+    git("-C", str(seed), "add", "-A")
+    git("-C", str(seed), "commit", "-qm", "first")
+    git("-C", str(seed), "push", "-q", "origin", "HEAD:main")
+    for branch in ("feat-one", "feat-two"):
+        git(
+            "-C",
+            str(bare),
+            "worktree",
+            "add",
+            "-q",
+            str(bare / "tree" / branch),
+            "-b",
+            branch,
+        )
+    return bare
+
+
+def test_every_worktree_of_one_repository_shares_a_config_home(
+    repository: Path,
+) -> None:
+    """The bug this name carried, and the whole of §6.
+
+    Keyed on the worktree directory, the name is the *branch* -- so the
+    documented `dev worktree create` workflow handed every feature a config
+    home created empty: default theme, trust re-seeded, every preference set
+    by hand again, and a sign-in per branch once one can be made inside.
+    """
+    one = state_volume_name(repository / "tree" / "feat-one")
+    two = state_volume_name(repository / "tree" / "feat-two")
+    assert one == two == "lup-cfg-project"
+
+
+def test_a_plain_checkout_and_its_worktrees_answer_the_same_name(
+    tmp_path: Path,
+) -> None:
+    """A non-bare repository's shared directory is `.git`, which names nothing.
+
+    Both spellings have to collapse onto the project, or a repository cloned
+    the ordinary way would key its config home on the string `.git` and every
+    project on the machine would share one.
+    """
+    root = tmp_path / "checkout"
+    root.mkdir()
+    git("-C", str(root), "init", "-q", "-b", "main")
+    git("-C", str(root), "config", "user.email", "test@example.invalid")
+    git("-C", str(root), "config", "user.name", "Test")
+    (root / "README.md").write_text("readme\n", encoding="utf-8")
+    git("-C", str(root), "add", "-A")
+    git("-C", str(root), "commit", "-qm", "first")
+    git("-C", str(root), "worktree", "add", "-q", str(tmp_path / "feat"), "-b", "feat")
+    assert state_volume_name(root) == "lup-cfg-checkout"
+    assert state_volume_name(tmp_path / "feat") == "lup-cfg-checkout"
+
+
+def test_the_launch_says_where_a_config_home_went(repository: Path) -> None:
+    """A rename hands back an empty config home, which looks like the bug.
+
+    The operator sees the same default theme either way, so the one launch
+    that can tell them apart is the one where the old volume is still there
+    and the new one is not.
+    """
+    worktree = repository / "tree" / "feat-one"
+    said = superseded_volume_notice(
+        worktree, Docker(), [superseded_volume_name(worktree)]
+    )
+    assert "lup-cfg-feat-one" in "\n".join(item.text for item in said)
+
+
+def test_nothing_is_said_once_the_repository_config_home_exists(
+    repository: Path,
+) -> None:
+    """Otherwise the warning outlives what it warns about."""
+    worktree = repository / "tree" / "feat-one"
+    existing = [superseded_volume_name(worktree), state_volume_name(worktree)]
+    assert superseded_volume_notice(worktree, Docker(), existing) == []
