@@ -1423,12 +1423,6 @@ def run_resolve(
     harness = composition.recipe.source
     plugin = harness.plugins[0]
     root = project_root()
-    if not check_remote_auth():
-        typer.echo(
-            "Continuing local-only: agent git commands that need the remote "
-            "will fail fast instead of prompting.",
-            err=True,
-        )
     launcher = LocalProcessLauncher()
     state_root = root / ".lup" / "resolve"
     resolved_run_id = run_id or chosen_run(
@@ -1448,8 +1442,22 @@ def run_resolve(
     # mid-flight, which can add or drop concerns while work is leased. Only a
     # starting run is refused; one already recorded keeps the base it
     # recorded, so a pull mid-run never strands it.
-    if not ResolverStateRepository(state_root, resolved_run_id).exists():
-        if abort_reason is None:
+    recorded = ResolverStateRepository(state_root, resolved_run_id).exists()
+    if abort_reason is not None:
+        # Ending a run reads recorded state and frees worktrees. It opens no
+        # session and reaches no remote, so a run that was never recorded is
+        # refused here rather than after a config home, a plugin install and a
+        # remote probe have been built to end something that is not there.
+        if not recorded:
+            raise typer.BadParameter(f"no resolver run {resolved_run_id!r} to abort")
+    else:
+        if not check_remote_auth():
+            typer.echo(
+                "Continuing local-only: agent git commands that need the remote "
+                "will fail fast instead of prompting.",
+                err=True,
+            )
+        if not recorded:
             require_fresh_base(probe_base_freshness(launcher, root))
     # A run leases a worktree per concern, and `worktree add` writes git
     # config three times over — so a confinement that owns `config.lock` stops
@@ -1903,10 +1911,6 @@ def run_resolve(
 
         async def drive() -> None:
             if abort_reason is not None:
-                if not core.repository.exists():
-                    raise typer.BadParameter(
-                        f"no resolver run {resolved_run_id!r} to abort"
-                    )
                 aborted = core.abort(abort_reason)
                 for record in aborted.cleanup:
                     typer.echo(
