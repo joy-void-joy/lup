@@ -15,7 +15,7 @@ And ports are allowlisted while destinations are not, because the ports a
 sandbox legitimately needs are enumerable and its destinations are not.
 """
 
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 
 from pydantic import BaseModel, Field
 
@@ -59,7 +59,24 @@ CLOUD_METADATA_HOSTS: tuple[str, ...] = (
 )
 
 # The names a host answers to for itself, which no address range expresses.
-LOCAL_NAMES: tuple[str, ...] = ("localhost", ".localhost", ".local")
+#
+# Dotted forms only, and that is load-bearing rather than terse. A leading dot
+# in `dstdomain` matches the apex as well as every subdomain -- the Squid FAQ
+# spells it out: a request for `http://foo.com/` matches both `foo.com` and
+# `.foo.com` -- so `.localhost` already covers the bare name, and listing both
+# is a redundancy squid treats as *fatal*:
+#
+#   ERROR: '.localhost' is a subdomain of 'localhost'
+#   FATAL: Bungled /etc/squid/squid.conf line 6
+#
+# Measured, as the whole reason the first contained sessions had no way out:
+# squid exited on this line, the proxy container removed itself, and every
+# reader downstream saw a proxy name that would not resolve.
+#
+# Squid's own advice there is to remove `.localhost`, and following it would
+# be wrong -- that drops subdomain coverage and keeps only the apex, which is
+# the narrower half. The entry to remove is the bare one.
+LOCAL_NAMES: tuple[str, ...] = (".localhost", ".local")
 
 
 class EgressPolicy(BaseModel, frozen=True):
@@ -90,6 +107,45 @@ class EgressPolicy(BaseModel, frozen=True):
         """Every hostname this policy refuses, from both of its lists."""
         return self.denied_metadata_hosts + self.denied_local_names
 
+    def distinct(self, names: Sequence[str]) -> list[str]:
+        """One ``dstdomain`` list with nothing in it that another entry covers.
+
+        Squid refuses a ``dstdomain`` ACL holding both a name and a dotted
+        form that contains it, and refuses it *fatally* -- the proxy does not
+        start. So this is not tidying: an adopter who adds ``example.com``
+        beside an existing ``.example.com`` would otherwise get a boundary
+        that silently is not there, which is the one failure this whole
+        design forbids.
+
+        Dropping the covered entry loses nothing, because a leading dot
+        matches the apex too. That is what makes normalising the right answer
+        rather than refusing: there is no declaration here that means
+        something the shorter list does not.
+
+        Applied to what is admitted as well as to what is denied, since both
+        render as ``dstdomain`` and squid does not care which of them a
+        redundancy came from.
+        """
+
+        def covers(outer: str, inner: str) -> bool:
+            """Whether *outer* already matches everything *inner* would.
+
+            Only a dotted entry covers anything but itself: ``.local`` covers
+            ``local`` and ``foo.local``, while ``local`` covers only itself.
+            Nested rather than free-standing because the rule is squid's
+            matching semantics and has no meaning away from this call.
+            """
+            if not outer.startswith("."):
+                return False
+            return inner == outer[1:] or inner.endswith(outer)
+
+        unique = list(dict.fromkeys(names))
+        return [
+            name
+            for name in unique
+            if not any(other != name and covers(other, name) for other in unique)
+        ]
+
     def render(self) -> str:
         """Compile this policy into the proxy configuration enforcing it."""
 
@@ -100,21 +156,23 @@ class EgressPolicy(BaseModel, frozen=True):
             for port in self.tunnel_ports:
                 yield f"acl SSL_ports port {port}"
             yield "acl CONNECT method CONNECT"
-            if self.denied_names:
-                yield f"acl forbidden_names dstdomain {' '.join(self.denied_names)}"
+            forbidden = self.distinct(self.denied_names)
+            if forbidden:
+                yield f"acl forbidden_names dstdomain {' '.join(forbidden)}"
             for destination in self.denied_destinations:
                 yield f"acl forbidden_destinations dst {destination}"
-            if self.allowed_domains:
-                yield f"acl allowed_domains dstdomain {' '.join(self.allowed_domains)}"
+            admitted = self.distinct(self.allowed_domains or [])
+            if admitted:
+                yield f"acl allowed_domains dstdomain {' '.join(admitted)}"
             # Denials first, so a permitted name that resolves to a private
             # address is still refused.
-            if self.denied_names:
+            if forbidden:
                 yield "http_access deny forbidden_names"
             if self.denied_destinations:
                 yield "http_access deny forbidden_destinations"
             yield "http_access deny !Safe_ports"
             yield "http_access deny CONNECT !SSL_ports"
-            if self.allowed_domains:
+            if admitted:
                 yield "http_access allow allowed_domains"
                 yield "http_access deny all"
             else:
