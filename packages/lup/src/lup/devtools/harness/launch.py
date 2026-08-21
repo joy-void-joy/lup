@@ -29,7 +29,7 @@ from lup.adapters.codex.harness_runtime import (
 )
 from lup.adapters.codex.transcripts import CodexTranscripts
 from lup.harness.environment import non_interactive_environment
-from lup.harness.models import NativeName, Plugin
+from lup.harness.models import NativeName, Plugin, Resumption
 from lup.harness.requirements import (
     Finding,
     LostCapability,
@@ -563,6 +563,35 @@ def writable_root_arguments() -> list[str]:
     return ["-c", f'sandbox_workspace_write.writable_roots=["{tree}"]']
 
 
+def claude_resume_arguments(resume: Resumption) -> list[str]:
+    """Claude Code's spelling: continuing and resuming are two flags.
+
+    ``--continue`` takes the most recent conversation in the working
+    directory and ``--resume`` opens the picker or takes a session id, so a
+    request reaches the runtime as words rather than as a mode.
+    """
+    if resume.session is not None:
+        return ["--resume", resume.session]
+    if resume.pick:
+        return ["--resume"]
+    return ["--continue"] if resume.latest else []
+
+
+def codex_resume_arguments(resume: Resumption) -> list[str]:
+    """Codex's spelling: reopening is a subcommand, and it leads the vector.
+
+    The same three requests, in the shape this runtime has for them —
+    ``resume`` alone is the picker, ``--last`` is the most recent, and a
+    session id is positional. It comes first because a subcommand does, which
+    is the whole of why the two cannot share one word list.
+    """
+    if resume.session is not None:
+        return ["resume", resume.session]
+    if resume.pick:
+        return ["resume"]
+    return ["resume", "--last"] if resume.latest else []
+
+
 def claude_sandbox_arguments(plugin: Plugin) -> list[str]:
     """Widen the Claude sandbox's writable set over the same sibling tree/.
 
@@ -629,12 +658,16 @@ def launch_claude(
     model: str | None,
     generate_only: bool,
     mode: LaunchMode | None = None,
+    resume: Resumption = Resumption(),
 ) -> None:
     """Generate/reconcile Claude artifacts and launch the verified local plugin."""
+    contradiction = resume.contradicted()
+    if contradiction is not None:
+        raise typer.BadParameter(contradiction)
     plugin = composition.recipe.source.plugins[0]
     if not ready_to_open(composition, generate_only):
         return
-    arguments: list[str] = []
+    arguments: list[str] = claude_resume_arguments(resume)
     # A mode's model is a default rather than a fixture: it says what this kind
     # of session runs on when nobody said otherwise, and an explicit --model
     # still wins, because overriding the model is why a caller passes one.
@@ -705,8 +738,12 @@ def launch_codex(
     generate_only: bool,
     force_install: bool,
     mode: LaunchMode | None = None,
+    resume: Resumption = Resumption(),
 ) -> None:
     """Generate/reconcile Codex artifacts and launch without updating the CLI."""
+    contradiction = resume.contradicted()
+    if contradiction is not None:
+        raise typer.BadParameter(contradiction)
     plugin = composition.recipe.source.plugins[0]
     if not ready_to_open(composition, generate_only):
         return
@@ -721,7 +758,10 @@ def launch_codex(
     installer = CodexPluginInstaller(
         PluginCacheConfig(codex_home=selected_home, marketplace=plugin.marketplace)
     )
-    arguments: list[str] = list(envelope)
+    # The subcommand leads, and everything the envelope carries follows it,
+    # because a word placed after a positional session id would be read as
+    # another one.
+    arguments: list[str] = [*codex_resume_arguments(resume), *envelope]
     if profile is not None:
         arguments.extend(["--profile", profile])
     selected_model = model or (mode.model if mode is not None else None)

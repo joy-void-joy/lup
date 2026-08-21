@@ -25,6 +25,7 @@ from lup.devtools.dev.issues import EXCLUDED_LABEL
 from lup.devtools.harness.composition import NativeTargets, claude_profile_directory
 from lup.devtools.harness.generate import NativeHarnessComposition
 from lup.devtools.harness.profile_app import create_profile_app
+from lup.harness.models import Resumption
 from lup.runtime.profiles import ProfileDirectory
 from lup.devtools.harness.drift import RepositoryWriter
 from lup.devtools.supervisor.app import serve_supervisor
@@ -530,6 +531,20 @@ def create_harness_app(
                 bool,
                 typer.Option("--generate-only", help="Generate without launching"),
             ] = False,
+            continue_latest: Annotated[
+                bool,
+                typer.Option(
+                    "--continue", "-c", help="Reopen the most recent session here"
+                ),
+            ] = False,
+            resume: Annotated[
+                bool,
+                typer.Option("--resume", help="Pick a session to reopen"),
+            ] = False,
+            session: Annotated[
+                str | None,
+                typer.Option("--session", help="Reopen this session by id"),
+            ] = None,
         ) -> None:
             selection = launch.extract_launch_mode(modes, ctx.args)
             launch.launch_claude(
@@ -540,6 +555,7 @@ def create_harness_app(
                 model,
                 generate_only,
                 selection.mode,
+                Resumption(latest=continue_latest, pick=resume, session=session),
             )
 
     codex_target = targets.builder("codex")
@@ -579,6 +595,20 @@ def create_harness_app(
                     help="Reinstall even when the cached digest matches",
                 ),
             ] = False,
+            continue_latest: Annotated[
+                bool,
+                typer.Option(
+                    "--continue", "-c", help="Reopen the most recent session here"
+                ),
+            ] = False,
+            resume: Annotated[
+                bool,
+                typer.Option("--resume", help="Pick a session to reopen"),
+            ] = False,
+            session: Annotated[
+                str | None,
+                typer.Option("--session", help="Reopen this session by id"),
+            ] = None,
         ) -> None:
             selection = launch.extract_launch_mode(modes, ctx.args)
             launch.launch_codex(
@@ -590,6 +620,7 @@ def create_harness_app(
                 generate_only,
                 force_install,
                 selection.mode,
+                Resumption(latest=continue_latest, pick=resume, session=session),
             )
 
     return app

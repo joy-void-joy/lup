@@ -1344,3 +1344,56 @@ class CapabilityEvidence[C](CapabilityReport, frozen=True):
     """One probe's verdict together with the adapter-shaped proof of it."""
 
     evidence: C
+
+
+class Resumption(BaseModel, frozen=True):
+    """Which earlier session a launch reopens, if any.
+
+    One shape for every launcher, because what an operator is asking for is
+    the same whichever runtime answers and only the spelling differs — a flag
+    on one, a subcommand on another. Declared once rather than as three loose
+    booleans threaded through each launcher, so a runtime added later answers
+    one question instead of being handed three that can disagree.
+
+    Reopening matters beyond convenience, which is what makes it worth a
+    declaration. The policy a session enforces is compiled into a plugin tree
+    its runtime loads at startup, so widening that policy takes effect only in
+    a new process — and a new process that started from nothing costs the whole
+    conversation that established what the widening was for. That price is
+    what pushes an agent toward a per-call escape, which helps once and
+    evaporates. With reopening, the durable path is also the cheap one:
+    propose the declaration edit, have it approved, regenerate, reopen.
+    """
+
+    latest: bool = False
+    """Reopen the most recent session here, without choosing one."""
+
+    pick: bool = False
+    """Offer the runtime's own picker over this project's sessions."""
+
+    session: str | None = None
+    """Reopen one session by the id its runtime knows it as."""
+
+    def wanted(self) -> bool:
+        """Whether this launch is reopening anything at all."""
+        return self.latest or self.pick or self.session is not None
+
+    def contradicted(self) -> str | None:
+        """The complaint, when more than one session was named at once.
+
+        Refused rather than ranked: an order of precedence here would be this
+        module deciding which of two things an operator meant, and being
+        wrong about it silently.
+        """
+        asked = [
+            name
+            for name, given in (
+                ("--continue", self.latest),
+                ("--resume", self.pick),
+                ("--session", self.session is not None),
+            )
+            if given
+        ]
+        if len(asked) < 2:
+            return None
+        return f"a launch reopens one session; got {', '.join(asked)}"
