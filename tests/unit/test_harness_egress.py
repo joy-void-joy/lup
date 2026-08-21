@@ -161,17 +161,24 @@ def test_naming_domains_flips_the_policy_to_refuse_by_default() -> None:
     assert "http_access deny all" in rendered
 
 
-def test_the_launch_names_what_will_hang_rather_than_be_refused() -> None:
+def test_the_launch_names_what_fails_outside_the_proxys_vocabulary() -> None:
     """The one failure the boundary cannot attribute after the fact.
 
     A refused request leaves a proxy log line :mod:`lup.sandbox.attribution`
-    can read. A component that ignores the variables sends packets onto a
-    network with no gateway and waits, leaving nothing behind at all -- so
-    before it happens is the only time it can be said.
+    can read. A component that ignores the variables resolves the name itself
+    on a network whose resolver was deliberately taken away, and fails in
+    DNS's vocabulary -- naming neither the proxy nor the boundary -- so before
+    it happens is the only time it can be said.
+
+    The claim this used to make was that such a component hangs. Measured
+    inside a session, it does not: the network is created `--disable-dns`, so
+    `ssh` fails at name resolution in milliseconds and never opens a socket
+    to wait on. A warning about a wait nobody will ever see is a warning that
+    teaches the reader to expect the wrong symptom.
     """
     lines = "\n".join(item.text for item in SessionEgress().notice("feat"))
     assert "ssh" in lines
-    assert "hang" in lines
+    assert "name resolution" in lines
 
 
 def test_an_unfiltered_launch_says_what_it_is_leaving_open() -> None:

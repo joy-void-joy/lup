@@ -66,9 +66,11 @@ class Unproxied(BaseModel, frozen=True):
     Declared because the failure has no vocabulary of its own. A component
     that honours ``HTTPS_PROXY`` and is refused gets a 403 the proxy wrote and
     :mod:`lup.sandbox.attribution` can explain; a component that ignores it
-    sends its packets onto a network with no gateway and simply waits. There
-    is nothing to attribute afterwards, so the only place this can be said is
-    before it happens.
+    resolves the name itself, on a network whose resolver was deliberately
+    taken away, and fails in DNS's vocabulary instead -- naming neither the
+    proxy nor the boundary. Nothing afterwards can attribute ``Temporary
+    failure in name resolution`` to a decision somebody made on purpose, so
+    the only place this can be said is before it happens.
     """
 
     component: str = Field(description="What ignores the variables")
@@ -86,10 +88,14 @@ class Unproxied(BaseModel, frozen=True):
 
 SSH_IGNORES_THE_PROXY = Unproxied(
     component="ssh",
-    reason="reads none of the proxy variables and speaks its own protocol on port 22",
+    reason=(
+        "reads none of the proxy variables and resolves the host itself, "
+        "which this network has no resolver to answer"
+    ),
     consequence=(
-        "a `git@host:` remote is unreachable; use HTTPS with a scoped token, "
-        "which is what the credential design assumes"
+        "a direct `ssh`, `scp` or `rsync -e ssh` fails at name resolution in "
+        "milliseconds; a git remote spelled for ssh is rewritten to HTTPS at "
+        "launch, which is what the credential design assumes"
     ),
 )
 """The measurement the credential design rests on, kept where a launch says it."""
@@ -513,9 +519,10 @@ class SessionEgress(BaseModel, frozen=True):
         """What a launch says about the network the session is about to get.
 
         Every line here is one the friction table demands: the posture, what
-        the posture refuses, what will hang rather than fail, and how to take
-        the infrastructure back down. A boundary nobody was told about is one
-        whose refusals get debugged as something else.
+        the posture refuses, what fails in some other vocabulary than the
+        proxy's, and how to take the infrastructure back down. A boundary
+        nobody was told about is one whose refusals get debugged as something
+        else.
         """
         if not self.filtered():
             return [
@@ -546,8 +553,8 @@ class SessionEgress(BaseModel, frozen=True):
                 [
                     Notice(
                         text=(
-                            "These ignore the proxy and will hang rather than "
-                            "be refused:"
+                            "These ignore the proxy and cannot reach anything "
+                            "through it:"
                         ),
                         urgency="warning",
                     )
