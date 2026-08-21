@@ -38,6 +38,8 @@ from decisions import (
     refused_tool_decision,
 )
 from host import (
+    boundary_description,
+    boundary_refusal,
     declared_identity,
     publish_edition,
     read_document,
@@ -148,6 +150,11 @@ def joined(decisions):
 def dispatch(payload, permission_request=False):
     name = payload["tool_name"]
     tool_input = payload["tool_input"]
+    # Where this session is rooted, which is what says whether a patched file
+    # belongs to the repository being worked on or to somebody else's. Read
+    # once, because the shell path and the patch path ask the same question of
+    # it and a second read is a second place it can be forgotten.
+    session_directory = Path(payload["cwd"]) if "cwd" in payload else None
     if name == "Bash":
         requested_escape = spent_escape(tool_input)
         escaped = requested_escape or auto_escape_matches(
@@ -162,7 +169,7 @@ def dispatch(payload, permission_request=False):
             # request is the other supported route. Both are checked against
             # semantic placement before the hook lets the native boundary act.
             escapable=escaped,
-            cwd=Path(payload["cwd"]) if "cwd" in payload else None,
+            cwd=session_directory,
         )
         # PreToolUse can neither see nor place every native escape. Let Codex's
         # sandbox run a confined call or raise the PermissionRequest where this
@@ -193,6 +200,7 @@ def dispatch(payload, permission_request=False):
                     change.after,
                     change.path_exists,
                     autonomous,
+                    session_directory,
                 )
                 for change in patched_files(tool_input["command"], read_document)
             ]
@@ -210,8 +218,38 @@ def dispatch(payload, permission_request=False):
     return KernelDecision("ask", f"unknown tool {name!r} is not covered by policy")
 
 
+def spoken_failure(payload):
+    """Everything a finished call said about going wrong, as one text.
+
+    Read out of whichever shape the response arrives in, because a hook is
+    promised the field and not its type, and a runtime free to add a third
+    shape must not turn this into an exception in a hook whose failure is a
+    decision that never happened. The same reading Claude's dispatcher makes,
+    which is the point: what a boundary refusal looks like is the kernel's
+    words, not either runtime's.
+    """
+    response = payload["tool_response"] if "tool_response" in payload else ""
+    if isinstance(response, str):
+        return response
+    if not isinstance(response, dict):
+        return ""
+    return "\n".join(
+        str(value) for value in response.values() if isinstance(value, str)
+    )
+
+
 def observe(payload):
-    """Record which checkout an edit landed in, and decide nothing.
+    """Explain a failure the boundary caused, or record where an edit landed.
+
+    A finished shell command is read for a failure the *boundary* caused and
+    stays silent about every other kind: the mount table refuses a write as
+    ``Read-only file system``, which is what a broken disk says too, so an
+    agent reading it changes permissions, creates the parent, and retries --
+    none of which can work, and none of which says so. This is the only
+    moment that failure can be explained, because the evidence is the
+    command's own output and it does not exist until now.
+
+    The rest records which checkout an edit landed in, and decides nothing.
 
     Codex reads the directory it ran in, where Claude reads the edited file.
     Not a lesser answer here, and not an available one either way: Codex
@@ -229,8 +267,12 @@ def observe(payload):
     edit never touched.
     """
     root = payload["cwd"] if "cwd" in payload else ""
+    if payload["tool_name"] == "Bash" if "tool_name" in payload else False:
+        described = boundary_description(Path(root) if root else None)
+        return boundary_refusal(spoken_failure(payload), described)
     if root:
         publish_edition(root)
+    return ""
 
 
 def main():
@@ -242,7 +284,15 @@ def main():
         # a call that already happened.
         event = payload["hook_event_name"] if "hook_event_name" in payload else ""
         if event == "PostToolUse":
-            observe(payload)
+            # Exit 2 is the one channel this event has to the agent here as
+            # on the other runtime: the call already ran, so nothing is
+            # undone, and a clean exit says nothing anywhere it will be read.
+            # Silence unless the boundary is what refused, so the channel
+            # means something when it is used.
+            found = observe(payload)
+            if found:
+                sys.stderr.write(found)
+                raise SystemExit(2)
             return
         permission_request = event == "PermissionRequest"
         permission_evidenced = event == "PreToolUse" and spend_approval(payload)

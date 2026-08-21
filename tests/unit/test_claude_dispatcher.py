@@ -49,7 +49,7 @@ Production because the edit gates below are what these tests are about, and
 a test root answers to the test-edit guard before any of them is reached."""
 
 
-def edit_payload(path: str, old: str, new: str, replace_all: bool) -> object:
+def edit_payload(path: str, old: str, new: str, replace_all: bool) -> JsonObject:
     return {
         "tool_name": "Edit",
         "tool_input": {
@@ -251,6 +251,108 @@ def delete_repo(tmp_path: Path) -> Path:
     git("commit", "-m", "chore: base")
     (work / "untracked.py").write_text("value = 2\n", encoding="utf-8")
     return work
+
+
+@pytest.fixture
+def other_repository(tmp_path: Path) -> Path:
+    """A checkout of a different repository, holding one file lup would refuse."""
+    work = tmp_path / "elsewhere"
+    (work / "src").mkdir(parents=True)
+    git = initialized_repo(work, tmp_path / "no-hooks")
+    (work / "src" / "theirs.py").write_text("value = 1\n", encoding="utf-8")
+    git("add", "src")
+    git("commit", "-m", "chore: base")
+    return work
+
+
+def foreign_verdict(path: Path, old: str, new: str, cwd: Path) -> tuple[str, str]:
+    """One edit judged with the session directory a live session always sends."""
+    payload = {
+        **edit_payload(str(path), old, new, False),
+        "cwd": str(cwd),
+    }
+    specific = decide_from(payload, cwd)["hookSpecificOutput"]
+    assert isinstance(specific, dict)
+    return str(specific["permissionDecision"]), str(
+        specific["permissionDecisionReason"]
+    )
+
+
+def test_another_repositorys_file_is_not_judged_by_this_projects_conventions(
+    other_repository: Path,
+) -> None:
+    """The defect #206 and #188 describe, at the dispatcher a session runs.
+
+    `Any` is a production denial here. Applied to a checkout that never
+    adopted these conventions it produced dozens of refusals naming lup rules,
+    and the only ways through were to restyle somebody else's code inside an
+    unrelated diff or to write a suppression directive into a repository with
+    no rule checker to read it.
+    """
+    effect, reason = foreign_verdict(
+        other_repository / "src" / "theirs.py",
+        "value = 1",
+        "from typing import Any",
+        Path.cwd(),
+    )
+
+    assert effect == "ask"
+    assert "different repository" in reason
+    assert "Any" not in reason
+
+
+def test_this_projects_own_file_is_still_judged(other_repository: Path) -> None:
+    """The half that must not move. Lifting the gates on a guess would silence
+    them here, which costs more than friction in somebody else's tree."""
+    decision = decide(
+        edit_payload(
+            "packages/lup/src/lup/devtools/dev/antipatterns.py",
+            "from lup.policy.kernel.roles import path_role",
+            "from typing import Any",
+            False,
+        )
+    )
+    specific = decision["hookSpecificOutput"]
+    assert isinstance(specific, dict)
+    assert specific["permissionDecision"] == "deny"
+
+
+def test_a_sibling_worktree_of_this_repository_is_not_foreign() -> None:
+    """The discriminator is the repository, never the checkout.
+
+    Most work here happens in a worktree, and comparing checkout roots would
+    lift every rule the moment a session edited a file one directory
+    sideways -- in this repository's own code.
+    """
+    judged = "packages/lup/src/lup/devtools/dev/antipatterns.py"
+    siblings = [
+        Path(line.removeprefix("worktree "))
+        for line in str(
+            sh.Command("git")("worktree", "list", "--porcelain")
+        ).splitlines()
+        if line.startswith("worktree ")
+    ]
+    # A sibling that actually carries the file, because an absent preimage
+    # asks for its own reasons and would read here as the gate having fired.
+    # The bare repository is in this listing too and carries no checkout.
+    elsewhere = next(
+        (
+            path
+            for path in siblings
+            if path != Path.cwd().resolve() and (path / judged).exists()
+        ),
+        None,
+    )
+    if elsewhere is None:
+        pytest.skip("this checkout has no sibling worktree carrying the judged file")
+    effect, _reason = foreign_verdict(
+        elsewhere / judged,
+        "from lup.policy.kernel.roles import path_role",
+        "from typing import Any",
+        Path.cwd(),
+    )
+
+    assert effect == "deny"
 
 
 def undo_refs(work: Path) -> list[str]:

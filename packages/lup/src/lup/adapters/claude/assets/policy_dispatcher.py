@@ -38,6 +38,8 @@ from decisions import (
     refused_tool_decision,
 )
 from host import (
+    boundary_description,
+    boundary_refusal,
     declared_identity,
     file_diagnostics,
     publish_edition,
@@ -139,6 +141,11 @@ def placed_input(payload):
 def dispatch(payload):
     name = payload["tool_name"]
     tool_input = payload["tool_input"]
+    # Where this session is rooted, which is what says whether an edited file
+    # belongs to the repository being worked on or to somebody else's. Read
+    # once, because the shell path and the edit path ask the same question of
+    # it and a second read is a second place it can be forgotten.
+    session_directory = Path(payload["cwd"]) if "cwd" in payload else None
     agent_type = payload["agent_type"] if "agent_type" in payload else ""
     autonomous = (
         agent_type in AUTONOMOUS_AGENT_IDENTITIES
@@ -154,7 +161,7 @@ def dispatch(payload):
             # A call's sandbox is an argument of the call here, so a verdict
             # that has to leave the sandbox is carried out rather than refused.
             escapable=True,
-            cwd=Path(payload["cwd"]) if "cwd" in payload else None,
+            cwd=session_directory,
         )
     if name == "WebFetch":
         return fetch_decision(tool_input["url"])
@@ -166,7 +173,9 @@ def dispatch(payload):
             tool_input["new_string"],
             "replace_all" in tool_input and tool_input["replace_all"] is True,
         )
-        return edit_decision(path, before, after, Path(path).exists(), autonomous)
+        return edit_decision(
+            path, before, after, Path(path).exists(), autonomous, session_directory
+        )
     if name == "Write":
         path = tool_input["file_path"]
         return edit_decision(
@@ -175,6 +184,7 @@ def dispatch(payload):
             tool_input["content"],
             Path(path).exists(),
             autonomous,
+            session_directory,
         )
     # Asked of whatever reached here rather than of a listed few: which tools
     # are worth refusing is the declaration's answer, and naming any of them
@@ -240,7 +250,9 @@ def rendered(decision, payload, placed):
         "permissionDecision": settled.effect,
         "permissionDecisionReason": settled.reason,
     }
-    offer = escalation_offer(settled.sandbox, settled.reason)
+    offer = escalation_offer(
+        settled.sandbox, settled.reason, payload["tool_name"] == "Bash"
+    )
     if offer:
         answer["additionalContext"] = offer
     if placed is not None and settled.effect != "deny":
@@ -260,16 +272,51 @@ def rendered(decision, payload, placed):
     }
 
 
-def observe(payload):
-    """Record where an edit landed and type-check it, deciding nothing.
+def spoken_failure(payload):
+    """Everything a finished call said about going wrong, as one text.
 
-    Claude Code names the file the same way for both editing tools, so the
-    one key is the whole reading. A payload without it is a call this event
-    is registered for and has nothing to say about, which is not a failure —
-    the matcher is narrow, but the runtime owns it, and a tool that stops
-    carrying a path should cost a recorded edition rather than an error.
+    Read out of whichever shape the response arrives in, because a hook is
+    promised the field and not its type: Claude Code returns a shell call's
+    result as an object carrying its streams and other tools as plain text,
+    and a runtime free to add a third shape must not turn this into an
+    exception in a hook whose failure is a decision that never happened.
+    """
+    response = payload["tool_response"] if "tool_response" in payload else ""
+    if isinstance(response, str):
+        return response
+    if not isinstance(response, dict):
+        return ""
+    return "\n".join(
+        str(value) for value in response.values() if isinstance(value, str)
+    )
+
+
+def observe(payload):
+    """Explain a failure the boundary caused, or record where an edit landed.
+
+    Two watchers on one event, told apart by what the call was. A finished
+    shell command is read for a failure the *boundary* caused and stays
+    silent about every other kind: the mount table refuses a write as
+    ``Read-only file system``, which is what a broken disk says too, so an
+    agent reading it changes permissions, creates the parent, and retries —
+    none of which can work, and none of which says so. This is the only
+    moment that failure can be explained, because the evidence is the
+    command's own output and it does not exist until now.
+
+    An edit is read as before: Claude Code names the file the same way for
+    both editing tools, so the one key is the whole reading. A payload
+    without either is a call this event is registered for and has nothing to
+    say about, which is not a failure — the matcher is the runtime's, and a
+    tool that stops carrying a path should cost a recorded edition rather
+    than an error.
     """
     tool_input = payload["tool_input"] if "tool_input" in payload else {}
+    if payload["tool_name"] == "Bash" if "tool_name" in payload else False:
+        described = boundary_description(
+            Path(payload["cwd"]) if "cwd" in payload else None
+        )
+        refusal = boundary_refusal(spoken_failure(payload), described)
+        return [refusal] if refusal else []
     path = tool_input["file_path"] if "file_path" in tool_input else ""
     if not path:
         return []

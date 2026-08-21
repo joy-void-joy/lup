@@ -256,6 +256,127 @@ def shared_git_directory(path_text: str) -> str:
     return str(linked.parents[1])
 
 
+def boundary_description(
+    root: Path | None, ledger: str = ".lup/boundary.json"
+) -> dict[str, list[str]]:
+    """What the launcher recorded about the boundary this session runs behind.
+
+    The mount table and the egress allowlist are *launch* facts, not
+    generation facts: which worktrees exist and which of them this session
+    leased is decided when the container starts, long after this dispatcher
+    was compiled. So the launcher writes them down and this reads them back,
+    the same shape the run ledger already uses.
+
+    An absent file is the ordinary answer rather than a failure: an
+    uncontained session has no boundary to describe, and one whose launcher
+    predates this has none recorded. Both mean the same thing to every caller
+    -- there is nothing here to attribute a failure to -- so both come back
+    empty.
+    """
+    if root is None:
+        return {}
+    try:
+        raw = (root / ledger).read_text()
+    except OSError:
+        return {}
+    try:
+        loaded = json.loads(raw)
+    except ValueError:
+        return {}
+    if not isinstance(loaded, dict):
+        return {}
+    return {
+        name: [item for item in value if isinstance(item, str)]
+        for name, value in loaded.items()
+        if isinstance(name, str) and isinstance(value, list)
+    }
+
+
+def unquoted_path(word: str) -> str:
+    """One word of a diagnostic, with the punctuation it was quoted in removed.
+
+    An error message is prose with a path in it, and prose has no parser --
+    which is why this trims rather than parses. Kept as its own function so
+    that reasoning sits beside the one line it excuses.
+    """
+    # lup: ignore[string-strip] — the quotes a diagnostic wraps a path in are
+    # exactly what has to come off, and no parser reads free-form prose
+    return word.strip("'\"`:,;()[]<>")
+
+
+def boundary_refusal(failure: str, described: dict[str, list[str]]) -> str:
+    """Name the boundary as the cause of a failure, or say nothing at all.
+
+    A confined command that fails fails in the vocabulary of whatever it was
+    doing. A write the mount table refused arrives as ``Read-only file
+    system`` and a host the proxy refused arrives as a timeout, and neither
+    says "you are confined" -- so an agent reading them debugs the filesystem
+    or the network library, for as long as it takes somebody to notice.
+
+    The discipline that makes this worth having is the refusal to guess. A
+    marker in the text never suffices on its own, because ``Read-only file
+    system`` appears for a genuinely read-only disk too; the claim is made
+    only where a *declared* read-only mount covers the path the failure named.
+    Everything else says nothing, and silence is the right answer here far
+    more often than a claim is. A wrong boundary claim is worse than none: it
+    teaches an agent to reach for the host when the bug was in its own code,
+    and that lesson outlives the one command it was wrong about.
+
+    The same reading as :mod:`lup.sandbox.attribution`, in the pinned standard
+    library, because this one runs inside the compiled dispatcher where that
+    module cannot be imported. What it deliberately does not repeat is the
+    egress half: a refused host is read out of the proxy's own log rather than
+    out of the client's guess about why its connection died, and reaching that
+    log means reaching the container runtime, which this half must not do.
+    """
+    markers = described["write_refusals"] if "write_refusals" in described else []
+    read_only = described["read_only"] if "read_only" in described else []
+    if not markers or not read_only:
+        return ""
+    if not any(marker in failure for marker in markers):
+        return ""
+    covering = [
+        mount
+        for word in failure.split()
+        for candidate in [unquoted_path(word)]
+        if candidate.startswith("/") and len(candidate) > 1
+        for mount in read_only
+        if candidate == mount or candidate.startswith(mount + "/")
+    ]
+    if not covering:
+        return ""
+    return (
+        f"The boundary refused this, not the filesystem: {covering[0]} is "
+        "mounted read-only on purpose, so retrying, changing permissions or "
+        "creating the parent will not help. Work inside your own tree, or "
+        "propose adding the path to the image declaration if it genuinely "
+        "belongs in every session."
+    )
+
+
+def foreign_repository(path_text: str, root: Path | None) -> bool:
+    """Whether this path belongs to a repository other than the session's.
+
+    The discriminator is the *repository*, never the checkout. A sibling
+    worktree of this repository is still this repository's code and still
+    answers to its conventions, so comparing checkout roots would lift every
+    rule the moment work moved one directory sideways -- which is most of how
+    this project is worked on. :func:`shared_git_directory` is the answer both
+    ends can name alike, whichever worktree either of them is sitting in.
+
+    Undecidable answers say no. A path in no repository, a session in no
+    repository, and an unreadable ``.git`` all leave one side blank, and the
+    honest reading of "cannot tell" is that this project's rules still apply:
+    lifting them on a guess would silence the gates on this repository's own
+    files, where keeping them costs friction somewhere that is not ours.
+    """
+    if root is None:
+        return False
+    here = shared_git_directory(str(root))
+    there = shared_git_directory(path_text)
+    return bool(here) and bool(there) and here != there
+
+
 def publish_edition(path_text: str) -> None:
     """Say which checkout an edit landed in, for the servers that would guess.
 
@@ -620,6 +741,23 @@ def undo_snapshot(
     command whose purpose is destroying what this cannot restore, and a
     credential belongs outside the checkout rather than inside one.
 
+    **One ref per distinct state the tree was ever in**, and that is what
+    makes taking one before *every* command affordable rather than merely
+    cheap. Git addresses content, so a command that changed nothing produces
+    a byte-identical tree -- and naming the ref after that tree means writing
+    it again simply overwrites the existing one with the newer note. A read
+    leaves no new ref at all.
+
+    The alternative was a list of commands worth snapshotting before, and it
+    was tried and measured wrong. Keying on whether the classifier waved a
+    command through conflates *this destroys work* with *this was not
+    recognised*, which are the same verdict and different questions: one
+    session produced sixty refs, fifty-seven of them in front of a `grep` or
+    a `sed`. Dedup needs no list, cannot miss a command nobody enumerated,
+    and leaves a listing somebody can actually read -- which is the whole
+    point of recording the reason, since what a reader looks for is the
+    snapshot from before the thing that went wrong.
+
     Silent about its own failure, and deliberately. This runs in front of a
     command somebody asked for; a checkout mid-merge, a locked index, and a
     repository this process cannot write to are all reasons a snapshot cannot
@@ -632,9 +770,9 @@ def undo_snapshot(
     for the first snapshot of a session, then a median of 11 ms warm and 14 ms
     with a file changed, against roughly a second of interpreter start for a
     subprocess that would do the same work. A safety net paid for on every
-    mutating command has to cost what this costs, or it is the first thing
-    somebody turns off -- and the warm figure is the one that matters, because
-    the cold index is paid once and reused for the rest of the session.
+    command has to cost what this costs, or it is the first thing somebody
+    turns off -- and the warm figure is the one that matters, because the cold
+    index is paid once and reused for the rest of the session.
     """
     if root is None:
         return ""
@@ -650,8 +788,22 @@ def undo_snapshot(
     commit = git_answers(["commit-tree", tree[0], "-m", f"lup undo: {reason}"], root)
     if not commit:
         return ""
+    # The name carries both, and needs both. The stamp orders the listing
+    # exactly -- git records a commit's date to the second, so two states
+    # reached inside one second would otherwise tie, and a tie in a safety
+    # net's "newest" is wrong at the worst possible moment. The tree hash is
+    # what makes the state findable again: every earlier ref holding this
+    # same tree is retired just below, so the listing carries one entry per
+    # distinct state rather than one per command.
+    held = tree[0][:12]
+    where = namespace or undo_namespace()
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%f")
-    reference = f"{namespace or undo_namespace()}/{stamp}-{commit[0][:8]}"
+    for stale in (
+        git_answers(["for-each-ref", "--format=%(refname)", where], root) or []
+    ):
+        if stale.endswith(f"-{held}"):
+            git_answers(["update-ref", "-d", stale], root)
+    reference = f"{where}/{stamp}-{held}"
     if git_answers(["update-ref", reference, commit[0]], root) is None:
         return ""
     return reference
@@ -929,6 +1081,7 @@ def edit_decision(
     after: str | None,
     path_exists: bool,
     autonomous: bool,
+    cwd: Path | None = None,
 ) -> KernelDecision:
     """Judge one file's before and after against the declared edit policy.
 
@@ -948,12 +1101,19 @@ def edit_decision(
     server, which is the difference between a gate that costs a second per
     edit and one that costs a second on the edits that need it.
     """
+    outside_this_repository = foreign_repository(path_text, cwd)
     suffix = Path(path_text).suffix.lower()
     python_source = suffix in (".py", ".pyi")
     rows = ANTI_PATTERN_ROWS[suffix] if suffix in ANTI_PATTERN_ROWS else []
+    # A checker is not started for a file this policy has already decided it
+    # has nothing to say about. It would resolve another repository's imports
+    # against another repository's environment to answer a rule that will not
+    # be applied, and pay a language server's second for the privilege.
     refuted = (
         resolved_refutations(path_text, after, RESOLUTION_COMMAND)
-        if after is not None and awaits_resolution(before, after, rows, python_source)
+        if not outside_this_repository
+        and after is not None
+        and awaits_resolution(before, after, rows, python_source)
         else None
     )
     return decide_edit(
@@ -970,6 +1130,7 @@ def edit_decision(
         python_source=python_source,
         acceptance_guard=ACCEPTANCE_GUARD,
         refuted=refuted,
+        foreign=outside_this_repository,
     )
 
 
@@ -1072,6 +1233,11 @@ def joined(decisions):
 def dispatch(payload, permission_request=False):
     name = payload["tool_name"]
     tool_input = payload["tool_input"]
+    # Where this session is rooted, which is what says whether a patched file
+    # belongs to the repository being worked on or to somebody else's. Read
+    # once, because the shell path and the patch path ask the same question of
+    # it and a second read is a second place it can be forgotten.
+    session_directory = Path(payload["cwd"]) if "cwd" in payload else None
     if name == "Bash":
         requested_escape = spent_escape(tool_input)
         escaped = requested_escape or auto_escape_matches(
@@ -1086,7 +1252,7 @@ def dispatch(payload, permission_request=False):
             # request is the other supported route. Both are checked against
             # semantic placement before the hook lets the native boundary act.
             escapable=escaped,
-            cwd=Path(payload["cwd"]) if "cwd" in payload else None,
+            cwd=session_directory,
         )
         # PreToolUse can neither see nor place every native escape. Let Codex's
         # sandbox run a confined call or raise the PermissionRequest where this
@@ -1117,6 +1283,7 @@ def dispatch(payload, permission_request=False):
                     change.after,
                     change.path_exists,
                     autonomous,
+                    session_directory,
                 )
                 for change in patched_files(tool_input["command"], read_document)
             ]
@@ -1134,8 +1301,38 @@ def dispatch(payload, permission_request=False):
     return KernelDecision("ask", f"unknown tool {name!r} is not covered by policy")
 
 
+def spoken_failure(payload):
+    """Everything a finished call said about going wrong, as one text.
+
+    Read out of whichever shape the response arrives in, because a hook is
+    promised the field and not its type, and a runtime free to add a third
+    shape must not turn this into an exception in a hook whose failure is a
+    decision that never happened. The same reading Claude's dispatcher makes,
+    which is the point: what a boundary refusal looks like is the kernel's
+    words, not either runtime's.
+    """
+    response = payload["tool_response"] if "tool_response" in payload else ""
+    if isinstance(response, str):
+        return response
+    if not isinstance(response, dict):
+        return ""
+    return "\n".join(
+        str(value) for value in response.values() if isinstance(value, str)
+    )
+
+
 def observe(payload):
-    """Record which checkout an edit landed in, and decide nothing.
+    """Explain a failure the boundary caused, or record where an edit landed.
+
+    A finished shell command is read for a failure the *boundary* caused and
+    stays silent about every other kind: the mount table refuses a write as
+    ``Read-only file system``, which is what a broken disk says too, so an
+    agent reading it changes permissions, creates the parent, and retries --
+    none of which can work, and none of which says so. This is the only
+    moment that failure can be explained, because the evidence is the
+    command's own output and it does not exist until now.
+
+    The rest records which checkout an edit landed in, and decides nothing.
 
     Codex reads the directory it ran in, where Claude reads the edited file.
     Not a lesser answer here, and not an available one either way: Codex
@@ -1153,8 +1350,12 @@ def observe(payload):
     edit never touched.
     """
     root = payload["cwd"] if "cwd" in payload else ""
+    if payload["tool_name"] == "Bash" if "tool_name" in payload else False:
+        described = boundary_description(Path(root) if root else None)
+        return boundary_refusal(spoken_failure(payload), described)
     if root:
         publish_edition(root)
+    return ""
 
 
 def main():
@@ -1166,7 +1367,15 @@ def main():
         # a call that already happened.
         event = payload["hook_event_name"] if "hook_event_name" in payload else ""
         if event == "PostToolUse":
-            observe(payload)
+            # Exit 2 is the one channel this event has to the agent here as
+            # on the other runtime: the call already ran, so nothing is
+            # undone, and a clean exit says nothing anywhere it will be read.
+            # Silence unless the boundary is what refused, so the channel
+            # means something when it is used.
+            found = observe(payload)
+            if found:
+                sys.stderr.write(found)
+                raise SystemExit(2)
             return
         permission_request = event == "PermissionRequest"
         permission_evidenced = event == "PreToolUse" and spend_approval(payload)

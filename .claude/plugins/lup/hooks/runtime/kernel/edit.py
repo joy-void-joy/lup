@@ -12,6 +12,7 @@ from typing import TypedDict
 
 from .decision import KernelDecision
 from .roles import (
+    FOREIGN_REPOSITORY_REFERRAL,
     GENERATED_PLUGIN_REFUSAL,
     is_generated_plugin_target,
     normalized_path,
@@ -1642,6 +1643,7 @@ def decide_edit(
     acceptance_guard: AcceptanceGuardRow | None = None,
     marker_files: tuple[str, ...] = PACKAGE_MARKER_FILES,
     refuted: dict[str, list[int]] | None = None,
+    foreign: bool = False,
 ) -> KernelDecision:
     """Apply anti-pattern, path, marker, full-write, deletion, and size gates.
 
@@ -1690,6 +1692,20 @@ def decide_edit(
     # only correct answer is "edit the source instead".
     if is_generated_plugin_target(path):
         return KernelDecision("deny", GENERATED_PLUGIN_REFUSAL)
+    # Below the plugin refusal, which is about a universal fact -- a build
+    # product is overwritten by the next generation, in anybody's repository
+    # -- and above everything else, which is not. The gates that follow
+    # describe how *this* project's code should read, and applying them to
+    # another repository's files judges that repository by conventions it
+    # never adopted: measured, one session produced dozens of denials naming
+    # lup rules against a checkout that had its own hooks, its own size
+    # budget, and no lup rule checker to read a suppression directive. The
+    # edit was refused until the other repository's code had been restyled
+    # into this one's conventions, inside a diff whose subject was something
+    # else entirely. So the honest answer is that this policy has nothing to
+    # say about the file, and the human who launched a session here decides.
+    if foreign:
+        return KernelDecision("ask", FOREIGN_REPOSITORY_REFERRAL)
     # Whether this file may be edited at all is prior to how the edit reads,
     # so the guard answers ahead of every gate below — including pure
     # deletion, which would otherwise allow removing the test outright, and

@@ -31,6 +31,25 @@ GENERATED_PLUGIN_REFUSAL = (
 )
 
 
+# lup: ignore[constant-declaration] — the words this gate says, in a kernel
+# compiled hermetically into a bare dispatcher that takes no arguments
+FOREIGN_REPOSITORY_REFERRAL = (
+    "this file belongs to a different repository, whose conventions, size"
+    " budget and gates are its own — this project's rule checker has nothing"
+    " to say about it and is not applying any of them. Edit it as that"
+    " repository would want it, not as this one would"
+)
+"""What a foreign-repository edit is told, in place of a convention refusal.
+
+The sentence has to say two things at once and be believed on both. That the
+edit may proceed once a human approves it, and — the part that was actually
+costing something — that the rules it is *not* being judged by were never
+about it, so the way through is not to satisfy them. A refusal naming a lup
+rule teaches an agent to restyle somebody else's code until the rule stops
+firing, which is exactly what happened.
+"""
+
+
 def is_generated_plugin_target(word: str) -> bool:
     """Recognize a path confined to a native plugin tree the harness renders.
 
