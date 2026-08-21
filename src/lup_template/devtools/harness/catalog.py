@@ -53,13 +53,6 @@ from lup_template.devtools.harness.content.shell_vocabulary import (
 )
 
 EXCLUDED_COMMANDS = [
-    # `py eval` is the rung the guidance points at for computing anything, and
-    # it computes by talking to the Docker daemon over a Unix socket the
-    # isolation blocks outright — the one incompatibility the runtime's own
-    # documentation names. Excluding the rung leaves the expression evaluated
-    # where it always was, in a container; granting the socket instead would
-    # hand every sandboxed command the host through it.
-    "uv run lup-devtools py eval *",
     # Egress the sandbox proxy cannot carry: it allowlists hostnames over
     # HTTP, and the transport underneath a git remote is SSH on port 22. No
     # narrower lever reaches this — a credential path takes a mode and not a

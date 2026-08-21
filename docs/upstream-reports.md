@@ -29,8 +29,7 @@ command directly instead. Refusing to run it — a worktree-isolated session's
 git operations must target its own worktree.
 ```
 
-`grep -c eval`, `rg complete src/`, `grep -rn enable .` and
-`uv run lup-devtools py eval '1+1'` fail identically.
+`grep -c eval`, `rg complete src/` and `grep -rn enable .` fail identically.
 
 Note the word must be its own argv element: `git log -S"ssh alias"` does
 **not** reproduce, because quoting keeps `alias` from becoming one.

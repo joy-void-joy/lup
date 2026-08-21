@@ -201,10 +201,17 @@ which is what the shell fixtures below are written against."""
 SHELL_POLICY_CASES = [
     DecisionCase(input="env MODE=test python script.py", effect="deny"),
     DecisionCase(input="uv run --with requests python -c 'x'", effect="deny"),
-    # A scratch root is gitignored, so a script there reaches no reviewer and
-    # no diff; the escalation ladder routes one-off work to devtools instead.
-    DecisionCase(input="uv run pytest | uv run python tmp/oneoff.py", effect="deny"),
-    DecisionCase(input="uv run python tmp/oneoff.py", effect="deny"),
+    # A script file is the ladder's rung for computing something once, and it
+    # is allowed wherever it sits: the refusal is about inline code leaving
+    # nothing behind to read, which a file does not do. A scratch root reaches
+    # no reviewer, but a one-off nobody reads again costs a reviewer nothing,
+    # and the session running it is contained.
+    DecisionCase(input="uv run pytest | uv run python tmp/oneoff.py", effect="allow"),
+    DecisionCase(input="uv run python tmp/oneoff.py", effect="allow"),
+    # The flags keep the refusal, because each of them is a program with no
+    # file to open afterwards.
+    DecisionCase(input="uv run python -m http.server", effect="deny"),
+    DecisionCase(input="uv run python", effect="deny"),
     DecisionCase(input="find . -name '*.py' | xargs grep TODO", effect="allow"),
     DecisionCase(input="echo x | xargs rm -rf", effect="ask"),
     DecisionCase(input="cd /tmp/worktree && uv run pytest", effect="allow"),

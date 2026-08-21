@@ -25,6 +25,7 @@ from pathlib import Path
 
 from host import (
     contained,
+    script_run_nudge,
     directory_write_targets,
     empty_directory_targets,
     existing_write_targets,
@@ -42,7 +43,12 @@ from kernel.edit import (
     relocated_suppressions,
 )
 from kernel.fetch import decide_fetch
-from kernel.lex import shell_path_verb_targets, shell_write_targets
+from kernel.lex import (
+    python_script_targets,
+    shell_path_verb_targets,
+    shell_write_targets,
+)
+from kernel.words import INTERPRETERS
 from kernel.shell import decide_shell
 from kernel.tools import decide_tool
 from policy_data import (
@@ -98,7 +104,7 @@ def bash_decision(
     passing is a rule that silently stopped applying.
     """
     acted_on = shell_path_verb_targets(command)
-    return decide_shell(
+    verdict = decide_shell(
         command,
         SHELL_RULES,
         ALLOWED_FETCH_SCOPES,
@@ -126,6 +132,17 @@ def bash_decision(
         # about the host with no runtime variation to it, so neither
         # dispatcher is given the chance to forget it.
         contained=contained(),
+    )
+    # Counted only where the command was going to run anyway. A refused script
+    # never ran, so counting it would nudge toward promoting something that
+    # has not worked once.
+    if verdict.effect != "allow":
+        return verdict
+    nudge = script_run_nudge(python_script_targets(command, INTERPRETERS), cwd)
+    return (
+        KernelDecision("allow", verdict.reason + nudge, verdict.sandbox)
+        if nudge
+        else verdict
     )
 
 

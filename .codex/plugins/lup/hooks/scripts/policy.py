@@ -34,7 +34,12 @@ from kernel.edit import (
     relocated_suppressions,
 )
 from kernel.fetch import decide_fetch
-from kernel.lex import shell_path_verb_targets, shell_write_targets
+from kernel.lex import (
+    python_script_targets,
+    shell_path_verb_targets,
+    shell_write_targets,
+)
+from kernel.words import INTERPRETERS
 from kernel.shell import decide_shell
 from kernel.tools import decide_tool
 from policy_data import (
@@ -61,6 +66,91 @@ def sandbox_active() -> bool:
     """Whether the launcher confined this session to an OS sandbox."""
     environ = os.environ  # lup: ignore[os-environ]
     return "LUP_SANDBOX_ACTIVE" in environ and environ["LUP_SANDBOX_ACTIVE"] == "1"
+
+
+def script_run_nudge(
+    scripts: list[str],
+    root: Path | None,
+    after: int = 5,
+    every: int = 10,
+    ledger: str = ".lup/script-runs.json",
+) -> str:
+    """Count each script's runs and say when one has stopped being a one-off.
+
+    The ladder allows a scratch script because computing something once does
+    not earn a command. Nothing in that argument survives the fifth run: by
+    then the thing is a tool, and a tool nobody can invoke by name is one the
+    next session rewrites from scratch. This is what notices, because the
+    agent doing the rewriting has no memory of the previous four.
+
+    Advice rather than a gate. It rides along with a verdict that already
+    allowed the command, so a genuine repeat is a sentence to read and not a
+    wall -- the only form this can take without punishing the case it exists
+    to improve.
+
+    Said once at ``after`` and then only every ``every`` runs, because the
+    two ways to get this wrong are opposite and both fatal to it. On every
+    run it becomes noise attached to a command that worked, which is read
+    once and skipped forever after. Once and never again, and a session that
+    was mid-thought when it arrived never hears it a second time, however
+    many more times it runs the thing.
+
+    A ledger that cannot be read or written yields no nudge. A counter is not
+    worth failing a command over, and a read-only checkout is an ordinary
+    place to be running.
+    """
+    if root is None or not scripts:
+        return ""
+    path = root / ledger
+    # An unreadable ledger and an unparseable one are different failures. The
+    # first is a checkout this process cannot read, where the honest answer is
+    # to say nothing. The second is a file whose contents are not a tally, and
+    # treating that as fatal would disable the nudge permanently -- the file
+    # never gets rewritten, so every later run reads the same wreckage. Start
+    # the count over instead.
+    try:
+        raw = path.read_text() if path.exists() else ""
+    except OSError:
+        return ""
+    try:
+        loaded = json.loads(raw) if raw else None
+    except ValueError:
+        loaded = None
+    try:
+        counts = loaded if isinstance(loaded, dict) else {}
+        seen = {
+            script: (
+                counts[script]
+                if script in counts and isinstance(counts[script], int)
+                else 0
+            )
+            for script in dict.fromkeys(scripts)
+        }
+        bumped = {
+            script: before + scripts.count(script) for script, before in seen.items()
+        }
+        # A nudge point is `after`, then every `every` runs past it. This run
+        # earns a nudge when it carried the count across one of them.
+        earned = [
+            script
+            for script, total in bumped.items()
+            if any(
+                seen[script] < point <= total
+                for point in range(after, total + 1, every)
+            )
+        ]
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({**counts, **bumped}, indent=2, sort_keys=True))
+    except OSError:
+        return ""
+    if not earned:
+        return ""
+    counted = ", ".join(f"{script} ({bumped[script]}x)" for script in earned)
+    return (
+        f" — {counted}: more than a one-off by now, so consider making it a"
+        " `lup-devtools` command, which lands in the diff and can be run"
+        " again by name"
+    )
 
 
 def contained() -> bool:
@@ -624,7 +714,7 @@ def bash_decision(
     passing is a rule that silently stopped applying.
     """
     acted_on = shell_path_verb_targets(command)
-    return decide_shell(
+    verdict = decide_shell(
         command,
         SHELL_RULES,
         ALLOWED_FETCH_SCOPES,
@@ -652,6 +742,17 @@ def bash_decision(
         # about the host with no runtime variation to it, so neither
         # dispatcher is given the chance to forget it.
         contained=contained(),
+    )
+    # Counted only where the command was going to run anyway. A refused script
+    # never ran, so counting it would nudge toward promoting something that
+    # has not worked once.
+    if verdict.effect != "allow":
+        return verdict
+    nudge = script_run_nudge(python_script_targets(command, INTERPRETERS), cwd)
+    return (
+        KernelDecision("allow", verdict.reason + nudge, verdict.sandbox)
+        if nudge
+        else verdict
     )
 
 
