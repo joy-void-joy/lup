@@ -455,6 +455,21 @@ def reported(findings: list[Finding]) -> list[Finding]:
     return findings
 
 
+def verify_inside(
+    manifest: Manifest, opening: list[str], setting_up: bool = True
+) -> list[Finding]:
+    """Exercise the image half behind an argv somebody already assembled.
+
+    Split from :func:`report_inside_requirements` so the launch can use it
+    without building the argv a second time. Assembling it starts the egress
+    proxy and may build the image, so a second call would not merely be slow
+    -- it would print the whole boundary notice again, which reads as the
+    launch having done it twice.
+    """
+    environ: EnvVars = dict(os.environ)  # lup: ignore[os-environ]
+    return reported(manifest.check_inside(environ, opening, setting_up))
+
+
 def report_inside_requirements(
     composition: NativeHarnessComposition,
     plugin: Plugin,
@@ -494,8 +509,7 @@ def report_inside_requirements(
         login,
         interactive=False,
     )
-    environ: EnvVars = dict(os.environ)  # lup: ignore[os-environ]
-    return reported(harness.requirements.check_inside(environ, opening))
+    return verify_inside(harness.requirements, opening)
 
 
 def codex_login_preflight(home: Path, environment: EnvVars) -> None:
@@ -854,19 +868,39 @@ def session_argv(
         return [cli, *arguments]
     harness = composition.recipe.source
     credential = login.credentials_path(config_home)
-    return [
-        *contained_argv(
-            harness.image,
-            harness.requirements,
-            project_root(),
-            plugin.hooks.human_owned_files if plugin.hooks is not None else [],
-            config_home,
-            credential if credential.exists() else None,
-            login,
-        ),
-        cli,
-        *arguments,
-    ]
+    opening = contained_argv(
+        harness.image,
+        harness.requirements,
+        project_root(),
+        plugin.hooks.human_owned_files if plugin.hooks is not None else [],
+        config_home,
+        credential if credential.exists() else None,
+        login,
+    )
+    # Verified on the way in, rather than asserted. This is §6's whole point
+    # and the launch is where it has to happen: the boundary was built two
+    # lines ago and nothing had ever asked whether it carries traffic. What
+    # that cost, measured on the first contained session anybody opened, was
+    # a session that started cleanly, looked entirely healthy, and reported
+    # every request as the operator's own internet or DNS being down.
+    #
+    # Not the whole image roster -- only the entries marked `always`, which
+    # is the handful whose absence means the session can do nothing. A model
+    # call and a toolchain version belong to `harness requirements --inside`.
+    verify_inside(harness.requirements, probing(opening), setting_up=False)
+    return [*opening, cli, *arguments]
+
+
+def probing(opening: list[str]) -> list[str]:
+    """The session's own argv, with the interactive terminal taken back off.
+
+    The same argv rather than a fresh one, because a probe assembled
+    separately verifies a container no session opens -- which is how the
+    exercise this replaces could pass on a host whose sessions could not
+    start. The one difference is deliberate: a probe's output is captured,
+    and ``-it`` against a pipe fails on the terminal it was promised.
+    """
+    return [word for word in opening if word != "-it"]
 
 
 # lup: ignore[model-free-function] — a launcher is not an operation on a mode.

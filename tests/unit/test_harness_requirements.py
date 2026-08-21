@@ -8,6 +8,7 @@ diagnosis that stays quiet about a failure it does not explain.
 
 from pathlib import Path
 
+import lup.devtools.harness.launch as launch
 from lup.harness.image import Podman
 from lup.harness.ownership import source_digest
 from lup.harness.toolchain import for_host
@@ -449,4 +450,45 @@ def test_the_image_half_is_exercised_behind_the_argv_a_session_opens() -> None:
         "claude",
         "-p",
         "Reply with exactly: SESSION_OK",
+    ]
+
+
+def test_a_launch_asks_only_the_image_entries_marked_always() -> None:
+    """The whole image roster at every launch would cost a container each.
+
+    The axis is doing real work here rather than expressing importance: what
+    a launch pays for is the handful whose absence means the session can do
+    nothing at all, and a model call and a toolchain version are what
+    somebody setting a machine up hears once.
+    """
+    declared = manifest()
+    opening = ["podman", "run", "--rm", "lup-agent:abc"]
+    at_launch = {
+        item.requirement.capability
+        for item in declared.check_inside({}, opening, setting_up=False)
+    }
+    at_setup = {
+        item.requirement.capability for item in declared.check_inside({}, opening)
+    }
+
+    assert at_launch == {"egress proxy resolves", "egress proxy tunnels out"}
+    assert "contained agent session" in at_setup - at_launch
+
+
+def test_the_launch_probe_drops_the_terminal_it_cannot_have() -> None:
+    """The session's own argv, minus the one flag a captured probe cannot take.
+
+    The same argv rather than a fresh one is the whole point — an exercise
+    assembled separately verifies a container no session opens — so the
+    difference has to be exactly this and nothing else.
+    """
+    opening = ["podman", "run", "--rm", "-it", "-v", "vol:/cfg", "lup-agent:abc"]
+
+    assert launch.probing(opening) == [
+        "podman",
+        "run",
+        "--rm",
+        "-v",
+        "vol:/cfg",
+        "lup-agent:abc",
     ]

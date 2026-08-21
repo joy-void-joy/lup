@@ -623,6 +623,22 @@ class Requirement(BaseModel, frozen=True):
             "of an important thing inexpressible"
         ),
     )
+    at_launch: bool = Field(
+        default=False,
+        description=(
+            "Whether a contained launch pays a container start to verify "
+            "this on the way in. A separate field from ``checked`` because "
+            "``checked`` is about an exercise's cost and the same exercise "
+            "costs differently on each side: ``uv --version`` is free on the "
+            "host and a container start inside, so one field marking it "
+            "cheap was read as cheap in both places -- measured, a launch "
+            "roster that grew to six container starts including a "
+            "``bunx tsc`` and a ``gh auth status``. False by default, so "
+            "nothing costs a launch anything unless it says so, and what "
+            "says so is the boundary: the part whose failure is invisible "
+            "from outside and leaves the session unable to do anything"
+        ),
+    )
     exercise: Exercise
     absence: Absence
     diagnoses: list[Diagnosis] = Field(
@@ -753,7 +769,7 @@ class Manifest(BaseModel, frozen=True):
             and (setting_up or item.checked == "always")
         ]
 
-    def inside_the_image(self) -> list[Requirement]:
+    def inside_the_image(self, setting_up: bool = True) -> list[Requirement]:
         """The requirements the container is expected to satisfy, not this machine.
 
         The other half of :meth:`on_the_host`, and for a long time the half
@@ -764,19 +780,27 @@ class Manifest(BaseModel, frozen=True):
         bought was a manifest whose image half was a claim, with each entry's
         docstring describing a proof nothing had performed.
 
-        Every one of them is checked at setup rather than at launch, whatever
-        the entry says, and that is a fact about this roster rather than a
-        judgement about its members: reaching any of them means starting a
-        container, which is the cost ``checked`` exists to keep out of a
-        session's opening.
+        *setting_up* is off for a launch, which narrows this to the entries
+        that asked to be verified there. Every entry in this roster costs a
+        container start -- there is no cheap one -- so what a launch pays for
+        is named rather than inferred: the boundary, whose failure is
+        invisible from outside and leaves the session unable to do anything.
+        A toolchain version and a model call are what somebody setting a
+        machine up hears once.
         """
-        return [item for item in self.requirements if item.where in ("image", "both")]
+        return [
+            item
+            for item in self.requirements
+            if item.where in ("image", "both") and (setting_up or item.at_launch)
+        ]
 
     def check(self, environment: EnvVars, setting_up: bool = False) -> list["Finding"]:
         """Exercise every host-side requirement, in declaration order."""
         return [item.check(environment) for item in self.on_the_host(setting_up)]
 
-    def check_inside(self, environment: EnvVars, opening: list[str]) -> list["Finding"]:
+    def check_inside(
+        self, environment: EnvVars, opening: list[str], setting_up: bool = True
+    ) -> list["Finding"]:
         """Exercise every image-side requirement inside what *opening* starts.
 
         *opening* is the argv a session opens with, minus the CLI it would
@@ -789,7 +813,7 @@ class Manifest(BaseModel, frozen=True):
             item.model_copy(update={"exercise": item.exercise.behind(opening)}).check(
                 environment
             )
-            for item in self.inside_the_image()
+            for item in self.inside_the_image(setting_up)
         ]
 
     def packages(self) -> list[Package]:

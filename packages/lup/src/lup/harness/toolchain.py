@@ -480,31 +480,40 @@ def proxy_resolves_requirement(
 ) -> Requirement:
     """Whether the session's network resolves the name its proxy answers to.
 
-    The first component of a filtered egress, and the one whose failure is
-    least recognisable. A session on an internal network reaches the world
-    only through a proxy it addresses by alias, and an alias is a DNS record
-    the network's own resolver holds. Where that record is missing -- the
-    proxy running but never joined to this network, the connect half of a
-    two-command start having failed after the run half succeeded -- every
-    request fails before a packet is addressed to anything.
+        The first component of a filtered egress, and the one whose failure is
+        least recognisable. A session on an internal network reaches the world
+        only through a proxy it addresses by alias, and an alias is a DNS record
+        the network's own resolver holds. Where that record is missing -- the
+        proxy running but never joined to this network, the connect half of a
+        two-command start having failed after the run half succeeded -- every
+        request fails before a packet is addressed to anything.
 
-    What the operator sees is the reason this is exercised separately.
-    Nothing names a proxy: the runtime reports that it cannot reach the API
-    and suggests checking the internet or DNS, which is true in the narrowest
-    sense and points at the operator's router. Measured, on the first
-    contained session anybody opened.
+        What the operator sees is the reason this is exercised separately.
+        Nothing names a proxy: the runtime reports that it cannot reach the API
+        and suggests checking the internet or DNS, which is true in the narrowest
+        sense and points at the operator's router. Measured, on the first
+        contained session anybody opened.
+    ``at_launch`` because this is one of the two places in the image roster
+        where a container start is worth paying for on the way in. A session that
+        opens without it is a session that cannot do anything, and it does not
+        fail on the way in -- it opens, looks entirely healthy, and then blames
+        the operator's network for every request. One second buys a refusal that
+        names the cause instead.
     """
     return Requirement(
         capability="egress proxy resolves",
+        at_launch=True,
         purpose="reaching anything at all from inside a filtered session",
         where=where,
-        checked="setup",
         exercise=Run(command=["getent", "hosts", alias]),
         absence=RefusedLaunch(
             because=(
                 "a filtered session addresses its only way out by this name, "
                 "so nothing in it can reach the network — and the runtime "
-                "reports that as the operator's own internet being down"
+                "reports that as the operator's own internet being down. "
+                "`harness egress --down` removes the network and the proxy "
+                "so the next launch rebuilds the pair; `--unsandboxed` opens "
+                "on the host under the semantic policy alone"
             )
         ),
         install=install,
@@ -518,27 +527,32 @@ def proxy_tunnels_requirement(
 ) -> Requirement:
     """Whether a request actually reaches the public internet through the proxy.
 
-    The second component, and the end-to-end one. Resolving the alias proves
-    a name; this proves the tunnel -- that the proxy accepted a ``CONNECT``,
-    that it could resolve the destination on its own side, and that its
-    bridged network really does reach out.
+        The second component, and the end-to-end one. Resolving the alias proves
+        a name; this proves the tunnel -- that the proxy accepted a ``CONNECT``,
+        that it could resolve the destination on its own side, and that its
+        bridged network really does reach out.
 
-    Through ``curl``'s reading of the proxy variables rather than an explicit
-    ``-x``, deliberately. Those variables are what every other client in the
-    session reads, so a probe that bypassed them would prove the proxy works
-    while saying nothing about whether anything is pointed at it -- which is
-    exactly the half that was broken.
+        Through ``curl``'s reading of the proxy variables rather than an explicit
+        ``-x``, deliberately. Those variables are what every other client in the
+        session reads, so a probe that bypassed them would prove the proxy works
+        while saying nothing about whether anything is pointed at it -- which is
+        exactly the half that was broken.
 
-    The destination is the API the session exists to reach. A generic
-    connectivity host would answer a question nobody has: an allowlist that
-    admits the wider internet and not this one is a working boundary and a
-    session that cannot do anything.
+        The destination is the API the session exists to reach. A generic
+        connectivity host would answer a question nobody has: an allowlist that
+        admits the wider internet and not this one is a working boundary and a
+        session that cannot do anything.
+    ``at_launch`` for the reason the resolution probe above is. The two are
+        separate rather than one because they fail separately and send a reader
+        to different places: a name that does not resolve is the proxy's
+        attachment to this network, and a name that resolves but does not carry
+        traffic is the proxy itself, or what it was configured to allow.
     """
     return Requirement(
         capability="egress proxy tunnels out",
+        at_launch=True,
         purpose="every model call, package install and documentation fetch",
         where=where,
-        checked="setup",
         # `-o /dev/null` with the code written out: any HTTP status proves the
         # tunnel stood up, and the body does not. An unauthenticated 401 from
         # the API is a complete success for this question, so matching on
@@ -561,7 +575,10 @@ def proxy_tunnels_requirement(
             because=(
                 "the session is on a network with no gateway and the one "
                 "process bridged out of it is not carrying its traffic, so "
-                "every model call fails"
+                "every model call fails. The rendered policy is at "
+                "`tmp/egress.conf` and the proxy's own log says which rule "
+                "refused; `harness egress --down` rebuilds the pair, and "
+                "`--unsandboxed` opens without an egress boundary at all"
             )
         ),
         install=install,
@@ -617,7 +634,10 @@ def metadata_refused_requirement(
             because=(
                 "the egress boundary is not refusing the cloud metadata "
                 "endpoint, so a session in this container can read whatever "
-                "credentials the host's instance role holds"
+                "credentials the host's instance role holds. This one is not "
+                "answered by widening anything: the denials are compiled "
+                "from `EgressPolicy` into `tmp/egress.conf`, and a proxy "
+                "running an older render of it is the likeliest cause"
             )
         ),
         install=install,
