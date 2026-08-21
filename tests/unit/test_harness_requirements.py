@@ -14,6 +14,7 @@ from lup.harness.requirements import (
     Finding,
     LostCapability,
     Manifest,
+    Package,
     RefusedLaunch,
     Requirement,
     Run,
@@ -149,7 +150,7 @@ def test_a_manifest_collects_the_packages_an_image_installs_without_repeating_on
             requirement("second", WORKING, where="both", install=["shared", "two"]),
         ]
     )
-    assert manifest.packages() == ["shared", "one", "two"]
+    assert [item.name for item in manifest.packages()] == ["shared", "one", "two"]
 
 
 def test_a_host_requirement_never_reaches_the_image() -> None:
@@ -254,17 +255,23 @@ def test_the_offered_container_requirement_defaults_out_of_the_image() -> None:
     offered = container_requirement()
     assert offered.where == "host"
     assert offered.install == []
-    assert not any("docker" in package for package in default_manifest().packages())
+    assert not any(
+        "docker" in package.name for package in default_manifest().packages()
+    )
 
 
 def test_every_offered_requirement_lets_a_project_place_and_install_it() -> None:
     """The seams are parameters, so an adopter overrules without forking lup."""
     from lup.harness.toolchain import bun_requirement, container_requirement
 
-    moved = bun_requirement(where="both", install=["bun-bin"])
-    assert moved.where == "both" and moved.install == ["bun-bin"]
-    inside = container_requirement(where="image", install=["docker.io"])
-    assert inside.where == "image" and inside.install == ["docker.io"]
+    moved = bun_requirement(where="both", install=[Package(name="bun-bin")])
+    assert moved.where == "both" and [item.name for item in moved.install] == [
+        "bun-bin"
+    ]
+    inside = container_requirement(where="image", install=[Package(name="docker.io")])
+    assert inside.where == "image" and [item.name for item in inside.install] == [
+        "docker.io"
+    ]
 
 
 def test_the_declared_manifest_asks_the_host_for_nothing_image_side() -> None:
@@ -275,7 +282,23 @@ def test_the_declared_manifest_asks_the_host_for_nothing_image_side() -> None:
 
     on_host = [item.capability for item in MANIFEST.on_the_host(setting_up=True)]
     assert "bun" not in on_host and "typescript" not in on_host
-    assert {"bun", "typescript"} <= set(MANIFEST.packages())
+    assert {"bun", "typescript"} <= {item.name for item in MANIFEST.packages()}
+
+
+def test_every_declared_package_is_obtained_by_something_that_verifies_it() -> None:
+    """The property the base image was chosen for, pinned so a change is visible.
+
+    A `script` package runs a shell line the build never checks. None is
+    declared, and the `package-install-script` rule is what keeps it that way
+    -- but a rule catches the source shape, and this catches the roster the
+    image is actually built from, including anything a constructor default
+    reintroduces.
+    """
+    from lup.harness.toolchain import default_manifest
+    from lup_template.devtools.harness.content.requirements import manifest
+
+    for roster in (default_manifest(), manifest()):
+        assert not [item for item in roster.packages() if item.manager == "script"]
 
 
 def test_a_finding_carries_the_requirement_that_produced_it() -> None:

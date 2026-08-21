@@ -29,6 +29,7 @@ from lup.harness.requirements import (
     EnvironmentRedirect,
     LostCapability,
     Manifest,
+    Package,
     RefusedLaunch,
     Requirement,
     Run,
@@ -39,7 +40,7 @@ from lup.harness.requirements import (
 
 def uv_requirement(
     where: Side = "both",
-    install: list[str] = [],
+    install: list[Package] = [],
 ) -> Requirement:
     """The package manager every command in a lup project is invoked through.
 
@@ -69,7 +70,7 @@ def uv_requirement(
 
 def container_requirement(
     where: Side = "host",
-    install: list[str] = [],
+    install: list[Package] = [],
     socket_variable: str = "DOCKER_HOST",
     socket_group: str = "docker",
     lost: str = "sandboxed evaluation and multi-worker resolve",
@@ -112,7 +113,7 @@ def container_requirement(
 
 def same_path_mount_requirement(
     where: Side = "host",
-    install: list[str] = [],
+    install: list[Package] = [],
     image: str = "docker.io/library/busybox:latest",
     probe: Path = Path("/tmp/lup-same-path-probe"),
     witness: str = "pyproject.toml",
@@ -180,7 +181,7 @@ def same_path_mount_requirement(
 
 def github_requirement(
     where: Side = "both",
-    install: list[str] = ["gh"],
+    install: list[Package] = [Package(name="github-cli")],
 ) -> Requirement:
     """The GitHub CLI, exercised as *authenticated* rather than as installed.
 
@@ -202,7 +203,7 @@ def github_requirement(
 
 def bun_requirement(
     where: Side = "image",
-    install: list[str] = ["bun"],
+    install: list[Package] = [Package(name="bun")],
 ) -> Requirement:
     """The JavaScript runtime and package manager, wanted inside the image.
 
@@ -223,7 +224,7 @@ def bun_requirement(
 
 def typescript_requirement(
     where: Side = "image",
-    install: list[str] = ["typescript"],
+    install: list[Package] = [Package(name="typescript", manager="bun")],
 ) -> Requirement:
     """The TypeScript compiler, reached through the package runner.
 
@@ -243,7 +244,7 @@ def typescript_requirement(
 
 def clipboard_requirement(
     where: Side = "host",
-    install: list[str] = [],
+    install: list[Package] = [],
 ) -> Requirement:
     """Any one of the clipboard clients a desktop might have, as an advisory.
 
@@ -271,6 +272,59 @@ def clipboard_requirement(
             ]
         ),
         absence=Advisory(improves="copying a command to the clipboard"),
+        install=install,
+    )
+
+
+def agent_session_requirement(
+    where: Side = "host",
+    install: list[Package] = [],
+    image: str = "lup-agent:latest",
+) -> Requirement:
+    """Whether an agent session actually runs inside the image, not merely opens.
+
+    The question the whole contained-agent architecture rests on, and one that
+    every cheaper probe answers wrongly. ``claude --version`` passes in an
+    image where no session can authenticate; a config home that accepts a
+    ``mkdir`` proves the filesystem and nothing about whether the runtime will
+    use it; and ``claude plugin validate`` was measured reporting a plugin
+    path *missing* through a bind mount that was demonstrably there -- the
+    same rootless-podman misreport ``same_path_mount_requirement`` exists to
+    route around.
+
+    So the exercise runs a real turn and requires its answer back. That cannot
+    pass without the image, the mount, the relocated config home, the
+    credential store and the model endpoint all working together, and it
+    cannot fail for a reason unrelated to any of them.
+
+    Checked at setup rather than at every launch: it starts a container and
+    spends a model call. It is also the one requirement here whose absence
+    refuses rather than degrades, because an architecture whose sessions do
+    not run is not a degraded architecture.
+    """
+    return Requirement(
+        capability="contained agent session",
+        purpose="running agents, workers and reviewers inside the boundary",
+        where=where,
+        checked="setup",
+        exercise=Run(
+            command=[
+                "docker",
+                "run",
+                "--rm",
+                image,
+                "claude",
+                "-p",
+                "Reply with exactly: SESSION_OK",
+            ],
+            expect="SESSION_OK",
+        ),
+        absence=RefusedLaunch(
+            because=(
+                "the boundary is claimed but no session can run behind it, so "
+                "the work would silently proceed on the host instead"
+            )
+        ),
         install=install,
     )
 

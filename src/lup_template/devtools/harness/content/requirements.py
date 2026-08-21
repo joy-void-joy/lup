@@ -20,6 +20,7 @@ from pathlib import Path
 from lup.harness.requirements import Manifest
 from lup.workspace.paths import project_root
 from lup.harness.toolchain import (
+    agent_session_requirement,
     bun_requirement,
     clipboard_requirement,
     container_requirement,
@@ -65,6 +66,7 @@ def manifest(root: Path | None = None) -> Manifest:
             uv_requirement(),
             container_requirement(),
             same_path_mount_requirement(probe=root or project_root()),
+            agent_session_requirement(),
             github_requirement(),
             bun_requirement(),
             typescript_requirement(),

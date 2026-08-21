@@ -136,6 +136,19 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         message="No __all__ — import directly from the defining module",
     ),
     AntiPattern(
+        # Soft rather than refused, because the hatch has a real use: an
+        # adopter may depend on something no distribution and no registry
+        # carries. What the rule buys is that reaching for it costs a written
+        # reason, where a bare field would have been chosen silently -- which
+        # is how three unverified installs reached this harness's first image
+        # declaration before anything had built it.
+        id="package-install-script",
+        pattern=re.compile(r"""manager\s*=\s*["']script["']"""),
+        message="A script package runs an unverified shell line at build time — "
+        "prefer a distribution package, or a registry version whose integrity "
+        "is checked before it lands",
+    ),
+    AntiPattern(
         id="dict-str-object",
         pattern=re.compile(r"\b(?:dict|Mapping)\[\s*str\s*,\s*object\s*\]"),
         message="Never use dict[str, object] or Mapping[str, object] — use TypedDict or BaseModel",

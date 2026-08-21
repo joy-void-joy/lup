@@ -47,9 +47,94 @@ from pathlib import Path
 from typing import Annotated, Literal
 
 import sh
-from pydantic import BaseModel, Discriminator, Field
+from pydantic import BaseModel, Discriminator, Field, model_validator
 
 from lup.types import EnvVars
+
+
+type PackageManager = Literal["pacman", "bun", "uv", "script"]
+"""Which ecosystem obtains an installable.
+
+Three that verify what they fetch, and one that does not. ``pacman`` takes
+distribution packages, signed by the distribution and checked before they
+unpack; ``bun`` and ``uv`` take a registry name at a pinned version, whose
+integrity hash the lockfile records. ``script`` runs a shell line, verifies
+nothing, and is refused by the ``package-install-script`` rule -- it stays
+expressible because an adopter may hold a dependency no registry carries, and
+refusing it by rule rather than by omission means that adopter writes down why
+instead of discovering the field is missing.
+"""
+
+
+class Package(BaseModel, frozen=True):
+    """One installable, and the ecosystem that obtains it.
+
+    A bare name cannot install anything, and a flat list of names hid that for
+    as long as nothing consumed the list. What the list was silently promising
+    was one ``apt-get install`` line, and measured against a Debian base every
+    entry in it was false: ``gh`` is not in the stable archive, ``bun`` ships
+    only as an install script, and ``typescript`` is a registry package. A
+    declaration that can only be rendered one way, into a line that does not
+    work, is worse than no declaration.
+
+    So the manager is part of the declaration rather than an assumption the
+    renderer makes -- and the base was chosen to make the honest answer the
+    short one. A bare string parses as a distribution package because, on the
+    distribution this harness builds from, that is the right answer for every
+    package in the toolchain.
+    """
+
+    name: str = Field(description="What the manager is asked for")
+    manager: PackageManager = Field(
+        default="pacman",
+        description=(
+            "``pacman`` is the base image's own distribution and the answer "
+            "wherever it has the package, which is everywhere this "
+            "repository's toolchain reaches. ``bun`` takes a JavaScript "
+            "registry package and ``uv`` a Python one, both at a pinned "
+            "version whose integrity the lockfile records. ``script`` "
+            "verifies nothing and is refused by rule"
+        ),
+    )
+    version: str = Field(
+        default="",
+        description=(
+            "Pinned version for a registry package. Empty takes the "
+            "registry's current release, which is a decision to re-make on "
+            "every build rather than a version to reproduce"
+        ),
+    )
+    command: str = Field(
+        default="",
+        description="The shell line that installs a ``script`` package",
+    )
+
+    def requested(self) -> str:
+        """How this package is named to its manager, version included."""
+        return f"{self.name}@{self.version}" if self.version else self.name
+
+    @model_validator(mode="before")
+    @classmethod
+    # lup: ignore[bare-object] — pydantic hands a before-hook whatever the
+    # caller wrote, which is the untyped boundary the rule says to narrow at
+    def a_bare_name_is_a_distribution_package(cls, value: object) -> object:
+        """Accept the common case spelled shortest, as a plain string."""
+        return {"name": value} if isinstance(value, str) else value
+
+    @model_validator(mode="after")
+    def a_script_carries_the_line_that_runs_it(self) -> "Package":
+        """A script package with no command is one that installs nothing.
+
+        Caught here rather than at render time, because a package that
+        silently installs nothing produces an image missing a tool and an
+        error naming that tool -- pointing at the toolchain rather than at
+        the declaration that forgot to say how to get it.
+        """
+        if self.manager == "script" and not self.command:
+            raise ValueError(
+                f"package {self.name!r} installs by script but names no command"
+            )
+        return self
 
 
 class Advisory(BaseModel, frozen=True):
@@ -348,10 +433,10 @@ class Requirement(BaseModel, frozen=True):
             "message points somewhere else"
         ),
     )
-    install: list[str] = Field(
+    install: list[Package] = Field(
         default=[],
         description=(
-            "Distribution packages that satisfy this *inside a container "
+            "Packages that satisfy this *inside a container "
             "image built from this harness*, when a package manager is how "
             "it is obtained there. Empty is the common answer and means one "
             "of two things: the base image already ships it, or the "
@@ -440,7 +525,7 @@ class Manifest(BaseModel, frozen=True):
         """Exercise every host-side requirement, in declaration order."""
         return [item.check(environment) for item in self.on_the_host(setting_up)]
 
-    def packages(self) -> list[str]:
+    def packages(self) -> list[Package]:
         """Everything an image installs to satisfy this manifest, deduplicated.
 
         Ordered by first declaration rather than sorted: an image layer reads
@@ -454,6 +539,10 @@ class Manifest(BaseModel, frozen=True):
         which that workflow already solves with a setup action -- and it
         would have installed a container runtime the image must never carry.
         A requirement is one thing; where each place gets it is another.
+
+        Each entry carries the manager that obtains it, because the three
+        this repository declares need three different ones and a list of
+        bare names could only ever have been rendered as one.
         """
         return list(
             dict.fromkeys(

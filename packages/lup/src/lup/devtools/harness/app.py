@@ -177,6 +177,22 @@ def create_harness_app(
         ):
             raise typer.Exit(1)
 
+    @app.command("image")
+    def image_command(
+        target: Annotated[str, typer.Argument(help=selector)] = targets.every,
+    ) -> None:
+        """Render the container image this project's sessions run in.
+
+        Printed rather than written, because a Dockerfile on disk is a second
+        place the toolchain is stated and the first thing to drift from the
+        declaration. A build reads this on stdin -- ``harness image | docker
+        build -f - .`` -- so what is built is what is declared, every time,
+        with nothing in between to edit.
+        """
+        for composition in targets.resolve(target, project_root()):
+            source = composition.recipe.source
+            typer.echo(source.image.dockerfile(source.requirements))
+
     @app.command("serve-resolver-tools")
     def serve_resolver_tools_command() -> None:
         """Serve one worker's question tools over stdio, for out-of-process runtimes."""

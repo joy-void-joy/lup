@@ -44,6 +44,7 @@ from lup_template.agent.toolsets import tool_group_names
 from lup_template.devtools.harness.content.catalog import AGENTS, RETIRED, SKILLS
 from lup_template.devtools.subapps import SELECTION
 from lup_template.devtools.harness.content.guidance import document as guidance_document
+from lup_template.devtools.harness.content.image import agent_image
 from lup_template.devtools.harness.content.requirements import manifest
 from lup_template.devtools.harness.content.shell_vocabulary import (
     RUNNER_TARGETS,
@@ -379,6 +380,7 @@ def portable_harness(version: str = "0.2.0", root: Path | None = None) -> Harnes
         generator_version=version,
         source_evidence={"content": "typed-python"},
         requirements=manifest(root),
+        image=agent_image(),
         plugins=[plugin],
         guidance=guidance_document(plugin.hooks.rules if plugin.hooks else None),
         resolver=ResolveSpec(
