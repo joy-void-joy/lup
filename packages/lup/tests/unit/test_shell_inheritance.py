@@ -343,14 +343,28 @@ def test_the_forms_escaping_the_sandbox_are_exactly_the_decided_git_ones() -> No
     the forms running outside are exactly the ones it decides. A refusal is
     unplaced, held there at construction rather than by this table, so the git
     forms that deny stay ambient too.
+
+    `git --version` is one of those decided forms: it de-escalates at the
+    command row and carries that row's placement like any other.
+
+    `git --help` is the one exception, and it is not this table's doing. A
+    help probe is answered before any command row is consulted, so it never
+    reaches a placement to inherit and comes back ambient. Harmless — printing
+    usage touches no worktree — but pinned here, because the asymmetry between
+    the two spellings is invisible from the table alone.
     """
     forms = classify_forms(default_vocabulary())
     escaping = [form for form in forms if form.sandbox != "ambient"]
     reached = [
         form
         for form in forms
-        if form.command.startswith("git") and form.effect in ("allow", "ask")
+        if form.command.startswith("git")
+        and form.effect in ("allow", "ask")
+        and form.command != "git --help"
     ]
 
     assert [form.sandbox for form in escaping] == ["outside"] * len(escaping)
     assert escaping == reached
+    assert [form.sandbox for form in forms if form.command == "git --help"] == [
+        "ambient"
+    ]
