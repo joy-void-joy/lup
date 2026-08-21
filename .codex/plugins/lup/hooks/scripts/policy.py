@@ -997,8 +997,7 @@ def bash_decision(
     )
     if verdict.effect == "deny":
         return verdict
-    targets = [*shell_write_targets(command), *acted_on]
-    recorded = undo_point(command, verdict, targets, cwd)
+    recorded = undo_point(command, verdict, cwd)
     # Counted only where the command was going to run anyway. A refused script
     # never ran, so counting it would nudge toward promoting something that
     # has not worked once.
@@ -1013,19 +1012,28 @@ def bash_decision(
 
 
 def undo_point(
-    command: str, verdict: KernelDecision, targets: list[str], cwd: Path | None
+    command: str, verdict: KernelDecision, cwd: Path | None
 ) -> KernelDecision:
-    """Snapshot the tree before a command that could destroy work in it.
+    """Snapshot the tree before the command runs, and say so on a question.
 
     The whole case for relaxing a permission lattice is that a mistake can be
     put back, so this is what has to exist before that relaxation is honest.
-    What it does not need is a second list of destructive spellings: the
-    vocabulary already draws that line, and draws it more finely than a list
-    of verbs could. ``git reset`` is allowed and ``git reset --hard`` asks;
-    ``git switch`` is allowed and ``git switch --force`` asks. So the mark is
-    the verdict itself — anything the classifier did not wave through — plus
-    the paths the command was already resolved to be writing, which is what
-    catches an allowed-because-recoverable ``rm`` of a tracked file.
+    What it does not need is a trigger, and the two that were tried both
+    answered a different question from the one a safety net asks. Keying on
+    the verdict conflates *this destroys work* with *this was not recognised*,
+    which share one effect: a live session produced sixty refs, fifty-seven of
+    them in front of a ``grep`` or a ``sed``. Keying on the paths the command
+    was resolved to be writing misses every write that is not in an argv,
+    which is every build, every installer and every script — measured, a
+    ``bun install`` that rewrites the lockfile was snapshotted by neither.
+
+    So the snapshot is unconditional and :func:`undo_snapshot` deduplicates by
+    tree content instead. Git addresses content, so a command that changed
+    nothing writes a byte-identical tree, the ref named after that tree
+    overwrites the earlier one, and the listing carries one entry per distinct
+    state the tree was ever in rather than one per command. Coverage is exact
+    by construction, including for whatever nobody would have thought to
+    enumerate.
 
     Said out loud only on an approval question, which is the one moment the
     information changes an answer: a human deciding whether to permit
@@ -1034,8 +1042,6 @@ def undo_point(
     mutating command is one nobody reads by the third time — and ``dev undo``
     is where a snapshot is looked for anyway.
     """
-    if not targets and verdict.effect == "allow":
-        return verdict
     reference = undo_snapshot(cwd, command)
     if not reference or verdict.effect != "ask":
         return verdict

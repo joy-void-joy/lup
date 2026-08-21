@@ -418,12 +418,40 @@ def test_the_approval_question_says_the_tree_was_snapshotted(
     assert "snapshotted" in reason and "refs/lup/undo/" in reason
 
 
-def test_a_read_only_command_is_not_snapshotted(delete_repo: Path) -> None:
-    """Otherwise every `ls` writes a ref, and the listing stops being readable."""
+def test_a_command_whose_writes_are_not_in_its_argv_is_snapshotted(
+    delete_repo: Path,
+) -> None:
+    """Coverage is what the net is for, and no trigger delivered it.
+
+    The trigger this replaced fired on the paths a command named plus the
+    verdict the classifier reached, and a build, an installer or a script
+    announces neither: `bun install` rewrites a tracked lockfile from an argv
+    naming no path, under a verdict that waves it through, and was
+    snapshotted by nothing. `git status --short` is that shape without the
+    toolchain — allowed, naming no target, and held anyway.
+    """
     effect, _reason = snapshotting_effect("git status --short", delete_repo)
 
     assert effect == "allow"
-    assert undo_refs(delete_repo) == []
+    assert undo_refs(delete_repo) == ["lup undo: git status --short"]
+
+
+def test_commands_that_change_nothing_leave_one_snapshot_between_them(
+    delete_repo: Path,
+) -> None:
+    """What makes holding every command affordable, and the listing readable.
+
+    Git addresses content, so a command that changed nothing writes a
+    byte-identical tree and the ref named after it overwrites the earlier
+    one. The listing carries one entry per distinct state the tree was ever
+    in rather than one per command — which is the property the trigger was
+    reached for and did not deliver, since what it mostly caught was
+    commands it did not recognise.
+    """
+    snapshotting_effect("git status --short", delete_repo)
+    snapshotting_effect("ls src", delete_repo)
+
+    assert undo_refs(delete_repo) == ["lup undo: ls src"]
 
 
 def test_an_allowed_delete_is_snapshotted_without_saying_so(

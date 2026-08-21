@@ -3,10 +3,17 @@
 The permission lattice asks about a great deal, and the argument for asking
 about everything unjudged is an observability argument that logging serves
 without interrupting anybody. What makes that trade safe is not a better
-classifier -- it is being able to put the tree back. So before a command that
-can destroy work, the tree is written into the object store under a ref of its
-own, and `rm -rf`, `git reset --hard` and a mistaken edit stop being
-irreversible.
+classifier -- it is being able to put the tree back. So before *every*
+command, the tree is written into the object store under a ref of its own, and
+`rm -rf`, `git reset --hard` and a mistaken edit stop being irreversible.
+
+Every command rather than the destructive ones, because a trigger answers a
+different question from the one a safety net asks. Naming the paths a command
+writes misses every write that is not in an argv -- a build, an installer, a
+script -- and keying on the classifier's verdict catches mostly what it did
+not recognise. Dedup by tree content is what makes the unconditional version
+affordable: a command that changed nothing writes a byte-identical tree, so
+the ref named after it overwrites the earlier one.
 
 **The writing is not here.** It is
 :func:`~lup.policy.assets.host.undo_snapshot`, compiled into the dispatcher
