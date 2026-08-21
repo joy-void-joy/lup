@@ -34,7 +34,7 @@ from rich.console import Console
 from rich.live import Live
 from rich.text import Text
 
-from lup.harness.credential import remote_rewrites
+from lup.harness.credential import committer, remote_rewrites
 from lup.harness.egress import PROXY_LABEL, SessionEgress
 from lup.harness.image import ContainerEngine, Image, detected_client
 from lup.harness.notice import Notice
@@ -1428,7 +1428,11 @@ def contained_argv(
         else ""
     )
     rewrites = remote_rewrites(root, image.forge.host)
-    for notice in image.forge.notice(token, rewrites):
+    # Read on the host for the same reason the rewrites are: `.git/config` is
+    # writable from inside, so an identity resolved in there would be one the
+    # confined thing chose for itself.
+    identity = committer(root)
+    for notice in image.forge.notice(token, rewrites, identity):
         notice.say()
     # The operator's terminal, answered here rather than in the declaration
     # the digest hashes. Same rule as the container client and for the same
@@ -1452,6 +1456,7 @@ def contained_argv(
         engine=client,
         forge_token=token,
         rewrites=rewrites,
+        identity=identity,
         terminal=terminal.environment,
         interactive=interactive,
         proxy_address=reached_at,

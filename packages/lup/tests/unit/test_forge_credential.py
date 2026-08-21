@@ -9,12 +9,16 @@ has to arrive somewhere the confined thing cannot reach behind.
 
 from pathlib import Path
 
+import pytest
+
+from lup.devtools.utils import git
 from lup.harness.credential import (
     AgentKey,
     GitAccess,
     InheritedSigning,
     RemoteRewrite,
     SigningOff,
+    committer,
     parse_remote,
     remote_rewrites,
     resolved_host,
@@ -207,3 +211,59 @@ def test_the_signing_choice_reaches_the_configuration_the_container_starts_with(
         item.key for item in GitAccess(signing=AgentKey()).configuration(REWRITE, "tok")
     }
     assert "user.signingkey" in keys
+
+
+def test_a_commit_made_inside_is_authored_as_the_checkout_authors(
+    tmp_path: Path,
+) -> None:
+    """Otherwise git assembles one from the container hostname and refuses it.
+
+    `Author identity unknown ... got 'agent@9c9dff017051.(none)'` stops every
+    commit and names a machine that exists for the length of one session --
+    which reads as a broken image rather than as a fact nobody carried in.
+    """
+    git("-C", str(tmp_path), "init", "-q")
+    git("-C", str(tmp_path), "config", "user.name", "Some One")
+    git("-C", str(tmp_path), "config", "user.email", "some@one.invalid")
+    environment = GitAccess().environment("", REWRITE, committer(tmp_path))
+    count = int(environment["GIT_CONFIG_COUNT"])
+    settled = {
+        environment[f"GIT_CONFIG_KEY_{index}"]: environment[f"GIT_CONFIG_VALUE_{index}"]
+        for index in range(count)
+    }
+    assert settled["user.name"] == "Some One"
+    assert settled["user.email"] == "some@one.invalid"
+
+
+def test_half_an_identity_is_no_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Git needs both, so a name alone would be a launch that reported success.
+
+    The commit fails identically either way; carrying half of it would move
+    the failure past the one notice that could have named it.
+
+    The outer scopes are taken away rather than assumed empty. Git resolves
+    an identity across system, global, local and worktree, which is the whole
+    reason :func:`committer` asks git instead of reading a file -- and it
+    means a developer machine with a global `user.email` answers this
+    question before the fixture gets to.
+    """
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(tmp_path / "absent-global"))
+    monkeypatch.setenv("GIT_CONFIG_SYSTEM", str(tmp_path / "absent-system"))
+    git("-C", str(tmp_path), "init", "-q")
+    git("-C", str(tmp_path), "config", "user.name", "Some One")
+    assert committer(tmp_path) is None
+
+
+def test_an_absent_identity_is_said_at_launch_rather_than_at_the_commit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The one moment the boundary can name what git will not."""
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(tmp_path / "absent-global"))
+    monkeypatch.setenv("GIT_CONFIG_SYSTEM", str(tmp_path / "absent-system"))
+    git("-C", str(tmp_path), "init", "-q")
+    lines = "\n".join(
+        item.text for item in GitAccess().notice("", REWRITE, committer(tmp_path))
+    )
+    assert "user.email" in lines

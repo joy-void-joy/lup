@@ -29,7 +29,7 @@ from typing import Literal
 import sh
 from pydantic import BaseModel, Field
 
-from lup.harness.credential import GitAccess, RemoteRewrite
+from lup.harness.credential import GitAccess, GitIdentity, RemoteRewrite
 from lup.harness.egress import SessionEgress
 from lup.harness.environment import NON_INTERACTIVE_SHELL_ENV
 from lup.harness.requirements import Manifest, Package, PackageManager
@@ -855,6 +855,7 @@ USER $UID:$GID
         engine: ContainerEngine = Docker(),
         forge_token: str = "",
         rewrites: list[RemoteRewrite] | None = None,
+        identity: GitIdentity | None = None,
         terminal: EnvVars | None = None,
         interactive: bool = True,
         proxy_address: str = "",
@@ -912,7 +913,7 @@ USER $UID:$GID
         # part of the run that is neither an image fact nor a posture: it is
         # a secret and a resolution of *this host's* remotes, and neither
         # belongs in a layer anybody could pull.
-        reaching = self.forge.environment(forge_token, rewrites or []) | (
+        reaching = self.forge.environment(forge_token, rewrites or [], identity) | (
             terminal or {}
         )
         return [

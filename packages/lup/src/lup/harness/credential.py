@@ -85,6 +85,63 @@ class RemoteRewrite(BaseModel, frozen=True):
         return GitSetting(key=f"url.{self.https}.insteadOf", value=self.spelling)
 
 
+class GitIdentity(BaseModel, frozen=True):
+    """Who a commit made inside the boundary is authored as.
+
+    Read off the host checkout and passed in, for the same reason the remote
+    rewrites are: the file that answers it is `.git/config`, which the
+    container can write, so an identity resolved in there is one the confined
+    thing chose for itself.
+
+    Sent at all because git has no usable fallback. With nothing configured
+    it assembles one from the container's hostname and then refuses to use
+    it -- `Author identity unknown ... got 'agent@9c9dff017051.(none)'` --
+    which stops every commit and names a machine that exists for the length
+    of one session.
+
+    Authorship rather than a claim about who wrote the code. The signing
+    member is what makes that claim, and declines to; a `Co-Authored-By`
+    trailer is what records the agent. A commit authored as the operator is
+    the same arrangement an editor has always had -- the person the work is
+    being done for.
+    """
+
+    name: str = Field(description="The author name a contained commit carries")
+    email: str = Field(description="The author address a contained commit carries")
+
+    def configuration(self) -> list[GitSetting]:
+        """The two keys git refuses to commit without."""
+        return [
+            GitSetting(key="user.name", value=self.name),
+            GitSetting(key="user.email", value=self.email),
+        ]
+
+
+def committer(root: Path) -> GitIdentity | None:
+    """The identity this checkout commits under, as git itself resolves it.
+
+    Asked of `git config` rather than read out of a file, for the reason
+    :func:`resolved_host` is asked of ssh: the answer is assembled from the
+    system, global, local and worktree scopes in a precedence only git
+    implements, and an adopter who set theirs per repository would be missed
+    by anything reading one file.
+
+    Nothing comes back unless both halves are there. Git needs both, and a
+    name with no address refuses exactly as an absent one does -- so half an
+    identity would be a launch that reported success and a commit that
+    failed anyway.
+    """
+
+    def configured(key: str) -> str:
+        try:
+            return git.out("-C", str(root), "config", "--get", key).strip()
+        except sh.ErrorReturnCode:
+            return ""
+
+    name, email = configured("user.name"), configured("user.email")
+    return GitIdentity(name=name, email=email) if name and email else None
+
+
 class SigningOff(BaseModel, frozen=True):
     """Agent commits are not signed, and the launch says so once.
 
@@ -394,13 +451,16 @@ class GitAccess(BaseModel, frozen=True):
         return GitSetting(key="credential.helper", value=f"!f() {{ {answered}; }}; f")
 
     def configuration(
-        self, rewrites: list[RemoteRewrite], token: str
+        self,
+        rewrites: list[RemoteRewrite],
+        token: str,
+        identity: GitIdentity | None = None,
     ) -> list[GitSetting]:
         """Every git setting the container starts with, in one list.
 
         The rewrites point each ssh spelling at HTTPS, the helper answers for
-        the token or refuses in its name, and the signing member says what a
-        commit claims.
+        the token or refuses in its name, the identity says who a commit is
+        authored as, and the signing member says what it claims.
 
         A rewrite used to be withheld unless a token came with it, on the
         reasoning that half this arrangement is worse than none: a remote
@@ -412,11 +472,17 @@ class GitAccess(BaseModel, frozen=True):
         """
         return [
             *[rewrite.setting() for rewrite in rewrites],
+            *(identity.configuration() if identity is not None else []),
             *self.signing.configuration(),
             self.helper(token),
         ]
 
-    def environment(self, token: str, rewrites: list[RemoteRewrite]) -> EnvVars:
+    def environment(
+        self,
+        token: str,
+        rewrites: list[RemoteRewrite],
+        identity: GitIdentity | None = None,
+    ) -> EnvVars:
         """The variables that carry the token and the configuration inside.
 
         ``GIT_CONFIG_COUNT`` and its numbered pairs, because git reads them
@@ -435,7 +501,7 @@ class GitAccess(BaseModel, frozen=True):
         signing settings unsent beside it: the launch said commits were
         unsigned while the checkout's own ``commit.gpgsign`` still stood.
         """
-        settings = self.configuration(rewrites, token)
+        settings = self.configuration(rewrites, token, identity)
         carried = (
             # `gh` reads its own variable and shares the one credential.
             {self.token_variable: token, "GH_TOKEN": token} if token else {}
@@ -453,7 +519,41 @@ class GitAccess(BaseModel, frozen=True):
             },
         }
 
-    def notice(self, token: str, rewrites: list[RemoteRewrite]) -> list[Notice]:
+    def authorship(self, identity: GitIdentity | None) -> list[Notice]:
+        """Who a commit made in here will be authored as, or that none can be.
+
+        The absent case is the one worth a line. Git's own account of it
+        names a container hostname and no way to fix it from where the
+        reader is standing, and it arrives in the middle of the commit that
+        was the point of the session rather than before it.
+        """
+        return [
+            Notice(
+                text=(
+                    f"Commits: authored as {identity.name} <{identity.email}>, "
+                    "carried from this checkout. Signing is the separate "
+                    "claim, said below."
+                ),
+                urgency="ready",
+            )
+            if identity is not None
+            else Notice(
+                text=(
+                    "Commits: this checkout sets no `user.name` and "
+                    "`user.email`, so a commit in here refuses with `Author "
+                    "identity unknown` and a hostname that lives as long as "
+                    "the container. Set them on the host and relaunch."
+                ),
+                urgency="warning",
+            )
+        ]
+
+    def notice(
+        self,
+        token: str,
+        rewrites: list[RemoteRewrite],
+        identity: GitIdentity | None = None,
+    ) -> list[Notice]:
         """What the launch says about reaching the forge, before it is needed.
 
         The absent-token case is the one worth being careful about. It is not
@@ -480,6 +580,7 @@ class GitAccess(BaseModel, frozen=True):
                     ),
                     urgency="warning",
                 ),
+                *self.authorship(identity),
                 *self.signing.notice(),
             ]
         rewritten = (
@@ -496,5 +597,6 @@ class GitAccess(BaseModel, frozen=True):
                 ),
                 urgency="ready",
             ),
+            *self.authorship(identity),
             *self.signing.notice(),
         ]
