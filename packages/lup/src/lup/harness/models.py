@@ -1078,6 +1078,35 @@ class Harness(BaseModel, frozen=True):
         """
         return next(plugin.hooks for plugin in self.plugins if plugin.hooks is not None)
 
+    def holding(self, rules: RuleSelection) -> "Harness":
+        """This harness compiled against a different selection of scan rules.
+
+        One way in, for the one caller that has a reason: a launch opening a
+        session the rules are not the point of. Every plugin is rewritten
+        together, because one selection reaches the sweep, the edit hook and
+        the generated reference — and a tree relaxed on one runtime and not
+        another would be two policies wearing one name.
+
+        A copy rather than a mutation, and only generation reads it. What a
+        repository holds itself to stays the declaration in its catalog,
+        which is where a durable answer belongs and where `dev seams` writes
+        one.
+        """
+        return self.model_copy(
+            update={
+                "plugins": [
+                    plugin
+                    if plugin.hooks is None
+                    else plugin.model_copy(
+                        update={
+                            "hooks": plugin.hooks.model_copy(update={"rules": rules})
+                        }
+                    )
+                    for plugin in self.plugins
+                ]
+            }
+        )
+
     @property
     def rendered_ids(self) -> list[str]:
         """Every declaration a target renders as an artifact of its own.

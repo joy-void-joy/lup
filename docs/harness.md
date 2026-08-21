@@ -408,6 +408,34 @@ for the cache. Personal trust state, credentials, active run state, and cache
 contents are never generated and never committed. Review hook trust with the
 native hooks surface after generation.
 
+### Opening a session the anti-pattern gate leaves alone
+
+`--ignore-antipatterns`, on both launchers, for the sessions where the rules
+are not the point: exploring, spiking, or working over code these conventions
+were never written for.
+
+It reaches the gate rather than the command line, which is the only thing that
+would make it work. The anti-pattern table is projected into each plugin's
+hermetic edit policy at generation time, and `ready_to_open` regenerates before
+it opens — so the flag compiles the tree the session actually runs against.
+What it sets is `RuleSelection` with every id retired, spelled as the ids
+rather than as a flag meaning "all of them", because the selection is
+subtractive and a rule added later should be one the selection has visibly not
+answered for.
+
+Three things it deliberately does not do, each announced at launch because each
+bites later and none announces itself:
+
+- **The sweep does not follow.** `dev check --antipatterns` reads the
+  repository's own declaration, so a session that edited freely under the flag
+  will fail it. That is the point rather than an oversight: a transient switch
+  must not quietly become the repository's answer.
+- **The committed tree is rewritten.** Regenerate before committing, or the
+  commit carries a plugin nothing declares.
+- **It is not how a project drops the rules.** `dev seams --retire-all` is,
+  because that writes the decision where a review sees it and `--keep` takes it
+  back.
+
 ### Reopening a session, and why a launcher owns it
 
 Both launchers reopen an earlier session, from one declaration and in each

@@ -563,6 +563,34 @@ def writable_root_arguments() -> list[str]:
     return ["-c", f'sandbox_workspace_write.writable_roots=["{tree}"]']
 
 
+def announce_relaxed_rules(relaxed: bool, plugin: Plugin) -> None:
+    """Say what a relaxed launch retired, and what it did not.
+
+    The launch is the only moment this is legible. The tree it compiles
+    carries no rules, so nothing downstream can report their absence — a
+    session opened under it simply meets no rule and has no way to tell that
+    from a repository with none. So the count is read off the plugin actually
+    being opened rather than off the declaration it came from.
+
+    Two consequences ride along because both bite later and neither announces
+    itself. The repository is unchanged, so the sweep still holds it to every
+    rule and a session that edited freely under this will fail `dev check`.
+    And the committed tree has just been rewritten, so a commit made from here
+    would carry a plugin nobody declared.
+    """
+    if not relaxed:
+        return
+    retired = len(plugin.hooks.rules.retired if plugin.hooks is not None else [])
+    typer.echo(f"anti-patterns retired for this session: {retired} rules")
+    typer.echo(
+        "`dev check --antipatterns` still holds this repository to them; run "
+        "`lup-devtools harness generate all` before committing, or the "
+        "compiled tree carries a policy nothing declares. To retire them for "
+        "good instead, `dev seams --retire-all` writes it where a review sees "
+        "it."
+    )
+
+
 def claude_resume_arguments(resume: Resumption) -> list[str]:
     """Claude Code's spelling: continuing and resuming are two flags.
 
@@ -659,12 +687,14 @@ def launch_claude(
     generate_only: bool,
     mode: LaunchMode | None = None,
     resume: Resumption = Resumption(),
+    relaxed: bool = False,
 ) -> None:
     """Generate/reconcile Claude artifacts and launch the verified local plugin."""
     contradiction = resume.contradicted()
     if contradiction is not None:
         raise typer.BadParameter(contradiction)
     plugin = composition.recipe.source.plugins[0]
+    announce_relaxed_rules(relaxed, plugin)
     if not ready_to_open(composition, generate_only):
         return
     arguments: list[str] = claude_resume_arguments(resume)
@@ -739,12 +769,14 @@ def launch_codex(
     force_install: bool,
     mode: LaunchMode | None = None,
     resume: Resumption = Resumption(),
+    relaxed: bool = False,
 ) -> None:
     """Generate/reconcile Codex artifacts and launch without updating the CLI."""
     contradiction = resume.contradicted()
     if contradiction is not None:
         raise typer.BadParameter(contradiction)
     plugin = composition.recipe.source.plugins[0]
+    announce_relaxed_rules(relaxed, plugin)
     if not ready_to_open(composition, generate_only):
         return
     environment = non_interactive_environment(os.environ)  # lup: ignore[os-environ]

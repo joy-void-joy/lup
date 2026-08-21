@@ -248,3 +248,16 @@ def all_rules(
         for rule in [*STRUCTURAL_RULES, *anti_pattern_rules(rules)]
         if kept.keeps(rule.id)
     ]
+
+
+def every_rule_retired() -> RuleSelection:
+    """A selection holding a project to none of the rules this library ships.
+
+    Spelled as every id rather than as a flag meaning "all of them", because
+    the selection is subtractive: a project that drops the family and one
+    that dropped them a denial at a time are the same project, and a rule
+    added later is one this selection has visibly not answered for. It is
+    also what makes a relaxation legible — the retirement names what it
+    retired instead of standing for it.
+    """
+    return RuleSelection(retired=[rule.id for rule in all_rules()])
