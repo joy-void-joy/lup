@@ -226,8 +226,15 @@ def test_the_config_home_is_container_private_and_carries_across_launches() -> N
     assert f"CODEX_HOME={image.config_home}" in started
 
 
-def test_the_credential_crosses_as_one_read_only_file() -> None:
-    """The config home holds every project's session state; the token is one file."""
+def test_the_credential_crosses_as_one_read_only_file_outside_the_config_home() -> None:
+    """The config home holds every project's session state; the login is one file.
+
+    Offered beside the config home rather than over it. Mounted at the path
+    the CLI keeps a login, read-only, it looked right and was not: that file
+    is written back both when a sign-in completes and when an expiring token
+    renews, so the mount refused both, and it shadowed the config volume's
+    own copy so a login made inside vanished at the next launch.
+    """
     image = Image()
     started = image.session_arguments(
         tag="t",
@@ -240,10 +247,37 @@ def test_the_credential_crosses_as_one_read_only_file() -> None:
         config_home_env="CLAUDE_CONFIG_DIR",
         credential=Path("/home/u/.claude/.credentials.json"),
     )
-    mounted = (
-        f"/home/u/.claude/.credentials.json:{image.config_home}/.credentials.json:ro"
-    )
-    assert mounted in started
+    assert f"/home/u/.claude/.credentials.json:{image.credential_seed}:ro" in started
+    assert image.credential_seed.startswith(f"{image.config_home}/") is False
+    # The filename is the runtime's own word, and one image starts every
+    # runtime the harness declares, so the entrypoint is told rather than
+    # assuming Claude Code's.
+    assert "LUP_CREDENTIAL_NAME=.credentials.json" in started
+
+
+def test_the_entrypoint_seeds_a_login_only_into_a_config_home_without_one() -> None:
+    """Both directions have to be safe, and only this order makes them so.
+
+    Copying unconditionally would overwrite a login made inside with the
+    host's at every launch, which is the feature undone. Writing back to the
+    host's file would let a contained agent rotate the credential every host
+    session depends on. Copying once, into an empty home, is neither.
+    """
+    entrypoint = Image().dockerfile(Manifest())
+    assert '[ ! -f "$config/$LUP_CREDENTIAL_NAME" ]' in entrypoint
+    assert 'cp "$seed" "$config/$LUP_CREDENTIAL_NAME"' in entrypoint
+
+
+def test_the_entrypoint_reads_the_config_home_the_image_baked() -> None:
+    """One image starts every runtime, and they disagree about the variable.
+
+    It read `CLAUDE_CONFIG_DIR` with a fallback to `$HOME/.claude`, so a
+    Codex session -- started with `CODEX_HOME` pointed at the same mount --
+    seeded its trust into a directory nothing was reading.
+    """
+    entrypoint = Image().dockerfile(Manifest())
+    assert f"config={Image().config_home}" in entrypoint
+    assert "CLAUDE_CONFIG_DIR:-" not in entrypoint
 
 
 def test_an_engine_is_identified_by_what_it_reports_not_by_its_name() -> None:

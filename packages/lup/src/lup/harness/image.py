@@ -412,6 +412,20 @@ class Image(BaseModel, frozen=True):
             "runtime's own word and arrives from its login declaration"
         ),
     )
+    credential_seed: str = Field(
+        default="/opt/lup/credential-seed",
+        description=(
+            "Where the host's stored login is offered to the entrypoint, "
+            "outside the config home rather than over it. The host file used "
+            "to be bind-mounted read-only at the exact path the CLI keeps a "
+            "login, which read as working -- a session started signed in -- "
+            "and was not: that file is written back to, both when a login "
+            "completes and when an expiring token is renewed, and a "
+            "read-only mount refused both. It also shadowed whatever the "
+            "config volume held, so a login made inside was invisible the "
+            "next launch. Offered here instead, and copied in once"
+        ),
+    )
     registry_root: str = Field(
         default="/opt/bun",
         description=(
@@ -707,7 +721,7 @@ SEED
 COPY <<'ENTRY' /usr/local/bin/lup-entrypoint
 #!/bin/sh
 set -e
-config="${{CLAUDE_CONFIG_DIR:-$HOME/.claude}}"
+config={self.config_home}
 mkdir -p "$config"
 # Said here because here is where the evidence is. A config volume filled
 # under one user-namespace mapping and mounted under another belongs to a uid
@@ -734,6 +748,20 @@ if [ ! -f "$config/.claude.json" ]; then
   jq --arg here "$PWD" \\
      '.projects[$here] = {{"hasTrustDialogAccepted": true}}' \\
      /opt/lup/trust-seed.json > "$config/.claude.json"
+fi
+# The stored login, copied in rather than mounted over the path it lives at.
+# Only when the config home has none, which is what keeps the two directions
+# from fighting: a login made in here is never overwritten by the host's, and
+# the host's file is never written by anything in here. After the copy this
+# container owns its credential outright, so `/login` completes and an
+# expiring token renews -- neither of which a read-only mount allowed.
+#
+# The filename is the runtime's own word and arrives per launch, because one
+# image starts every runtime the harness declares and they do not agree on it.
+seed={self.credential_seed}
+if [ -n "$LUP_CREDENTIAL_NAME" ] && [ -f "$seed" ] && [ ! -f "$config/$LUP_CREDENTIAL_NAME" ]; then
+  cp "$seed" "$config/$LUP_CREDENTIAL_NAME"
+  chmod 600 "$config/$LUP_CREDENTIAL_NAME"
 fi
 exec "$@"
 ENTRY
@@ -874,10 +902,22 @@ USER $UID:$GID
         ``permissions.allow`` with a notice rather than an error, so the
         policy would be off with nothing having failed.
 
-        ``credential`` is mounted read-only at the one path the CLI reads it
-        from. The agent can read it, which is not a leak this could close:
-        an agent that can open a session can reach whatever opens one. The
-        scope is the boundary, not the secrecy.
+        ``credential`` is offered read-only at :attr:`credential_seed` and
+        copied into the config home by the entrypoint when that home has
+        none. It used to be mounted read-only at the path the CLI keeps a
+        login, which looked right and was not: the CLI writes that file back
+        both when a login completes and when it renews an expiring token, so
+        a read-only mount meant `/login` could not finish inside the boundary
+        and a long session could not renew what it started with. The mount
+        also shadowed the config volume's own copy, so a login made in here
+        was gone by the next launch.
+
+        The agent can read the credential either way, which is not a leak
+        this could close: an agent that can open a session can reach whatever
+        opens one. The scope is the boundary, not the secrecy. What the copy
+        does close is the other direction -- nothing in here writes the
+        host's file -- at the cost of the two diverging, which is what makes
+        signing in as somebody else inside possible at all.
 
         ``terminal`` is what :meth:`TerminalHandoff.for_host` answered on this
         machine, passed rather than resolved here for the reason every host
@@ -901,7 +941,12 @@ USER $UID:$GID
             for argument in ("-v", f"{host}:{inside}:ro")
         ]
         seeded = (
-            ["-v", f"{credential}:{self.config_home}/{credential_file}:ro"]
+            [
+                "-v",
+                f"{credential}:{self.credential_seed}:ro",
+                "-e",
+                f"LUP_CREDENTIAL_NAME={credential_file}",
+            ]
             if credential is not None
             else []
         )
