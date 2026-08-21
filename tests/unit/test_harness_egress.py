@@ -432,23 +432,12 @@ def test_a_proxy_with_no_gateway_anywhere_is_told_so_plainly() -> None:
     cheaper question and cannot resolve a name — which is the state a reader
     would otherwise have to infer from a resolver list and a 503.
     """
-    stranded = contained.EgressState(
-        network="net",
-        proxy="proxy",
-        alias="egress",
-        network_exists=True,
-        dns_enabled=True,
-        proxy_exists=True,
-        proxy_running=True,
-        attached=True,
-        aliases=["egress"],
-        legs=[contained.NetworkLeg(network="net", address="10.89.0.29")],
-        route="",
-        reached=False,
-    )
+    stranded = working_proxy(route="", reached=False)
 
     assert not stranded.routes()
-    assert any("no route off them at all" in item.text for item in stranded.verdict())
+    assert any(
+        "reaches only its own networks" in item.text for item in stranded.verdict()
+    )
 
 
 def test_a_recorded_gateway_is_not_taken_for_a_route() -> None:
@@ -523,3 +512,95 @@ def test_an_unreadable_table_is_not_read_as_a_route() -> None:
     assert contained.default_route("") == ""
     assert contained.default_route("Iface\tDestination\tGateway\n") == ""
     assert contained.default_route("garbage\n\n  \n") == ""
+
+
+def working_proxy(**differing: object) -> "contained.EgressState":
+    """A proxy with every question but the named ones answering well.
+
+    Nested defaults rather than a fixture, because what each case is about is
+    the one or two fields it overrides — and a reader of the case should not
+    have to hold eleven others in mind to see which.
+    """
+    return contained.EgressState.model_validate(
+        {
+            "network": "net",
+            "proxy": "proxy",
+            "alias": "egress",
+            "network_exists": True,
+            "dns_enabled": True,
+            "proxy_exists": True,
+            "proxy_running": True,
+            "attached": True,
+            "aliases": ["egress"],
+            "legs": [contained.NetworkLeg(network="net", address="10.89.0.29")],
+            "route": "via 10.88.0.1 on eth0",
+            "resolver": "10.89.0.1 192.168.0.1",
+            "answers_locally": True,
+            "reached": True,
+            **differing,
+        }
+    )
+
+
+def test_a_chain_that_answers_locally_and_not_publicly_is_named_as_shadowing() -> None:
+    """The one explanation those facts leave, said rather than left to infer.
+
+    A route out, a working nameserver in the list, its own network's names
+    resolving, and a public name not. glibc takes the first authoritative
+    answer and stops, so a resolver refusing everything outside its network
+    hides every server after it — including the one that would have answered.
+    """
+    shadowed = working_proxy(reached=False)
+
+    assert any("stopping early" in item.text for item in shadowed.verdict())
+
+
+def test_a_proxy_that_resolves_nothing_at_all_is_not_called_shadowed() -> None:
+    """Two of the clauses is a guess, and guesses are what this keeps refuting.
+
+    A chain that answers nothing — not even its own network's names — is a
+    different fault with a different repair, and saying "stopping early"
+    about it would send a reader to change resolvers that were never
+    consulted.
+    """
+    silent = working_proxy(reached=False, answers_locally=False)
+
+    assert not silent.shadowed()
+
+
+def test_a_proxy_with_no_route_is_not_called_shadowed_either() -> None:
+    """Nor is one that cannot reach any resolver it lists."""
+    stranded = working_proxy(reached=False, route="")
+
+    assert not stranded.shadowed()
+    assert any("reaches only its own networks" in i.text for i in stranded.verdict())
+
+
+def test_squid_s_own_errors_are_kept_above_the_traffic_that_drowns_them() -> None:
+    """A busy proxy writes one access line per request and few error lines.
+
+    Measured: twenty rows of `TCP_TUNNEL/503` repeating, with the line saying
+    why sitting above the window. A plain tail shows the half that repeats.
+    """
+    said = "\n".join(
+        ["FATAL: something went wrong"]
+        + [
+            f"175500000{n}.1 0 10.89.0.38 TCP_TUNNEL/503 0 CONNECT h:443"
+            for n in range(9)
+        ]
+    )
+
+    def spelled(binary: str):
+        def call(*_words: str, **_kw: object) -> str:
+            return said
+
+        return call
+
+    original = sh.Command
+    sh.Command = spelled  # pyright: ignore[reportAttributeAccessIssue]
+    try:
+        kept = contained.proxy_log("proxy", Docker())
+    finally:
+        sh.Command = original  # pyright: ignore[reportAttributeAccessIssue]
+
+    assert kept.splitlines()[0] == "FATAL: something went wrong"

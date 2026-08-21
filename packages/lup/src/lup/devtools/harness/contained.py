@@ -278,13 +278,19 @@ def default_route(table: str) -> str:
     return ""
 
 
-def proxy_log(name: str, engine: ContainerEngine, lines: int = 20) -> str:
-    """What a proxy container said before it stopped saying anything.
+def proxy_log(name: str, engine: ContainerEngine, lines: int = 400) -> str:
+    """What a proxy container said, with its own errors kept above the traffic.
 
     Both streams, because squid splits them: its access log is configured onto
-    stdout and everything about why it would not start onto stderr, so reading
-    one of the two is reading the half that is empty in exactly the case this
-    is for.
+    stdout and everything about why it would not start, or why one request
+    could not be completed, onto stderr. Reading one of the two is reading the
+    half that is empty in exactly the case this is for.
+
+    They are separated again on the way out, and that is not cosmetic. A busy
+    proxy writes one access line per request and a handful of error lines
+    across its whole life, so a plain tail is twenty rows of traffic and none
+    of the diagnosis -- measured, five hundred bytes of `TCP_TUNNEL/503`
+    repeating while the line saying *why* sat above the window.
     """
     try:
         spoken = sh.Command(engine.binary)(
@@ -292,7 +298,11 @@ def proxy_log(name: str, engine: ContainerEngine, lines: int = 20) -> str:
         )
     except (sh.CommandNotFound, sh.ErrorReturnCode):
         return ""
-    return str(spoken).strip()
+    said = str(spoken).strip().splitlines()
+    traffic = [line for line in said if "TCP_" in line or "TAG_" in line]
+    return "\n".join(
+        [*[line for line in said if line not in traffic][-12:], *traffic[-6:]]
+    )
 
 
 def departed(
@@ -619,6 +629,17 @@ class EgressState(BaseModel, frozen=True):
             "a proxy that cannot resolve anything"
         ),
     )
+    answers_locally: bool = Field(
+        default=False,
+        description=(
+            "Whether the proxy can resolve the alias its own network's "
+            "resolver holds. Beside :attr:`reached` this is the pair that "
+            "matters: a resolver chain answering internal names and refusing "
+            "public ones is being consulted and stopping early, which is a "
+            "different fault from one that cannot be reached at all and has "
+            "a different repair"
+        ),
+    )
     reached: bool = Field(
         default=False,
         description=(
@@ -723,6 +744,13 @@ class EgressState(BaseModel, frozen=True):
                         urgency="ready" if self.reached else "refusal",
                         indent=1,
                     ),
+                    Notice(
+                        text=(
+                            f"its own network's names resolve: {self.answers_locally}"
+                        ),
+                        urgency="ready" if self.answers_locally else "warning",
+                        indent=1,
+                    ),
                 ]
                 if self.proxy_running
                 else []
@@ -751,6 +779,36 @@ class EgressState(BaseModel, frozen=True):
         metadata said yes, and every packet failed instantly.
         """
         return bool(self.route)
+
+    def shadowed(self) -> list[Notice]:
+        """Name the one fault the facts above single out, when they do.
+
+        A route out, a resolver list holding a working server, names of its
+        own network resolving, and a public name not: that combination has
+        one explanation. glibc takes the first authoritative answer it gets
+        and stops, so a resolver that says NXDOMAIN for everything outside
+        its own network hides every server listed after it — including the
+        one that would have answered.
+
+        Said only when every clause holds. A verdict that guessed from two of
+        them would be the sixth theory this boundary has produced by reading,
+        and the previous five were all refuted by measuring.
+        """
+        if not (self.route and self.answers_locally and self.resolver):
+            return []
+        return [
+            Notice(
+                text=(
+                    "It has a route out and a working nameserver in its list, "
+                    "and it resolves its own network's names — so the chain is "
+                    "answering and stopping early. The first resolver refuses "
+                    "public names authoritatively, which hides every server "
+                    "after it."
+                ),
+                urgency="detail",
+                indent=1,
+            )
+        ]
 
     def verdict(self) -> list[Notice]:
         """What the facts above add up to, in the words a session would use.
@@ -794,18 +852,24 @@ class EgressState(BaseModel, frozen=True):
                     ),
                     urgency="refusal",
                 ),
-                Notice(
-                    text=(
-                        "No network it is on offers a gateway, so it has no "
-                        "route off them at all — which is why it resolves "
-                        "nothing: the nameservers it holds are unreachable."
-                        if self.legs and not self.routes()
-                        else "That is the proxy's own resolution or its route "
-                        "out, not the session's network. Its log above and "
-                        "its networks say which."
-                    ),
-                    urgency="detail",
-                    indent=1,
+                *(
+                    self.shadowed()
+                    or [
+                        Notice(
+                            text=(
+                                "It holds no default route, so it reaches only "
+                                "its own networks — which is why it resolves "
+                                "nothing: every nameserver it lists is "
+                                "unreachable."
+                                if not self.routes()
+                                else "That is the proxy's own resolution or "
+                                "its route out, not the session's network. "
+                                "Its log above and its networks say which."
+                            ),
+                            urgency="detail",
+                            indent=1,
+                        )
+                    ]
                 ),
             ]
         return [
@@ -918,6 +982,14 @@ def egress_state(
     # `getent` exits 2 on a name it cannot find and says nothing, so the
     # question is carried into the answer and the verdict comes off `worked`.
     looked = within("getent", "hosts", resolving)
+    # The same question about a name the session's own resolver is *supposed*
+    # to know. The pair is what tells a resolver that is not answering apart
+    # from one that is answering "no": if the alias resolves here and a public
+    # name does not, the chain is being consulted and is refusing to look
+    # further -- and glibc stops at the first authoritative answer, so an
+    # NXDOMAIN from the internal network's resolver hides every server after
+    # it, including the working one.
+    known = within("getent", "hosts", egress.alias)
     routed = default_route(within("cat", "/proc/net/route").text)
     nameservers = " ".join(
         line.split()[1]
@@ -931,6 +1003,7 @@ def egress_state(
         legs=legs,
         route=routed,
         reached=looked.worked,
+        answers_locally=known.worked,
         upstream=f"{resolving} -> {looked.text or 'no answer'}",
         alias=egress.alias,
         network_exists=bool(dns),
