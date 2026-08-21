@@ -15,32 +15,33 @@ laptop with no bun and no clipboard is told nothing at all at launch, which
 is correct -- neither is a fault of that machine.
 """
 
-from pathlib import Path
-
-from lup.devtools.harness.contained import checkout_tag
 from lup.harness.requirements import Manifest
-from lup.workspace.paths import project_root
 from lup.harness.toolchain import (
     agent_session_requirement,
     bun_requirement,
     clipboard_requirement,
     container_requirement,
     github_requirement,
+    metadata_refused_requirement,
+    proxy_resolves_requirement,
+    proxy_tunnels_requirement,
     same_path_mount_requirement,
+    terminal_handoff_requirement,
     typescript_requirement,
     uv_requirement,
 )
 
 
-def manifest(root: Path | None = None) -> Manifest:
-    """This repository's requirements, resolved against the checkout it runs in.
+def manifest() -> Manifest:
+    """This repository's requirements, host side and image side.
 
-    A function rather than a constant because one entry has to know where this
-    checkout actually is. The same-path mount probe was measured failing for
-    exactly the directories the rail leases while passing for others, so a
-    probe aimed at a fixed path could report success on a host where every
-    real mount silently does nothing -- the precise false report this manifest
-    exists to prevent.
+    Nothing here names a path, a container client, or an image tag, and that
+    is load-bearing rather than tidy. This manifest sits inside the `Harness`
+    the ownership digest hashes, so a host fact written into it moves that
+    digest per machine: measured, two worktrees of one commit hashing
+    differently, which made every checkout but the last one to generate read
+    its own committed tree as stale. The shapes are declared here and
+    `lup.harness.toolchain.for_host` aims them at what this machine answered.
 
     Ordered by how early a session notices an absence, not by importance, and
     deliberately short. A first draft also declared ripgrep, and exercising it
@@ -52,20 +53,14 @@ def manifest(root: Path | None = None) -> Manifest:
     invents prerequisites refuses machines that were fine, which is this
     module's own failure pointed the other way.
 
-    `bun` and `typescript` are declared and, until the image declaration
-    exists, unverified: an image-side requirement is checked where it is
-    needed, and there is not yet an image to check it in. What they buy today
-    is the package list a build will be assembled from, and the honest
-    statement that nothing has exercised them.
+    The image half is exercised inside the container a session opens, which
+    `harness requirements --inside` is for. Four of its entries are the
+    boundary taken component by component -- the proxy alias resolving, a
+    request reaching the world through it, the metadata endpoint still being
+    refused, and the operator's terminal having arrived. Each was a thing the
+    first contained session found broken and no preflight was in a position
+    to see, because the image half had been declared and never run.
     """
-    # Asked of the launcher rather than spelled, because the two spelled it
-    # differently and only one of them builds anything: the offered default
-    # is `lup-agent:latest` and a launch tags `lup-agent:<checkout>`, so the
-    # session probe was pulling a name from a registry -- `requested access
-    # to the resource is denied` -- while the image it was asking about sat
-    # in local storage under another name. Deriving it also means the tag
-    # scheme can change without this going quietly stale.
-    checkout = root or project_root()
     return Manifest(
         requirements=[
             # Every default taken as offered. Where this repository has an
@@ -74,11 +69,19 @@ def manifest(root: Path | None = None) -> Manifest:
             # have none.
             uv_requirement(),
             container_requirement(),
-            same_path_mount_requirement(probe=checkout),
-            agent_session_requirement(image=checkout_tag(checkout)),
+            same_path_mount_requirement(),
             github_requirement(),
+            clipboard_requirement(),
+            # The image half, exercised behind the argv a session opens with.
+            # Ordered as a session meets them: the network has to resolve
+            # before it can tunnel, the tunnel has to stand before a turn can
+            # run, and the terminal is what the operator sees either way.
+            proxy_resolves_requirement(),
+            proxy_tunnels_requirement(),
+            metadata_refused_requirement(),
+            terminal_handoff_requirement(),
             bun_requirement(),
             typescript_requirement(),
-            clipboard_requirement(),
+            agent_session_requirement(),
         ],
     )

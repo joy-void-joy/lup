@@ -441,7 +441,7 @@ def portable_harness(version: str = "0.2.0", root: Path | None = None) -> Harnes
     return Harness(
         generator_version=version,
         source_evidence={"content": "typed-python"},
-        requirements=manifest(root),
+        requirements=manifest(),
         image=agent_image(),
         plugins=[plugin],
         guidance=guidance_document(plugin.hooks.rules if plugin.hooks else None),

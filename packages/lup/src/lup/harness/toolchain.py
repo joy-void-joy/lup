@@ -29,8 +29,11 @@ from lup.harness.requirements import (
     Advisory,
     AnyOf,
     EnvironmentRedirect,
+    Exercise,
+    HostFacts,
     LostCapability,
     Manifest,
+    MountProbe,
     Package,
     RefusedLaunch,
     Requirement,
@@ -70,7 +73,9 @@ def uv_requirement(
     )
 
 
-def for_host(manifest: Manifest, engine: ContainerEngine) -> Manifest:
+def for_host(
+    manifest: Manifest, engine: ContainerEngine, checkout: Path | None = None
+) -> Manifest:
     """This manifest with every client-carried exercise pointed at ``engine``.
 
     The split this exists for: *which capability is required* is a
@@ -88,17 +93,41 @@ def for_host(manifest: Manifest, engine: ContainerEngine) -> Manifest:
     ``--userns=keep-id`` and a Docker client rejects the flag before the
     daemon sees it -- while the podman CLI beside it is what a session opens
     through. Exercising the refused one verifies a boundary no session uses.
+
+    ``checkout`` is the second such fact and arrives the same way. A probe
+    aimed at where this tree actually sits cannot have that path in the
+    declaration: measured, the ownership digest moved between two worktrees
+    of one commit, so every checkout but the one that generated last read its
+    own committed tree as stale -- for having been checked out somewhere
+    else. What is declared is the shape; this is where a machine answers it.
     """
+    facts = HostFacts(client=engine.binary, checkout=checkout or Path())
     return Manifest(
         requirements=[
             requirement.model_copy(
-                update={"exercise": requirement.exercise.pointed_at(engine.binary)}
+                update={"exercise": resolved_exercise(requirement, facts)}
             )
-            if requirement.by_client
-            else requirement
             for requirement in manifest.requirements
         ]
     )
+
+
+def resolved_exercise(requirement: Requirement, facts: HostFacts) -> Exercise:
+    """One requirement's exercise with everything this machine has to supply.
+
+    Two resolutions rather than one, because they answer different questions.
+    ``by_client`` is the *requirement's* claim that the client carries the
+    exercise out, and only some requirements make it; :meth:`Exercise.given`
+    is each exercise shape answering for whatever else it could not name, and
+    every shape answers it -- with "nothing" where a command is already
+    portable.
+    """
+    exercise = (
+        requirement.exercise.pointed_at(facts.client)
+        if requirement.by_client
+        else requirement.exercise
+    )
+    return exercise.given(facts)
 
 
 def container_client(fallback: str = "docker") -> ContainerEngine:
@@ -184,9 +213,7 @@ def same_path_mount_requirement(
     where: Side = "host",
     install: list[Package] = [],
     image: str = "docker.io/library/busybox:latest",
-    probe: Path = Path("/tmp/lup-same-path-probe"),
     witness: str = "pyproject.toml",
-    client: str = "docker",
 ) -> Requirement:
     """Whether this host can bind-mount a directory at its own absolute path.
 
@@ -211,9 +238,17 @@ def same_path_mount_requirement(
     unless the mount both happened and carried content, and it cannot fail
     for a reason that has nothing to do with mounting.
 
-    ``probe`` should be pointed at a directory the project actually leases
-    rather than left at its default, and ``witness`` at a file that exists
-    inside it. A probe aimed somewhere else answers about somewhere else.
+    Which directory it is aimed at is not written here, and that is the
+    second thing this got wrong. Spelling the checkout put an absolute host
+    path into a declaration the ownership digest hashes, and the digest then
+    moved between two worktrees of one commit -- so every checkout but the
+    last one to generate read its own committed tree as stale, for a fact
+    about where somebody had put it. :class:`MountProbe` declares the shape
+    and :func:`for_host` aims it, which is the same split the container
+    client already goes through.
+
+    ``witness`` names a file the probed directory is known to hold. A probe
+    whose witness is absent answers about the witness rather than the mount.
 
     Checked at setup rather than at every launch, because it starts a
     container. That is a statement about the probe's cost and not about the
@@ -221,28 +256,10 @@ def same_path_mount_requirement(
     """
     return Requirement(
         capability="same-path bind mounts",
-        by_client=True,
         purpose="the worktree rail, which confines a worker by mounting",
         where=where,
         checked="setup",
-        # Read a file that only exists on the host side, rather than asking
-        # whether the directory is there. Asking about the directory is what a
-        # first draft did, and it can pass without the mount having happened
-        # at all: the container creates an empty directory at any mount target
-        # it was given, so `test -d` answers yes about a directory the mount
-        # left behind. Reading a file through it cannot.
-        exercise=Run(
-            command=[
-                client,
-                "run",
-                "--rm",
-                "-v",
-                f"{probe}:{probe}:ro",
-                image,
-                "cat",
-                str(probe / witness),
-            ]
-        ),
+        exercise=MountProbe(image=image, witness=witness),
         absence=LostCapability(
             capability="the worktree rail, and so multi-worker resolve"
         ),
@@ -399,10 +416,9 @@ def clipboard_requirement(
 
 
 def agent_session_requirement(
-    where: Side = "host",
+    where: Side = "image",
     install: list[Package] = [],
-    image: str = "lup-agent:latest",
-    client: str = "docker",
+    runtime: str = "claude",
 ) -> Requirement:
     """Whether an agent session actually runs inside the image, not merely opens.
 
@@ -417,30 +433,34 @@ def agent_session_requirement(
 
     So the exercise runs a real turn and requires its answer back. That cannot
     pass without the image, the mount, the relocated config home, the
-    credential store and the model endpoint all working together, and it
-    cannot fail for a reason unrelated to any of them.
+    credential store, the egress proxy and the model endpoint all working
+    together, and it cannot fail for a reason unrelated to any of them.
 
-    Checked at setup rather than at every launch: it starts a container and
-    spends a model call. It is also the one requirement here whose absence
-    refuses rather than degrades, because an architecture whose sessions do
-    not run is not a degraded architecture.
+    The list in that sentence is what the declaration used to *claim*. Spelled
+    out as its own ``run``, this exercise carried no mount, no config home, no
+    credential and no network -- so it started a bare container on the
+    engine's default bridge, where the proxy this architecture routes through
+    does not stand between anything. It could pass on a host whose sessions
+    could not open, which is the one thing a declare-and-verify manifest must
+    not do, and it is the reason the first contained session met a DNS
+    failure that no preflight had been in a position to see.
+
+    Declared image-side now, which is what makes it true: an image-side
+    exercise is carried out behind the argv a session opens with, so every
+    part of the boundary the sentence above names is in the path. Nothing here
+    spells a client or a tag, and that is the same fix a second time -- both
+    were host facts sitting in a declaration the ownership digest hashes.
+
+    Its absence refuses rather than degrades, because an architecture whose
+    sessions do not run is not a degraded architecture.
     """
     return Requirement(
         capability="contained agent session",
-        by_client=True,
         purpose="running agents, workers and reviewers inside the boundary",
         where=where,
         checked="setup",
         exercise=Run(
-            command=[
-                client,
-                "run",
-                "--rm",
-                image,
-                "claude",
-                "-p",
-                "Reply with exactly: SESSION_OK",
-            ],
+            command=[runtime, "-p", "Reply with exactly: SESSION_OK"],
             expect="SESSION_OK",
         ),
         absence=RefusedLaunch(
@@ -448,6 +468,211 @@ def agent_session_requirement(
                 "the boundary is claimed but no session can run behind it, so "
                 "the work would silently proceed on the host instead"
             )
+        ),
+        install=install,
+    )
+
+
+def proxy_resolves_requirement(
+    where: Side = "image",
+    install: list[Package] = [],
+    alias: str = "egress",
+) -> Requirement:
+    """Whether the session's network resolves the name its proxy answers to.
+
+    The first component of a filtered egress, and the one whose failure is
+    least recognisable. A session on an internal network reaches the world
+    only through a proxy it addresses by alias, and an alias is a DNS record
+    the network's own resolver holds. Where that record is missing -- the
+    proxy running but never joined to this network, the connect half of a
+    two-command start having failed after the run half succeeded -- every
+    request fails before a packet is addressed to anything.
+
+    What the operator sees is the reason this is exercised separately.
+    Nothing names a proxy: the runtime reports that it cannot reach the API
+    and suggests checking the internet or DNS, which is true in the narrowest
+    sense and points at the operator's router. Measured, on the first
+    contained session anybody opened.
+    """
+    return Requirement(
+        capability="egress proxy resolves",
+        purpose="reaching anything at all from inside a filtered session",
+        where=where,
+        checked="setup",
+        exercise=Run(command=["getent", "hosts", alias]),
+        absence=RefusedLaunch(
+            because=(
+                "a filtered session addresses its only way out by this name, "
+                "so nothing in it can reach the network — and the runtime "
+                "reports that as the operator's own internet being down"
+            )
+        ),
+        install=install,
+    )
+
+
+def proxy_tunnels_requirement(
+    where: Side = "image",
+    install: list[Package] = [],
+    destination: str = "https://api.anthropic.com/",
+) -> Requirement:
+    """Whether a request actually reaches the public internet through the proxy.
+
+    The second component, and the end-to-end one. Resolving the alias proves
+    a name; this proves the tunnel -- that the proxy accepted a ``CONNECT``,
+    that it could resolve the destination on its own side, and that its
+    bridged network really does reach out.
+
+    Through ``curl``'s reading of the proxy variables rather than an explicit
+    ``-x``, deliberately. Those variables are what every other client in the
+    session reads, so a probe that bypassed them would prove the proxy works
+    while saying nothing about whether anything is pointed at it -- which is
+    exactly the half that was broken.
+
+    The destination is the API the session exists to reach. A generic
+    connectivity host would answer a question nobody has: an allowlist that
+    admits the wider internet and not this one is a working boundary and a
+    session that cannot do anything.
+    """
+    return Requirement(
+        capability="egress proxy tunnels out",
+        purpose="every model call, package install and documentation fetch",
+        where=where,
+        checked="setup",
+        # `-o /dev/null` with the code written out: any HTTP status proves the
+        # tunnel stood up, and the body does not. An unauthenticated 401 from
+        # the API is a complete success for this question, so matching on
+        # content here would refuse a working boundary.
+        exercise=Run(
+            command=[
+                "curl",
+                "--silent",
+                "--show-error",
+                "--max-time",
+                "30",
+                "--output",
+                "/dev/null",
+                "--write-out",
+                "%{http_code}",
+                destination,
+            ]
+        ),
+        absence=RefusedLaunch(
+            because=(
+                "the session is on a network with no gateway and the one "
+                "process bridged out of it is not carrying its traffic, so "
+                "every model call fails"
+            )
+        ),
+        install=install,
+    )
+
+
+def metadata_refused_requirement(
+    where: Side = "image",
+    install: list[Package] = [],
+    endpoint: str = "http://169.254.169.254/",
+    status: str = "403",
+) -> Requirement:
+    """Whether the boundary still refuses what it exists to refuse.
+
+    The third component, and the only one that fails *closed*: the two above
+    ask whether the session can reach the world, and this asks whether it
+    still cannot reach the places a compromised one would head for. Both
+    questions have to be live, because the natural repair for the first --
+    widen, bridge, turn the filtering off -- passes it by removing the
+    boundary, and nothing else here would notice.
+
+    The cloud metadata endpoint stands for the whole denied set. It is the
+    destination with the highest payoff and the lowest effort: an unauthenticated
+    HTTP GET that hands out instance credentials, on an address every cloud
+    answers on. If this one is refused, the private-range rules the proxy
+    compiles are in force.
+
+    Matching a *status* rather than the proxy's error page. The status is
+    protocol; the page is a build's English, and a probe that read it would
+    start failing on a proxy upgrade that changed nothing about the boundary.
+    """
+    return Requirement(
+        capability="metadata endpoint refused",
+        purpose="the half of the boundary that keeps a session out of the host's cloud",
+        where=where,
+        checked="setup",
+        exercise=Run(
+            command=[
+                "curl",
+                "--silent",
+                "--show-error",
+                "--max-time",
+                "30",
+                "--output",
+                "/dev/null",
+                "--write-out",
+                "%{http_code}",
+                endpoint,
+            ],
+            expect=status,
+        ),
+        absence=RefusedLaunch(
+            because=(
+                "the egress boundary is not refusing the cloud metadata "
+                "endpoint, so a session in this container can read whatever "
+                "credentials the host's instance role holds"
+            )
+        ),
+        install=install,
+    )
+
+
+def terminal_handoff_requirement(
+    where: Side = "image",
+    install: list[Package] = [],
+) -> Requirement:
+    """Whether the operator's terminal actually arrived inside the container.
+
+    Three facts in one exercise because they fail together and are fixed
+    together: they are the same handoff, and splitting them would start three
+    containers to answer one question.
+
+    Each of the three was measured absent on the first contained session.
+    ``COLORTERM`` unset is 24-bit colour collapsing to sixteen, with the
+    engine's own placeholder ``TERM`` making a truecolour terminal
+    indistinguishable from a teletype. An ``EDITOR`` naming nothing runnable
+    is the open-in-editor binding doing nothing when pressed -- and an
+    ``EDITOR`` that is merely *unset* is the same silence, which is why this
+    checks that it runs rather than that it is written. A ``LANG`` naming a
+    locale nobody generated is glibc falling back to ASCII, one warning per
+    program.
+
+    The exercise prints what it found before it checks it, so a failure
+    reports the values rather than only the verdict. Which of the three is
+    wrong is the whole of what a reader needs, and re-running by hand inside
+    a container is not a step anybody should have to take to learn it.
+    """
+    return Requirement(
+        capability="terminal handoff",
+        purpose="colour, the open-in-editor binding, and UTF-8 output",
+        where=where,
+        checked="setup",
+        exercise=Run(
+            command=[
+                "sh",
+                "-c",
+                'printf "TERM=%s COLORTERM=%s EDITOR=%s LANG=%s\n" '
+                '"$TERM" "$COLORTERM" "$EDITOR" "$LANG"; '
+                '[ -n "$COLORTERM" ] || { '
+                'echo "COLORTERM did not cross, so colour is 16 not 16m" >&2; '
+                "exit 1; }; "
+                'command -v "$EDITOR" >/dev/null || { '
+                'echo "EDITOR=$EDITOR names nothing runnable here" >&2; '
+                "exit 1; }; "
+                'LC_ALL="$LANG" locale >/dev/null 2>&1 || { '
+                'echo "LANG=$LANG was never generated in this image" >&2; '
+                "exit 1; }",
+            ]
+        ),
+        absence=Advisory(
+            improves="colour depth, the open-in-editor binding, and UTF-8 output"
         ),
         install=install,
     )

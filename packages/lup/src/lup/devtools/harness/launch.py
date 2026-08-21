@@ -430,9 +430,20 @@ def report_requirements(manifest: Manifest, setting_up: bool = False) -> list[Fi
     # the declaration is hashed into the ownership digest and a container
     # client is a fact about the machine. This is the only place the
     # exercises actually run, so it is the only place that has to know.
-    findings = for_host(manifest, container_client()).check(
+    findings = for_host(manifest, container_client(), project_root()).check(
         environ, setting_up=setting_up
     )
+    return reported(findings)
+
+
+def reported(findings: list[Finding]) -> list[Finding]:
+    """Say what each finding found, and stop where absence refuses.
+
+    One place for both halves so the two rosters cannot come to differ about
+    what a refusal means. They already had somewhere to differ: the inside
+    roster was written after the host one and, printed separately, would have
+    been free to treat a refused finding as a line rather than a stop.
+    """
     for finding in findings:
         for notice in finding.notices():
             notice.say()
@@ -442,6 +453,49 @@ def report_requirements(manifest: Manifest, setting_up: bool = False) -> list[Fi
             "; ".join(item.requirement.absence.consequence() for item in stopping)
         )
     return findings
+
+
+def report_inside_requirements(
+    composition: NativeHarnessComposition,
+    plugin: Plugin,
+    config_home: Path,
+    login: ProviderLogin,
+) -> list[Finding]:
+    """Exercise the image-side requirements inside the container a session opens.
+
+    The half of the manifest that had nowhere to run. An image requirement is
+    excluded from the host roster for a good reason -- a laptop without
+    ``bun`` is not a laptop with a problem -- and excluded was as far as it
+    went: declared, rendered into a package list, never exercised. What that
+    bought was a preflight that reported a healthy machine and a session that
+    could not resolve its own proxy, because everything the boundary is made
+    of sat on the unexercised side.
+
+    Behind the *same* argv a launch opens with, assembled by the same call.
+    That is the whole design, and the alternative has already been measured
+    wrong twice: an exercise spelled as its own ``run`` verified a container
+    with no network, no mounts and no config home, and an exercise spelled
+    with its own client verified an engine no session opens through. A probe
+    that assembles its own container answers about that container.
+
+    Non-interactive, which is the one deliberate difference. A probe's output
+    is captured rather than shown, and ``-it`` against a pipe fails on the
+    terminal it was promised.
+    """
+    harness = composition.recipe.source
+    credential = login.credentials_path(config_home)
+    opening = contained_argv(
+        harness.image,
+        harness.requirements,
+        project_root(),
+        plugin.hooks.human_owned_files if plugin.hooks is not None else [],
+        config_home,
+        credential if credential.exists() else None,
+        login,
+        interactive=False,
+    )
+    environ: EnvVars = dict(os.environ)  # lup: ignore[os-environ]
+    return reported(harness.requirements.check_inside(environ, opening))
 
 
 def codex_login_preflight(home: Path, environment: EnvVars) -> None:

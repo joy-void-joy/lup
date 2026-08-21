@@ -154,6 +154,17 @@ def create_harness_app(
                 help="Skip the conveniences, exactly as a launch does",
             ),
         ] = False,
+        inside: Annotated[
+            bool,
+            typer.Option(
+                "--inside",
+                help=(
+                    "Exercise the image half instead, inside the container a "
+                    "session opens — builds the image and starts the egress "
+                    "boundary if they are not up"
+                ),
+            ),
+        ] = False,
     ) -> None:
         """Exercise the external programs this project expects on this machine.
 
@@ -161,10 +172,17 @@ def create_harness_app(
         -- so somebody setting a machine up hears everything once, where they
         can act on it, and every session afterwards hears only what it lost.
 
-        Only host-side requirements are exercised. What the container image
-        is expected to carry is checked where it is needed rather than here,
-        because a machine that will never run a TypeScript toolchain outside
-        a container is not a machine with a problem.
+        Host-side by default. ``--inside`` asks the other half, behind the
+        argv a session opens with: the image's toolchain, the egress proxy
+        taken component by component, and whether the operator's terminal
+        arrived. That half was declared and unexercised for as long as it had
+        nowhere to run, which is how a preflight reported a healthy machine
+        while the first contained session could not resolve its own proxy.
+
+        The two are separate flags rather than one roster because their costs
+        are not comparable. The host half asks programs their versions; the
+        image half builds an image, starts a proxy, opens a container per
+        requirement, and spends a model call on the last of them.
 
         Exits nonzero when something whose absence costs a capability is not
         working. An advisory alone never fails this: it is advice, and a
@@ -173,8 +191,20 @@ def create_harness_app(
         findings = [
             finding
             for composition in targets.resolve(target, project_root())
-            for finding in launch.report_requirements(
-                composition.recipe.source.requirements, setting_up=not launch_only
+            for finding in (
+                launch.report_inside_requirements(
+                    composition,
+                    composition.recipe.source.plugins[0],
+                    launch.ambient_config_home(
+                        directory.login, Path.home() / ".claude"
+                    ),
+                    directory.login,
+                )
+                if inside
+                else launch.report_requirements(
+                    composition.recipe.source.requirements,
+                    setting_up=not launch_only,
+                )
             )
         ]
         if not findings:

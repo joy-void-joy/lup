@@ -6,6 +6,8 @@ installed-but-not-working, one capability spelled several ways, and a
 diagnosis that stays quiet about a failure it does not explain.
 """
 
+from pathlib import Path
+
 from lup.harness.image import Podman
 from lup.harness.ownership import source_digest
 from lup.harness.toolchain import for_host
@@ -328,7 +330,14 @@ def test_the_declared_client_is_the_portable_one_whatever_this_host_runs() -> No
 
     assert carried, "this project declares no client-carried exercise"
     assert all(item.exercise.programs() == ["docker"] for item in carried)
-    assert source_digest(portable_harness()) == source_digest(portable_harness())
+    # Two *different* checkouts, which is the comparison that catches this.
+    # Asking the same root twice was the earlier assertion and could not fail:
+    # a host fact resolved from the root gives the same answer both times, so
+    # the digest was measured stable against the one input that never varied
+    # while it moved for every worktree that was not this one.
+    assert source_digest(
+        portable_harness(root=Path("/tmp/one-checkout"))
+    ) == source_digest(portable_harness(root=Path("/tmp/another-checkout")))
 
 
 def test_the_preflight_points_every_client_exercise_at_what_answered() -> None:
@@ -346,10 +355,18 @@ def test_the_preflight_points_every_client_exercise_at_what_answered() -> None:
     assert all(item.exercise.programs() == ["podman"] for item in carried)
 
 
-def test_pointing_a_manifest_at_a_host_leaves_everything_else_alone() -> None:
-    """Only the client moves — the arguments are the declaration's."""
+def test_pointing_a_manifest_at_a_host_moves_only_what_a_machine_supplies() -> None:
+    """The client and the checkout are filled in; nothing else is touched.
+
+    Two things a machine supplies, and the test has to allow for both. A
+    ``Run`` keeps every argument the declaration wrote and moves only its
+    program. A ``MountProbe`` has no arguments to keep — it is a shape, and
+    resolving it is what turns it into a command — so the assertion for it is
+    that the command it became names this checkout rather than any other.
+    """
     declared = manifest()
-    pointed = for_host(declared, Podman(binary="podman"))
+    here = Path("/tmp/some-checkout")
+    pointed = for_host(declared, Podman(binary="podman"), here)
 
     assert [item.capability for item in pointed.requirements] == [
         item.capability for item in declared.requirements
@@ -360,8 +377,76 @@ def test_pointing_a_manifest_at_a_host_leaves_everything_else_alone() -> None:
     assert [item.exercise.programs() for item in pointed.requirements] != [
         item.exercise.programs() for item in declared.requirements
     ]
-    assert [
-        item.exercise.model_dump(exclude={"command"}) for item in pointed.requirements
-    ] == [
-        item.exercise.model_dump(exclude={"command"}) for item in declared.requirements
+    spelled = {
+        item.capability: item.exercise
+        for item in declared.requirements
+        if isinstance(item.exercise, Run)
+    }
+    assert all(
+        item.exercise.model_dump(exclude={"command"})
+        == spelled[item.capability].model_dump(exclude={"command"})
+        for item in pointed.requirements
+        if item.capability in spelled
+    )
+
+
+def test_a_mount_probe_is_aimed_at_the_checkout_a_machine_names() -> None:
+    """The shape carries no path; the resolution carries this one.
+
+    The declaration cannot name a checkout, because it is hashed into the
+    ownership digest and a worktree is where somebody put it. Measured before
+    this split: two checkouts of one commit hashing differently, so every one
+    but the last to generate read its own committed tree as stale.
+    """
+    here = Path("/tmp/some-checkout")
+    aimed = for_host(manifest(), Podman(binary="podman"), here).requirements
+    probe = next(
+        item for item in aimed if item.capability == "same-path bind mounts"
+    ).exercise
+
+    assert isinstance(probe, Run)
+    assert probe.command[0] == "podman"
+    assert f"{here}:{here}:ro" in probe.command
+    assert str(here / "pyproject.toml") in probe.command
+
+
+def test_nothing_in_a_declared_manifest_names_a_path_or_a_client() -> None:
+    """The whole roster, checked for the fact that must not be in it.
+
+    A per-entry assertion would pass for every entry written before the one
+    that reintroduces the trap. This asks the question of the manifest itself,
+    so a new requirement that bakes a host path fails here rather than at
+    whichever adopter cloned to a different directory.
+    """
+    written = manifest().model_dump_json()
+
+    assert str(Path.cwd()) not in written
+    assert str(Path.home()) not in written
+
+
+def test_the_image_half_is_exercised_behind_the_argv_a_session_opens() -> None:
+    """An image requirement runs inside the container, not beside it.
+
+    The defect this closes: image-side entries were excluded from the host
+    roster and exercised nowhere, so the whole boundary — proxy, mounts,
+    config home — was declared and unverified. What made that invisible is
+    that the one entry which did run spelled its own `docker run`, which
+    verified a container with no network and no mounts.
+    """
+    opening = ["podman", "run", "--rm", "--network", "lup-net", "lup-agent:abc"]
+    inside = manifest().check_inside({}, opening)
+    session = next(
+        item
+        for item in inside
+        if item.requirement.capability == "contained agent session"
+    )
+
+    assert [item.requirement.capability for item in inside]
+    carried = session.requirement.exercise
+    assert isinstance(carried, Run)
+    assert carried.command[: len(opening)] == opening
+    assert carried.command[len(opening) :] == [
+        "claude",
+        "-p",
+        "Reply with exactly: SESSION_OK",
     ]

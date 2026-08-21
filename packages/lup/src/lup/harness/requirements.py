@@ -357,6 +357,32 @@ class Run(BaseModel, frozen=True):
         """
         return self.model_copy(update={"command": [program, *self.command[1:]]})
 
+    def behind(self, opening: list[str]) -> "Run":
+        """This exercise carried out inside whatever *opening* starts.
+
+        How an image-side requirement stops being a claim. The command an
+        image requirement declares -- ``bun --version``, ``claude -p`` -- is
+        the right command; what was missing was anywhere to run it, so the
+        declaration sat unexercised while its docstring described what it
+        proved. Prefixing the argv a session opens with is the whole of the
+        answer, and it matters that it is *that* argv rather than a fresh
+        ``run``: a probe assembled separately verifies a container no session
+        opens, which is how a boundary passes its own preflight and then
+        fails the first session behind it.
+        """
+        return self.model_copy(update={"command": [*opening, *self.command]})
+
+    def given(self, facts: "HostFacts") -> "Run":
+        """This exercise with anything the declaration could not name filled in.
+
+        Nothing, for a plain run: its command is portable, which is what
+        being a plain run means. The method is here rather than only on the
+        members that need it so a caller never tests which member it holds --
+        the same argument :meth:`programs` makes, applied to the second thing
+        a machine has to supply.
+        """
+        return self
+
     def run(self) -> ExerciseOutcome:
         """Carry the operation out, answering whether it proved the claim."""
         try:
@@ -418,6 +444,26 @@ class AnyOf(BaseModel, frozen=True):
             }
         )
 
+    def behind(self, opening: list[str]) -> "AnyOf":
+        """Every spelling carried out inside what *opening* starts."""
+        return self.model_copy(
+            update={
+                "alternatives": [
+                    candidate.behind(opening) for candidate in self.alternatives
+                ]
+            }
+        )
+
+    def given(self, facts: "HostFacts") -> "AnyOf":
+        """Every spelling given what the declaration could not name."""
+        return self.model_copy(
+            update={
+                "alternatives": [
+                    candidate.given(facts) for candidate in self.alternatives
+                ]
+            }
+        )
+
     def run(self) -> ExerciseOutcome:
         """Take the first spelling that works, or report what each one said."""
         outcomes = [candidate.run() for candidate in self.alternatives]
@@ -433,7 +479,115 @@ class AnyOf(BaseModel, frozen=True):
         )
 
 
-type Exercise = Annotated[Run | AnyOf, Discriminator("kind")]
+class HostFacts(BaseModel, frozen=True):
+    """What a machine supplies to an exercise the declaration could not name.
+
+    The counterpart to every "no fact about a machine belongs in a hashed
+    declaration" argument in this module, gathered into one object so the
+    resolution is one call rather than one per fact. Every field here was
+    measured moving a generated tree's ownership digest between two checkouts
+    of the same commit: the container client, because ``DOCKER_HOST`` decides
+    it; and the checkout path, because a worktree is where somebody put it.
+    """
+
+    client: str = Field(
+        default="docker", description="The container client this machine answered with"
+    )
+    checkout: Path = Field(
+        default=Path(),
+        description="Where this checkout sits, for a probe aimed at the real tree",
+    )
+
+
+class MountProbe(BaseModel, frozen=True):
+    """Read a file back through a bind mount of a directory at its own path.
+
+    The prerequisite the worktree rail rests on, as a shape rather than as a
+    spelled-out command. Every part of that command that differs between two
+    machines -- which client, which directory -- is supplied by
+    :class:`HostFacts` when the probe is about to run, and what is declared
+    here is only what is the same everywhere: the throwaway image, and the
+    name of a file the checkout is known to contain.
+
+    Spelled out, this requirement put an absolute path into a declaration the
+    ownership digest hashes, and the digest then moved between two worktrees
+    of one commit -- so every checkout but the one that last generated read
+    its own committed tree as stale, for a fact about where somebody had put
+    it.
+
+    Why a *read* rather than a presence check: asking ``test -d`` about the
+    mounted directory answered false on rootless podman for every worktree
+    this rail leases, which reads exactly like an absent mount and is not
+    one. And a container creates an empty directory at any mount target it is
+    given, so the check can pass with no mount having happened at all.
+    Reading a file across the boundary can do neither.
+    """
+
+    kind: Literal["mount_probe"] = "mount_probe"
+    image: str = Field(
+        default="docker.io/library/busybox:latest",
+        description="A throwaway image with a shell, for reading one file",
+    )
+    witness: str = Field(
+        default="pyproject.toml",
+        description="A file the probed directory is known to hold",
+    )
+
+    def resolved(self, facts: HostFacts) -> Run:
+        """This probe as the command a machine runs, host facts filled in."""
+        mount = f"{facts.checkout}:{facts.checkout}:ro"
+        return Run(
+            command=[
+                facts.client,
+                "run",
+                "--rm",
+                "-v",
+                mount,
+                self.image,
+                "cat",
+                str(facts.checkout / self.witness),
+            ]
+        )
+
+    def programs(self) -> list[str]:
+        """The client, which is the one executable this runs on the host."""
+        return ["docker"]
+
+    def pointed_at(self, program: str) -> "MountProbe":
+        """Unchanged: which client runs this arrives through :class:`HostFacts`.
+
+        Answered rather than omitted so the union stays uniform -- a caller
+        that had to know this member ignores repointing is a caller testing
+        which member it holds.
+        """
+        return self
+
+    def behind(self, opening: list[str]) -> "MountProbe":
+        """Unchanged: this probe *is* a container start, so it opens its own."""
+        return self
+
+    def given(self, facts: HostFacts) -> Run:
+        """The resolved command, which is what a host fact turns this into."""
+        return self.resolved(facts)
+
+    def run(self) -> ExerciseOutcome:
+        """Refuse rather than pass, because nothing has aimed this yet.
+
+        An unresolved probe has no directory to read and no client to read it
+        with. Reporting that plainly is the only honest answer: a silent
+        success here would vouch for the mount topology the whole worktree
+        rail stands on, having tested nothing.
+        """
+        return ExerciseOutcome(
+            proved=False,
+            detail=(
+                "this mount probe was never given a checkout to aim at, so it "
+                "tested nothing — exercise it through `for_host`"
+            ),
+        )
+
+
+type Exercise = Annotated[Run | AnyOf | MountProbe, Discriminator("kind")]
 
 
 type Side = Literal["host", "image", "both"]
@@ -599,9 +753,44 @@ class Manifest(BaseModel, frozen=True):
             and (setting_up or item.checked == "always")
         ]
 
+    def inside_the_image(self) -> list[Requirement]:
+        """The requirements the container is expected to satisfy, not this machine.
+
+        The other half of :meth:`on_the_host`, and for a long time the half
+        with nowhere to run. An image-side entry was excluded from the host
+        roster -- correctly, since a laptop without ``bun`` is not a laptop
+        with a problem -- and excluded is where it stopped: declared,
+        rendered into a package list, and never once exercised. What that
+        bought was a manifest whose image half was a claim, with each entry's
+        docstring describing a proof nothing had performed.
+
+        Every one of them is checked at setup rather than at launch, whatever
+        the entry says, and that is a fact about this roster rather than a
+        judgement about its members: reaching any of them means starting a
+        container, which is the cost ``checked`` exists to keep out of a
+        session's opening.
+        """
+        return [item for item in self.requirements if item.where in ("image", "both")]
+
     def check(self, environment: EnvVars, setting_up: bool = False) -> list["Finding"]:
         """Exercise every host-side requirement, in declaration order."""
         return [item.check(environment) for item in self.on_the_host(setting_up)]
+
+    def check_inside(self, environment: EnvVars, opening: list[str]) -> list["Finding"]:
+        """Exercise every image-side requirement inside what *opening* starts.
+
+        *opening* is the argv a session opens with, minus the CLI it would
+        have run. Passed in rather than built here because assembling it
+        needs the launcher's whole world -- the lease, the credential, the
+        engine, the network -- and a manifest that reached for those would be
+        a manifest only a launcher could hold.
+        """
+        return [
+            item.model_copy(update={"exercise": item.exercise.behind(opening)}).check(
+                environment
+            )
+            for item in self.inside_the_image()
+        ]
 
     def packages(self) -> list[Package]:
         """Everything an image installs to satisfy this manifest, deduplicated.
