@@ -800,7 +800,12 @@ def decide_uv(
 
     A flag naming where packages come from, or dropping the isolation build
     code runs in, is not the verb it rides on: it is a source nobody
-    declared, and it asks even where the bare verb would not.
+    declared, and it asks even where the bare verb would not — and it is
+    asked *before* the target is looked at, for the same reason. Placed after,
+    it was unreachable for exactly the spelling that matters:
+    ``uv run --with X ruff check .`` asked and
+    ``uv run --with X python script.py`` was allowed, because the interpreter
+    branch answered and returned first. Order was the whole of that defect.
     """
     subcommand = words[1]
     if subcommand in ("add", "sync"):
@@ -826,23 +831,31 @@ def decide_uv(
             return unjudged("uv run has no command")
         run_command = posixpath.basename(run_words[0])
         bare_target = "/" not in run_words[0]
-        if run_command in INTERPRETERS:
-            # A script file and an inline program are different questions, and
-            # answering them together denied the rung the guidance points at
-            # for computing something once. What the deny is actually about is
-            # reviewability: `-c` leaves nothing behind to read, where a file
-            # can be opened, diffed and run again. So the flags keep the
-            # refusal and a named script does not.
-            rest = run_words[1:]
-            inline = [word for word in rest if word in ("-c", "-m")]
-            named = [word for word in rest if not word.startswith("-")]
-            if inline or not named:
-                return KernelDecision("deny", "inline code is not allowed")
-            return KernelDecision(
-                "allow", "a script file can be read, where inline code cannot"
-            )
-        if run_command in ("-c", "-m", "--script"):
+        # A script file and an inline program are different questions, and
+        # answering them together denied the rung the guidance points at for
+        # computing something once. What the deny is actually about is
+        # reviewability: `-c` leaves nothing behind to read, where a file can
+        # be opened, diffed and run again. So the flags keep the refusal and a
+        # named script does not.
+        rest = run_words[1:]
+        inline = [word for word in rest if word in ("-c", "-m")]
+        named = [word for word in rest if not word.startswith("-")]
+        interpreted = run_command in INTERPRETERS
+        if run_command in ("-c", "-m", "--script") or (
+            interpreted and (inline or not named)
+        ):
             return KernelDecision("deny", "inline code is not allowed")
+        # Between the refusal above and the target's own verdict below, which
+        # is where the lattice would put it anyway: a deny outranks an ask,
+        # and an ask outranks whatever the target says about itself. These
+        # flags are not a property of the target at all -- they name a source
+        # nobody declared and install from it before the target runs -- so
+        # they cannot sit under the target's answer. Measured sitting under
+        # it: `uv run --with X ruff check .` asked while
+        # `uv run --with X python script.py` was allowed, because the
+        # interpreter branch answered and returned first. Then measured
+        # sitting above the refusal, which was worse:
+        # `uv run --with X python -c 'code'` softened from deny to ask.
         risky = ("--with", "--with-editable", "--with-requirements", "--env-file")
         if any(
             word == option or word.startswith(option + "=")
@@ -851,6 +864,10 @@ def decide_uv(
         ):
             return KernelDecision(
                 "ask", "uv run --with fetches and executes external code"
+            )
+        if interpreted:
+            return KernelDecision(
+                "allow", "a script file can be read, where inline code cannot"
             )
         declared = next(
             (row for row in runner_targets if row["name"] == run_command), None
