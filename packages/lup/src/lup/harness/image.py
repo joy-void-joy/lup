@@ -322,6 +322,7 @@ class Image(BaseModel, frozen=True):
             "procps-ng",
             "ripgrep",
             "fd",
+            "python",
             "uv",
             "nodejs",
         ],
@@ -331,7 +332,11 @@ class Image(BaseModel, frozen=True):
             "particular project's work needs. ``uv`` and ``nodejs`` are here "
             "because the registry managers stand on them: a package declared "
             "for ``uv`` or ``bun`` cannot install if the tool that installs "
-            "it was itself left to a shell script"
+            "it was itself left to a shell script. ``python`` is here for the "
+            "permission dispatcher, which a native CLI starts as a bare "
+            "``python3`` deliberately outside any virtual environment, so the "
+            "interpreter ``uv`` manages is the one interpreter it may not "
+            "use: an image carrying only that one has no policy at all"
         ),
     )
     inner_sandbox: list[str] = Field(
