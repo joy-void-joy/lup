@@ -315,10 +315,25 @@ def portable_harness(version: str = "0.2.0", root: Path | None = None) -> Harnes
             # domain whose sensitive files are a data directory, a migration
             # set or a deployment manifest says so instead.
             protected_edit_roots=[
+                # Both runtimes' trees, because one of them being protected
+                # and the other open is a hole with no reason behind it: the
+                # settings, trust state and hand-written skills under each
+                # decide the same things about the session that reads them.
                 Path(".claude"),
+                Path(".codex"),
                 Path("pyproject.toml"),
                 Path("sync.json"),
                 Path("downstream.json"),
+                # What the agent is allowed to do at all is declared here, and
+                # an agent that can widen its own policy without a question
+                # has a preference rather than a boundary. Protected so the
+                # widening is the thing approved: the agent writes the change,
+                # the diff is in front of whoever answers, and it is durable —
+                # a declaration appears in a review, is drift-checked, and
+                # holds for the next session, where a per-call escape helps
+                # once and evaporates.
+                Path("packages/lup/src/lup/policy"),
+                Path("src/lup_template/devtools/harness/catalog.py"),
             ],
             # lup: template: what each tree in this domain is *for*. A role is
             # how a gate tells a fixture from production and a build product

@@ -415,6 +415,38 @@ for the cache. Personal trust state, credentials, active run state, and cache
 contents are never generated and never committed. Review hook trust with the
 native hooks surface after generation.
 
+### Reopening a session, and why a launcher owns it
+
+Both launchers reopen an earlier session, from one declaration and in each
+runtime's own words:
+
+| request | flag | Claude | Codex |
+|---|---|---|---|
+| the most recent session here | `--continue` / `-c` | `--continue` | `resume --last` |
+| choose from a picker | `--resume` | `--resume` | `resume` |
+| one session by id | `--session <id>` | `--resume <id>` | `resume <id>` |
+
+The shapes are genuinely different rather than differently named — a
+subcommand has to lead the argument vector where a flag does not — which is
+why `Resumption` carries the request and each adapter's function carries the
+words. Naming two at once is refused rather than ranked, before anything is
+generated.
+
+This exists for more than convenience. The policy a session enforces is
+compiled into the plugin tree its runtime loads **at startup**, so widening
+that policy takes effect only in a new process. Without reopening, the price
+of every widening is the conversation that established what it was for — which
+is what pushes an agent toward a per-call escape that helps once and
+evaporates. With it the durable path is also the cheap one:
+
+1. The agent proposes the declaration edit. The policy source is a protected
+   path, so the edit surfaces as an approval with the diff in it.
+2. Approve it — what is approved is the rule, not one command.
+3. `harness generate all`, or just relaunch: `ready_to_open` regenerates on
+   the way in.
+4. `harness claude --continue` / `harness codex --continue`. The reopened
+   session is already running against the tree the approval produced.
+
 ### Where a profile comes from
 
 A profile names one account and the configuration home it runs under, and which

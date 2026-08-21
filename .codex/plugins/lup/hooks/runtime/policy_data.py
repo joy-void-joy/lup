@@ -209,6 +209,12 @@ PATH_RULES: list[PathRuleRow] = [
     },
     {
         "kind": "subtree",
+        "value": ".codex",
+        "reason": "protected path requires approval",
+        "allow_autonomous": True,
+    },
+    {
+        "kind": "subtree",
         "value": "pyproject.toml",
         "reason": "protected path requires approval",
         "allow_autonomous": True,
@@ -222,6 +228,18 @@ PATH_RULES: list[PathRuleRow] = [
     {
         "kind": "subtree",
         "value": "downstream.json",
+        "reason": "protected path requires approval",
+        "allow_autonomous": True,
+    },
+    {
+        "kind": "subtree",
+        "value": "packages/lup/src/lup/policy",
+        "reason": "protected path requires approval",
+        "allow_autonomous": True,
+    },
+    {
+        "kind": "subtree",
+        "value": "src/lup_template/devtools/harness/catalog.py",
         "reason": "protected path requires approval",
         "allow_autonomous": True,
     },
