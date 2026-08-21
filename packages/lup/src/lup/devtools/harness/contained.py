@@ -729,6 +729,19 @@ class EgressState(BaseModel, frozen=True):
             "report a missing tool as a missing route"
         ),
     )
+    started_with: str = Field(
+        default="",
+        description=(
+            "The command the engine records this container as having been "
+            "created with, read back rather than reconstructed. What a "
+            "launcher *asked* for and what a container *has* are two things, "
+            "and three round trips went on the difference: a flag added to "
+            "the arguments and never applied because a running proxy was "
+            "reused, and then applied and apparently undone by a later "
+            "`network connect`. Printing the intent would have shown the "
+            "intent both times"
+        ),
+    )
     resolver: str = Field(
         default="",
         description=(
@@ -807,6 +820,17 @@ class EgressState(BaseModel, frozen=True):
                 indent=1,
             ),
             Notice(text=f"proxy {self.proxy}", urgency="detail"),
+            *(
+                [
+                    Notice(
+                        text=f"started with: {self.started_with}",
+                        urgency="detail",
+                        indent=1,
+                    )
+                ]
+                if self.started_with
+                else []
+            ),
             Notice(
                 text=f"state: {state}",
                 urgency="ready" if self.proxy_running else "refusal",
@@ -1113,6 +1137,9 @@ def egress_state(
     # it, including the working one.
     known = within("getent", "hosts", egress.alias)
     routed = default_route(within("cat", "/proc/net/route").text)
+    # Podman records it; Docker does not, and an empty answer there is an
+    # absence of the field rather than of the container.
+    created = asked("inspect", "--format", '{{join .Config.CreateCommand " "}}', proxy)
     nameservers = " ".join(
         line.split()[1]
         for line in within("cat", "/etc/resolv.conf").text.splitlines()
@@ -1124,6 +1151,7 @@ def egress_state(
         resolver=nameservers,
         legs=legs,
         route=routed,
+        started_with=created,
         reached=looked.worked,
         answers_locally=known.worked,
         upstream=f"{resolving} -> {looked.text or 'no answer'}",
