@@ -96,6 +96,13 @@ current directory in place; `git worktree add` gives the branch a directory
 of its own, which is what keeps several live at once. `worktrees/` and
 `refs/` are gitignored, the latter holding symlinks to downstream projects.
 
+The base the branch is cut from is recorded against it, because topology
+cannot recover a creation point once the parent has merged on. It is read
+from the checkout you run in, so a detached HEAD has nothing to read: rather
+than record nothing and let a later reader guess, creation refuses and asks
+for `--base <branch>`, or `--no-record` to say deliberately that this branch
+has no base worth keeping.
+
 The command prints the path and does not move whoever ran it. **Launch a
 session rooted at that path**; do not relocate a running one. The difference
 is not style. A runtime that can move a running session arms its own
