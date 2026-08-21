@@ -195,3 +195,54 @@ def test_allow_authoring_moves_only_the_author_describing_their_own_work() -> No
     assert verdict("gh pr create -R other/victim --fill", authoring).effect == "ask"
     assert verdict("gh pr create -R other/victim --fill", publishing).effect == "ask"
     assert verdict("gh pr view -R other/repo 12", authoring).effect == "allow"
+
+
+def test_a_container_carries_what_nobody_judged_instead_of_refusing_it() -> None:
+    """The whole of what a boundary buys the deny lattice.
+
+    Unjudged work is refused on a bare host because the semantic layer is the
+    only thing standing. Inside a container it is carried by the boundary
+    instead, which is the friction win the containment exists for -- and the
+    reason the lattice may be smaller wherever one is running.
+    """
+    rules = erase_shell_rules(default_vocabulary())
+    unjudged = "frobnicate --wibble"
+
+    assert decide_shell(unjudged, rules).effect == "deny"
+    assert decide_shell(unjudged, rules, contained=True).effect == "defer"
+
+
+def test_a_container_does_not_rescue_a_verdict_somebody_made() -> None:
+    """A judged deny is an answer, and running it confined would still run it.
+
+    The relaxation reaches work nobody classified. A rule that refused this
+    command refused it for a reason the boundary knows nothing about --
+    reviewability, most often -- so containment must not quietly overturn it.
+    """
+    rules = erase_shell_rules(default_vocabulary())
+
+    assert decide_shell("python3 -c 'x'", rules, contained=True).effect == "deny"
+
+
+def test_an_excluded_command_is_still_confined_inside_a_container() -> None:
+    """`excluded_commands` excuses a command from the *native* sandbox only.
+
+    The container never agreed to leave anything alone, so an entry that
+    opens a hole in the inner boundary must not open one here. Judged as
+    confined like everything else.
+    """
+    rules = erase_shell_rules(default_vocabulary())
+    excluded = ["frobnicate *"]
+
+    bare = decide_shell(
+        "frobnicate --wibble", rules, sandboxed=True, excluded_commands=excluded
+    )
+    inside = decide_shell(
+        "frobnicate --wibble",
+        rules,
+        sandboxed=True,
+        excluded_commands=excluded,
+        contained=True,
+    )
+    assert bare.effect == "deny"
+    assert inside.effect == "defer"

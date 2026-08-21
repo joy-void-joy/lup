@@ -335,8 +335,16 @@ class Image(BaseModel, frozen=True):
         return [item for item in self.packages(manifest) if item.manager == manager]
 
     def environment(self) -> EnvVars:
-        """Every variable the image bakes in, cache pointers included."""
+        """Every variable the image bakes in, cache pointers included.
+
+        ``LUP_CONTAINED`` is how the policy inside learns there is a boundary
+        under it. Baked into the image rather than passed at run time because
+        it is a fact about where the process is, not a posture a caller
+        chooses: a session that could switch it off from the outside would be
+        telling the policy to relax with nothing underneath.
+        """
         return {
+            "LUP_CONTAINED": "1",
             "UV_PROJECT_ENVIRONMENT": self.project_environment,
             "UV_LINK_MODE": "copy",
             **{

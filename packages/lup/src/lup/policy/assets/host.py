@@ -31,6 +31,20 @@ def sandbox_active() -> bool:
     return "LUP_SANDBOX_ACTIVE" in environ and environ["LUP_SANDBOX_ACTIVE"] == "1"
 
 
+def contained() -> bool:
+    """Whether this session is running inside the project's container.
+
+    A different question from :func:`sandbox_active`, and the two are not
+    interchangeable: the native sandbox confines one call at a time and can
+    be told to leave some alone, where a container confines the process and
+    was never asked. Read from the image's own baked-in variable rather than
+    from anything a launch passes, so a session cannot be told it is
+    contained by something standing outside the container.
+    """
+    environ = os.environ  # lup: ignore[os-environ]
+    return "LUP_CONTAINED" in environ and environ["LUP_CONTAINED"] == "1"
+
+
 def managed_script_roots(root: Path | None) -> list[str]:
     """Name the package roots a runtime installed and therefore trusts.
 

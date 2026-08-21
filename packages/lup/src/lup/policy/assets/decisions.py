@@ -24,6 +24,7 @@ against the workspace.
 from pathlib import Path
 
 from host import (
+    contained,
     directory_write_targets,
     empty_directory_targets,
     existing_write_targets,
@@ -120,6 +121,11 @@ def bash_decision(
         target_tables=RUNNER_TARGET_TABLES,
         interactive=interactive,
         escapable=escapable,
+        # Read here rather than passed by each dispatcher, unlike `escapable`
+        # above: whether this process sits inside the container is a fact
+        # about the host with no runtime variation to it, so neither
+        # dispatcher is given the chance to forget it.
+        contained=contained(),
     )
 
 
