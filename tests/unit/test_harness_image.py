@@ -66,7 +66,50 @@ def test_a_registry_package_carries_its_pinned_version_into_the_install() -> Non
 
 def test_globally_installed_executables_are_reachable_by_directory() -> None:
     """Measured: linking the CLI by name left `tsc` installed and unreachable."""
-    assert "ENV PATH=/root/.bun/bin:$PATH" in Image().dockerfile(Manifest())
+    assert "ENV PATH=/opt/bun/bin:$PATH" in Image().dockerfile(Manifest())
+
+
+def test_the_registry_root_is_reachable_by_the_user_the_session_runs_as() -> None:
+    """The build installs as root and the session runs as the host's uid.
+
+    Root's home is mode 750, so a global toolchain installed there is
+    installed into a directory the session cannot enter -- and the failure is
+    reported by whatever tried to run the tool, never by the layer that
+    misplaced it. Outside any home directory, and handed over with the rest.
+    """
+    rendered = Image().dockerfile(Manifest())
+    assert "/root/.bun" not in rendered
+    assert "chown -R $UID:$GID /opt/lup/venv /opt/bun" in rendered
+
+
+def test_the_registry_root_is_declared_before_anything_installs_into_it() -> None:
+    """An install layer above the variable installs somewhere else entirely."""
+    rendered = Image().dockerfile(
+        Manifest(
+            requirements=[
+                requirement("js", [Package(name="typescript", manager="bun")])
+            ]
+        )
+    )
+    assert rendered.index("ENV BUN_INSTALL=/opt/bun") < rendered.index("bun add -g")
+
+
+def test_the_package_manager_that_installs_is_the_one_with_a_cache() -> None:
+    """A cache volume for a tool the image never installs is a mount for nothing.
+
+    Both registries here are `bun` and `uv`; the baseline carries `nodejs` and
+    not `npm`, so nothing in this image has ever run npm. Caching for it while
+    the manager that does the installing re-fetched every package was the
+    accretion this declaration now has to answer for.
+    """
+    cached = {cache.variable for cache in Image().caches}
+    assert "BUN_INSTALL_CACHE_DIR" in cached
+    assert "npm_config_cache" not in cached
+
+
+def test_every_cache_volume_says_what_needed_it() -> None:
+    """The counter-pressure, applied first to the declaration that carries it."""
+    assert all(cache.because for cache in Image().caches)
 
 
 def test_the_trust_seed_names_no_host_path() -> None:

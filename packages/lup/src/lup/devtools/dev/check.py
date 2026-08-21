@@ -21,6 +21,7 @@ from lup.devtools.dev.boundaries import (
 from lup.devtools.dev.branches import unlanded_siblings
 from lup.devtools.dev.git_guards import GitGuard, read_hooks
 from lup.devtools.dev.comments import FoundComment, scan_tracked
+from lup.devtools.harness.accretion import report, survey
 from lup.devtools.harness.drift import (
     RepositoryWriter,
     inspect_drift,
@@ -375,6 +376,18 @@ def run_checks(
         f"guidance budget: {state} — {used}/{GUIDANCE_BYTE_BUDGET} bytes, {free} free"
     )
     results.append(CheckOutcome(name="guidance budget", passed=free >= 0))
+
+    # advisory — an unexercised widening is a question, not a defect. A host
+    # reached only by a command nobody has run this week is still needed, and
+    # a gate that failed on it would teach people to stop reading the gate.
+    for line in report(
+        [
+            finding
+            for composition in compositions
+            for finding in survey(composition.recipe.source.image, project_root().name)
+        ]
+    ):
+        typer.echo(line)
 
     # advisory — reports another tree's state, so it never gates this one
     unlanded = unlanded_siblings()

@@ -36,7 +36,7 @@ filtered session. That is not a gap to close later. It is the measurement
 
 from pathlib import Path
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from lup.sandbox.egress import EgressPolicy
 from lup.sandbox.models import NetworkMode
@@ -82,6 +82,41 @@ SSH_IGNORES_THE_PROXY = Unproxied(
 """The measurement the credential design rests on, kept where a launch says it."""
 
 
+class AllowedHost(BaseModel, frozen=True):
+    """One destination the boundary admits, and what made it necessary.
+
+    The motivation is the field that matters. A boundary answered by widening
+    its own declaration teaches an agent that every wall is answered by
+    widening it, and mounts and allowed hosts then accrete with nothing ever
+    removing one -- each entry perfectly defensible when written and nobody
+    afterwards able to say whether it is still needed. Recording the command
+    that motivated it makes the second question answerable: an entry whose
+    command nobody runs any more is an entry to take out, and the check that
+    reads the proxy's log can say which have not been reached at all.
+
+    A bare hostname still parses, so widening the list in a hurry stays one
+    word -- and shows up in the check as an entry that never said why.
+    """
+
+    host: str = Field(description="The domain the proxy admits")
+    because: str = Field(
+        default="",
+        description=(
+            "The command or capability that needed it. Empty is accepted and "
+            "reported, because refusing it would make the honest answer -- "
+            "'I do not remember' -- unwritable"
+        ),
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    # lup: ignore[bare-object] — pydantic hands a before-hook whatever the
+    # caller wrote, which is the untyped boundary the rule says to narrow at
+    def a_bare_name_is_a_host_nobody_said_why_about(cls, value: object) -> object:
+        """Accept the shortest spelling, and let the check ask for the rest."""
+        return {"host": value} if isinstance(value, str) else value
+
+
 class SessionEgress(BaseModel, frozen=True):
     """How one agent session reaches the network, declared with what enforces it.
 
@@ -106,11 +141,23 @@ class SessionEgress(BaseModel, frozen=True):
     policy: EgressPolicy = Field(
         default=EgressPolicy(),
         description=(
-            "What the proxy permits. The default names no domains, which "
-            "keeps every public destination reachable while still refusing "
-            "the private ranges, the metadata hosts and the local names -- "
-            "the part that is the same for every adopter. Naming domains "
-            "flips it to refuse-by-default"
+            "The denial vocabulary and the ports, which are the same for "
+            "every adopter. What is *admitted* is not set here -- "
+            "`admits` below owns it, and :meth:`enforced` overwrites this "
+            "field's allowlist with what that says, so there is no second "
+            "way to widen the boundary that records no reason for widening it"
+        ),
+    )
+    admits: list[AllowedHost] = Field(
+        default=[],
+        description=(
+            "Destinations this project reaches, each with what needed it. "
+            "Empty keeps the permissive posture: every public destination "
+            "reachable, the private ranges and metadata hosts still refused. "
+            "That is the default because an allowlist is a deployment fact "
+            "with a different answer per adopter, and a baked one hands the "
+            "next project a timeout for a registry nobody could have known "
+            "to list. Naming any host flips the posture to refuse-by-default"
         ),
     )
     proxy_image: str = DEFAULT_PROXY_IMAGE
@@ -135,6 +182,20 @@ class SessionEgress(BaseModel, frozen=True):
     def filtered(self) -> bool:
         """Whether this declaration puts a proxy between the session and the world."""
         return self.mode == "filtered"
+
+    def enforced(self) -> EgressPolicy:
+        """The policy the proxy is actually given, allowlist and all.
+
+        One place the two halves are joined, so nothing else has to remember
+        that ``admits`` is where hosts are named and ``policy`` is where
+        everything else is. A declaration that set ``policy.allowed_domains``
+        directly is overwritten rather than merged: two ways to widen the
+        boundary is one way too many, and the one that survives is the one
+        that records why.
+        """
+        return self.policy.model_copy(
+            update={"allowed_domains": [item.host for item in self.admits] or None}
+        )
 
     def network_name(self, project: str) -> str:
         """The internal network this project's sessions attach to."""
@@ -265,8 +326,8 @@ class SessionEgress(BaseModel, frozen=True):
                 "reachable from inside the container."
             ]
         scoped = (
-            f"only {', '.join(self.policy.allowed_domains)}"
-            if self.policy.allowed_domains
+            f"only {', '.join(item.host for item in self.admits)}"
+            if self.admits
             else "any public destination"
         )
         return [

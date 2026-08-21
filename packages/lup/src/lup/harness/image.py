@@ -28,6 +28,7 @@ from pathlib import Path
 import sh
 from pydantic import BaseModel, Field
 
+from lup.harness.credential import GitAccess, RemoteRewrite
 from lup.harness.egress import SessionEgress
 from lup.harness.requirements import Manifest, Package, PackageManager
 from lup.types import EnvVars, JsonObject
@@ -50,6 +51,18 @@ class CacheVolume(BaseModel, frozen=True):
             "Environment variable that points its tool at this path. Empty "
             "when the tool already defaults here and naming it would only "
             "add a second place the path is written"
+        ),
+    )
+    because: str = Field(
+        default="",
+        description=(
+            "What made this necessary. A boundary answered by widening its "
+            "own declaration teaches an agent that every wall is answered by "
+            "widening it, and volumes then accrete with nothing removing "
+            "one -- each perfectly defensible when written and nobody "
+            "afterwards able to say whether it is still earning its place. "
+            "Empty is accepted and reported, because refusing it would make "
+            "the honest answer -- 'I do not remember' -- unwritable"
         ),
     )
 
@@ -263,15 +276,27 @@ class Image(BaseModel, frozen=True):
             "runtime's own word and arrives from its login declaration"
         ),
     )
-    registry_bin: str = Field(
-        default="/root/.bun/bin",
+    registry_root: str = Field(
+        default="/opt/bun",
         description=(
-            "Where the registry managers put globally installed executables. "
-            "On PATH as a directory, because linking each tool by name is a "
-            "list that goes stale the moment a package is added -- which it "
-            "did, leaving `tsc` installed and unreachable"
+            "``BUN_INSTALL``: where bun keeps what it installs globally. "
+            "Outside any home directory, because the build installs as root "
+            "and the session runs as the host's uid -- and root's home is "
+            "mode 750, so a global toolchain left there is installed into a "
+            "directory the session user cannot enter. The build owns this "
+            "path to the session's uid for the same reason"
         ),
     )
+
+    def registry_bin(self) -> str:
+        """Where globally installed executables land, for PATH.
+
+        A directory on PATH rather than each tool linked by name: a list of
+        names goes stale the moment a package is added, which it did, leaving
+        `tsc` installed and unreachable.
+        """
+        return f"{self.registry_root}/bin"
+
     registries: list[Registry] = Field(
         default=[
             Registry(manager="bun", command="bun add -g"),
@@ -283,6 +308,17 @@ class Image(BaseModel, frozen=True):
             "listed here installs something whose version was pinned and "
             "whose integrity the lockfile recorded, and a shell line is "
             "neither"
+        ),
+    )
+    forge: GitAccess = Field(
+        default=GitAccess(),
+        description=(
+            "How this session reaches a remote, and what its commits claim. "
+            "Part of this declaration for the same reason the egress is: the "
+            "credential the container is given and the rewrite that makes it "
+            "reachable are one fact, and a launcher holding half of it is "
+            "how a session ends up with a token and an ssh remote it cannot "
+            "use the token on"
         ),
     )
     egress: SessionEgress = Field(
@@ -297,9 +333,26 @@ class Image(BaseModel, frozen=True):
     )
     caches: list[CacheVolume] = Field(
         default=[
-            CacheVolume(name="lup-uv", path="/cache/uv", variable="UV_CACHE_DIR"),
-            CacheVolume(name="lup-npm", path="/cache/npm", variable="npm_config_cache"),
-            CacheVolume(name="lup-ruff", path="/cache/ruff", variable="RUFF_CACHE_DIR"),
+            CacheVolume(
+                name="lup-uv",
+                path="/cache/uv",
+                variable="UV_CACHE_DIR",
+                because="a `uv sync` at every container start, re-downloading "
+                "the whole dependency tree without it",
+            ),
+            CacheVolume(
+                name="lup-bun",
+                path="/cache/bun",
+                variable="BUN_INSTALL_CACHE_DIR",
+                because="`bunx tsc` and any `bun add` at container start, "
+                "re-fetching every package without it",
+            ),
+            CacheVolume(
+                name="lup-ruff",
+                path="/cache/ruff",
+                variable="RUFF_CACHE_DIR",
+                because="ruff re-analysing every file on each check otherwise",
+            ),
         ],
         description="Directories that outlive the container, to bound rebuild cost",
     )
@@ -415,16 +468,23 @@ RUN printf '%s\\n' \\
 RUN pacman -S --noconfirm --needed \\
         {installed} \\
     && pacman -Scc --noconfirm
+
+# Where the registry manager installs, declared before it installs anything.
+# Outside any home directory: this build runs as root and the session runs as
+# the host's uid, and root's home is mode 750 -- so a global toolchain left
+# there is installed into a directory the session cannot enter, which reads
+# as the tool having failed to install rather than as a permission.
+#
+# On PATH as a directory rather than each tool linked by name, because a list
+# of names goes stale the moment a package is added -- which it did, leaving
+# `tsc` installed and unreachable.
+ENV BUN_INSTALL={self.registry_root}
+ENV PATH={self.registry_bin()}:$PATH
 {registry_layers}{script_layer}
 # The CLI, from the registry at a pinned version rather than an install
 # script, so what lands is what this declaration names and the layer the run
 # mounts read-only cannot be rewritten by a self-update.
 RUN bun add -g @anthropic-ai/claude-code@{self.claude_version}
-
-# Everything bun installs globally lands here, so the directory goes on PATH
-# rather than each tool being linked one at a time. Measured: linking only the
-# CLI left `tsc` installed and unreachable, which reads as a failed install.
-ENV PATH={self.registry_bin}:$PATH
 
 # Trust, seeded where a fresh config home will find it. A workspace this
 # image was built for is one the operator already decided to run, but an
@@ -460,12 +520,18 @@ ENTRYPOINT ["/usr/local/bin/lup-entrypoint"]
 # The identity the session runs as. Supplied at build time from the host's own
 # uid/gid, because a bind mount carries numbers rather than names: a container
 # that ran as its own root would leave root-owned files in the host checkout.
+#
+# Every directory the build wrote to as root and the session has to reach is
+# handed over here, the registry root included. Leaving that one out is how a
+# pinned toolchain ends up installed and unreachable, reported by whatever
+# tried to run it rather than by the layer that misplaced it.
 ARG UID=1000
 ARG GID=1000
 RUN groupadd -g $GID agent 2>/dev/null || true \\
     && useradd -u $UID -g $GID -m -s /bin/bash agent 2>/dev/null || true \\
-    && mkdir -p {self.project_environment} {" ".join(c.path for c in self.caches)} \\
-    && chown -R $UID:$GID {self.project_environment} \\
+    && mkdir -p {self.project_environment} {self.registry_root} \\
+        {" ".join(c.path for c in self.caches)} \\
+    && chown -R $UID:$GID {self.project_environment} {self.registry_root} \\
         {" ".join(c.path for c in self.caches)}
 
 {exported}
@@ -549,6 +615,8 @@ USER $UID:$GID
         credential: Path | None = None,
         host_config_home: Path | None = None,
         engine: ContainerEngine = Docker(),
+        forge_token: str = "",
+        rewrites: list[RemoteRewrite] | None = None,
     ) -> list[str]:
         """The whole argv that opens one agent session inside a container.
 
@@ -586,6 +654,12 @@ USER $UID:$GID
         bridged = (
             self.ide_bridge(host_config_home) if host_config_home is not None else []
         )
+        # The forge configuration is passed rather than baked, and passed
+        # here rather than through `run_arguments`, because it is the one
+        # part of the run that is neither an image fact nor a posture: it is
+        # a secret and a resolution of *this host's* remotes, and neither
+        # belongs in a layer anybody could pull.
+        reaching = self.forge.environment(forge_token, rewrites or [])
         return [
             engine.binary,
             "run",
@@ -596,6 +670,11 @@ USER $UID:$GID
             "-e",
             f"{config_home_env}={self.config_home}",
             *self.run_arguments(checkout, uid, gid, engine),
+            *[
+                argument
+                for name, value in reaching.items()
+                for argument in ("-e", f"{name}={value}")
+            ],
             *mounts,
             *seeded,
             *bridged,
