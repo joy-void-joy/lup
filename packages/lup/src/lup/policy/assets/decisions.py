@@ -24,6 +24,7 @@ against the workspace.
 from pathlib import Path
 
 from host import (
+    script_run_nudge,
     directory_write_targets,
     empty_directory_targets,
     existing_write_targets,
@@ -44,7 +45,12 @@ from kernel.edit import (
     relocated_suppressions,
 )
 from kernel.fetch import decide_fetch
-from kernel.lex import shell_path_verb_targets, shell_write_targets
+from kernel.lex import (
+    python_script_targets,
+    shell_path_verb_targets,
+    shell_write_targets,
+)
+from kernel.words import INTERPRETERS
 from kernel.shell import decide_shell
 from kernel.tools import decide_tool
 from policy_data import (
@@ -147,7 +153,19 @@ def bash_decision(
     # it is not written down anywhere.
     if verdict.effect == "defer":
         record_deferral(cwd, command, verdict.reason, verdict.recovery != "nothing")
-    return undo_point(verdict, reference)
+    pointed = undo_point(verdict, reference)
+    if pointed.effect != "allow":
+        return pointed
+    nudge = script_run_nudge(python_script_targets(command, INTERPRETERS), cwd)
+    if not nudge:
+        return pointed
+    return KernelDecision(
+        pointed.effect,
+        pointed.reason + nudge,
+        pointed.sandbox,
+        pointed.escalated,
+        recovery=pointed.recovery,
+    )
 
 
 def undo_point(verdict: KernelDecision, reference: str) -> KernelDecision:
@@ -171,6 +189,8 @@ def undo_point(verdict: KernelDecision, reference: str) -> KernelDecision:
         f"{verdict.reason} — the tree was snapshotted first; "
         f"`lup-devtools dev undo` lists it as {reference}",
         verdict.sandbox,
+        verdict.escalated,
+        recovery=verdict.recovery,
     )
 
 

@@ -1,6 +1,5 @@
-"""Typer command tree for Python introspection: info, source, eval, imports, search."""
+"""Typer command tree for Python introspection: info, source, imports, search."""
 
-import ast
 import inspect
 from collections import defaultdict
 from typing import Annotated
@@ -27,7 +26,6 @@ from lup.devtools.py.search import (
 )
 from lup.devtools.py.source import format_tree
 from lup.devtools.subapps import subapp
-from lup.sandbox.models import DockerUnreachableError
 
 app = typer.Typer(no_args_is_help=True)
 SUBAPP = subapp("py", "Python module introspection", app)
@@ -157,41 +155,6 @@ def source_cmd(
     typer.echo()
     for i, line in enumerate(selected, start=start_lineno + start_idx):
         typer.echo(f"{i:4d}  {line}")
-
-
-@app.command("eval")
-def eval_cmd(
-    expression: Annotated[str, typer.Argument(help="Python expression to evaluate")],
-) -> None:
-    """Evaluate a Python expression in the sandbox, with modules auto-imported.
-
-    Only expressions are allowed (no statements). This project's source is
-    mounted read-only, so `lup.*` and the application package import here
-    exactly as they do on the host — but the expression runs in a container,
-    so what it can reach is the container's, not this checkout's.
-    """
-    try:
-        ast.parse(expression, mode="eval")
-    except SyntaxError as e:
-        fail(f"Invalid expression: {e}")
-
-    try:
-        from lup.devtools.py.sandbox_eval import evaluate_in_sandbox
-    except ImportError:
-        fail(
-            "`py eval` runs in the sandbox, which needs the docker extra: "
-            "`uv sync --extra docker`. For reading code rather than running "
-            "it, `py info` and `py source` need nothing extra; for anything "
-            "you will want twice, add a devtools command."
-        )
-
-    try:
-        typer.echo(evaluate_in_sandbox(expression))
-    except DockerUnreachableError as e:
-        fail(
-            f"{e}\n\nFor reading code rather than running it, `py info`, "
-            "`py source`, and `py search` need no daemon at all."
-        )
 
 
 @app.command("imports")

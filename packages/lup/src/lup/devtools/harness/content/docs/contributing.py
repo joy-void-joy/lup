@@ -47,7 +47,7 @@ uv run lup-devtools harness codex
 | Anything only this application needs | `{layout.directory()}` | [template.md](template.md) |
 | A skill, agent, guidance, permission policy, or a page under `docs/` | the `devtools/harness/content/` of whichever half owns its subject | [harness.md](harness.md) |
 | Repeated shell incantations | a new `lup-devtools` command | [template.md](template.md) |
-| A one-off computation | `lup-devtools py eval`, or a new command | below |
+| A one-off computation | a new `lup-devtools` command | below |
 
 The placement question between the first two rows is the one that matters, and
 it has a single test: *would another project built on lup want this?* If yes,
@@ -63,15 +63,26 @@ the first of these that fits:
 1. To read code rather than run it: `py info`, `py source`, `py search`,
    `py imports`, and the codeintel tools, which resolve names through a
    language server and answer without executing anything.
-2. To compute something: `uv run lup-devtools py eval '<expression>'`, which
-   auto-imports and needs no file. It evaluates inside the sandbox container
-   with this checkout's source mounted read-only, so `lup.*` and the
-   application package import exactly as they do here while the expression
-   itself reaches the container rather than the checkout.
-3. Where no sandbox is available: a new `lup-devtools` command — reviewable,
-   because `devtools/` lands in the diff.
+2. To compute something once: a script under `tmp/`, run directly. It imports
+   this checkout the way any other module does, and the session it runs in is
+   itself contained, so what used to be the objection — an unreviewable thing
+   executing outside any boundary — is now only the first half. A one-off
+   nobody will read again costs a reviewer nothing.
+3. For anything you will want twice: a new `lup-devtools` command, which
+   lands in the diff and can be run again by name rather than rewritten. The
+   policy counts how often each script runs and says so when one has passed
+   what a one-off is for — advice riding along with a verdict that already
+   allowed the command, not a gate. It arrives at the fifth run and then
+   every tenth, because a session that was mid-thought at the first one has
+   to hear it again, and one that hears it every run stops reading it.
 4. As a last resort, an inline heredoc behind an escalation marker
    ([permissions.md](permissions.md)).
+
+A rung that evaluated an expression inside its own container used to sit
+between the first two, and was removed with that container. The agent session
+is contained now, so a second boundary within it bought no isolation — and the
+one it had actively got in the way, since the tool could not import the very
+checkout it was asked about.
 
 The argument is reviewability, not power: an agent may already edit
 `devtools/` and run it.
@@ -145,9 +156,9 @@ carrying any of fifteen shell words as an argv element in any position:
 
 Only `.` is gated to first position; the other fourteen match anywhere, and
 none of them is gated on the command being a git command. So an isolated
-session loses `grep -c hash`, `rg complete src/`, and
-`uv run lup-devtools py eval '1+1'` — read-only commands with no git in
-them — for as long as it lasts, and no approval marker reaches the refusal.
+session loses `grep -c hash` and `rg complete src/` — read-only commands with
+no git in them — for as long as it lasts, and no approval marker reaches the
+refusal.
 A session launched already rooted in the worktree is never isolated and
 keeps all of them, which is why the workflow asks for a launch. Staying put
 and editing through absolute paths works too. Measured against Claude Code

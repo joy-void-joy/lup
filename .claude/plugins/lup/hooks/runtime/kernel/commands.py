@@ -846,7 +846,22 @@ def decide_uv(
             return unjudged("uv run has no command")
         run_command = posixpath.basename(run_words[0])
         bare_target = "/" not in run_words[0]
-        if run_command in INTERPRETERS or run_command in ("-c", "-m", "--script"):
+        if run_command in INTERPRETERS:
+            # A script file and an inline program are different questions, and
+            # answering them together denied the rung the guidance points at
+            # for computing something once. What the deny is actually about is
+            # reviewability: `-c` leaves nothing behind to read, where a file
+            # can be opened, diffed and run again. So the flags keep the
+            # refusal and a named script does not.
+            rest = run_words[1:]
+            inline = [word for word in rest if word in ("-c", "-m")]
+            named = [word for word in rest if not word.startswith("-")]
+            if inline or not named:
+                return KernelDecision("deny", "inline code is not allowed")
+            return KernelDecision(
+                "allow", "a script file can be read, where inline code cannot"
+            )
+        if run_command in ("-c", "-m", "--script"):
             return KernelDecision("deny", "inline code is not allowed")
         risky = ("--with", "--with-editable", "--with-requirements", "--env-file")
         if any(

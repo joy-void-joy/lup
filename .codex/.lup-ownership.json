@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "81512e9e0bbada5a80c621c5bea447211b59d572b666ba4b98cdc0d9342ada48",
+  "source_digest": "3aac0170e169c55f9bc378e47cde9228e30792cb95333dc105c4f97b587e2c03",
   "target_requirements": [
     "codex-cli>=0.144"
   ],
@@ -100,7 +100,7 @@
     {
       "path": ".codex/plugins/lup/hooks/runtime/kernel/commands.py",
       "category": "generated",
-      "sha256": "75795fe904728d0ce1e8c4d0b55e2d563571e4ea334a3f8ed4dafa6ebb65f66b",
+      "sha256": "b6d85b934eebe0aa012f9b526e7d19be2aacc86a43698e208988243963a3cfe1",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -128,7 +128,7 @@
     {
       "path": ".codex/plugins/lup/hooks/runtime/kernel/lex.py",
       "category": "generated",
-      "sha256": "a609a7925e4affd7d30c6b0d80f7f5730a90772e7d337f0040d620ff4dcdefa1",
+      "sha256": "d369bd0926af8dc13ca74e04e1b301b664498e6af1967c7f29e88a657bf23644",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -177,14 +177,14 @@
     {
       "path": ".codex/plugins/lup/hooks/runtime/policy_data.py",
       "category": "generated",
-      "sha256": "bf5bf3b6a84cb58d0628f646da6a08aa4d980982069de0fb5624c0fff4136231",
+      "sha256": "854b0ba0408cb230f7704b5de923b919863ae5f8b822cb5feb4596e7c9fd2592",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
     {
       "path": ".codex/plugins/lup/hooks/scripts/policy.py",
       "category": "generated",
-      "sha256": "8265aa43d4faabecb7c9a3cdf5a1630526e9e54bd4ac904e94f8147012dbb4e4",
+      "sha256": "c6cd6dfb4ab7865d1753c11dac3dc3c2205ba5e8481f2ea3601583dd04236079",
       "semantic_id": "hooks.lup-policy",
       "executable": true
     },
@@ -422,7 +422,7 @@
     {
       "path": "AGENTS.md",
       "category": "generated",
-      "sha256": "b42396c411e4e76cdf2024303928aa04b84105c896c767e84a16caf8fa2fa638",
+      "sha256": "68f362646be5c9efb010b1454f2d5b4ab5c968d1fffed84a896f4a4aeb6e2e36",
       "semantic_id": "harness.guidance",
       "executable": false
     }

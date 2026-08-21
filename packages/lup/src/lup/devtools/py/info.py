@@ -312,8 +312,8 @@ def show_callable_info(obj: object, name: str) -> None:
 
 # A repr can be arbitrarily large (a loaded dataframe, a deep dict); this caps
 # the inline preview so `py info` doesn't flood the terminal, and reports the
-# full length so the truncation is never silent. Use `py source`/`py eval` for
-# the whole value.
+# full length so the truncation is never silent. Use `py source` for the whole
+# value.
 REPR_PREVIEW_CHARS = 2000
 
 

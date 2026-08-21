@@ -2535,7 +2535,6 @@ def test_declared_exclusions_cover_the_commands_the_boundary_cannot_carry() -> N
     assert hooks is not None
     excluded = hooks.excluded_commands()
     for command in (
-        "uv run lup-devtools py eval 'lup.harness.models.HookSandbox'",
         "git push origin HEAD",
         "git fetch --all",
         "gh pr view 47",

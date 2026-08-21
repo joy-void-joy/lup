@@ -32,6 +32,83 @@ def sandbox_active() -> bool:
     return "LUP_SANDBOX_ACTIVE" in environ and environ["LUP_SANDBOX_ACTIVE"] == "1"
 
 
+def script_run_nudge(
+    scripts: list[str],
+    root: Path | None,
+    after: int = 5,
+    every: int = 10,
+    ledger: str = ".lup/script-runs.json",
+) -> str:
+    """Count each script's runs and say when one has stopped being a one-off.
+
+    The ladder allows a scratch script because computing something once does
+    not earn a command. Nothing in that argument survives the fifth run: by
+    then the thing is a tool, and a tool nobody can invoke by name is one the
+    next session rewrites from scratch. This is what notices, because the
+    agent doing the rewriting has no memory of the previous four.
+
+    Advice rather than a gate. It rides along with a verdict that already
+    allowed the command, so a genuine repeat is a sentence to read and not a
+    wall -- the only form this can take without punishing the case it exists
+    to improve.
+
+    Said once at ``after`` and then only every ``every`` runs, because the
+    two ways to get this wrong are opposite and both fatal to it. On every
+    run it becomes noise attached to a command that worked, which is read
+    once and skipped forever after. Once and never again, and a session that
+    was mid-thought when it arrived never hears it a second time, however
+    many more times it runs the thing.
+
+    A ledger that cannot be read or written yields no nudge. A counter is not
+    worth failing a command over, and a read-only checkout is an ordinary
+    place to be running.
+    """
+    if root is None or not scripts:
+        return ""
+    path = root / ledger
+    try:
+        raw = path.read_text() if path.exists() else ""
+    except OSError:
+        return ""
+    try:
+        loaded = json.loads(raw) if raw else None
+    except ValueError:
+        loaded = None
+    try:
+        counts = loaded if isinstance(loaded, dict) else {}
+        seen = {
+            script: (
+                counts[script]
+                if script in counts and isinstance(counts[script], int)
+                else 0
+            )
+            for script in dict.fromkeys(scripts)
+        }
+        bumped = {
+            script: before + scripts.count(script) for script, before in seen.items()
+        }
+        earned = [
+            script
+            for script, total in bumped.items()
+            if any(
+                seen[script] < point <= total
+                for point in range(after, total + 1, every)
+            )
+        ]
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({**counts, **bumped}, indent=2, sort_keys=True))
+    except OSError:
+        return ""
+    if not earned:
+        return ""
+    counted = ", ".join(f"{script} ({bumped[script]}x)" for script in earned)
+    return (
+        f" — {counted}: more than a one-off by now, so consider making it a"
+        " `lup-devtools` command, which lands in the diff and can be run"
+        " again by name"
+    )
+
+
 def record_deferral(
     root: Path | None,
     command: str,
