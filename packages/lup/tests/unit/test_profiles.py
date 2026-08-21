@@ -227,3 +227,55 @@ def test_an_unknown_name_carries_the_roster_however_it_was_resolved(
     assert "unknown profile 'ghost'" in str(raised.value)
     assert "known: work" in str(raised.value)
     assert "profile add ghost" in str(raised.value)
+
+
+def test_an_account_is_named_where_a_run_starts_rather_than_inherited(
+    directory: ProfileDirectory, tmp_path: Path
+) -> None:
+    """The seam an entry point takes instead of reading the console.
+
+    Selecting a profile has to reach everything a run opens — planners,
+    workers, reviewers — and it reached only what a launcher opened, because
+    every other entry point derived its environment from whatever the shell
+    exported. Resolving once, into a value the run is handed, is what makes
+    an entry point that forgets impossible to write rather than merely wrong.
+    """
+    home = tmp_path / "work-home"
+    directory.add("work", home)
+
+    account = directory.account("work")
+
+    assert (account.name, account.home) == ("work", home)
+    exported = account.exported({"PATH": "/usr/bin"})
+    assert exported["PATH"] == "/usr/bin"
+    assert exported == {**exported, **CLAUDE_LOGIN.environment(home)}
+
+
+def test_an_explicit_name_beats_the_active_selection_for_an_account(
+    directory: ProfileDirectory, tmp_path: Path
+) -> None:
+    directory.add("work", tmp_path / "work-home")
+    directory.add("personal", tmp_path / "personal-home")
+    directory.use("personal")
+
+    assert directory.account(None).name == "personal"
+    assert directory.account("work").name == "work"
+    assert directory.account("work").home == tmp_path / "work-home"
+
+
+def test_naming_no_account_where_none_is_active_stays_on_the_surrounding_one(
+    directory: ProfileDirectory,
+) -> None:
+    """A real answer rather than a gap, and it writes nothing.
+
+    A project that keeps no profiles has no account to name, and a session
+    opened inside another one should stay on the account it was started
+    under. Both are the same fact: this account exports nothing, so what the
+    environment already carries survives.
+    """
+    account = directory.account(None)
+
+    assert (account.name, account.home) == (None, None)
+    assert account.exported({"CLAUDE_CONFIG_DIR": "/already/chosen"}) == {
+        "CLAUDE_CONFIG_DIR": "/already/chosen"
+    }

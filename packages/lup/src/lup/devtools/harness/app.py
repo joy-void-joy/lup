@@ -226,6 +226,14 @@ def create_harness_app(
             str | None,
             typer.Option("--adapter", help=", ".join(targets.builders)),
         ] = None,
+        profile: Annotated[
+            str | None,
+            typer.Option(
+                "--profile",
+                "-p",
+                help="Account every session this run opens; defaults to the active one",
+            ),
+        ] = None,
         run_id: Annotated[
             str | None,
             typer.Option(
@@ -438,6 +446,7 @@ def create_harness_app(
                     auth_probe_delay=auth_probe_delay,
                     max_parallel_workers=max_parallel_workers,
                     recheck_standing_per_join=recheck_standing_per_join,
+                    profile=profile,
                 )
             )
             return
@@ -454,6 +463,7 @@ def create_harness_app(
             # core still holds a composition, so ending a run without the flag
             # takes the first declared adapter and never asks it for anything.
             targets.resolve(adapter or next(iter(targets.builders)), project_root())[0],
+            directory.account(profile),
             run_id,
             answer or [],
             abort,
