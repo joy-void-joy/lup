@@ -10,11 +10,11 @@ from .decision import (
     ESCALATE_HINT,
     KernelDecision,
     RESHAPE_HINT,
-    SANDBOX_TRAPPED_REASON,
     SUBSTITUTION_SENTINEL,
     SandboxPlacement,
     unjudged,
 )
+from .settlement import SettlementFacts, settle
 from .rows import (
     PathRoleRow,
     PathRuleRow,
@@ -895,102 +895,66 @@ def decide_shell(
 ) -> KernelDecision:
     """Classify one command, honoring an escalation marker and hinting denies.
 
-    A leading ``# lup: escalate: <why>`` line promotes a classified deny or
-    ask to an approval question carrying the agent's stated reason, so the
-    human sees intent at the moment of judgment. A deny without a marker names
-    the escalation recipe: unjudged work bounces back to the agent, which
-    reshapes it into the allowed vocabulary or deliberately promotes it.
-    When the execution is sandboxed, unjudged work defers instead: the OS
-    boundary confines it, and only an unsandboxed escape returns to the
-    deny lattice. A command the declaration excludes from the sandbox is
-    such an escape without saying so — the boundary was told to leave it
-    alone — so it is judged as though no sandbox were running at all.
+    Two steps, and only the first is here. This reads the leading
+    ``# lup: escalate: <why>`` line off the command, refuses a marker that
+    states no reason, and hands the classified verdict to the settlement
+    order in ``settlement.py`` along with every session fact that bears on
+    it: whether a boundary is running, whether this host can put one call
+    outside it, and whether there is anybody to ask.
 
-    A non-interactive host has no approval channel, so a question it cannot
-    put to a human is not a question — sandboxed, it rides the same OS
-    boundary as unjudged work; unsandboxed, it fails closed. Such a host is
-    never told to escalate, because that flow cannot complete there. A judged
-    deny is never rescued by the sandbox in either mode.
+    What that order says, in the order it says it. A stated reason turns
+    anything not already permitted into the approval question the agent asked
+    for, carrying the reason it gave. A call declared ``outside`` on a host
+    with no channel to put it there is refused outright, because approval
+    would only move the failure to a bare filesystem error with the boundary
+    misreported as a bug in the code. A question on a host with nobody to put
+    it to is no judgment at all. What nobody judged, a boundary carries — and
+    without one, the refusal names the escalation recipe, so unjudged work
+    bounces back to the agent to be reshaped into the allowed vocabulary or
+    deliberately promoted. A judged deny is never rescued by the sandbox: it
+    is somebody's answer, and running it confined would still be running it.
 
-    ``escapable`` is the third fact of that family: whether this host can put
-    one call outside its own sandbox. A command declared ``outside`` is not
-    advice — confined, it fails on whatever it writes first — so a host that
-    cannot place it stops it here with that reason rather than letting it reach
-    the shell. The pair is what makes the declaration safe to give a toolchain:
-    where the escape is carried out it is unprompted, and where nothing can
-    carry it out the refusal names the sandbox instead of a bare write error.
+    A command the declaration excludes from the sandbox is an escape without
+    saying so — the boundary was told to leave it alone — so it is judged as
+    though no sandbox were running at all, which is what ``confined`` says
+    that ``sandboxed`` does not.
+
+    ``escapable`` is whether this host can put one call outside its own
+    sandbox, and the pair with the declaration is what makes a placement safe
+    to give a toolchain: where the escape is carried out it is unprompted,
+    and where nothing can carry it out the refusal names the sandbox instead
+    of a bare write error.
     """
     hint = ESCALATE_HINT if interactive else RESHAPE_HINT
     confined = sandboxed and not sandbox_excluded(command, excluded_commands or [])
 
-    def resolve(decision: KernelDecision) -> KernelDecision:
-        if sandboxed and not escapable and decision.sandbox == "outside":
-            return KernelDecision(
-                "deny", SANDBOX_TRAPPED_REASON, escalated=decision.escalated
-            )
-        match decision.effect:
-            case "allow":
-                return decision
-            case "ask" if interactive:
-                return decision
-            case "defer" | "ask" if confined:
-                return KernelDecision(
-                    "defer", decision.reason, escalated=decision.escalated
-                )
-            case _:
-                # The stated intent outlives the refusal. A host with no human
-                # to ask still has somewhere to send this, and the marker's
-                # whole purpose is reaching whoever can act on it — denied
-                # with the reason dropped, the agent's escalation summoned
-                # nobody, which is the documented escape hatch having no
-                # effect in the one context that most needs one.
-                return KernelDecision(
-                    "deny", decision.reason + hint, escalated=decision.escalated
-                )
-
     marker = ESCALATE_RE.match(command)
-    if marker is not None:
-        why = marker.group("why").strip()
-        if not why:
-            return KernelDecision("deny", "escalation requires a stated reason" + hint)
-        inner = classify_shell(
-            command[marker.end() :],
-            rows,
-            allowed_scopes=allowed_scopes,
-            denied_scopes=denied_scopes,
-            trusted_script_roots=trusted_script_roots,
-            path_roles=path_roles,
-            path_rules=path_rules,
-            existing_targets=existing_targets,
-            recoverable_targets=recoverable_targets,
-            directory_targets=directory_targets,
-            empty_directories=empty_directories,
-            recoverable_target_limit=recoverable_target_limit,
-            runner_targets=runner_targets,
-            target_tables=target_tables,
-        )
-        if inner.effect == "allow":
-            return inner
-        return resolve(
-            KernelDecision(
-                "ask", f"escalated ({why}): {inner.reason}", inner.sandbox, why
-            )
-        )
-    return resolve(
-        classify_shell(
-            command,
-            rows,
-            allowed_scopes=allowed_scopes,
-            denied_scopes=denied_scopes,
-            trusted_script_roots=trusted_script_roots,
-            path_roles=path_roles,
-            path_rules=path_rules,
-            existing_targets=existing_targets,
-            recoverable_targets=recoverable_targets,
-            directory_targets=directory_targets,
-            empty_directories=empty_directories,
-            recoverable_target_limit=recoverable_target_limit,
-            runner_targets=runner_targets,
-            target_tables=target_tables,
+    why = marker.group("why").strip() if marker is not None else ""
+    if marker is not None and not why:
+        return KernelDecision("deny", "escalation requires a stated reason" + hint)
+    return settle(
+        SettlementFacts(
+            classify_shell(
+                command[marker.end() :] if marker is not None else command,
+                rows,
+                allowed_scopes=allowed_scopes,
+                denied_scopes=denied_scopes,
+                trusted_script_roots=trusted_script_roots,
+                path_roles=path_roles,
+                path_rules=path_rules,
+                existing_targets=existing_targets,
+                recoverable_targets=recoverable_targets,
+                directory_targets=directory_targets,
+                empty_directories=empty_directories,
+                recoverable_target_limit=recoverable_target_limit,
+                runner_targets=runner_targets,
+                target_tables=target_tables,
+            ),
+            escalation=why,
+            sandboxed=sandboxed,
+            confined=confined,
+            escapable=escapable,
+            interactive=interactive,
+            hint=hint,
         )
     )
