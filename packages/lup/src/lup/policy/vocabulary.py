@@ -60,6 +60,12 @@ class JudgedCommand(BaseModel, frozen=True):
 
     Without somewhere to say "except this verb", listing an archive is as
     much an approval as extracting one."""
+    write_markers: list[str] = []
+    """Argument prefixes whose absence makes this command read-only.
+
+    The same exception stated negatively, for a command that has no query
+    verb because its query form is the plain one: `dd` writes given an `of=`
+    and reads without it."""
 
 
 def read_only_rules(
@@ -165,7 +171,15 @@ def judged_ask_rules(
             name="tee",
             reason="writing files requires approval — prefer the Write tool",
         ),
-        JudgedCommand(name="dd", reason="raw device or file writes require approval"),
+        JudgedCommand(
+            name="dd",
+            # `dd` writes when handed an `of=` and reads to stdout without
+            # one, so its read-only form is the invocation with nothing extra
+            # in it. No verb list can name that, which is why every
+            # `dd if=x` stopped for approval as a write.
+            write_markers=["of="],
+            reason="raw device or file writes require approval",
+        ),
         JudgedCommand(name="truncate", reason="truncating files requires approval"),
         JudgedCommand(name="kill", reason="terminating processes requires approval"),
         JudgedCommand(name="pkill", reason="terminating processes requires approval"),
@@ -251,6 +265,7 @@ def judged_ask_rules(
             name=command.name,
             default_effect="ask",
             read_verbs=command.read_verbs,
+            write_markers=command.write_markers,
             reason=command.reason,
         )
         for command in commands
@@ -871,6 +886,13 @@ def git_rule(
     return ShellCommandRule(
         name="git",
         default_effect="deny",
+        # `git version` is classified read-only as a subcommand, and the same
+        # question spelled as a flag was reaching the default deny -- so the
+        # policy answered "this git subcommand is not classified" about a
+        # command carrying no subcommand at all. The same shape `bun` fixes
+        # above, and the same class as the pure reads §4.2 closed: asking a
+        # program what it is cannot change anything.
+        allow_flags=["--version", "--help"],
         ask_flags=[
             "-c",
             "--config-env",

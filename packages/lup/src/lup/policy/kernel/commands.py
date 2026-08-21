@@ -41,7 +41,10 @@ def apply_command_row(row: ShellRuleRow, arguments: list[str]) -> KernelDecision
     argument is exactly one of those flags — the command's declared pure
     read-only form. One with ``read_verbs`` de-escalates when a declared
     verb appears and every word is a literal free of guarded flags — the
-    verb pins the invocation to its query action.
+    verb pins the invocation to its query action. One with ``write_markers``
+    states that de-escalation negatively, for a command whose read-only form
+    is the one carrying nothing extra: it allows when no legible word carries
+    a marker.
     """
     if row["effect"] != "allow" and row["allow_flags"] and arguments:
         if all(word in row["allow_flags"] for word in arguments):
@@ -59,6 +62,30 @@ def apply_command_row(row: ShellRuleRow, arguments: list[str]) -> KernelDecision
             return KernelDecision(
                 "allow",
                 "a declared read-only verb pins the query action",
+                row["sandbox"],
+            )
+    if row["effect"] != "allow" and row["write_markers"] and arguments:
+        # Absence is the test, so every word has to be legible: one this
+        # cannot read might carry the marker, and "no marker found" would
+        # otherwise be indistinguishable from "no marker was readable".
+        #
+        # A stricter bar than `opaque_argument`, deliberately. That catches a
+        # `$` opening a word, because what it guards are positive tests where
+        # a missed expansion still leaves the required verb absent. Here a
+        # missed expansion is the whole verdict, and `dd if=$X` splits into
+        # `of=` at runtime if `$X` holds a space — measured allowing until
+        # this test replaced it.
+        legible = not any(
+            opaque_argument(word) or "$" in word or "`" in word for word in arguments
+        )
+        if legible and not any(
+            word.startswith(marker)
+            for word in arguments
+            for marker in row["write_markers"]
+        ):
+            return KernelDecision(
+                "allow",
+                "no declared write marker is present, so this only reads",
                 row["sandbox"],
             )
     if row["effect"] == "allow" and row["ask_flags"]:
