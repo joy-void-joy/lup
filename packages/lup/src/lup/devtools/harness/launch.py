@@ -34,6 +34,7 @@ from lup.adapters.codex.transcripts import CodexTranscripts
 from lup.harness.environment import non_interactive_environment
 from lup.harness.models import NativeName, Plugin, Resumption
 from lup.harness.notice import Notice
+from lup.harness.toolchain import container_client, for_host
 from lup.harness.requirements import (
     Finding,
     Manifest,
@@ -425,7 +426,13 @@ def report_requirements(manifest: Manifest, setting_up: bool = False) -> list[Fi
     that was equally true yesterday.
     """
     environ: EnvVars = dict(os.environ)  # lup: ignore[os-environ]
-    findings = manifest.check(environ, setting_up=setting_up)
+    # Pointed at this host's client here rather than declared as one, because
+    # the declaration is hashed into the ownership digest and a container
+    # client is a fact about the machine. This is the only place the
+    # exercises actually run, so it is the only place that has to know.
+    findings = for_host(manifest, container_client()).check(
+        environ, setting_up=setting_up
+    )
     for finding in findings:
         for notice in finding.notices():
             notice.say()

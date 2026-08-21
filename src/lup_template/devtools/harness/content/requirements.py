@@ -17,6 +17,7 @@ is correct -- neither is a fault of that machine.
 
 from pathlib import Path
 
+from lup.devtools.harness.contained import image_tag
 from lup.harness.requirements import Manifest
 from lup.workspace.paths import project_root
 from lup.harness.toolchain import (
@@ -57,6 +58,14 @@ def manifest(root: Path | None = None) -> Manifest:
     is the package list a build will be assembled from, and the honest
     statement that nothing has exercised them.
     """
+    # Asked of the launcher rather than spelled, because the two spelled it
+    # differently and only one of them builds anything: the offered default
+    # is `lup-agent:latest` and a launch tags `lup-agent:<checkout>`, so the
+    # session probe was pulling a name from a registry -- `requested access
+    # to the resource is denied` -- while the image it was asking about sat
+    # in local storage under another name. Deriving it also means the tag
+    # scheme can change without this going quietly stale.
+    checkout = root or project_root()
     return Manifest(
         requirements=[
             # Every default taken as offered. Where this repository has an
@@ -65,8 +74,8 @@ def manifest(root: Path | None = None) -> Manifest:
             # have none.
             uv_requirement(),
             container_requirement(),
-            same_path_mount_requirement(probe=root or project_root()),
-            agent_session_requirement(),
+            same_path_mount_requirement(probe=checkout),
+            agent_session_requirement(image=image_tag(checkout)),
             github_requirement(),
             bun_requirement(),
             typescript_requirement(),

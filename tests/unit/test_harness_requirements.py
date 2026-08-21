@@ -6,6 +6,11 @@ installed-but-not-working, one capability spelled several ways, and a
 diagnosis that stays quiet about a failure it does not explain.
 """
 
+from lup.harness.image import Podman
+from lup.harness.ownership import source_digest
+from lup.harness.toolchain import for_host
+from lup_template.devtools.harness.catalog import portable_harness
+from lup_template.devtools.harness.content.requirements import manifest
 from lup.harness.requirements import (
     Advisory,
     AnyOf,
@@ -307,3 +312,56 @@ def test_a_finding_carries_the_requirement_that_produced_it() -> None:
     """So a caller reporting one can say what it was for without a lookup."""
     declared = requirement("echo", WORKING)
     assert Finding(requirement=declared, working=True).requirement is declared
+
+
+def test_the_declared_client_is_the_portable_one_whatever_this_host_runs() -> None:
+    """A container client is a fact about the machine, not about the project.
+
+    The ownership digest hashes the whole declaration, so a probe of this
+    host inside it reports generated artifacts as stale on any machine whose
+    client differs. Measured before this split existed: the digest moved
+    between two runs on *one* machine, minutes apart, because a stale podman
+    pid file was cleaned up between them and the resolution flipped.
+    """
+    declared = manifest()
+    carried = [item for item in declared.requirements if item.by_client]
+
+    assert carried, "this project declares no client-carried exercise"
+    assert all(item.exercise.programs() == ["docker"] for item in carried)
+    assert source_digest(portable_harness()) == source_digest(portable_harness())
+
+
+def test_the_preflight_points_every_client_exercise_at_what_answered() -> None:
+    """The other half: it does matter which client, where they actually run.
+
+    A Docker CLI pointed at a podman socket answers first and is refused as
+    undrivable, so exercising it verifies a boundary no session opens.
+    `for_host` is the one place that knows, because it is the one place the
+    exercises run.
+    """
+    pointed = for_host(manifest(), Podman(binary="podman"))
+    carried = [item for item in pointed.requirements if item.by_client]
+
+    assert carried
+    assert all(item.exercise.programs() == ["podman"] for item in carried)
+
+
+def test_pointing_a_manifest_at_a_host_leaves_everything_else_alone() -> None:
+    """Only the client moves — the arguments are the declaration's."""
+    declared = manifest()
+    pointed = for_host(declared, Podman(binary="podman"))
+
+    assert [item.capability for item in pointed.requirements] == [
+        item.capability for item in declared.requirements
+    ]
+    # Through `programs`, because the roster holds more than one shape of
+    # exercise and only `Run` has a command to index -- the clipboard entry
+    # is an `AnyOf` over several spellings.
+    assert [item.exercise.programs() for item in pointed.requirements] != [
+        item.exercise.programs() for item in declared.requirements
+    ]
+    assert [
+        item.exercise.model_dump(exclude={"command"}) for item in pointed.requirements
+    ] == [
+        item.exercise.model_dump(exclude={"command"}) for item in declared.requirements
+    ]

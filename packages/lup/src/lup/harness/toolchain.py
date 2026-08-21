@@ -24,6 +24,7 @@ it is for shell rules.
 from pathlib import Path
 
 from lup.devtools.clipboard import clipboard_probes
+from lup.harness.image import ContainerEngine, Docker, detected_client
 from lup.harness.requirements import (
     Advisory,
     AnyOf,
@@ -69,12 +70,72 @@ def uv_requirement(
     )
 
 
+def for_host(manifest: Manifest, engine: ContainerEngine) -> Manifest:
+    """This manifest with every client-carried exercise pointed at ``engine``.
+
+    The split this exists for: *which capability is required* is a
+    declaration, hashed into the ownership digest and identical on every
+    machine, while *which program carries the exercise out* is a fact about
+    the machine in front of you. Folding the second into the first reported
+    generated artifacts as stale for having a different container client --
+    measured moving twice on one machine, minutes apart, when a stale podman
+    pid file was cleaned up between the runs.
+
+    It matters which client, which is why this exists at all rather than the
+    declaration simply being right: ``DOCKER_HOST`` pointing a genuine Docker
+    CLI at a podman socket leaves that CLI answering first, and
+    :func:`~lup.harness.image.detected_client` refuses it -- podman needs
+    ``--userns=keep-id`` and a Docker client rejects the flag before the
+    daemon sees it -- while the podman CLI beside it is what a session opens
+    through. Exercising the refused one verifies a boundary no session uses.
+    """
+    return Manifest(
+        requirements=[
+            requirement.model_copy(
+                update={"exercise": requirement.exercise.pointed_at(engine.binary)}
+            )
+            if requirement.by_client
+            else requirement
+            for requirement in manifest.requirements
+        ]
+    )
+
+
+def container_client(fallback: str = "docker") -> ContainerEngine:
+    """Which client a container exercise should run through — the launcher's.
+
+    Asked rather than spelled, because the two answers come apart on an
+    ordinary host: ``DOCKER_HOST`` pointing a genuine Docker CLI at a podman
+    socket leaves that CLI answering first, and
+    :func:`~lup.harness.image.detected_client` refuses it as undrivable --
+    podman needs ``--userns=keep-id`` and a Docker client rejects the flag
+    before the daemon sees it -- while the podman CLI beside it is what a
+    session actually opens through. A manifest exercising the refused client
+    verifies a boundary no session uses: it can pass where the launch fails
+    and fail where the launch would have worked, which is the one thing a
+    declare-and-verify manifest must not do.
+
+    The engine rather than the binary, because the client decides more than
+    which program is spawned: what the daemon behind it is *asked* is spelled
+    per engine too, and `podman info --format '{{.ServerVersion}}'` fails with
+    *can't evaluate field ServerVersion* -- which a preflight reports as the
+    runtime being unavailable on a host where it is running fine.
+
+    ``fallback`` is what a host with no client at all gets. A name rather than
+    an absence, so the exercise still fails in that program's own words --
+    ``docker: not found`` says more than an empty command could.
+    """
+    found = detected_client()
+    return found.engine() if found is not None else Docker(binary=fallback)
+
+
 def container_requirement(
     where: Side = "host",
     install: list[Package] = [],
     socket_variable: str = "DOCKER_HOST",
     socket_group: str = "docker",
     lost: str = "sandboxed evaluation and multi-worker resolve",
+    client: str = "docker",
 ) -> Requirement:
     """A reachable container daemon, exercised by asking it its own version.
 
@@ -100,9 +161,16 @@ def container_requirement(
     """
     return Requirement(
         capability="container runtime",
+        by_client=True,
         purpose="the sandbox code evaluation runs in, and multi-worker resolve",
         where=where,
-        exercise=Run(command=["docker", "info", "--format", "{{.ServerVersion}}"]),
+        # Bare `info` rather than a formatted field, because the report is
+        # shaped per engine and the query is not: `podman info --format
+        # '{{.ServerVersion}}'` answers *can't evaluate field ServerVersion*,
+        # which a preflight reports as the runtime being unavailable on a
+        # machine where it is running fine. Both engines fail `info` when the
+        # daemon is unreachable, which is the whole of what this asks.
+        exercise=Run(command=[client, "info"]),
         absence=LostCapability(capability=lost),
         diagnoses=[
             EnvironmentRedirect(variable=socket_variable),
@@ -118,6 +186,7 @@ def same_path_mount_requirement(
     image: str = "docker.io/library/busybox:latest",
     probe: Path = Path("/tmp/lup-same-path-probe"),
     witness: str = "pyproject.toml",
+    client: str = "docker",
 ) -> Requirement:
     """Whether this host can bind-mount a directory at its own absolute path.
 
@@ -152,6 +221,7 @@ def same_path_mount_requirement(
     """
     return Requirement(
         capability="same-path bind mounts",
+        by_client=True,
         purpose="the worktree rail, which confines a worker by mounting",
         where=where,
         checked="setup",
@@ -163,7 +233,7 @@ def same_path_mount_requirement(
         # left behind. Reading a file through it cannot.
         exercise=Run(
             command=[
-                "docker",
+                client,
                 "run",
                 "--rm",
                 "-v",
@@ -332,6 +402,7 @@ def agent_session_requirement(
     where: Side = "host",
     install: list[Package] = [],
     image: str = "lup-agent:latest",
+    client: str = "docker",
 ) -> Requirement:
     """Whether an agent session actually runs inside the image, not merely opens.
 
@@ -356,12 +427,13 @@ def agent_session_requirement(
     """
     return Requirement(
         capability="contained agent session",
+        by_client=True,
         purpose="running agents, workers and reviewers inside the boundary",
         where=where,
         checked="setup",
         exercise=Run(
             command=[
-                "docker",
+                client,
                 "run",
                 "--rm",
                 image,

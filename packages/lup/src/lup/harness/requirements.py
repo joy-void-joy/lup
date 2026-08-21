@@ -345,6 +345,18 @@ class Run(BaseModel, frozen=True):
         """
         return [self.command[0]]
 
+    def pointed_at(self, program: str) -> "Run":
+        """This exercise with its program replaced, arguments untouched.
+
+        Asked of the exercise for the same reason :meth:`programs` is: a
+        caller that tested which member of the union it held would be a
+        caller a third shape has to be added to. What it is *for* is one
+        thing -- a container client is a fact about the machine, and the
+        declaration this sits in is hashed into the ownership digest, so the
+        program cannot be chosen until the exercise is about to run.
+        """
+        return self.model_copy(update={"command": [program, *self.command[1:]]})
+
     def run(self) -> ExerciseOutcome:
         """Carry the operation out, answering whether it proved the claim."""
         try:
@@ -388,6 +400,23 @@ class AnyOf(BaseModel, frozen=True):
         return [
             name for candidate in self.alternatives for name in candidate.programs()
         ]
+
+    def pointed_at(self, program: str) -> "AnyOf":
+        """Every spelling repointed, which is what holding several means here.
+
+        Nothing declares a client-carried capability this way today. Written
+        anyway, because the alternative is the union answering for one member
+        and raising for the other, and a shape that answers only sometimes is
+        one the caller has to test for -- which is the test this method
+        exists to remove.
+        """
+        return self.model_copy(
+            update={
+                "alternatives": [
+                    candidate.pointed_at(program) for candidate in self.alternatives
+                ]
+            }
+        )
 
     def run(self) -> ExerciseOutcome:
         """Take the first spelling that works, or report what each one said."""
@@ -459,6 +488,20 @@ class Requirement(BaseModel, frozen=True):
             "of two things: the base image already ships it, or the "
             "capability is the host's and the container deliberately does "
             "not have it"
+        ),
+    )
+
+    by_client: bool = Field(
+        default=False,
+        description=(
+            "Whether the host's container client carries this exercise out. "
+            "Which client that is stays out of the declaration deliberately: "
+            "the ownership digest hashes this model, so a probe of the host "
+            "in here reports generated artifacts as stale on any machine "
+            "whose client differs -- measured moving twice on one machine, "
+            "minutes apart, when a stale pid file was cleaned up between the "
+            "runs. The exercise names the portable spelling and "
+            "`lup.harness.toolchain.for_host` points it at what answered"
         ),
     )
 
