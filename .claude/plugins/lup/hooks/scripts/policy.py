@@ -45,6 +45,7 @@ from policy_data import (
     ANTI_PATTERN_ROWS,
     RESOLUTION_COMMAND,
     DENIED_FETCH_SCOPES,
+    EDIT_RULES,
     KNOWN_ALLOWANCES,
     MAXIMUM_ADDED_LINES,
     PATH_ROLES,
@@ -677,6 +678,7 @@ def edit_decision(
     after: str | None,
     path_exists: bool,
     autonomous: bool,
+    operation: str = "modify",
 ) -> KernelDecision:
     """Judge one file's before and after against the declared edit policy.
 
@@ -718,6 +720,9 @@ def edit_decision(
         python_source=python_source,
         acceptance_guard=ACCEPTANCE_GUARD,
         refuted=refuted,
+        suffix=suffix,
+        operation=operation,
+        edit_rules=EDIT_RULES,
     )
 
 
@@ -835,15 +840,19 @@ def dispatch(payload):
             tool_input["new_string"],
             "replace_all" in tool_input and tool_input["replace_all"] is True,
         )
-        return edit_decision(path, before, after, Path(path).exists(), autonomous)
+        return edit_decision(
+            path, before, after, Path(path).exists(), autonomous, "modify"
+        )
     if name == "Write":
         path = tool_input["file_path"]
+        exists = Path(path).exists()
         return edit_decision(
             path,
             read_document(path),
             tool_input["content"],
-            Path(path).exists(),
+            exists,
             autonomous,
+            "overwrite" if exists else "create",
         )
     # Asked of whatever reached here rather than of a listed few: which tools
     # are worth refusing is the declaration's answer, and naming any of them

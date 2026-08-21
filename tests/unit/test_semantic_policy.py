@@ -60,6 +60,7 @@ from lup.policy.kernel.decision import (
 from lup.policy.kernel.edit import decide_edit
 from lup.policy.kernel.rows import PathRoleRow
 from lup.policy.refused_tools import RefusedTool, erase_refused_tools
+from lup.policy.edit_rules import EditRule
 from lup.policy.shell_rules import (
     RunnerTargetRule,
     ShellOperationRule,
@@ -88,7 +89,15 @@ from lup.policy.rules import (
 
 from lup.policy.vocabulary import runner_target_rules
 from lup_template.devtools.harness.catalog import declared_hook_set, portable_harness
-from lup_template.devtools.harness.content.shell_vocabulary import SHELL_RULES
+
+SHELL_RULES = declared_hook_set().resolved_shell_rules()
+"""This project's vocabulary as the runtime resolves it, not as it is declared.
+
+Asked of the hook set rather than of the selection module, because what these
+cases are about is the table a session and a generated dispatcher actually
+walk. A test that resolved the selection its own way could agree with the
+declaration while disagreeing with everything that reads it.
+"""
 
 
 class DecisionCase(BaseModel, frozen=True):
@@ -1307,6 +1316,26 @@ def assembled_edit_decision(
     )
 
 
+# lup: ignore[constant-declaration] — a fixture table, deliberately shaped
+FIXTURE_EDIT_RULES: list[EditRule] = [
+    EditRule(
+        name="fixture-suffix-nothing-else-uses",
+        suffixes=[".fixture"],
+        effect="deny",
+        reason="declared only to prove the rows cross the boundary",
+    )
+]
+"""An edit table that renders and matches nothing the edit cases exercise.
+
+The point of this test is that the assembled kernel decides identically with
+no lup on the path, so the table must not move any case's verdict. What it has
+to prove is narrower and still worth proving: that a declared table survives
+erasure, renders into the generated data, imports under `-I -S`, and is
+accepted by the kernel beside it — which an empty list would not show, since
+an empty list is what the renderer emits when the field is missing entirely.
+"""
+
+
 def test_assembled_kernel_runs_without_site_packages(tmp_path: Path) -> None:
     runtime = tmp_path / "runtime"
     runtime.mkdir()
@@ -1337,6 +1366,7 @@ def test_assembled_kernel_runs_without_site_packages(tmp_path: Path) -> None:
             path_roles=FIXTURE_PATH_ROLES,
             acceptance_guard=None,
             shell_rules=SHELL_RULES,
+            edit_rules=FIXTURE_EDIT_RULES,
             refused_tools=FIXTURE_REFUSED_TOOLS,
             recoverable_target_limit=FIXTURE_RECOVERABLE_LIMIT,
             runner_targets=FIXTURE_RUNNER_TARGETS,
@@ -1372,9 +1402,10 @@ def test_assembled_kernel_runs_without_site_packages(tmp_path: Path) -> None:
         "from kernel.shell import decide_shell\n"
         "from policy_data import (\n"
         "    ALLOWED_FETCH_SCOPES, ANTI_PATTERN_ROWS, DENIED_FETCH_SCOPES,\n"
-        "    MAXIMUM_ADDED_LINES, PATH_ROLES, PATH_RULES, RUNNER_TARGETS,\n"
-        "    SANDBOX_EXCLUDED_COMMANDS, SHELL_RULES,\n"
+        "    EDIT_RULES, MAXIMUM_ADDED_LINES, PATH_ROLES, PATH_RULES,\n"
+        "    RUNNER_TARGETS, SANDBOX_EXCLUDED_COMMANDS, SHELL_RULES,\n"
         ")\n"
+        "assert EDIT_RULES, 'the declared edit table did not reach the runtime'\n"
         "fixtures = json.loads(\n"
         "    (Path(__file__).parent / 'fixtures.json').read_text(encoding='utf-8')\n"
         ")\n"
@@ -1406,6 +1437,7 @@ def test_assembled_kernel_runs_without_site_packages(tmp_path: Path) -> None:
         "        maximum_added_lines=MAXIMUM_ADDED_LINES,\n"
         "        autonomous=case['autonomous'],\n"
         "        python_source=suffix in ('.py', '.pyi'),\n"
+        "        suffix=suffix, edit_rules=EDIT_RULES,\n"
         "    )\n"
         "    assert decision.effect == case['effect'], case\n",
         encoding="utf-8",

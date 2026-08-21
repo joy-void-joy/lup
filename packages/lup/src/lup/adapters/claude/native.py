@@ -142,7 +142,23 @@ class ClaudeEventDecoder(NativeEventDecoder[ClaudeBeforeToolEvent]):
                 )
                 name = "Edit"
             case ClaudeWriteOperation(path=path, content=content):
-                tool = EditBatch(changes=[EditChange(path=path, after=content)])
+                # Whether this replaces a file or makes one is the difference
+                # between an overwrite and a creation, and only the tree can
+                # answer it. Naming it here is what lets `as_documents` fetch
+                # the preimage an overwrite carries no copy of — without which
+                # the marker gate compares a file's notes against nothing,
+                # finds none of them missing, and admits a write that erased
+                # every one. The generated dispatchers read that document
+                # themselves; this path had no equivalent.
+                tool = EditBatch(
+                    changes=[
+                        EditChange(
+                            path=path,
+                            after=content,
+                            operation="overwrite" if path.exists() else "create",
+                        )
+                    ]
+                )
                 name = "Write"
             case ClaudeEditBatchOperation(changes=changes):
                 tool = EditBatch(changes=changes)

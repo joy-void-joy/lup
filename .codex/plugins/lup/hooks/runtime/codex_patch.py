@@ -45,6 +45,22 @@ class PatchedFile:
         self.after = after
         self.path_exists = path_exists
 
+    def operation(self) -> str:
+        """Which class of change this is, for the gates that judge by it.
+
+        Derived rather than carried from the envelope's own verb because the
+        three the format spells — add, update, delete — are already implied by
+        what the decode produced: an envelope that removed a file has no
+        after, and one that added a file names a path the tree does not hold.
+        An update is the remainder, and it is a fragment patch rather than a
+        whole-file replacement, so it is never an overwrite.
+        """
+        if self.after is None or self.after == "":
+            return "delete"
+        if not self.path_exists:
+            return "create"
+        return "modify"
+
 
 class ChangeChunk:
     """One context-anchored update chunk from a file section."""

@@ -935,7 +935,9 @@ def create_dev_app(
         ] = False,
     ) -> None:
         """Show every shell form the declared vocabulary judges, and how."""
-        rules = default_vocabulary() if offered else list(declared().hooks.shell_rules)
+        rules = (
+            default_vocabulary() if offered else declared().hooks.resolved_shell_rules()
+        )
         policy_explain.survey(rules, as_json, output, provenance)
 
     # -- plugin commands --

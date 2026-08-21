@@ -51,6 +51,7 @@ from policy_data import (
     ANTI_PATTERN_ROWS,
     RESOLUTION_COMMAND,
     DENIED_FETCH_SCOPES,
+    EDIT_RULES,
     KNOWN_ALLOWANCES,
     MAXIMUM_ADDED_LINES,
     PATH_ROLES,
@@ -163,6 +164,7 @@ def edit_decision(
     after: str | None,
     path_exists: bool,
     autonomous: bool,
+    operation: str = "modify",
 ) -> KernelDecision:
     """Judge one file's before and after against the declared edit policy.
 
@@ -204,4 +206,7 @@ def edit_decision(
         python_source=python_source,
         acceptance_guard=ACCEPTANCE_GUARD,
         refuted=refuted,
+        suffix=suffix,
+        operation=operation,
+        edit_rules=EDIT_RULES,
     )
