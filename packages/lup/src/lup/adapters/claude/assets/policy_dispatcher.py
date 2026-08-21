@@ -166,15 +166,19 @@ def dispatch(payload):
             tool_input["new_string"],
             "replace_all" in tool_input and tool_input["replace_all"] is True,
         )
-        return edit_decision(path, before, after, Path(path).exists(), autonomous)
+        return edit_decision(
+            path, before, after, Path(path).exists(), autonomous, "modify"
+        )
     if name == "Write":
         path = tool_input["file_path"]
+        exists = Path(path).exists()
         return edit_decision(
             path,
             read_document(path),
             tool_input["content"],
-            Path(path).exists(),
+            exists,
             autonomous,
+            "overwrite" if exists else "create",
         )
     # Asked of whatever reached here rather than of a listed few: which tools
     # are worth refusing is the declaration's answer, and naming any of them
