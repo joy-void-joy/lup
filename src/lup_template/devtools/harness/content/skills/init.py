@@ -10,7 +10,7 @@ SPELLING = provenance.Provenance(
 )
 """One checkout, unqualified: this skill turns the library's clone into the project."""
 
-# lup: Initialization never configures the seams. It interviews the domain,
+# lup: solved: Initialization never configures the seams. It interviews the domain,
 # prunes scaffolding, and walks the `# lup: template:` markers, but the points a
 # project is meant to settle about *itself* — the `DevProject` declaration, the
 # `HookSet` in its catalog, its path roles, and above all which of the library's
@@ -22,12 +22,23 @@ SPELLING = provenance.Provenance(
 # answers: a domain that does not want them should be able to say so once at
 # init rather than retire thirty ids one at a time, or discover the whole family
 # only when an edit is denied by a rule it never agreed to.
-# lup: `/lup:init` never asks who owns README.md. `human_owned_files` in
+# lup: solved: `/lup:init` never asks who owns README.md. `human_owned_files` in
 # src/lup_template/devtools/harness/catalog.py locks it, so an initialized
 # domain inherits an approval gate on the one file it most wants the agent to
 # write, and no phase surfaces the choice. Ask it here alongside the other
 # ownership decisions, and make unlocking a `lup-devtools` command that edits
 # the declaration and regenerates — not a hand edit of the catalog.
+# lup: defer[content-overhaul lands]: that branch answers the ownership seam a
+# second way, with `dev init ownership --lock/--unlock`, and rewrote these same
+# two claims into `solved:` by way of it. So merging conflicts exactly here,
+# which is the right place for the collision to surface — but the standing
+# merge guidance biases toward inclusion, and inclusion is the wrong answer to
+# a duplicate. `dev seams` is the one to keep: it settles all four seams rather
+# than ownership alone, it sits in the library where every adopter reaches it
+# rather than in this application, and it wires install as well as init. Drop
+# `dev init ownership` from src/lup_template/devtools/dev/init.py and its
+# command in that package's app.py when the branch merges, leaving one
+# `solved:` pair here rather than two.
 SKILL = models.Skill(
     id="skill.init",
     name="init",
@@ -154,6 +165,21 @@ Before customizing, decide which optional patterns this domain actually needs. T
 - **Commit loop** (auto-commit in `environment/cli/__main__.py`) — keep only if each run yields a data artifact worth versioning. Session data is gitignored by default (the `notes/*` lines in `.gitignore`), so traces and outputs stay local; keeping this pattern means removing those two lines so session data can be committed. When deleting the pattern, leave the ignore lines in place.
 
 Confirm the keep/delete set with the user, then **delete the files and their wiring** for everything not kept before proceeding. The customization steps below apply only to what you kept.
+
+## Phase 1.6: Settle the Seams
+
+A seam is a place the library holds an opinion this domain is meant to overrule, and every one of them ships at a default. **A default nobody was shown is not a decision** — so put each of them to the user rather than letting the scaffold's answer become theirs by silence.
+
+Run `uv run lup-devtools dev seams`. It prints each seam, what it currently holds, and where it is written. Take them one at a time:
+
+- **Who owns which files.** A human-owned file surfaces every change as an approval and the agent does not write it — it proposes the edit instead. `README.md` ships owned, which is right for a scaffold whose README describes the scaffold and often wrong for a domain whose README is the one file it most wants written for it. Ask; `dev seams --disown README.md` or `--own <path>` writes the answer.
+- **Which trees an edit needs approval into.** What ships answers for a framework that generates its own plugin trees and carries its own policy. A domain whose sensitive files are a data directory, a migration set or a deployment manifest says so instead.
+- **What each tree is for.** A role is how every gate tells a fixture from production and a build product from work, so a data directory, a notebook tree or a generated client belongs here — once, where all of them read it.
+- **Which scan rules this domain holds itself to.** A convention is a judgement, and a repository that settled one differently is not defective there. Offer three answers and mean all three: keep them, drop a named few (`dev seams --retire <rule-id>`), or **drop the family outright** (`dev seams --retire-all`). Dropping the family is a legitimate answer given once here, rather than thirty retirements discovered one denial at a time.
+
+Every one of these is also a `# lup: template:` marker in the catalog, so `dev todos` lists any left standing and Phase 4 meets them again. Answering here is what keeps that list from being the first time anyone sees the choice.
+
+Each answer edits the declaration; **regenerate afterwards** with `uv run lup-devtools harness generate all`, because the compiled plugin trees are what the gates actually read.
 
 ## Phase 2: Rename Package
 
