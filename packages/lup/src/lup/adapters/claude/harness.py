@@ -453,7 +453,11 @@ CLAUDE_DISPATCHER = DispatcherDeclaration(
     routed_tools=["Bash", "WebFetch", "Edit", "Write"],
     hook_events=["PreToolUse", "PostToolUse"],
     observation_event="PostToolUse",
-    observed_tools=["Edit", "Write"],
+    # Bash is watched for one thing only: a failure the boundary caused,
+    # which is the one failure whose evidence exists nowhere before the call
+    # has finished. Nothing else about a finished command is read, and a
+    # command that failed for its own reasons produces no line at all.
+    observed_tools=["Edit", "Write", "Bash"],
     failure="conservative_ask",
     runtime_modules=["policy_data"],
 )

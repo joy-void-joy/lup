@@ -489,7 +489,11 @@ CODEX_DISPATCHER = DispatcherDeclaration(
     routed_tools=["Bash", "web_fetch", "apply_patch"],
     hook_events=["PermissionRequest", "PreToolUse", "PostToolUse"],
     observation_event="PostToolUse",
-    observed_tools=["apply_patch"],
+    # Bash joins the patch tool for one thing only: a failure the boundary
+    # caused, whose evidence exists nowhere before the call has finished.
+    # Claude Code watches the same tool for the same reason and says the same
+    # sentence; what differs is only which words each runtime reads it out of.
+    observed_tools=["apply_patch", "Bash"],
     failure="stderr_exit",
     runtime_modules=["codex_patch", "policy_data"],
 )

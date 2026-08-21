@@ -245,5 +245,12 @@ class ClaudeDecisionRenderer(NativeDecisionRenderer[ClaudeDecisionOutput]):
             permissionDecision=settled.effect,
             permissionDecisionReason=settled.reason,
             updatedInput=claude_sandbox_input(tool_input, settled.sandbox),
+            # No ``spendable`` argument, and that is a limit of this contract
+            # rather than a judgement: :meth:`render` is handed a verdict and
+            # a call's arguments and never the tool's name, so it cannot say
+            # whether the escape has a field to land in. The compiled
+            # dispatcher, which judges every tool through one path, can and
+            # does. Nothing declares an escalable placement on a tool other
+            # than the shell, so the two agree today.
             additionalContext=escalation_offer(settled.sandbox, settled.reason),
         )

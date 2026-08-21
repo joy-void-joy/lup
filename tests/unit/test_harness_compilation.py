@@ -416,18 +416,23 @@ def test_codex_recipe_registers_semantic_permission_approval() -> None:
     assert "hooks/scripts/policy.py" in hook_config
 
 
-def test_the_watching_event_is_registered_for_editing_tools_alone() -> None:
-    """A narrow matcher, because this event is registered to record, not judge.
+def test_the_watching_event_is_registered_for_what_it_watches_alone() -> None:
+    """A narrow matcher, because this event is registered to watch, not judge.
 
-    The deciding events cover everything the dispatcher routes, so sharing
-    one registration would spawn the script after every shell command and
-    every fetch to find no edited file to record. The two are separate keys
-    for that reason, and the compiler still proves the dispatcher may name
-    the event at all.
+    The deciding events cover everything the dispatcher routes, and sharing
+    one registration would spawn the script after every fetch to find
+    nothing it has anything to say about. The two are separate keys for that
+    reason, and the compiler still proves the dispatcher may name the event
+    at all.
+
+    The shell tool is watched too, for one thing: a failure the *boundary*
+    caused, whose evidence is the command's own output and does not exist
+    before the call has finished. Every other kind of failure produces no
+    line at all.
     """
     for target, plugin_root, edits in (
-        (claude_target, ".claude", "Edit|Write"),
-        (codex_target, ".codex", "apply_patch"),
+        (claude_target, ".claude", "Edit|Write|Bash"),
+        (codex_target, ".codex", "apply_patch|Bash"),
     ):
         artifacts = {
             artifact.path: artifact
