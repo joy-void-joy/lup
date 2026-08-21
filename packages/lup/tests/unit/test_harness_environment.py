@@ -10,6 +10,7 @@ from lup.harness.environment import (
     NON_INTERACTIVE_SHELL_ENV,
     non_interactive_environment,
 )
+from lup.harness.image import Image
 
 
 def test_defaults_present_over_empty_base() -> None:
@@ -34,6 +35,20 @@ def test_an_inherited_virtual_environment_does_not_bind_the_child_project() -> N
 
     assert merged["HOME"] == "/home/user"
     assert "VIRTUAL_ENV" not in merged
+
+
+def test_a_contained_session_starts_with_the_same_defaults() -> None:
+    """The spawn point that got missed, and the one nobody can answer a prompt at.
+
+    Every host-side flow merged these; the image baked none of them, so a
+    session inside it could reach a credential prompt with no terminal behind
+    it -- the failure the forge design exists to head off, at the one place
+    it was never checked.
+    """
+    baked = Image().environment()
+    assert baked["GIT_TERMINAL_PROMPT"] == "0"
+    assert baked["SSH_ASKPASS_REQUIRE"] == "never"
+    assert baked["LUP_CONTAINED"] == "1"
 
 
 def test_merge_does_not_mutate_base() -> None:

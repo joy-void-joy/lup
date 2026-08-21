@@ -31,6 +31,7 @@ from pydantic import BaseModel, Field
 
 from lup.harness.credential import GitAccess, RemoteRewrite
 from lup.harness.egress import SessionEgress
+from lup.harness.environment import NON_INTERACTIVE_SHELL_ENV
 from lup.harness.requirements import Manifest, Package, PackageManager
 from lup.harness.terminal import TerminalHandoff
 from lup.types import EnvVars, JsonObject
@@ -574,6 +575,16 @@ class Image(BaseModel, frozen=True):
     def environment(self) -> EnvVars:
         """Every variable the image bakes in, cache pointers included.
 
+        :data:`~lup.harness.environment.NON_INTERACTIVE_SHELL_ENV` first, and
+        baked rather than passed, because a container is a spawn point like
+        any other and was the one that got missed: the launch and resolver
+        flows merged these at every place they start a command, and a session
+        inside the image started with none of them. What that cost is a
+        credential prompt with no terminal to answer it -- the failure the
+        whole forge design exists to head off, reintroduced at the one spot
+        nothing was measuring. Baked, so anything that starts this image gets
+        it: a probe and a one-off ``run`` are as unattended as a session.
+
         ``LUP_CONTAINED`` is how the policy inside learns there is a boundary
         under it. Baked into the image rather than passed at run time because
         it is a fact about where the process is, not a posture a caller
@@ -588,6 +599,7 @@ class Image(BaseModel, frozen=True):
         unset ``LANG`` means.
         """
         return {
+            **NON_INTERACTIVE_SHELL_ENV,
             "LUP_CONTAINED": "1",
             "LANG": self.terminal.fallback_locale,
             "UV_PROJECT_ENVIRONMENT": self.project_environment,
