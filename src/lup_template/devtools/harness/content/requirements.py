@@ -17,7 +17,7 @@ is correct -- neither is a fault of that machine.
 
 from pathlib import Path
 
-from lup.devtools.harness.contained import image_tag
+from lup.devtools.harness.contained import checkout_tag
 from lup.harness.requirements import Manifest
 from lup.workspace.paths import project_root
 from lup.harness.toolchain import (
@@ -75,7 +75,7 @@ def manifest(root: Path | None = None) -> Manifest:
             uv_requirement(),
             container_requirement(),
             same_path_mount_requirement(probe=checkout),
-            agent_session_requirement(image=image_tag(checkout)),
+            agent_session_requirement(image=checkout_tag(checkout)),
             github_requirement(),
             bun_requirement(),
             typescript_requirement(),

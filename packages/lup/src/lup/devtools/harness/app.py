@@ -24,7 +24,13 @@ import lup.devtools.harness.resolve as resolve
 from lup.codescan.registry import every_rule_retired
 from lup.devtools.dev.issues import EXCLUDED_LABEL
 from lup.devtools.harness.composition import NativeTargets, claude_profile_directory
-from lup.devtools.harness.contained import report_egress
+from lup.devtools.harness.contained import (
+    image_tag,
+    report_egress,
+    retire_images,
+    superseded_images,
+)
+from lup.harness.image import detected_client
 from lup.devtools.harness.generate import NativeHarnessComposition
 from lup.devtools.harness.profile_app import create_profile_app
 from lup.harness.models import Resumption
@@ -183,6 +189,12 @@ def create_harness_app(
     @app.command("image")
     def image_command(
         target: Annotated[str, typer.Argument(help=selector)] = targets.every,
+        prune: Annotated[
+            bool,
+            typer.Option(
+                "--prune", help="Remove images no checkout is pointing at any more"
+            ),
+        ] = False,
     ) -> None:
         """Render the container image this project's sessions run in.
 
@@ -191,10 +203,30 @@ def create_harness_app(
         declaration. A build reads this on stdin -- ``harness image | docker
         build -f - .`` -- so what is built is what is declared, every time,
         with nothing in between to edit.
+
+        ``--prune`` sweeps instead of printing. An image is named after the
+        declaration it was built from, which is what lets two checkouts share
+        one -- and means editing the declaration leaves the old image
+        standing rather than replacing it. What goes is every digest tag with
+        no checkout tag on it; what stays is anything a checkout still points
+        at, and the image this declaration would build right now.
         """
         for composition in targets.resolve(target, project_root()):
             source = composition.recipe.source
-            typer.echo(source.image.dockerfile(source.requirements))
+            rendered = source.image.dockerfile(source.requirements)
+            if not prune:
+                typer.echo(rendered)
+                continue
+            client = detected_client()
+            if client is None:
+                typer.echo("No container client answered, so nothing was swept.")
+                return
+            finished = superseded_images(client.engine(), image_tag(rendered))
+            if not finished:
+                typer.echo("Nothing superseded — every image has a checkout on it.")
+                return
+            for tag in retire_images(finished, client.engine()):
+                typer.echo(f"removed {tag}")
 
     @app.command("egress")
     def egress_command(

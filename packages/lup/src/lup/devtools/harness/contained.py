@@ -41,12 +41,38 @@ from lup.sandbox.attribution import WRITE_REFUSAL_MARKERS
 from lup.sandbox.rail import Lease, lease_for
 
 
-def image_tag(root: Path) -> str:
-    """The image this checkout answers to.
+def image_tag(dockerfile: str) -> str:
+    """The image a declaration answers to, named for the declaration itself.
 
-    Named for the repository rather than the worktree, because every worktree
-    of one repository declares the same toolchain and building a layer per
-    branch would pay the whole build cost for a name.
+    Two worktrees share a layer exactly when they would build the same thing,
+    and get separate ones exactly when they would not -- derived rather than
+    assumed. The assumption is what the alternatives cost. Naming the image
+    after the *worktree* pays a full build per checkout, which is hundreds of
+    packages times however many are open. Naming it after the *repository*
+    rests on every worktree declaring the same toolchain, which is true right
+    up until a branch edits the image declaration -- and then the two rebuild
+    over each other on every switch, because :func:`image_matches` compares
+    the declaration digest and each finds the other's.
+
+    Twelve hex characters, for the reason a short object hash is enough to
+    name a commit: this is a handle for a thing already in the store, not a
+    security claim, and the full digest is on the image's own label.
+    """
+    return f"lup-agent:{declaration_digest(dockerfile)[:12]}"
+
+
+def checkout_tag(root: Path) -> str:
+    """The readable name this checkout's latest image also answers to.
+
+    A second tag on the same image, moved to whatever this checkout last
+    built or reused. It earns its place twice over. An image list showing
+    only digests is one nobody can read, and -- the load-bearing half -- the
+    preflight has to name the image it probes, while the digest is computed
+    *from* the manifest that preflight is part of. A name that does not
+    depend on the declaration is the only one that can be stated inside it.
+
+    Moved even when the build is skipped, or a checkout that reused another's
+    image would have no tag of its own and its probe would ask after nothing.
     """
     return f"lup-agent:{root.name}"
 
@@ -100,6 +126,114 @@ def image_matches(tag: str, dockerfile: str, engine: ContainerEngine) -> bool:
     except (sh.CommandNotFound, sh.ErrorReturnCode):
         return False
     return str(labelled).strip() == declaration_digest(dockerfile)
+
+
+# lup: ignore[constant-declaration] — an identity this repository defines, not a
+# judgement: the tag functions above spell it and the sweep below matches on it,
+# so a caller free to differ would be a caller whose prune found nothing
+IMAGE_PREFIX = "lup-agent:"
+"""What every image this project builds is named under.
+
+An identity rather than a judgement: the tag functions above spell it and the
+sweep below has to match them, so a caller free to differ would be a caller
+whose prune found nothing.
+"""
+
+
+def superseded_images(engine: ContainerEngine, keep: str) -> list[str]:
+    """The digest tags no checkout is pointing at any more.
+
+    Content-addressing is what lets two checkouts share a layer, and the cost
+    it comes with is that editing the declaration leaves the old image
+    standing rather than replacing it under one name. These are big -- a full
+    Arch base and a package set -- so something has to name what is finished.
+
+    A digest tag is finished when no readable checkout tag sits on the same
+    image. That is the whole test, and it is deliberately not "older than":
+    a checkout nobody has opened for a month still runs the image its tag
+    points at, and time says nothing about that.
+
+    ``keep`` is the tag this checkout would build right now, held back
+    whether or not anything is tagged onto it yet -- a sweep run between a
+    declaration edit and the next launch would otherwise delete the image
+    that launch is about to reuse.
+    """
+    try:
+        listed = sh.Command(engine.binary)(
+            "images", "--format", "{{.ID}} {{.Repository}}:{{.Tag}}"
+        )
+    except (sh.CommandNotFound, sh.ErrorReturnCode):
+        return []
+    return finished_tags(str(listed), keep)
+
+
+def finished_tags(listing: str, keep: str) -> list[str]:
+    """Read one engine's image listing down to the tags nothing points at.
+
+    Split from the call that fetches the listing because this is the half
+    that decides what gets deleted, and a sweep whose selection cannot be
+    exercised without a container runtime is one nobody should be asked to
+    trust. The listing is one ``<id> <repository>:<tag>`` per line, which is
+    the format the caller asks for.
+
+    A digest tag is recognized by its shape -- the prefix plus twelve hex
+    characters -- rather than by parsing, because that is what
+    :func:`image_tag` produces and a checkout name of that exact length
+    would have to be twelve characters of hex to collide.
+    """
+    rows = [line.split() for line in listing.splitlines()]
+    # Sliced at the prefix rather than split on "/", because the registry a
+    # listing prepends is not a path and the tag is not its last segment: the
+    # name this project builds under starts where the prefix does, and
+    # everything before it is whichever store the image happens to sit in.
+    named = [
+        (row[0], row[1][row[1].index(IMAGE_PREFIX) :])
+        for row in rows
+        if len(row) == 2 and IMAGE_PREFIX in row[1]
+    ]
+    beside = {
+        identifier: [tag for other, tag in named if other == identifier]
+        for identifier, _ in named
+    }
+    return sorted(
+        tag
+        for tags in beside.values()
+        for tag in tags
+        if tag != keep
+        and len(tag) == len(IMAGE_PREFIX) + 12
+        and not any(len(other) != len(tag) for other in tags)
+    )
+
+
+def retire_images(tags: list[str], engine: ContainerEngine) -> list[str]:
+    """Remove each named image, reporting the ones that actually went.
+
+    One call per tag rather than one call for all of them, because a single
+    failure -- an image a stopped container still references -- would take
+    the whole sweep down with it and leave the operator no better off.
+    """
+    gone: list[str] = []
+    for tag in tags:
+        try:
+            sh.Command(engine.binary)("rmi", tag)
+        except (sh.CommandNotFound, sh.ErrorReturnCode):
+            continue
+        gone.append(tag)
+    return gone
+
+
+def name_for_checkout(tag: str, readable: str, engine: ContainerEngine) -> None:
+    """Point this checkout's readable name at the image it will actually run.
+
+    Idempotent, and silent about its own failure: the tag is a convenience
+    for whoever reads an image list and the name the preflight probes, and
+    neither is worth refusing a launch over. The session runs the digest tag
+    regardless, which is the one that has to be right.
+    """
+    try:
+        sh.Command(engine.binary)("tag", tag, readable)
+    except (sh.CommandNotFound, sh.ErrorReturnCode):
+        return
 
 
 def running(name: str, engine: ContainerEngine) -> bool:
@@ -344,9 +478,11 @@ def contained_argv(
         if not found.drives_its_server():
             raise typer.BadParameter(found.consequence())
         client = found.engine()
-    tag = image_tag(root)
-    if not image_matches(tag, image.dockerfile(manifest), client):
+    rendered = image.dockerfile(manifest)
+    tag = image_tag(rendered)
+    if not image_matches(tag, rendered, client):
         build_image(image, manifest, tag, client, root)
+    name_for_checkout(tag, checkout_tag(root), client)
     start_egress(image.egress, root.name, client, root)
     for notice in image.egress.notice(root.name):
         notice.say()
