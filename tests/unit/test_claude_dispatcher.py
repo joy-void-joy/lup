@@ -858,3 +858,50 @@ def test_both_boundaries_place_one_call_the_same_way(
     assert dispatcher_rewrite(placement, call) == claude_placed_input(
         "Bash", call, placement
     )
+
+
+def test_a_loss_the_snapshot_holds_is_handed_to_the_runtime(delete_repo: Path) -> None:
+    """The relaxation, through the only thing a session runs.
+
+    `git reset --hard` destroys working-tree content and nothing else, and
+    the tree is in the object store before the command is judged — so the
+    policy has no permanent loss left to interrupt about. It answers with no
+    verdict at all rather than with a permission: the call goes to the
+    runtime's own gate, which is where an operator's configuration lives, and
+    a session at the runtime's defaults is still asked in the runtime's own
+    words.
+
+    The empty object is that answer on this runtime's wire. The ref is the
+    evidence the snapshot the relaxation rests on was actually taken, and
+    taken *before* the verdict read it.
+    """
+    payload = {**bash_payload("git reset --hard"), "cwd": str(delete_repo)}
+
+    assert decide_from(payload, delete_repo) == {}
+    assert undo_refs(delete_repo) == ["lup undo: git reset --hard"]
+
+
+def test_the_one_loss_the_snapshot_cannot_hold_still_asks(delete_repo: Path) -> None:
+    """`git clean -fdx` is the deliberate exception, not an unannotated gap.
+
+    The snapshot leaves ignored files out — `.env.local`, the resolver's
+    state, a virtual environment — and `git clean -fdx` is the one command
+    whose whole purpose is destroying exactly those. So it keeps asking in
+    the posture where every neighbour of it stops.
+    """
+    effect, _reason = snapshotting_effect("git clean -fdx", delete_repo)
+
+    assert effect == "ask"
+
+
+def test_an_effect_no_boundary_here_reaches_still_asks(delete_repo: Path) -> None:
+    """The blanket relaxation this axis exists to avoid.
+
+    Nothing in a session puts back a deleted remote ref, so relaxing every
+    approval question under a boundary would have handed remote-ref deletion,
+    issue creation and package publication to whatever the runtime's mode
+    happened to be.
+    """
+    effect, _reason = snapshotting_effect("git push --delete origin feat", delete_repo)
+
+    assert effect == "ask"

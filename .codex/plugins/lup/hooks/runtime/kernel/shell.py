@@ -12,6 +12,7 @@ from .decision import (
     RELAY_HINT,
     RESHAPE_HINT,
     SUBSTITUTION_SENTINEL,
+    Recovery,
     SandboxPlacement,
     unjudged,
 )
@@ -796,6 +797,21 @@ def decide_segment_list(
     return decisions
 
 
+def joined_recovery(decisions: list[KernelDecision]) -> Recovery:
+    """What puts back what a whole command line destroys.
+
+    The weakest answer any of its segments gave. One line is one act as far
+    as a person deciding about it is concerned, so a segment nothing restores
+    makes the line one nothing restores -- ``ls && git push --delete`` is not
+    made recoverable by the half that only read.
+    """
+    if any(item.recovery == "nothing" for item in decisions):
+        return "nothing"
+    if any(item.recovery == "container" for item in decisions):
+        return "container"
+    return "snapshot"
+
+
 def joined_placement(decisions: list[KernelDecision]) -> SandboxPlacement:
     """Where a whole command runs, given what each of its segments needs.
 
@@ -855,16 +871,19 @@ def classify_shell(
     )
     decisions = decide_segment_list(segments, context)
     placement = joined_placement(decisions)
+    restoration = joined_recovery(decisions)
     denied = next((item for item in decisions if item.effect == "deny"), None)
     if denied is not None:
         return denied
     asked = next((item for item in decisions if item.effect == "ask"), None)
     if asked is not None:
-        return KernelDecision("ask", asked.reason, placement)
+        return KernelDecision("ask", asked.reason, placement, restoration)
     deferred = next((item for item in decisions if item.effect == "defer"), None)
     if deferred is not None:
         return deferred
-    return KernelDecision("allow", "every shell segment is declared safe", placement)
+    return KernelDecision(
+        "allow", "every shell segment is declared safe", placement, restoration
+    )
 
 
 def excluded_prefix(pattern: str) -> list[str]:
@@ -930,6 +949,7 @@ def decide_shell(
     target_tables: list[ShellRuleRow] | None = None,
     escapable: bool = False,
     contained: bool = False,
+    recovered: bool = False,
     relayed: bool = False,
 ) -> KernelDecision:
     """Classify one command, honoring an escalation marker and hinting denies.
@@ -1017,6 +1037,7 @@ def decide_shell(
             contained=contained,
             confined=confined,
             escapable=escapable,
+            recovered=recovered,
             interactive=interactive,
             hint=hint,
         )

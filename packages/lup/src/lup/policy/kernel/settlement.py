@@ -41,6 +41,7 @@ class SettlementFacts:
     contained: bool
     confined: bool
     escapable: bool
+    recovered: bool
     interactive: bool
     hint: str
 
@@ -52,6 +53,7 @@ class SettlementFacts:
         contained: bool,
         confined: bool,
         escapable: bool,
+        recovered: bool,
         interactive: bool,
         hint: str,
     ) -> None:
@@ -61,6 +63,7 @@ class SettlementFacts:
         self.contained = contained
         self.confined = confined
         self.escapable = escapable
+        self.recovered = recovered
         self.interactive = interactive
         self.hint = hint
 
@@ -73,6 +76,7 @@ class SettlementFacts:
             self.contained,
             self.confined,
             self.escapable,
+            self.recovered,
             self.interactive,
             self.hint,
         )
@@ -113,6 +117,7 @@ class StatedReason(SettlementRule):
             "ask",
             f"escalated ({facts.escalation}): {facts.decision.reason}",
             facts.decision.sandbox,
+            facts.decision.recovery,
         )
 
 
@@ -147,7 +152,11 @@ class ContainedPlacement(SettlementRule):
     def reached(self, facts: SettlementFacts) -> KernelDecision | None:
         if not facts.contained or facts.decision.sandbox == "ambient":
             return None
-        return KernelDecision(facts.decision.effect, facts.decision.reason)
+        return KernelDecision(
+            facts.decision.effect,
+            facts.decision.reason,
+            recovery=facts.decision.recovery,
+        )
 
 
 class TrappedPlacement(SettlementRule):
@@ -168,6 +177,59 @@ class TrappedPlacement(SettlementRule):
             if facts.decision.sandbox == "outside":
                 return KernelDecision("deny", SANDBOX_TRAPPED_REASON)
         return None
+
+
+class RestoredBySession(SettlementRule):
+    """An approval question about a loss this session can already put back.
+
+    The vocabulary guards *the direction that removes something no second
+    attempt restores*. What a second attempt restores is a fact about the
+    session and not about the command, and every rule states which restorer
+    its question was about — so where that restorer is present, the loss the
+    question was protecting against does not happen and the question has no
+    subject.
+
+    Settled as a **deferral, not a permission**, and the difference is the
+    whole design. Nothing here decides the call may run: it decides that this
+    policy has no reason left to interrupt, and hands the call to the
+    runtime's own gate, which is where an operator's configuration lives. A
+    session run with everything approved runs it; a session at the runtime's
+    defaults is still asked, in the runtime's own words. The policy stops
+    spending a human's attention on a loss it can undo, and buys no authority
+    with it.
+
+    Which makes ``defer`` two things reaching one word, and the rows below
+    have to keep them apart: a deferral from :func:`unjudged` means *nobody
+    looked*, and this one means *somebody looked and the boundary answers*.
+    So this row settles rather than rewrites. :class:`Unjudged` turns an
+    unexamined deferral into a refusal for want of anybody having looked, and
+    a judged deferral that fell through to it would be refused for the one
+    reason that is not true of it.
+
+    A stated reason keeps its question. `# lup: escalate:` is the agent
+    asking to be judged, and answering it with a deferral would drop both the
+    question and the reason given for it.
+    """
+
+    def reached(self, facts: SettlementFacts) -> KernelDecision | None:
+        if facts.decision.effect != "ask" or facts.escalation:
+            return None
+        match facts.decision.recovery:
+            case "snapshot" if facts.recovered:
+                held = "the tree is in the object store"
+            # Both, and not the container alone. What a container makes
+            # disposable is the machine; the checkout is bind-mounted from
+            # the host and survives it, so the wider value needs the narrower
+            # one underneath it or it relaxes the half nothing holds.
+            case "container" if facts.contained and facts.recovered:
+                held = "the container is disposable and the tree is held"
+            case _:
+                return None
+        return KernelDecision(
+            "defer",
+            f"{facts.decision.reason} — settled by this session rather than"
+            f" asked: {held}",
+        )
 
 
 class UnanswerableQuestion(SettlementRule):
@@ -241,6 +303,7 @@ SETTLEMENT_ORDER: list[SettlementRule] = [
     ContainedPlacement(),
     StatedReason(),
     TrappedPlacement(),
+    RestoredBySession(),
     UnanswerableQuestion(),
     ConfinedElsewhere(),
     Unjudged(),

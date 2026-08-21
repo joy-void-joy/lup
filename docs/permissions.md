@@ -44,8 +44,10 @@ The rows, in order:
 
 | row | what it says |
 |---|---|
+| `ContainedPlacement` | a container is the place every placement was asking for, so none of them is left to carry |
 | `StatedReason` | a marker turns anything not already permitted into the question it asked for |
 | `TrappedPlacement` | a call declared `outside` where nothing can place it outside cannot run, and no reason moves that |
+| `RestoredBySession` | a question about a loss this session can put back is settled as a deferral rather than asked |
 | `UnanswerableQuestion` | a question on a host with nobody to ask is no judgment |
 | `ConfinedElsewhere` | no judgment, and a boundary beneath it: the boundary carries it |
 | `Unjudged` | no judgment and no boundary: refuse, naming the recipe |
@@ -60,7 +62,43 @@ allow placed outside runs there unprompted; an ask placed outside says so in
 the question it asks; a deny short-circuits the axis entirely, and so does a
 defer, which hands the sandbox status over with the rest of the decision.
 Confinement wins a join, so one segment that must stay inside keeps the whole
-line inside. A runtime with no per-call sandbox renders the plain effect.
+line inside. A runtime with no per-call sandbox renders the plain effect. A
+container answers the axis rather than trapping on it: `outside` names the
+native per-call sandbox, a container runs none, and the paths that placement
+was about — the runtime's configuration home, the repository's locks, a route
+to a remote — are all the container's own.
+
+**Recovery** is the third axis, and the one that makes the effect a function
+of the session rather than of the command. The vocabulary guards *the
+direction that removes something no second attempt restores*, and what a
+second attempt restores depends on what is running beneath it — so each rule
+names the restorer its question was about:
+
+| value | what puts the loss back | what carries it |
+|---|---|---|
+| `snapshot` | the whole loss is working-tree content in this checkout | the undo layer, container or not — `git reset --hard`, `git restore`, `git rm` |
+| `container` | the loss can also land on this machine | a container *and* the snapshot beneath it, because the bind-mounted checkout survives the container — `rm`, `tar`, `apt install`, `systemctl` |
+| `nothing` | neither reaches it | nothing, so the question stands — a remote ref, a published artifact, a command whose argument is another command, and the parts of this checkout no snapshot holds |
+
+`nothing` is the default and the whole safety of the axis: a rule nobody
+annotated keeps asking. `git clean -fdx` carries it deliberately rather than
+by omission — it destroys ignored files, which is exactly what the snapshot
+leaves out.
+
+Where the named restorer is present, `RestoredBySession` settles the question
+as a **deferral, not a permission**. Nothing decides the call may run: the
+policy decides it has no reason left to interrupt, and the call goes to the
+runtime's own gate, where an operator's configuration lives. A session run
+with everything approved runs it; one at the runtime's defaults is still
+asked, in the runtime's own words. A `# lup: escalate:` marker keeps its
+question either way — it is the agent asking to be judged, and a boundary
+does not overrule it.
+
+That makes `defer` two things reaching one word, which the rows below it have
+to keep apart: an unjudged deferral means *nobody looked*, and this one means
+*somebody looked and the boundary answers*. `Unjudged` refuses the first for
+want of anybody having looked, so the second settles rather than rewrites and
+never reaches it.
 
 `uv run <target>` is parsed rather than matched against that table, so its
 targets carry the same three answers on a table of their own: each declares

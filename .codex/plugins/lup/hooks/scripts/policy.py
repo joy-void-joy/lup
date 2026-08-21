@@ -961,6 +961,13 @@ def bash_decision(
     passing is a rule that silently stopped applying.
     """
     acted_on = shell_path_verb_targets(command)
+    # Before the verdict rather than after it, because the verdict reads it:
+    # an approval question exists where a loss is permanent, and a tree the
+    # object store already holds has no permanent loss to ask about. Ordered
+    # the other way the relaxation would be judging a snapshot that did not
+    # exist yet, and a refused command is snapshotted too -- one ref for a
+    # state the tree was already in, which dedup collapses.
+    reference = undo_snapshot(cwd, command)
     verdict = decide_shell(
         command,
         SHELL_RULES,
@@ -994,10 +1001,11 @@ def bash_decision(
         # about the host with no runtime variation to it, so neither
         # dispatcher is given the chance to forget it.
         contained=contained(),
+        recovered=bool(reference),
     )
     if verdict.effect == "deny":
         return verdict
-    recorded = undo_point(command, verdict, cwd)
+    recorded = undo_point(verdict, reference)
     # Counted only where the command was going to run anyway. A refused script
     # never ran, so counting it would nudge toward promoting something that
     # has not worked once.
@@ -1011,38 +1019,20 @@ def bash_decision(
     )
 
 
-def undo_point(
-    command: str, verdict: KernelDecision, cwd: Path | None
-) -> KernelDecision:
-    """Snapshot the tree before the command runs, and say so on a question.
+def undo_point(verdict: KernelDecision, reference: str) -> KernelDecision:
+    """Say the tree was snapshotted, on the one verdict that changes for it.
 
-    The whole case for relaxing a permission lattice is that a mistake can be
-    put back, so this is what has to exist before that relaxation is honest.
-    What it does not need is a trigger, and the two that were tried both
-    answered a different question from the one a safety net asks. Keying on
-    the verdict conflates *this destroys work* with *this was not recognised*,
-    which share one effect: a live session produced sixty refs, fifty-seven of
-    them in front of a ``grep`` or a ``sed``. Keying on the paths the command
-    was resolved to be writing misses every write that is not in an argv,
-    which is every build, every installer and every script — measured, a
-    ``bun install`` that rewrites the lockfile was snapshotted by neither.
+    The snapshot itself is taken above, before the verdict, because the
+    verdict reads it. What is left here is what the human is told.
 
-    So the snapshot is unconditional and :func:`undo_snapshot` deduplicates by
-    tree content instead. Git addresses content, so a command that changed
-    nothing writes a byte-identical tree, the ref named after that tree
-    overwrites the earlier one, and the listing carries one entry per distinct
-    state the tree was ever in rather than one per command. Coverage is exact
-    by construction, including for whatever nobody would have thought to
-    enumerate.
-
-    Said out loud only on an approval question, which is the one moment the
-    information changes an answer: a human deciding whether to permit
-    something destructive is weighing exactly whether it can be undone. On an
-    allowed command the snapshot is silent, because a line appended to every
-    mutating command is one nobody reads by the third time — and ``dev undo``
-    is where a snapshot is looked for anyway.
+    On an approval question, which is the one moment the information changes
+    an answer: somebody deciding whether to permit something destructive is
+    weighing exactly whether it can be undone. On an allowed command the
+    snapshot is silent, because a line appended to every mutating command is
+    one nobody reads by the third time — and ``dev undo`` is where a snapshot
+    is looked for anyway. On a deferral the reason reaches no human at all;
+    it reaches the record, which is where the relaxation is reviewed.
     """
-    reference = undo_snapshot(cwd, command)
     if not reference or verdict.effect != "ask":
         return verdict
     return KernelDecision(

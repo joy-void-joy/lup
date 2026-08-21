@@ -2,7 +2,7 @@
 
 from typing import Literal, TypedDict
 
-from .decision import DecisionEffect, SandboxPlacement
+from .decision import DecisionEffect, Recovery, SandboxPlacement
 
 type PathRuleKind = Literal[
     "exact",
@@ -200,10 +200,17 @@ class ShellRuleRow(TypedDict):
     effect reads, and a verb whose blast radius wants the OS boundary keeps it
     however ordinary the effect reads.
 
-    Both axes arrive already resolved down the nesting, so matching one row is
-    the whole answer. ``effect_source`` and ``sandbox_source`` say which level
-    supplied each value, which is what a reader needs at a verdict they did not
-    expect; neither is consulted in reaching one.
+    ``recovery`` says what would put back what this command destroys, which
+    is what makes the effect a function of the session rather than of the
+    command alone: an approval question exists because a loss is permanent,
+    and a session carrying the restorer named here has no such loss to ask
+    about.
+
+    All three axes arrive already resolved down the nesting, so matching one
+    row is the whole answer. ``effect_source``, ``sandbox_source`` and
+    ``recovery_source`` say which level supplied each value, which is what a
+    reader needs at a verdict they did not expect; none is consulted in
+    reaching one.
     """
 
     command: str
@@ -213,6 +220,8 @@ class ShellRuleRow(TypedDict):
     effect_source: RuleLevel
     sandbox: SandboxPlacement
     sandbox_source: RuleLevel
+    recovery: Recovery
+    recovery_source: RuleLevel
     ask_flags: list[str]
     allow_flags: list[str]
     read_verbs: list[str]

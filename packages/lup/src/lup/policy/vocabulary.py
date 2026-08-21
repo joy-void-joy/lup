@@ -41,7 +41,7 @@ from collections.abc import Sequence
 
 from pydantic import BaseModel
 
-from lup.policy.kernel.decision import SandboxPlacement
+from lup.policy.kernel.decision import Recovery, SandboxPlacement
 from lup.policy.shell_rules import (
     RunnerTargetRule,
     ShellCommandRule,
@@ -55,6 +55,12 @@ class JudgedCommand(BaseModel, frozen=True):
 
     name: str
     reason: str
+    recovery: Recovery = "nothing"
+    """What would put back what this command destroys, if anything here does.
+
+    The question this row asks exists because a loss is permanent, so naming
+    the restorer that makes it impermanent is naming when the question stops
+    being worth a human's attention. Silence keeps the question."""
     read_verbs: list[str] = []
     """This command's own spellings of its query action, which de-escalate it.
 
@@ -162,16 +168,37 @@ def read_only_rules(
 
 def judged_ask_rules(
     commands: Sequence[JudgedCommand] = (
-        JudgedCommand(name="rm", reason="deleting files requires approval"),
-        JudgedCommand(name="rmdir", reason="deleting directories requires approval"),
-        JudgedCommand(name="mv", reason="moving files requires approval"),
-        JudgedCommand(name="cp", reason="copying over files requires approval"),
+        JudgedCommand(
+            name="rm",
+            reason="deleting files requires approval",
+            recovery="container",
+        ),
+        JudgedCommand(
+            name="rmdir",
+            reason="deleting directories requires approval",
+            recovery="container",
+        ),
+        JudgedCommand(
+            name="mv",
+            reason="moving files requires approval",
+            recovery="container",
+        ),
+        JudgedCommand(
+            name="cp",
+            reason="copying over files requires approval",
+            recovery="container",
+        ),
         JudgedCommand(name="chmod", reason="changing permissions requires approval"),
         JudgedCommand(name="chown", reason="changing ownership requires approval"),
-        JudgedCommand(name="ln", reason="creating links requires approval"),
+        JudgedCommand(
+            name="ln",
+            reason="creating links requires approval",
+            recovery="container",
+        ),
         JudgedCommand(
             name="tee",
             reason="writing files requires approval — prefer the Write tool",
+            recovery="container",
         ),
         JudgedCommand(
             name="dd",
@@ -181,10 +208,23 @@ def judged_ask_rules(
             # `dd if=x` stopped for approval as a write.
             write_markers=["of="],
             reason="raw device or file writes require approval",
+            recovery="container",
         ),
-        JudgedCommand(name="truncate", reason="truncating files requires approval"),
-        JudgedCommand(name="kill", reason="terminating processes requires approval"),
-        JudgedCommand(name="pkill", reason="terminating processes requires approval"),
+        JudgedCommand(
+            name="truncate",
+            reason="truncating files requires approval",
+            recovery="container",
+        ),
+        JudgedCommand(
+            name="kill",
+            reason="terminating processes requires approval",
+            recovery="container",
+        ),
+        JudgedCommand(
+            name="pkill",
+            reason="terminating processes requires approval",
+            recovery="container",
+        ),
         JudgedCommand(
             name="command",
             # Reached only in the query shape: every other spelling runs the
@@ -198,26 +238,31 @@ def judged_ask_rules(
             # `-xzf` also contains: these are tar's own list-mode spellings.
             read_verbs=["-t", "--list", "-tf", "-tvf", "-tzf", "-tzvf", "-tjf", "-tJf"],
             reason="archive operations write files — requires approval",
+            recovery="container",
         ),
         JudgedCommand(
             name="unzip",
             read_verbs=["-l", "-t", "-v", "-z"],
             reason="archive extraction writes files — requires approval",
+            recovery="container",
         ),
         JudgedCommand(
             name="zip",
             read_verbs=["-sf", "--show-files"],
             reason="archive creation writes files — requires approval",
+            recovery="container",
         ),
         JudgedCommand(
             name="gzip",
             read_verbs=["-l", "--list", "-t", "--test"],
             reason="compression rewrites files — requires approval",
+            recovery="container",
         ),
         JudgedCommand(
             name="gunzip",
             read_verbs=["-l", "--list", "-t", "--test"],
             reason="decompression rewrites files — requires approval",
+            recovery="container",
         ),
         JudgedCommand(name="sudo", reason="privilege escalation requires approval"),
         JudgedCommand(name="doas", reason="privilege escalation requires approval"),
@@ -246,12 +291,36 @@ def judged_ask_rules(
             name="yarn",
             reason="package tools fetch and execute code — requires approval",
         ),
-        JudgedCommand(name="apt", reason="system package changes require approval"),
-        JudgedCommand(name="apt-get", reason="system package changes require approval"),
-        JudgedCommand(name="pacman", reason="system package changes require approval"),
-        JudgedCommand(name="brew", reason="system package changes require approval"),
-        JudgedCommand(name="systemctl", reason="service management requires approval"),
-        JudgedCommand(name="crontab", reason="schedule changes require approval"),
+        JudgedCommand(
+            name="apt",
+            reason="system package changes require approval",
+            recovery="container",
+        ),
+        JudgedCommand(
+            name="apt-get",
+            reason="system package changes require approval",
+            recovery="container",
+        ),
+        JudgedCommand(
+            name="pacman",
+            reason="system package changes require approval",
+            recovery="container",
+        ),
+        JudgedCommand(
+            name="brew",
+            reason="system package changes require approval",
+            recovery="container",
+        ),
+        JudgedCommand(
+            name="systemctl",
+            reason="service management requires approval",
+            recovery="container",
+        ),
+        JudgedCommand(
+            name="crontab",
+            reason="schedule changes require approval",
+            recovery="container",
+        ),
     ),
 ) -> list[ShellCommandRule]:
     """Commands that ask on every production path, with the reason each carries.
@@ -266,6 +335,7 @@ def judged_ask_rules(
             default_effect="ask",
             read_verbs=command.read_verbs,
             write_markers=command.write_markers,
+            recovery=command.recovery,
             reason=command.reason,
         )
         for command in commands
@@ -347,6 +417,7 @@ def guarded_tool_rules() -> list[ShellCommandRule]:
             name="tree",
             default_effect="allow",
             ask_flags=["-o"],
+            recovery="container",
             reason="a tree flag that writes a file requires approval",
         ),
         ShellCommandRule(
@@ -364,12 +435,14 @@ def guarded_tool_rules() -> list[ShellCommandRule]:
             name="base64",
             default_effect="allow",
             ask_flags=["-o", "--output"],
+            recovery="container",
             reason="a base64 flag that writes a file requires approval",
         ),
         ShellCommandRule(
             name="yq",
             default_effect="allow",
             ask_flags=["-i", "--inplace", "--in-place", "-s", "--split-exp"],
+            recovery="container",
             reason=(
                 "a yq flag that edits files in place or splits into files"
                 " requires approval"
@@ -394,6 +467,7 @@ def guarded_tool_rules() -> list[ShellCommandRule]:
             name="find",
             default_effect="allow",
             ask_flags=["-delete", "-fprint", "-fprint0", "-fprintf", "-fls"],
+            recovery="container",
             reason="a mutating find action requires approval",
         ),
         ShellCommandRule(
@@ -401,6 +475,7 @@ def guarded_tool_rules() -> list[ShellCommandRule]:
             name="ss",
             default_effect="allow",
             ask_flags=["-K", "--kill"],
+            recovery="container",
             reason="killing sockets requires approval",
         ),
         ShellCommandRule(
@@ -584,6 +659,7 @@ def git_rule(
                 name=name,
                 effect="allow",
                 ask_flags=["--output"],
+                recovery="container",
                 reason="writing command output to a file requires approval",
             )
             # `--output` names a path on the command line and lands a file
@@ -666,19 +742,28 @@ def git_rule(
             name="apply",
             effect="allow",
             ask_flags=["--unsafe-paths", "--build-fake-ancestor"],
+            recovery="container",
             reason="a patch that writes outside the working area requires approval",
         ),
         ShellSubcommandRule(
             name="restore",
             effect="ask",
+            recovery="snapshot",
             reason="restoring files discards working-tree changes",
         ),
         ShellSubcommandRule(
             name="rm",
             effect="ask",
+            recovery="snapshot",
             reason="removing tracked files requires approval",
         ),
         ShellSubcommandRule(
+            # The one destructive git verb the snapshot does not answer, and
+            # the reason it keeps asking wherever the others stop. `-fdx`
+            # takes ignored files, and ignored files are exactly what the
+            # snapshot leaves out: `.env.local`, the resolver's state, a
+            # virtual environment. Naming a restorer here would relax the one
+            # command whose whole purpose is destroying what nothing holds.
             name="clean",
             effect="ask",
             reason="deleting untracked files is destructive — requires approval",
@@ -701,6 +786,7 @@ def git_rule(
         ShellSubcommandRule(
             name="checkout",
             effect="deny" if redirect_checkout else "ask",
+            recovery="snapshot",
             reason=(
                 "use git switch for branches or git restore for files"
                 if redirect_checkout
@@ -740,9 +826,11 @@ def git_rule(
                     name="view",
                     effect="allow",
                     ask_flags=["--output"],
+                    recovery="container",
                     reason="writing command output to a file requires approval",
                 ),
             ],
+            recovery="snapshot",
             reason="a bisect step moves HEAD across commits",
         ),
         ShellSubcommandRule(
@@ -772,12 +860,14 @@ def git_rule(
             name="reset",
             effect="allow",
             ask_flags=["--hard", "--merge", "--keep"],
+            recovery="snapshot",
             reason="a working-tree-destroying reset requires approval",
         ),
         ShellSubcommandRule(
             name="switch",
             effect="allow",
             ask_flags=["-f", "--force", "--discard-changes"],
+            recovery="snapshot",
             reason="a force switch can discard working-tree changes",
         ),
         ShellSubcommandRule(
@@ -810,6 +900,7 @@ def git_rule(
                     name="list",
                     effect="allow",
                     ask_flags=["--output"],
+                    recovery="container",
                     reason="writing command output to a file requires approval",
                 ),
                 ShellOperationRule(
@@ -817,6 +908,7 @@ def git_rule(
                     name="show",
                     effect="allow",
                     ask_flags=["--output"],
+                    recovery="container",
                     reason="writing command output to a file requires approval",
                 ),
                 ShellOperationRule(name="push", effect="allow"),

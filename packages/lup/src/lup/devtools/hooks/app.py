@@ -58,7 +58,11 @@ def create_hooks_app(declared: Callable[[], HookSet]) -> typer.Typer:
     app = typer.Typer(help="Query the permission policy", no_args_is_help=True)
 
     def shell_decision(
-        command: str, autonomous: bool, interactive: bool, trapped: bool = False
+        command: str,
+        autonomous: bool,
+        interactive: bool,
+        trapped: bool = False,
+        contained: bool = False,
     ) -> Decision:
         """Classify one shell command exactly as a live session would.
 
@@ -72,12 +76,23 @@ def create_hooks_app(declared: Callable[[], HookSet]) -> typer.Typer:
         it, is told about a command that has to run outside. Left off, the
         answer is the declared verdict — the placement itself, which is what a
         reader wants to see. Turned on, it is the refusal that boundary reaches.
+
+        ``contained`` asks the same question of the other boundary, and the
+        two are not spellings of each other: a container satisfies a placement
+        where a native sandbox traps it, and it answers the losses a rule
+        declares as landing on this machine.
+
+        The undo layer is reported as present either way, because it is: a
+        session snapshots the tree before every command, and a reader asking
+        what they will be asked about should be told what a session is told.
         """
         policy = semantic_policy_for(
             declared(),
             autonomous=autonomous,
             interactive=interactive,
             sandbox_active=trapped,
+            contained=contained,
+            recovered=True,
         )
         return policy.decide(ShellCommand(command=command, cwd=project_root()))
 
@@ -99,6 +114,13 @@ def create_hooks_app(declared: Callable[[], HookSet]) -> typer.Typer:
                 help="Judge as a confined session whose runtime cannot escape",
             ),
         ] = False,
+        contained: Annotated[
+            bool,
+            typer.Option(
+                "--contained",
+                help="Judge as a session running inside the project's container",
+            ),
+        ] = False,
         as_json: Annotated[bool, typer.Option("--json", help="Emit JSON")] = False,
     ) -> None:
         """Say what the policy decides about one shell command, and why.
@@ -107,10 +129,13 @@ def create_hooks_app(declared: Callable[[], HookSet]) -> typer.Typer:
 
             $ uv run lup-devtools hooks classify 'gh api /repos/o/r/pulls/1'
             $ uv run lup-devtools hooks classify 'rm build/out' --json
+            $ uv run lup-devtools hooks classify 'rm -rf build' --contained
             $ uv run lup-devtools hooks classify 'uv run lup-devtools dev check' --trapped
         """
         report(
-            command, shell_decision(command, autonomous, not headless, trapped), as_json
+            command,
+            shell_decision(command, autonomous, not headless, trapped, contained),
+            as_json,
         )
 
     @app.command("classify-fetch")

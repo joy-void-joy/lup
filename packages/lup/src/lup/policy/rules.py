@@ -151,6 +151,8 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
         sandbox_active: bool = False,
         sandbox_excluded_commands: list[str] | None = None,
         escapable: bool = False,
+        contained: bool = False,
+        recovered: bool = False,
         trusted_script_roots: list[str] | None = None,
         interactive: bool = True,
         path_roles: list[PathRoleRow] | None = None,
@@ -165,6 +167,13 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
         self.runner_targets = erase_runner_targets(runner_targets or [])
         self.target_tables = runner_target_tables(runner_targets or [])
         self.escapable = escapable
+        self.contained = contained
+        # Two facts about the session rather than about any command, and
+        # neither is discoverable from here: whether a container is the
+        # boundary, and whether the undo layer holds this tree. A caller that
+        # knows says so, and one that does not gets the strict answer -- which
+        # for both is the one that relaxes nothing.
+        self.recovered = recovered
         self.rules = erase_shell_rules(rules)
         self.allowed_scopes = [url_scope_row(scope) for scope in allowed_urls or []]
         self.denied_scopes = [url_scope_row(scope) for scope in denied_urls or []]
@@ -203,6 +212,8 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
                 runner_targets=self.runner_targets,
                 target_tables=self.target_tables,
                 escapable=self.escapable,
+                contained=self.contained,
+                recovered=self.recovered,
                 relayed=self.relayed,
             )
         )

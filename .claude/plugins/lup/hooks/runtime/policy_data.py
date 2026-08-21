@@ -1951,6 +1951,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -1966,6 +1968,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -1981,6 +1985,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -1996,6 +2002,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -2011,6 +2019,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -2026,6 +2036,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -2041,6 +2053,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -2056,6 +2070,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -2071,6 +2087,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -2086,6 +2104,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -2101,6 +2121,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -2116,6 +2138,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -2131,6 +2155,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -2146,6 +2172,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -2161,6 +2189,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -2176,6 +2206,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -2191,6 +2223,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -2206,6 +2240,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -2221,6 +2257,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -2236,6 +2274,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -2251,6 +2291,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -2266,6 +2308,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -2281,6 +2325,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -2296,6 +2342,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -2311,6 +2359,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -2326,6 +2376,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -2341,6 +2393,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -2356,6 +2410,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -2371,6 +2427,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -2386,6 +2444,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -2401,6 +2461,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -2416,6 +2478,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -2431,6 +2495,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -2446,6 +2512,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -2461,6 +2529,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -2476,6 +2546,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -2491,6 +2563,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -2506,6 +2580,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -2521,6 +2597,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -2536,6 +2614,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -2551,6 +2631,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -2566,6 +2648,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -2581,6 +2665,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -2596,6 +2682,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -2611,6 +2699,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -2626,6 +2716,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -2641,6 +2733,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -2656,6 +2750,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -2671,6 +2767,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -2686,6 +2784,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -2701,6 +2801,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -2716,6 +2818,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -2731,6 +2835,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -2746,6 +2852,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -2761,6 +2869,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -2776,6 +2886,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -2791,6 +2903,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -2806,6 +2920,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -2821,6 +2937,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -2836,6 +2954,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -2851,6 +2971,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -2866,6 +2988,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -2881,6 +3005,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -2896,6 +3022,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -2911,6 +3039,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -2926,6 +3056,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -2941,6 +3073,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -2956,6 +3090,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -2971,6 +3107,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -2986,6 +3124,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -3001,6 +3141,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -3016,6 +3158,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -3031,6 +3175,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -3046,6 +3192,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "container",
+        "recovery_source": "command",
         "reason": "deleting files requires approval",
     },
     {
@@ -3061,6 +3209,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "container",
+        "recovery_source": "command",
         "reason": "deleting directories requires approval",
     },
     {
@@ -3076,6 +3226,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "container",
+        "recovery_source": "command",
         "reason": "moving files requires approval",
     },
     {
@@ -3091,6 +3243,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "container",
+        "recovery_source": "command",
         "reason": "copying over files requires approval",
     },
     {
@@ -3106,6 +3260,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "command",
         "reason": "changing permissions requires approval",
     },
     {
@@ -3121,6 +3277,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "command",
         "reason": "changing ownership requires approval",
     },
     {
@@ -3136,6 +3294,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "container",
+        "recovery_source": "command",
         "reason": "creating links requires approval",
     },
     {
@@ -3151,6 +3311,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "container",
+        "recovery_source": "command",
         "reason": "writing files requires approval \u2014 prefer the Write tool",
     },
     {
@@ -3168,6 +3330,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "container",
+        "recovery_source": "command",
         "reason": "raw device or file writes require approval",
     },
     {
@@ -3183,6 +3347,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "container",
+        "recovery_source": "command",
         "reason": "truncating files requires approval",
     },
     {
@@ -3198,6 +3364,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "container",
+        "recovery_source": "command",
         "reason": "terminating processes requires approval",
     },
     {
@@ -3213,6 +3381,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "container",
+        "recovery_source": "command",
         "reason": "terminating processes requires approval",
     },
     {
@@ -3231,6 +3401,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "command",
         "reason": "'command' runs a program through a modified lookup \u2014 name it directly",
     },
     {
@@ -3255,6 +3427,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "container",
+        "recovery_source": "command",
         "reason": "archive operations write files \u2014 requires approval",
     },
     {
@@ -3275,6 +3449,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "container",
+        "recovery_source": "command",
         "reason": "archive extraction writes files \u2014 requires approval",
     },
     {
@@ -3293,6 +3469,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "container",
+        "recovery_source": "command",
         "reason": "archive creation writes files \u2014 requires approval",
     },
     {
@@ -3313,6 +3491,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "container",
+        "recovery_source": "command",
         "reason": "compression rewrites files \u2014 requires approval",
     },
     {
@@ -3333,6 +3513,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "container",
+        "recovery_source": "command",
         "reason": "decompression rewrites files \u2014 requires approval",
     },
     {
@@ -3348,6 +3530,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "command",
         "reason": "privilege escalation requires approval",
     },
     {
@@ -3363,6 +3547,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "command",
         "reason": "privilege escalation requires approval",
     },
     {
@@ -3378,6 +3564,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "command",
         "reason": "remote access requires approval",
     },
     {
@@ -3393,6 +3581,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "command",
         "reason": "remote copies require approval",
     },
     {
@@ -3408,6 +3598,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "command",
         "reason": "remote sync requires approval",
     },
     {
@@ -3423,6 +3615,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "command",
         "reason": "downloading files requires approval \u2014 prefer curl or WebFetch",
     },
     {
@@ -3444,6 +3638,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "command",
         "reason": "make executes arbitrary recipes \u2014 requires approval",
     },
     {
@@ -3466,6 +3662,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "command",
         "reason": "package tools fetch and execute code \u2014 requires approval",
     },
     {
@@ -3481,6 +3679,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "command",
         "reason": "package tools fetch and execute code \u2014 requires approval",
     },
     {
@@ -3496,6 +3696,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "command",
         "reason": "package tools fetch and execute code \u2014 requires approval",
     },
     {
@@ -3511,6 +3713,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "container",
+        "recovery_source": "command",
         "reason": "system package changes require approval",
     },
     {
@@ -3526,6 +3730,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "container",
+        "recovery_source": "command",
         "reason": "system package changes require approval",
     },
     {
@@ -3541,6 +3747,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "container",
+        "recovery_source": "command",
         "reason": "system package changes require approval",
     },
     {
@@ -3556,6 +3764,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "container",
+        "recovery_source": "command",
         "reason": "system package changes require approval",
     },
     {
@@ -3571,6 +3781,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "container",
+        "recovery_source": "command",
         "reason": "service management requires approval",
     },
     {
@@ -3586,6 +3798,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "container",
+        "recovery_source": "command",
         "reason": "schedule changes require approval",
     },
     {
@@ -3601,6 +3815,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "use uv add / uv remove instead of pip",
     },
     {
@@ -3616,6 +3832,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "use uv add / uv remove instead of pip",
     },
     {
@@ -3631,6 +3849,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -3646,6 +3866,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -3664,6 +3886,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "credential-agent changes stay with the user \u2014 ask them to run it",
     },
     {
@@ -3679,6 +3903,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "credential-agent lifecycle stays with the user \u2014 ask them to run it",
     },
     {
@@ -3698,6 +3924,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "a sort flag that writes a file or runs a program requires approval",
     },
     {
@@ -3715,6 +3943,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "container",
+        "recovery_source": "command",
         "reason": "a tree flag that writes a file requires approval",
     },
     {
@@ -3735,6 +3965,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "a ripgrep flag that runs another program requires approval",
     },
     {
@@ -3753,6 +3985,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "container",
+        "recovery_source": "command",
         "reason": "a base64 flag that writes a file requires approval",
     },
     {
@@ -3774,6 +4008,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "container",
+        "recovery_source": "command",
         "reason": "a yq flag that edits files in place or splits into files requires approval",
     },
     {
@@ -3794,6 +4030,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "an xmllint flag that writes files or opens a shell requires approval",
     },
     {
@@ -3815,6 +4053,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "container",
+        "recovery_source": "command",
         "reason": "a mutating find action requires approval",
     },
     {
@@ -3833,6 +4073,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "container",
+        "recovery_source": "command",
         "reason": "killing sockets requires approval",
     },
     {
@@ -3854,6 +4096,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "netcat moves data unless -z pins it to a port scan",
     },
     {
@@ -3869,6 +4113,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "directory navigation",
     },
     {
@@ -3884,6 +4130,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "reach this toolchain through `uv run lup-devtools`, which guarantees the environment it runs in \u2014 only the conflict workflow, whose commands must start while the manifest does not parse, is documented without it",
     },
     {
@@ -3899,6 +4147,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "operation",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -3914,6 +4164,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "reach this toolchain through `uv run lup-devtools`, which guarantees the environment it runs in \u2014 only the conflict workflow, whose commands must start while the manifest does not parse, is documented without it",
     },
     {
@@ -3945,6 +4197,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         ],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "this git subcommand is not classified as read-only or reversible",
     },
     {
@@ -3960,6 +4214,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -3975,6 +4231,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -3990,6 +4248,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -4005,6 +4265,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -4020,6 +4282,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -4035,6 +4299,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -4050,6 +4316,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -4065,6 +4333,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -4080,6 +4350,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -4095,6 +4367,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -4110,6 +4384,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -4125,6 +4401,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -4140,6 +4418,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -4155,6 +4435,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -4170,6 +4452,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -4185,6 +4469,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -4200,6 +4486,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -4215,6 +4503,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -4230,6 +4520,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -4245,6 +4537,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -4260,6 +4554,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -4275,6 +4571,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -4290,6 +4588,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -4305,6 +4605,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -4320,6 +4622,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -4335,6 +4639,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -4350,6 +4656,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -4365,6 +4673,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -4380,6 +4690,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -4395,6 +4707,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -4410,6 +4724,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -4425,6 +4741,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -4440,6 +4758,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -4455,6 +4775,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -4470,6 +4792,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -4485,6 +4809,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -4500,6 +4826,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -4515,6 +4843,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -4530,6 +4860,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -4545,6 +4877,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -4560,6 +4894,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -4575,6 +4911,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -4590,6 +4928,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -4605,6 +4945,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -4620,6 +4962,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -4635,6 +4979,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -4650,6 +4996,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -4665,6 +5013,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -4680,6 +5030,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -4695,6 +5047,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -4712,6 +5066,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "container",
+        "recovery_source": "subcommand",
         "reason": "writing command output to a file requires approval",
     },
     {
@@ -4729,6 +5085,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "container",
+        "recovery_source": "subcommand",
         "reason": "writing command output to a file requires approval",
     },
     {
@@ -4746,6 +5104,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "container",
+        "recovery_source": "subcommand",
         "reason": "writing command output to a file requires approval",
     },
     {
@@ -4763,6 +5123,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "container",
+        "recovery_source": "subcommand",
         "reason": "writing command output to a file requires approval",
     },
     {
@@ -4780,6 +5142,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "container",
+        "recovery_source": "subcommand",
         "reason": "writing command output to a file requires approval",
     },
     {
@@ -4797,6 +5161,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "container",
+        "recovery_source": "subcommand",
         "reason": "writing command output to a file requires approval",
     },
     {
@@ -4814,6 +5180,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "container",
+        "recovery_source": "subcommand",
         "reason": "writing command output to a file requires approval",
     },
     {
@@ -4831,6 +5199,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "container",
+        "recovery_source": "subcommand",
         "reason": "writing command output to a file requires approval",
     },
     {
@@ -4848,6 +5218,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "container",
+        "recovery_source": "subcommand",
         "reason": "writing command output to a file requires approval",
     },
     {
@@ -4865,6 +5237,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "container",
+        "recovery_source": "subcommand",
         "reason": "writing command output to a file requires approval",
     },
     {
@@ -4883,6 +5257,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "opening matches in an arbitrary program requires approval",
     },
     {
@@ -4901,6 +5277,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "replaying commits through a shell command requires approval",
     },
     {
@@ -4918,6 +5296,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "overriding the transport program requires approval",
     },
     {
@@ -4935,6 +5315,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "overriding the transport program requires approval",
     },
     {
@@ -4954,6 +5336,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "removing a remote ref requires approval",
     },
     {
@@ -4969,6 +5353,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "cloning fetches external code \u2014 requires approval",
     },
     {
@@ -4987,6 +5373,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "container",
+        "recovery_source": "subcommand",
         "reason": "a patch that writes outside the working area requires approval",
     },
     {
@@ -5002,6 +5390,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "snapshot",
+        "recovery_source": "subcommand",
         "reason": "restoring files discards working-tree changes",
     },
     {
@@ -5017,6 +5407,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "snapshot",
+        "recovery_source": "subcommand",
         "reason": "removing tracked files requires approval",
     },
     {
@@ -5032,6 +5424,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "deleting untracked files is destructive \u2014 requires approval",
     },
     {
@@ -5056,6 +5450,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "git config can change how commands execute",
     },
     {
@@ -5071,6 +5467,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "snapshot",
+        "recovery_source": "subcommand",
         "reason": "use git switch for branches or git restore for files",
     },
     {
@@ -5086,6 +5484,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "expiring reflog entries is destructive \u2014 requires approval",
     },
     {
@@ -5101,6 +5501,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "deleting reflog entries is destructive \u2014 requires approval",
     },
     {
@@ -5116,6 +5518,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -5138,6 +5542,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "deleting or moving a branch requires approval",
     },
     {
@@ -5153,6 +5559,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "snapshot",
+        "recovery_source": "subcommand",
         "reason": "",
     },
     {
@@ -5170,6 +5578,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "container",
+        "recovery_source": "operation",
         "reason": "writing command output to a file requires approval",
     },
     {
@@ -5185,6 +5595,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "snapshot",
+        "recovery_source": "subcommand",
         "reason": "a bisect step moves HEAD across commits",
     },
     {
@@ -5200,6 +5612,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -5215,6 +5629,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -5230,6 +5646,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "submodule operations fetch and check out external code",
     },
     {
@@ -5248,6 +5666,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "deleting a tag requires approval",
     },
     {
@@ -5263,6 +5683,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "pointing a symbolic ref somewhere else moves HEAD",
     },
     {
@@ -5282,6 +5704,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "snapshot",
+        "recovery_source": "subcommand",
         "reason": "a working-tree-destroying reset requires approval",
     },
     {
@@ -5301,6 +5725,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "snapshot",
+        "recovery_source": "subcommand",
         "reason": "a force switch can discard working-tree changes",
     },
     {
@@ -5316,6 +5742,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -5331,6 +5759,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -5346,6 +5776,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -5361,6 +5793,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -5376,6 +5810,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "removing a worktree deletes it \u2014 requires approval",
     },
     {
@@ -5391,6 +5827,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "pruning worktrees is destructive \u2014 requires approval",
     },
     {
@@ -5406,6 +5844,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "this worktree operation is not classified",
     },
     {
@@ -5423,6 +5863,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "container",
+        "recovery_source": "operation",
         "reason": "writing command output to a file requires approval",
     },
     {
@@ -5440,6 +5882,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "container",
+        "recovery_source": "operation",
         "reason": "writing command output to a file requires approval",
     },
     {
@@ -5455,6 +5899,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -5470,6 +5916,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -5485,6 +5933,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -5500,6 +5950,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -5515,6 +5967,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "dropping a stash is destructive \u2014 requires approval",
     },
     {
@@ -5530,6 +5984,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "clearing stashes is destructive \u2014 requires approval",
     },
     {
@@ -5545,6 +6001,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -5560,6 +6018,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "removing a remote requires approval",
     },
     {
@@ -5575,6 +6035,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "removing a remote requires approval",
     },
     {
@@ -5590,6 +6052,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "changing a remote URL requires approval",
     },
     {
@@ -5605,6 +6069,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "pruning a remote is destructive \u2014 requires approval",
     },
     {
@@ -5620,6 +6086,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -5635,6 +6103,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "this gh command is not classified",
     },
     {
@@ -5650,6 +6120,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -5665,6 +6137,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -5680,6 +6154,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -5695,6 +6171,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -5710,6 +6188,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -5725,6 +6205,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -5743,6 +6225,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "gh pr create against another repository requires approval",
     },
     {
@@ -5761,6 +6245,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "gh pr edit against another repository requires approval",
     },
     {
@@ -5779,6 +6265,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "gh pr ready against another repository requires approval",
     },
     {
@@ -5794,6 +6282,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "gh pr comment changes remote state \u2014 requires approval",
     },
     {
@@ -5809,6 +6299,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "gh pr review changes remote state \u2014 requires approval",
     },
     {
@@ -5824,6 +6316,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "gh pr merge changes remote state \u2014 requires approval",
     },
     {
@@ -5839,6 +6333,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "gh pr close changes remote state \u2014 requires approval",
     },
     {
@@ -5854,6 +6350,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "this gh pr operation is not classified",
     },
     {
@@ -5869,6 +6367,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -5884,6 +6384,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -5899,6 +6401,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -5914,6 +6418,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "gh issue create changes remote state \u2014 requires approval",
     },
     {
@@ -5929,6 +6435,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "gh issue edit changes remote state \u2014 requires approval",
     },
     {
@@ -5944,6 +6452,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "gh issue comment changes remote state \u2014 requires approval",
     },
     {
@@ -5959,6 +6469,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "gh issue close changes remote state \u2014 requires approval",
     },
     {
@@ -5974,6 +6486,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "this gh issue operation is not classified",
     },
     {
@@ -5989,6 +6503,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -6004,6 +6520,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -6019,6 +6537,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -6034,6 +6554,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "gh run rerun changes remote state \u2014 requires approval",
     },
     {
@@ -6049,6 +6571,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "gh run cancel changes remote state \u2014 requires approval",
     },
     {
@@ -6064,6 +6588,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "gh run download changes remote state \u2014 requires approval",
     },
     {
@@ -6079,6 +6605,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "this gh run operation is not classified",
     },
     {
@@ -6094,6 +6622,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -6109,6 +6639,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -6124,6 +6656,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "gh repo clone changes remote state \u2014 requires approval",
     },
     {
@@ -6139,6 +6673,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "gh repo fork changes remote state \u2014 requires approval",
     },
     {
@@ -6154,6 +6690,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "this gh repo operation is not classified",
     },
     {
@@ -6169,6 +6707,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -6184,6 +6724,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -6199,6 +6741,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "gh release create changes remote state \u2014 requires approval",
     },
     {
@@ -6214,6 +6758,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "gh release upload changes remote state \u2014 requires approval",
     },
     {
@@ -6229,6 +6775,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "this gh release operation is not classified",
     },
     {
@@ -6244,6 +6792,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -6259,6 +6809,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "gh cache delete changes remote state \u2014 requires approval",
     },
     {
@@ -6274,6 +6826,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "this gh cache operation is not classified",
     },
     {
@@ -6289,6 +6843,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -6304,6 +6860,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -6319,6 +6877,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "gh workflow run changes remote state \u2014 requires approval",
     },
     {
@@ -6334,6 +6894,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "gh workflow enable changes remote state \u2014 requires approval",
     },
     {
@@ -6349,6 +6911,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "gh workflow disable changes remote state \u2014 requires approval",
     },
     {
@@ -6364,6 +6928,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "this gh workflow operation is not classified",
     },
     {
@@ -6379,6 +6945,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -6394,6 +6962,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "this gh auth operation is not classified",
     },
     {
@@ -6409,6 +6979,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -6424,6 +6996,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -6439,6 +7013,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -6454,6 +7030,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -6469,6 +7047,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -6484,6 +7064,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "this gh search operation is not classified",
     },
     {
@@ -6499,6 +7081,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -6514,6 +7098,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "gh label create changes remote state \u2014 requires approval",
     },
     {
@@ -6529,6 +7115,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "gh label edit changes remote state \u2014 requires approval",
     },
     {
@@ -6544,6 +7132,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "gh label delete changes remote state \u2014 requires approval",
     },
     {
@@ -6559,6 +7149,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "gh label clone changes remote state \u2014 requires approval",
     },
     {
@@ -6574,6 +7166,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "this gh label operation is not classified",
     },
     {
@@ -6589,6 +7183,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -6604,6 +7200,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -6619,6 +7217,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "gh gist create changes remote state \u2014 requires approval",
     },
     {
@@ -6634,6 +7234,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "gh gist edit changes remote state \u2014 requires approval",
     },
     {
@@ -6649,6 +7251,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "gh gist delete changes remote state \u2014 requires approval",
     },
     {
@@ -6664,6 +7268,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "gh gist clone changes remote state \u2014 requires approval",
     },
     {
@@ -6679,6 +7285,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "this gh gist operation is not classified",
     },
     {
@@ -6694,6 +7302,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -6709,6 +7319,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -6724,6 +7336,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -6739,6 +7353,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -6754,6 +7370,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "gh project create changes remote state \u2014 requires approval",
     },
     {
@@ -6769,6 +7387,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "gh project edit changes remote state \u2014 requires approval",
     },
     {
@@ -6784,6 +7404,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "gh project close changes remote state \u2014 requires approval",
     },
     {
@@ -6799,6 +7421,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "gh project delete changes remote state \u2014 requires approval",
     },
     {
@@ -6814,6 +7438,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "gh project item-add changes remote state \u2014 requires approval",
     },
     {
@@ -6829,6 +7455,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "gh project item-delete changes remote state \u2014 requires approval",
     },
     {
@@ -6844,6 +7472,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "this gh project operation is not classified",
     },
     {
@@ -6859,6 +7489,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -6874,6 +7506,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -6889,6 +7523,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "gh variable set changes remote state \u2014 requires approval",
     },
     {
@@ -6904,6 +7540,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "gh variable delete changes remote state \u2014 requires approval",
     },
     {
@@ -6919,6 +7557,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "this gh variable operation is not classified",
     },
     {
@@ -6934,6 +7574,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -6949,6 +7591,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -6964,6 +7608,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -6979,6 +7625,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "this gh ruleset operation is not classified",
     },
     {
@@ -6994,6 +7642,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -7009,6 +7659,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -7024,6 +7676,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "gh config set changes remote state \u2014 requires approval",
     },
     {
@@ -7039,6 +7693,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "this gh config operation is not classified",
     },
     {
@@ -7054,6 +7710,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -7069,6 +7727,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -7092,6 +7752,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "gh api can mutate anything \u2014 requires approval",
     },
     {
@@ -7107,6 +7769,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "container operations require approval",
     },
     {
@@ -7122,6 +7786,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -7137,6 +7803,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -7152,6 +7820,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -7167,6 +7837,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -7182,6 +7854,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -7197,6 +7871,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -7212,6 +7888,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -7227,6 +7905,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -7242,6 +7922,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -7257,6 +7939,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -7272,6 +7956,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -7287,6 +7973,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -7302,6 +7990,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -7317,6 +8007,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -7332,6 +8024,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -7347,6 +8041,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -7362,6 +8058,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -7377,6 +8075,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -7392,6 +8092,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -7407,6 +8109,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "container operations require approval",
     },
     {
@@ -7422,6 +8126,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -7437,6 +8143,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -7452,6 +8160,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -7467,6 +8177,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "container operations require approval",
     },
     {
@@ -7482,6 +8194,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -7497,6 +8211,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -7512,6 +8228,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "container operations require approval",
     },
     {
@@ -7527,6 +8245,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -7542,6 +8262,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -7557,6 +8279,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "container operations require approval",
     },
     {
@@ -7572,6 +8296,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -7587,6 +8313,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -7602,6 +8330,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -7617,6 +8347,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "container operations require approval",
     },
     {
@@ -7632,6 +8364,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -7647,6 +8381,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -7662,6 +8398,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -7677,6 +8415,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "container operations require approval",
     },
     {
@@ -7695,6 +8435,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "bare interpreters and inline code are not allowed",
     },
     {
@@ -7710,6 +8452,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "subcommand",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "restoring declared dependencies reaches the registry",
     },
     {
@@ -7725,6 +8469,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -7740,6 +8486,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -7755,6 +8503,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "",
     },
     {
@@ -7770,6 +8520,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "subcommand",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "adding a dependency changes what this project needs",
     },
     {
@@ -7785,6 +8537,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "removing a dependency changes what this project needs",
     },
     {
@@ -7800,6 +8554,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "subcommand",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "running a package that is not a declared dependency",
     },
     {
@@ -7819,6 +8575,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "emitting compiler output writes files the command does not bound",
     },
     {
@@ -7834,6 +8592,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "the package runner fetches what is not already a dependency",
     },
     {
@@ -7852,6 +8612,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "outside",
         "sandbox_source": "command",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "emitting compiler output writes files the command does not bound",
     },
     {
@@ -7867,6 +8629,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "the package runner fetches what is not already a dependency",
     },
     {
@@ -7885,6 +8649,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "value_flags": [],
         "sandbox": "ambient",
         "sandbox_source": "root",
+        "recovery": "nothing",
+        "recovery_source": "root",
         "reason": "emitting compiler output writes files the command does not bound",
     },
 ]
