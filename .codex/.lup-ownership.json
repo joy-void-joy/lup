@@ -149,7 +149,7 @@
     {
       "path": ".codex/plugins/lup/hooks/runtime/kernel/settlement.py",
       "category": "generated",
-      "sha256": "e70f36fc44e4521cd875d3f0748753a75657219002c8697eab4e0d149d1980e2",
+      "sha256": "b42c9e01699b06f1b816ad6c321b06b12e3869dab5fd76dbfaeae7bbed96b2c9",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -184,7 +184,7 @@
     {
       "path": ".codex/plugins/lup/hooks/scripts/policy.py",
       "category": "generated",
-      "sha256": "bf34ead0d3a52e8f667bb79d9505e82aa0099c80e848e72f9a253f1136bafc78",
+      "sha256": "a032e7fbb754553ed652c51bac0c2095d6ba2bec4fff50c89f8917785a536cc4",
       "semantic_id": "hooks.lup-policy",
       "executable": true
     },

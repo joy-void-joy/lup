@@ -155,6 +155,84 @@ def script_run_nudge(
     )
 
 
+def record_deferral(
+    root: Path | None,
+    command: str,
+    reason: str,
+    judged: bool,
+    corpus: str = ".lup/hooks/learned.jsonl",
+) -> str:
+    """Write down one command this policy declined to interrupt about.
+
+    The other half of allow-and-log, and what makes the relaxation honest.
+    The lattice asked about everything unjudged for an *observability*
+    reason, and logging serves that without spending anybody's attention --
+    but only if something is actually written down, or the relaxation is
+    just the asking removed.
+
+    **Two kinds of deferral reach here and they are worth very different
+    things**, which is why ``judged`` is recorded rather than inferred later.
+    An unjudged one is a gap in the vocabulary: nobody has ever said anything
+    about this command, and it is a candidate for a rule. A judged one is the
+    relaxation working -- a rule looked, and the boundary answered for the
+    loss -- and it is an audit trail rather than a candidate. Collapsing them
+    would put `git reset --hard` in the same list as a command nobody has
+    classified, and the list is read to find the second.
+
+    **Written at the moment the verdict exists**, rather than after the
+    command has run. §10 proposed the later event gated on this one, to learn
+    from what a human approved -- and then refuted its own signal: a runtime
+    offers both "yes" and "yes, don't ask again" and the later event cannot
+    tell them apart, and a human may answer by *editing* the command, so it
+    fires for something other than what was judged. None of that touches a
+    deferral, which is nobody's approval and is exactly known here.
+
+    **One line per distinct command.** A session defers the same `grep` fifty
+    times, and fifty identical lines is a list nobody reads -- the same
+    failure the undo layer's dedup exists to prevent, in the same shape. So a
+    command already written down is skipped, and the file is a set: what a
+    diff shows is what this session met that no session had met before.
+
+    Silent about its own failure, and for the reason :func:`undo_snapshot`
+    is: this runs in front of a command somebody asked for, and a read-only
+    checkout is an ordinary place to be running. An empty string says nothing
+    was recorded.
+    """
+    if root is None or not command:
+        return ""
+    path = root / corpus
+    try:
+        seen = path.read_text(encoding="utf-8") if path.exists() else ""
+    except OSError:
+        return ""
+    entry = json.dumps(
+        {
+            "command": command,
+            "reason": reason,
+            "judged": judged,
+            "first_seen": datetime.now(UTC).isoformat(),
+        },
+        sort_keys=True,
+    )
+    # Compared on the command alone, because the rest of the row is what this
+    # session happened to say about it: the same command reached twice under
+    # two reasons is one candidate, and a timestamp differs every time.
+    for line in seen.splitlines():
+        try:
+            held = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(held, dict) and "command" in held and held["command"] == command:
+            return ""
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as sink:
+            sink.write(entry + "\n")
+    except OSError:
+        return ""
+    return entry
+
+
 def contained() -> bool:
     """Whether this session is running inside the project's container.
 
@@ -1006,6 +1084,12 @@ def bash_decision(
     )
     if verdict.effect == "deny":
         return verdict
+    # The log half of allow-and-log. A deferral is this policy declining to
+    # interrupt, which is the one verdict that reaches nobody: the runtime's
+    # own gate decides and the reason goes to no human. Written down here or
+    # it is not written down anywhere.
+    if verdict.effect == "defer":
+        record_deferral(cwd, command, verdict.reason, verdict.recovery != "nothing")
     recorded = undo_point(verdict, reference)
     # Counted only where the command was going to run anyway. A refused script
     # never ran, so counting it would nudge toward promoting something that

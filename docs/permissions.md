@@ -100,6 +100,34 @@ to keep apart: an unjudged deferral means *nobody looked*, and this one means
 want of anybody having looked, so the second settles rather than rewrites and
 never reaches it.
 
+**And it is written down**, which is what makes the relaxation honest rather
+than merely quieter. The lattice asked about everything unjudged for an
+*observability* reason, and a deferral is the one verdict that reaches nobody
+— the runtime's own gate decides and the reason goes to no human. So every
+deferral appends to `.lup/hooks/learned.jsonl`, one line per distinct command,
+and `uv run lup-devtools hooks learn` reads it back as two lists:
+
+- **gaps** — commands nobody has judged, which a boundary carried rather than
+  a rule. Each is a candidate for a row in the shell vocabulary, and this list
+  is the reason the corpus exists.
+- **settled** — commands a rule judged and the boundary answered for. The
+  audit trail: read it to check the relaxation is letting through what you
+  meant.
+
+Nothing writes a rule automatically, and the refusal is the design. From one
+deferred `ruff check .`, a row of `ruff` → allow permits `ruff format --write`
+forever and a row of `ruff check` → allow permits `ruff check --fix`; the same
+mechanism over `rm tmp/scratch` → `rm` → allow permits `rm -rf`. What separates
+the safe generalisation from the catastrophic one is exactly the judgement a
+person is there to make.
+
+Recorded when the verdict is reached rather than after the command has run. The
+later event was the first proposal — learning from what a human approved — and
+it cannot carry that: a runtime offers both *yes* and *yes, don't ask again*
+and the event cannot tell them apart, and a human may answer by editing the
+command, so it fires for something other than what was judged. None of that
+touches a deferral, which is nobody's approval and is exactly known here.
+
 `uv run <target>` is parsed rather than matched against that table, so its
 targets carry the same three answers on a table of their own: each declares
 its effect, its placement, and its reason. Blessing is the default and the
