@@ -12,8 +12,8 @@ from pydantic import BaseModel
 from lup.devtools.dev.git_guards import DECLARED_GUARDS, GitGuard, arm, read_guards
 from lup.policy.assets.host import project_environment
 from lup.devtools.layout import get_tree_dir
+from lup.devtools.clipboard import copy_to_clipboard
 from lup.devtools.utils import (
-    copy_to_clipboard,
     decode_stderr,
     format_table,
     git,
