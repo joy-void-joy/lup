@@ -18,16 +18,20 @@ failure mode the design forbids, so a caller that asked to be contained and
 cannot be gets a refusal naming what was missing, and the operator decides.
 """
 
+import json
+import os
 from pathlib import Path
 
 import sh
 import typer
 
+from lup.harness.credential import remote_rewrites
 from lup.harness.egress import SessionEgress
 from lup.harness.image import ContainerEngine, Image, detected_engine
 from lup.harness.requirements import Manifest
 from lup.runtime.login import ProviderLogin
-from lup.sandbox.rail import lease_for
+from lup.sandbox.attribution import WRITE_REFUSAL_MARKERS
+from lup.sandbox.rail import Lease, lease_for
 
 
 def image_tag(root: Path) -> str:
@@ -104,7 +108,7 @@ def start_egress(
     scratch = root / "tmp"
     scratch.mkdir(parents=True, exist_ok=True)
     configuration = scratch / "egress.conf"
-    configuration.write_text(egress.policy.render())
+    configuration.write_text(egress.enforced().render())
     try:
         client(*egress.proxy_arguments(project, configuration))
         client(*egress.connect_arguments(project))
@@ -117,6 +121,36 @@ def start_egress(
             "declare `mode='bridge'` on the image's egress to run without "
             "an egress boundary."
         ) from error
+
+
+def record_boundary(lease: Lease, egress: SessionEgress, root: Path) -> None:
+    """Write down what this session is confined by, for the gate that explains it.
+
+    The mount table is a launch fact and the dispatcher that has to explain a
+    refusal was compiled long before it. Nothing else bridges that: the
+    dispatcher runs as a bare script with no way to ask the container runtime
+    anything, and a refusal it cannot attribute reaches the agent as
+    ``Read-only file system`` -- which is a broken disk, not a boundary, and
+    is debugged as one.
+
+    Written on every contained launch rather than once, because a lease
+    changes when a sibling worktree appears or goes, and a stale table would
+    attribute a refusal to a mount that is no longer there. An uncontained
+    launch writes nothing and the reader treats absence as "no boundary to
+    speak of", which is exactly what it is.
+    """
+    ledger = root / ".lup" / "boundary.json"
+    ledger.parent.mkdir(parents=True, exist_ok=True)
+    ledger.write_text(
+        json.dumps(
+            {
+                "read_only": sorted(lease.read_only.values()),
+                "write_refusals": list(WRITE_REFUSAL_MARKERS),
+                "allowed_hosts": sorted(item.host for item in egress.admits),
+            },
+            indent=2,
+        )
+    )
 
 
 def report_egress(egress: SessionEgress, root: Path, down: bool) -> None:
@@ -215,6 +249,20 @@ def contained_argv(
     for line in image.egress.notice(root.name):
         typer.echo(line)
     lease = lease_for(root, human_owned)
+    record_boundary(lease, image.egress, root)
+    # Read on the host and passed in, never resolved inside: the file that
+    # answers "where does this remote point" is `.git/config`, which the
+    # container can write, so a rewrite decided in there is a rewrite the
+    # confined thing chose for itself.
+    environ = os.environ  # lup: ignore[os-environ]
+    token = (
+        environ[image.forge.token_variable]
+        if image.forge.token_variable in environ
+        else ""
+    )
+    rewrites = remote_rewrites(root, image.forge.host)
+    for line in image.forge.notice(token, rewrites):
+        typer.echo(line)
     return image.session_arguments(
         tag=tag,
         checkout=root,
@@ -228,4 +276,6 @@ def contained_argv(
         credential=credential,
         host_config_home=host_config_home,
         engine=client,
+        forge_token=token,
+        rewrites=rewrites,
     )
