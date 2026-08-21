@@ -33,6 +33,7 @@ from lup.adapters.codex.harness_runtime import (
 from lup.adapters.codex.transcripts import CodexTranscripts
 from lup.harness.environment import non_interactive_environment
 from lup.harness.models import NativeName, Plugin, Resumption
+from lup.harness.notice import Notice
 from lup.harness.requirements import (
     Finding,
     Manifest,
@@ -377,7 +378,10 @@ def start_harness_transcript(
     )
     diagnostics = capture_watcher_diagnostics(trace_path.parent)
     watcher.start()
-    typer.echo(f"{provider} observable transcript: {trace_path}")
+    Notice(
+        text=f"{provider} observable transcript: {trace_path}",
+        urgency="artifact",
+    ).say()
     return HarnessTranscript(journal=journal, watcher=watcher, diagnostics=diagnostics)
 
 
@@ -396,7 +400,10 @@ def runtime_preflight(composition: NativeHarnessComposition) -> None:
     evidence = composition.readiness()
     for item in evidence:
         state = "ready" if item.supported else "missing"
-        typer.echo(f"{target} {item.capability}: {state} ({item.version})")
+        Notice(
+            text=f"{target} {item.capability}: {state} ({item.version})",
+            urgency="ready" if item.supported else "refusal",
+        ).say()
     if any(not item.supported for item in evidence):
         raise typer.BadParameter(f"{target} runtime preflight failed")
     report_requirements(composition.recipe.source.requirements)
@@ -420,8 +427,8 @@ def report_requirements(manifest: Manifest, setting_up: bool = False) -> list[Fi
     environ: EnvVars = dict(os.environ)  # lup: ignore[os-environ]
     findings = manifest.check(environ, setting_up=setting_up)
     for finding in findings:
-        for line in finding.lines():
-            typer.echo(line)
+        for notice in finding.notices():
+            notice.say()
     stopping = refused(findings)
     if stopping:
         raise typer.BadParameter(
@@ -494,13 +501,22 @@ def apply_sandbox_environment(
     unusable = [finding for finding in findings if not finding.working]
     if unusable:
         for finding in unusable:
-            typer.echo(
-                f"{label} sandbox: {finding.requirement.capability} — {finding.detail}"
-            )
-        typer.echo(f"{label} sandbox: deny lattice stays active")
+            Notice(
+                text=(
+                    f"{label} sandbox: {finding.requirement.capability} — "
+                    f"{finding.detail}"
+                ),
+                urgency="warning",
+            ).say()
+        Notice(
+            text=f"{label} sandbox: deny lattice stays active", urgency="warning"
+        ).say()
         return
     environment["LUP_SANDBOX_ACTIVE"] = "1"
-    typer.echo(f"{label} sandbox: active — unjudged shell defers to the OS boundary")
+    Notice(
+        text=f"{label} sandbox: active — unjudged shell defers to the OS boundary",
+        urgency="boundary",
+    ).say()
 
 
 # lup: ignore[library-default] — each entry is literally a Codex CLI flag
@@ -559,22 +575,31 @@ def codex_sandbox_arguments(
         if word in CODEX_SANDBOX_OVERRIDES or word.startswith("--sandbox=")
     ]
     if overrides:
-        typer.echo(
-            f"codex sandbox: caller envelope ({' '.join(overrides)}) — "
-            "deny lattice stays active"
-        )
+        Notice(
+            text=(
+                f"codex sandbox: caller envelope ({' '.join(overrides)}) — "
+                "deny lattice stays active"
+            ),
+            urgency="warning",
+        ).say()
         return []
     if contained:
-        typer.echo(
-            "codex sandbox: off inside the container — "
-            "the container is the boundary, and its proxy is the way out"
-        )
+        Notice(
+            text=(
+                "codex sandbox: off inside the container — "
+                "the container is the boundary, and its proxy is the way out"
+            ),
+            urgency="boundary",
+        ).say()
         return ["--sandbox", "danger-full-access"]
     environment["LUP_SANDBOX_ACTIVE"] = "1"
-    typer.echo(
-        "codex sandbox: workspace-write envelope — "
-        "unjudged shell defers to the OS boundary"
-    )
+    Notice(
+        text=(
+            "codex sandbox: workspace-write envelope — "
+            "unjudged shell defers to the OS boundary"
+        ),
+        urgency="boundary",
+    ).say()
     return ["--sandbox", "workspace-write", *writable_root_arguments()]
 
 
@@ -610,7 +635,10 @@ def announce_relaxed_rules(relaxed: bool, plugin: Plugin) -> None:
     if not relaxed:
         return
     retired = len(plugin.hooks.rules.retired if plugin.hooks is not None else [])
-    typer.echo(f"anti-patterns retired for this session: {retired} rules")
+    Notice(
+        text=f"anti-patterns retired for this session: {retired} rules",
+        urgency="warning",
+    ).say()
     typer.echo(
         "`dev check --antipatterns` still holds this repository to them; run "
         "`lup-devtools harness generate all` before committing, or the "

@@ -33,6 +33,7 @@ from rich.text import Text
 from lup.harness.credential import remote_rewrites
 from lup.harness.egress import SessionEgress
 from lup.harness.image import ContainerEngine, Image, detected_client
+from lup.harness.notice import Notice
 from lup.harness.requirements import Manifest
 from lup.runtime.login import ProviderLogin
 from lup.sandbox.attribution import WRITE_REFUSAL_MARKERS
@@ -169,14 +170,21 @@ def report_egress(egress: SessionEgress, root: Path, down: bool) -> None:
     project = root.name
     client = detected_client()
     if client is None:
-        typer.echo("No container client answered, so nothing of this is running.")
+        Notice(
+            text="No container client answered, so nothing of this is running.",
+            urgency="warning",
+        ).say()
         return
     for argv in egress.teardown_arguments(project) if down else []:
         # Every exit code is acceptable here and nowhere else: removing a
         # container that is already gone reports an error naming exactly the
         # absence this call was asked to produce.
         sh.Command(client.binary)(*argv, _ok_code=list(range(256)))
-    typer.echo("Removed." if down else "\n".join(egress.notice(project)))
+    if down:
+        Notice(text="Removed.", urgency="ready").say()
+        return
+    for notice in egress.notice(project):
+        notice.say()
 
 
 def network_present(name: str, engine: ContainerEngine) -> bool:
@@ -231,8 +239,8 @@ def build_image(
         f"GID={root.stat().st_gid}",
         str(scratch),
     ]
-    typer.echo(f"Building {tag} from {dockerfile}")
-    typer.echo(f"Its output: {log}")
+    Notice(text=f"Building {tag} from {dockerfile}", urgency="progress").say()
+    Notice(text=f"Its output: {log}", urgency="artifact").say()
     console = Console()
     recent: deque[str] = deque(maxlen=shown)  # lup: ignore[empty-collection]
     with log.open("w", encoding="utf-8") as handle:
@@ -305,8 +313,8 @@ def contained_argv(
     if not image_present(tag, client):
         build_image(image, manifest, tag, client, root)
     start_egress(image.egress, root.name, client, root)
-    for line in image.egress.notice(root.name):
-        typer.echo(line)
+    for notice in image.egress.notice(root.name):
+        notice.say()
     lease = lease_for(root, human_owned)
     record_boundary(lease, image.egress, root)
     # Read on the host and passed in, never resolved inside: the file that
@@ -320,8 +328,8 @@ def contained_argv(
         else ""
     )
     rewrites = remote_rewrites(root, image.forge.host)
-    for line in image.forge.notice(token, rewrites):
-        typer.echo(line)
+    for notice in image.forge.notice(token, rewrites):
+        notice.say()
     return image.session_arguments(
         tag=tag,
         checkout=root,

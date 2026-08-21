@@ -49,6 +49,7 @@ from typing import Annotated, Literal
 import sh
 from pydantic import BaseModel, Discriminator, Field, model_validator
 
+from lup.harness.notice import Notice, Urgency
 from lup.types import EnvVars
 
 
@@ -488,21 +489,39 @@ class Finding(BaseModel, frozen=True):
         """Whether this finding is one a launch must not continue past."""
         return not self.working and self.requirement.absence.refuses()
 
-    def lines(self) -> list[str]:
+    def notices(self) -> list[Notice]:
         """This finding as an operator reads it: verdict, cause, consequence.
 
         The consequence is printed even when a cause was found, because the
         two answer different questions -- why it failed, and what is now
         missing -- and a reader who gets only the first has to work out
         whether it mattered.
+
+        The urgency is the finding's own, not the printer's. A capability
+        whose absence refuses the launch and one whose absence merely costs
+        something are different sentences to a reader and were the same
+        sentence on the screen, which is how a working machine's launch and
+        a broken one's looked alike.
         """
         if self.working:
-            return [f"{self.requirement.capability}: working"]
+            return [
+                Notice(text=f"{self.requirement.capability}: working", urgency="ready")
+            ]
+        urgency: Urgency = "refusal" if self.refuses() else "warning"
         consequence = self.requirement.absence.consequence()
         return [
-            f"{self.requirement.capability}: {consequence}",
-            *[f"    {cause}" for cause in self.causes or [self.detail]],
-            f"    needed for {self.requirement.purpose}",
+            Notice(
+                text=f"{self.requirement.capability}: {consequence}", urgency=urgency
+            ),
+            *[
+                Notice(text=cause, urgency=urgency, indent=1)
+                for cause in self.causes or [self.detail]
+            ],
+            Notice(
+                text=f"needed for {self.requirement.purpose}",
+                urgency="detail",
+                indent=1,
+            ),
         ]
 
 

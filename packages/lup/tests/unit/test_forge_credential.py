@@ -62,7 +62,7 @@ def test_the_absence_of_a_token_is_said_at_launch() -> None:
     session is exactly the failure the manifest exists to prevent, so the
     variable is named before anything needs it.
     """
-    spoken = " ".join(GitAccess().notice("", []))
+    spoken = " ".join(item.text for item in GitAccess().notice("", []))
     assert "LUP_GIT_TOKEN" in spoken
     assert "ssh key is on the host" in spoken
 
@@ -74,7 +74,9 @@ def test_the_launch_says_the_agent_can_read_the_token() -> None:
     scope is the boundary, not the secrecy, and a reader who believed
     otherwise would scope the token wrongly.
     """
-    assert "not the secrecy" in " ".join(GitAccess().notice("tok", REWRITE))
+    assert "not the secrecy" in " ".join(
+        item.text for item in GitAccess().notice("tok", REWRITE)
+    )
 
 
 def test_an_ssh_config_alias_is_taken_apart_rather_than_pattern_matched() -> None:
@@ -154,7 +156,7 @@ def test_signing_is_off_by_default_and_says_so() -> None:
     """
     settings = {item.key: item.value for item in SigningOff().configuration()}
     assert settings["commit.gpgsign"] == "false"
-    assert "unsigned" in " ".join(SigningOff().notice())
+    assert "unsigned" in " ".join(item.text for item in SigningOff().notice())
 
 
 def test_the_agent_key_signs_as_the_agent_and_admits_it_is_unverified() -> None:
@@ -167,13 +169,15 @@ def test_the_agent_key_signs_as_the_agent_and_admits_it_is_unverified() -> None:
     settings = {item.key: item.value for item in AgentKey().configuration()}
     assert settings["gpg.format"] == "ssh"
     assert settings["commit.gpgsign"] == "true"
-    assert "unverified" in " ".join(AgentKey().notice())
+    assert "unverified" in " ".join(item.text for item in AgentKey().notice())
 
 
 def test_inheriting_the_checkouts_signing_says_what_it_will_cost() -> None:
     """The usual outcome is a mid-commit failure debugged as a GPG problem."""
     assert InheritedSigning().configuration() == []
-    assert "boundary, not a GPG fault" in " ".join(InheritedSigning().notice())
+    assert "boundary, not a GPG fault" in " ".join(
+        item.text for item in InheritedSigning().notice()
+    )
 
 
 def test_the_signing_choice_reaches_the_configuration_the_container_starts_with() -> (

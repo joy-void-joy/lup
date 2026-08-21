@@ -44,6 +44,7 @@ import sh
 from pydantic import BaseModel, Discriminator, Field
 
 from lup.devtools.utils import git
+from lup.harness.notice import Notice
 from lup.types import EnvVars
 
 
@@ -105,11 +106,18 @@ class SigningOff(BaseModel, frozen=True):
             GitSetting(key="tag.gpgsign", value="false"),
         ]
 
-    def notice(self) -> list[str]:
+    def notice(self) -> list[Notice]:
+        """A capability the session does not have, which is not a fault."""
         return [
-            "Signing: off for agent commits. The signing key stays on the "
-            "host, so a commit made in here is unsigned — sign at the merge "
-            "that lands the work, or set `signing` on the image declaration."
+            Notice(
+                text=(
+                    "Signing: off for agent commits. The signing key stays "
+                    "on the host, so a commit made in here is unsigned — "
+                    "sign at the merge that lands the work, or set "
+                    "`signing` on the image declaration."
+                ),
+                urgency="warning",
+            )
         ]
 
 
@@ -152,12 +160,18 @@ class AgentKey(BaseModel, frozen=True):
             GitSetting(key="commit.gpgsign", value="true"),
         ]
 
-    def notice(self) -> list[str]:
+    def notice(self) -> list[Notice]:
+        """A capability the session has, said in the terms it is true in."""
         return [
-            f"Signing: on, as {self.identity}, with a key held in this "
-            "container. A forge will show these as unverified until the "
-            "public half is registered — which is correct, since they were "
-            "not signed by you."
+            Notice(
+                text=(
+                    f"Signing: on, as {self.identity}, with a key held in "
+                    "this container. A forge will show these as unverified "
+                    "until the public half is registered — which is "
+                    "correct, since they were not signed by you."
+                ),
+                urgency="ready",
+            )
         ]
 
 
@@ -179,11 +193,18 @@ class InheritedSigning(BaseModel, frozen=True):
         """Nothing. The checkout's configuration decides, for better or worse."""
         return []
 
-    def notice(self) -> list[str]:
+    def notice(self) -> list[Notice]:
+        """The loud one, because its usual outcome is a mid-commit failure."""
         return [
-            "Signing: inherited from this checkout. If it is configured and "
-            "the key is on the host, commits will fail mid-way with "
-            "`gpg: signing failed` — which is a boundary, not a GPG fault."
+            Notice(
+                text=(
+                    "Signing: inherited from this checkout. If it is "
+                    "configured and the key is on the host, commits will "
+                    "fail mid-way with `gpg: signing failed` — which is a "
+                    "boundary, not a GPG fault."
+                ),
+                urgency="warning",
+            )
         ]
 
 
@@ -399,7 +420,7 @@ class GitAccess(BaseModel, frozen=True):
             },
         }
 
-    def notice(self, token: str, rewrites: list[RemoteRewrite]) -> list[str]:
+    def notice(self, token: str, rewrites: list[RemoteRewrite]) -> list[Notice]:
         """What the launch says about reaching the forge, before it is needed.
 
         The absent-token case is the one worth being careful about. It is not
@@ -410,10 +431,15 @@ class GitAccess(BaseModel, frozen=True):
         """
         if not token:
             return [
-                f"Forge: no token in {self.token_variable}, so nothing in "
-                "this session can reach a remote. The ssh key is on the host "
-                "by design and nothing routes to it, so a push or a fetch "
-                "will fail rather than quietly fall back to it.",
+                Notice(
+                    text=(
+                        f"Forge: no token in {self.token_variable}, so nothing "
+                        "in this session can reach a remote. The ssh key is on "
+                        "the host by design and nothing routes to it, so a push "
+                        "or a fetch will fail rather than quietly fall back to it."
+                    ),
+                    urgency="warning",
+                ),
                 *self.signing.notice(),
             ]
         rewritten = (
@@ -422,8 +448,13 @@ class GitAccess(BaseModel, frozen=True):
             else "no ssh remote to rewrite"
         )
         return [
-            f"Forge: {self.host} over HTTPS with the token in "
-            f"{self.token_variable}; {rewritten}. The agent can read this "
-            "token — the scope is the boundary, not the secrecy.",
+            Notice(
+                text=(
+                    f"Forge: {self.host} over HTTPS with the token in "
+                    f"{self.token_variable}; {rewritten}. The agent can read "
+                    "this token — the scope is the boundary, not the secrecy."
+                ),
+                urgency="ready",
+            ),
             *self.signing.notice(),
         ]

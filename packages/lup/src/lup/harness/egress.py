@@ -38,6 +38,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field, model_validator
 
+from lup.harness.notice import Notice
 from lup.sandbox.egress import EgressPolicy
 from lup.sandbox.models import NetworkMode
 from lup.types import EnvVars
@@ -67,8 +68,12 @@ class Unproxied(BaseModel, frozen=True):
     consequence: str = Field(description="What is unreachable as a result")
 
     def sentence(self) -> str:
-        """One line naming this component and what it costs, for the launch."""
-        return f"  {self.component}: {self.reason} — {self.consequence}"
+        """One line naming this component and what it costs, for the launch.
+
+        Unindented: subordination is the notice's to express, so a line that
+        carried its own two spaces would be indented twice over.
+        """
+        return f"{self.component}: {self.reason} — {self.consequence}"
 
 
 SSH_IGNORES_THE_PROXY = Unproxied(
@@ -339,7 +344,7 @@ class SessionEgress(BaseModel, frozen=True):
             ["network", "rm", self.network_name(project)],
         ]
 
-    def notice(self, project: str) -> list[str]:
+    def notice(self, project: str) -> list[Notice]:
         """What a launch says about the network the session is about to get.
 
         Every line here is one the friction table demands: the posture, what
@@ -349,9 +354,14 @@ class SessionEgress(BaseModel, frozen=True):
         """
         if not self.filtered():
             return [
-                f"Egress: {self.mode} — no proxy between this session and the "
-                "network. The LAN, localhost and any metadata endpoint are "
-                "reachable from inside the container."
+                Notice(
+                    text=(
+                        f"Egress: {self.mode} — no proxy between this session "
+                        "and the network. The LAN, localhost and any metadata "
+                        "endpoint are reachable from inside the container."
+                    ),
+                    urgency="warning",
+                )
             ]
         scoped = (
             f"only {', '.join(item.host for item in self.admits)}"
@@ -359,14 +369,36 @@ class SessionEgress(BaseModel, frozen=True):
             else "any public destination"
         )
         return [
-            f"Egress: filtered through {self.proxy_name(project)} — {scoped}. "
-            "Private ranges, cloud metadata hosts and local names are refused.",
+            Notice(
+                text=(
+                    f"Egress: filtered through {self.proxy_name(project)} — "
+                    f"{scoped}. Private ranges, cloud metadata hosts and local "
+                    "names are refused."
+                ),
+                urgency="boundary",
+            ),
             *(
-                ["These ignore the proxy and will hang rather than be refused:"]
+                [
+                    Notice(
+                        text=(
+                            "These ignore the proxy and will hang rather than "
+                            "be refused:"
+                        ),
+                        urgency="warning",
+                    )
+                ]
                 if self.unproxied
                 else []
             ),
-            *[item.sentence() for item in self.unproxied],
-            "It outlives this session so the next one does not pay for it "
-            "again; `harness egress --down` removes it.",
+            *[
+                Notice(text=item.sentence(), urgency="warning", indent=1)
+                for item in self.unproxied
+            ],
+            Notice(
+                text=(
+                    "It outlives this session so the next one does not pay for "
+                    "it again; `harness egress --down` removes it."
+                ),
+                urgency="detail",
+            ),
         ]
