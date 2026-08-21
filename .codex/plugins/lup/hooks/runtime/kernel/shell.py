@@ -162,35 +162,16 @@ def decide_find_words(words: list[str], context: ShellContext) -> KernelDecision
     return decide_command_rows(remaining, context["rows"])
 
 
-def decide_shell_segment(segment: list[str], context: ShellContext) -> KernelDecision:
-    """Classify one parsed shell segment against the vocabulary and handlers."""
-    while segment and segment[0] == "!":
-        segment = segment[1:]
-    if not segment:
-        return unjudged("shell segment has no command")
-    if segment[0] == "[[":
-        return KernelDecision("allow", "test expression is read-only")
-    effective = effective_command(segment)
-    words = effective["words"]
-    dangerous = effective["dangerous"]
-    if dangerous:
-        return KernelDecision(
-            "ask", "a security-sensitive environment assignment requires approval"
-        )
-    if not words:
-        return unjudged("shell segment has no command")
-    if SUBSTITUTION_SENTINEL in words[0]:
-        return unjudged("a command substitution in command position is not classified")
-    if any(
-        SUBSTITUTION_SENTINEL in word for word in words[1:]
-    ) and not argument_safe_words(words, context):
-        return unjudged(
-            "a command substitution result could become a guarded flag — run"
-            " it in its own call and splice the literal output"
-        )
+def decide_segment_words(words: list[str], context: ShellContext) -> KernelDecision:
+    """Classify one command's words against the vocabulary and handlers.
+
+    Separate from the segment above it because a verdict and a placement are
+    two axes, and only one of them is a help probe's to answer. Reached with
+    the word list a segment settles to, so a construct that recurses into a
+    payload — ``xargs``, ``find -exec`` — goes back through the segment and
+    meets the same reading of it.
+    """
     executable = posixpath.basename(words[0])
-    if is_help_probe(words[1:]):
-        return KernelDecision("allow", "a help probe only prints usage")
     if executable in INTERPRETERS and not declares_command(executable, context["rows"]):
         if len(words) > 1 and is_trusted_script(
             words[1], context["trusted_script_roots"]
@@ -272,6 +253,55 @@ def decide_shell_segment(segment: list[str], context: ShellContext) -> KernelDec
     if executable == "uv" and len(words) > 1:
         return decide_uv(words, context["runner_targets"], context["target_tables"])
     return decide_command_rows(words, context["rows"])
+
+
+def decide_shell_segment(segment: list[str], context: ShellContext) -> KernelDecision:
+    """Classify one parsed shell segment, letting a help probe soften the effect.
+
+    Printing usage says nothing about *where* the command has to run, and the
+    two are separate axes — so the probe replaces the verdict and the walk
+    still answers for the placement. Short-circuited above that walk it
+    answered for both, and dropped every declared placement a ``--help``
+    happened to sit in: measured, ``uv run lup-devtools dev check`` was placed
+    ``outside`` while ``uv run lup-devtools --help`` — the same toolchain, one
+    word apart — was placed ``ambient``, and so was every other help probe in
+    the vocabulary. The depth was incidental; the short circuit was the whole
+    of it.
+
+    Which is the reachable half of that defect: a toolchain declared
+    ``outside`` because it opens agent sessions is asked for its own usage
+    from inside the sandbox that placement exists to escape.
+    """
+    while segment and segment[0] == "!":
+        segment = segment[1:]
+    if not segment:
+        return unjudged("shell segment has no command")
+    if segment[0] == "[[":
+        return KernelDecision("allow", "test expression is read-only")
+    effective = effective_command(segment)
+    words = effective["words"]
+    dangerous = effective["dangerous"]
+    if dangerous:
+        return KernelDecision(
+            "ask", "a security-sensitive environment assignment requires approval"
+        )
+    if not words:
+        return unjudged("shell segment has no command")
+    if SUBSTITUTION_SENTINEL in words[0]:
+        return unjudged("a command substitution in command position is not classified")
+    if any(
+        SUBSTITUTION_SENTINEL in word for word in words[1:]
+    ) and not argument_safe_words(words, context):
+        return unjudged(
+            "a command substitution result could become a guarded flag — run"
+            " it in its own call and splice the literal output"
+        )
+    decision = decide_segment_words(words, context)
+    if is_help_probe(words[1:]):
+        return KernelDecision(
+            "allow", "a help probe only prints usage", decision.sandbox
+        )
+    return decision
 
 
 def loop_leader(segment: list[str]) -> str:
