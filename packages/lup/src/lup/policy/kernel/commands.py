@@ -67,6 +67,7 @@ def apply_command_row(row: ShellRuleRow, arguments: list[str]) -> KernelDecision
                 "allow",
                 "every argument is a declared read-only flag",
                 row["sandbox"],
+                row["recovery"],
             )
     if row["effect"] != "allow" and row["read_verbs"] and arguments:
         clean = not any(
@@ -78,6 +79,7 @@ def apply_command_row(row: ShellRuleRow, arguments: list[str]) -> KernelDecision
                 "allow",
                 "a declared read-only verb pins the query action",
                 row["sandbox"],
+                row["recovery"],
             )
     if row["effect"] != "allow" and row["write_markers"] and arguments:
         # Absence is the test, so every word has to be legible: one this
@@ -102,6 +104,7 @@ def apply_command_row(row: ShellRuleRow, arguments: list[str]) -> KernelDecision
                 "allow",
                 "no declared write marker is present, so this only reads",
                 row["sandbox"],
+                row["recovery"],
             )
     if row["effect"] == "allow" and row["ask_flags"]:
         opaque = next(
@@ -122,8 +125,9 @@ def apply_command_row(row: ShellRuleRow, arguments: list[str]) -> KernelDecision
                 "ask",
                 row["reason"] or f"{guarded} requires approval",
                 row["sandbox"],
+                row["recovery"],
             )
-    return KernelDecision(row["effect"], row["reason"], row["sandbox"])
+    return KernelDecision(row["effect"], row["reason"], row["sandbox"], row["recovery"])
 
 
 class Subcommand(TypedDict):
@@ -154,6 +158,7 @@ def split_subcommand(
     ask_flags = default["ask_flags"] if default else []
     value_flags = default["value_flags"] if default else []
     placement = default["sandbox"] if default else "ambient"
+    restoration = default["recovery"] if default else "nothing"
     position = 0
     while position < len(arguments):
         word = arguments[position]
@@ -169,6 +174,7 @@ def split_subcommand(
                 "ask",
                 f"{executable} global flag {word} requires approval{redirect}",
                 placement,
+                restoration,
             )
         position += 2 if word in value_flags else 1
     return Subcommand(word="", remainder=[])
