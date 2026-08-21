@@ -753,6 +753,7 @@ USER $UID:$GID
         uid: int,
         gid: int,
         engine: ContainerEngine = Docker(),
+        proxy_address: str = "",
     ) -> list[str]:
         """The run arguments a session is started with, mounts excluded.
 
@@ -775,6 +776,13 @@ USER $UID:$GID
         who flipped the mode paid a distribution rebuild to change one
         variable -- where the paths and the project environment really are
         facts about what was built.
+
+        ``proxy_address`` is where the proxy sits on that network, which a
+        caller reads back after starting it. It cannot be anything this
+        declaration holds -- it is assigned when the container joins -- and
+        the earlier attempt to avoid needing it, by addressing the proxy
+        under a DNS alias, is what put a resolver on the internal network and
+        left the proxy unable to resolve anything at all.
         """
         return [
             *engine.identity_arguments(uid, gid),
@@ -796,7 +804,7 @@ USER $UID:$GID
             *[
                 argument
                 for name, value in (
-                    self.environment() | self.egress.environment()
+                    self.environment() | self.egress.environment(proxy_address)
                 ).items()
                 for argument in ("-e", f"{name}={value}")
             ],
@@ -832,6 +840,7 @@ USER $UID:$GID
         rewrites: list[RemoteRewrite] | None = None,
         terminal: EnvVars | None = None,
         interactive: bool = True,
+        proxy_address: str = "",
     ) -> list[str]:
         """The whole argv that opens one agent session inside a container.
 
@@ -898,7 +907,7 @@ USER $UID:$GID
             f"{state_volume}:{self.config_home}",
             "-e",
             f"{config_home_env}={self.config_home}",
-            *self.run_arguments(checkout, uid, gid, engine),
+            *self.run_arguments(checkout, uid, gid, engine, proxy_address),
             *[
                 argument
                 for name, value in reaching.items()

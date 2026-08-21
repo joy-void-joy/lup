@@ -52,9 +52,15 @@ def test_the_session_is_pointed_at_the_proxy_it_is_the_only_way_out_through() ->
     Both the boundary and the route through it come from one declaration, so
     a session cannot be attached to the internal network without also being
     told how to reach the proxy that is its only member with a way out.
+
+    By address rather than by name. Addressing it by a DNS alias put a
+    resolver on the internal network, and an internal network's resolver
+    refuses every public name authoritatively — so it stood in front of the
+    one server the proxy could have resolved through, and nothing in the
+    session reached anything.
     """
-    environment = SessionEgress().environment()
-    assert environment["HTTPS_PROXY"] == "http://egress:3128"
+    environment = SessionEgress().environment("10.89.0.29")
+    assert environment["HTTPS_PROXY"] == "http://10.89.0.29:3128"
     assert environment["https_proxy"] == environment["HTTPS_PROXY"]
     # Written rather than emptied: emptying kept the host's exemptions out
     # and took the session's own loopback with them, so an agent that started
@@ -72,7 +78,7 @@ def test_node_is_told_to_read_the_proxy_variables_it_otherwise_ignores() -> None
     network with no gateway and wait -- the boundary breaking the one thing
     the session exists to do, with a timeout for a diagnostic.
     """
-    assert SessionEgress().environment()["NODE_USE_ENV_PROXY"] == "1"
+    assert SessionEgress().environment("10.89.0.29")["NODE_USE_ENV_PROXY"] == "1"
 
 
 def test_an_unfiltered_declaration_sets_no_proxy_variables() -> None:
@@ -84,17 +90,25 @@ def test_the_proxy_reaches_the_outside_and_the_session_reaches_the_proxy() -> No
     """The two halves that make one process the only bridge.
 
     The proxy starts on the engine's ordinary network -- that is the half
-    with a route out -- and is joined to the internal network afterwards
-    under the alias the session's environment resolves. Either half alone is
-    a boundary with nothing behind it.
+    with a route out -- and is joined to the internal network afterwards.
+    Either half alone is a boundary with nothing behind it.
+
+    No alias on the join. An alias is a DNS record, this network has no
+    resolver, and podman records one on a network that cannot serve it — its
+    own manual says so, which is how the first launch connected without
+    complaint and the name never worked. A flag accepted and ignored is worse
+    than one refused.
     """
     egress = SessionEgress()
     started = egress.proxy_arguments("feat", Path("/repo/tmp/egress.conf"))
     assert started[started.index("--network") + 1] == "bridge"
     connected = egress.connect_arguments("feat")
-    assert connected[:3] == ["network", "connect", "--alias"]
-    assert connected[3] == egress.alias
-    assert connected[-2:] == ["lup-egress-net-feat", "lup-egress-feat"]
+    assert connected == [
+        "network",
+        "connect",
+        "lup-egress-net-feat",
+        "lup-egress-feat",
+    ]
 
 
 def test_the_network_the_proxy_joins_is_the_one_the_session_attaches_to() -> None:
@@ -220,7 +234,10 @@ def test_a_running_proxy_off_the_network_is_repaired_rather_than_believed(
     )
     contained.start_egress(SessionEgress(), "feat", Docker(), tmp_path)
 
-    assert ["docker", "network", "connect", "--alias", "egress"] == issued[-1][:5]
+    # Among what was issued rather than last: the address a session is
+    # pointed at is read back after the join, so the join is no longer the
+    # final word.
+    assert any(argv[:3] == ["docker", "network", "connect"] for argv in issued)
 
 
 def test_a_proxy_already_on_the_network_is_left_alone(
@@ -389,17 +406,16 @@ def test_a_reachable_proxy_that_reaches_nothing_is_not_called_working() -> None:
     standing = contained.EgressState(
         network="net",
         proxy="proxy",
-        alias="egress",
         network_exists=True,
         dns_enabled=True,
         proxy_exists=True,
         proxy_running=True,
         attached=True,
-        aliases=["egress"],
+        address="10.89.0.29",
         reached=False,
     )
 
-    assert standing.resolvable()
+    assert standing.addressable()
     assert not any(item.urgency == "ready" for item in standing.verdict())
     assert any("cannot reach the world" in item.text for item in standing.verdict())
 
@@ -436,7 +452,6 @@ def test_a_recorded_gateway_is_not_taken_for_a_route() -> None:
     recorded = contained.EgressState(
         network="net",
         proxy="proxy",
-        alias="egress",
         legs=[
             contained.NetworkLeg(
                 network="podman", address="10.88.0.4", gateway="10.88.0.1"
@@ -505,13 +520,12 @@ def working_proxy(**differing: object) -> "contained.EgressState":
         {
             "network": "net",
             "proxy": "proxy",
-            "alias": "egress",
             "network_exists": True,
             "dns_enabled": True,
             "proxy_exists": True,
             "proxy_running": True,
             "attached": True,
-            "aliases": ["egress"],
+            "address": "10.89.0.29",
             "legs": [contained.NetworkLeg(network="net", address="10.89.0.29")],
             "route": "via 10.88.0.1 on eth0",
             "resolver": "10.89.0.1 192.168.0.1",
@@ -705,7 +719,6 @@ def test_a_proxy_from_an_older_declaration_is_replaced(
         return call
 
     monkeypatch.setattr(sh, "Command", stale)
-    contained.settled(SessionEgress(), "feat", Docker(), tmp_path / "e.conf", 0)
     contained.start_egress(SessionEgress(), "feat", Docker(), tmp_path)
 
     assert any(argv[1] == "rm" for argv in issued)
@@ -730,3 +743,85 @@ def test_the_declaration_moves_with_what_a_proxy_would_be_started_from() -> None
     admitting = SessionEgress(admits=[AllowedHost(host="pypi.org")])
     assert base.declaration([]) != admitting.declaration([])
     assert base.declaration(["1.1.1.1"]) == SessionEgress().declaration(["1.1.1.1"])
+
+
+def test_a_network_from_an_older_declaration_is_rebuilt(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The third thing reused whatever the declaration said, and the widest.
+
+    A network is created once and outlives every launch, so the posture it
+    was created under is the posture it keeps. The flag that stops its
+    resolver shadowing the proxy's would never have reached a machine whose
+    network already existed — which would have swallowed the repair for both
+    of the other two.
+    """
+    issued: list[list[str]] = []
+    # Stateful, because the sequence under test is remove-then-create and a
+    # fake that reported the network present throughout would let a launch
+    # skip the create and still look right.
+    removed: list[bool] = []
+
+    def spelled(binary: str):
+        def call(*words: str, **_: object) -> str:
+            issued.append([binary, *words])
+            if words[:2] == ("network", "rm"):
+                removed.append(True)
+                return ""
+            if words[:2] == ("network", "inspect"):
+                if removed:
+                    raise sh.ErrorReturnCode_1("network inspect", b"", b"no such")
+                return "a digest from some earlier declaration"
+            return ""
+
+        return call
+
+    monkeypatch.setattr(contained, "host_resolv_conf", lambda *_: "nameserver 1.1.1.1")
+    monkeypatch.setattr(sh, "Command", spelled)
+    # The rebuilt proxy never comes up under this fake, so the launch refuses
+    # after its grace window. What is under test is everything before that.
+    with pytest.raises(typer.BadParameter):
+        contained.start_egress(SessionEgress(), "feat", Docker(), tmp_path)
+
+    # The proxy goes before the network holding it, then the network is made
+    # again carrying the declaration in force.
+    assert ["docker", "rm", "--force"] in [argv[:3] for argv in issued]
+    assert ["docker", "network", "rm"] in [argv[:3] for argv in issued]
+    created = next(
+        argv for argv in issued if argv[:3] == ["docker", "network", "create"]
+    )
+    assert "--disable-dns" in created
+    assert created[created.index("--label") + 1].startswith("lup.egress=")
+
+
+def test_a_network_carrying_the_current_declaration_is_left_alone(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Rebuilding one every launch would take the proxy with it every time."""
+    resolv = "nameserver 192.168.0.1\n"
+    monkeypatch.setattr(contained, "host_resolv_conf", lambda *_: resolv)
+    current = contained.declaration_digest(
+        SessionEgress().declaration(SessionEgress().resolvers_for(resolv))
+    )
+    issued: list[list[str]] = []
+
+    def spelled(binary: str):
+        def call(*words: str, **_: object) -> str:
+            issued.append([binary, *words])
+            if words[:2] == ("network", "inspect"):
+                return current
+            if words[0] == "inspect" and "{{.State.Running}}" in words:
+                return "true"
+            if words[0] == "inspect" and PROXY_LABEL in " ".join(words):
+                return current
+            if words[0] == "inspect":
+                return "bridge lup-egress-net-feat "
+            return ""
+
+        return call
+
+    monkeypatch.setattr(sh, "Command", spelled)
+    contained.start_egress(SessionEgress(), "feat", Docker(), tmp_path)
+
+    assert not any(argv[:3] == ["docker", "network", "rm"] for argv in issued)
+    assert not any(argv[:3] == ["docker", "network", "create"] for argv in issued)

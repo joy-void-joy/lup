@@ -23,7 +23,7 @@ from lup.harness.toolchain import (
     container_requirement,
     github_requirement,
     metadata_refused_requirement,
-    proxy_resolves_requirement,
+    proxy_reachable_requirement,
     proxy_tunnels_requirement,
     same_path_mount_requirement,
     terminal_handoff_requirement,
@@ -55,7 +55,7 @@ def manifest() -> Manifest:
 
     The image half is exercised inside the container a session opens, which
     `harness requirements --inside` is for. Four of its entries are the
-    boundary taken component by component -- the proxy alias resolving, a
+    boundary taken component by component -- the proxy being reachable, a
     request reaching the world through it, the metadata endpoint still being
     refused, and the operator's terminal having arrived. Each was a thing the
     first contained session found broken and no preflight was in a position
@@ -73,10 +73,10 @@ def manifest() -> Manifest:
             github_requirement(),
             clipboard_requirement(),
             # The image half, exercised behind the argv a session opens with.
-            # Ordered as a session meets them: the network has to resolve
+            # Ordered as a session meets them: the proxy has to be reachable
             # before it can tunnel, the tunnel has to stand before a turn can
             # run, and the terminal is what the operator sees either way.
-            proxy_resolves_requirement(),
+            proxy_reachable_requirement(),
             proxy_tunnels_requirement(),
             metadata_refused_requirement(),
             terminal_handoff_requirement(),

@@ -24,7 +24,7 @@ def test_a_session_reaches_its_own_loopback_without_the_proxy() -> None:
     -- the container is on a network with no gateway and cannot reach the
     host's loopback whatever the proxy says.
     """
-    environment = SessionEgress().environment()
+    environment = SessionEgress().environment("10.89.0.29")
 
     assert environment["NO_PROXY"] == "localhost,127.0.0.1,::1"
     assert environment["no_proxy"] == environment["NO_PROXY"]
@@ -38,12 +38,12 @@ def test_the_exemption_is_written_rather_than_inherited() -> None:
     to, which is a hang rather than a refusal. Writing the value keeps that
     out; it is only the *emptiness* that was wrong.
     """
-    assert "corp" not in SessionEgress().environment()["NO_PROXY"]
+    assert "corp" not in SessionEgress().environment("10.89.0.29")["NO_PROXY"]
 
 
 def test_an_unfiltered_session_is_handed_no_proxy_variables_at_all() -> None:
     """There is no proxy to point at, so naming one would point at nothing."""
-    assert SessionEgress(mode="bridge").environment() == {}
+    assert SessionEgress(mode="bridge").environment("10.89.0.29") == {}
 
 
 def test_a_session_publishes_nothing_to_the_host_by_default() -> None:
@@ -71,3 +71,14 @@ def test_an_image_built_from_a_different_declaration_is_stale() -> None:
     """
     assert declaration_digest("FROM a") != declaration_digest("FROM b")
     assert declaration_digest("FROM a") == declaration_digest("FROM a")
+
+
+def test_a_session_with_no_proxy_address_is_handed_no_variables() -> None:
+    """Pointing at a proxy that is not there is worse than pointing at nothing.
+
+    A session with no proxy variables fails at its first request in the
+    client's own words. One pointed at an address nothing answers on fails in
+    the proxy's — a sentence about a boundary that was never built, which is
+    the vocabulary this whole design exists to keep out of a session.
+    """
+    assert SessionEgress().environment("") == {}

@@ -471,7 +471,7 @@ def test_a_launch_asks_only_the_image_entries_marked_always() -> None:
         item.requirement.capability for item in declared.check_inside({}, opening)
     }
 
-    assert at_launch == {"egress proxy resolves", "egress proxy tunnels out"}
+    assert at_launch == {"session reaches its proxy", "egress proxy tunnels out"}
     assert "contained agent session" in at_setup - at_launch
 
 

@@ -470,9 +470,31 @@ def attached(name: str, network: str, engine: ContainerEngine) -> bool:
     return network in str(found).split()
 
 
+def proxy_address(egress: SessionEgress, project: str, engine: ContainerEngine) -> str:
+    """Where the proxy sits on the session's network, asked after it joined.
+
+    The one fact the session's environment cannot be assembled without, and
+    the one nothing could hold in advance: it is assigned when the container
+    joins the network. Reaching for a name instead is what put a resolver on
+    an internal network and left the proxy unable to resolve anything, so the
+    address is asked for here rather than designed around.
+    """
+    try:
+        found = sh.Command(engine.binary)(
+            "inspect",
+            "--format",
+            f'{{{{with index .NetworkSettings.Networks "{egress.network_name(project)}"}}}}'
+            "{{.IPAddress}}{{end}}",
+            egress.proxy_name(project),
+        )
+    except (sh.CommandNotFound, sh.ErrorReturnCode):
+        return ""
+    return str(found).strip()
+
+
 def start_egress(
     egress: SessionEgress, project: str, engine: ContainerEngine, root: Path
-) -> None:
+) -> str:
     """Bring up the internal network and the proxy bridged out of it.
 
     Idempotent, and idempotent one piece at a time rather than as a whole:
@@ -496,21 +518,42 @@ def start_egress(
     version was running.
     """
     if not egress.filtered():
-        return
+        return ""
     client = sh.Command(engine.binary)
-    if not network_present(egress.network_name(project), engine):
-        client(*egress.network_arguments(project))
     # Read here rather than declared, for the reason the terminal handoff and
     # the container client are: this is a fact about the machine, and the
     # declaration it would otherwise sit in is hashed into the ownership
     # digest. A launch is the only place that can answer it.
     resolvers = egress.resolvers_for(host_resolv_conf())
     declaration = egress.declaration(resolvers)
+    network = egress.network_name(project)
+    # The network first, because rebuilding it takes the proxy with it — a
+    # network with a container attached refuses to go, and every posture the
+    # network carries is one the proxy inherited when it joined.
+    if network_present(network, engine) and not network_matches(
+        network, declaration, engine
+    ):
+        Notice(
+            text=(
+                f"{network} was created under an older declaration of this "
+                "boundary — a network keeps the posture it was created with, "
+                "so its resolver, its isolation and everything a container "
+                "inherits by joining it are that older answer. Rebuilding it "
+                "and the proxy on it."
+            ),
+            urgency="progress",
+        ).say()
+        for argv in egress.teardown_arguments(project):
+            # Every exit code is acceptable: removing a piece already gone
+            # reports an error naming exactly the absence this wanted.
+            client(*argv, _ok_code=list(range(256)))
+    if not network_present(network, engine):
+        client(*egress.network_arguments(project, declaration_digest(declaration)))
     if running(egress.proxy_name(project), engine) and proxy_matches(
         egress.proxy_name(project), declaration, engine
     ):
         if attached(egress.proxy_name(project), egress.network_name(project), engine):
-            return
+            return proxy_address(egress, project, engine)
         # Connecting a running container is the repair rather than restarting
         # it, because the proxy is shared: another checkout's session may be
         # reaching the network through this same container right now, and
@@ -523,12 +566,13 @@ def start_egress(
                 f"{egress.proxy_name(project)} is running but is not on "
                 f"{egress.network_name(project)}, and joining it failed: "
                 f"{error.stderr.decode('utf-8', 'replace').strip()}. A session "
-                "opened now would resolve nothing — it addresses its only way "
-                f"out as `{egress.alias}`, which is an alias on that network. "
-                "Remove the pair with `harness egress --down` and let the next "
-                "launch rebuild them, or open the session with --unsandboxed."
+                "opened now would have no address to send to — the proxy is "
+                "reached at the address it holds on that network, and it "
+                "holds none. Remove the pair with `harness egress --down` and "
+                "let the next launch rebuild them, or open the session with "
+                "--unsandboxed."
             ) from error
-        return
+        return proxy_address(egress, project, engine)
     # A proxy that is here and not being kept is one this has to account for
     # before it goes: dead, in which case its log is the only record of why,
     # or started from a declaration that has since moved. Either way the name
@@ -559,6 +603,7 @@ def start_egress(
             "an egress boundary."
         ) from error
     settled(egress, project, engine, configuration)
+    return proxy_address(egress, project, engine)
 
 
 def settled(
@@ -680,7 +725,7 @@ class EgressState(BaseModel, frozen=True):
 
     network: str = Field(description="The internal network this project declares")
     proxy: str = Field(description="The container bridged out of it")
-    alias: str = Field(description="The name a session addresses the proxy by")
+
     network_exists: bool = False
     dns_enabled: bool = False
     proxy_exists: bool = False
@@ -785,22 +830,24 @@ class EgressState(BaseModel, frozen=True):
         ),
     )
 
-    def resolvable(self) -> bool:
-        """Whether a session on this network could turn the alias into an address.
+    def addressable(self) -> bool:
+        """Whether a session on this network has a proxy it can send to.
 
-        Every clause is load-bearing and each was a candidate in turn. The
-        alias is *recorded* even on a network whose DNS is off -- podman's own
-        manual says so, and that is why the connect succeeded silently and the
-        name never worked -- so carrying the alias is not enough. A stopped
-        proxy holds no DNS record whatever the network says. And a proxy on
-        the bridge but not on this network is invisible to a session on it.
+        Every clause was a candidate in turn, and the one that is gone is
+        instructive: this used to ask whether an *alias* resolved, which is a
+        question that could be answered yes by a network whose resolver then
+        refused every public name the proxy needed. Addressing the proxy
+        where it is removed the question rather than answering it.
+
+        A proxy on the engine's bridge and not on this network is invisible
+        to a session on it, and one with no address there is the same thing
+        said in the engine's own terms.
         """
         return (
             self.network_exists
-            and self.dns_enabled
             and self.proxy_running
             and self.attached
-            and self.alias in self.aliases
+            and bool(self.address)
         )
 
     def notices(self) -> list[Notice]:
@@ -974,14 +1021,14 @@ class EgressState(BaseModel, frozen=True):
             urgency="detail",
             indent=1,
         )
-        if not self.resolvable():
+        if not self.addressable():
             return [
                 Notice(
                     text=(
-                        f"A session cannot resolve `{self.alias}`, so every "
-                        "request in it fails at DNS — which the runtime "
-                        "reports as the operator's own internet or DNS being "
-                        "down."
+                        "A session has no address for the proxy on this "
+                        "network, so every request in it fails before it is "
+                        "sent — which the runtime reports as the operator's "
+                        "own internet or DNS being down."
                     ),
                     urgency="refusal",
                 ),
@@ -991,8 +1038,9 @@ class EgressState(BaseModel, frozen=True):
             return [
                 Notice(
                     text=(
-                        f"A session can reach `{self.alias}`, and the proxy "
-                        "cannot reach the world — so requests arrive and are "
+                        f"A session can reach the proxy at {self.address}, "
+                        "and the proxy cannot reach the world — so requests "
+                        "arrive and are "
                         "answered 503 rather than refused. The boundary is "
                         "standing; what is behind it is not."
                     ),
@@ -1021,8 +1069,8 @@ class EgressState(BaseModel, frozen=True):
         return [
             Notice(
                 text=(
-                    f"A session can resolve `{self.alias}`, reach the proxy, "
-                    "and be carried out through it."
+                    f"A session reaches the proxy at {self.address} and is "
+                    "carried out through it."
                 ),
                 urgency="ready",
             )
@@ -1128,14 +1176,18 @@ def egress_state(
     # `getent` exits 2 on a name it cannot find and says nothing, so the
     # question is carried into the answer and the verdict comes off `worked`.
     looked = within("getent", "hosts", resolving)
-    # The same question about a name the session's own resolver is *supposed*
-    # to know. The pair is what tells a resolver that is not answering apart
-    # from one that is answering "no": if the alias resolves here and a public
-    # name does not, the chain is being consulted and is refusing to look
-    # further -- and glibc stops at the first authoritative answer, so an
-    # NXDOMAIN from the internal network's resolver hides every server after
-    # it, including the working one.
-    known = within("getent", "hosts", egress.alias)
+    # Asked only where the session's network runs a resolver at all, which
+    # is off by default and for this exact reason: a resolver there answers
+    # names on that network and refuses every other one authoritatively, and
+    # glibc stops at the first authoritative answer -- so it stands in front
+    # of the one server that could resolve a public name. Where a project
+    # turns it back on, this pair is what tells that shadowing apart from a
+    # resolver chain that is simply not answering.
+    known = (
+        within("getent", "hosts", egress.proxy_name(project))
+        if egress.resolves_names
+        else Spoken()
+    )
     routed = default_route(within("cat", "/proc/net/route").text)
     # Podman records it; Docker does not, and an empty answer there is an
     # absence of the field rather than of the container.
@@ -1155,7 +1207,6 @@ def egress_state(
         reached=looked.worked,
         answers_locally=known.worked,
         upstream=f"{resolving} -> {looked.text or 'no answer'}",
-        alias=egress.alias,
         network_exists=bool(dns),
         dns_enabled=dns == "true",
         proxy_exists=bool(status),
@@ -1202,6 +1253,32 @@ def report_egress(egress: SessionEgress, root: Path, down: bool) -> None:
     # could not resolve the name it addresses that proxy by.
     for notice in egress_state(egress, project, client.engine()).notices():
         notice.say()
+
+
+def network_matches(name: str, declaration: str, engine: ContainerEngine) -> bool:
+    """Whether this network was created under the declaration in force now.
+
+    The third thing in this design that was reused whatever the declaration
+    said, and the one that would have swallowed the repair for the other two.
+    A network is created once and outlives every launch, so the posture it
+    was first created under is the posture it keeps -- and the flag that
+    stops its resolver shadowing the proxy's would never have reached a
+    machine whose network already existed.
+
+    An unlabelled network is one created before this existed and counts as
+    stale, for the reason an unlabelled image and an unlabelled proxy do.
+    """
+    try:
+        labelled = sh.Command(engine.binary)(
+            "network",
+            "inspect",
+            "--format",
+            f'{{{{index .Labels "{PROXY_LABEL}"}}}}',
+            name,
+        )
+    except (sh.CommandNotFound, sh.ErrorReturnCode):
+        return False
+    return str(labelled).strip() == declaration_digest(declaration)
 
 
 def network_present(name: str, engine: ContainerEngine) -> bool:
@@ -1335,7 +1412,7 @@ def contained_argv(
     if not image_matches(tag, rendered, client):
         build_image(image, manifest, tag, client, root)
     name_for_checkout(tag, checkout_tag(root), client)
-    start_egress(image.egress, root.name, client, root)
+    reached_at = start_egress(image.egress, root.name, client, root)
     for notice in image.egress.notice(root.name):
         notice.say()
     lease = lease_for(root, human_owned)
@@ -1377,4 +1454,5 @@ def contained_argv(
         rewrites=rewrites,
         terminal=terminal.environment,
         interactive=interactive,
+        proxy_address=reached_at,
     )
