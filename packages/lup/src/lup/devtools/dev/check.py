@@ -21,7 +21,7 @@ from lup.devtools.dev.boundaries import (
 from lup.devtools.dev.branches import unlanded_siblings
 from lup.devtools.dev.git_guards import GitGuard, read_hooks
 from lup.devtools.dev.comments import FoundComment, scan_tracked
-from lup.devtools.dev.gates import sweep_gates
+from lup.devtools.dev.gates import sweep_all
 from lup.devtools.harness.drift import (
     RepositoryWriter,
     inspect_drift,
@@ -269,8 +269,10 @@ def run_checks(
     # gating — a deferral that stated a condition this checkout can resolve is
     # a question with an answer, and the answer turning yes is the one moment
     # the note was written for. Advisory is right for what somebody still has
-    # to judge; this is the part nobody has to.
-    sweep = sweep_gates(found)
+    # to judge; this is the part nobody has to. Read from the integration
+    # branch as well as from here, because a note about this branch was
+    # written where its author stood and this checkout has no copy of it.
+    sweep = sweep_all(found)
     for line in sweep.lines():
         typer.echo(line)
     results.append(CheckOutcome(name="woken deferrals", passed=not sweep.woken))

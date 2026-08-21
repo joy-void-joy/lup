@@ -13,11 +13,25 @@ being correct, and that is the one moment nothing announced.
 
 So a condition written in one of the spellings below is *resolved* rather
 than printed. Each names a fact about this checkout that has a definite
-answer offline — a branch reaching integration, a path ceasing to exist — and
+answer offline — a branch being in play, a path ceasing to exist — and
 `dev check` asks it on every run. While the answer is no the note stays where
 it was, listed among the other deferrals and gating nothing. When the answer
 turns yes the check fails, once, at the moment the condition the author named
 actually came true.
+
+Where the note *lives* is the other half, and the one that decides whether
+any of this arrives in time. A note about a branch is written by somebody
+standing somewhere else — usually the integration branch — and the person it
+concerns is on the branch it names, in a checkout that has no copy of it and
+will not until they merge. Reading only the working tree therefore delivers
+every such warning exactly one step after the step it was written to change.
+So the integration branch is read too, for the notes naming the branch in
+hand, and those wake on that branch rather than on whoever merges later.
+
+What this cannot do is reach a checkout that does not carry this code. A
+branch cut before these gates existed runs the check it has, so its warning
+still arrives with the merge that brings the tooling — no worse than before,
+and no better. Every branch cut since is reached on its first run.
 
 Prose keeps working and keeps meaning what it meant. A condition this module
 does not recognise is not an error and not a typo to be corrected: "until the
@@ -35,12 +49,14 @@ union declares and falls through to being prose.
 """
 
 import re
+from collections.abc import Callable
 from pathlib import Path
 from typing import ClassVar
 
 import sh
 from pydantic import BaseModel
 
+from lup.codescan.markers import MarkerComment, find_feedback, scan_mode_for
 from lup.devtools.dev.branches import get_integration_branch, is_ancestor
 from lup.devtools.dev.comments import FoundComment
 from lup.devtools.utils import git
@@ -54,6 +70,16 @@ from lup.workspace.paths import project_root
 # included, because a continuation line joins into a note's text before this
 # ever sees it.
 GATE_RE = re.compile(r"^(?P<keyword>[\w-]+)\s*:\s*(?P<argument>.*)$", re.DOTALL)
+
+
+def current_branch() -> str:
+    """The branch this checkout is standing on, empty on a detached head.
+
+    Empty rather than an error, because a detached head is a legitimate place
+    to run a check from and no gate that names a branch can match one. It
+    falls through to the questions that do not need it.
+    """
+    return git.out("branch", "--show-current").strip()
 
 
 class GateVerdict(BaseModel, frozen=True):
@@ -91,15 +117,22 @@ class Gate(BaseModel, frozen=True):
         return f"{self.keyword}:{self.argument}"
 
 
-class BranchLanded(Gate, frozen=True):
-    """`branch:<name>` — fires once that branch reaches the integration branch.
+class BranchInPlay(Gate, frozen=True):
+    """`branch:<name>` — fires wherever that branch has become somebody's problem.
 
-    A branch that no longer exists fires too, and says so. The likeliest
-    reading is that it landed and was pruned, which is exactly the condition
-    stated; the other reading is that it was abandoned, which is also a moment
-    the note wants somebody at. Reporting "cannot tell" would leave the one
-    case a deferral behind a branch exists to catch sitting silent, so it
-    fires and the evidence says which question to go and settle.
+    Three moments, and the first is the one that matters. **Standing on the
+    branch fires it**, because a note about a branch is written for whoever is
+    working on that branch, and they are the last people to see it: the note
+    lives wherever it was written — usually the integration branch — and their
+    checkout will not carry it until they merge. Waking only on arrival would
+    reach them one step after the step it was meant to change, which is not a
+    warning, it is a post-mortem.
+
+    Landing fires it too, for the run after nobody acted. So does a branch
+    that no longer exists: pruned-after-landing is the likely reading and
+    abandoned is the other, and both are moments the note wanted somebody at.
+    Reporting "cannot tell" would leave the one case a branch deferral exists
+    to catch sitting silent, so it fires and the evidence says what to settle.
     """
 
     keyword: ClassVar[str] = "branch"
@@ -107,6 +140,14 @@ class BranchLanded(Gate, frozen=True):
     def asked(self) -> GateVerdict:
         if not self.argument:
             return GateVerdict(fired=True, evidence="names no branch")
+        if current_branch() == self.argument:
+            return GateVerdict(
+                fired=True,
+                evidence=(
+                    f"you are on {self.argument} — this note was written about "
+                    "this branch, from wherever it was left"
+                ),
+            )
         integration = get_integration_branch()
         try:
             git("rev-parse", "--verify", "--quiet", f"{self.argument}^{{commit}}")
@@ -144,7 +185,7 @@ class PathGone(Gate, frozen=True):
         return GateVerdict(fired=True, evidence=f"{self.argument} is gone")
 
 
-DECLARED_GATES: list[type[Gate]] = [BranchLanded, PathGone]
+DECLARED_GATES: list[type[Gate]] = [BranchInPlay, PathGone]
 """Every spelling a bracketed deferral can be resolved in.
 
 A list of the members rather than a keyword-to-class mapping written out
@@ -175,6 +216,78 @@ def parse_gate(
     return None
 
 
+def inbound_notes(
+    branch: str,
+    integration: str,
+    find: Callable[[str, str], list[MarkerComment]] = find_feedback,
+) -> list[FoundComment]:
+    """Deferrals on *integration* whose gate names *branch*.
+
+    This is the half that makes a branch gate reach anybody in time. A note is
+    written where its author stood — on the integration branch, or on whatever
+    landed into it — and the person it concerns is standing somewhere else, on
+    the branch it names, in a checkout that does not carry it and will not
+    until they merge. Scanning only the working tree therefore delivers the
+    warning exactly one step after the step it was written to change.
+
+    So the integration branch is read as well, and only for notes naming the
+    branch in hand. Naming is what keeps this quiet: a check that surfaced
+    every deferral on the integration branch would put the same wall of text
+    in front of every branch in the repository, which is the listing nobody
+    reads with extra steps.
+
+    Two git calls plus one per file that actually holds a marker, rather than
+    a second full scan of the tree: the grep names the candidates and only
+    those are read back and parsed. A blob that has stopped being valid UTF-8
+    or has vanished between the two calls is skipped, the way the working-tree
+    scan skips what it cannot decode.
+    """
+    if not branch:
+        return []
+    aimed_here = f"{BranchInPlay.keyword}:{branch}"
+    try:
+        candidates = git.lines(
+            # From the root, not from wherever this was invoked. `git grep`
+            # scopes to the working directory, so a check run from a nested
+            # package — which the library's own suite is — would miss every
+            # note outside it and report the quiet, passing answer. Asking
+            # from the root also keeps the paths it names root-relative, which
+            # is what `git show <ref>:<path>` wants back.
+            "-C",
+            str(project_root()),
+            "grep",
+            "--name-only",
+            "--fixed-strings",
+            f"defer[{aimed_here}]",
+            integration,
+        )
+    except sh.ErrorReturnCode:
+        return []
+    found: list[FoundComment] = []  # lup: ignore[empty-collection] — scan fold
+    for line in candidates:
+        # `git grep <ref>` prefixes each hit with `<ref>:`, which is the ref
+        # this was asked for and so is dropped rather than parsed back out.
+        rel = line.removeprefix(f"{integration}:")
+        try:
+            text = git.out("-C", str(project_root()), "show", f"{integration}:{rel}")
+        except sh.ErrorReturnCode:
+            continue
+        lines = text.splitlines()
+        for comment in find(text, scan_mode_for(Path(rel))):
+            # The grep names files, not notes, so a file that carries one note
+            # aimed here carries all its others into this loop too. Keeping
+            # them would let a deferral about some other branch fire on this
+            # one purely for sharing a file, which is the noise the naming
+            # rule exists to prevent.
+            if comment.condition != aimed_here:
+                continue
+            context = "\n".join(lines[comment.read_start - 1 : comment.read_end])
+            found.append(
+                FoundComment(file=rel, context=context, **comment.model_dump())
+            )
+    return found
+
+
 class WokenDeferral(BaseModel, frozen=True):
     """A parked note whose stated condition this checkout says has come true."""
 
@@ -184,6 +297,13 @@ class WokenDeferral(BaseModel, frozen=True):
     gate: str
     evidence: str
     text: str
+    origin: str = ""
+    """The ref this note was read from, empty for the working tree.
+
+    Carried because "where the note is" and "where you are" have just stopped
+    being the same place, and a reader sent to a file that does not exist in
+    their checkout has been given a worse than useless instruction.
+    """
 
     def reported(self) -> str:
         """This deferral as the failing check prints it.
@@ -194,8 +314,9 @@ class WokenDeferral(BaseModel, frozen=True):
         be gone and found in the file the report was supposed to save the trip
         to.
         """
+        where = f"{self.origin}:" if self.origin else ""
         return (
-            f"  {self.file}:{self.start_line}-{self.end_line}  "
+            f"  {where}{self.file}:{self.start_line}-{self.end_line}  "
             f"[{self.gate}] {self.evidence}\n    {self.text}"
         )
 
@@ -223,13 +344,18 @@ class GateSweep(BaseModel, frozen=True):
 
 
 def sweep_gates(
-    found: list[FoundComment], declared: list[type[Gate]] = DECLARED_GATES
+    found: list[FoundComment],
+    declared: list[type[Gate]] = DECLARED_GATES,
+    origin: str = "",
 ) -> GateSweep:
     """Resolve every bracketed deferral in *found* that names a declared gate.
 
     Notes that stated prose are not counted as asked. They were never a
     question this checkout could put, so folding them into the total would
     report coverage the sweep does not have.
+
+    *origin* is the ref these notes were read from, and travels onto whatever
+    wakes so the report can say where to go and read it.
     """
     asked = 0
     woken: list[WokenDeferral] = []  # lup: ignore[empty-collection] — scan fold
@@ -249,6 +375,29 @@ def sweep_gates(
                 gate=gate.spelling(),
                 evidence=verdict.evidence,
                 text=comment.text,
+                origin=origin,
             )
         )
     return GateSweep(asked=asked, woken=woken)
+
+
+def sweep_all(
+    found: list[FoundComment], declared: list[type[Gate]] = DECLARED_GATES
+) -> GateSweep:
+    """Every gate this checkout can put: its own tree's, and the ones aimed at it.
+
+    The two halves answer different failures and neither covers the other. The
+    working tree's gates catch a condition that came true under a note you are
+    carrying; the integration branch's catch a note somebody left about the
+    branch you are standing on, which your checkout has no copy of. A sweep
+    that ran only the first is the one that reaches its reader a merge too
+    late.
+    """
+    integration = get_integration_branch()
+    here = sweep_gates(found, declared)
+    inbound = sweep_gates(
+        inbound_notes(current_branch(), integration), declared, origin=integration
+    )
+    return GateSweep(
+        asked=here.asked + inbound.asked, woken=[*here.woken, *inbound.woken]
+    )

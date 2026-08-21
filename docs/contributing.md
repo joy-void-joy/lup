@@ -74,15 +74,24 @@ default, and a bracketed `defer[<gate>]: <text>` states a real,
 externally-checkable gate — never a restatement that this code might change
 again.
 
-Some gates this checkout can resolve, and those it does. `defer[branch:<name>]`
-wakes once that branch reaches the integration branch, and
-`defer[gone:<path>]` once that path stops existing: `dev check` asks them
+Some gates this checkout can resolve, and those it does. `dev check` asks them
 every run, reports them among the other deferrals while the answer is no, and
-fails the run the answer turns yes. A gate it cannot see — "until the v2 API
-ships" — stays prose and stays advisory, which is the whole of what a stated
-gate ever did before. Prefer a resolvable spelling where one fits, because a
-deferral is dormant exactly as long as nobody has reason to read it, and the
-moment it stops being dormant is the moment nothing else announces.
+fails the run the answer turns yes. `defer[gone:<path>]` wakes once that path
+stops existing.
+
+`defer[branch:<name>]` wakes for whoever is standing on that branch, and again
+if the branch lands with nobody having acted. The first is the point. A note
+about a branch is written by somebody standing somewhere else, and the person
+it concerns is on the branch it names, in a checkout that carries no copy of
+it — so the check reads the integration branch as well as the working tree,
+for the notes naming the branch in hand. Write one where you are, aimed at the
+branch that has to act, and it reaches them without waiting for a merge.
+
+A gate the checkout cannot see — "until the v2 API ships" — stays prose and
+stays advisory, which is the whole of what a stated gate ever did before.
+Prefer a resolvable spelling where one fits, because a deferral is dormant
+exactly as long as nobody has reason to read it, and the moment it stops being
+dormant is the moment nothing else announces.
 
 A note is right when the subject is the code: a bug worth remarking on, an
 idea for a feature, anything the site it concerns can hold. Work whose
