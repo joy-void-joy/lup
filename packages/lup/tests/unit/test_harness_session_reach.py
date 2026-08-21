@@ -9,6 +9,7 @@ failure these hold still.
 
 from pathlib import Path
 
+from lup.devtools.harness.contained import declaration_digest
 from lup.harness.egress import SessionEgress
 from lup.harness.image import Image
 
@@ -58,3 +59,15 @@ def test_a_declared_port_reaches_the_host_on_the_same_number() -> None:
     )
 
     assert arguments[arguments.index("-p") + 1] == "5173:5173"
+
+
+def test_an_image_built_from_a_different_declaration_is_stale() -> None:
+    """Presence was the wrong question: a tag is built once and edited never.
+
+    Every later change to the declaration -- a pinned CLI, a package, the
+    entrypoint -- landed in the repository and never in the thing a session
+    actually ran in, because from the outside a stale image and a current one
+    are the same tag.
+    """
+    assert declaration_digest("FROM a") != declaration_digest("FROM b")
+    assert declaration_digest("FROM a") == declaration_digest("FROM a")

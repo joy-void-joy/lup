@@ -18,6 +18,7 @@ failure mode the design forbids, so a caller that asked to be contained and
 cannot be gets a refusal naming what was missing, and the operator decides.
 """
 
+import hashlib
 import json
 import os
 from collections import deque
@@ -61,19 +62,50 @@ def state_volume_name(root: Path) -> str:
     return f"lup-cfg-{root.name}"
 
 
-def image_present(tag: str, engine: ContainerEngine) -> bool:
-    """Whether this tag already exists, asked of the engine rather than guessed."""
+# lup: ignore[constant-declaration] — an identity this repository defines, not a
+# judgement: the writer and the reader have to name the same key or neither works
+DECLARATION_LABEL = "lup.declaration"
+"""The label carrying the digest of the Dockerfile an image was built from."""
+
+
+def declaration_digest(dockerfile: str) -> str:
+    """What this declaration hashes to, for comparing an image against it."""
+    return hashlib.sha256(dockerfile.encode("utf-8")).hexdigest()
+
+
+def image_matches(tag: str, dockerfile: str, engine: ContainerEngine) -> bool:
+    """Whether this tag exists *and* was built from this declaration.
+
+    Presence alone was the question for a while, and it is the wrong one: an
+    image is built once and the declaration goes on changing, so every later
+    edit -- a pinned CLI, a package, the entrypoint -- was a change that
+    landed in the repository and never in the thing a session actually ran
+    in. Nothing reported it, because from the outside a stale image and a
+    current one are one tag.
+
+    The digest is a label rather than a file beside the image, so it travels
+    with what it describes and cannot be left behind by a `rmi`. An image
+    carrying no label at all is one built before this existed, and is treated
+    as stale: rebuilding costs a build, and trusting it costs a session
+    running in something nobody can identify.
+    """
     try:
-        sh.Command(engine.binary)("image", "inspect", tag)
+        labelled = sh.Command(engine.binary)(
+            "image",
+            "inspect",
+            "--format",
+            f'{{{{index .Config.Labels "{DECLARATION_LABEL}"}}}}',
+            tag,
+        )
     except (sh.CommandNotFound, sh.ErrorReturnCode):
         return False
-    return True
+    return str(labelled).strip() == declaration_digest(dockerfile)
 
 
 def running(name: str, engine: ContainerEngine) -> bool:
     """Whether a container by this name is up, asked of the engine.
 
-    Asked rather than remembered, for the same reason :func:`image_present`
+    Asked rather than remembered, for the same reason :func:`image_matches`
     is: the operator may have removed it between launches, another checkout
     of the same repository may have brought it up, and a launcher that kept
     its own record of either would be reading a file instead of the truth.
@@ -225,12 +257,15 @@ def build_image(
     scratch = root / "tmp"
     scratch.mkdir(parents=True, exist_ok=True)
     dockerfile = scratch / "agent.Dockerfile"
-    dockerfile.write_text(image.dockerfile(manifest))
+    rendered = image.dockerfile(manifest)
+    dockerfile.write_text(rendered)
     log = scratch / "agent-build.log"
     argv = [
         "build",
         "-t",
         tag,
+        "--label",
+        f"{DECLARATION_LABEL}={declaration_digest(rendered)}",
         "-f",
         str(dockerfile),
         "--build-arg",
@@ -310,7 +345,7 @@ def contained_argv(
             raise typer.BadParameter(found.consequence())
         client = found.engine()
     tag = image_tag(root)
-    if not image_present(tag, client):
+    if not image_matches(tag, image.dockerfile(manifest), client):
         build_image(image, manifest, tag, client, root)
     start_egress(image.egress, root.name, client, root)
     for notice in image.egress.notice(root.name):

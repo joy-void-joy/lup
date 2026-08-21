@@ -651,6 +651,21 @@ COPY <<'ENTRY' /usr/local/bin/lup-entrypoint
 set -e
 config="${{CLAUDE_CONFIG_DIR:-$HOME/.claude}}"
 mkdir -p "$config"
+# Said here because here is where the evidence is. A config volume filled
+# under one user-namespace mapping and mounted under another belongs to a uid
+# this session is not, and the shell's own report of that is `Permission
+# denied` on a path -- which names neither the volume nor the mapping, and
+# reads as a broken image. Nothing on the host can ask this reliably: the
+# volume's directory is not always stat-able from outside, so a launcher's
+# check would be silent exactly when it mattered.
+if [ ! -w "$config" ]; then
+  echo "lup: $config is not writable by uid $(id -u)." >&2
+  echo "lup: the volume mounted there was filled by a different uid, which" >&2
+  echo "lup: happens when this project's container engine or its user" >&2
+  echo "lup: namespace mapping changed since the volume was created." >&2
+  echo "lup: remove that volume and the next launch recreates it." >&2
+  exit 1
+fi
 if [ ! -f "$config/.claude.json" ]; then
   # The checkout this container was started against is the one the operator
   # chose when they wrote the mount and the workdir, so it is trusted here
