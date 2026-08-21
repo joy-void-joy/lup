@@ -27,7 +27,7 @@ import typer
 
 from lup.harness.credential import remote_rewrites
 from lup.harness.egress import SessionEgress
-from lup.harness.image import ContainerEngine, Image, detected_engine
+from lup.harness.image import ContainerEngine, Image, detected_client
 from lup.harness.requirements import Manifest
 from lup.runtime.login import ProviderLogin
 from lup.sandbox.attribution import WRITE_REFUSAL_MARKERS
@@ -162,7 +162,7 @@ def report_egress(egress: SessionEgress, root: Path, down: bool) -> None:
     half standing while reporting an error.
     """
     project = root.name
-    client = detected_engine()
+    client = detected_client()
     if client is None:
         typer.echo("No container client answered, so nothing of this is running.")
         return
@@ -234,14 +234,25 @@ def contained_argv(
     Refuses rather than degrades when no container client answers: a launch
     that asked for the boundary and silently ran without one is exactly the
     failure the boundary exists to make impossible.
+
+    A client that answers and cannot drive the engine behind it is refused
+    the same way and in different words, because the two failures send an
+    operator to opposite places: one to install a runtime, the other to stop
+    pointing the one they have at somebody else's socket.
     """
-    client = engine if engine is not None else detected_engine()
-    if client is None:
-        raise typer.BadParameter(
-            "No container client answered, so this session cannot be "
-            "contained. Install docker or podman, or open the session with "
-            "--unsandboxed to run on the host under the semantic policy alone."
-        )
+    if engine is not None:
+        client = engine
+    else:
+        found = detected_client()
+        if found is None:
+            raise typer.BadParameter(
+                "No container client answered, so this session cannot be "
+                "contained. Install docker or podman, or open the session with "
+                "--unsandboxed to run on the host under the semantic policy alone."
+            )
+        if not found.drives_its_server():
+            raise typer.BadParameter(found.consequence())
+        client = found.engine()
     tag = image_tag(root)
     if not image_present(tag, client):
         build_image(image, manifest, tag, client, root)

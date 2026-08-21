@@ -31,7 +31,7 @@ from pydantic import BaseModel, Field
 import sh
 
 from lup.harness.egress import SessionEgress
-from lup.harness.image import Image, detected_engine
+from lup.harness.image import Image, detected_client
 
 
 class Unexercised(BaseModel, frozen=True):
@@ -54,7 +54,7 @@ def proxy_log(proxy: str) -> list[str]:
     the honest answer -- there is no evidence either way, which is different
     from evidence of disuse and is reported as such.
     """
-    engine = detected_engine()
+    engine = detected_client()
     if engine is None:
         return []
     try:

@@ -24,6 +24,7 @@ same-path mounting that :func:`run_arguments` refuses to spell any other way.
 import json
 from collections.abc import Callable, Mapping
 from pathlib import Path
+from typing import Literal
 
 import sh
 from pydantic import BaseModel, Field
@@ -100,10 +101,14 @@ class ContainerEngine(BaseModel, frozen=True):
     ``--userns: invalid USER mode``, so a launcher that spelled one engine's
     requirement unconditionally could not start under the other.
 
-    Detected from the *client*, never the server. This is not a distinction
-    without a difference: a Docker CLI pointed at a podman socket is a real
-    configuration, and the flag is rejected by the client before the daemon
-    ever sees it, so asking the daemon what it is answers the wrong question.
+    The spelling is the *client's*, because the client is what accepts or
+    rejects a flag: a Docker CLI refuses ``--userns=keep-id`` before the
+    daemon ever sees it, whatever the daemon happens to be. Which engine is
+    *behind* that client is a second question, and :class:`ContainerClient`
+    is where the two are held together -- a Docker CLI pointed at a podman
+    socket by ``DOCKER_HOST`` is a real configuration, and it is one no
+    spelling can rescue, because the flag podman needs is the flag this
+    client refuses to send.
     """
 
     binary: str = Field(description="The executable that starts a container")
@@ -145,32 +150,131 @@ def reported_version(name: str) -> str:
     return str(sh.Command(name)("--version"))
 
 
-def detected_engine(
+def reported_server(name: str) -> str:
+    """What the engine *behind* one client says it is, in its own components.
+
+    A separate question from :func:`reported_version`, and asked separately
+    because the two disagree on a real host: ``DOCKER_HOST`` pointed at a
+    podman socket leaves a Docker CLI reporting Docker while every container
+    it starts is podman's. The components list is what carries the name --
+    podman answers with a ``Podman Engine`` entry where Docker answers with
+    ``Engine`` and ``containerd`` -- and the version number alone does not,
+    which is why this asks for the list rather than the shorter field.
+
+    Unlike the client probe this one reaches a daemon, so it fails whenever
+    nothing is listening. That failure is not an error here: a client with no
+    running daemon is undrivable for reasons this question cannot improve on,
+    and the caller reads the absence as an unknown server.
+    """
+    return str(sh.Command(name)("version", "--format", "{{json .Server.Components}}"))
+
+
+type EngineFlavor = Literal["docker", "podman", "unknown"]
+"""Which of the two engines something is, or that it did not say."""
+
+
+def flavor_of(reported: str) -> EngineFlavor:
+    """Read an engine's own words for which of the two it is."""
+    return "podman" if "podman" in reported.lower() else "docker"
+
+
+class ContainerClient(BaseModel, frozen=True):
+    """One container client on this host, and the engine actually behind it.
+
+    Both halves, because either alone gets a real host wrong. The client
+    decides which flags are *sendable*: the ``podman-docker`` package installs
+    a ``docker`` that is podman and takes podman's arguments despite the name,
+    which is why nothing here trusts the spelling of a path. The server
+    decides what those flags will *mean*: ``DOCKER_HOST`` pointing a genuine
+    Docker CLI at a podman socket is an ordinary developer setup, and the
+    containers it starts are podman's however the client answers.
+
+    Measured on such a host, and the reason this class exists rather than a
+    bare engine: podman remaps uids unless told ``--userns=keep-id``, the
+    Docker CLI rejects that flag outright, and the session's own bind-mounted
+    checkout is therefore read-only to it -- ``touch: Permission denied`` on
+    the tree it was opened to work on. No spelling fixes that, because the
+    one word that would is the word this client will not carry.
+    """
+
+    binary: str = Field(description="The executable that starts a container")
+    client: EngineFlavor = Field(description="What the CLI says it is")
+    server: EngineFlavor = Field(
+        default="unknown",
+        description=(
+            "What answers on that CLI's socket. ``unknown`` when nothing "
+            "answered, which is not treated as a mismatch: a daemon that is "
+            "down is a different problem with its own message, and guessing "
+            "at a mismatch would name the wrong one"
+        ),
+    )
+
+    def engine(self) -> ContainerEngine:
+        """The identity spelling this *client* accepts, whatever runs behind it."""
+        return (
+            Podman(binary=self.binary)
+            if self.client == "podman"
+            else Docker(binary=self.binary)
+        )
+
+    def drives_its_server(self) -> bool:
+        """Whether this client can express what the engine behind it requires."""
+        return not (self.client == "docker" and self.server == "podman")
+
+    def consequence(self) -> str:
+        """What a session started through this client would lose, for a refusal."""
+        return (
+            f"`{self.binary}` is a Docker client driving a podman engine, which "
+            "podman needs `--userns=keep-id` to do without remapping uids -- and "
+            "a Docker client rejects that flag before the daemon sees it, so the "
+            "session's own checkout would be read-only to it. Install podman's "
+            "own CLI, or unset DOCKER_HOST to reach a Docker daemon, or open the "
+            "session with --unsandboxed to run on the host under the semantic "
+            "policy alone."
+        )
+
+
+def detected_client(
     candidates: tuple[str, ...] = ("docker", "podman"),
     ask: Callable[[str], str] = reported_version,
-) -> ContainerEngine | None:
-    """Which container client this host has, identified by what it calls itself.
+    ask_server: Callable[[str], str] = reported_server,
+) -> ContainerClient | None:
+    """Which client this host should drive its containers through.
 
-    The version string rather than the file name, because the name is not
-    reliable evidence: the ``podman-docker`` package installs a ``docker``
-    that is podman, and it needs podman's identity spelling despite answering
-    to the other name. Asking it who it is gets that right, where trusting
-    the spelling of the path would hand podman Docker's arguments.
+    Every candidate is asked rather than the first one that answers being
+    taken, because "answers" and "can do the job" came apart on a real host:
+    a Docker CLI pointed at podman answers first and cannot start a usable
+    session, while the podman CLI sitting beside it can. Preferring a client
+    that matches its own server picks the second without anyone having to
+    know the first was there.
 
-    ``None`` when no candidate answers, which is a real answer rather than an
-    error: a host without a container client can still open an unconfined
-    session, and refusing here would take that away from everyone who never
-    asked for the boundary.
+    A mismatched client is still returned when it is the only one, so the
+    caller can refuse in that client's own terms rather than reporting a
+    host with no container runtime -- which would be false, and would send
+    an operator to install what they already have.
+
+    ``None`` when no candidate answers at all, which is a real answer rather
+    than an error: a host without a container client can still open an
+    unconfined session, and refusing here would take that away from everyone
+    who never asked for the boundary.
     """
-    for name in candidates:
+
+    def probed(name: str) -> ContainerClient | None:
         try:
             reported = ask(name)
         except (sh.CommandNotFound, sh.ErrorReturnCode):
-            continue
-        return (
-            Podman(binary=name) if "podman" in reported.lower() else Docker(binary=name)
-        )
-    return None
+            return None
+        try:
+            behind = flavor_of(ask_server(name))
+        except (sh.CommandNotFound, sh.ErrorReturnCode):
+            behind = "unknown"
+        return ContainerClient(binary=name, client=flavor_of(reported), server=behind)
+
+    answered = [found for name in candidates if (found := probed(name)) is not None]
+    return next(
+        (found for found in answered if found.drives_its_server()),
+        answered[0] if answered else None,
+    )
 
 
 class Image(BaseModel, frozen=True):
@@ -355,6 +459,24 @@ class Image(BaseModel, frozen=True):
             ),
         ],
         description="Directories that outlive the container, to bound rebuild cost",
+    )
+    pids_limit: int = Field(
+        default=4096,
+        description=(
+            "How many processes the session may hold, spelled rather than "
+            "left to the engine's default for the reason the egress proxy "
+            "spells its own: a bound a reader can see in the argv is a bound "
+            "somebody can argue with, where an absent flag is a bound nobody "
+            "knows the value of. Measured, and the reason this is not "
+            "optional -- a Docker CLI driving a podman engine is given "
+            "``pids.max=1`` when the flag is absent, and a container that may "
+            "hold one process cannot fork, so the entrypoint dies on its "
+            "first `mkdir` with `fork: Resource temporarily unavailable` and "
+            "nothing in the message names a limit. 4096 because a session "
+            "runs a toolchain rather than one program: a `uv sync`, a test "
+            "run and a language server are each many processes, and the "
+            "number is a runaway backstop rather than a budget"
+        ),
     )
     trusted_projects: list[Path] = Field(
         default=[],
@@ -573,6 +695,8 @@ USER $UID:$GID
         return [
             *engine.identity_arguments(uid, gid),
             *self.egress.attachment_arguments(checkout.name),
+            "--pids-limit",
+            str(self.pids_limit),
             "-w",
             str(checkout),
             *[
