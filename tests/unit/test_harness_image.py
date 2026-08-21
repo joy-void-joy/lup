@@ -264,8 +264,13 @@ def test_the_entrypoint_seeds_a_login_only_into_a_config_home_without_one() -> N
     session depends on. Copying once, into an empty home, is neither.
     """
     entrypoint = Image().dockerfile(Manifest())
-    assert '[ ! -f "$config/$LUP_CREDENTIAL_NAME" ]' in entrypoint
     assert 'cp "$seed" "$config/$LUP_CREDENTIAL_NAME"' in entrypoint
+    # Size rather than presence, and a removal first. Every config home that
+    # predates this holds an empty file here -- the mount point the old
+    # read-only bind needed, owned by the uid that created it -- which a
+    # presence test reads as a login and a copy cannot write through.
+    assert '[ ! -s "$config/$LUP_CREDENTIAL_NAME" ]' in entrypoint
+    assert 'rm -f "$config/$LUP_CREDENTIAL_NAME"' in entrypoint
 
 
 def test_the_entrypoint_reads_the_config_home_the_image_baked() -> None:

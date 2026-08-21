@@ -779,8 +779,17 @@ fi
 #
 # The filename is the runtime's own word and arrives per launch, because one
 # image starts every runtime the harness declares and they do not agree on it.
+# `-s` rather than `-f`, and a removal before the copy, because every config
+# home that predates this holds an empty file at exactly this path: it was the
+# mount point the old read-only bind needed, so the engine created it, and it
+# belongs to the remapped uid that created it. A presence test would read that
+# as a login and seed nothing, and a copy over it would be refused for the
+# ownership -- the directory is ours and the file is not, so it is removed
+# rather than written through. An empty credential is not a login by anyone's
+# definition, so nothing is lost by replacing one.
 seed={self.credential_seed}
-if [ -n "$LUP_CREDENTIAL_NAME" ] && [ -f "$seed" ] && [ ! -f "$config/$LUP_CREDENTIAL_NAME" ]; then
+if [ -n "$LUP_CREDENTIAL_NAME" ] && [ -f "$seed" ] && [ ! -s "$config/$LUP_CREDENTIAL_NAME" ]; then
+  rm -f "$config/$LUP_CREDENTIAL_NAME"
   cp "$seed" "$config/$LUP_CREDENTIAL_NAME"
   chmod 600 "$config/$LUP_CREDENTIAL_NAME"
 fi
