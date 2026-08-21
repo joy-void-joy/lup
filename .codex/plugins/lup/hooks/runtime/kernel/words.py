@@ -391,6 +391,58 @@ def asks_before_removing_a_directory(
     )
 
 
+def rewrites_only_recoverable_files(
+    targets: list[str],
+    path_roles: list[PathRoleRow],
+    recoverable_targets: list[str] | None = None,
+    recoverable_target_limit: int = 5,
+    path_rules: list[PathRuleRow] | None = None,
+) -> KernelDecision | None:
+    """Grant a rewrite in place whose every named file could be brought back.
+
+    The same question :func:`confined_to_recoverable_roots` asks of a delete,
+    asked of a command that overwrites: what would this cost if it were
+    wrong. A scratch file costs nothing by declaration; a committed file with
+    no uncommitted change costs a checkout and no information. Past the cap
+    it is a sweep rather than an edit, and a sweep is worth a question even
+    where every file in it could be restored.
+
+    What this does *not* answer is the other half of why an in-place rewrite
+    is gated: it walks past the gates an edit is judged by — the anti-pattern
+    table, the review-note gate, the size gate. Those are reviewability, and
+    no boundary and no undo layer answers them. What recoverability does
+    settle is that being wrong is repairable and the whole change stands in
+    the diff, so the grant says which half it granted.
+
+    ``None`` wherever the answer is not established — no targets, a word that
+    expands at run time, a file the host reported nothing about — and ``None``
+    leaves the caller's own refusal standing.
+    """
+    if not targets:
+        return None
+    if any(opaque_argument(word) or "$" in word for word in targets):
+        return None
+    disposable = [word for word in targets if path_role(word, path_roles) == "scratch"]
+    restorable = [
+        word
+        for word in targets
+        if word not in disposable and word in (recoverable_targets or [])
+    ]
+    if len(disposable) + len(restorable) != len(targets):
+        return None
+    if len(restorable) > recoverable_target_limit:
+        return None
+    protected = protected_write_target(targets, path_rules or [], True)
+    if protected is not None:
+        return protected
+    return KernelDecision(
+        "allow",
+        "every file this rewrites is restorable, and the whole change is in the"
+        " diff — but the edit gates did not read it, so the anti-pattern, note"
+        " and size rules are `dev check`'s to catch",
+    )
+
+
 def protected_write_target(
     targets: list[str], path_rules: list[PathRuleRow], path_exists: bool
 ) -> KernelDecision | None:

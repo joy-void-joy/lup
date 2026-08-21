@@ -7,17 +7,32 @@ import re
 from typing import TypedDict
 
 from .decision import KernelDecision, unjudged
-from .rows import PathRuleRow, RunnerTargetRow, ShellRuleRow, UrlScopeRow
+from .rows import (
+    PathRoleRow,
+    PathRuleRow,
+    RunnerTargetRow,
+    ShellRuleRow,
+    UrlScopeRow,
+)
 from .words import (
     INTERPRETERS,
     flag_matches,
     git_restore_operands,
     opaque_argument,
     protected_write_target,
+    rewrites_only_recoverable_files,
     uv_run_words,
 )
 from .fetch import decide_fetch
 
+# lup: ignore[constant-declaration] — refusal wording, declared with its verdict
+IN_PLACE_SED_REFUSAL = (
+    "in-place sed bypasses every gate an edit is judged by — the anti-pattern"
+    " table, the review-note gate, the size gate, and the protected paths. For"
+    " a rename across many sites, `rename_symbol` resolves scopes an"
+    " exact-string substitution cannot tell apart; otherwise make the change"
+    " through the edit tool, which is what those gates read"
+)
 # lup: ignore[constant-declaration] — sed's own short flags, spelled as sed does
 SED_SAFE_SHORT_FLAGS = "nErsuz"
 # lup: ignore[library-default] — sed's own long spellings of the short flags above
@@ -345,18 +360,48 @@ def safe_sed_script(script: str) -> bool:
     return True
 
 
-def decide_sed_words(words: list[str]) -> KernelDecision:
+def decide_sed_words(
+    words: list[str],
+    path_roles: list[PathRoleRow] | None = None,
+    recoverable_targets: list[str] | None = None,
+    recoverable_target_limit: int = 5,
+    path_rules: list[PathRuleRow] | None = None,
+) -> KernelDecision:
     """Allow only read-only sed: safe flags plus a safe script grammar.
 
     ``--sandbox`` makes sed itself reject the write and execute commands, so
-    the script screen is skipped under it; in-place editing and script files
-    stay denied toward the Edit tool and inline scripts.
+    the script screen is skipped under it; a script file stays denied toward
+    an inline script, because nothing screens what is in it.
+
+    In-place editing is two objections wearing one refusal, and only one of
+    them survives a boundary. *Being wrong is unrepairable* is answered by
+    the files themselves: a scratch file costs nothing, a committed file with
+    no uncommitted change costs a checkout, and the whole change stands in
+    the diff either way — the same question a delete is already granted on,
+    asked of the verb that overwrites instead of the one that removes. So a
+    rewrite whose every named file could be brought back is allowed, with the
+    grant saying what it granted.
+
+    *It walks past the gates an edit is judged by* is not answered by
+    anything: the anti-pattern table, the review-note gate and the size gate
+    are reviewability, and no container and no undo layer enforces them. That
+    is what remains once recoverability is established, and it is why the
+    grant names `dev check` as where those rules will still be read.
+
+    Where recoverability is not established — a file the host reported
+    nothing about, a word that expands at run time, more restorable files
+    than a rewrite should sweep — the refusal stands and names the tool that
+    does the job it is usually reached for: a rename across many sites is
+    `rename_symbol`, which resolves scopes an exact-string substitution
+    cannot tell apart. A stated reason still turns that refusal into the
+    question it asks for.
     """
     scripts: list[str] = []
     positional: list[str] = []
     script_expected = False
     script_from_options = False
     sandbox = False
+    in_place = False
     for word in words[1:]:
         if script_expected:
             scripts.append(word)
@@ -364,16 +409,15 @@ def decide_sed_words(words: list[str]) -> KernelDecision:
             continue
         if word.startswith("--"):
             name, separator, value = word.partition("=")
-            # lup: Seems counterproductive not to just accept sed here. A real
-            # denial read: "escalated (renaming one keyword argument at 38
+            # lup: solved: Seems counterproductive not to just accept sed here. A
+            # real denial read: "escalated (renaming one keyword argument at 38
             # identical call sites across 9 files; the substitution is
             # exact-string and the result is verified by pyright plus the
             # suite): in-place sed bypasses the edit policy — use Edit". An
             # escalation carrying that reason should get through.
             if name in ("--in-place", "--inplace"):
-                return KernelDecision(
-                    "deny", "in-place sed bypasses the edit policy — use Edit"
-                )
+                in_place = True
+                continue
             if name == "--file":
                 return KernelDecision(
                     "deny", "sed script files are not screened — inline the script"
@@ -393,9 +437,11 @@ def decide_sed_words(words: list[str]) -> KernelDecision:
         if word.startswith("-") and len(word) > 1:
             flags = word[1:]
             if "i" in flags:
-                return KernelDecision(
-                    "deny", "in-place sed bypasses the edit policy — use Edit"
-                )
+                # `-i` takes its backup suffix attached, so everything after
+                # it is that suffix rather than more flags — which is also
+                # sed's own reading of `-ie`.
+                in_place = True
+                flags = flags[: flags.index("i")]
             if "f" in flags:
                 return KernelDecision(
                     "deny", "sed script files are not screened — inline the script"
@@ -414,7 +460,18 @@ def decide_sed_words(words: list[str]) -> KernelDecision:
         scripts.append(positional.pop(0))
     if not sandbox and not all(safe_sed_script(script) for script in scripts):
         return unjudged("sed script is not classified as read-only")
-    return KernelDecision("allow", "read-only sed script")
+    if not in_place:
+        return KernelDecision("allow", "read-only sed script")
+    granted = rewrites_only_recoverable_files(
+        positional,
+        path_roles or [],
+        recoverable_targets,
+        recoverable_target_limit,
+        path_rules,
+    )
+    return (
+        granted if granted is not None else KernelDecision("deny", IN_PLACE_SED_REFUSAL)
+    )
 
 
 def safe_awk_program(program: str) -> bool:

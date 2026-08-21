@@ -255,7 +255,13 @@ def decide_shell_segment(segment: list[str], context: ShellContext) -> KernelDec
     if executable == "find":
         return decide_find_words(words, context)
     if executable == "sed":
-        return decide_sed_words(words)
+        return decide_sed_words(
+            words,
+            context["path_roles"],
+            context["recoverable_targets"],
+            context["recoverable_target_limit"],
+            context["path_rules"],
+        )
     if executable in ("awk", "gawk", "mawk"):
         return decide_awk_words(words)
     if executable == "uvx":

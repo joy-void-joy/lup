@@ -3707,3 +3707,71 @@ def test_a_type_check_through_a_package_runner_is_the_read_it_is() -> None:
     # Composed the way it was met: segments join, so one asking segment made
     # a whole verify line ask.
     assert effect("git status --short && cd frontend && npx tsc --noEmit") == "allow"
+
+
+def test_rewriting_a_restorable_file_costs_what_deleting_it_costs(
+    tmp_path: Path,
+) -> None:
+    """An in-place rewrite is judged on its files, the way a delete already is.
+
+    Two objections wore one refusal here, and only one survives a boundary
+    beneath it. *Being wrong is unrepairable* is answered by the files: a
+    committed file with no uncommitted change costs a checkout and no
+    information, and the whole change stands in the diff. *It walks past the
+    gates an edit is judged by* is not answered by anything, which is why the
+    grant says so and names `dev check`.
+    """
+    committed_tree(tmp_path, "notes.md", "other.md")
+    policy = ShellPolicy(SHELL_RULES, runner_targets=FIXTURE_RUNNER_TARGETS)
+
+    def decided(command: str) -> str:
+        return policy.decide(ShellCommand(command=command, cwd=tmp_path)).effect
+
+    assert decided("sed -i 's/body/text/' notes.md") == "allow"
+    assert decided("sed -i.bak 's/body/text/' notes.md other.md") == "allow"
+    assert decided("sed -ni 's/body/text/p' notes.md") == "allow"
+
+    # A file the host can vouch for nothing about costs whatever was in it.
+    (tmp_path / "dirty.md").write_text("uncommitted\n", encoding="utf-8")
+    assert decided("sed -i 's/a/b/' dirty.md") == "deny"
+    assert decided("sed -i 's/a/b/' absent.md") == "deny"
+    # Naming no file at all establishes nothing to be restorable.
+    assert decided("sed -i 's/a/b/'") == "deny"
+    # A word that names a different path at run time is not established either.
+    assert decided("sed -i 's/a/b/' $TARGET") == "deny"
+
+
+def test_an_in_place_rewrite_never_covers_a_protected_path(tmp_path: Path) -> None:
+    """Restorability answers what it costs, never who may replace it."""
+    committed_tree(tmp_path, "README.md", "notes.md")
+    policy = ShellPolicy(
+        SHELL_RULES,
+        path_rules=[human_owned_path_rule("README.md")],
+        runner_targets=FIXTURE_RUNNER_TARGETS,
+    )
+
+    def effect(command: str) -> str:
+        return policy.decide(ShellCommand(command=command, cwd=tmp_path)).effect
+
+    assert effect("sed -i 's/a/b/' notes.md") == "allow"
+    assert effect("sed -i 's/a/b/' README.md") == "ask"
+
+
+def test_an_in_place_rewrite_is_still_screened_for_what_the_script_does(
+    tmp_path: Path,
+) -> None:
+    """Recoverability says nothing about a script that writes or executes.
+
+    The two screens are independent: one asks what the named files cost, the
+    other what the script reaches. A grant on the first never opens the
+    second, which is what keeps `w` and `e` out of an allowed command.
+    """
+    committed_tree(tmp_path, "notes.md")
+    policy = ShellPolicy(SHELL_RULES, runner_targets=FIXTURE_RUNNER_TARGETS)
+
+    def effect(command: str) -> str:
+        return policy.decide(ShellCommand(command=command, cwd=tmp_path)).effect
+
+    assert effect("sed -i 's/a/b/w /etc/passwd' notes.md") != "allow"
+    assert effect("sed -i '1e cat /etc/shadow' notes.md") != "allow"
+    assert effect("sed -i -f script.sed notes.md") == "deny"
