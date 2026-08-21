@@ -134,6 +134,13 @@ def create_dev_app(
                 help="Create with no base recorded, instead of refusing to guess",
             ),
         ] = False,
+        clipboard: Annotated[
+            bool,
+            typer.Option(
+                "--clipboard",
+                help="Also copy the shell line to your clipboard, for pasting",
+            ),
+        ] = False,
     ) -> None:
         """Create or re-attach a git worktree."""
         worktree.create(
@@ -144,6 +151,7 @@ def create_dev_app(
             relocation_hint,
             force=force,
             no_record=no_record,
+            clipboard=clipboard,
             guards=declared().git_guards,
         )
 
@@ -887,7 +895,11 @@ def create_dev_app(
         root = project_root()
         if take:
             taken = undo.snapshot(root, take)
-            typer.echo(f"{taken.ref}  {taken.commit[:12]}")
+            typer.echo(
+                f"{taken.ref}  {taken.commit[:12]}"
+                if taken is not None
+                else "No snapshot taken — this checkout could not be written to."
+            )
             return
         if expire_days is not None:
             for gone in undo.expire(root, expire_days):

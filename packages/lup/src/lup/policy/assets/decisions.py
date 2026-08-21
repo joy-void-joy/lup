@@ -31,6 +31,7 @@ from host import (
     managed_script_roots,
     recoverable_write_targets,
     resolved_refutations,
+    undo_snapshot,
     worktree_path,
 )
 from kernel.decision import KernelDecision
@@ -98,7 +99,7 @@ def bash_decision(
     passing is a rule that silently stopped applying.
     """
     acted_on = shell_path_verb_targets(command)
-    return decide_shell(
+    verdict = decide_shell(
         command,
         SHELL_RULES,
         ALLOWED_FETCH_SCOPES,
@@ -121,6 +122,46 @@ def bash_decision(
         target_tables=RUNNER_TARGET_TABLES,
         interactive=interactive,
         escapable=escapable,
+    )
+    if verdict.effect == "deny":
+        return verdict
+    return undo_point(
+        command, verdict, [*shell_write_targets(command), *acted_on], cwd
+    )
+
+
+def undo_point(
+    command: str, verdict: KernelDecision, targets: list[str], cwd: Path | None
+) -> KernelDecision:
+    """Snapshot the tree before a command that could destroy work in it.
+
+    The whole case for relaxing a permission lattice is that a mistake can be
+    put back, so this is what has to exist before that relaxation is honest.
+    What it does not need is a second list of destructive spellings: the
+    vocabulary already draws that line, and draws it more finely than a list
+    of verbs could. ``git reset`` is allowed and ``git reset --hard`` asks;
+    ``git switch`` is allowed and ``git switch --force`` asks. So the mark is
+    the verdict itself — anything the classifier did not wave through — plus
+    the paths the command was already resolved to be writing, which is what
+    catches an allowed-because-recoverable ``rm`` of a tracked file.
+
+    Said out loud only on an approval question, which is the one moment the
+    information changes an answer: a human deciding whether to permit
+    something destructive is weighing exactly whether it can be undone. On an
+    allowed command the snapshot is silent, because a line appended to every
+    mutating command is one nobody reads by the third time — and ``dev undo``
+    is where a snapshot is looked for anyway.
+    """
+    if not targets and verdict.effect == "allow":
+        return verdict
+    reference = undo_snapshot(cwd, command)
+    if not reference or verdict.effect != "ask":
+        return verdict
+    return KernelDecision(
+        verdict.effect,
+        f"{verdict.reason} — the tree was snapshotted first; "
+        f"`lup-devtools dev undo` lists it as {reference}",
+        verdict.sandbox,
     )
 
 

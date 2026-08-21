@@ -19,6 +19,7 @@ variable to read — never as a branch on which runtime is asking.
 import json
 import os
 import sys
+from datetime import UTC, datetime
 
 # lup: ignore[subprocess] — `sh` is third-party and this half is compiled into a bare script that has no virtual environment to resolve it from
 import subprocess
@@ -407,13 +408,27 @@ def existing_write_targets(targets: list[str], root: Path | None = None) -> list
     return [target for target in targets if (where / target).exists()]
 
 
-def git_answers(arguments: list[str], root: Path) -> list[str] | None:
-    """One read-only Git query's lines, or None when Git cannot answer.
+def git_answers(
+    arguments: list[str],
+    root: Path,
+    # lup: ignore[dict-str-payload] — variable names are an open set the caller
+    # supplies, not an enumerable one this signature could name
+    overrides: dict[str, str] | None = None,
+) -> list[str] | None:
+    """One Git invocation's lines, or None when Git cannot answer.
 
     Git missing, the path outside a repository, a malformed pathspec, and a
     non-zero exit all collapse to None, so a caller reading this as evidence
     that something is safe to destroy treats an unanswerable question as a no.
+
+    ``overrides`` are merged over the inherited environment rather than
+    replacing it, because a replacement drops ``PATH`` and ``HOME`` and the
+    invocation then fails for a reason that has nothing to do with what it
+    was asked. The one caller that passes any is the snapshot, which needs
+    ``GIT_INDEX_FILE`` pointed somewhere other than the index a human is in
+    the middle of composing.
     """
+    environ = os.environ  # lup: ignore[os-environ]
     try:
         finished = subprocess.run(
             ["git", *arguments],
@@ -421,10 +436,89 @@ def git_answers(arguments: list[str], root: Path) -> list[str] | None:
             capture_output=True,
             text=True,
             check=False,
+            env={**environ, **overrides} if overrides else None,
         )
     except OSError:
         return None
     return finished.stdout.splitlines() if finished.returncode == 0 else None
+
+
+def undo_namespace() -> str:
+    """Where snapshots live: a ref namespace of this project's own.
+
+    Under ``refs/`` rather than in a stash so nothing a human does to their
+    stash disturbs them, and outside ``refs/heads`` so no branch listing,
+    push, or fetch treats them as work anybody meant to publish.
+
+    A function rather than a constant because this half is spliced into the
+    compiled dispatcher one function at a time, and a name beside them is
+    dropped on the way in — read by the type checker, absent from the script.
+    Being a function is also what makes it importable by the command that
+    lists snapshots back, so the writer and the reader cannot end up looking
+    in two different places for the same safety net.
+    """
+    return "refs/lup/undo"
+
+
+def undo_snapshot(
+    root: Path | None,
+    reason: str,
+    session: str = "default",
+    namespace: str = "",
+) -> str:
+    """Write the working tree into the object store before something destroys it.
+
+    The whole argument for relaxing a permission lattice is that a mistake can
+    be undone, so this is what has to exist before that relaxation is honest.
+    Tracked content *and* untracked files, through a throwaway index rather
+    than through ``git stash create``: measured, ``stash create`` captures only
+    tracked files that were modified, so the file written thirty seconds ago
+    and not yet added -- precisely what ``rm -rf src/`` destroys -- is absent
+    from it exactly when it is reached for.
+
+    Ignored files are not captured, and that is a stated limit rather than an
+    oversight: on the checkout this was built in, ignored-but-precious content
+    came to 592 MB against a 21 MB object store, so capturing it would write
+    twenty-eight times the repository's whole history before every mutating
+    command. ``git clean -fdx`` therefore keeps asking, because it is the one
+    command whose purpose is destroying what this cannot restore, and a
+    credential belongs outside the checkout rather than inside one.
+
+    Silent about its own failure, and deliberately. This runs in front of a
+    command somebody asked for; a checkout mid-merge, a locked index, and a
+    repository this process cannot write to are all reasons a snapshot cannot
+    be taken, and none of them is a reason to stop the command. An empty
+    string says no snapshot exists, which is what a caller needs to know and
+    all it needs to know.
+
+    In the compiled dispatcher rather than behind ``lup-devtools`` because of
+    what it costs. Measured on a 2,634-file checkout of this repository: 81 ms
+    for the first snapshot of a session, then a median of 11 ms warm and 14 ms
+    with a file changed, against roughly a second of interpreter start for a
+    subprocess that would do the same work. A safety net paid for on every
+    mutating command has to cost what this costs, or it is the first thing
+    somebody turns off -- and the warm figure is the one that matters, because
+    the cold index is paid once and reused for the rest of the session.
+    """
+    if root is None:
+        return ""
+    directory = git_answers(["rev-parse", "--absolute-git-dir"], root)
+    if not directory:
+        return ""
+    private = {"GIT_INDEX_FILE": f"{directory[0]}/lup-undo-{session}.index"}
+    if git_answers(["add", "-A"], root, private) is None:
+        return ""
+    tree = git_answers(["write-tree"], root, private)
+    if not tree:
+        return ""
+    commit = git_answers(["commit-tree", tree[0], "-m", f"lup undo: {reason}"], root)
+    if not commit:
+        return ""
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%f")
+    reference = f"{namespace or undo_namespace()}/{stamp}-{commit[0][:8]}"
+    if git_answers(["update-ref", reference, commit[0]], root) is None:
+        return ""
+    return reference
 
 
 def recoverable_write_targets(

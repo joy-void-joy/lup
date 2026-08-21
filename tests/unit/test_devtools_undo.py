@@ -27,6 +27,18 @@ def checkout(tmp_path: Path) -> Path:
     return tmp_path
 
 
+def taken(root: Path, reason: str) -> undo.UndoPoint:
+    """One snapshot, insisting it happened.
+
+    Every test below is about what a snapshot *holds*, so "no snapshot" is
+    never the subject and asserting it here keeps that assertion out of each
+    of them. The one test that is about failing does not call this.
+    """
+    point = undo.snapshot(root, reason)
+    assert point is not None
+    return point
+
+
 def test_an_untracked_file_survives_a_snapshot(checkout: Path) -> None:
     """The case `git stash create` misses, and the reason this module exists.
 
@@ -36,15 +48,15 @@ def test_an_untracked_file_survives_a_snapshot(checkout: Path) -> None:
     with a hole where the accidents are.
     """
     (checkout / "new.txt").write_text("just written\n", encoding="utf-8")
-    taken = undo.snapshot(checkout, "about to rm -rf")
-    held = git.out("-C", str(checkout), "cat-file", "-p", f"{taken.commit}:new.txt")
+    point = taken(checkout, "about to rm -rf")
+    held = git.out("-C", str(checkout), "cat-file", "-p", f"{point.commit}:new.txt")
     assert held.strip() == "just written"
 
 
 def test_a_modified_tracked_file_survives_a_snapshot(checkout: Path) -> None:
     (checkout / "tracked.txt").write_text("edited\n", encoding="utf-8")
-    taken = undo.snapshot(checkout, "about to reset")
-    held = git.out("-C", str(checkout), "cat-file", "-p", f"{taken.commit}:tracked.txt")
+    point = taken(checkout, "about to reset")
+    held = git.out("-C", str(checkout), "cat-file", "-p", f"{point.commit}:tracked.txt")
     assert held.strip() == "edited"
 
 
@@ -56,8 +68,8 @@ def test_an_ignored_file_is_left_out(checkout: Path) -> None:
     """
     (checkout / "ignored").mkdir()
     (checkout / "ignored" / "big.bin").write_text("x", encoding="utf-8")
-    taken = undo.snapshot(checkout, "about to clean")
-    listed = git.out("-C", str(checkout), "ls-tree", "-r", "--name-only", taken.commit)
+    point = taken(checkout, "about to clean")
+    listed = git.out("-C", str(checkout), "ls-tree", "-r", "--name-only", point.commit)
     assert "ignored/big.bin" not in listed
 
 
@@ -84,9 +96,9 @@ def test_snapshots_list_newest_first_with_the_reason_they_were_taken(
 
 def test_a_snapshot_names_the_command_it_can_be_restored_with(checkout: Path) -> None:
     """Printed rather than run: restoring overwrites present work with past work."""
-    taken = undo.snapshot(checkout, "probe")
-    assert taken.restore_command() == (
-        f"git restore --source {taken.commit} --worktree ."
+    point = taken(checkout, "probe")
+    assert point.restore_command() == (
+        f"git restore --source {point.commit} --worktree ."
     )
 
 

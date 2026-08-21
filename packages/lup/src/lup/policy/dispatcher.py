@@ -77,6 +77,7 @@ DISPATCHER_STDLIB = (
     "sys",
     "pathlib",
     "subprocess",
+    "datetime",
 )
 """The standard library a compiled dispatcher may reach.
 
@@ -90,6 +91,14 @@ recoverable is a question only a process can answer, and every alternative
 spelling of it — ``sh``, a devtools helper — is exactly the unresolvable
 import this pin exists to reject. Being genuine standard library, it cannot
 produce that failure. Each further entry deserves the same argument.
+
+``datetime`` earns its place the same way. The undo snapshot names each ref
+with a microsecond stamp, and the precision is load-bearing rather than
+decorative: Git records a ref's date from its commit, whose resolution is one
+second, so two snapshots taken in the same second tie — and a tie means the
+listing hands back the older of the two at exactly the moment somebody is
+reaching for the newer one. Nothing already pinned here can produce a
+sub-second stamp.
 """
 
 ROUTER = "dispatch"
