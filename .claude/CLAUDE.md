@@ -167,6 +167,8 @@ If you find yourself running the same command repeatedly, **add a command** — 
 
 Both rosters are rendered from typed declarations: what is about agent work lives in `packages/lup/src/lup/devtools/harness/content/catalog.py`, what is about being a template in `src/lup_template/devtools/harness/content/catalog.py`, which composes both. Change the catalog that owns the subject, then regenerate.
 
+**Every runtime, in the same change.** Anything you establish about one runtime — a policy concept, a launch flag, a hook mechanism, a rendered artifact — states what each of the others does about it, and lands with all of them built rather than one deferred. Never describe one runtime's mechanism without saying the rest. Where a runtime genuinely cannot express the concept, say so explicitly and name what it does instead: one of the two here has no per-call sandbox escape at all, so every `sandbox="outside"` placement is rendered and dropped there, and an unstated gap like that is how it stays invisible until an adopter meets it. A change is not done while `harness generate all` reconciles only one tree; `docs/permissions.md` names which runtime is which.
+
 ### Code Intelligence
 
 The `codeintel` tool group answers questions about code by *resolving* it, through a language server. **Prefer them over grep for anything about a name**, and prefer `rename_symbol` over an edit with `replace_all`, which cannot tell one scope from another; apply the edits it reports yourself. `docs/conventions.md` lists what each tool answers. `grep` is still right for what is genuinely characters: a string literal, a comment, a non-Python file.

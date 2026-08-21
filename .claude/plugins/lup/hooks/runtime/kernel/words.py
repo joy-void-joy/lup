@@ -8,7 +8,11 @@ from typing import TypedDict
 from .archives import archive_write
 from .decision import KernelDecision, SUBSTITUTION_SENTINEL
 from .edit import path_rule_matches
-from .roles import path_role
+from .roles import (
+    GENERATED_PLUGIN_REFUSAL,
+    is_generated_plugin_target,
+    path_role,
+)
 from .rows import PathRoleRow, PathRuleRow
 
 
@@ -59,8 +63,6 @@ DANGEROUS_ENV_NAMES = (
 )
 # lup: ignore[library-default] — variable prefixes the OS, those runtimes, and these tools read to redirect execution or retarget a command
 DANGEROUS_ENV_PREFIXES = ("LD_", "DYLD_", "PYTHON", "GIT_", "GH_", "BASH_FUNC_")
-# lup: ignore[library-default] — the native runtimes' own plugin directory names
-GENERATED_PLUGIN_ROOTS = (".claude/plugins", ".codex/plugins")
 # lup: ignore[library-default] — real interpreter executables; omitting one is a hole, not a preference
 INTERPRETERS = (
     "python",
@@ -184,38 +186,6 @@ def is_trusted_script(word: str, roots: list[str]) -> bool:
         normalized.startswith(posixpath.join(posixpath.normpath(root), ""))
         for root in roots
         if root.startswith("/") and posixpath.normpath(root) != "/"
-    )
-
-
-# lup: ignore[constant-declaration] — refusal wording, declared with its verdict
-GENERATED_PLUGIN_REFUSAL = (
-    "a native plugin tree is compiled from typed source, and the running"
-    " runtime already loaded it — edit the policy source, run"
-    " `lup-devtools harness generate all`, then ask the user to restart"
-    " claude or codex so the change takes effect"
-)
-
-
-def is_generated_plugin_target(word: str) -> bool:
-    """Recognize a path confined to a native plugin tree the harness renders.
-
-    Every file there is compiled from typed source, so writing one by hand
-    edits a build product: the change is reverted by the next generation and
-    never reaches the runtime that already loaded it. The roots stop at
-    ``plugins`` because their parents also hold settings, trust state, and
-    hand-written skills and commands that no generator can restore.
-
-    The roots are matched as path segments wherever they occur, so an absolute
-    spelling and a sibling worktree's tree are recognized too. A relaxation
-    may safely decline to resolve those, because declining leaves the ask in
-    place; a refusal that only knew the repo-relative spelling would instead
-    fail open on the one form that reaches past this worktree.
-    """
-    segments = posixpath.normpath(word).split("/")
-    return any(
-        segments[index : index + len(parts)] == parts
-        for parts in [root.split("/") for root in GENERATED_PLUGIN_ROOTS]
-        for index in range(len(segments))
     )
 
 
