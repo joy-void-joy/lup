@@ -10,6 +10,10 @@ boundary because nobody told it the boundary was there.
 
 from pathlib import Path
 
+import pytest
+import sh
+
+import lup.devtools.harness.contained as contained
 from lup.harness.egress import SessionEgress, Unproxied
 from lup.harness.image import Docker, Image
 from lup.harness.requirements import Manifest
@@ -187,3 +191,68 @@ def test_the_egress_environment_is_not_baked_into_the_image() -> None:
     rendered = Image().dockerfile(Manifest())
     assert "HTTPS_PROXY" not in rendered
     assert "ENV LUP_CONTAINED=1" in rendered
+
+
+def test_a_running_proxy_off_the_network_is_repaired_rather_than_believed(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The hole a launch fell into: running is not the same as reachable.
+
+    An earlier `start_egress` returned as soon as the proxy was *running*, so
+    a proxy that had lost its place on the internal network — or never taken
+    one, the connect half having failed after the run half succeeded — was
+    found running and left exactly as it was, on that launch and every launch
+    afterwards.
+
+    What that costs is why it is worth a test rather than a comment. The
+    session addresses its only way out by an alias on that network, so every
+    request fails at DNS, and the runtime reports it as the operator's own
+    internet or DNS being broken. Nothing in that sentence mentions a proxy.
+    """
+    issued: list[list[str]] = []
+
+    def spelled(binary: str):
+        def call(*words: str, **_: object) -> str:
+            issued.append([binary, *words])
+            return {
+                # The network is there, the proxy is up — and it is on the
+                # engine's default bridge and nothing else, which is exactly
+                # the state that reads as healthy from every cheaper question.
+                "inspect": "true" if "{{.State.Running}}" in words else "bridge ",
+            }.get(words[0], "")
+
+        return call
+
+    monkeypatch.setattr(sh, "Command", spelled)
+    contained.start_egress(SessionEgress(), "feat", Docker(), tmp_path)
+
+    assert ["docker", "network", "connect", "--alias", "egress"] == issued[-1][:5]
+
+
+def test_a_proxy_already_on_the_network_is_left_alone(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Idempotent, so a second launch neither restarts nor reconnects anything.
+
+    Reconnecting a container that is already connected is an error on both
+    engines, so a repair that did not first ask would turn every launch after
+    the first into a refusal.
+    """
+    issued: list[list[str]] = []
+
+    def spelled(binary: str):
+        def call(*words: str, **_: object) -> str:
+            issued.append([binary, *words])
+            return {
+                "inspect": "true"
+                if "{{.State.Running}}" in words
+                else "bridge lup-egress-net-feat ",
+            }.get(words[0], "")
+
+        return call
+
+    monkeypatch.setattr(sh, "Command", spelled)
+    contained.start_egress(SessionEgress(), "feat", Docker(), tmp_path)
+
+    assert not any("connect" in argv for argv in issued)
+    assert not any("run" in argv for argv in issued)

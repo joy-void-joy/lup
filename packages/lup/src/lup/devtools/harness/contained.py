@@ -253,16 +253,54 @@ def running(name: str, engine: ContainerEngine) -> bool:
     return str(state).strip() == "true"
 
 
+def attached(name: str, network: str, engine: ContainerEngine) -> bool:
+    """Whether this container is on that network, asked of the engine.
+
+    The third piece of the egress state, and the one a launcher is most
+    likely to assume rather than ask. A proxy is *running* and a proxy is
+    *reachable from the session's network* are different facts that come
+    apart in ordinary ways: the operator removes the network while the proxy
+    stays up, or the connect half of a two-command start fails after the run
+    half succeeded. Either leaves a proxy answering ``true`` to every
+    question a launcher thought to ask, on a network the session is not on.
+
+    What that costs is worth spelling, because it is not a timeout. The
+    session resolves ``egress`` through the internal network's resolver,
+    which has no record of a container that never joined -- so every request
+    fails at DNS, and the runtime reports it as the operator's internet or
+    DNS being broken. Nothing in that sentence is true, and nothing in it
+    mentions a proxy.
+    """
+    try:
+        found = sh.Command(engine.binary)(
+            "inspect",
+            "--format",
+            "{{range $name, $_ := .NetworkSettings.Networks}}{{$name}} {{end}}",
+            name,
+        )
+    except (sh.CommandNotFound, sh.ErrorReturnCode):
+        return False
+    return network in str(found).split()
+
+
 def start_egress(
     egress: SessionEgress, project: str, engine: ContainerEngine, root: Path
 ) -> None:
     """Bring up the internal network and the proxy bridged out of it.
 
     Idempotent, and idempotent one piece at a time rather than as a whole:
-    the network can outlive a proxy the operator stopped, and a run that
-    treated the pair as one fact would leave a session attached to a network
-    with nothing on the far side of it -- which is the failure mode the
-    filtered posture exists to avoid, arrived at by the launcher itself.
+    the network can outlive a proxy the operator stopped, the proxy can
+    outlive the network it was attached to, and a run that treated any pair
+    of the three as one fact would leave a session attached to a network with
+    nothing on the far side of it -- which is the failure mode the filtered
+    posture exists to avoid, arrived at by the launcher itself.
+
+    The attachment is the piece an earlier version assumed. It returned as
+    soon as the proxy was *running*, so a proxy that had lost its place on the
+    internal network -- or never taken one, the connect half of the start
+    having failed after the run half succeeded -- was found running and left
+    exactly as it was, on every launch afterwards. :func:`attached` is what
+    turns that from a permanent state into a repair.
 
     The rendered configuration is written into the checkout's scratch
     directory rather than piped in, for the reason :func:`build_image` writes
@@ -276,6 +314,25 @@ def start_egress(
     if not network_present(egress.network_name(project), engine):
         client(*egress.network_arguments(project))
     if running(egress.proxy_name(project), engine):
+        if attached(egress.proxy_name(project), egress.network_name(project), engine):
+            return
+        # Connecting a running container is the repair rather than restarting
+        # it, because the proxy is shared: another checkout's session may be
+        # reaching the network through this same container right now, and
+        # taking it down to fix an attachment it already has would break a
+        # session that was working to mend one that was not.
+        try:
+            client(*egress.connect_arguments(project))
+        except sh.ErrorReturnCode as error:
+            raise typer.BadParameter(
+                f"{egress.proxy_name(project)} is running but is not on "
+                f"{egress.network_name(project)}, and joining it failed: "
+                f"{error.stderr.decode('utf-8', 'replace').strip()}. A session "
+                "opened now would resolve nothing — it addresses its only way "
+                f"out as `{egress.alias}`, which is an alias on that network. "
+                "Remove the pair with `harness egress --down` and let the next "
+                "launch rebuild them, or open the session with --unsandboxed."
+            ) from error
         return
     scratch = root / "tmp"
     scratch.mkdir(parents=True, exist_ok=True)
