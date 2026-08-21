@@ -26,7 +26,6 @@
     "allow": [
       "WebSearch",
       "Skill(lup:hooks)",
-      "EnterWorktree",
       "ExitWorktree",
       "Read(./.claude/settings.json.local*)",
       "Read(./sync.json.local)",

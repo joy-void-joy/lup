@@ -2591,19 +2591,26 @@ def test_a_checkout_keeping_no_companion_names_nothing_further(tmp_path: Path) -
     assert companion_plugin_directories(tmp_path, "lup") == []
 
 
-def test_entering_and_leaving_a_worktree_is_granted_rather_than_asked_about() -> None:
-    """The workflow mandates the worktree, so asking about it asks whether to follow it.
+def test_leaving_a_worktree_is_granted_and_entering_one_is_not() -> None:
+    """Entering arms a wall; leaving is how a session that got in gets out.
 
-    Neither tool is a shell command, so no vocabulary sweep reaches them and
-    `hooks classify` cannot answer for them: the grant lives in the settings
-    artifact, which is why the pin does too.
+    The grant and the refusal have to agree, and once did not: entering was
+    granted here while the guidance told every session not to do it, which
+    left the whole gate resting on prose. Neither tool is a shell command, so
+    no vocabulary sweep reaches them and `hooks classify` cannot answer for
+    them -- the grant lives in the settings artifact and the refusal in the
+    tool table, which is why both pins do too.
     """
-    permissions = project_settings(portable_harness().plugins[0])["permissions"]
+    plugin = portable_harness().plugins[0]
+    permissions = project_settings(plugin)["permissions"]
     assert isinstance(permissions, dict)
     allowed = permissions["allow"]
     assert isinstance(allowed, list)
-    assert "EnterWorktree" in allowed
     assert "ExitWorktree" in allowed
+    assert "EnterWorktree" not in allowed
+    assert plugin.hooks is not None
+    refused = {item.tool for item in plugin.hooks.refused_tools}
+    assert "EnterWorktree" in refused
 
 
 def test_codex_sandbox_arguments_establish_the_envelope() -> None:

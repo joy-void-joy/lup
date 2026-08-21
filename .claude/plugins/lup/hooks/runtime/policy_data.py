@@ -7885,6 +7885,11 @@ REFUSED_TOOLS: list[RefusedToolRow] = [
         "specifier": "artifact-design",
         "reason": "publishing a page leaves the repository, and this project already owns surfaces that do not \u2014 run `uv run lup-devtools report` for everything left to implement, or the report skill to write it whole to tmp/report.md",
     },
+    {
+        "tool": "EnterWorktree",
+        "specifier": "",
+        "reason": "entering a worktree with this tool arms Claude Code's worktree isolation for the rest of the session, which then refuses eval, source, fc, coproc, trap, enable, mapfile, readarray, hash, bind, complete, compgen, alias and let in any argv position \u2014 including in read-only commands with no git in them, so `grep -c hash file.py` stops working. Measured: the tool call is what arms it, not where the session is. `dev worktree create` already made the tree \u2014 launch a session rooted in it, or address its files by absolute path from here",
+    },
 ]
 
 AUTONOMOUS_AGENT_IDENTITIES: list[str] = [
