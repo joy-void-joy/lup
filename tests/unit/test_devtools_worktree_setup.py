@@ -288,3 +288,72 @@ def test_commits_no_remote_holds_are_left_for_the_gated_push(
     create("topic")
 
     assert "Not pushing topic" in capsys.readouterr().out
+
+
+def test_a_base_nobody_can_name_is_refused_before_the_worktree_exists(
+    repo: Path,
+    tree_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A detached HEAD has no branch to read, so there is nothing to record.
+
+    The old fallback wrote nothing and said nothing, and the loss surfaced
+    much later as a base guessed from a topology that had moved. Refused at
+    creation, where naming the base is one flag.
+    """
+    repo_git(repo)("checkout", "--detach")
+    monkeypatch.chdir(repo)
+
+    with pytest.raises(typer.Exit) as exit_info:
+        create("topic")
+
+    assert exit_info.value.exit_code == 1
+    assert "not on a branch" in capsys.readouterr().err
+    assert not (tree_dir / "topic").exists()
+
+
+def test_a_base_nobody_can_name_is_created_anyway_when_asked_deliberately(
+    repo: Path,
+    tree_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`--no-record` is the deliberate answer, and it makes the worktree."""
+    repo_git(repo)("checkout", "--detach")
+    monkeypatch.chdir(repo)
+
+    worktree.create(
+        "topic",
+        no_sync=True,
+        no_copy_data=True,
+        base_branch=None,
+        launcher=relocation_hint,
+        no_record=True,
+    )
+
+    assert (tree_dir / "topic").is_dir()
+    recorded = repo_git(repo)(
+        "config", "--get", "branch.topic.lup-base", _ok_code=[0, 1]
+    )
+    assert str(recorded).strip() == ""
+
+
+def test_a_named_base_is_recorded_from_a_detached_head(
+    repo: Path,
+    tree_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Naming the base is the other answer, and it records what was named."""
+    repo_git(repo)("checkout", "--detach")
+    monkeypatch.chdir(repo)
+
+    worktree.create(
+        "topic",
+        no_sync=True,
+        no_copy_data=True,
+        base_branch="main",
+        launcher=relocation_hint,
+    )
+
+    recorded = repo_git(repo)("config", "--get", "branch.topic.lup-base")
+    assert str(recorded).strip() == "main"

@@ -216,14 +216,18 @@ class RecordedBase(SetupStep, frozen=True):
     def label(self) -> str:
         return f"the base recorded for {self.branch}"
 
-    def satisfied(self) -> bool:
-        if not self.origin or self.origin == self.branch:
-            return True
+    def already_recorded(self) -> bool:
+        """Whether a base is written for this branch, whoever wrote it."""
         return bool(
             git.out(
                 "config", "--get", f"branch.{self.branch}.lup-base", _ok_code=[0, 1]
             )
         )
+
+    def satisfied(self) -> bool:
+        if self.origin == self.branch:
+            return True
+        return self.already_recorded()
 
     def run(self) -> None:
         git("config", f"branch.{self.branch}.lup-base", self.origin)
@@ -394,6 +398,7 @@ def create(
     base_branch: str | None,
     launcher: WorktreeLauncher,
     force: bool = False,
+    no_record: bool = False,
     extras: list[str] = GITIGNORED_EXTRAS,
     guards: list[GitGuard] = DECLARED_GUARDS,
 ) -> None:
@@ -409,6 +414,27 @@ def create(
     tree_dir = get_tree_dir()
     worktree_path = tree_dir / name
     resuming = worktree_path.exists() and worktree_is_registered(worktree_path)
+
+    # What a base is recorded from, settled before anything is created. The
+    # fallback reads this checkout's current branch, which answers only while
+    # there is one: on a detached HEAD the read comes back empty, the record
+    # is skipped, and nothing says so — which is why `sync base` reports "Base
+    # guessed" long afterwards, on a topology that has since moved. A base
+    # nobody can name is refused here instead, where the answer is a flag
+    # rather than archaeology.
+    recorded = RecordedBase(
+        branch=name, origin=base_branch or git.out("branch", "--show-current")
+    )
+    if not recorded.origin and not no_record and not recorded.already_recorded():
+        typer.echo(
+            f"Cannot tell what {name} would be cut from: {current_dir} is not on "
+            "a branch, so nothing would be recorded as its base and every later "
+            "reader would have to guess it from topology.\n"
+            "Name it with --base <branch>, or pass --no-record to create the "
+            "worktree with no base recorded.",
+            err=True,
+        )
+        raise typer.Exit(1)
 
     if worktree_path.exists() and not resuming:
         if not force:
@@ -428,15 +454,14 @@ def create(
         """Everything that has to hold before this worktree can be used."""
         yield MergeDriver()
         yield ArmedGitGuards(guards=guards, worktree=worktree_path)
-        # lup: `lup-devtools sync base` often reports "Base guessed", because this is
-        # where the record fails to happen: the fallback reads the *cwd's* current
-        # branch, which is not the branch being worked in once EnterWorktree has
-        # moved the session, and records nothing at all when the read comes back
+        # lup: solved: `lup-devtools sync base` often reports "Base guessed", because
+        # this is where the record fails to happen: the fallback reads the *cwd's*
+        # current branch, which is not the branch being worked in once EnterWorktree
+        # has moved the session, and records nothing at all when the read comes back
         # empty. Make `worktree create` refuse without `--branch` when it cannot know
         # what base to record, with a `--no-record` to suppress that deliberately.
-        yield RecordedBase(
-            branch=name, origin=base_branch or git.out("branch", "--show-current")
-        )
+        if not no_record:
+            yield recorded
         yield PushedBranch(branch=name)
         if not no_copy_data:
             yield CopiedExtras(

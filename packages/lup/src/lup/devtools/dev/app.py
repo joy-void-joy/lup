@@ -127,6 +127,13 @@ def create_dev_app(
                 help="Delete an existing unregistered directory at the worktree path",
             ),
         ] = False,
+        no_record: Annotated[
+            bool,
+            typer.Option(
+                "--no-record",
+                help="Create with no base recorded, instead of refusing to guess",
+            ),
+        ] = False,
     ) -> None:
         """Create or re-attach a git worktree."""
         worktree.create(
@@ -136,6 +143,7 @@ def create_dev_app(
             base_branch,
             relocation_hint,
             force=force,
+            no_record=no_record,
             guards=declared().git_guards,
         )
 
