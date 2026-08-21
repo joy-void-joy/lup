@@ -32,6 +32,26 @@ nothing for unjudged work to defer to.
 Segments join deny > ask > defer > allow — unjudged rides into a judged
 prompt, a judged deny wins the batch. Malformed input fails conservatively.
 
+What the classified verdict then becomes is a second, ordered pass, declared
+as an order rather than written as a branch. `policy/kernel/settlement.py`
+holds one row per rule, read the way `.gitignore` reads patterns: every row is
+offered the running verdict, a row that rewrites hands its result to the next,
+and the first row that settles ends the pass. So a statement about precedence
+— *a stated reason never leaves a refusal standing*, *a judged deny is not
+rescued by a boundary*, *a question nobody can answer is no judgment* — is one
+row that says it, and changing the policy is moving, adding, or dropping one.
+The rows, in order:
+
+| row | what it says |
+|---|---|
+| `StatedReason` | a marker turns anything not already permitted into the question it asked for |
+| `TrappedPlacement` | a call declared `outside` where nothing can place it outside cannot run, and no reason moves that |
+| `UnanswerableQuestion` | a question on a host with nobody to ask is no judgment |
+| `ConfinedElsewhere` | no judgment, and a boundary beneath it: the boundary carries it |
+| `Unjudged` | no judgment and no boundary: refuse, naming the recipe |
+| `JudgedRefusal` | a rule refused this, and confinement is no answer to somebody's answer |
+| `Standing` | a permission, or an answerable question, stands |
+
 Where a command runs is a second axis beside that verdict, declared per rule
 rather than inferred: `git` states its placement once and every verb beneath
 it runs outside the sandbox, because one confined away from its transport or
@@ -154,10 +174,15 @@ inside a shell tool call never reaches the dispatcher that judges it.
 The guidance spells both; this is what each one does.
 
 - The escalation marker, `lup: escalate: <why>` as the leading comment line
-  of a shell command, promotes a classified deny or ask into an approval
+  of a shell command, promotes anything not already permitted into an approval
   question carrying that reason. It is the recovery path when work is denied
   as unjudged: reshape the command into the allowed vocabulary, or escalate
-  with a reason.
+  with a reason. It is an **effect**-axis marker and says nothing about
+  placement — it asks whether the call may happen, not where. Two refusals it
+  does not reach, both being statements that the call cannot happen rather
+  than that nobody approved it: a marker stating no reason, which would be
+  authorising itself, and a call declared `outside` on a host with no channel
+  to put it there.
 - The typed suppression marker, `lup: ignore[<rule-id>]` as a comment on the
   offending line, silences exactly the anti-pattern it names and no other, so
   the site still trips every rule it left unnamed. [contributing.md](contributing.md)

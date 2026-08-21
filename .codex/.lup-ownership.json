@@ -147,9 +147,16 @@
       "executable": false
     },
     {
+      "path": ".codex/plugins/lup/hooks/runtime/kernel/settlement.py",
+      "category": "generated",
+      "sha256": "5c77870604cc6539c1f0435862f6b3c8234415e222a84919674f1ef86a9059c2",
+      "semantic_id": "hooks.lup-policy",
+      "executable": false
+    },
+    {
       "path": ".codex/plugins/lup/hooks/runtime/kernel/shell.py",
       "category": "generated",
-      "sha256": "b1719e265cc038a97bc1a0a28268361240b58c1c4ca0f3b0776f65fca4bf1f95",
+      "sha256": "fe80732009fdbc46062ee89bfb1d3d74cbbf9076df7e159c5087d535726a95ad",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
