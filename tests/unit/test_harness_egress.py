@@ -15,7 +15,7 @@ import sh
 import typer
 
 import lup.devtools.harness.contained as contained
-from lup.harness.egress import SessionEgress, Unproxied
+from lup.harness.egress import AllowedHost, PROXY_LABEL, SessionEgress, Unproxied
 from lup.harness.image import Docker, Image
 from lup.harness.requirements import Manifest
 from lup.sandbox.egress import EgressPolicy
@@ -210,21 +210,14 @@ def test_a_running_proxy_off_the_network_is_repaired_rather_than_believed(
     request fails at DNS, and the runtime reports it as the operator's own
     internet or DNS being broken. Nothing in that sentence mentions a proxy.
     """
-    issued: list[list[str]] = []
-
-    def spelled(binary: str):
-        def call(*words: str, **_: object) -> str:
-            issued.append([binary, *words])
-            return {
-                # The network is there, the proxy is up — and it is on the
-                # engine's default bridge and nothing else, which is exactly
-                # the state that reads as healthy from every cheaper question.
-                "inspect": "true" if "{{.State.Running}}" in words else "bridge ",
-            }.get(words[0], "")
-
-        return call
-
-    monkeypatch.setattr(sh, "Command", spelled)
+    issued = engine_answering(
+        monkeypatch,
+        # The network is there, the proxy is up and carries the declaration in
+        # force — and it is on the engine's default bridge and nothing else,
+        # which is exactly the state that reads as healthy from every cheaper
+        # question this launcher used to ask.
+        networks="bridge ",
+    )
     contained.start_egress(SessionEgress(), "feat", Docker(), tmp_path)
 
     assert ["docker", "network", "connect", "--alias", "egress"] == issued[-1][:5]
@@ -239,20 +232,7 @@ def test_a_proxy_already_on_the_network_is_left_alone(
     engines, so a repair that did not first ask would turn every launch after
     the first into a refusal.
     """
-    issued: list[list[str]] = []
-
-    def spelled(binary: str):
-        def call(*words: str, **_: object) -> str:
-            issued.append([binary, *words])
-            return {
-                "inspect": "true"
-                if "{{.State.Running}}" in words
-                else "bridge lup-egress-net-feat ",
-            }.get(words[0], "")
-
-        return call
-
-    monkeypatch.setattr(sh, "Command", spelled)
+    issued = engine_answering(monkeypatch, networks="bridge lup-egress-net-feat ")
     contained.start_egress(SessionEgress(), "feat", Docker(), tmp_path)
 
     assert not any("connect" in argv for argv in issued)
@@ -655,3 +635,98 @@ def test_a_declared_resolver_overrides_what_the_host_names() -> None:
 def test_no_resolvers_means_no_flag_rather_than_an_empty_one() -> None:
     """An engine handed `--dns` with nothing after it refuses the whole run."""
     assert "--dns" not in SessionEgress().proxy_arguments("feat", Path("e.conf"))
+
+
+def engine_answering(
+    monkeypatch: pytest.MonkeyPatch,
+    networks: str,
+    resolv: str = "nameserver 192.168.0.1\n",
+) -> list[list[str]]:
+    """An engine reporting a running proxy started from the declaration in force.
+
+    The label has to be the *current* digest rather than a fixture string,
+    because what these cases are about is the launcher reusing a proxy it
+    recognises — pinning a literal would make them pass while the comparison
+    was broken, which is the failure a declaration digest exists to catch.
+
+    The host's resolv.conf is pinned for the same reason in reverse: it feeds
+    the digest, so reading the real one would make the answer depend on the
+    machine running the test.
+    """
+    monkeypatch.setattr(contained, "host_resolv_conf", lambda *_: resolv)
+    current = contained.declaration_digest(
+        SessionEgress().declaration(SessionEgress().resolvers_for(resolv))
+    )
+    issued: list[list[str]] = []
+
+    def spelled(binary: str):
+        def call(*words: str, **_: object) -> str:
+            issued.append([binary, *words])
+            if words[0] != "inspect":
+                return ""
+            if "{{.State.Running}}" in words:
+                return "true"
+            if PROXY_LABEL in " ".join(words):
+                return current
+            return networks
+
+        return call
+
+    monkeypatch.setattr(sh, "Command", spelled)
+    return issued
+
+
+def test_a_proxy_from_an_older_declaration_is_replaced(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The defect that made the resolver fix land nowhere.
+
+    An image is rebuilt when its declaration moves; the proxy was reused
+    whatever the declaration said. So a `--dns` flag was added, a launch was
+    run, and the proxy was found running and left exactly as it was — with
+    the launch reporting the boundary it was supposed to have. From outside,
+    a stale proxy and a current one are one running name.
+    """
+    issued = engine_answering(monkeypatch, networks="bridge lup-egress-net-feat ")
+
+    def stale(binary: str):
+        def call(*words: str, **_: object) -> str:
+            issued.append([binary, *words])
+            if words[0] != "inspect":
+                return ""
+            if "{{.State.Running}}" in words:
+                return "true"
+            if "{{.State.Status}}" in words:
+                return "running"
+            if PROXY_LABEL in " ".join(words):
+                return "a digest from some earlier declaration"
+            return "bridge lup-egress-net-feat "
+
+        return call
+
+    monkeypatch.setattr(sh, "Command", stale)
+    contained.settled(SessionEgress(), "feat", Docker(), tmp_path / "e.conf", 0)
+    contained.start_egress(SessionEgress(), "feat", Docker(), tmp_path)
+
+    assert any(argv[1] == "rm" for argv in issued)
+    started = next(argv for argv in issued if argv[1] == "run")
+    assert "--dns" in started
+    assert started[started.index("--dns") + 1] == "192.168.0.1"
+
+
+def test_the_declaration_moves_with_what_a_proxy_would_be_started_from() -> None:
+    """Policy, resolvers and image all count; the scratch path does not.
+
+    The path is this checkout's `tmp/` and would make two worktrees disagree
+    about a proxy they share — the same rule that took the checkout out of
+    the ownership digest.
+    """
+    base = SessionEgress()
+
+    assert base.declaration(["1.1.1.1"]) != base.declaration(["9.9.9.9"])
+    assert base.declaration([]) != SessionEgress(
+        proxy_image="ubuntu/squid:other"
+    ).declaration([])
+    admitting = SessionEgress(admits=[AllowedHost(host="pypi.org")])
+    assert base.declaration([]) != admitting.declaration([])
+    assert base.declaration(["1.1.1.1"]) == SessionEgress().declaration(["1.1.1.1"])

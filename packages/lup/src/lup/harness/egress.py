@@ -45,6 +45,12 @@ from lup.sandbox.egress import EgressPolicy
 from lup.sandbox.models import NetworkMode
 from lup.types import EnvVars
 
+# lup: ignore[constant-declaration] — an identity this repository defines, not
+# a judgement: the writer and the reader have to name the same label key or
+# neither works, exactly as the image's own declaration label does
+PROXY_LABEL = "lup.egress"
+"""The label carrying the digest of the declaration a proxy was started from."""
+
 DEFAULT_PROXY_IMAGE = "ubuntu/squid:6.6-24.04_edge"
 """The image the filtered network is bridged through, pinned rather than latest.
 
@@ -239,6 +245,33 @@ class SessionEgress(BaseModel, frozen=True):
             update={"allowed_domains": [item.host for item in self.admits] or None}
         )
 
+    def declaration(self, resolvers: list[str]) -> str:
+        """Everything about this proxy that a change to should replace it.
+
+        The counterpart to the image's own declaration label, and it exists
+        for the same measured reason. An image is rebuilt when what it is
+        declared to be moves; a proxy was reused whatever the declaration
+        said, so every later edit -- the policy, the resolvers, the image --
+        landed in the repository and never in the container a session
+        actually reached. Nothing reported it, because from the outside a
+        stale proxy and a current one are one running name.
+
+        The rendered policy rather than the path it is written to: the path
+        is this checkout's scratch directory and would make two worktrees
+        disagree about a proxy they share. Same rule as everywhere else here
+        -- what is compared has to be what was declared, never where this
+        machine happened to put it.
+        """
+        return "\n".join(
+            [
+                self.mode,
+                self.proxy_image,
+                self.alias,
+                *resolvers,
+                self.enforced().render(),
+            ]
+        )
+
     def network_name(self, project: str) -> str:
         """The internal network this project's sessions attach to."""
         return f"lup-egress-net-{project}"
@@ -339,7 +372,11 @@ class SessionEgress(BaseModel, frozen=True):
         return list(dict.fromkeys(named()))
 
     def proxy_arguments(
-        self, project: str, configuration: Path, resolvers: list[str] | None = None
+        self,
+        project: str,
+        configuration: Path,
+        resolvers: list[str] | None = None,
+        digest: str = "",
     ) -> list[str]:
         """The argv starting the proxy, bridged out and stripped of everything else.
 
@@ -366,6 +403,8 @@ class SessionEgress(BaseModel, frozen=True):
             "--detach",
             "--name",
             self.proxy_name(project),
+            "--label",
+            f"{PROXY_LABEL}={digest}",
             *[word for address in resolvers or [] for word in ("--dns", address)],
             "--network",
             "bridge",

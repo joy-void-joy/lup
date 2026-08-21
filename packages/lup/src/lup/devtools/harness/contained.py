@@ -35,7 +35,7 @@ from rich.live import Live
 from rich.text import Text
 
 from lup.harness.credential import remote_rewrites
-from lup.harness.egress import SessionEgress
+from lup.harness.egress import PROXY_LABEL, SessionEgress
 from lup.harness.image import ContainerEngine, Image, detected_client
 from lup.harness.notice import Notice
 from lup.harness.requirements import Manifest
@@ -355,33 +355,52 @@ def proxy_log(name: str, engine: ContainerEngine, lines: int = 400) -> str:
 def departed(
     egress: SessionEgress, project: str, engine: ContainerEngine
 ) -> list[Notice]:
-    """Account for a proxy that exists and is not running, then take it away.
+    """Account for a proxy this launch is about to replace, then take it away.
 
-    The evidence step this design was missing. The proxy ran with ``--rm``, so
-    a squid that exited on its configuration removed itself on the way out and
-    left a launch reporting a boundary that was not there -- measured, and
-    then read for three passes as a name that would not resolve, because the
-    thing that would have said otherwise had deleted itself.
+    Two things arrive here. One died -- and the evidence step this design was
+    missing is reading why: the proxy ran with ``--rm``, so a squid that
+    exited on its configuration removed itself on the way out and left a
+    launch reporting a boundary that was not there, which was then read for
+    three passes as a name that would not resolve. The other is running and
+    was started from a declaration that has since moved, which is the
+    counterpart to rebuilding a stale image and is a replacement rather than
+    a failure.
 
     Removal happens here rather than being left to the operator because the
     name is what blocks the restart, and a launch that refused on a name
-    collision would be reporting the corpse rather than the death.
+    collision would be reporting the collision rather than the cause.
     """
     name = egress.proxy_name(project)
     try:
-        state = sh.Command(engine.binary)(
-            "inspect", "--format", "{{.State.Status}}", name
-        )
+        state = str(
+            sh.Command(engine.binary)("inspect", "--format", "{{.State.Status}}", name)
+        ).strip()
     except (sh.CommandNotFound, sh.ErrorReturnCode):
         return []
     spoken = proxy_log(name, engine)
     sh.Command(engine.binary)("rm", "--force", name, _ok_code=list(range(256)))
+    # Two ways to arrive here and they are not the same news. A proxy that
+    # died left the last session with no way out and its log says why; one
+    # that is running was started from a declaration that has since moved,
+    # which is a replacement rather than a failure and has nothing to explain.
+    if state == "running":
+        return [
+            Notice(
+                text=(
+                    f"{name} was started from an older declaration of this "
+                    "boundary, so it is being replaced. A session reaching it "
+                    "would have got the policy, the resolvers or the image "
+                    "this project no longer declares."
+                ),
+                urgency="progress",
+            )
+        ]
     return [
         Notice(
             text=(
-                f"The previous {name} was {str(state).strip()} rather than "
-                "running, so the last session it was meant to carry had no "
-                "way out. Replacing it; what it said before it stopped:"
+                f"The previous {name} was {state} rather than running, so the "
+                "last session it was meant to carry had no way out. Replacing "
+                "it; what it said before it stopped:"
             ),
             urgency="warning",
         ),
@@ -390,6 +409,35 @@ def departed(
             for line in (spoken.splitlines() or ["nothing at all"])
         ],
     ]
+
+
+def proxy_matches(name: str, declaration: str, engine: ContainerEngine) -> bool:
+    """Whether a running proxy was started from the declaration in force now.
+
+    The same question :func:`image_matches` asks of an image, and missing for
+    the proxy until a change to the declaration failed to reach one. A proxy
+    is started once and the declaration goes on moving -- the policy, the
+    resolvers, the pinned image -- so every later edit landed in the
+    repository and never in the container a session reached. Measured: a
+    ``--dns`` flag added, a launch run, and the proxy found running and left
+    exactly as it was, with the launch reporting the boundary it was supposed
+    to have.
+
+    A proxy carrying no label is one started before this existed and is
+    treated as stale, for the reason an unlabelled image is: replacing it
+    costs a second, and trusting it costs a session behind a boundary nobody
+    can identify.
+    """
+    try:
+        labelled = sh.Command(engine.binary)(
+            "inspect",
+            "--format",
+            f'{{{{index .Config.Labels "{PROXY_LABEL}"}}}}',
+            name,
+        )
+    except (sh.CommandNotFound, sh.ErrorReturnCode):
+        return False
+    return str(labelled).strip() == declaration_digest(declaration)
 
 
 def attached(name: str, network: str, engine: ContainerEngine) -> bool:
@@ -452,7 +500,15 @@ def start_egress(
     client = sh.Command(engine.binary)
     if not network_present(egress.network_name(project), engine):
         client(*egress.network_arguments(project))
-    if running(egress.proxy_name(project), engine):
+    # Read here rather than declared, for the reason the terminal handoff and
+    # the container client are: this is a fact about the machine, and the
+    # declaration it would otherwise sit in is hashed into the ownership
+    # digest. A launch is the only place that can answer it.
+    resolvers = egress.resolvers_for(host_resolv_conf())
+    declaration = egress.declaration(resolvers)
+    if running(egress.proxy_name(project), engine) and proxy_matches(
+        egress.proxy_name(project), declaration, engine
+    ):
         if attached(egress.proxy_name(project), egress.network_name(project), engine):
             return
         # Connecting a running container is the repair rather than restarting
@@ -473,25 +529,25 @@ def start_egress(
                 "launch rebuild them, or open the session with --unsandboxed."
             ) from error
         return
-    # A proxy that exists and is not running is one that died, and its log is
-    # the only account of why. Read before it is cleared, because clearing it
-    # is what has to happen next: the name is taken, so `run --name` would
-    # refuse, and the refusal would name the collision rather than the death.
+    # A proxy that is here and not being kept is one this has to account for
+    # before it goes: dead, in which case its log is the only record of why,
+    # or started from a declaration that has since moved. Either way the name
+    # is taken, so `run --name` would refuse and the refusal would name the
+    # collision rather than the cause.
     for notice in departed(egress, project, engine):
         notice.say()
     scratch = root / "tmp"
     scratch.mkdir(parents=True, exist_ok=True)
     configuration = scratch / "egress.conf"
     configuration.write_text(egress.enforced().render())
-    # Read here rather than declared, for the reason the terminal handoff and
-    # the container client are: this is a fact about the machine, and the
-    # declaration it would otherwise sit in is hashed into the ownership
-    # digest. A launch is the only place that can answer it.
-    resolvers = egress.resolvers_for(host_resolv_conf())
     for notice in handed_resolvers(resolvers):
         notice.say()
     try:
-        client(*egress.proxy_arguments(project, configuration, resolvers))
+        client(
+            *egress.proxy_arguments(
+                project, configuration, resolvers, declaration_digest(declaration)
+            )
+        )
         client(*egress.connect_arguments(project))
     except sh.ErrorReturnCode as error:
         raise typer.BadParameter(
