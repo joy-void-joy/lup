@@ -115,7 +115,7 @@ def semantic_policy_for(
     return SemanticToolPolicy(
         fetch=FetchPolicy(allowed, denied),
         shell=ShellPolicy(
-            list(hooks.shell_rules),
+            hooks.resolved_shell_rules(),
             allowed_urls=allowed,
             denied_urls=denied,
             sandbox_active=sandbox_active,
@@ -136,10 +136,7 @@ def semantic_policy_for(
             acceptance_guard=guard.erased()
             if (guard := hooks.acceptance_guard)
             else None,
-            # Resolved over an empty library table: the kernel's own verdicts
-            # are the defaults, and they live in the gates rather than in a
-            # table something could retire out from under them.
-            edit_rules=hooks.edit_rules.over([]),
+            edit_rules=hooks.resolved_edit_rules(),
         ),
         refused_tools=list(hooks.refused_tools),
     )

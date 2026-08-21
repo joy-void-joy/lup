@@ -261,15 +261,22 @@ def test_a_directive_two_lines_above_a_table_stays_spurious() -> None:
 SHELL_VOCABULARY = Path("src/lup_template/devtools/harness/content/shell_vocabulary.py")
 """Where this project's shell command tables live, outside the library."""
 
-MOVED_TABLES = ["SHELL_RULES"]
-"""What still could not move, now that the words themselves have.
+MOVED_TABLES: list[str] = []
+"""Nothing is left here that the library could hold, and that is the point.
 
-The five word tables this once listed reached the library as parameter
-defaults on the groups in ``lup.policy.vocabulary``, so an adopter replaces a
-vocabulary by calling a group differently instead of editing lup. What is
-left is the composition — which groups this project takes and what it passes
-them — and that is the one thing that is genuinely its own judgement, so the
-rule naming it here is the rule working rather than a breach to clear.
+This once named six tables, then one. The five word tables reached the
+library as parameter defaults on the groups in ``lup.policy.vocabulary``, so
+an adopter replaces a vocabulary by calling a group differently instead of
+editing lup. The last entry was ``SHELL_RULES`` itself — the composition,
+which was a table only because a project had no way to state a difference
+without restating everything around it. A ``Selection`` over
+``default_vocabulary()`` is that way, so what remains in the file is two
+declarations that genuinely have no library form: a rule no other project
+has, and ``git`` carrying this repository's two arguments.
+
+An empty list is the assertion, not the absence of one: the rule still runs
+against the whole file, and anything a future composition parks here comes
+back as a breach.
 """
 
 

@@ -558,8 +558,8 @@ class ClaudeHookRenderer(ArtifactRenderer[HookSet]):
                         acceptance_guard=guard.erased()
                         if (guard := source.acceptance_guard)
                         else None,
-                        shell_rules=list(source.shell_rules),
-                        edit_rules=source.edit_rules.over([]),
+                        shell_rules=source.resolved_shell_rules(),
+                        edit_rules=source.resolved_edit_rules(),
                         refused_tools=list(source.refused_tools),
                         recoverable_target_limit=source.recoverable_target_limit,
                         runner_targets=list(source.runner_targets),

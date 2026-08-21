@@ -89,7 +89,15 @@ from lup.policy.rules import (
 
 from lup.policy.vocabulary import runner_target_rules
 from lup_template.devtools.harness.catalog import declared_hook_set, portable_harness
-from lup_template.devtools.harness.content.shell_vocabulary import SHELL_RULES
+
+SHELL_RULES = declared_hook_set().resolved_shell_rules()
+"""This project's vocabulary as the runtime resolves it, not as it is declared.
+
+Asked of the hook set rather than of the selection module, because what these
+cases are about is the table a session and a generated dispatcher actually
+walk. A test that resolved the selection its own way could agree with the
+declaration while disagreeing with everything that reads it.
+"""
 
 
 class DecisionCase(BaseModel, frozen=True):

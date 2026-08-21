@@ -8,10 +8,11 @@ project which says nothing gets the library's table unchanged.
 """
 
 from lup.policy.edit_rules import EditRule
+from lup.policy.kernel.decision import DecisionEffect
 from lup.selection import Selection
 
 
-def rule(name: str, effect: str = "allow") -> EditRule:
+def rule(name: str, effect: DecisionEffect = "allow") -> EditRule:
     """One rule that decides, named so a selection can reach it."""
     return EditRule(name=name, effect=effect, reason=f"{name} decided")
 
