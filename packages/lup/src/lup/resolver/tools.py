@@ -33,8 +33,7 @@ from lup.actors.mailbox import (
 from lup.resolver.mailbox import PendingQuestion, QuestionMailbox
 from lup.policy.identity import ConcernAllowance
 from lup.resolver.models import (
-    ALLOWANCE_GRANTED,
-    ALLOWANCE_REFUSED,
+    AllowanceRuling,
     MaterialQuestion,
     asks_for_an_allowance,
 )
@@ -421,7 +420,7 @@ def create_question_tools(
                             f"Grant `{params.allowance}` to {concern_id}?\n\n"
                             f"{params.reason}"
                         ),
-                        choices=[ALLOWANCE_GRANTED, ALLOWANCE_REFUSED],
+                        choices=AllowanceRuling.choices(),
                     )
                 ]
             )

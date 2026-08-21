@@ -186,7 +186,7 @@ class ConcernExecutor:
                 f"{review.reason}\n\nCarry that as a residual and take the "
                 "acceptance, or send it back for another round?"
             ),
-            choices=[ruling.value for ruling in ResidualRuling],
+            choices=ResidualRuling.choices(),
             closed_choices=True,
             criteria=sorted(unaccounted),
         )

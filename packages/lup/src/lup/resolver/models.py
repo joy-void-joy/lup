@@ -316,18 +316,8 @@ class RecheckRuling(BaseModel, frozen=True):
     ruling: str
 
 
-# lup: ignore[constant-declaration] — the literal a human's answer is matched
-# against, so the word is the wire value rather than a label over one
-ALLOWANCE_GRANTED = "grant"
-"""The one answer that extends a concern's authority."""
-
-# lup: ignore[constant-declaration] — the other wire value that answer takes
-ALLOWANCE_REFUSED = "refuse"
-"""The one answer that withholds it."""
-
-
-# lup: A closed gate's answer domain is one fact, and this file spells it four
-# ways: `[APPROVE, DEFER]` twice from constants, `[ALLOWANCE_GRANTED,
+# lup: solved: A closed gate's answer domain is one fact, and this file spells it
+# four ways: `[APPROVE, DEFER]` twice from constants, `[ALLOWANCE_GRANTED,
 # ALLOWANCE_REFUSED]` from another pair, and `["superseded", "regression"]`
 # inline at joins.py:551 with its reader comparing the same literals by hand.
 # Nothing ties the choices a question publishes to the token its reader tests,
@@ -335,11 +325,56 @@ ALLOWANCE_REFUSED = "refuse"
 # cleanly and then meant refusal. Give every closed gate the shape
 # `ResidualRuling` has — one enum, choices derived from it — so a reader cannot
 # test for a token the question never offered.
-class ResidualRuling(StrEnum):
+class ClosedAnswer(StrEnum):
+    """One gate's whole answer domain, published and read from one place.
+
+    A question with a fixed set of answers has one fact to state, and it was
+    stated four ways across this package: two constant pairs, a third pair,
+    and a list of literals whose reader compared the same literals by hand.
+    Nothing tied the choices a question published to the token its reader
+    tested — which is how the allowance gate came to offer its answers as
+    suggestions while its only reader tested for a literal, so a human's
+    prose grant promoted cleanly and then meant refusal, with nothing
+    anomalous to report anywhere.
+
+    Deriving the offer from the domain closes that by construction: a reader
+    can only test a member, and every member is offered. A gate whose answers
+    are open — a name, a path, prose — is not one of these and should not be
+    made into one.
+    """
+
+    @classmethod
+    def choices(cls) -> list[str]:
+        """Every answer this gate offers, in declaration order."""
+        return [member.value for member in cls]
+
+
+class ResidualRuling(ClosedAnswer):
     """Whether an acceptance survives a criterion the reviewer left unmet."""
 
     CARRY = "carry"
     SEND_BACK = "send back"
+
+
+class AllowanceRuling(ClosedAnswer):
+    """Whether a concern's request for authority it does not have is granted."""
+
+    GRANT = "grant"
+    REFUSE = "refuse"
+
+
+class ConcernApproval(ClosedAnswer):
+    """Whether a planned concern joins this run or waits for another."""
+
+    APPROVE = "approve"
+    DEFER = "defer"
+
+
+class SupersessionRuling(ClosedAnswer):
+    """Whether an earlier parent's unmet criterion was overtaken or broken."""
+
+    SUPERSEDED = "superseded"
+    REGRESSION = "regression"
 
 
 def allowance_question_id(concern_id: str, allowance: ConcernAllowance) -> str:

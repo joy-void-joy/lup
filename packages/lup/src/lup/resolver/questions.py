@@ -31,7 +31,7 @@ from lup.actors.mailbox import (
 from lup.actors.questions import QuestionAnswer
 from lup.resolver.mailbox import PendingQuestion, QuestionMailbox
 from lup.resolver.models import (
-    ALLOWANCE_GRANTED,
+    AllowanceRuling,
     AnswerBatch,
     ConcernStatus,
     MaterialQuestion,
@@ -158,7 +158,7 @@ class QuestionBroker:
             [
                 questions[offer.question_id]
                 for offer in valid
-                if offer.value == ALLOWANCE_GRANTED
+                if offer.value == AllowanceRuling.GRANT
             ]
         )
         return [
