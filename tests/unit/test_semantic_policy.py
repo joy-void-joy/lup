@@ -724,6 +724,23 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="GIT_SSH_COMMAND=./x git fetch origin", effect="ask"),
     DecisionCase(input="git fetch ext::sh -c id", effect="ask"),
     DecisionCase(input="uv run --with evil pytest", effect="ask"),
+    # The same flag in front of an interpreter, which is the likelier
+    # spelling of the two and the one that was allowed. The gate existed and
+    # sat *below* the interpreter branch, so that branch answered first:
+    # `--with evil pytest` asked while `--with evil python x.py` did not, and
+    # the difference was ordering rather than judgement. The bare rung stays
+    # open beside it, because a named script is what the ladder points at.
+    DecisionCase(input="uv run --with evil python script.py", effect="ask"),
+    DecisionCase(
+        input="uv run --with-requirements r.txt python script.py", effect="ask"
+    ),
+    DecisionCase(input="uv run --with-editable . python script.py", effect="ask"),
+    DecisionCase(input="uv run --env-file .env python script.py", effect="ask"),
+    DecisionCase(input="uv run python script.py", effect="allow"),
+    # And the refusal still outranks the ask. Hoisting the flag check above
+    # the interpreter branch softened this one from deny to ask, which is a
+    # reviewability rule being answered by a supply-chain question.
+    DecisionCase(input="uv run --with requests python -c 'x'", effect="deny"),
     # Unknown words behind a literal blessed uv run target only reach that
     # target's argv; at or before the target they keep the opaque gate.
     DecisionCase(
