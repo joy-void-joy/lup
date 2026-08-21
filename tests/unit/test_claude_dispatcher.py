@@ -253,6 +253,93 @@ def delete_repo(tmp_path: Path) -> Path:
     return work
 
 
+def undo_refs(work: Path) -> list[str]:
+    """Every snapshot this checkout holds, read the way a human would find them."""
+    return [
+        line
+        for line in str(
+            sh.Command("git")(
+                "-C", str(work), "for-each-ref", "--format=%(subject)", "refs/lup/undo"
+            )
+        ).splitlines()
+        if line
+    ]
+
+
+def snapshotting_effect(command: str, cwd: Path) -> tuple[str, str]:
+    """One command judged with the ``cwd`` a live session always sends.
+
+    The other cases here leave it out and are answered correctly anyway,
+    because the runtime spawns a hook with the session's own directory and
+    the filesystem questions resolve against it either way. The snapshot
+    cannot take that route: it *writes*, and a writer that guessed at its
+    tree from the process it happened to be started in would put refs
+    somewhere nobody asked. So it takes no snapshot at all without being told
+    where, and these cases have to say.
+    """
+    payload = {**bash_payload(command), "cwd": str(cwd)}
+    specific = decide_from(payload, cwd)["hookSpecificOutput"]
+    assert isinstance(specific, dict)
+    return str(specific["permissionDecision"]), str(
+        specific["permissionDecisionReason"]
+    )
+
+
+def test_a_command_that_could_destroy_work_is_snapshotted_first(
+    delete_repo: Path,
+) -> None:
+    """The recoverability the relaxed lattice rests on, taken by the dispatcher.
+
+    Nothing else stands in front of a command, so this only passes when the
+    emitted script wrote the snapshot itself -- a devtools subprocess would
+    cost an interpreter start on every mutating command and be the first thing
+    somebody turned off.
+    """
+    effect, _reason = snapshotting_effect("rm untracked.py", delete_repo)
+
+    assert effect == "ask"
+    assert undo_refs(delete_repo) == ["lup undo: rm untracked.py"]
+
+
+def test_the_approval_question_says_the_tree_was_snapshotted(
+    delete_repo: Path,
+) -> None:
+    """The one moment the information changes an answer.
+
+    A human deciding whether to permit something destructive is weighing
+    exactly whether it can be undone, so the question carries the ref. An
+    allowed command stays silent, because a line appended to every mutating
+    command is one nobody reads by the third time.
+    """
+    _effect, reason = snapshotting_effect("rm untracked.py", delete_repo)
+
+    assert "snapshotted" in reason and "refs/lup/undo/" in reason
+
+
+def test_a_read_only_command_is_not_snapshotted(delete_repo: Path) -> None:
+    """Otherwise every `ls` writes a ref, and the listing stops being readable."""
+    effect, _reason = snapshotting_effect("git status --short", delete_repo)
+
+    assert effect == "allow"
+    assert undo_refs(delete_repo) == []
+
+
+def test_an_allowed_delete_is_snapshotted_without_saying_so(
+    delete_repo: Path,
+) -> None:
+    """Allowed-because-recoverable is still a delete, and git's copy is not the tree.
+
+    `rm src/file0.py` is granted because the object store holds that file byte
+    for byte -- but the rest of the working tree is what a mistaken sweep
+    takes with it, and that is what the snapshot holds.
+    """
+    effect, reason = snapshotting_effect("rm src/file0.py", delete_repo)
+
+    assert effect == "allow"
+    assert "snapshotted" not in reason
+    assert undo_refs(delete_repo) == ["lup undo: rm src/file0.py"]
+
+
 def test_removing_a_committed_unmodified_file_is_granted(delete_repo: Path) -> None:
     """Git holds exactly what is on disk, so the delete costs a checkout.
 

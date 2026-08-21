@@ -1,4 +1,4 @@
-"""A snapshot taken before a destructive command, so it stops being one.
+"""Finding the snapshots the permission dispatcher took, and retiring them.
 
 The permission lattice asks about a great deal, and the argument for asking
 about everything unjudged is an observability argument that logging serves
@@ -7,6 +7,16 @@ classifier -- it is being able to put the tree back. So before a command that
 can destroy work, the tree is written into the object store under a ref of its
 own, and `rm -rf`, `git reset --hard` and a mistaken edit stop being
 irreversible.
+
+**The writing is not here.** It is
+:func:`~lup.policy.assets.host.undo_snapshot`, compiled into the dispatcher
+that judges each command, because that is the only place standing in front of
+one -- and because the cost has to be a few milliseconds rather than an
+interpreter start, or a net paid for on every mutating command is the first
+thing somebody turns off. What is here is everything a human does with the
+result afterwards: listing what was taken, saying how to put one back, and
+expiring the ones nobody will reach for. The two halves share this module's
+namespace and its capture rules by importing them rather than by agreeing.
 
 **What is captured, exactly.** Tracked content *and* untracked files, through
 a throwaway index rather than through `git stash create`. That distinction is
@@ -40,17 +50,19 @@ line edited costs about 10 KB, which is why they expire.
 from datetime import UTC, datetime
 from pathlib import Path
 
-import sh
 from pydantic import BaseModel, Field
 
 from lup.devtools.utils import git
+from lup.policy.assets.host import undo_namespace, undo_snapshot
 
-UNDO_NAMESPACE = "refs/lup/undo"
-"""Where snapshots live: a ref namespace of this project's own.
+UNDO_NAMESPACE = undo_namespace()
+"""Where snapshots live, asked of the half that writes them.
 
-Under `refs/` rather than in a stash so nothing a human does to their stash
-disturbs them, and outside `refs/heads` so no branch listing, push, or fetch
-treats them as work anybody meant to publish.
+Derived rather than restated. The dispatcher takes the snapshots and this
+module lists them, so a namespace each of them spelled for itself would be a
+safety net whose two halves disagreed about where its contents were -- and
+neither half would fail, because looking in an empty namespace is what an
+empty namespace looks like.
 """
 
 DEFAULT_RETENTION_DAYS = 7
@@ -124,45 +136,37 @@ class UndoPoint(BaseModel, frozen=True):
         )
 
 
-def index_path(root: Path, session: str) -> Path:
-    """Where the throwaway index for one session's snapshots lives.
-
-    Inside the git directory rather than a temporary one, so it survives
-    between snapshots in the same checkout: a warm index is what makes a
-    snapshot cost milliseconds instead of re-hashing every file, and a fresh
-    one on each call would pay the cold cost every time.
-
-    Per session, because two sessions sharing one index file would each
-    invalidate the other's cached stat data and both would run cold.
-    """
-    named = Path(git.out("-C", str(root), "rev-parse", "--git-dir").strip())
-    directory = named if named.is_absolute() else root / named
-    return directory / f"lup-undo-{session}.index"
-
-
 def snapshot(
     root: Path,
     reason: str,
     session: str = "default",
     namespace: str = UNDO_NAMESPACE,
-) -> UndoPoint:
-    """Write the working tree into the object store and name it.
+) -> UndoPoint | None:
+    """Take a snapshot by hand, and report it the way the listing reports one.
 
-    Through a private index so neither the real index nor the working tree is
-    touched: a snapshot must not stage anything, and one taken before every
-    command would otherwise quietly rewrite the state a human was in the
-    middle of composing.
+    The writing itself belongs to :func:`~lup.policy.assets.host.undo_snapshot`
+    and is not repeated here. That function is compiled into the permission
+    dispatcher, where the snapshot is actually taken -- before every command
+    the classifier did not wave through -- and a second implementation beside
+    this listing would be a safety net whose two halves could disagree about
+    where snapshots live and what is in them.
+
+    ``None`` where no snapshot could be taken. Nothing here can say why: the
+    writer is silent about its own failure on purpose, because it runs in
+    front of a command somebody asked for and a checkout mid-merge is not a
+    reason to stop that command. The recovery is the same either way -- look
+    at whether git can write to this checkout at all.
     """
-    taken = datetime.now(UTC)
-    private = {"GIT_INDEX_FILE": str(index_path(root, session))}
-    git("-C", str(root), "add", "-A", _env=private)
-    tree = git.out("-C", str(root), "write-tree", _env=private).strip()
-    commit = git.out(
-        "-C", str(root), "commit-tree", tree, "-m", f"lup undo: {reason}"
-    ).strip()
-    ref = f"{namespace}/{taken:%Y%m%dT%H%M%S%f}-{commit[:8]}"
-    git("-C", str(root), "update-ref", ref, commit)
-    return UndoPoint(ref=ref, commit=commit, taken_at=taken, reason=reason)
+    reference = undo_snapshot(root, reason, session, namespace)
+    if not reference:
+        # Nothing was written, so there is nothing to look up -- and looking
+        # anyway would ask git about a checkout that just proved it cannot
+        # answer, turning a reported failure into a raised one.
+        return None
+    return next(
+        (item for item in points(root, namespace) if item.ref == reference),
+        None,
+    )
 
 
 def points(root: Path, namespace: str = UNDO_NAMESPACE) -> list[UndoPoint]:
@@ -229,11 +233,9 @@ def snapshot_quietly(root: Path, reason: str, session: str = "default") -> str:
     A safety net that stops the thing it was protecting is worse than no net:
     a checkout mid-merge, a locked index, and a repository this process cannot
     write to are all reasons a snapshot cannot be taken, and none of them is a
-    reason to refuse the command. Returns the ref on success and an
-    explanation on failure, so a caller can say which happened without having
-    to decide what to do about it.
+    reason to refuse the command. Returns the ref on success and a sentence on
+    failure, so a caller can print either without having to decide which it
+    is holding.
     """
-    try:
-        return snapshot(root, reason, session).ref
-    except (sh.ErrorReturnCode, OSError, ValueError) as failure:
-        return f"no snapshot taken ({failure})"
+    taken = snapshot(root, reason, session)
+    return taken.ref if taken is not None else "no snapshot taken"
