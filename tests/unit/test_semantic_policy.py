@@ -3364,3 +3364,91 @@ def test_asking_git_its_own_version_is_not_an_unclassified_subcommand() -> None:
     assert effect("git gc") == "deny"
     assert effect("git filter-branch") == "deny"
     assert effect("git --exec-path=/x status") == "ask"
+
+
+def test_editing_a_compiled_plugin_tree_is_refused_by_the_file_gate_too() -> None:
+    """The refusal the shell path already gave, given to Edit and Write.
+
+    A plugin tree is a build product: the change is reverted by the next
+    generation and never reaches the runtime that already loaded it. The
+    shell path said so; an Edit to the same file was judged by the ordinary
+    lattice, which has no verdict that is right here — an allow writes
+    something about to be overwritten, and an ask puts a question to a human
+    whose only correct answer is "edit the source instead".
+
+    Both runtimes' trees, because which tree a write lands in is the same
+    question whichever one is running.
+    """
+    for tree in (".claude", ".codex"):
+        decision = decide_edit(
+            f"{tree}/plugins/lup/hooks/runtime/policy_data.py",
+            "SHELL_RULES = []",
+            "SHELL_RULES = [1]",
+            path_exists=True,
+            path_rules=[],
+            antipattern_rows=[],
+            python_source=True,
+        )
+        assert decision.effect == "deny", tree
+        assert "compiled from typed source" in decision.reason, tree
+
+
+def test_a_note_whose_words_stay_in_the_file_was_moved_rather_than_deleted() -> None:
+    """Relocating a note is the repair, not the loss.
+
+    A note routinely lands against the wrong declaration — most often in a
+    merge, where both sides added at one spot — and the gate read any edit
+    dropping the marker line as a deletion. Judged on the words instead: a
+    marker whose text still appears in the file has been moved, which makes
+    the order the spelling of a move.
+    """
+    note = "# lup: the base is read from the wrong checkout"
+    both = f"{note}\ndef first(): ...\n\n\n{note}\ndef second(): ...\n"
+    one = f"def first(): ...\n\n\n{note}\ndef second(): ...\n"
+
+    decision = decide_edit(
+        "a.py",
+        both,
+        one,
+        path_exists=True,
+        path_rules=[],
+        antipattern_rows=[],
+        python_source=True,
+    )
+
+    assert decision.effect != "deny", decision.reason
+
+
+def test_a_note_whose_words_leave_the_file_is_still_a_deletion() -> None:
+    """The gate that was there all along, unchanged where it was right."""
+    note = "# lup: the base is read from the wrong checkout"
+    decision = decide_edit(
+        "a.py",
+        f"{note}\ndef first(): ...\n",
+        "def first(): ...\n",
+        path_exists=True,
+        path_rules=[],
+        antipattern_rows=[],
+        python_source=True,
+    )
+
+    assert decision.effect == "deny"
+    assert "removes inline review feedback" in decision.reason
+    assert "write it at its new site first" in decision.reason
+
+
+def test_moving_one_note_does_not_cover_deleting_another() -> None:
+    """The difference is over the words, so a distinct note is still lost."""
+    moved = "# lup: the base is read from the wrong checkout"
+    other = "# lup: this counts every concern holding a commit"
+    decision = decide_edit(
+        "a.py",
+        f"{moved}\ndef first(): ...\n\n\n{moved}\n{other}\ndef second(): ...\n",
+        f"def first(): ...\n\n\n{moved}\ndef second(): ...\n",
+        path_exists=True,
+        path_rules=[],
+        antipattern_rows=[],
+        python_source=True,
+    )
+
+    assert decision.effect == "deny"

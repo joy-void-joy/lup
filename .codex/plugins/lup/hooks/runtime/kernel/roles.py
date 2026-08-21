@@ -20,6 +20,46 @@ from pathlib import PurePosixPath
 
 from .rows import PathRoleKind, PathRoleName, PathRoleRow
 
+# lup: ignore[library-default] — the native runtimes' own plugin directory names
+GENERATED_PLUGIN_ROOTS = (".claude/plugins", ".codex/plugins")
+# lup: ignore[constant-declaration] — refusal wording, declared with its verdict
+GENERATED_PLUGIN_REFUSAL = (
+    "a native plugin tree is compiled from typed source, and the running"
+    " runtime already loaded it — edit the policy source, run"
+    " `lup-devtools harness generate all`, then ask the user to restart"
+    " claude or codex so the change takes effect"
+)
+
+
+def is_generated_plugin_target(word: str) -> bool:
+    """Recognize a path confined to a native plugin tree the harness renders.
+
+    Every file there is compiled from typed source, so writing one by hand
+    edits a build product: the change is reverted by the next generation and
+    never reaches the runtime that already loaded it. The roots stop at
+    ``plugins`` because their parents also hold settings, trust state, and
+    hand-written skills and commands that no generator can restore.
+
+    The roots are matched as path segments wherever they occur, so an absolute
+    spelling and a sibling worktree's tree are recognized too. A relaxation
+    may safely decline to resolve those, because declining leaves the ask in
+    place; a refusal that only knew the repo-relative spelling would instead
+    fail open on the one form that reaches past this worktree.
+
+    Both runtimes' roots are named and both gates read this one answer: which
+    tree a write lands in is the same question whichever runtime is running,
+    and a refusal knowing one spelling would leave the other open.
+    """
+    # lup: ignore[string-split] — segment comparison on an already-normalized
+    # posix path, which is what the roots are declared as
+    segments = posixpath.normpath(word).split("/")
+    return any(
+        segments[index : index + len(parts)] == parts
+        # lup: ignore[string-split] — the declared roots, in the same terms
+        for parts in [root.split("/") for root in GENERATED_PLUGIN_ROOTS]
+        for index in range(len(segments))
+    )
+
 
 def is_session_scratch_target(word: str) -> bool:
     """Recognize a path confined to the session scratchpad.

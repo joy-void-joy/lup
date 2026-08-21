@@ -11,7 +11,13 @@ from collections.abc import Callable, Iterator
 from typing import TypedDict
 
 from .decision import KernelDecision
-from .roles import normalized_path, path_role, root_matches
+from .roles import (
+    GENERATED_PLUGIN_REFUSAL,
+    is_generated_plugin_target,
+    normalized_path,
+    path_role,
+    root_matches,
+)
 from .rows import AcceptanceGuardRow, AntiPatternRow, PathRoleRow, PathRuleRow
 
 MARKER_RE = re.compile(r"(#|//)\s*lup\s*:", re.IGNORECASE)
@@ -414,12 +420,24 @@ def quoted_example(line: str, position: int) -> bool:
 
 def count_outside_examples(pattern: re.Pattern[str], text: str) -> int:
     """Count matches in one chunk of prose, skipping backtick-quoted examples."""
-    return sum(
-        1
+    return len(texts_outside_examples(pattern, text))
+
+
+def texts_outside_examples(pattern: re.Pattern[str], text: str) -> list[str]:
+    """Each match's own line from the marker onward, quoted examples skipped.
+
+    A note's identity is the words it was written with, which is why this
+    collects the line a marker opens rather than the fact that it matched.
+    Two markers reading the same are one note in two places, and that is the
+    fact a relocation turns on: the words are still in the file, so nothing
+    was deleted.
+    """
+    return [
+        line[match.start() :].strip()
         for line in text.splitlines()
         for match in pattern.finditer(line)
         if not quoted_example(line, match.start())
-    )
+    ]
 
 
 def count_in_prose(
@@ -436,14 +454,26 @@ def count_in_prose(
     higher until its last conflict marker went, and that drop read as
     deleted feedback.
     """
+    found = texts_in_prose(source, pattern, python_source)
+    return None if found is None else len(found)
+
+
+def texts_in_prose(
+    source: str, pattern: re.Pattern[str], python_source: bool = False
+) -> list[str] | None:
+    """Each marker's words, taken from where prose belongs and nowhere else.
+
+    The population :func:`count_in_prose` counts, kept rather than tallied,
+    so a gate can ask which marker went as well as how many.
+    """
     if not python_source:
-        return count_outside_examples(pattern, source)
+        return texts_outside_examples(pattern, source)
     tokens = python_tokens(source)
     if tokens is None:
         return None
     documentation = docstring_lines(source)
-    return sum(
-        count_outside_examples(pattern, token.string)
+    return [
+        text
         for token in tokens
         if token.type == tokenize.COMMENT
         or (
@@ -453,7 +483,31 @@ def count_in_prose(
                 for line in range(token.start[0], token.end[0] + 1)
             )
         )
-    )
+        for text in texts_outside_examples(pattern, token.string)
+    ]
+
+
+def markers_lost(
+    previous: str, updated: str, pattern: re.Pattern[str], python_source: bool
+) -> list[str] | None:
+    """Which markers' words this edit takes out of the file altogether.
+
+    The difference is over the words rather than over a tally, which is what
+    tells a deletion from a move. A note carried to the declaration it
+    actually concerns leaves the file holding the same words in a different
+    place, and the only spelling of that an edit can make is: add it at the
+    new site, then remove the old copy. The second edit drops the count and
+    loses nothing, and this is what says so.
+
+    Copies are not counted, only words. A note that stood twice and now
+    stands once has lost nothing a reader could want — the identity of a note
+    is what it asks for, and that is still in the file to be answered.
+    """
+    before = texts_in_prose(previous, pattern, python_source)
+    after = texts_in_prose(updated, pattern, python_source)
+    if before is None or after is None:
+        return None
+    return [text for text in before if text not in after]
 
 
 def review_marker_count(source: str, python_source: bool = False) -> int | None:
@@ -489,6 +543,16 @@ def marker_decision(
     `--restore`, which touches only `solved:` claims. No session's edits are
     exempt here: an environment cannot carry this authority, so a grant that
     claims to is ignored.
+
+    Moving a marker is not deleting one, and the count alone cannot tell them
+    apart. A note routinely lands against the wrong declaration — most often
+    in a merge, where both sides added at one spot — and carrying it to the
+    site it concerns is the repair, not the loss. So a removal is judged on
+    the words rather than the tally: a marker whose text still appears
+    somewhere in the file has been moved, and the file still holds everything
+    it held. That makes the order the spelling of a move — add it at the new
+    site, then remove the old copy — which is also the order that never
+    leaves the file without it.
     """
     # A revision whose note count could not be established has not been shown
     # to have lost anything, and denying on an unmeasurable difference is
@@ -509,15 +573,17 @@ def marker_decision(
     claimed = claimed_now - claimed_before
     if opened < 0 and opened + claimed == 0:
         return None
-    if opened < 0:
+    if opened < 0 and markers_lost(previous, updated, OPEN_NOTE_RE, python_source):
         return KernelDecision(
             "deny",
             "this edit removes inline review feedback. Resolving a note means "
             "replacing `# lup:` with `# lup: solved:` and keeping its text, so "
             "the claim can be checked against what was asked; deleting it "
-            "leaves nothing to check",
+            "leaves nothing to check. Moving one is neither: write it at its "
+            "new site first, and removing the old copy is then allowed, "
+            "because its words are still in the file",
         )
-    if claimed < 0:
+    if claimed < 0 and markers_lost(previous, updated, SOLVED_NOTE_RE, python_source):
         return KernelDecision(
             "deny",
             "this edit removes a `# lup: solved:` claim. Only the review pass "
@@ -1560,14 +1626,14 @@ def acceptance_guard_decision(
     return KernelDecision("ask", guard["ask_reason"])
 
 
-# lup: Editing `.claude/` or `.codex/` should be auto-deny here, carrying the
+# lup: solved: Editing `.claude/` or `.codex/` should be auto-deny here, carrying the
 # redirecting guidance that the `.py` generating it is what to modify instead.
 # `GENERATED_PLUGIN_REFUSAL` in the kernel's words module already says exactly
 # that, but only the shell path reaches it — an Edit or Write to the same file
 # is judged by the ordinary lattice.
 #
-# lup: It should be possible to *relocate* a note. The gate reads any edit that
-# drops the marker line as a deletion, so moving one to the declaration it
+# lup: solved: It should be possible to *relocate* a note. The gate reads any edit
+# that drops the marker line as a deletion, so moving one to the declaration it
 # actually concerns is refused with "resolving a note means replacing it with
 # solved" — which is not what a move is. This bites hardest in a merge, where
 # both sides add at one spot and a note routinely lands against the wrong
@@ -1628,6 +1694,15 @@ def decide_edit(
     previous = before or ""
     updated = after or ""
     role = path_role(path, path_roles or [])
+    # A compiled plugin tree is a build product, and this is the same refusal
+    # the shell path already gives for writing one: the change is reverted by
+    # the next generation and never reaches the runtime that already loaded
+    # it. Judged here rather than by the lattice below, because every verdict
+    # the lattice can reach is wrong for this file — an allow writes something
+    # that will be overwritten, and an ask puts a question to a human whose
+    # only correct answer is "edit the source instead".
+    if is_generated_plugin_target(path):
+        return KernelDecision("deny", GENERATED_PLUGIN_REFUSAL)
     # Whether this file may be edited at all is prior to how the edit reads,
     # so the guard answers ahead of every gate below — including pure
     # deletion, which would otherwise allow removing the test outright, and
