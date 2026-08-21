@@ -9,6 +9,8 @@ those by name is what kept these commands in an application package; taking
 them as a declaration is what lets any adopter supply its own.
 """
 
+from pathlib import Path
+
 from pydantic import BaseModel
 
 from lup.codescan.boundaries import ApplicationRoots
@@ -72,4 +74,14 @@ class DevProject(BaseModel, frozen=True):
     The seam guard reads it to tell a composition root — which may say
     ``ClaudeSpellings`` because choosing is its whole job — from a module
     that reached past the abstraction it was handed.
+    """
+
+    catalog: Path | None = None
+    """Where this repository writes down what it settled about itself.
+
+    Named rather than derived, because the layout is the application's and a
+    library guessing at one would report the wrong file as unanswered.
+    Declaring none is a real answer — a project curating its declarations by
+    hand needs no surface over them — and the seam command says so rather
+    than reading somewhere it was never pointed.
     """
