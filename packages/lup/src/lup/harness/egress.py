@@ -160,6 +160,19 @@ class SessionEgress(BaseModel, frozen=True):
             "to list. Naming any host flips the posture to refuse-by-default"
         ),
     )
+    reached_directly: list[str] = Field(
+        default=["localhost", "127.0.0.1", "::1"],
+        description=(
+            "Destinations a session reaches without the proxy, written into "
+            "``NO_PROXY`` rather than inherited from the host. The session's "
+            "own loopback, and only that: an agent that runs a dev server "
+            "and curls it is reaching a port inside its own container, which "
+            "no boundary here was ever meant to stand between. Widening this "
+            "to a real destination would be widening the boundary, because "
+            "an exempt name is one the proxy never sees -- which is why the "
+            "default names nothing the container could not already reach"
+        ),
+    )
     proxy_image: str = DEFAULT_PROXY_IMAGE
     alias: str = Field(
         default="egress",
@@ -209,8 +222,22 @@ class SessionEgress(BaseModel, frozen=True):
         """The variables pointing a session's toolchain at its only way out.
 
         Both cases are set because the tools disagree about which they read,
-        and ``NO_PROXY`` is emptied so nothing arrives from the host claiming
-        an exemption that the internal network could not honour anyway.
+        and ``NO_PROXY`` is *written* rather than inherited, so nothing
+        arrives from the host claiming an exemption that the internal network
+        could not honour anyway.
+
+        Written rather than emptied, which is the same argument carried one
+        step further. Emptying it took the host's exemptions away and the one
+        exemption that is always right along with them: a client honours
+        these variables for ``localhost`` too, so a session that started its
+        own dev server and reached for it sent the request to the proxy --
+        measured, ``curl -v http://localhost:3000`` answering ``Uses proxy
+        env variable http_proxy`` -- where squid refused it twice over, as a
+        denied local name and as a port outside 80 and 443. Nothing was
+        protected by that. The session container is on a network with no
+        gateway, so it cannot reach the host's loopback whatever the proxy
+        says, and the denial only ever stopped it reaching *its own*
+        services by name.
 
         ``NODE_USE_ENV_PROXY`` is here because the CLI this harness launches
         is itself a Node program, and Node honours these variables only when
@@ -223,6 +250,7 @@ class SessionEgress(BaseModel, frozen=True):
         if not self.filtered():
             return {}
         proxy = f"http://{self.alias}:{self.policy.listen_port}"
+        direct = ",".join(self.reached_directly)
         return {
             "HTTP_PROXY": proxy,
             "HTTPS_PROXY": proxy,
@@ -230,8 +258,8 @@ class SessionEgress(BaseModel, frozen=True):
             "http_proxy": proxy,
             "https_proxy": proxy,
             "all_proxy": proxy,
-            "NO_PROXY": "",
-            "no_proxy": "",
+            "NO_PROXY": direct,
+            "no_proxy": direct,
             "NODE_USE_ENV_PROXY": "1",
         }
 

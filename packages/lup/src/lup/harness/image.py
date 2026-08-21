@@ -474,6 +474,18 @@ class Image(BaseModel, frozen=True):
         ],
         description="Directories that outlive the container, to bound rebuild cost",
     )
+    published_ports: list[int] = Field(
+        default=[],
+        description=(
+            "Ports the session's container publishes to the host, so a human "
+            "can open what the agent is serving. Empty by default, because "
+            "publishing is the one hole in a container's surface that faces "
+            "the operator's own machine and most projects serve nothing. A "
+            "project doing frontend work names its dev ports here and gets "
+            "them; the agent's own `curl localhost:<port>` needs nothing "
+            "from this list, because that traffic never leaves the container"
+        ),
+    )
     pids_limit: int = Field(
         default=4096,
         description=(
@@ -713,6 +725,11 @@ USER $UID:$GID
             *self.egress.attachment_arguments(checkout.name),
             "--pids-limit",
             str(self.pids_limit),
+            *[
+                argument
+                for port in self.published_ports
+                for argument in ("-p", f"{port}:{port}")
+            ],
             "-w",
             str(checkout),
             *[
