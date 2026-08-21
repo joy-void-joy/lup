@@ -29,6 +29,7 @@ import lup.devtools.dev.undo as undo
 import lup.devtools.dev.model_config as model_config_mod
 import lup.devtools.dev.plugin as plugin_mod
 import lup.devtools.dev.policy_explain as policy_explain
+import lup.devtools.dev.seams as seams
 import lup.devtools.dev.pr as pr
 import lup.devtools.dev.relocate as relocate_mod
 import lup.devtools.dev.resolve_review as resolve_review
@@ -36,6 +37,7 @@ import lup.devtools.dev.rules as rules
 import lup.devtools.dev.worktree as worktree
 import lup.devtools.harness.content.docs.upstream_reports as upstream_reports
 from lup.codescan.markers import NoteKind
+from lup.codescan.registry import all_rules
 from lup.devtools.utils import repository_slug
 from lup.devtools.harness.composition import NativeTargets
 from lup.devtools.harness.drift import RepositoryWriter
@@ -681,6 +683,67 @@ def create_dev_app(
         same scan, same file/line/text/context shape, narrowed to that flavor.
         """
         comments.report(as_json, commit=False, kind=NoteKind.template)
+
+    @app.command("seams")
+    def seams_cmd(
+        own: Annotated[
+            list[str] | None,
+            typer.Option("--own", help="Hand a file to its human owner (repeatable)"),
+        ] = None,
+        disown: Annotated[
+            list[str] | None,
+            typer.Option("--disown", help="Let the agent write this file again"),
+        ] = None,
+        retire: Annotated[
+            list[str] | None,
+            typer.Option("--retire", help="Stop holding this project to a rule id"),
+        ] = None,
+        keep: Annotated[
+            list[str] | None,
+            typer.Option("--keep", help="Hold this project to a rule id again"),
+        ] = None,
+        retire_all: Annotated[
+            bool,
+            typer.Option("--retire-all", help="Retire every rule the library ships"),
+        ] = False,
+    ) -> None:
+        """Show what this project settled about itself, or settle one of them.
+
+        With no options this prints each seam, its current value and where it
+        is written — which is what makes putting them to a person possible at
+        all, during initialization or afterwards. A default nobody was shown
+        is not a decision, and neither is one whose declaration somebody would
+        have to go find.
+
+        The options write that declaration rather than asking anyone to edit
+        it, and print what to regenerate. Nothing regenerates here: what
+        compiles from a declaration is the project's own set of trees, and a
+        command that guessed at them would be answering for a layout it does
+        not own.
+        """
+        catalog = declared().project.catalog
+        answers = seams.Answers(
+            own=own or [],
+            disown=disown or [],
+            retire=retire or [],
+            keep=keep or [],
+            retire_all=retire_all,
+        )
+        if not answers.given():
+            for line in seams.survey(catalog):
+                typer.echo(line)
+            return
+        if catalog is None:
+            raise typer.BadParameter(
+                "this project declares no catalog path, so there is nothing to "
+                "write a seam into; name one on its `DevProject`"
+            )
+        # Every id the library ships, not every id this project still keeps:
+        # retiring all of them has to name the ones already retired too, or
+        # the answer would silently exclude what a previous answer dropped.
+        shipped = [rule.id for rule in all_rules()]
+        for line in answers.settled(catalog, shipped):
+            typer.echo(line)
 
     @app.command("refutations")
     def refutations_cmd(
