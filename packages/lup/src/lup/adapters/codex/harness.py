@@ -56,6 +56,7 @@ from lup.policy.dispatcher import (
     DispatcherDeclaration,
     compile_dispatcher,
     dispatcher_banner,
+    guarded_hook_command,
 )
 from lup.policy.kernel.decision import SandboxPlacement
 from lup.policy.kernel.rows import PathRoleRow
@@ -641,7 +642,7 @@ class CodexHookRenderer(ArtifactRenderer[HookSet]):
     def render(self, source: HookSet) -> ArtifactTree:
         policy_hook = {
             "type": "command",
-            "command": 'python3 "$PLUGIN_ROOT/hooks/scripts/policy.py"',
+            "command": guarded_hook_command("PLUGIN_ROOT"),
             "statusMessage": "Checking Lup policy",
             "timeout": 30,
         }
