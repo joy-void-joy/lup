@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "a9c39521893358c22360efc3e25ce99894405dafe5891d68b6b76eb8cfd9404c",
+  "source_digest": "b707b4fb8be8cdd54f844332e02f65b1b20097a0fdccbd43118b90084a5477c3",
   "target_requirements": [
     "claude-code"
   ],
@@ -9,7 +9,7 @@
     {
       "path": ".claude/CLAUDE.md",
       "category": "generated",
-      "sha256": "abf8e02fd2f35884d4174cfdfc120701ea26708d770cb68fa7a80b249314c668",
+      "sha256": "d9174273855ebc60dd1c0de07275d66931a76e4b9de5daa053335364a8334819",
       "semantic_id": "harness.guidance",
       "executable": false
     },
@@ -37,7 +37,7 @@
     {
       "path": ".claude/plugins/lup/TEMPLATE_CLAUDE.md",
       "category": "generated",
-      "sha256": "06ee1836c0345aa160a94fd025d4af70b4bfb82b79825210f4343a86fc1e9268",
+      "sha256": "771408eac7f1c0101d40caa13e31d4f23f4b189a3e193949ec1e25d79c57dae9",
       "semantic_id": "harness.template-guidance",
       "executable": false
     },
@@ -198,7 +198,7 @@
     {
       "path": ".claude/plugins/lup/commands/land.md",
       "category": "generated",
-      "sha256": "c8bfc7e3f2f6cd52322b2751cf5ecb7cd25f8f32853ed1511004d778379101bc",
+      "sha256": "97451e054235f0d15d86e351e446f5fa0041dec957190efcc8e077dddeb09ae8",
       "semantic_id": "skill.land",
       "executable": false
     },
@@ -296,7 +296,7 @@
     {
       "path": ".claude/plugins/lup/hooks/hooks.json",
       "category": "generated",
-      "sha256": "efb04101441d129514c81f1591af8a453febe354364fdf4f7c03b2907aa71429",
+      "sha256": "bf8f2f3e7efec129ada5cd7ab5470b8806e214c6f0fa9993e93e13e9b1d27903",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -401,7 +401,7 @@
     {
       "path": ".claude/plugins/lup/hooks/runtime/policy_data.py",
       "category": "generated",
-      "sha256": "70edfab9a849d092baf483e4b2b744c47c684794bd302a98529baf1bc6ba2ddf",
+      "sha256": "85cf63429f1f9de61e2cd9b4f25dd9cc7e7405c66712105f90c88afcff0d2dd4",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -422,7 +422,7 @@
     {
       "path": ".claude/settings.json",
       "category": "generated",
-      "sha256": "ffaa67ed4b982e896be79031253c7e5dc7da6a7db5da9b4df224a895e1857c8d",
+      "sha256": "00c2138a3f386b8b5c632181395b3aea0c4bfa373ed588224f52cbde72041c16",
       "semantic_id": "harness.project-settings",
       "executable": false
     },

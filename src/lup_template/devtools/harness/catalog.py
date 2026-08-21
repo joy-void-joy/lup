@@ -86,9 +86,34 @@ back; the report surface is where the same question is answered in a place
 every later session, scan, and gate can reach.
 """
 
+WORKTREE_ENTRY_REFUSAL = (
+    "entering a worktree with this tool arms Claude Code's worktree isolation"
+    " for the rest of the session, which then refuses eval, source, fc, coproc,"
+    " trap, enable, mapfile, readarray, hash, bind, complete, compgen, alias and"
+    " let in any argv position — including in read-only commands with no git in"
+    " them, so `grep -c hash file.py` stops working. Measured: the tool call is"
+    " what arms it, not where the session is. `dev worktree create` already made"
+    " the tree — launch a session rooted in it, or address its files by absolute"
+    " path from here"
+)
+"""Why the tool that moves a session into a worktree is the wrong way in.
+
+The refusal names the cost rather than the rule, because the cost is what is
+hard to believe: a gate that has nothing to do with this project refuses
+fourteen ordinary shell words, for the rest of the session, on a command that
+reads. An agent told only "do not call this" reaches for it the moment the
+guidance is out of context; one told what happens does not.
+
+Not walled off. A deliberate use escalates with the marker the shell lattice
+already uses, and gets an approval question carrying this reason — which is
+the right shape, because a human who knows they are about to lose those words
+may still have a reason to.
+"""
+
 REFUSED_TOOLS = [
     RefusedTool(tool="Artifact", reason=ARTIFACT_REFUSAL),
     RefusedTool(tool="Skill", specifier="artifact-design", reason=ARTIFACT_REFUSAL),
+    RefusedTool(tool="EnterWorktree", reason=WORKTREE_ENTRY_REFUSAL),
 ]
 """The calls this project has decided against, each naming what to reach for.
 

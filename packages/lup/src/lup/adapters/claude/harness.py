@@ -123,17 +123,23 @@ class ClaudeSpellings(NativeSpellings):
         available. Launching belongs to whoever is starting work; an agent
         already mid-session cannot launch anything, and telling it to would
         be instructing it to do what it cannot -- so the fallback that
-        reaches the same branch from where it stands is named second, and
-        the move that works everywhere is named last with its price on it.
+        reaches the same branch from where it stands is named second.
+
+        The third is named as refused rather than merely discouraged, because
+        that is what it now is: the tool table denies it, carrying the cost as
+        its reason, and a deliberate use escalates. Prose that only called it
+        expensive was the whole of the gate before, and prose is what falls
+        out of context first.
         """
         return Instruction(
             f"work in <{path}> by whichever of these you can reach: launch a "
             f"session rooted there; or, already running, keep working where "
-            f"you are and address files under <{path}> by absolute path; or "
-            f"`EnterWorktree(path=<{path}>)`, returning with "
-            '`ExitWorktree(action="keep")` — which reaches any worktree from '
-            "anywhere and is last because it arms worktree isolation, whose "
-            "refusals cover ordinary read-only commands"
+            f"you are and address files under <{path}> by absolute path. "
+            f"`EnterWorktree(path=<{path}>)` reaches any worktree from "
+            "anywhere and is refused for it: entering one arms worktree "
+            "isolation, whose refusals cover ordinary read-only commands for "
+            "the rest of the session. Escalate it if you truly need it, and "
+            'leave with `ExitWorktree(action="keep")`'
         )
 
     def escape_sandbox(self, reason: str) -> Spelling:
