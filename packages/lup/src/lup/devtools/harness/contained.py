@@ -1483,6 +1483,12 @@ def contained_argv(
         notice.say()
     for notice in superseded_volume_notice(root, client, existing_volumes(client)):
         notice.say()
+    # Started before the container rather than beside it, because a pipe with
+    # no reader blocks its writer: a sign-in that raced the listener would
+    # hang on the one step the whole bridge exists to unblock.
+    handing = image.browser.serve()
+    for notice in image.browser.notice(handing is not None):
+        notice.say()
     lease = lease_for(root, human_owned)
     record_boundary(lease, image.egress, root)
     # Read on the host and passed in, never resolved inside: the file that
@@ -1525,6 +1531,7 @@ def contained_argv(
         forge_token=token,
         rewrites=rewrites,
         identity=identity,
+        browser_directory=handing,
         terminal=terminal.environment,
         interactive=interactive,
         proxy_address=reached_at,

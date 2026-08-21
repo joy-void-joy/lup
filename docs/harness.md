@@ -454,12 +454,66 @@ A container changes three facts and not one, which is worth stating because
 conflating them is how a boundary stops being one:
 
 - The session is sandboxed, so the boundary is real.
-- Nothing is escapable. There is no channel to put one call outside a
+- No *call* is escapable. There is no channel to put one call outside a
   container, so a call declared `outside` is **trapped** rather than placed —
   refused with the reason that says so, instead of failing later on whatever it
   writes first with the boundary misreported as a bug in the code.
 - An exclusion opens no hole. `excluded_commands` excuses a command from the
   *native* sandbox; the container never agreed to leave anything alone.
+
+#### The one thing that does cross, and what bounds it
+
+A sign-in cannot finish inside a container. The CLI reaches its servers through
+the proxy and gets an authorization URL, and then needs a browser — which is
+outside, along with the operator, the password manager and the second factor.
+Nothing in the image can open one and nothing should: a browser inside would be
+a browser with the session's filesystem under it.
+
+So `Image.browser` carries the URL out and nothing else. The container writes it
+to a named pipe; a thread in the launcher reads that pipe and hands admitted
+URLs to Python's `webbrowser`, which is the standard library's answer to what
+"open a browser" means on this operating system. Three things keep it narrow:
+
+- **The pipe carries a URL.** No path, no command, and nothing comes back.
+- **Only https, and only a declared address.** `admits` is the width of the
+  opening, and each entry says what needed it, so an address nobody can argue
+  for is one that can be taken out.
+- **The host is compared after parsing.** Every cheap version of that test is
+  wrong in the same direction: `startswith` admits `claude.ai.evil.test`, `in`
+  admits `evil.test/?next=https://claude.ai`, `endswith` admits `notclaude.ai`,
+  and reading the text rather than parsing it admits `claude.ai@evil.test` —
+  which is a request to `evil.test`, and only a parser says so.
+
+Reached through the `BROWSER` convention, which Claude Code documents honouring.
+A runtime that opens a page by some other route reaches nothing here and prints
+its URL as it would have anyway — which is also what an unbridged launch does,
+and the launch says which of the two it is. The fallback needs no bridge: open
+the URL yourself, and the page shows a code to paste back at the
+`Paste code here if prompted` prompt.
+
+#### What the config home holds, and how long
+
+The container's configuration home is a volume, named per **repository** rather
+than per checkout — keyed on the shared git directory, which is the one name
+every worktree of a repository agrees on. Keyed on the worktree instead, the
+name is the branch, and the documented one-worktree-per-feature workflow hands
+every feature a config home created empty: default theme, trust re-seeded, each
+preference set by hand again. What it costs is that worktrees of one repository
+share trust and session history, which is what a host home already does.
+
+The stored login is **copied in** on the first launch that finds the home
+without one, not mounted over. Mounted read-only at the path the CLI keeps a
+login — which is what it was — it looked right and was not: that file is written
+back both when a sign-in completes and when an expiring token is renewed, so
+signing in inside the boundary could reach the servers, get its code, and fail
+at the last step. Copying once, into an empty home, is what makes both
+directions safe: a login made inside is never overwritten by the host's, and the
+host's file is never written by anything in here. The two are then free to be
+different accounts, which is the point.
+
+The checkout's `user.name` and `user.email` cross the same way the remote
+rewrites do — read on the host, passed in — because git's fallback is to
+assemble an identity from the container's hostname and then refuse to use it.
 
 A judged deny is still an answer. Containment reaches work nobody classified,
 never a rule somebody wrote, so the reviewability refusals hold inside.
