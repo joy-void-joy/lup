@@ -128,14 +128,38 @@ class BranchInPlay(Gate, frozen=True):
     reach them one step after the step it was meant to change, which is not a
     warning, it is a post-mortem.
 
-    Landing fires it too, for the run after nobody acted. So does a branch
-    that no longer exists: pruned-after-landing is the likely reading and
-    abandoned is the other, and both are moments the note wanted somebody at.
-    Reporting "cannot tell" would leave the one case a branch deferral exists
-    to catch sitting silent, so it fires and the evidence says what to settle.
+    Landing fires it too, for the run after nobody acted.
+
+    A branch this checkout cannot see does **not** fire, and that is the ruling
+    that keeps the whole gate usable. Absence looks identical either way: a
+    branch pruned after landing and a branch that was simply never fetched are
+    the same missing ref, and the second is the ordinary case rather than the
+    rare one — a CI job clones the ref under test and nothing else, so every
+    feature branch in the repository is missing there. Firing on absence
+    therefore turns every build red for conditions none of which came true,
+    which is precisely the branch a reader learns to ignore. So absence stays
+    dormant and says it could not see, and the landing case is caught while
+    the ref is still there or not at all.
     """
 
     keyword: ClassVar[str] = "branch"
+
+    def visible(self) -> str:
+        """The ref this checkout can read the named branch through, or empty.
+
+        The remote-tracking ref counts and is answered with, because a full
+        clone that has never checked a branch out still knows what it is and
+        where it sits against the integration branch — which is the whole of
+        what the landing question needs. Returning which ref answered rather
+        than that one did keeps the caller from having to guess again.
+        """
+        for ref in (self.argument, f"origin/{self.argument}"):
+            try:
+                git("rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}")
+            except sh.ErrorReturnCode:
+                continue
+            return ref
+        return ""
 
     def asked(self) -> GateVerdict:
         if not self.argument:
@@ -149,22 +173,21 @@ class BranchInPlay(Gate, frozen=True):
                 ),
             )
         integration = get_integration_branch()
-        try:
-            git("rev-parse", "--verify", "--quiet", f"{self.argument}^{{commit}}")
-        except sh.ErrorReturnCode:
+        readable = self.visible()
+        if not readable:
             return GateVerdict(
-                fired=True,
+                fired=False,
                 evidence=(
-                    f"{self.argument} no longer exists — landed and pruned, or "
-                    "abandoned; either way it is not still on its way in"
+                    f"{self.argument} is not in this checkout, which says "
+                    "nothing about whether it landed"
                 ),
             )
-        if is_ancestor(self.argument, integration):
+        if is_ancestor(readable, integration):
             return GateVerdict(
-                fired=True, evidence=f"{self.argument} has reached {integration}"
+                fired=True, evidence=f"{readable} has reached {integration}"
             )
         return GateVerdict(
-            fired=False, evidence=f"{self.argument} has not reached {integration}"
+            fired=False, evidence=f"{readable} has not reached {integration}"
         )
 
 

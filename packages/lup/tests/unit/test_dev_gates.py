@@ -112,7 +112,10 @@ def test_a_branch_gate_fires_on_the_branch_it_names() -> None:
     # lives where its author stood, and their checkout carries no copy until
     # they merge. Waking on arrival only would reach them one step after the
     # step it was written to change.
-    standing = BranchInPlay(argument=current_branch()).asked()
+    standing_on = current_branch()
+    if not standing_on:
+        pytest.skip("detached head — CI checks out a ref, not a branch")
+    standing = BranchInPlay(argument=standing_on).asked()
     assert standing.fired
     assert "you are on" in standing.evidence
 
@@ -123,18 +126,35 @@ def test_a_branch_gate_fires_once_its_branch_is_in_the_integration_branch() -> N
     # named here would land eventually and turn this into a test about how old
     # the checkout is. Either reason is a pass — running this from the
     # integration branch itself reaches the same verdict by the other route.
-    landed = BranchInPlay(argument=get_integration_branch()).asked()
+    gate = BranchInPlay(argument=get_integration_branch())
+    if not gate.visible():
+        pytest.skip("this checkout cannot see the integration branch")
+    landed = gate.asked()
     assert landed.fired
     assert get_integration_branch() in landed.evidence
 
 
-def test_a_branch_gate_fires_when_its_branch_is_no_longer_there() -> None:
-    # Pruned after landing is the likely reading and abandoned is the other,
-    # and both are moments the note wanted somebody at. The evidence says which
-    # question to settle rather than deciding it here.
-    vanished = BranchInPlay(argument="no-such-branch-was-ever-pushed").asked()
-    assert vanished.fired
-    assert "no longer exists" in vanished.evidence
+def test_a_branch_this_checkout_cannot_see_stays_dormant() -> None:
+    # The ruling that keeps the gate usable at all. A branch pruned after
+    # landing and a branch never fetched are the same missing ref, and the
+    # second is the ordinary case: a CI job clones the ref under test and
+    # nothing else, so every feature branch is absent there. Firing on absence
+    # would turn every build red for conditions none of which came true —
+    # exactly the branch a reader learns to ignore.
+    unseen = BranchInPlay(argument="no-such-branch-was-ever-pushed").asked()
+    assert not unseen.fired
+    assert "not in this checkout" in unseen.evidence
+
+
+def test_a_checkout_missing_every_feature_branch_wakes_nothing() -> None:
+    # The CI shape, stated as the property rather than as one branch's luck:
+    # a sweep over gates naming branches none of which are present must come
+    # back empty, not with one entry per gate.
+    sweep = sweep_gates(
+        [parked("branch:absent-one"), parked("branch:absent-two")],
+    )
+    assert sweep.asked == 2
+    assert sweep.woken == []
 
 
 def test_a_note_on_another_ref_reaches_the_branch_it_names() -> None:
