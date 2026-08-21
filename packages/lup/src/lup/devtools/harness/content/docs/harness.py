@@ -431,6 +431,52 @@ bites later and none announces itself:
   because that writes the decision where a review sees it and `--keep` takes it
   back.
 
+### Where a session runs, and the flag that takes it back to the host
+
+Both launchers open the session **inside the container the project declares**,
+and `--unsandboxed` opens it on the host instead. The image is built from
+`Harness.image` on first use and mounted rather than copied into, so a `uv add`
+costs a sync and not a rebuild.
+
+What the container is for is the size of the policy above it. A semantic policy
+with no boundary beneath it is the only thing standing, so it has to guess at
+every rail and refuse whatever it cannot classify; with a real one beneath it,
+work nobody judged is carried by the boundary instead. That is not a separate
+feature — it is the same `confined` fact the settlement order already turned
+on, finally set by something other than the native sandbox.
+
+A container changes three facts and not one, which is worth stating because
+conflating them is how a boundary stops being one:
+
+- The session is sandboxed, so the boundary is real.
+- Nothing is escapable. There is no channel to put one call outside a
+  container, so a call declared `outside` is **trapped** rather than placed —
+  refused with the reason that says so, instead of failing later on whatever it
+  writes first with the boundary misreported as a bug in the code.
+- An exclusion opens no hole. `excluded_commands` excuses a command from the
+  *native* sandbox; the container never agreed to leave anything alone.
+
+A judged deny is still an answer. Containment reaches work nobody classified,
+never a rule somebody wrote, so the reviewability refusals hold inside.
+
+Two things it deliberately does not do:
+
+- **It does not fall back.** A launch that asked to be contained and could not
+  be is a refusal naming what to install, because a boundary that quietly is
+  not there is the one failure the boundary exists to prevent.
+- **It does not decide the identity itself.** How a container is told to run as
+  the invoking user differs by engine and is fatal when guessed: `--userns=keep-id`
+  is podman's word for "do not remap", and Docker refuses it outright. The
+  engine answers for its own spelling, and which engine is present is read from
+  what the client *reports* rather than from its filename — the `podman-docker`
+  package installs a `docker` that is really podman.
+
+Codex takes the same treatment through the same assembly, with one word
+differing: which environment variable points a CLI at its configuration home is
+that runtime's own, and it arrives from the login declaration rather than being
+spelled at the container — Codex reads `CODEX_HOME` where Claude reads
+`CLAUDE_CONFIG_DIR`.
+
 ### Reopening a session, and why a launcher owns it
 
 Both launchers reopen an earlier session, from one declaration and in each
