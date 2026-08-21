@@ -8,7 +8,7 @@ the broken version too.
 
 from pathlib import Path
 
-from lup.harness.image import Docker, Image, Podman, detected_engine
+from lup.harness.image import Docker, Image, Podman, detected_client
 from lup.harness.requirements import Manifest, Package, Requirement, Run
 from lup.harness.requirements import LostCapability
 
@@ -253,13 +253,23 @@ def test_an_engine_is_identified_by_what_it_reports_not_by_its_name() -> None:
     the identity mapping, so detection asks the client who it is.
     """
 
-    found = detected_engine(("docker",), lambda _name: "podman version 6.1.0")
+    found = detected_client(
+        ("docker",),
+        lambda _name: "podman version 6.1.0",
+        lambda _name: '[{"Name":"Podman Engine"}]',
+    )
     assert found is not None
-    assert found == Podman(binary="docker")
-    assert found.identity_arguments(1000, 1000)[-1] == "--userns=keep-id"
+    assert found.engine() == Podman(binary="docker")
+    assert found.engine().identity_arguments(1000, 1000)[-1] == "--userns=keep-id"
 
 
 def test_a_real_docker_client_is_not_mistaken_for_podman() -> None:
     """The other direction of the same question, against Docker's own string."""
-    found = detected_engine(("docker",), lambda _name: "Docker version 29.7.2")
-    assert found == Docker(binary="docker")
+    found = detected_client(
+        ("docker",),
+        lambda _name: "Docker version 29.7.2",
+        lambda _name: '[{"Name":"Engine"},{"Name":"containerd"}]',
+    )
+    assert found is not None
+    assert found.engine() == Docker(binary="docker")
+    assert found.drives_its_server()

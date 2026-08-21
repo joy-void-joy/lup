@@ -242,7 +242,7 @@ def build_image(
     Notice(text=f"Building {tag} from {dockerfile}", urgency="progress").say()
     Notice(text=f"Its output: {log}", urgency="artifact").say()
     console = Console()
-    recent: deque[str] = deque(maxlen=shown)  # lup: ignore[empty-collection]
+    recent: deque[str] = deque(maxlen=shown)
     with log.open("w", encoding="utf-8") as handle:
         # Transient, so the window closes when the build does and the
         # scrollback keeps the two header lines rather than a frozen tail of

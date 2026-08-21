@@ -40,7 +40,9 @@ def requirement(name: str, exercise: Run | AnyOf, **rest: object) -> Requirement
 def test_a_clean_exit_proves_a_requirement() -> None:
     found = requirement("echo", WORKING).check({})
     assert found.working
-    assert found.lines() == ["echo: working"]
+    assert [(item.text, item.urgency) for item in found.notices()] == [
+        ("echo: working", "ready")
+    ]
 
 
 def test_a_missing_program_is_named_as_missing_rather_than_as_a_failure() -> None:
@@ -220,7 +222,7 @@ def test_an_empty_manifest_checks_nothing_and_installs_nothing() -> None:
 def test_a_failing_finding_says_what_was_lost_and_what_needed_it() -> None:
     """Why it failed and what is now missing are different questions."""
     lines = requirement("clipboard", Run(command=["lup-no-such-program"])).check({})
-    rendered = "\n".join(lines.lines())
+    rendered = "\n".join(item.text for item in lines.notices())
     assert "the clipboard capability is unavailable" in rendered
     assert "needed for whatever clipboard is for" in rendered
 

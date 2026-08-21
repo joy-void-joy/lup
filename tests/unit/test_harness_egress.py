@@ -51,7 +51,10 @@ def test_the_session_is_pointed_at_the_proxy_it_is_the_only_way_out_through() ->
     environment = SessionEgress().environment()
     assert environment["HTTPS_PROXY"] == "http://egress:3128"
     assert environment["https_proxy"] == environment["HTTPS_PROXY"]
-    assert environment["NO_PROXY"] == ""
+    # Written rather than emptied: emptying kept the host's exemptions out
+    # and took the session's own loopback with them, so an agent that started
+    # a dev server and curled it was answered by the proxy.
+    assert environment["NO_PROXY"] == "localhost,127.0.0.1,::1"
 
 
 def test_node_is_told_to_read_the_proxy_variables_it_otherwise_ignores() -> None:
@@ -147,14 +150,14 @@ def test_the_launch_names_what_will_hang_rather_than_be_refused() -> None:
     network with no gateway and waits, leaving nothing behind at all -- so
     before it happens is the only time it can be said.
     """
-    lines = "\n".join(SessionEgress().notice("feat"))
+    lines = "\n".join(item.text for item in SessionEgress().notice("feat"))
     assert "ssh" in lines
     assert "hang" in lines
 
 
 def test_an_unfiltered_launch_says_what_it_is_leaving_open() -> None:
     """Turning the boundary off is a posture, and a posture is announced."""
-    lines = "\n".join(SessionEgress(mode="bridge").notice("feat"))
+    lines = "\n".join(item.text for item in SessionEgress(mode="bridge").notice("feat"))
     assert "no proxy" in lines
     assert "metadata" in lines
 
@@ -171,7 +174,7 @@ def test_a_declared_unproxied_component_reaches_the_launch_notice() -> None:
     egress = SessionEgress(
         unproxied=[Unproxied(component="rsync", reason="speaks ssh", consequence="no")]
     )
-    assert any("rsync" in line for line in egress.notice("feat"))
+    assert any("rsync" in item.text for item in egress.notice("feat"))
 
 
 def test_the_egress_environment_is_not_baked_into_the_image() -> None:
