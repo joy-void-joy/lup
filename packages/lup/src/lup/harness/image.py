@@ -29,6 +29,7 @@ from typing import Literal
 import sh
 from pydantic import BaseModel, Field
 
+from lup.harness.browser import BrowserBridge
 from lup.harness.credential import GitAccess, GitIdentity, RemoteRewrite
 from lup.harness.egress import SessionEgress
 from lup.harness.environment import NON_INTERACTIVE_SHELL_ENV
@@ -412,6 +413,17 @@ class Image(BaseModel, frozen=True):
             "runtime's own word and arrives from its login declaration"
         ),
     )
+    browser: BrowserBridge = Field(
+        default=BrowserBridge(),
+        description=(
+            "How a sign-in URL reaches a browser on the operator's machine, "
+            "which is the one thing a contained session cannot finish alone. "
+            "Declared beside the egress because it is the same subject read "
+            "the other way round: that says what may leave, and this is the "
+            "single narrow thing that may -- a URL, on a known sign-in "
+            "address, and nothing back"
+        ),
+    )
     credential_seed: str = Field(
         default="/opt/lup/credential-seed",
         description=(
@@ -614,6 +626,7 @@ class Image(BaseModel, frozen=True):
         """
         return {
             **NON_INTERACTIVE_SHELL_ENV,
+            **self.browser.environment(),
             "LUP_CONTAINED": "1",
             "LANG": self.terminal.fallback_locale,
             "UV_PROJECT_ENVIRONMENT": self.project_environment,
@@ -668,8 +681,16 @@ class Image(BaseModel, frozen=True):
             for item in self.obtained_by(manifest, "script")
         )
         agent_clis = " ".join(item.requested() for item in self.agent_clis)
+        opening = self.browser.script()
+        # Quoted, because `ENV name=value` takes whitespace as separating
+        # *more* pairs: an unquoted `GIT_SSH_COMMAND=ssh -o BatchMode=yes`
+        # makes `-o` a name with no value and the whole file unparseable.
+        # JSON is the quoting, since its escapes are the ones this parser
+        # reads and nothing here wants shell expansion -- `PATH`, which does,
+        # is written literally a few lines up.
         exported = "\n".join(
-            f"ENV {name}={value}" for name, value in self.environment().items()
+            f"ENV {name}={json.dumps(value)}"
+            for name, value in self.environment().items()
         )
         volumes = "\n".join(f"VOLUME {cache.path}" for cache in self.caches)
         seed = json.dumps(self.seed_configuration(), indent=2)
@@ -767,6 +788,14 @@ exec "$@"
 ENTRY
 RUN chmod +x /usr/local/bin/lup-entrypoint
 ENTRYPOINT ["/usr/local/bin/lup-entrypoint"]
+
+# What `BROWSER` names, so a sign-in inside can reach a browser outside. The
+# pipe it writes to is mounted per launch; with nothing mounted the script
+# prints the URL and returns, which is what the flow falls back to.
+COPY <<'OPEN' {self.browser.opener}
+{opening}
+OPEN
+RUN chmod +x {self.browser.opener}
 
 # The identity the session runs as. Supplied at build time from the host's own
 # uid/gid, because a bind mount carries numbers rather than names: a container
@@ -884,6 +913,7 @@ USER $UID:$GID
         forge_token: str = "",
         rewrites: list[RemoteRewrite] | None = None,
         identity: GitIdentity | None = None,
+        browser_directory: Path | None = None,
         terminal: EnvVars | None = None,
         interactive: bool = True,
         proxy_address: str = "",
@@ -953,6 +983,11 @@ USER $UID:$GID
         bridged = (
             self.ide_bridge(host_config_home) if host_config_home is not None else []
         )
+        opening = (
+            ["-v", f"{browser_directory}:{self.browser.inside}:rw"]
+            if browser_directory is not None
+            else []
+        )
         # The forge configuration is passed rather than baked, and passed
         # here rather than through `run_arguments`, because it is the one
         # part of the run that is neither an image fact nor a posture: it is
@@ -979,6 +1014,7 @@ USER $UID:$GID
             *mounts,
             *seeded,
             *bridged,
+            *opening,
             tag,
         ]
 

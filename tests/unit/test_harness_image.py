@@ -307,3 +307,29 @@ def test_a_real_docker_client_is_not_mistaken_for_podman() -> None:
     assert found is not None
     assert found.engine() == Docker(binary="docker")
     assert found.drives_its_server()
+
+
+def test_every_baked_variable_is_a_line_the_dockerfile_parser_accepts() -> None:
+    """The check that was missing, and the shape of what it missed.
+
+    `ENV name=value` takes whitespace as separating *more* pairs, so a value
+    with a space in it makes the rest of that value into names with no
+    values -- `ENV GIT_SSH_COMMAND=ssh -o BatchMode=yes` fails the whole file
+    with `can't find = in "-o"`.
+
+    Nothing caught it for as long as the tests asked what `environment()`
+    returned. That is the declaration; the Dockerfile is the artifact, and a
+    variable can be perfectly correct in the first and unparseable in the
+    second. Generation does not build, so the image stayed broken through a
+    green `harness generate all` and was found by a build.
+    """
+    baked = [
+        line.removeprefix("ENV ")
+        for line in Image().dockerfile(Manifest()).splitlines()
+        if line.startswith("ENV ")
+    ]
+    assert baked
+    for pair in baked:
+        value = pair.split("=", 1)[1]
+        quoted = value.startswith('"') and value.endswith('"')
+        assert quoted or not any(character.isspace() for character in value), pair
