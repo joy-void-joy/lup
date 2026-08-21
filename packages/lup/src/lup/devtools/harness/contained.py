@@ -498,6 +498,29 @@ class Spoken(BaseModel, frozen=True):
     text: str = Field(default="", description="Its own words, either way")
 
 
+class NetworkLeg(BaseModel, frozen=True):
+    """One network a container is on, and whether it offers a way off it.
+
+    The gateway is the field this exists for. A proxy is the only process
+    meant to be on both sides of the boundary, and "on two networks" says
+    nothing about whether either of them routes anywhere -- an ``--internal``
+    network is precisely one that does not. A report listing membership
+    without it describes a container that looks correctly attached and can
+    reach nothing.
+    """
+
+    network: str = Field(description="What the network is called")
+    address: str = Field(default="", description="The container's address on it")
+    gateway: str = Field(
+        default="", description="What it routes through there, empty for internal"
+    )
+
+    def sentence(self) -> str:
+        """This leg as one line, saying plainly when it leads nowhere."""
+        through = f"via {self.gateway}" if self.gateway else "no gateway"
+        return f"{self.network} at {self.address or 'no address'} — {through}"
+
+
 class EgressState(BaseModel, frozen=True):
     """What this project's egress infrastructure is actually doing, asked.
 
@@ -536,6 +559,16 @@ class EgressState(BaseModel, frozen=True):
             "and a failure to reach an origin are told apart -- squid "
             "answers a denied request and an unreachable one with different "
             "codes and says which in its own log"
+        ),
+    )
+    legs: list[NetworkLeg] = Field(
+        default=[],
+        description=(
+            "Every network the proxy is on, with what each routes through. "
+            "The proxy is the one process meant to be on both sides, so this "
+            "is where a proxy that joined the session's network and lost its "
+            "way out of the other one shows up -- a state in which every "
+            "question asked so far answers correctly and nothing works"
         ),
     )
     resolver: str = Field(
@@ -620,6 +653,19 @@ class EgressState(BaseModel, frozen=True):
                 indent=1,
             ),
             *(
+                [Notice(text="its networks:", urgency="detail", indent=1)]
+                if self.legs
+                else []
+            ),
+            *[
+                Notice(
+                    text=leg.sentence(),
+                    urgency="ready" if leg.gateway else "warning",
+                    indent=2,
+                )
+                for leg in self.legs
+            ],
+            *(
                 [
                     Notice(
                         text=f"resolving through: {self.resolver or 'nothing it names'}",
@@ -646,6 +692,16 @@ class EgressState(BaseModel, frozen=True):
             ],
             *self.verdict(),
         ]
+
+    def routes(self) -> bool:
+        """Whether any network the proxy is on offers it a way off that network.
+
+        The question membership does not answer. An ``--internal`` network is
+        precisely one with no gateway, so a proxy correctly attached to the
+        session's network and to nothing else is a proxy that is *there* and
+        can reach nothing — and every cheaper question about it answers yes.
+        """
+        return any(leg.gateway for leg in self.legs)
 
     def verdict(self) -> list[Notice]:
         """What the facts above add up to, in the words a session would use.
@@ -691,8 +747,13 @@ class EgressState(BaseModel, frozen=True):
                 ),
                 Notice(
                     text=(
-                        "That is the proxy's own resolution or its route out, "
-                        "not the session's network. Its log above says which."
+                        "No network it is on offers a gateway, so it has no "
+                        "route off them at all — which is why it resolves "
+                        "nothing: the nameservers it holds are unreachable."
+                        if self.legs and not self.routes()
+                        else "That is the proxy's own resolution or its route "
+                        "out, not the session's network. Its log above and "
+                        "its networks say which."
                     ),
                     urgency="detail",
                     indent=1,
@@ -743,6 +804,26 @@ def egress_state(
         "{{range $name, $_ := .NetworkSettings.Networks}}{{$name}} {{end}}",
         proxy,
     ).split()
+    legs = [
+        NetworkLeg(
+            network=leg,
+            address=asked(
+                "inspect",
+                "--format",
+                f'{{{{with index .NetworkSettings.Networks "{leg}"}}}}'
+                "{{.IPAddress}}{{end}}",
+                proxy,
+            ),
+            gateway=asked(
+                "inspect",
+                "--format",
+                f'{{{{with index .NetworkSettings.Networks "{leg}"}}}}'
+                "{{.Gateway}}{{end}}",
+                proxy,
+            ),
+        )
+        for leg in joined
+    ]
     names = asked(
         "inspect",
         "--format",
@@ -797,6 +878,7 @@ def egress_state(
         network=network,
         proxy=proxy,
         resolver=nameservers,
+        legs=legs,
         reached=looked.worked,
         upstream=f"{resolving} -> {looked.text or 'no answer'}",
         alias=egress.alias,

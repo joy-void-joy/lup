@@ -422,3 +422,46 @@ def test_a_reachable_proxy_that_reaches_nothing_is_not_called_working() -> None:
     assert standing.resolvable()
     assert not any(item.urgency == "ready" for item in standing.verdict())
     assert any("cannot reach the world" in item.text for item in standing.verdict())
+
+
+def test_a_proxy_with_no_gateway_anywhere_is_told_so_plainly() -> None:
+    """Membership answers yes and the proxy still reaches nothing.
+
+    An `--internal` network is precisely one with no gateway, so a proxy
+    attached to the session's network and to nothing else passes every
+    cheaper question and cannot resolve a name — which is the state a reader
+    would otherwise have to infer from a resolver list and a 503.
+    """
+    stranded = contained.EgressState(
+        network="net",
+        proxy="proxy",
+        alias="egress",
+        network_exists=True,
+        dns_enabled=True,
+        proxy_exists=True,
+        proxy_running=True,
+        attached=True,
+        aliases=["egress"],
+        legs=[contained.NetworkLeg(network="net", address="10.89.0.29")],
+        reached=False,
+    )
+
+    assert not stranded.routes()
+    assert any("no route off them at all" in item.text for item in stranded.verdict())
+
+
+def test_a_leg_that_routes_is_not_reported_as_stranded() -> None:
+    """One gateway anywhere is a way out, whatever the internal leg lacks."""
+    bridged = contained.EgressState(
+        network="net",
+        proxy="proxy",
+        alias="egress",
+        legs=[
+            contained.NetworkLeg(
+                network="podman", address="10.88.0.4", gateway="10.88.0.1"
+            ),
+            contained.NetworkLeg(network="net", address="10.89.0.29"),
+        ],
+    )
+
+    assert bridged.routes()
