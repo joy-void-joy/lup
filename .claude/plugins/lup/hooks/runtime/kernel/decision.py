@@ -171,7 +171,26 @@ ESCALATE_HINT = (
     " — reshape the command into the allowed vocabulary, or resubmit with a"
     " leading '# lup: escalate: <why>' line to request approval"
 )
-RESHAPE_HINT = " — reshape the command into the allowed vocabulary"  # lup: ignore[constant-declaration] — refusal wording
+# lup: ignore[constant-declaration] — refusal wording
+RESHAPE_HINT = " — reshape the command into the allowed vocabulary"
+# lup: ignore[constant-declaration] — refusal wording, declared with its verdict
+RELAY_HINT = (
+    " — reshape the command into the allowed vocabulary, or ask for the gate"
+    " with `request_allowance`, which reaches whoever is watching this run"
+)
+"""What a reviewed worker is told, which is not what a headless run is told.
+
+Both are non-interactive and only one of them is alone. A resolver worker
+holds a question mailbox: it can put the ask to the human supervising the
+run and carry on from where it stopped when the answer lands. Telling it to
+reshape the command is telling it the route it has does not exist, and
+measured, it does what anybody would — it queues a *material question*
+instead, which parks the whole run on a decision nobody needed to make.
+
+A genuinely headless run has no such channel and still gets
+:data:`RESHAPE_HINT`, because naming a route that is not there is the same
+failure pointed the other way.
+"""
 # lup: ignore[constant-declaration] — refusal wording, declared with its verdict
 SUBSTITUTION_REASON = (
     "command substitution is denied — run the inner command in its own call"

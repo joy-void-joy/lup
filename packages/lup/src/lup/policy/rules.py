@@ -157,6 +157,7 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
         path_rules: list["PathRule"] | None = None,
         recoverable_target_limit: int = 5,
         runner_targets: list[RunnerTargetRule] | None = None,
+        relayed: bool = False,
     ) -> None:
         self.path_rules = [path_rule_row(rule) for rule in path_rules or []]
         self.path_roles = path_roles or []
@@ -171,6 +172,7 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
         self.sandbox_excluded_commands = sandbox_excluded_commands or []
         self.trusted_script_roots = trusted_script_roots or []
         self.interactive = interactive
+        self.relayed = relayed
 
     def decide(self, event: ShellCommand) -> Decision:
         root = event.cwd or Path.cwd()
@@ -201,6 +203,7 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
                 runner_targets=self.runner_targets,
                 target_tables=self.target_tables,
                 escapable=self.escapable,
+                relayed=self.relayed,
             )
         )
 

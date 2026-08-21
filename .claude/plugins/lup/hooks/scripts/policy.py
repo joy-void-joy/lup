@@ -935,6 +935,7 @@ def bash_decision(
     interactive: bool,
     escapable: bool,
     cwd: Path | None,
+    relayed: bool = False,
 ) -> KernelDecision:
     """Judge one shell command against the declared vocabulary.
 
@@ -983,6 +984,11 @@ def bash_decision(
         runner_targets=RUNNER_TARGETS,
         target_tables=RUNNER_TARGET_TABLES,
         interactive=interactive,
+        # A reviewed worker is non-interactive and not therefore alone: it
+        # holds a mailbox reaching the human supervising its run, and a
+        # refusal that named no route sent it to queue a blocking question
+        # instead.
+        relayed=relayed,
         escapable=escapable,
         # Read here rather than passed by each dispatcher, unlike `escapable`
         # above: whether this process sits inside the container is a fact
@@ -1243,6 +1249,10 @@ def dispatch(payload):
             # that has to leave the sandbox is carried out rather than refused.
             escapable=True,
             cwd=session_directory,
+            # A reviewed worker's session has nobody at a keyboard and is not
+            # therefore alone: the run it belongs to carries a mailbox that
+            # reaches whoever is supervising it.
+            relayed=autonomous,
         )
     if name == "WebFetch":
         return fetch_decision(tool_input["url"])

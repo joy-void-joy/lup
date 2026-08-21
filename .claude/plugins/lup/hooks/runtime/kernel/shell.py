@@ -9,6 +9,7 @@ from typing import TypedDict
 from .decision import (
     ESCALATE_HINT,
     KernelDecision,
+    RELAY_HINT,
     RESHAPE_HINT,
     SUBSTITUTION_SENTINEL,
     SandboxPlacement,
@@ -899,6 +900,7 @@ def decide_shell(
     target_tables: list[ShellRuleRow] | None = None,
     escapable: bool = False,
     contained: bool = False,
+    relayed: bool = False,
 ) -> KernelDecision:
     """Classify one command, honoring an escalation marker and hinting denies.
 
@@ -931,8 +933,17 @@ def decide_shell(
     to give a toolchain: where the escape is carried out it is unprompted,
     and where nothing can carry it out the refusal names the sandbox instead
     of a bare write error.
+
+    ``relayed`` says a non-interactive session is not therefore *alone*. A
+    reviewed worker holds a question mailbox reaching the human supervising
+    the run, so a refusal that told it to reshape the command was naming the
+    only route it had as unavailable — and measured, it did what anybody
+    would and queued a material question instead, parking the whole run on a
+    decision nobody needed to make. Three states rather than two, because
+    "nobody to ask" and "somebody, but not right now" are different answers
+    and were sharing one.
     """
-    hint = ESCALATE_HINT if interactive else RESHAPE_HINT
+    hint = ESCALATE_HINT if interactive else RELAY_HINT if relayed else RESHAPE_HINT
     # A container confines the whole session rather than one call at a time,
     # which changes all three facts below and not merely the first. It is a
     # boundary, so the session is sandboxed. It has no channel to put one call

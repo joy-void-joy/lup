@@ -934,6 +934,7 @@ def bash_decision(
     interactive: bool,
     escapable: bool,
     cwd: Path | None,
+    relayed: bool = False,
 ) -> KernelDecision:
     """Judge one shell command against the declared vocabulary.
 
@@ -982,6 +983,11 @@ def bash_decision(
         runner_targets=RUNNER_TARGETS,
         target_tables=RUNNER_TARGET_TABLES,
         interactive=interactive,
+        # A reviewed worker is non-interactive and not therefore alone: it
+        # holds a mailbox reaching the human supervising its run, and a
+        # refusal that named no route sent it to queue a blocking question
+        # instead.
+        relayed=relayed,
         escapable=escapable,
         # Read here rather than passed by each dispatcher, unlike `escapable`
         # above: whether this process sits inside the container is a fact
@@ -1200,6 +1206,42 @@ def record_approval(payload, max_pending=256):
     receipt.write_text(fingerprint, encoding="utf-8")
 
 
+def uncorrelated(payload):
+    """Why a call that should carry an approval does not, in one sentence.
+
+    Empty when nothing is amiss, which is the ordinary case: a call that was
+    never escalated has no approval to find and no problem to report.
+
+    This exists because the failure it names is otherwise indistinguishable
+    from the one it is not. A call whose native approval was accepted and
+    whose receipt then failed to correlate reaches the same refusal as a call
+    nobody approved at all -- so #180 reads as "the policy rejected my
+    escalated diff" and the actual defect, whichever field the two events
+    disagreed on, leaves no trace. Naming the step that failed does not fix
+    it and does make the next run conclusive.
+    """
+    root = approval_receipt_root()
+    if root is None or not root.exists() or not list(root.iterdir()):
+        return ""
+    if approval_fingerprint(payload) is None:
+        missing = [
+            field
+            for field in ("session_id", "turn_id", "cwd", "tool_name")
+            if field not in payload or not payload[field]
+        ]
+        named = ", ".join(missing) if missing else "the command"
+        return (
+            f" — an approval is pending for this run and this call could not be"
+            f" matched to it: the event carries no {named}, so the two cannot"
+            " be correlated"
+        )
+    return (
+        " — an approval is pending for this run but none matches this exact"
+        " call; the escalation and this call disagree on the session, the turn,"
+        " the directory or the command text"
+    )
+
+
 def spend_approval(payload):
     """Consume one pending permission event matching this exact Bash call."""
     fingerprint = approval_fingerprint(payload)
@@ -1238,6 +1280,11 @@ def dispatch(payload, permission_request=False):
     # once, because the shell path and the patch path ask the same question of
     # it and a second read is a second place it can be forgotten.
     session_directory = Path(payload["cwd"]) if "cwd" in payload else None
+    # Whether this session is a reviewed worker, which decides two unrelated
+    # things: how a patch is judged, and whether a refusal has a route to
+    # name. Read once at the top rather than inside the branch that needed it
+    # first, since both branches need it now.
+    autonomous = declared_identity(AGENT_IDENTITY_ENV) in AUTONOMOUS_AGENT_IDENTITIES
     if name == "Bash":
         requested_escape = spent_escape(tool_input)
         escaped = requested_escape or auto_escape_matches(
@@ -1253,6 +1300,10 @@ def dispatch(payload, permission_request=False):
             # semantic placement before the hook lets the native boundary act.
             escapable=escaped,
             cwd=session_directory,
+            # A reviewed worker's session has nobody at a keyboard and is not
+            # therefore alone: the run it belongs to carries a mailbox that
+            # reaches whoever is supervising it.
+            relayed=autonomous,
         )
         # PreToolUse can neither see nor place every native escape. Let Codex's
         # sandbox run a confined call or raise the PermissionRequest where this
@@ -1272,9 +1323,6 @@ def dispatch(payload, permission_request=False):
     if name == "web_fetch":
         return fetch_decision(tool_input["url"])
     if name == "apply_patch":
-        autonomous = (
-            declared_identity(AGENT_IDENTITY_ENV) in AUTONOMOUS_AGENT_IDENTITIES
-        )
         return joined(
             [
                 edit_decision(
@@ -1419,7 +1467,12 @@ def main():
         return
     if decision.effect in ("allow", "defer"):
         return
-    sys.stderr.write(decision.reason)
+    # A refusal that arrives while an approval is pending is two failures
+    # wearing one face -- the policy declining a call, and the correlation
+    # between a native approval and the call it approved not landing. They
+    # read identically without this, which is how #180 reads as the first
+    # when it is the second.
+    sys.stderr.write(decision.reason + uncorrelated(payload))
     raise SystemExit(2)
 
 

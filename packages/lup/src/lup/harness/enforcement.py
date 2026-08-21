@@ -123,6 +123,11 @@ def semantic_policy_for(
             escapable=escapable,
             trusted_script_roots=trusted_script_roots,
             interactive=interactive,
+            # A reviewed worker is the one non-interactive session with a
+            # route: the run it belongs to carries a mailbox reaching whoever
+            # supervises it, so its refusals name that instead of telling it
+            # to reshape a command it had every right to run.
+            relayed=autonomous,
             path_roles=roles,
             path_rules=declared_path_rules(hooks),
             recoverable_target_limit=hooks.recoverable_target_limit,

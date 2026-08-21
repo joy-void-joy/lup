@@ -2279,6 +2279,24 @@ def test_non_interactive_denials_do_not_prescribe_escalation() -> None:
     assert "allowed vocabulary" in blocked.reason
 
 
+def test_a_reviewed_worker_is_told_the_route_it_actually_has() -> None:
+    """Non-interactive and alone are different states that shared one answer.
+
+    A worker holds a question mailbox reaching the human supervising its run,
+    so telling it to reshape the command names the only route it has as
+    unavailable — and measured in #202, it did what anybody would and queued a
+    *material question* instead, parking the whole run on a decision nobody
+    needed to make. A genuinely headless run still gets the reshape, because
+    naming a route that is not there is the same failure pointed the other way.
+    """
+    relayed = ShellPolicy(SHELL_RULES, interactive=False, relayed=True).decide(
+        ShellCommand(command="git push --delete origin feat")
+    )
+    assert relayed.effect == "deny"
+    assert "request_allowance" in relayed.reason
+    assert "escalate" not in relayed.reason
+
+
 def test_claude_decoder_marks_unsandboxed_escapes() -> None:
     payload = ClaudeHookPayload(
         tool_name="Bash",
