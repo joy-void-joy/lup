@@ -2264,6 +2264,45 @@ def test_the_toolchain_carries_its_own_escape_and_is_refused_without_one() -> No
     assert "only a runtime without that channel" in trapped.reason
 
 
+def test_a_help_probe_keeps_the_placement_its_target_declares() -> None:
+    """Printing usage is a verdict about the effect and not about the place.
+
+    The toolchain above is declared ``outside`` because it opens agent
+    sessions, and asking it for its own usage is the same program under the
+    same declaration. Answered above the walk the probe returned a bare
+    allow, and the placement went with it: `uv run lup-devtools dev check`
+    was placed ``outside`` while `uv run lup-devtools --help`, one word
+    apart, was placed ``ambient`` — as was every other help probe in the
+    vocabulary, whatever its depth. So the probe now replaces the effect and
+    the walk still answers for the placement.
+    """
+    placed = ShellPolicy(
+        SHELL_RULES,
+        sandbox_active=True,
+        escapable=True,
+        runner_targets=FIXTURE_RUNNER_TARGETS,
+    ).decide(ShellCommand(command="uv run lup-devtools --help"))
+
+    assert placed.effect == "allow"
+    assert placed.sandbox == "outside"
+
+
+def test_a_help_probe_of_an_unclassified_command_still_reads() -> None:
+    """The probe's own reason for existing, which the placement must not cost.
+
+    An unclassified command is refused, and being able to read its usage is
+    how an agent finds the form that is not. Taking the placement from the
+    walk leaves that untouched: nothing declares this command, so the walk
+    declares no placement either.
+    """
+    read = ShellPolicy(SHELL_RULES, runner_targets=FIXTURE_RUNNER_TARGETS).decide(
+        ShellCommand(command="frobnicate --help")
+    )
+
+    assert read.effect == "allow"
+    assert read.sandbox == "ambient"
+
+
 def test_non_interactive_denials_do_not_prescribe_escalation() -> None:
     """Codex hooks cannot complete the approval flow, so they never name it."""
     interactive = ShellPolicy(SHELL_RULES).decide(

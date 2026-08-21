@@ -380,7 +380,7 @@
     {
       "path": ".claude/plugins/lup/hooks/runtime/kernel/shell.py",
       "category": "generated",
-      "sha256": "9867ad5b90740cc3f4144eedb11496e2fb5f34249ddf564c27748a392ee78492",
+      "sha256": "01a602a716dae6af66dfb01905c80135fd4f165963ac1228abd944e6e97cf262",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
