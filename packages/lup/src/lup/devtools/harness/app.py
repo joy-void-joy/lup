@@ -21,6 +21,7 @@ import lup.devtools.harness.drift as drift
 import lup.devtools.harness.launch as launch
 import lup.devtools.harness.reconcile as reconcile
 import lup.devtools.harness.resolve as resolve
+from lup.codescan.registry import every_rule_retired
 from lup.devtools.dev.issues import EXCLUDED_LABEL
 from lup.devtools.harness.composition import NativeTargets, claude_profile_directory
 from lup.devtools.harness.generate import NativeHarnessComposition
@@ -423,8 +424,8 @@ def create_harness_app(
             start_new,
         )
 
-    # lup: There is no way to open a session that the anti-pattern gate leaves
-    # alone. Both launchers should offer one — `lup-devtools harness claude
+    # lup: solved: There is no way to open a session that the anti-pattern gate
+    # leaves alone. Both launchers should offer one — `lup-devtools harness claude
     # --ignore-antipatterns`, and the same option on `codex` — for the sessions
     # where the rules are not the point: exploring, spiking, or working over
     # code this repository's conventions were never written for. The flag has
@@ -438,20 +439,27 @@ def create_harness_app(
     # reads the same selection, and a session that edited freely under the flag
     # will fail it.
     def selected_target(
-        mode: launch.LaunchMode | None, runtime: str
+        mode: launch.LaunchMode | None, runtime: str, relaxed: bool = False
     ) -> NativeHarnessComposition:
         """The composition to generate and open, under whichever mode is in force.
 
         A mode carries its own targets, so this is where "the tree differs by
         mode" actually happens: everything downstream takes an already
         concrete composition and cannot tell which declaration produced it.
+
+        ``relaxed`` is the other thing that differs by launch, and it reaches
+        the same place for the same reason: the anti-pattern table is
+        projected into each plugin's hermetic edit policy at generation time,
+        so a switch that stopped at this command line would leave the session
+        judged by the tree it opened against rather than by what was asked
+        for.
         """
         source = mode.targets if mode is not None else targets
         build = source.builder(runtime)
         if build is None:
             named = f"--{mode.name} " if mode is not None else ""
             raise typer.BadParameter(f"{named}declares no {runtime} tree")
-        return build(project_root())
+        return build(project_root(), every_rule_retired() if relaxed else None)
 
     def launch_help(subject: str) -> str:
         """One launcher's help, with whatever modes this project declares."""
@@ -497,10 +505,17 @@ def create_harness_app(
                 str | None,
                 typer.Option("--session", help="Reopen this session by id"),
             ] = None,
+            ignore_antipatterns: Annotated[
+                bool,
+                typer.Option(
+                    "--ignore-antipatterns",
+                    help="Open a session the anti-pattern gate leaves alone",
+                ),
+            ] = False,
         ) -> None:
             selection = launch.extract_launch_mode(modes, ctx.args)
             launch.launch_claude(
-                selected_target(selection.mode, "claude"),
+                selected_target(selection.mode, "claude", ignore_antipatterns),
                 selection.arguments,
                 directory,
                 profile,
@@ -508,6 +523,7 @@ def create_harness_app(
                 generate_only,
                 selection.mode,
                 Resumption(latest=continue_latest, pick=resume, session=session),
+                ignore_antipatterns,
             )
 
     codex_target = targets.builder("codex")
@@ -561,10 +577,17 @@ def create_harness_app(
                 str | None,
                 typer.Option("--session", help="Reopen this session by id"),
             ] = None,
+            ignore_antipatterns: Annotated[
+                bool,
+                typer.Option(
+                    "--ignore-antipatterns",
+                    help="Open a session the anti-pattern gate leaves alone",
+                ),
+            ] = False,
         ) -> None:
             selection = launch.extract_launch_mode(modes, ctx.args)
             launch.launch_codex(
-                selected_target(selection.mode, "codex"),
+                selected_target(selection.mode, "codex", ignore_antipatterns),
                 selection.arguments,
                 codex_home,
                 profile,
@@ -573,6 +596,7 @@ def create_harness_app(
                 force_install,
                 selection.mode,
                 Resumption(latest=continue_latest, pick=resume, session=session),
+                ignore_antipatterns,
             )
 
     return app

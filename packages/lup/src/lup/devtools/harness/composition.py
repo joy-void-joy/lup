@@ -8,8 +8,9 @@ its own ``ProjectContent``, so the builders decide nothing about content.
 """
 
 from abc import ABC, abstractmethod
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from pathlib import Path
+from typing import Protocol, runtime_checkable
 
 import typer
 from pydantic import BaseModel
@@ -25,6 +26,7 @@ from lup.adapters.claude.profile_store import (
     ClaudeProfileNames,
     ClaudeProfileRegistrar,
 )
+from lup.codescan.common import RuleSelection
 from lup.adapters.codex.harness import CodexSpellings
 from lup.adapters.codex.harness_runtime import (
     CodexCliEvidence,
@@ -165,22 +167,43 @@ class CodexComposer(NativeComposer):
         )
 
 
-class NativeTargets(BaseModel, frozen=True):
+@runtime_checkable
+class TargetBuilder(Protocol):
+    """How one project turns a root into one runtime's whole composition.
+
+    Takes an optional rule selection because the one caller with a reason to
+    compile a tree against a different one is a launch — a session opened
+    where the conventions are not the point. Declared on the seam rather than
+    reached for through a global, so a project that wants no such launch
+    simply ignores the argument, and one that does cannot be handed it
+    through a channel nothing types.
+    """
+
+    def __call__(
+        self, root: Path, rules: RuleSelection | None = None
+    ) -> NativeHarnessComposition: ...
+
+
+class NativeTargets(BaseModel, frozen=True, arbitrary_types_allowed=True):
     """Every native adapter a CLI selector can name, and how to build each.
 
     A project declares which runtimes it generates a tree for; the commands
     take already concrete compositions and never learn a target's name. The
     builders are keyed rather than listed because the selector a human types
     is the key, and the launch commands are the adapter's own surface.
+
+    Arbitrary types because a builder is a callable seam rather than data:
+    what pydantic would validate here is a signature, which is pyright's
+    question and already answered there.
     """
 
-    builders: dict[str, Callable[[Path], NativeHarnessComposition]]
+    builders: dict[str, "TargetBuilder"]
 
     every: str = "all"
     """The selector reaching every declared tree at once, which is also what
     reaches the generated artifacts belonging to no single one of them."""
 
-    def builder(self, name: str) -> Callable[[Path], NativeHarnessComposition] | None:
+    def builder(self, name: str) -> "TargetBuilder | None":
         """How to build one named target, or nothing when it is not declared."""
         return self.builders.get(name)  # lup: ignore[dict-get]
 

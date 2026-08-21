@@ -107,3 +107,59 @@ def test_a_contradicted_request_never_reaches_a_runtime(
             force_install=False,
             resume=contradicted,
         )
+
+
+def test_a_relaxed_launch_says_what_it_retired_and_what_it_did_not(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The launch is the only moment a relaxation is legible.
+
+    The tree it compiles carries no rules, so nothing downstream can report
+    their absence: a session opened under it meets no rule and cannot tell
+    that from a repository with none. Two consequences ride along because
+    both bite later and neither announces itself — the sweep still holds the
+    repository to every rule, and the committed tree has just been rewritten.
+    """
+    from lup.codescan.common import RuleSelection
+    from lup.devtools.harness.launch import announce_relaxed_rules
+    from lup.harness.models import HookSet, Plugin
+
+    plugin = Plugin(
+        id="plugin.lup",
+        name="lup",
+        description="a plugin",
+        version="0.0.0",
+        marketplace="lup",
+        skills=[],
+        agents=[],
+        hooks=HookSet(
+            id="hooks.lup",
+            policy_ids=["edit"],
+            rules=RuleSelection(retired=["dict-get", "own-model-dispatch"]),
+        ),
+    )
+
+    announce_relaxed_rules(False, plugin)
+    assert capsys.readouterr().out == ""
+
+    announce_relaxed_rules(True, plugin)
+    said = capsys.readouterr().out
+    assert "retired for this session: 2 rules" in said
+    assert "dev check --antipatterns` still holds this repository" in said
+    assert "before committing" in said
+    assert "dev seams --retire-all" in said
+
+
+def test_every_rule_retired_names_them_rather_than_standing_for_them() -> None:
+    """The selection is subtractive, so "all of them" is spelled as all of them.
+
+    A rule the library adds later is then one this selection has visibly not
+    answered for, rather than one a flag silently swallowed.
+    """
+    from lup.codescan.registry import all_rules, every_rule_retired
+
+    retired = every_rule_retired()
+
+    assert len(retired.retired) == len(all_rules())
+    assert retired.retired
+    assert not any(retired.keeps(rule.id) for rule in all_rules())
