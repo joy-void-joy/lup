@@ -28,6 +28,7 @@ from pathlib import Path
 import sh
 from pydantic import BaseModel, Field
 
+from lup.harness.egress import SessionEgress
 from lup.harness.requirements import Manifest, Package, PackageManager
 from lup.types import EnvVars, JsonObject
 
@@ -284,6 +285,16 @@ class Image(BaseModel, frozen=True):
             "neither"
         ),
     )
+    egress: SessionEgress = Field(
+        default=SessionEgress(),
+        description=(
+            "How the session reaches the network. Part of this declaration "
+            "rather than the launcher's because the network the session "
+            "attaches to and the proxy the environment points at are one "
+            "fact spelled twice, and a launcher holding half of it is how a "
+            "session ends up on an internal network with no way out of it"
+        ),
+    )
     caches: list[CacheVolume] = Field(
         default=[
             CacheVolume(name="lup-uv", path="/cache/uv", variable="UV_CACHE_DIR"),
@@ -485,9 +496,17 @@ USER $UID:$GID
         default because it is the one an adopter is likeliest to have, and it
         is a default rather than an assumption: a caller that detected podman
         passes it and gets podman's spelling.
+
+        The egress environment is passed here rather than baked into the
+        image, unlike everything in :meth:`environment`. Which network a
+        session runs on is a posture, and baking it would mean an operator
+        who flipped the mode paid a distribution rebuild to change one
+        variable -- where the paths and the project environment really are
+        facts about what was built.
         """
         return [
             *engine.identity_arguments(uid, gid),
+            *self.egress.attachment_arguments(checkout.name),
             "-w",
             str(checkout),
             *[
@@ -497,7 +516,9 @@ USER $UID:$GID
             ],
             *[
                 argument
-                for name, value in self.environment().items()
+                for name, value in (
+                    self.environment() | self.egress.environment()
+                ).items()
                 for argument in ("-e", f"{name}={value}")
             ],
         ]

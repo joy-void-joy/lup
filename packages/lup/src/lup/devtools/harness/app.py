@@ -24,6 +24,7 @@ import lup.devtools.harness.resolve as resolve
 from lup.codescan.registry import every_rule_retired
 from lup.devtools.dev.issues import EXCLUDED_LABEL
 from lup.devtools.harness.composition import NativeTargets, claude_profile_directory
+from lup.devtools.harness.contained import report_egress
 from lup.devtools.harness.generate import NativeHarnessComposition
 from lup.devtools.harness.profile_app import create_profile_app
 from lup.harness.models import Resumption
@@ -194,6 +195,25 @@ def create_harness_app(
         for composition in targets.resolve(target, project_root()):
             source = composition.recipe.source
             typer.echo(source.image.dockerfile(source.requirements))
+
+    @app.command("egress")
+    def egress_command(
+        target: Annotated[str, typer.Argument(help=selector)] = targets.every,
+        down: Annotated[
+            bool,
+            typer.Option("--down", help="Remove the proxy and its network"),
+        ] = False,
+    ) -> None:
+        """Report or remove the network boundary this project's sessions run behind.
+
+        The proxy outlives a session deliberately -- starting one costs a
+        second and every launch would pay it -- which means something has to
+        be able to say what is running and take it away. Without that the
+        only answer is a raw engine command against a name the operator has
+        to know, which is the friction this whole harness exists to remove.
+        """
+        for composition in targets.resolve(target, project_root()):
+            report_egress(composition.recipe.source.image.egress, project_root(), down)
 
     @app.command("serve-resolver-tools")
     def serve_resolver_tools_command() -> None:

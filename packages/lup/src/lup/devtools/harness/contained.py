@@ -23,6 +23,7 @@ from pathlib import Path
 import sh
 import typer
 
+from lup.harness.egress import SessionEgress
 from lup.harness.image import ContainerEngine, Image, detected_engine
 from lup.harness.requirements import Manifest
 from lup.runtime.login import ProviderLogin
@@ -54,6 +55,95 @@ def image_present(tag: str, engine: ContainerEngine) -> bool:
     """Whether this tag already exists, asked of the engine rather than guessed."""
     try:
         sh.Command(engine.binary)("image", "inspect", tag)
+    except (sh.CommandNotFound, sh.ErrorReturnCode):
+        return False
+    return True
+
+
+def running(name: str, engine: ContainerEngine) -> bool:
+    """Whether a container by this name is up, asked of the engine.
+
+    Asked rather than remembered, for the same reason :func:`image_present`
+    is: the operator may have removed it between launches, another checkout
+    of the same repository may have brought it up, and a launcher that kept
+    its own record of either would be reading a file instead of the truth.
+    """
+    try:
+        state = sh.Command(engine.binary)(
+            "inspect", "--format", "{{.State.Running}}", name
+        )
+    except (sh.CommandNotFound, sh.ErrorReturnCode):
+        return False
+    return str(state).strip() == "true"
+
+
+def start_egress(
+    egress: SessionEgress, project: str, engine: ContainerEngine, root: Path
+) -> None:
+    """Bring up the internal network and the proxy bridged out of it.
+
+    Idempotent, and idempotent one piece at a time rather than as a whole:
+    the network can outlive a proxy the operator stopped, and a run that
+    treated the pair as one fact would leave a session attached to a network
+    with nothing on the far side of it -- which is the failure mode the
+    filtered posture exists to avoid, arrived at by the launcher itself.
+
+    The rendered configuration is written into the checkout's scratch
+    directory rather than piped in, for the reason :func:`build_image` writes
+    the Dockerfile there: what the proxy is enforcing should be readable as a
+    file rather than reconstructed from a declaration and a memory of which
+    version was running.
+    """
+    if not egress.filtered():
+        return
+    client = sh.Command(engine.binary)
+    if not network_present(egress.network_name(project), engine):
+        client(*egress.network_arguments(project))
+    if running(egress.proxy_name(project), engine):
+        return
+    scratch = root / "tmp"
+    scratch.mkdir(parents=True, exist_ok=True)
+    configuration = scratch / "egress.conf"
+    configuration.write_text(egress.policy.render())
+    try:
+        client(*egress.proxy_arguments(project, configuration))
+        client(*egress.connect_arguments(project))
+    except sh.ErrorReturnCode as error:
+        raise typer.BadParameter(
+            f"Could not start {egress.proxy_name(project)}, so this session "
+            "would open on an internal network with no way out of it. The "
+            "policy it was given is at "
+            f"{configuration}; open the session with --unsandboxed, or "
+            "declare `mode='bridge'` on the image's egress to run without "
+            "an egress boundary."
+        ) from error
+
+
+def report_egress(egress: SessionEgress, root: Path, down: bool) -> None:
+    """Say what network boundary this project has, and remove it when asked.
+
+    Removal names each piece separately and tolerates a piece already gone:
+    the operator may have stopped the proxy by hand, and a teardown that
+    failed on the half already in the state it wanted would leave the other
+    half standing while reporting an error.
+    """
+    project = root.name
+    client = detected_engine()
+    if client is None:
+        typer.echo("No container client answered, so nothing of this is running.")
+        return
+    for argv in egress.teardown_arguments(project) if down else []:
+        # Every exit code is acceptable here and nowhere else: removing a
+        # container that is already gone reports an error naming exactly the
+        # absence this call was asked to produce.
+        sh.Command(client.binary)(*argv, _ok_code=list(range(256)))
+    typer.echo("Removed." if down else "\n".join(egress.notice(project)))
+
+
+def network_present(name: str, engine: ContainerEngine) -> bool:
+    """Whether this network exists, asked of the engine rather than guessed."""
+    try:
+        sh.Command(engine.binary)("network", "inspect", name)
     except (sh.CommandNotFound, sh.ErrorReturnCode):
         return False
     return True
@@ -121,6 +211,9 @@ def contained_argv(
     tag = image_tag(root)
     if not image_present(tag, client):
         build_image(image, manifest, tag, client, root)
+    start_egress(image.egress, root.name, client, root)
+    for line in image.egress.notice(root.name):
+        typer.echo(line)
     lease = lease_for(root, human_owned)
     return image.session_arguments(
         tag=tag,
