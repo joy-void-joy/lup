@@ -170,15 +170,20 @@ def snapshot(
 
 
 def points(root: Path, namespace: str = UNDO_NAMESPACE) -> list[UndoPoint]:
-    """Every snapshot this checkout still holds, newest first.
+    """Every distinct state this checkout has been in, newest first.
 
     Ordered by ref name rather than by creation date, which sounds like the
     wrong key and is the right one. Git records a ref's date from the commit,
-    whose resolution is one second, so two snapshots taken in the same second
+    whose resolution is one second, so two states reached inside one second
     tie -- and a tie means `latest` can hand back the older of the two, which
     is the worst possible moment for a safety net to be approximate. The name
     carries a microsecond stamp in a fixed-width field, so sorting it as text
     is exact.
+
+    One entry per state rather than per command: the writer retires any
+    earlier ref holding the same tree, so a run of commands that changed
+    nothing leaves the single entry it started with, carrying the last thing
+    that was about to happen to it.
     """
     listed = git.lines(
         "-C",

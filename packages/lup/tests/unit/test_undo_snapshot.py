@@ -114,19 +114,52 @@ def test_the_environment_the_snapshot_needs_does_not_replace_the_rest(
     assert undo_snapshot(checkout, "probe") != ""
 
 
-def test_two_snapshots_of_the_same_tree_cost_nothing_extra(checkout: Path) -> None:
-    """Why this can afford to run before every mutating command.
+def test_a_command_that_changed_nothing_leaves_no_new_snapshot(
+    checkout: Path,
+) -> None:
+    """Why this can afford to run before *every* command rather than some.
 
-    Git addresses content rather than time, so an unchanged tree produces the
-    commit's parent-free equivalent of the same tree object and adds no
-    objects at all. What differs is only the ref.
+    Git addresses content, so an unchanged tree writes a byte-identical tree
+    object -- and naming the ref after that tree makes the second write an
+    overwrite rather than an addition. Measured against the alternative: a
+    trigger that fired on the classifier's verdict produced sixty refs in one
+    session, fifty-seven of them in front of a `grep`.
     """
     (checkout / "new.txt").write_text("present\n", encoding="utf-8")
-    first = undo_snapshot(checkout, "one")
-    second = undo_snapshot(checkout, "two")
-    assert first != second
-    trees = [
-        git.out("-C", str(checkout), "rev-parse", f"{reference}^{{tree}}").strip()
-        for reference in (first, second)
-    ]
-    assert trees[0] == trees[1]
+    undo_snapshot(checkout, "one")
+    undo_snapshot(checkout, "two")
+    assert len(git.lines("-C", str(checkout), "for-each-ref", undo_namespace())) == 1
+
+
+def test_the_surviving_note_is_the_latest_thing_about_to_happen(
+    checkout: Path,
+) -> None:
+    """What a reader looks for is the snapshot from before the thing that broke.
+
+    Sixty reads between two edits collapse to one ref, and the note on it has
+    to be the last command rather than the first, or the listing points at the
+    wrong moment while holding the right tree.
+    """
+    (checkout / "new.txt").write_text("present\n", encoding="utf-8")
+    undo_snapshot(checkout, "grep something")
+    reference = undo_snapshot(checkout, "rm -rf src")
+    subject = git.out("-C", str(checkout), "log", "-1", "--format=%s", reference)
+    assert subject.strip() == "lup undo: rm -rf src"
+
+
+def test_a_changed_tree_gets_a_snapshot_of_its_own(checkout: Path) -> None:
+    """Dedup must not swallow a state worth returning to."""
+    first = undo_snapshot(checkout, "before")
+    (checkout / "new.txt").write_text("written since\n", encoding="utf-8")
+    assert undo_snapshot(checkout, "after") != first
+
+
+def test_an_earlier_state_survives_the_states_that_followed_it(
+    checkout: Path,
+) -> None:
+    """The point of keeping one ref per state rather than only the newest."""
+    (checkout / "new.txt").write_text("first\n", encoding="utf-8")
+    reference = undo_snapshot(checkout, "before the edit")
+    (checkout / "new.txt").write_text("second\n", encoding="utf-8")
+    undo_snapshot(checkout, "after the edit")
+    assert held(checkout, reference, "new.txt") == "first"
