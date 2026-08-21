@@ -139,6 +139,11 @@ def placed_input(payload):
 def dispatch(payload):
     name = payload["tool_name"]
     tool_input = payload["tool_input"]
+    # Where this session is rooted, which is what says whether an edited file
+    # belongs to the repository being worked on or to somebody else's. Read
+    # once, because the shell path and the edit path ask the same question of
+    # it and a second read is a second place it can be forgotten.
+    session_directory = Path(payload["cwd"]) if "cwd" in payload else None
     agent_type = payload["agent_type"] if "agent_type" in payload else ""
     autonomous = (
         agent_type in AUTONOMOUS_AGENT_IDENTITIES
@@ -154,7 +159,7 @@ def dispatch(payload):
             # A call's sandbox is an argument of the call here, so a verdict
             # that has to leave the sandbox is carried out rather than refused.
             escapable=True,
-            cwd=Path(payload["cwd"]) if "cwd" in payload else None,
+            cwd=session_directory,
         )
     if name == "WebFetch":
         return fetch_decision(tool_input["url"])
@@ -167,7 +172,13 @@ def dispatch(payload):
             "replace_all" in tool_input and tool_input["replace_all"] is True,
         )
         return edit_decision(
-            path, before, after, Path(path).exists(), autonomous, "modify"
+            path,
+            before,
+            after,
+            Path(path).exists(),
+            autonomous,
+            "modify",
+            session_directory,
         )
     if name == "Write":
         path = tool_input["file_path"]
@@ -179,6 +190,7 @@ def dispatch(payload):
             exists,
             autonomous,
             "overwrite" if exists else "create",
+            session_directory,
         )
     # Asked of whatever reached here rather than of a listed few: which tools
     # are worth refusing is the declaration's answer, and naming any of them

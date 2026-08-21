@@ -27,6 +27,7 @@ from host import (
     directory_write_targets,
     empty_directory_targets,
     existing_write_targets,
+    foreign_repository,
     granted_allowances,
     managed_script_roots,
     recoverable_write_targets,
@@ -206,6 +207,7 @@ def edit_decision(
     path_exists: bool,
     autonomous: bool,
     operation: str = "modify",
+    cwd: Path | None = None,
 ) -> KernelDecision:
     """Judge one file's before and after against the declared edit policy.
 
@@ -225,12 +227,19 @@ def edit_decision(
     server, which is the difference between a gate that costs a second per
     edit and one that costs a second on the edits that need it.
     """
+    outside_this_repository = foreign_repository(path_text, cwd)
     suffix = Path(path_text).suffix.lower()
     python_source = suffix in (".py", ".pyi")
     rows = ANTI_PATTERN_ROWS[suffix] if suffix in ANTI_PATTERN_ROWS else []
+    # A checker is not started for a file this policy has already decided it
+    # has nothing to say about. It would resolve another repository's imports
+    # against another repository's environment to answer a rule that will not
+    # be applied, and pay a language server's second for the privilege.
     refuted = (
         resolved_refutations(path_text, after, RESOLUTION_COMMAND)
-        if after is not None and awaits_resolution(before, after, rows, python_source)
+        if not outside_this_repository
+        and after is not None
+        and awaits_resolution(before, after, rows, python_source)
         else None
     )
     return decide_edit(
@@ -250,4 +259,5 @@ def edit_decision(
         suffix=suffix,
         operation=operation,
         edit_rules=EDIT_RULES,
+        foreign=outside_this_repository,
     )

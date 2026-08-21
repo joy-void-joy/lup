@@ -148,6 +148,11 @@ def joined(decisions):
 def dispatch(payload, permission_request=False):
     name = payload["tool_name"]
     tool_input = payload["tool_input"]
+    # Where this session is rooted, which is what says whether a patched file
+    # belongs to the repository being worked on or to somebody else's. Read
+    # once, because the shell path and the patch path ask the same question of
+    # it and a second read is a second place it can be forgotten.
+    session_directory = Path(payload["cwd"]) if "cwd" in payload else None
     if name == "Bash":
         requested_escape = spent_escape(tool_input)
         escaped = requested_escape or auto_escape_matches(
@@ -162,7 +167,7 @@ def dispatch(payload, permission_request=False):
             # request is the other supported route. Both are checked against
             # semantic placement before the hook lets the native boundary act.
             escapable=escaped,
-            cwd=Path(payload["cwd"]) if "cwd" in payload else None,
+            cwd=session_directory,
         )
         # PreToolUse can neither see nor place every native escape. Let Codex's
         # sandbox run a confined call or raise the PermissionRequest where this
@@ -194,6 +199,7 @@ def dispatch(payload, permission_request=False):
                     change.path_exists,
                     autonomous,
                     change.operation(),
+                    session_directory,
                 )
                 for change in patched_files(tool_input["command"], read_document)
             ]
