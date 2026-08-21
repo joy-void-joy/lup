@@ -238,15 +238,15 @@ def judged_ask_rules(
             read_verbs=["ls", "list", "view", "outdated", "why", "explain"],
             reason="package tools fetch and execute code — requires approval",
         ),
-        # lup: A full verify line — ruff format, ruff check, pyright, pytest,
+        # lup: solved: A full verify line — ruff format, ruff check, pyright, pytest,
         # then `cd frontend && npx tsc --noEmit` — was refused here with
         # "package tools fetch and execute code". It should probably have been
         # auto-allowed, and so should the `command tsc isn't recognized` probe
         # the same line falls back to.
-        JudgedCommand(
-            name="npx",
-            reason="package tools fetch and execute code — requires approval",
-        ),
+        #
+        # `npx` moved to `typescript_rule`, beside the other package runner, so
+        # the compiler it most often reaches is recognized. What stays here is
+        # the package *managers*, which install rather than run.
         JudgedCommand(
             name="pnpm",
             reason="package tools fetch and execute code — requires approval",
@@ -1167,11 +1167,22 @@ def typescript_rule() -> list[ShellCommandRule]:
     configuration file chooses, so nothing in the command bounds what it
     touches, which is the shape this table asks about everywhere else.
 
-    `bunx` is declared alongside it because reaching a project-local compiler
-    through the package runner is how a pinned version gets used, and a
-    globally installed `tsc` checks against whatever somebody last installed.
-    Its own default asks, since the runner will fetch a package that is not a
-    declared dependency rather than report that it is missing.
+    Both package runners are declared alongside it because reaching a
+    project-local compiler through one is how a pinned version gets used, and
+    a globally installed `tsc` checks against whatever somebody last
+    installed. Each default asks, since a runner will fetch a package that is
+    not a declared dependency rather than report that it is missing — but the
+    compiler they most often reach is named beneath them, so a type check
+    spelled through a runner is the read it is. Without that, a verify line
+    ending in `npx tsc --noEmit` asked about its last segment and made the
+    whole line ask, which is a question about running the type checker.
+
+    They differ on one axis and it is not a preference. `bunx` is placed
+    outside the boundary because reaching the registry is what it is for;
+    `npx` is left unplaced, because the invocation this rule exists to
+    recognize resolves a dependency the project already has and needs no
+    network at all. A project whose runner does have to fetch says so by
+    widening this declaration, which is a change a reviewer sees.
     """
     checking = ShellSubcommandRule(
         name="tsc",
@@ -1192,6 +1203,12 @@ def typescript_rule() -> list[ShellCommandRule]:
             default_effect="ask",
             subcommands=[checking],
             sandbox="outside",
+            reason="the package runner fetches what is not already a dependency",
+        ),
+        ShellCommandRule(
+            name="npx",
+            default_effect="ask",
+            subcommands=[checking],
             reason="the package runner fetches what is not already a dependency",
         ),
     ]
