@@ -20,10 +20,15 @@ cannot be gets a refusal naming what was missing, and the operator decides.
 
 import json
 import os
+from collections import deque
+from contextlib import nullcontext
 from pathlib import Path
 
 import sh
 import typer
+from rich.console import Console
+from rich.live import Live
+from rich.text import Text
 
 from lup.harness.credential import remote_rewrites
 from lup.harness.egress import SessionEgress
@@ -184,39 +189,82 @@ def network_present(name: str, engine: ContainerEngine) -> bool:
 
 
 def build_image(
-    image: Image, manifest: Manifest, tag: str, engine: ContainerEngine, root: Path
+    image: Image,
+    manifest: Manifest,
+    tag: str,
+    engine: ContainerEngine,
+    root: Path,
+    shown: int = 4,
 ) -> None:
     """Build this project's image from the declaration, in the open.
 
     The Dockerfile is written into the checkout's scratch directory rather
     than piped in, so an operator who wants to know what was built can read
     the file the build actually used instead of reconstructing it.
+
+    Every line the build writes is kept, and the terminal shows the last
+    ``shown`` of them in place. The distinction matters more than it looks:
+    the *file* is complete, so nothing a reader might need was thrown away,
+    and the *display* is a window onto it rather than a shortened copy. A
+    cold build here is hundreds of package lines, and putting them in the
+    scrollback buries whatever the launch said before them -- which is
+    exactly the boundary report a session most needs to have read.
+
+    Two lines are printed before anything runs, because a build with a live
+    region and no header is a session that appears to have stopped: what is
+    being built, and where its full output is being written.
     """
     scratch = root / "tmp"
     scratch.mkdir(parents=True, exist_ok=True)
     dockerfile = scratch / "agent.Dockerfile"
     dockerfile.write_text(image.dockerfile(manifest))
+    log = scratch / "agent-build.log"
+    argv = [
+        "build",
+        "-t",
+        tag,
+        "-f",
+        str(dockerfile),
+        "--build-arg",
+        f"UID={root.stat().st_uid}",
+        "--build-arg",
+        f"GID={root.stat().st_gid}",
+        str(scratch),
+    ]
     typer.echo(f"Building {tag} from {dockerfile}")
-    try:
-        sh.Command(engine.binary)(
-            "build",
-            "-t",
-            tag,
-            "-f",
-            str(dockerfile),
-            "--build-arg",
-            f"UID={root.stat().st_uid}",
-            "--build-arg",
-            f"GID={root.stat().st_gid}",
-            str(scratch),
-            _fg=True,
-        )
-    except sh.ErrorReturnCode as error:
-        raise typer.BadParameter(
-            f"Could not build {tag} from {dockerfile}. The declaration is in "
-            "the project's Image; the build output above says which layer "
-            "failed."
-        ) from error
+    typer.echo(f"Its output: {log}")
+    console = Console()
+    recent: deque[str] = deque(maxlen=shown)  # lup: ignore[empty-collection]
+    with log.open("w", encoding="utf-8") as handle:
+        # Transient, so the window closes when the build does and the
+        # scrollback keeps the two header lines rather than a frozen tail of
+        # whatever the last layer happened to say. Off entirely where there
+        # is no terminal to redraw -- a CI log is a file, and a file wants
+        # every line in order, which is what the handle already gets.
+        live = Live(console=console, transient=True) if console.is_terminal else None
+
+        def record(chunk: str) -> None:
+            """Keep every line, and show the last few."""
+            handle.write(chunk)
+            spoken = chunk.rstrip()
+            if not spoken or live is None:
+                return
+            recent.append(spoken)
+            live.update(Text("\n".join(recent), style="dim"))
+
+        try:
+            with live or nullcontext():
+                sh.Command(engine.binary)(
+                    *argv, _out=record, _err_to_out=True, _out_bufsize=1
+                )
+        except sh.ErrorReturnCode as error:
+            for line in recent:
+                typer.echo(line)
+            raise typer.BadParameter(
+                f"Could not build {tag} from {dockerfile}. The declaration is "
+                f"in the project's Image; {log} holds every line of the build, "
+                "and its last ones say which layer failed."
+            ) from error
 
 
 def contained_argv(
