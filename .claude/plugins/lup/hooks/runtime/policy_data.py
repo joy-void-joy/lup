@@ -6,6 +6,7 @@
 from kernel.rows import (
     AcceptanceGuardRow,
     AntiPatternRow,
+    EditRuleRow,
     PathRoleRow,
     PathRuleRow,
     RefusedToolRow,
@@ -7283,6 +7284,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "reason": "container operations require approval",
     },
 ]
+
+EDIT_RULES: list[EditRuleRow] = []
 
 REFUSED_TOOLS: list[RefusedToolRow] = [
     {

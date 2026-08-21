@@ -12,7 +12,13 @@ from typing import TypedDict
 
 from .decision import KernelDecision
 from .roles import normalized_path, path_role, root_matches
-from .rows import AcceptanceGuardRow, AntiPatternRow, PathRoleRow, PathRuleRow
+from .rows import (
+    AcceptanceGuardRow,
+    AntiPatternRow,
+    EditRuleRow,
+    PathRoleRow,
+    PathRuleRow,
+)
 
 MARKER_RE = re.compile(r"(#|//)\s*lup\s*:", re.IGNORECASE)
 # A review note is any marker whose keyword is not `ignore`, which is the
@@ -471,9 +477,24 @@ def solved_note_count(source: str, python_source: bool = False) -> int | None:
     return count_in_prose(source, SOLVED_NOTE_RE, python_source)
 
 
+class MarkerVerdict(TypedDict):
+    """One marker-gate verdict, and the gate id a project would move it under.
+
+    The gate travels with the decision because the three verdicts this gate
+    reaches are about different things — feedback lost, a resolution claim
+    lost, feedback added — and a project that moves one of them has said
+    nothing about the other two. Handing back the decision alone would leave
+    the caller re-deriving which of the three it was from the words in its
+    reason.
+    """
+
+    gate: str
+    decision: KernelDecision
+
+
 def marker_decision(
     previous: str, updated: str, python_source: bool
-) -> KernelDecision | None:
+) -> MarkerVerdict | None:
     """Judge what this edit did to the file's review notes.
 
     Deleting feedback is denied rather than asked. An ask is something an
@@ -510,23 +531,32 @@ def marker_decision(
     if opened < 0 and opened + claimed == 0:
         return None
     if opened < 0:
-        return KernelDecision(
-            "deny",
-            "this edit removes inline review feedback. Resolving a note means "
-            "replacing `# lup:` with `# lup: solved:` and keeping its text, so "
-            "the claim can be checked against what was asked; deleting it "
-            "leaves nothing to check",
+        return MarkerVerdict(
+            gate="feedback-removed",
+            decision=KernelDecision(
+                "deny",
+                "this edit removes inline review feedback. Resolving a note means "
+                "replacing `# lup:` with `# lup: solved:` and keeping its text, so "
+                "the claim can be checked against what was asked; deleting it "
+                "leaves nothing to check",
+            ),
         )
     if claimed < 0:
-        return KernelDecision(
-            "deny",
-            "this edit removes a `# lup: solved:` claim. Only the review pass "
-            "retires one — it either confirms the claim and removes the note "
-            "(`dev comments --retire file:line`), or restores it to open "
-            "feedback (`dev comments --restore file:line`)",
+        return MarkerVerdict(
+            gate="claim-removed",
+            decision=KernelDecision(
+                "deny",
+                "this edit removes a `# lup: solved:` claim. Only the review pass "
+                "retires one — it either confirms the claim and removes the note "
+                "(`dev comments --retire file:line`), or restores it to open "
+                "feedback (`dev comments --restore file:line`)",
+            ),
         )
     if opened > 0:
-        return KernelDecision("ask", "edit adds inline review feedback")
+        return MarkerVerdict(
+            gate="feedback-added",
+            decision=KernelDecision("ask", "edit adds inline review feedback"),
+        )
     return None
 
 
@@ -1560,6 +1590,82 @@ def acceptance_guard_decision(
     return KernelDecision("ask", guard["ask_reason"])
 
 
+def edit_rule_matches(
+    row: EditRuleRow, gate: str, suffix: str, role: str, operation: str
+) -> bool:
+    """Whether one declared rule speaks about this change at this gate.
+
+    An empty axis means the rule is silent about it and matches every value,
+    so a rule constrains exactly what it names and a table of one rule saying
+    nothing but ``effect`` moves every gate at once — which is the shortest
+    way to state a project that reviews nothing at the hook.
+    """
+    return (
+        (not row["gates"] or gate in row["gates"])
+        and (not row["suffixes"] or suffix in row["suffixes"])
+        and (not row["roles"] or role in row["roles"])
+        and (not row["operations"] or operation in row["operations"])
+    )
+
+
+def edit_verdict(
+    rows: list[EditRuleRow],
+    gate: str,
+    suffix: str,
+    role: str,
+    operation: str,
+    default: KernelDecision,
+) -> KernelDecision:
+    """What one gate decides here: the last rule that moves it, or the kernel's own.
+
+    Last match rather than first, and rather than most specific, because these
+    rules overlap on purpose: a project states the broad case and then carves
+    exceptions out of it, exactly as `.gitignore` is written and read. Most
+    specific would make a table's meaning depend on a specificity ordering
+    nobody wrote down, and would have no answer at all for two rules of equal
+    reach.
+
+    A rule that states no effect is not a match here however well its axes fit
+    — it moves the threshold and nothing else, so it must not shadow a rule
+    behind it that does decide.
+    """
+    stated = [
+        row
+        for row in rows
+        if row["effect"] and edit_rule_matches(row, gate, suffix, role, operation)
+    ]
+    if not stated:
+        return default
+    decided = stated[-1]
+    effect = decided["effect"]
+    if effect not in ("allow", "ask", "deny", "defer"):
+        return default
+    return KernelDecision(effect, decided["reason"] or default.reason)
+
+
+def edit_threshold(
+    rows: list[EditRuleRow],
+    suffix: str,
+    role: str,
+    operation: str,
+    default: int,
+) -> int:
+    """How many added lines count as small here, by the same last-match rule.
+
+    Separate from :func:`edit_verdict` because the two move independently: a
+    project widening the size gate for one suffix is not restating who decides
+    when it trips, and one that redirects the verdict has said nothing about
+    how much is too much.
+    """
+    stated = [
+        row["maximum_added_lines"]
+        for row in rows
+        if row["maximum_added_lines"] is not None
+        and edit_rule_matches(row, "size", suffix, role, operation)
+    ]
+    return stated[-1] if stated else default
+
+
 # lup: Editing `.claude/` or `.codex/` should be auto-deny here, carrying the
 # redirecting guidance that the `.py` generating it is what to modify instead.
 # `GENERATED_PLUGIN_REFUSAL` in the kernel's words module already says exactly
@@ -1589,6 +1695,9 @@ def decide_edit(
     acceptance_guard: AcceptanceGuardRow | None = None,
     marker_files: tuple[str, ...] = PACKAGE_MARKER_FILES,
     refuted: dict[str, list[int]] | None = None,
+    suffix: str = "",
+    operation: str = "modify",
+    edit_rules: list[EditRuleRow] | None = None,
 ) -> KernelDecision:
     """Apply anti-pattern, path, marker, full-write, deletion, and size gates.
 
@@ -1628,13 +1737,27 @@ def decide_edit(
     previous = before or ""
     updated = after or ""
     role = path_role(path, path_roles or [])
+    rows = edit_rules or []
+
+    def judged(gate: str, default: KernelDecision) -> KernelDecision:
+        """This gate's verdict, as the project's declared table resolved it.
+
+        Every gate below states the verdict the kernel reaches on its own and
+        hands it here, so an empty table decides exactly what this function
+        decided before a table existed — and a project moving one gate has to
+        name it, rather than inheriting a shift it never asked for.
+        """
+        return edit_verdict(rows, gate, suffix, role, operation, default)
+
     # Whether this file may be edited at all is prior to how the edit reads,
     # so the guard answers ahead of every gate below — including pure
     # deletion, which would otherwise allow removing the test outright, and
     # the protected-path rules, whose autonomous release must not survive a
     # refusal aimed at exactly that caller.
     if role == "test" and acceptance_guard is not None:
-        return acceptance_guard_decision(acceptance_guard, autonomous)
+        return judged(
+            "acceptance-guard", acceptance_guard_decision(acceptance_guard, autonomous)
+        )
     # The conventions describe how production code should read. A test's
     # subject is production's behaviour, and scratch is disposable, so
     # neither is judged against them.
@@ -1645,7 +1768,7 @@ def decide_edit(
         # A granted suppression answers this gate and no other, so an allow
         # falls through to the rest of the lattice rather than ending it.
         if antipattern is not None and antipattern.effect != "allow":
-            return antipattern
+            return judged("anti-pattern", antipattern)
     protected = next(
         (
             row
@@ -1656,7 +1779,7 @@ def decide_edit(
         None,
     )
     if protected is not None and not (autonomous and protected["allow_autonomous"]):
-        return KernelDecision("ask", protected["reason"])
+        return judged("protected-path", KernelDecision("ask", protected["reason"]))
     # Feedback is feedback wherever it is left, so this gate follows the file
     # rather than the conventions: a note on a test still names work somebody
     # owes. Scratch is the exception, and only because nothing there persists
@@ -1664,20 +1787,40 @@ def decide_edit(
     if role != "scratch":
         marker = marker_decision(previous, updated, python_source)
         if marker is not None:
-            return marker
-    if before is None and role == "production":
+            return judged(marker["gate"], marker["decision"])
+    # A whole-file write is one the caller named as such, or one that arrived
+    # with no preimage at all. Both spellings are kept because they answer
+    # different callers: an adapter that knows the native call says so, and
+    # one that only has the documents falls back to the absence that used to
+    # be the whole test. Keying on the operation is what survives an adapter
+    # learning to carry a file's current text as the preimage — without it,
+    # teaching `Write` to do that would silently move every overwrite from
+    # this gate to the size gate below.
+    whole_file = operation in ("create", "overwrite") or before is None
+    if whole_file and role == "production":
         if autonomous:
-            return KernelDecision("allow", "reviewed autonomous full write")
+            return judged(
+                "autonomous-full-write",
+                KernelDecision("allow", "reviewed autonomous full write"),
+            )
         if posixpath.basename(path) in marker_files and documentation_only(updated):
-            return KernelDecision("allow", "a package marker states nothing to review")
-        return KernelDecision("ask", "full-file writes require approval")
+            return judged(
+                "package-marker",
+                KernelDecision("allow", "a package marker states nothing to review"),
+            )
+        return judged(
+            "full-write", KernelDecision("ask", "full-file writes require approval")
+        )
     if after is None or after == "":
-        return KernelDecision("allow", "pure deletion")
-    if (
-        role == "production"
-        and real_added_line_count(before, after, python_source) > maximum_added_lines
-    ):
+        return judged("pure-deletion", KernelDecision("allow", "pure deletion"))
+    if role == "production" and real_added_line_count(
+        before, after, python_source
+    ) > edit_threshold(rows, suffix, role, operation, maximum_added_lines):
         if autonomous:
-            return KernelDecision("allow", "reviewed autonomous edit")
-        return KernelDecision("defer", "edit exceeds the small-change gate")
-    return KernelDecision("allow", "small safe edit")
+            return judged(
+                "autonomous-edit", KernelDecision("allow", "reviewed autonomous edit")
+            )
+        return judged(
+            "size", KernelDecision("defer", "edit exceeds the small-change gate")
+        )
+    return judged("small-edit", KernelDecision("allow", "small safe edit"))

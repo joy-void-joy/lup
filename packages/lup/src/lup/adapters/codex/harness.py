@@ -729,6 +729,7 @@ class CodexHookRenderer(ArtifactRenderer[HookSet]):
                         if (guard := source.acceptance_guard)
                         else None,
                         shell_rules=list(source.shell_rules),
+                        edit_rules=source.edit_rules.over([]),
                         refused_tools=list(source.refused_tools),
                         recoverable_target_limit=source.recoverable_target_limit,
                         runner_targets=list(source.runner_targets),

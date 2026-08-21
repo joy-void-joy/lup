@@ -193,6 +193,7 @@ def dispatch(payload, permission_request=False):
                     change.after,
                     change.path_exists,
                     autonomous,
+                    change.operation(),
                 )
                 for change in patched_files(tool_input["command"], read_document)
             ]

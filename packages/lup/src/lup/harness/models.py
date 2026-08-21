@@ -30,7 +30,9 @@ from lup.mcp import ToolDeclaration
 from lup.policy.kernel.rows import AcceptanceGuardRow, PathRoleName
 from lup.policy.models import PolicyId, UrlPathPrefix
 from lup.policy.refused_tools import RefusedTool
+from lup.policy.edit_rules import EditRule
 from lup.policy.shell_rules import RunnerTargetRule, ShellCommandRule
+from lup.selection import Selection
 from lup.types import JsonValue, ToolGrant, ToolName
 
 if TYPE_CHECKING:
@@ -878,6 +880,17 @@ class HookSet(BaseModel, frozen=True):
         description=(
             "The whole shell vocabulary this project judges safe, asked, or "
             "denied; declare a downstream toolchain here, not in the kernel"
+        ),
+    )
+    edit_rules: Selection[EditRule] = Field(
+        default=Selection[EditRule](),
+        description=(
+            "How this project moves the edit gates the kernel decides on its "
+            "own — which whole-file writes it reviews at the hook, how much "
+            "counts as a small change, and for which files. An empty "
+            "selection decides exactly what the kernel decides unaided, so a "
+            "project states only its differences and every gate it says "
+            "nothing about keeps the library's answer"
         ),
     )
     diagnostics_command: list[str] = Field(
