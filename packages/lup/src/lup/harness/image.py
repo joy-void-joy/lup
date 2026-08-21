@@ -32,6 +32,7 @@ from pydantic import BaseModel, Field
 from lup.harness.credential import GitAccess, RemoteRewrite
 from lup.harness.egress import SessionEgress
 from lup.harness.requirements import Manifest, Package, PackageManager
+from lup.harness.terminal import TerminalHandoff
 from lup.types import EnvVars, JsonObject
 
 
@@ -382,6 +383,17 @@ class Image(BaseModel, frozen=True):
             "disagree with this declaration"
         ),
     )
+    terminal: TerminalHandoff = Field(
+        default=TerminalHandoff(),
+        description=(
+            "Which facts about the operator's terminal cross into the "
+            "session, and the editors the image carries so that the ones "
+            "naming a program name one that is there. Held on the image "
+            "rather than beside the launch for the same reason the mounts "
+            "are: the editor list is a layer this image builds, and the "
+            "variable pointing at it is only correct if the two agree"
+        ),
+    )
     config_home: str = Field(
         default="/cfg",
         description=(
@@ -524,19 +536,27 @@ class Image(BaseModel, frozen=True):
     )
 
     def packages(self, manifest: Manifest) -> list[Package]:
-        """Everything the image installs: baseline, inner sandbox, then declared.
+        """Everything the image installs: baseline, editors, then declared.
 
         Deduplicated with declaration order kept, so a rebuild does not
         invalidate a layer because two lists mentioned one package. The
         baseline is spelled as bare names, which parse as distribution
         packages -- correct for every one of them, and the reason the short
         spelling exists.
+
+        The editors come off the terminal handoff rather than being listed in
+        the baseline, so that the list an image installs and the list a launch
+        matches an ``EDITOR`` against are one list. Written twice, they come
+        apart in the direction that is hardest to see: the launch forwards a
+        name it believes is carried, the layer never installed it, and the
+        operator's editor fails to open with the runtime blamed for it.
         """
         return list(
             dict.fromkeys(
                 [
                     *(Package(name=name) for name in self.baseline),
                     *(Package(name=name) for name in self.inner_sandbox),
+                    *self.terminal.packages(),
                     *manifest.packages(),
                 ]
             )
@@ -554,9 +574,17 @@ class Image(BaseModel, frozen=True):
         it is a fact about where the process is, not a posture a caller
         chooses: a session that could switch it off from the outside would be
         telling the policy to relax with nothing underneath.
+
+        ``LANG`` is baked at the handoff's fallback and overwritten at run
+        time by whatever the operator's terminal answered. Both, because the
+        two cover different callers: a launch carries the operator's own
+        locale across, and anything that starts this image directly -- a
+        probe, a one-off ``run`` -- still gets UTF-8 rather than the ASCII an
+        unset ``LANG`` means.
         """
         return {
             "LUP_CONTAINED": "1",
+            "LANG": self.terminal.fallback_locale,
             "UV_PROJECT_ENVIRONMENT": self.project_environment,
             "UV_LINK_MODE": "copy",
             **{
@@ -580,6 +608,19 @@ class Image(BaseModel, frozen=True):
         """
         installed = " \\\n        ".join(
             item.name for item in self.obtained_by(manifest, "pacman")
+        )
+        generated = self.terminal.generated()
+        locales = (
+            "\n# The locales the terminal handoff carries, compiled so that an\n"
+            "# operator's own `LANG` names one that exists here. A forwarded\n"
+            "# locale glibc cannot find is answered by falling back to ASCII and\n"
+            "# warning once per program, which costs a session its box drawing\n"
+            "# and blames neither the image nor the launch.\n"
+            "RUN printf '%s\\n' \\\n        "
+            + " \\\n        ".join(f"'{item.line()}'" for item in generated)
+            + " >> /etc/locale.gen \\\n    && locale-gen\n"
+            if generated
+            else ""
         )
         registry_layers = "".join(
             f"\n# The {registry.manager} half of the toolchain, "
@@ -617,7 +658,7 @@ RUN printf '%s\\n' \\
 RUN pacman -S --noconfirm --needed \\
         {installed} \\
     && pacman -Scc --noconfirm
-
+{locales}
 # Where the registry manager installs, declared before it installs anything.
 # Outside any home directory: this build runs as root and the session runs as
 # the host's uid, and root's home is mode 750 -- so a global toolchain left
@@ -789,6 +830,8 @@ USER $UID:$GID
         engine: ContainerEngine = Docker(),
         forge_token: str = "",
         rewrites: list[RemoteRewrite] | None = None,
+        terminal: EnvVars | None = None,
+        interactive: bool = True,
     ) -> list[str]:
         """The whole argv that opens one agent session inside a container.
 
@@ -808,6 +851,18 @@ USER $UID:$GID
         from. The agent can read it, which is not a leak this could close:
         an agent that can open a session can reach whatever opens one. The
         scope is the boundary, not the secrecy.
+
+        ``terminal`` is what :meth:`TerminalHandoff.for_host` answered on this
+        machine, passed rather than resolved here for the reason every host
+        fact in this file is passed: the declaration is hashed, and a
+        ``TERM`` read inside it would report a generated tree stale for having
+        been checked from a different terminal.
+
+        ``interactive`` is what a probe turns off. The same argv has to open a
+        session and carry an exercise, because an exercise that ran through a
+        differently-assembled argv would verify a container no session opens
+        -- but a probe's output is captured rather than shown, and ``-it``
+        against a pipe fails on the terminal it was promised.
         """
         mounts = [
             argument
@@ -831,12 +886,14 @@ USER $UID:$GID
         # part of the run that is neither an image fact nor a posture: it is
         # a secret and a resolution of *this host's* remotes, and neither
         # belongs in a layer anybody could pull.
-        reaching = self.forge.environment(forge_token, rewrites or [])
+        reaching = self.forge.environment(forge_token, rewrites or []) | (
+            terminal or {}
+        )
         return [
             engine.binary,
             "run",
             "--rm",
-            "-it",
+            *(["-it"] if interactive else []),
             "-v",
             f"{state_volume}:{self.config_home}",
             "-e",

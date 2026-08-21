@@ -510,6 +510,7 @@ def contained_argv(
     credential: Path | None,
     login: ProviderLogin,
     engine: ContainerEngine | None = None,
+    interactive: bool = True,
 ) -> list[str]:
     """The argv that opens a session in this project's container.
 
@@ -558,6 +559,13 @@ def contained_argv(
     rewrites = remote_rewrites(root, image.forge.host)
     for notice in image.forge.notice(token, rewrites):
         notice.say()
+    # The operator's terminal, answered here rather than in the declaration
+    # the digest hashes. Same rule as the container client and for the same
+    # measured reason: a `TERM` folded into the declaration would report the
+    # generated trees stale on any machine whose terminal differed.
+    terminal = image.terminal.for_host(environ)
+    for notice in terminal.notices():
+        notice.say()
     return image.session_arguments(
         tag=tag,
         checkout=root,
@@ -573,4 +581,6 @@ def contained_argv(
         engine=client,
         forge_token=token,
         rewrites=rewrites,
+        terminal=terminal.environment,
+        interactive=interactive,
     )
