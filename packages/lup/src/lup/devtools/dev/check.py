@@ -21,6 +21,7 @@ from lup.devtools.dev.boundaries import (
 from lup.devtools.dev.branches import unlanded_siblings
 from lup.devtools.dev.git_guards import GitGuard, read_hooks
 from lup.devtools.dev.comments import FoundComment, scan_tracked
+from lup.devtools.dev.gates import sweep_gates
 from lup.devtools.harness.drift import (
     RepositoryWriter,
     inspect_drift,
@@ -68,6 +69,14 @@ def inline_notes_lines(found: list[FoundComment], scaffold: bool = False) -> lis
     author chose deliberately, so this reports and the reader decides. Their
     `deferred` lines render after the unresolved ones, carrying the gate a
     bracketed deferral stated, so what is still being asked reads first.
+
+    A deferral whose gate :mod:`lup.devtools.dev.gates` can resolve is listed
+    here too and gated separately, by the sweep that asks it. That is the same
+    principle rather than an exception to it: the author of `defer[branch:x]`
+    chose the condition deliberately, and failing the run it comes true is
+    that choice being kept, not overruled. What would train a reader to skip
+    the line is a branch red for a condition still false — which is exactly
+    what the sweep does not do.
 
     Customization markers read two ways, and *scaffold* says which. In the
     scaffold itself they are inventory — counted, never listed, because a
@@ -256,6 +265,15 @@ def run_checks(
     listed = inline_notes_lines(found, scaffold) if found else ["inline notes: none"]
     for line in listed:
         typer.echo(line)
+
+    # gating — a deferral that stated a condition this checkout can resolve is
+    # a question with an answer, and the answer turning yes is the one moment
+    # the note was written for. Advisory is right for what somebody still has
+    # to judge; this is the part nobody has to.
+    sweep = sweep_gates(found)
+    for line in sweep.lines():
+        typer.echo(line)
+    results.append(CheckOutcome(name="woken deferrals", passed=not sweep.woken))
 
     scan = scan_antipatterns(project)
     scoped = owned_findings(scan.findings, scope)

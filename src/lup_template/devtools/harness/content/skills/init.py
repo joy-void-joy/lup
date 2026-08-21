@@ -28,7 +28,7 @@ SPELLING = provenance.Provenance(
 # write, and no phase surfaces the choice. Ask it here alongside the other
 # ownership decisions, and make unlocking a `lup-devtools` command that edits
 # the declaration and regenerates — not a hand edit of the catalog.
-# lup: defer[content-overhaul lands]: that branch answers the ownership seam a
+# lup: defer[branch:content-overhaul]: that branch answers the ownership seam a
 # second way, with `dev init ownership --lock/--unlock`, and rewrote these same
 # two claims into `solved:` by way of it. So merging conflicts exactly here,
 # which is the right place for the collision to surface — but the standing
