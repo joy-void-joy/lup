@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 import sh
+import typer
 
 import lup.devtools.harness.contained as contained
 from lup.harness.egress import SessionEgress, Unproxied
@@ -256,3 +257,76 @@ def test_a_proxy_already_on_the_network_is_left_alone(
 
     assert not any("connect" in argv for argv in issued)
     assert not any("run" in argv for argv in issued)
+
+
+def test_a_proxy_that_starts_and_stops_is_reported_in_its_own_words(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`run --detach` answers whether the container was created, nothing more.
+
+    Squid reads its configuration at startup and exits on a line it will not
+    accept, and by then the launcher has a zero exit code and has already
+    said the boundary is up. Measured: a session opening onto an internal
+    network with nothing bridged out of it, and three passes reading that as
+    a name that would not resolve.
+    """
+
+    def spelled(binary: str):
+        def call(*words: str, **_: object) -> str:
+            # Not running, and with something to say about why.
+            if words[0] == "inspect":
+                return "exited"
+            if words[0] == "logs":
+                return "FATAL: Bungled /etc/squid/squid.conf line 6"
+            return ""
+
+        return call
+
+    monkeypatch.setattr(sh, "Command", spelled)
+    with pytest.raises(typer.BadParameter) as refusal:
+        contained.settled(SessionEgress(), "feat", Docker(), Path("egress.conf"), 0)
+
+    assert "Bungled" in str(refusal.value)
+
+
+def test_a_proxy_that_stayed_up_is_not_complained_about(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The whole point of the grace window is that passing it says nothing."""
+
+    def spelled(binary: str):
+        def call(*words: str, **_: object) -> str:
+            return "true" if words[0] == "inspect" else ""
+
+        return call
+
+    monkeypatch.setattr(sh, "Command", spelled)
+    contained.settled(SessionEgress(), "feat", Docker(), Path("egress.conf"), 0)
+
+
+def test_a_dead_proxy_is_read_before_it_is_cleared(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Cleared because the name blocks the restart; read because it is the only copy.
+
+    A launch that refused on the name collision would be reporting the corpse
+    rather than the death, and one that removed it silently would leave the
+    next reader exactly where the last three were.
+    """
+    issued: list[list[str]] = []
+
+    def spelled(binary: str):
+        def call(*words: str, **_: object) -> str:
+            issued.append([binary, *words])
+            return {
+                "inspect": "exited",
+                "logs": "FATAL: Bungled /etc/squid/squid.conf line 6",
+            }.get(words[0], "")
+
+        return call
+
+    monkeypatch.setattr(sh, "Command", spelled)
+    said = contained.departed(SessionEgress(), "feat", Docker())
+
+    assert any("Bungled" in item.text for item in said)
+    assert [argv[1] for argv in issued] == ["inspect", "logs", "rm"]

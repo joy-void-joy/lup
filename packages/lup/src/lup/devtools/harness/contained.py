@@ -21,6 +21,7 @@ cannot be gets a refusal naming what was missing, and the operator decides.
 import hashlib
 import json
 import os
+import time
 from collections import deque
 from contextlib import nullcontext
 from pathlib import Path
@@ -254,6 +255,63 @@ def running(name: str, engine: ContainerEngine) -> bool:
     return str(state).strip() == "true"
 
 
+def proxy_log(name: str, engine: ContainerEngine, lines: int = 20) -> str:
+    """What a proxy container said before it stopped saying anything.
+
+    Both streams, because squid splits them: its access log is configured onto
+    stdout and everything about why it would not start onto stderr, so reading
+    one of the two is reading the half that is empty in exactly the case this
+    is for.
+    """
+    try:
+        spoken = sh.Command(engine.binary)(
+            "logs", "--tail", str(lines), name, _err_to_out=True
+        )
+    except (sh.CommandNotFound, sh.ErrorReturnCode):
+        return ""
+    return str(spoken).strip()
+
+
+def departed(
+    egress: SessionEgress, project: str, engine: ContainerEngine
+) -> list[Notice]:
+    """Account for a proxy that exists and is not running, then take it away.
+
+    The evidence step this design was missing. The proxy ran with ``--rm``, so
+    a squid that exited on its configuration removed itself on the way out and
+    left a launch reporting a boundary that was not there -- measured, and
+    then read for three passes as a name that would not resolve, because the
+    thing that would have said otherwise had deleted itself.
+
+    Removal happens here rather than being left to the operator because the
+    name is what blocks the restart, and a launch that refused on a name
+    collision would be reporting the corpse rather than the death.
+    """
+    name = egress.proxy_name(project)
+    try:
+        state = sh.Command(engine.binary)(
+            "inspect", "--format", "{{.State.Status}}", name
+        )
+    except (sh.CommandNotFound, sh.ErrorReturnCode):
+        return []
+    spoken = proxy_log(name, engine)
+    sh.Command(engine.binary)("rm", "--force", name, _ok_code=list(range(256)))
+    return [
+        Notice(
+            text=(
+                f"The previous {name} was {str(state).strip()} rather than "
+                "running, so the last session it was meant to carry had no "
+                "way out. Replacing it; what it said before it stopped:"
+            ),
+            urgency="warning",
+        ),
+        *[
+            Notice(text=line, urgency="detail", indent=1)
+            for line in (spoken.splitlines() or ["nothing at all"])
+        ],
+    ]
+
+
 def attached(name: str, network: str, engine: ContainerEngine) -> bool:
     """Whether this container is on that network, asked of the engine.
 
@@ -335,6 +393,12 @@ def start_egress(
                 "launch rebuild them, or open the session with --unsandboxed."
             ) from error
         return
+    # A proxy that exists and is not running is one that died, and its log is
+    # the only account of why. Read before it is cleared, because clearing it
+    # is what has to happen next: the name is taken, so `run --name` would
+    # refuse, and the refusal would name the collision rather than the death.
+    for notice in departed(egress, project, engine):
+        notice.say()
     scratch = root / "tmp"
     scratch.mkdir(parents=True, exist_ok=True)
     configuration = scratch / "egress.conf"
@@ -351,6 +415,42 @@ def start_egress(
             "declare `mode='bridge'` on the image's egress to run without "
             "an egress boundary."
         ) from error
+    settled(egress, project, engine, configuration)
+
+
+def settled(
+    egress: SessionEgress,
+    project: str,
+    engine: ContainerEngine,
+    configuration: Path,
+    grace: float = 2.0,
+) -> None:
+    """Confirm the proxy is still up a moment after being told to start.
+
+    ``run --detach`` answers whether the container was *created*, which is a
+    different question from whether the program in it is still running --
+    measured, and the difference is the whole of this bug. Squid reads its
+    configuration at startup and exits on a line it will not accept, and by
+    then the launcher has its zero exit code and has moved on to say the
+    boundary is up.
+
+    So the start is waited out rather than believed. ``grace`` is the whole
+    window and it is slept through rather than polled, because a proxy that
+    comes up and dies a second later would satisfy a poll that stopped at the
+    first sight of it running. Paid once per proxy rather than once per
+    launch: a later session finds it up and returns before reaching here.
+    """
+    time.sleep(grace)
+    name = egress.proxy_name(project)
+    if running(name, engine):
+        return
+    spoken = proxy_log(name, engine)
+    raise typer.BadParameter(
+        f"{name} started and then stopped within {grace:g}s, so this session "
+        "would open on an internal network with nothing bridged out of it. "
+        f"The configuration it was given is at {configuration}. What it said "
+        "before it stopped:\n" + (spoken or "nothing at all")
+    )
 
 
 def record_boundary(lease: Lease, egress: SessionEgress, root: Path) -> None:
@@ -412,6 +512,15 @@ class EgressState(BaseModel, frozen=True):
         default=[], description="Names the proxy answers to on that network"
     )
     address: str = Field(default="", description="Its address there, if it has one")
+    log: str = Field(
+        default="",
+        description=(
+            "What a proxy that is not running said before it stopped. Empty "
+            "for one that is running, where the question does not arise, and "
+            "empty for one that was removed on exit -- which is the state "
+            "``--rm`` used to guarantee and is why it is no longer passed"
+        ),
+    )
 
     def resolvable(self) -> bool:
         """Whether a session on this network could turn the alias into an address.
@@ -462,6 +571,10 @@ class EgressState(BaseModel, frozen=True):
                 urgency="ready" if self.attached else "refusal",
                 indent=1,
             ),
+            *[
+                Notice(text=line, urgency="detail", indent=2)
+                for line in self.log.splitlines()
+            ],
             *self.verdict(),
         ]
 
@@ -551,6 +664,7 @@ def egress_state(
         attached=network in joined,
         aliases=names,
         address=address,
+        log="" if status == "running" else proxy_log(proxy, engine),
     )
 
 

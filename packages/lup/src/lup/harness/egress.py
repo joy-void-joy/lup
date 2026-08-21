@@ -291,11 +291,21 @@ class SessionEgress(BaseModel, frozen=True):
         its port is removed, because this container is the one process with a
         route out of the session's network and is therefore the one worth
         hardening.
+
+        Deliberately **not** ``--rm``, and the absence is the point. A
+        detached container that removes itself on exit is one whose logs are
+        gone by the time anybody asks, and ``run --detach`` returns zero the
+        moment the container is *created* -- so a proxy whose process dies a
+        moment later reports a clean start and leaves nothing behind. Measured
+        exactly that: a filtered session opened, the launch said the boundary
+        was up, the proxy was already gone, and three passes read it as a name
+        that would not resolve. A corpse costs nothing and is the only copy of
+        why. :func:`~lup.devtools.harness.contained.start_egress` reads it and
+        then clears it, so at most one is ever kept.
         """
         return [
             "run",
             "--detach",
-            "--rm",
             "--name",
             self.proxy_name(project),
             "--network",
