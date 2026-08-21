@@ -443,6 +443,13 @@ def reported(findings: list[Finding]) -> list[Finding]:
     what a refusal means. They already had somewhere to differ: the inside
     roster was written after the host one and, printed separately, would have
     been free to treat a refused finding as a line rather than a stop.
+
+    The refusal names the capabilities and stops there. Joining their whole
+    consequences into the exception was tried and is unreadable at the size
+    this roster reached: four refusals became one nine-line paragraph inside
+    an error box, restating word for word what had just been printed above it
+    with the causes, the recoveries and the blank lines all flattened out. The
+    lines above are the report; this is the exit code and what it was about.
     """
     for finding in findings:
         for notice in finding.notices():
@@ -450,7 +457,9 @@ def reported(findings: list[Finding]) -> list[Finding]:
     stopping = refused(findings)
     if stopping:
         raise typer.BadParameter(
-            "; ".join(item.requirement.absence.consequence() for item in stopping)
+            f"{len(stopping)} of these refuse a session: "
+            + ", ".join(item.requirement.capability for item in stopping)
+            + ". Each is reported above with its cause and what answers it."
         )
     return findings
 

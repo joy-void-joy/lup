@@ -27,6 +27,7 @@ from pathlib import Path
 
 import sh
 import typer
+from pydantic import BaseModel, Field
 from rich.console import Console
 from rich.live import Live
 from rich.text import Text
@@ -382,6 +383,177 @@ def record_boundary(lease: Lease, egress: SessionEgress, root: Path) -> None:
     )
 
 
+class EgressState(BaseModel, frozen=True):
+    """What this project's egress infrastructure is actually doing, asked.
+
+    The gap this fills is the one the whole boundary fell into. A launch
+    printed what the *declaration* said -- filtered, through this proxy, these
+    denials -- and nothing anywhere asked the engine whether any of it was so.
+    Measured: a session opening behind a proxy whose name it could not
+    resolve, reporting every request as the operator's internet being down.
+
+    Held as a model rather than printed as it is gathered so the verdict can
+    be computed from the whole picture. Which of these facts is wrong decides
+    where a reader goes next, and no single one of them says on its own.
+    """
+
+    network: str = Field(description="The internal network this project declares")
+    proxy: str = Field(description="The container bridged out of it")
+    alias: str = Field(description="The name a session addresses the proxy by")
+    network_exists: bool = False
+    dns_enabled: bool = False
+    proxy_exists: bool = False
+    proxy_running: bool = False
+    proxy_status: str = Field(
+        default="", description="What the engine says about the container's state"
+    )
+    attached: bool = False
+    aliases: list[str] = Field(
+        default=[], description="Names the proxy answers to on that network"
+    )
+    address: str = Field(default="", description="Its address there, if it has one")
+
+    def resolvable(self) -> bool:
+        """Whether a session on this network could turn the alias into an address.
+
+        Every clause is load-bearing and each was a candidate in turn. The
+        alias is *recorded* even on a network whose DNS is off -- podman's own
+        manual says so, and that is why the connect succeeded silently and the
+        name never worked -- so carrying the alias is not enough. A stopped
+        proxy holds no DNS record whatever the network says. And a proxy on
+        the bridge but not on this network is invisible to a session on it.
+        """
+        return (
+            self.network_exists
+            and self.dns_enabled
+            and self.proxy_running
+            and self.attached
+            and self.alias in self.aliases
+        )
+
+    def notices(self) -> list[Notice]:
+        """This state as a reader needs it: each fact, then what it adds up to.
+
+        Every fact printed rather than only the failing one, because which
+        combination holds is what decides where to go next -- a network with
+        no DNS is a different repair from a proxy that is not on it, and both
+        look identical from inside a session.
+        """
+        state = self.proxy_status or ("running" if self.proxy_running else "absent")
+        return [
+            Notice(text=f"network {self.network}", urgency="detail"),
+            Notice(
+                text=f"exists: {self.network_exists}, dns: {self.dns_enabled}",
+                urgency="ready" if self.dns_enabled else "refusal",
+                indent=1,
+            ),
+            Notice(text=f"proxy {self.proxy}", urgency="detail"),
+            Notice(
+                text=f"state: {state}",
+                urgency="ready" if self.proxy_running else "refusal",
+                indent=1,
+            ),
+            Notice(
+                text=(
+                    f"on this network: {self.attached}"
+                    + (f" as {', '.join(self.aliases)}" if self.aliases else "")
+                    + (f" at {self.address}" if self.address else "")
+                ),
+                urgency="ready" if self.attached else "refusal",
+                indent=1,
+            ),
+            *self.verdict(),
+        ]
+
+    def verdict(self) -> list[Notice]:
+        """What the facts above add up to, in the words a session would use."""
+        if self.resolvable():
+            return [
+                Notice(
+                    text=f"A session can resolve `{self.alias}` and reach the proxy.",
+                    urgency="ready",
+                )
+            ]
+        return [
+            Notice(
+                text=(
+                    f"A session cannot resolve `{self.alias}`, so every request "
+                    "in it fails at DNS — which the runtime reports as the "
+                    "operator's own internet or DNS being down."
+                ),
+                urgency="refusal",
+            ),
+            Notice(
+                text=(
+                    "`harness egress --down` removes both pieces so the next "
+                    "launch rebuilds them; `--unsandboxed` opens on the host."
+                ),
+                urgency="detail",
+                indent=1,
+            ),
+        ]
+
+
+def egress_state(
+    egress: SessionEgress, project: str, engine: ContainerEngine
+) -> EgressState:
+    """Ask the engine what this project's boundary is, rather than what it declares.
+
+    Every field comes off an inspect rather than off a record this launcher
+    kept. A launcher that remembered would be reading a file: the operator may
+    have removed either piece between launches, a sibling checkout may have
+    brought them up, and the state that mattered here -- an alias recorded on
+    a network that cannot serve it -- is one nothing would have thought to
+    write down.
+    """
+    client = sh.Command(engine.binary)
+    network = egress.network_name(project)
+    proxy = egress.proxy_name(project)
+
+    def asked(*words: str) -> str:
+        """One inspect, with absence answering empty rather than raising."""
+        try:
+            return str(client(*words)).strip()
+        except (sh.CommandNotFound, sh.ErrorReturnCode):
+            return ""
+
+    dns = asked("network", "inspect", "--format", "{{.DNSEnabled}}", network)
+    status = asked("inspect", "--format", "{{.State.Status}}", proxy)
+    joined = asked(
+        "inspect",
+        "--format",
+        "{{range $name, $_ := .NetworkSettings.Networks}}{{$name}} {{end}}",
+        proxy,
+    ).split()
+    names = asked(
+        "inspect",
+        "--format",
+        f'{{{{with index .NetworkSettings.Networks "{network}"}}}}'
+        "{{range .Aliases}}{{.}} {{end}}{{end}}",
+        proxy,
+    ).split()
+    address = asked(
+        "inspect",
+        "--format",
+        f'{{{{with index .NetworkSettings.Networks "{network}"}}}}'
+        "{{.IPAddress}}{{end}}",
+        proxy,
+    )
+    return EgressState(
+        network=network,
+        proxy=proxy,
+        alias=egress.alias,
+        network_exists=bool(dns),
+        dns_enabled=dns == "true",
+        proxy_exists=bool(status),
+        proxy_running=status == "running",
+        proxy_status=status,
+        attached=network in joined,
+        aliases=names,
+        address=address,
+    )
+
+
 def report_egress(egress: SessionEgress, root: Path, down: bool) -> None:
     """Say what network boundary this project has, and remove it when asked.
 
@@ -407,6 +579,14 @@ def report_egress(egress: SessionEgress, root: Path, down: bool) -> None:
         Notice(text="Removed.", urgency="ready").say()
         return
     for notice in egress.notice(project):
+        notice.say()
+    if not egress.filtered():
+        return
+    # What is declared, then what is running. Only the first was ever printed,
+    # and the two came apart in the way that matters: the notice above says
+    # traffic is filtered through a proxy, which was true, while the session
+    # could not resolve the name it addresses that proxy by.
+    for notice in egress_state(egress, project, client.engine()).notices():
         notice.say()
 
 
