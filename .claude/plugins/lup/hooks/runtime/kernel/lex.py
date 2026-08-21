@@ -748,6 +748,13 @@ def shell_path_verb_targets(command: str) -> list[str]:
             if archived["directory"] is not None:
                 targets.append(archived["directory"])
             continue
+        if posixpath.basename(words[0]) == "sed":
+            # Every literal word, the script included. Over-naming is exactly
+            # what this docstring says is safe: a script is not a file, so
+            # nothing will be reported about it, and which words a rewrite
+            # actually writes stays the kernel's own reading.
+            targets.extend(word for word in words[1:] if not word.startswith("-"))
+            continue
         if posixpath.basename(words[0]) not in SCRATCH_VERB_FLAGS:
             continue
         operands = path_verb_operands(words)["operands"]
