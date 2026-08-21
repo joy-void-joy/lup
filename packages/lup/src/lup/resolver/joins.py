@@ -58,6 +58,7 @@ from lup.resolver.models import (
     RecheckRuling,
     ResolveState,
     ReviewReport,
+    SupersessionRuling,
     WritableRootLease,
 )
 from lup.resolver.orchestrator import WorktreeOrchestrator
@@ -809,7 +810,7 @@ class Joiner:
                 f"{result.output.reason}. Was this criterion "
                 "superseded by later work, or is this a regression?"
             ),
-            choices=["superseded", "regression"],
+            choices=SupersessionRuling.choices(),
             closed_choices=True,
             criteria=sorted(lost),
         )
@@ -839,6 +840,6 @@ class Joiner:
             if {identifier: True for identifier in question.criteria} != lost_map:
                 continue
             ruling = answered[question.id] if question.id in answered else None
-            if ruling != "regression":
+            if ruling != SupersessionRuling.REGRESSION:
                 return True
         return False

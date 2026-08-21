@@ -49,9 +49,7 @@ from lup.resolver.contracts import (
 )
 from lup.runtime.errors import ProviderTurnError, TurnFailure
 from lup.resolver.core import (
-    APPROVE,
     ASSEMBLY_QUESTION_ID,
-    DEFER,
     ResolverCore,
     approval_decisions,
     approval_question,
@@ -96,8 +94,8 @@ from lup.resolver.models import (
     WorkerContext,
     WorkerReport,
     WritableRootLease,
-    ALLOWANCE_GRANTED,
-    ALLOWANCE_REFUSED,
+    AllowanceRuling,
+    ConcernApproval,
     allowance_question_id,
     asks_for_an_allowance,
 )
@@ -167,8 +165,8 @@ def seed_approvals(core: ResolverCore, concerns: list[Concern]) -> None:
     answering both.
     """
     for item in concerns:
-        seed_offer(core, approval_question(item).id, APPROVE)
-    seed_offer(core, ASSEMBLY_QUESTION_ID, APPROVE)
+        seed_offer(core, approval_question(item).id, ConcernApproval.APPROVE)
+    seed_offer(core, ASSEMBLY_QUESTION_ID, ConcernApproval.APPROVE)
 
 
 def worker_asks(mailbox: QuestionMailbox, run_id: str, asked: MaterialQuestion) -> None:
@@ -291,11 +289,11 @@ def test_persisted_approval_answers_filter_deferred_ancestry() -> None:
         answers=[
             QuestionAnswer(
                 question_id=approval_question(concerns[0]).id,
-                value=DEFER,
+                value=ConcernApproval.DEFER,
             ),
             QuestionAnswer(
                 question_id=approval_question(concerns[1]).id,
-                value=APPROVE,
+                value=ConcernApproval.APPROVE,
             ),
         ],
     )
@@ -4036,7 +4034,7 @@ def test_an_allowance_answered_in_prose_is_refused_rather_than_read_as_no(
                 id=gate,
                 concern_id="spu",
                 prompt="Grant antipattern-suppression to spu?",
-                choices=[ALLOWANCE_GRANTED, ALLOWANCE_REFUSED],
+                choices=AllowanceRuling.choices(),
                 closed_choices=asks_for_an_allowance("spu", gate),
             )
         ],
@@ -4261,7 +4259,7 @@ async def test_a_concern_admitted_into_a_parked_run_finishes_beside_the_original
     ]
 
     resumed = build_core()
-    seed_offer(resumed, "integration-approval-b", APPROVE)
+    seed_offer(resumed, "integration-approval-b", ConcernApproval.APPROVE)
     manifest = await resumed.resume()
 
     assert sorted(
@@ -4407,8 +4405,8 @@ async def test_an_admitted_concern_bases_on_a_completed_concerns_recorded_commit
 
     resumed = build_core()
     seed_offer(resumed, "b-dynamic", "durable")
-    seed_offer(resumed, "integration-approval-c", APPROVE)
-    seed_offer(resumed, "integration-approval-d", APPROVE)
+    seed_offer(resumed, "integration-approval-c", ConcernApproval.APPROVE)
+    seed_offer(resumed, "integration-approval-d", ConcernApproval.APPROVE)
     manifest = await resumed.resume()
 
     assert sorted(
