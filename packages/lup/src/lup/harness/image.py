@@ -24,6 +24,7 @@ same-path mounting that :func:`run_arguments` refuses to spell any other way.
 import json
 from pathlib import Path
 
+import sh
 from pydantic import BaseModel, Field
 
 from lup.harness.requirements import Manifest, Package, PackageManager
@@ -71,6 +72,79 @@ class Registry(BaseModel, frozen=True):
 
     manager: PackageManager = Field(description="Which manager this drives")
     command: str = Field(description="The install command, taking names as arguments")
+
+
+class ContainerEngine(BaseModel, frozen=True):
+    """How one container runtime spells the identity a session runs under.
+
+    The base carries the portable spelling and each engine adds only what is
+    its own, because the difference is not cosmetic: a bind mount carries uid
+    numbers rather than names, so an engine that remaps them writes files the
+    host user cannot read back. Measured -- ``--userns=keep-id`` is podman's
+    word for "do not remap", and Docker 29.7.2 refuses it outright with
+    ``--userns: invalid USER mode``, so a launcher that spelled one engine's
+    requirement unconditionally could not start under the other.
+
+    Detected from the *client*, never the server. This is not a distinction
+    without a difference: a Docker CLI pointed at a podman socket is a real
+    configuration, and the flag is rejected by the client before the daemon
+    ever sees it, so asking the daemon what it is answers the wrong question.
+    """
+
+    binary: str = Field(description="The executable that starts a container")
+
+    def identity_arguments(self, uid: int, gid: int) -> list[str]:
+        """Run the session as this uid and gid, in the words this engine takes."""
+        return ["--user", f"{uid}:{gid}"]
+
+
+class Docker(ContainerEngine, frozen=True):
+    """Docker, which maps container uids to host uids without being told.
+
+    A rootless Docker install maps the host user onto container root through
+    its own userns, which this does not attempt to correct: the remedy there
+    is ``--userns=host`` or a daemon-side mapping, both of which are postures
+    an operator chooses rather than facts a launcher can read off the client.
+    """
+
+    binary: str = "docker"
+
+
+class Podman(ContainerEngine, frozen=True):
+    """Podman, which remaps into the subuid range unless told to keep the id."""
+
+    binary: str = "podman"
+
+    def identity_arguments(self, uid: int, gid: int) -> list[str]:
+        """The portable spelling, plus podman's word for leaving the id alone."""
+        return [*super().identity_arguments(uid, gid), "--userns=keep-id"]
+
+
+def detected_engine(
+    candidates: tuple[str, ...] = ("docker", "podman"),
+) -> ContainerEngine | None:
+    """Which container client this host has, identified by what it calls itself.
+
+    The version string rather than the file name, because the name is not
+    reliable evidence: the ``podman-docker`` package installs a ``docker``
+    that is podman, and it needs podman's identity spelling despite answering
+    to the other name. Asking it who it is gets that right, where trusting
+    the spelling of the path would hand podman Docker's arguments.
+
+    ``None`` when no candidate answers, which is a real answer rather than an
+    error: a host without a container client can still open an unconfined
+    session, and refusing here would take that away from everyone who never
+    asked for the boundary.
+    """
+    for name in candidates:
+        try:
+            reported = str(sh.Command(name)("--version"))
+        except (sh.CommandNotFound, sh.ErrorReturnCode):
+            continue
+        return (
+            Podman(binary=name) if "podman" in reported.lower() else Docker(binary=name)
+        )
+    return None
 
 
 class Image(BaseModel, frozen=True):
@@ -358,7 +432,13 @@ RUN groupadd -g $GID agent 2>/dev/null || true \\
 USER $UID:$GID
 """
 
-    def run_arguments(self, checkout: Path, uid: int, gid: int) -> list[str]:
+    def run_arguments(
+        self,
+        checkout: Path,
+        uid: int,
+        gid: int,
+        engine: ContainerEngine = Docker(),
+    ) -> list[str]:
         """The run arguments a session is started with, mounts excluded.
 
         The checkout is mounted at its own absolute path and cannot be mounted
@@ -366,11 +446,16 @@ USER $UID:$GID
         absolute ``gitdir:`` pointer, so a tree mounted elsewhere is a checkout
         pointing at a path that does not exist. The rail's own mount topology
         supplies the list; this supplies everything around it.
+
+        The identity is the ``engine``'s to spell rather than this method's,
+        because the two runtimes disagree about it in a way that is fatal
+        rather than cosmetic -- see :class:`ContainerEngine`. Docker is the
+        default because it is the one an adopter is likeliest to have, and it
+        is a default rather than an assumption: a caller that detected podman
+        passes it and gets podman's spelling.
         """
         return [
-            "--user",
-            f"{uid}:{gid}",
-            "--userns=keep-id",
+            *engine.identity_arguments(uid, gid),
             "-w",
             str(checkout),
             *[

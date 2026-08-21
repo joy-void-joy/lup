@@ -6,7 +6,11 @@ first draft shipped. A test that only restated the declaration would pass on
 the broken version too.
 """
 
-from lup.harness.image import Image
+from pathlib import Path
+
+import sh
+
+from lup.harness.image import Docker, Image, Podman, detected_engine
 from lup.harness.requirements import Manifest, Package, Requirement, Run
 from lup.harness.requirements import LostCapability
 
@@ -108,3 +112,53 @@ def test_the_registry_managers_are_installed_before_they_are_used() -> None:
     """A package declared for `uv` or `bun` cannot install if its tool is absent."""
     baseline = Image().baseline
     assert "uv" in baseline and "nodejs" in baseline
+
+
+def test_docker_is_never_handed_podmans_identity_flag() -> None:
+    """Measured: Docker 29.7.2 refuses `--userns=keep-id` outright.
+
+    It exits with `--userns: invalid USER mode` before the daemon is reached,
+    so a launcher that spelled podman's requirement unconditionally could not
+    start a session under Docker at all. The first draft of `run_arguments`
+    did exactly that.
+    """
+    started = Image().run_arguments(Path("/checkout"), 1000, 1000, Docker())
+    assert "--userns=keep-id" not in started
+    assert started[:2] == ["--user", "1000:1000"]
+
+
+def test_podman_keeps_the_host_id_rather_than_remapping_it() -> None:
+    """Without this, a bind mount lands owned by a subuid the host cannot read.
+
+    Podman maps the invoking user into its subuid range by default, so files
+    the container writes into the mounted checkout come back owned by
+    something like 100999 rather than by the operator.
+    """
+    started = Image().run_arguments(Path("/checkout"), 1000, 1000, Podman())
+    assert "--userns=keep-id" in started
+
+
+def test_an_engine_is_identified_by_what_it_reports_not_by_its_name() -> None:
+    """The `podman-docker` package installs a `docker` that is really podman.
+
+    Trusting the path's spelling would hand it Docker's arguments and lose
+    the identity mapping, so detection asks the client who it is.
+    """
+
+    def shim(_name: str) -> object:
+        """A client at the name `docker` that reports itself as podman."""
+
+        def answer(_flag: str) -> str:
+            return "podman version 6.1.0"
+
+        return answer
+
+    original = sh.Command
+    sh.Command = shim
+    try:
+        found = detected_engine(("docker",))
+    finally:
+        sh.Command = original
+    assert found is not None
+    assert found == Podman(binary="docker")
+    assert found.identity_arguments(1000, 1000)[-1] == "--userns=keep-id"
