@@ -13,9 +13,9 @@ from lup.adapters.claude.login import CLAUDE_LOGIN
 from lup.devtools.dev.rules import write_rule_reference
 from lup.devtools.dev.workflow import write_workflow
 from lup.devtools.harness.composition import (
+    ClaudeComposer,
+    CodexComposer,
     NativeTargets,
-    claude_composition,
-    codex_composition,
     local_profile_directory,
 )
 from lup.devtools.harness.drift import RepositoryWriter
@@ -66,12 +66,12 @@ def profile_directory() -> ProfileDirectory:
 
 def claude_target(root: Path) -> NativeHarnessComposition:
     """This project's content, compiled through the Claude adapter."""
-    return claude_composition(root, project_content(root), TEMPLATE_CLAUDE)
+    return ClaudeComposer().compose(root, project_content(root), TEMPLATE_CLAUDE)
 
 
 def codex_target(root: Path) -> NativeHarnessComposition:
     """This project's content, compiled through the Codex adapter."""
-    return codex_composition(root, project_content(root), TEMPLATE_CODEX)
+    return CodexComposer().compose(root, project_content(root), TEMPLATE_CODEX)
 
 
 TARGETS = NativeTargets(builders={"claude": claude_target, "codex": codex_target})
