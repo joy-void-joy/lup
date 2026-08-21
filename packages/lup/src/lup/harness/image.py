@@ -364,13 +364,22 @@ class Image(BaseModel, frozen=True):
             "the fix, and it holds under a contained-Bash architecture too"
         ),
     )
-    claude_version: str = Field(
-        default="2.1.237",
+    agent_clis: list[Package] = Field(
+        default=[
+            Package(name="@anthropic-ai/claude-code", manager="bun", version="2.1.237"),
+            Package(name="@openai/codex", manager="bun", version="0.149.0"),
+        ],
         description=(
-            "Pinned rather than latest, so a rebuild is a decision. The "
-            "install lands in a layer the run mounts read-only, which is "
+            "The agent runtimes this image carries, each pinned rather than "
+            "latest so a rebuild is a decision. Every runtime the harness "
+            "launches belongs here: a contained launch runs `<cli>` inside "
+            "the container, so a runtime missing from this list builds an "
+            "image, starts a proxy, and then fails with `not found` on the "
+            "one program the session existed to run -- which is what "
+            "happened to Codex while the list was one hardcoded line. The "
+            "installs land in a layer the run mounts read-only, which is "
             "what stops a self-update from silently making the image "
-            "disagree with this field"
+            "disagree with this declaration"
         ),
     )
     config_home: str = Field(
@@ -574,6 +583,7 @@ class Image(BaseModel, frozen=True):
             f"RUN {item.command}\n"
             for item in self.obtained_by(manifest, "script")
         )
+        agent_clis = " ".join(item.requested() for item in self.agent_clis)
         exported = "\n".join(
             f"ENV {name}={value}" for name, value in self.environment().items()
         )
@@ -608,10 +618,11 @@ RUN pacman -S --noconfirm --needed \\
 ENV BUN_INSTALL={self.registry_root}
 ENV PATH={self.registry_bin()}:$PATH
 {registry_layers}{script_layer}
-# The CLI, from the registry at a pinned version rather than an install
-# script, so what lands is what this declaration names and the layer the run
-# mounts read-only cannot be rewritten by a self-update.
-RUN bun add -g @anthropic-ai/claude-code@{self.claude_version}
+# Every agent runtime the harness launches, from the registry at a pinned
+# version rather than an install script, so what lands is what the
+# declaration names and the layer the run mounts read-only cannot be
+# rewritten by a self-update.
+RUN bun add -g {agent_clis}
 
 # Trust, seeded where a fresh config home will find it. A workspace this
 # image was built for is one the operator already decided to run, but an

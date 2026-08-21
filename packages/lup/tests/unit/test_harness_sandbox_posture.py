@@ -1,13 +1,15 @@
 """What a launch claims about the boundary it is opening a session behind.
 
-Three failures live here, and every one of them was silent. A probe spelled
+Four failures live here, and every one of them was silent. A probe spelled
 one flag for two programs and reported a working socat broken on every host.
 A launch that was about to hand the session a container printed a verdict
-about a sandbox it was not going to use. And a client that answers for one
-engine while driving another started containers that could not fork and could
-not write to the checkout they were opened on.
+about a sandbox it was not going to use. A client that answers for one engine
+while driving another started containers that could not fork and could not
+write to the checkout they were opened on. And an image built for two
+runtimes carried one, so the second built a container, started a proxy, and
+died on `not found`.
 
-None of the three raised anything. That is what these hold still: each asserts
+None of the four raised anything. That is what these hold still: each asserts
 the shape of an argument list or an environment, because that is where the
 claim lives before anything has run.
 """
@@ -200,6 +202,20 @@ def test_a_session_container_is_given_a_process_bound_it_can_name() -> None:
 def test_an_image_no_longer_installs_a_sandbox_it_cannot_start() -> None:
     """Those two packages bought silence about a boundary that was not there."""
     assert Image().inner_sandbox == []
+
+
+def test_the_image_carries_every_runtime_a_contained_launch_can_open() -> None:
+    """A contained launch runs `<cli>` inside the container, so it has to be there.
+
+    While the install was one hardcoded line naming Claude, `harness codex`
+    without `--unsandboxed` built the image, started the egress proxy, wrote
+    the boundary record, and then failed on `codex: not found` -- every
+    expensive step taken before the cheap one that could not work.
+    """
+    installed = " ".join(item.requested() for item in Image().agent_clis)
+
+    assert "@anthropic-ai/claude-code@" in installed
+    assert "@openai/codex@" in installed
 
 
 def test_a_client_and_the_engine_behind_it_are_read_separately() -> None:
