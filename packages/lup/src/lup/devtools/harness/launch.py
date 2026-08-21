@@ -19,10 +19,13 @@ import sh
 import typer
 from pydantic import BaseModel, Field
 
+from lup.runtime.login import ProviderLogin
 from lup.runtime.profiles import ProfileDirectory
+from lup.devtools.harness.contained import contained_argv
 from lup.adapters.claude.harness import ClaudeSpellings
 from lup.adapters.claude.transcripts import ClaudeTranscripts
 from lup.adapters.codex.harness import CodexSpellings
+from lup.adapters.codex.login import CODEX_LOGIN
 from lup.adapters.codex.harness_runtime import (
     CodexPluginInstaller,
     PluginCacheConfig,
@@ -677,6 +680,56 @@ def companion_plugin_directories(root: Path, generated: str) -> list[Path]:
 # vector, and a mode is one optional argument among them; moving it onto
 # LaunchMode would make the model answerable for starting a runtime it knows
 # nothing about, and leave a project declaring no mode with no launcher at all.
+def ambient_config_home(login: ProviderLogin, fallback: Path) -> Path:
+    """The configuration home a launch would inherit, made concrete for a mount.
+
+    ``launch_home`` answers ``None`` for "inherit whatever the environment
+    selected", which is the right answer everywhere it is read -- except at a
+    mount, which names a file rather than a policy. Resolving it here lets
+    that ``None`` keep meaning what it means everywhere else instead of every
+    caller inventing a default.
+    """
+    # lup: ignore[os-environ,dict-get] — the process environment is the open
+    # mapping this reads by definition, and absence is the answer it wants
+    named = os.environ.get(login.config_home_env)
+    return Path(named) if named else fallback
+
+
+def session_argv(
+    cli: str,
+    arguments: list[str],
+    composition: NativeHarnessComposition,
+    plugin: Plugin,
+    config_home: Path,
+    login: ProviderLogin,
+    unsandboxed: bool,
+) -> list[str]:
+    """The argv that opens a session, inside the declared container or on the host.
+
+    One place decides this for both runtimes, because "contained unless the
+    operator said otherwise" is a property of the launch rather than of the
+    CLI being launched -- and a second runtime that decided it separately is
+    how one of them ends up quietly uncontained.
+    """
+    if unsandboxed:
+        return [cli, *arguments]
+    harness = composition.recipe.source
+    credential = login.credentials_path(config_home)
+    return [
+        *contained_argv(
+            harness.image,
+            harness.requirements,
+            project_root(),
+            plugin.hooks.human_owned_files if plugin.hooks is not None else [],
+            config_home,
+            credential if credential.exists() else None,
+            login,
+        ),
+        cli,
+        *arguments,
+    ]
+
+
 # lup: ignore[model-free-function] — a launcher is not an operation on a mode.
 def launch_claude(
     composition: NativeHarnessComposition,
@@ -688,6 +741,7 @@ def launch_claude(
     mode: LaunchMode | None = None,
     resume: Resumption = Resumption(),
     relaxed: bool = False,
+    unsandboxed: bool = False,
 ) -> None:
     """Generate/reconcile Claude artifacts and launch the verified local plugin."""
     contradiction = resume.contradicted()
@@ -746,7 +800,18 @@ def launch_claude(
         )
         with opening as session:
             environment.update(session)
-            sh.Command("claude")(*arguments, _fg=True, _env=environment)
+            argv = session_argv(
+                "claude",
+                arguments,
+                composition,
+                plugin,
+                home
+                if home is not None
+                else ambient_config_home(profiles.login, Path.home() / ".claude"),
+                profiles.login,
+                unsandboxed,
+            )
+            sh.Command(argv[0])(*argv[1:], _fg=True, _env=environment)
         succeeded = True
     except sh.CommandNotFound as error:
         raise typer.BadParameter("Claude Code CLI is not installed") from error
@@ -770,6 +835,7 @@ def launch_codex(
     mode: LaunchMode | None = None,
     resume: Resumption = Resumption(),
     relaxed: bool = False,
+    unsandboxed: bool = False,
 ) -> None:
     """Generate/reconcile Codex artifacts and launch without updating the CLI."""
     contradiction = resume.contradicted()
@@ -826,7 +892,16 @@ def launch_codex(
         ):
             typer.echo(f"Verified installed Codex plugin: {cache.installed_root}")
             environment.update(session)
-            sh.Command("codex")(*arguments, _fg=True, _env=environment)
+            argv = session_argv(
+                "codex",
+                arguments,
+                composition,
+                plugin,
+                selected_home,
+                CODEX_LOGIN,
+                unsandboxed,
+            )
+            sh.Command(argv[0])(*argv[1:], _fg=True, _env=environment)
         succeeded = True
     except sh.CommandNotFound as error:
         raise typer.BadParameter("Codex CLI is not installed") from error

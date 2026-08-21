@@ -556,6 +556,13 @@ def create_harness_app(
                     help="Open a session the anti-pattern gate leaves alone",
                 ),
             ] = False,
+            unsandboxed: Annotated[
+                bool,
+                typer.Option(
+                    "--unsandboxed",
+                    help="Open the session on the host instead of in the container",
+                ),
+            ] = False,
         ) -> None:
             selection = launch.extract_launch_mode(modes, ctx.args)
             launch.launch_claude(
@@ -568,6 +575,7 @@ def create_harness_app(
                 selection.mode,
                 Resumption(latest=continue_latest, pick=resume, session=session),
                 ignore_antipatterns,
+                unsandboxed,
             )
 
     codex_target = targets.builder("codex")
@@ -628,6 +636,13 @@ def create_harness_app(
                     help="Open a session the anti-pattern gate leaves alone",
                 ),
             ] = False,
+            unsandboxed: Annotated[
+                bool,
+                typer.Option(
+                    "--unsandboxed",
+                    help="Open the session on the host instead of in the container",
+                ),
+            ] = False,
         ) -> None:
             selection = launch.extract_launch_mode(modes, ctx.args)
             launch.launch_codex(
@@ -641,6 +656,7 @@ def create_harness_app(
                 selection.mode,
                 Resumption(latest=continue_latest, pick=resume, session=session),
                 ignore_antipatterns,
+                unsandboxed,
             )
 
     return app

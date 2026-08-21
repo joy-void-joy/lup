@@ -22,6 +22,7 @@ same-path mounting that :func:`run_arguments` refuses to spell any other way.
 """
 
 import json
+from collections.abc import Callable, Mapping
 from pathlib import Path
 
 import sh
@@ -120,8 +121,19 @@ class Podman(ContainerEngine, frozen=True):
         return [*super().identity_arguments(uid, gid), "--userns=keep-id"]
 
 
+def reported_version(name: str) -> str:
+    """What one container client says when asked who it is.
+
+    Separated from the detection so a caller can answer for a client that is
+    not installed here -- which is what makes the ``podman-docker`` case
+    testable on a machine that does not have it.
+    """
+    return str(sh.Command(name)("--version"))
+
+
 def detected_engine(
     candidates: tuple[str, ...] = ("docker", "podman"),
+    ask: Callable[[str], str] = reported_version,
 ) -> ContainerEngine | None:
     """Which container client this host has, identified by what it calls itself.
 
@@ -138,7 +150,7 @@ def detected_engine(
     """
     for name in candidates:
         try:
-            reported = str(sh.Command(name)("--version"))
+            reported = ask(name)
         except (sh.CommandNotFound, sh.ErrorReturnCode):
             continue
         return (
@@ -236,6 +248,18 @@ class Image(BaseModel, frozen=True):
             "install lands in a layer the run mounts read-only, which is "
             "what stops a self-update from silently making the image "
             "disagree with this field"
+        ),
+    )
+    config_home: str = Field(
+        default="/cfg",
+        description=(
+            "Where the runtime's configuration home sits inside the "
+            "container. Container-private rather than the host's, because "
+            "that directory holds the credential store and the session state "
+            "of every project the operator has open, none of which this "
+            "session has any business reading. What has to cross is named "
+            "one file at a time. Which variable points a CLI at it is that "
+            "runtime's own word and arrives from its login declaration"
         ),
     )
     registry_bin: str = Field(
@@ -479,7 +503,75 @@ USER $UID:$GID
         working. Bridging the one directory is narrower than sharing the config
         home, which holds the credential store.
         """
-        return ["-v", f"{config_home / 'ide'}:/cfg/ide:rw"]
+        return ["-v", f"{config_home / 'ide'}:{self.config_home}/ide:rw"]
+
+    def session_arguments(
+        self,
+        *,
+        tag: str,
+        checkout: Path,
+        uid: int,
+        gid: int,
+        writable: Mapping[Path, str],
+        read_only: Mapping[Path, str],
+        state_volume: str,
+        config_home_env: str,
+        credential_file: str = ".credentials.json",
+        credential: Path | None = None,
+        host_config_home: Path | None = None,
+        engine: ContainerEngine = Docker(),
+    ) -> list[str]:
+        """The whole argv that opens one agent session inside a container.
+
+        Assembled here rather than at the launcher because every part of it
+        has to agree with a part of the image: the config home the entrypoint
+        seeds, the caches the build chowned, the environment the layers
+        baked. A launcher that spelled these itself would be a second
+        declaration of the same facts, free to drift from this one.
+
+        ``state_volume`` carries the config home across launches. A container
+        that started clean each time would re-seed trust every launch, and --
+        measured -- an unseeded config home discards the workspace's declared
+        ``permissions.allow`` with a notice rather than an error, so the
+        policy would be off with nothing having failed.
+
+        ``credential`` is mounted read-only at the one path the CLI reads it
+        from. The agent can read it, which is not a leak this could close:
+        an agent that can open a session can reach whatever opens one. The
+        scope is the boundary, not the secrecy.
+        """
+        mounts = [
+            argument
+            for host, inside in writable.items()
+            for argument in ("-v", f"{host}:{inside}:rw")
+        ] + [
+            argument
+            for host, inside in read_only.items()
+            for argument in ("-v", f"{host}:{inside}:ro")
+        ]
+        seeded = (
+            ["-v", f"{credential}:{self.config_home}/{credential_file}:ro"]
+            if credential is not None
+            else []
+        )
+        bridged = (
+            self.ide_bridge(host_config_home) if host_config_home is not None else []
+        )
+        return [
+            engine.binary,
+            "run",
+            "--rm",
+            "-it",
+            "-v",
+            f"{state_volume}:{self.config_home}",
+            "-e",
+            f"{config_home_env}={self.config_home}",
+            *self.run_arguments(checkout, uid, gid, engine),
+            *mounts,
+            *seeded,
+            *bridged,
+            tag,
+        ]
 
     def seed_configuration(self) -> JsonObject:
         """The container-side ``.claude.json`` a fresh config home starts from.

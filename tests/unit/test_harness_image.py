@@ -8,8 +8,6 @@ the broken version too.
 
 from pathlib import Path
 
-import sh
-
 from lup.harness.image import Docker, Image, Podman, detected_engine
 from lup.harness.requirements import Manifest, Package, Requirement, Run
 from lup.harness.requirements import LostCapability
@@ -138,6 +136,73 @@ def test_podman_keeps_the_host_id_rather_than_remapping_it() -> None:
     assert "--userns=keep-id" in started
 
 
+def test_a_session_mounts_the_checkout_at_its_own_absolute_path() -> None:
+    """A linked worktree's `.git` is a file holding an absolute `gitdir:` pointer.
+
+    Mounted anywhere else, the tree inside the container is a checkout
+    pointing at a path that does not exist, and every git command fails
+    naming the repository rather than the mount.
+    """
+    started = Image().session_arguments(
+        tag="lup-agent:x",
+        checkout=Path("/home/u/repo"),
+        uid=1000,
+        gid=1000,
+        writable={Path("/home/u/repo"): "/home/u/repo"},
+        read_only={},
+        state_volume="lup-cfg-x",
+        config_home_env="CLAUDE_CONFIG_DIR",
+    )
+    assert "-v" in started
+    assert "/home/u/repo:/home/u/repo:rw" in started
+    assert started[-1] == "lup-agent:x"
+
+
+def test_the_config_home_is_container_private_and_carries_across_launches() -> None:
+    """A clean config home discards the workspace's declared permissions.
+
+    Measured: an unseeded home reports `Ignoring N permissions.allow entries`
+    and continues, so the policy is off with nothing having failed. The
+    volume is what stops that happening on every launch.
+    """
+    image = Image()
+    started = image.session_arguments(
+        tag="t",
+        checkout=Path("/c"),
+        uid=1,
+        gid=1,
+        writable={},
+        read_only={},
+        state_volume="lup-cfg-x",
+        config_home_env="CODEX_HOME",
+    )
+    assert f"lup-cfg-x:{image.config_home}" in started
+    # The variable is the runtime's own word, taken from its login declaration
+    # rather than spelled here: Codex reads a different one, and a container
+    # started with Claude's would leave it pointed at the host's home.
+    assert f"CODEX_HOME={image.config_home}" in started
+
+
+def test_the_credential_crosses_as_one_read_only_file() -> None:
+    """The config home holds every project's session state; the token is one file."""
+    image = Image()
+    started = image.session_arguments(
+        tag="t",
+        checkout=Path("/c"),
+        uid=1,
+        gid=1,
+        writable={},
+        read_only={},
+        state_volume="v",
+        config_home_env="CLAUDE_CONFIG_DIR",
+        credential=Path("/home/u/.claude/.credentials.json"),
+    )
+    mounted = (
+        f"/home/u/.claude/.credentials.json:{image.config_home}/.credentials.json:ro"
+    )
+    assert mounted in started
+
+
 def test_an_engine_is_identified_by_what_it_reports_not_by_its_name() -> None:
     """The `podman-docker` package installs a `docker` that is really podman.
 
@@ -145,20 +210,13 @@ def test_an_engine_is_identified_by_what_it_reports_not_by_its_name() -> None:
     the identity mapping, so detection asks the client who it is.
     """
 
-    def shim(_name: str) -> object:
-        """A client at the name `docker` that reports itself as podman."""
-
-        def answer(_flag: str) -> str:
-            return "podman version 6.1.0"
-
-        return answer
-
-    original = sh.Command
-    sh.Command = shim
-    try:
-        found = detected_engine(("docker",))
-    finally:
-        sh.Command = original
+    found = detected_engine(("docker",), lambda _name: "podman version 6.1.0")
     assert found is not None
     assert found == Podman(binary="docker")
     assert found.identity_arguments(1000, 1000)[-1] == "--userns=keep-id"
+
+
+def test_a_real_docker_client_is_not_mistaken_for_podman() -> None:
+    """The other direction of the same question, against Docker's own string."""
+    found = detected_engine(("docker",), lambda _name: "Docker version 29.7.2")
+    assert found == Docker(binary="docker")
