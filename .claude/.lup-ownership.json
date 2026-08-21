@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "30f5ff773d9969d5e38de46b6a1f6aae21a533078c526a1c61b78551d72db7fa",
+  "source_digest": "671c51aeea95810ebd3686f3d9293e8ed01b2cf743dc944e13dcb56177aca853",
   "target_requirements": [
     "claude-code"
   ],
@@ -296,7 +296,7 @@
     {
       "path": ".claude/plugins/lup/hooks/hooks.json",
       "category": "generated",
-      "sha256": "bf8f2f3e7efec129ada5cd7ab5470b8806e214c6f0fa9993e93e13e9b1d27903",
+      "sha256": "38be47111e15c863edecbbec990d633d23b7a3217dc047ca720c9b433ac17e4e",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },

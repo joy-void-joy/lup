@@ -46,6 +46,7 @@ from lup.policy.dispatcher import (
     DispatcherDeclaration,
     compile_dispatcher,
     dispatcher_banner,
+    guarded_hook_command,
 )
 from lup.policy.kernel.rows import PathRoleRow
 from lup.policy.refused_tools import routed_for
@@ -489,7 +490,7 @@ class ClaudeHookRenderer(ArtifactRenderer[HookSet]):
         command = [
             {
                 "type": "command",
-                "command": 'python3 "$CLAUDE_PLUGIN_ROOT/hooks/scripts/policy.py"',
+                "command": guarded_hook_command("CLAUDE_PLUGIN_ROOT"),
                 "timeout": 30,
             }
         ]

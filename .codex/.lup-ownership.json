@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "30f5ff773d9969d5e38de46b6a1f6aae21a533078c526a1c61b78551d72db7fa",
+  "source_digest": "671c51aeea95810ebd3686f3d9293e8ed01b2cf743dc944e13dcb56177aca853",
   "target_requirements": [
     "codex-cli>=0.144"
   ],
@@ -65,7 +65,7 @@
     {
       "path": ".codex/plugins/lup/hooks/hooks.json",
       "category": "generated",
-      "sha256": "41d495a4189435d54e1bb2b99eaec0f31db75dc38bab3a7d9c3d9d7007c36df1",
+      "sha256": "ca8d3edf973e863b38f4805df9c96df1cf4851f0405d93e5784befad9ab2592d",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
