@@ -84,6 +84,7 @@ from lup.resolver.tools import (
 )
 from lup.resolver.join_tools import create_join_tools
 from lup.runtime.factory import SessionFactory
+from lup.runtime.profiles import SessionAccount
 from lup.types import EnvVars
 from lup.workspace.paths import project_root
 from lup.devtools.dev.branches import probe_base_freshness, require_fresh_base
@@ -1041,6 +1042,13 @@ class DetachedRun(BaseModel, frozen=True):
     auth_probe_delay: float
     max_parallel_workers: int
     recheck_standing_per_join: bool
+    profile: str | None
+    """The account the child opens every session under.
+
+    Carried like everything else here, and for a sharper reason than most: a
+    child that dropped it would not fail, it would run on whichever account
+    the detaching shell happened to export — the operator's own, silently,
+    for every planner, worker and reviewer the run opens."""
 
     def arguments(self) -> list[str]:
         """The command a child is started with, carrying this whole invocation."""
@@ -1052,6 +1060,7 @@ class DetachedRun(BaseModel, frozen=True):
             "resolve",
             "--adapter",
             self.adapter,
+            *(["--profile", self.profile] if self.profile is not None else []),
             *(["--run-id", self.run_id] if self.run_id is not None else []),
             *(part for answer in self.answers for part in ("--answer", answer)),
             *self.admitted.arguments(),
@@ -1395,6 +1404,7 @@ def chosen_run(state_root: Path, fresh: str, *, start_new: bool, ending: bool) -
 
 def run_resolve(
     composition: NativeHarnessComposition,
+    account: SessionAccount,
     run_id: str | None,
     answers: list[str],
     abort_reason: str | None = None,
@@ -1500,7 +1510,7 @@ def run_resolve(
             PluginCacheConfig,
         )
 
-        from lup.adapters.codex.home import select_codex_home
+        from lup.adapters.codex.home import CodexWorktreeHomeStore, select_codex_home
 
         def codex_policy_environment(target: str, environment: EnvVars) -> EnvVars:
             """Point a Codex session at a home carrying this project's policy.
@@ -1520,15 +1530,17 @@ def run_resolve(
             """
             if target != "codex":
                 return {}
-            home = select_codex_home(None, environment, root)
+            home = select_codex_home(
+                None, environment, root, account.name, CodexWorktreeHomeStore()
+            )
             cache = CodexPluginInstaller(
                 PluginCacheConfig(codex_home=home.path, marketplace=plugin.marketplace)
             ).ensure(root / ".codex" / "plugins" / plugin.name, root)
             typer.echo(f"Verified installed Codex plugin: {cache.installed_root}")
             return {"CODEX_HOME": str(home.path)}
 
-        # lup: Selecting a profile must reach every lup invocation, not just a
-        # native launch. `profile use X` should decide the account for anything
+        # lup: solved: Selecting a profile must reach every lup invocation, not just
+        # a native launch. `profile use X` should decide the account for anything
         # lup runs — agents, subagents, resolver planners, workers, reviewers —
         # and today it decides only what `harness claude`/`codex` opens. This
         # site is one instance: it inherits the launching shell's identity, and
@@ -1539,8 +1551,10 @@ def run_resolve(
         # session environment should require naming the profile it runs under,
         # so a new entry point cannot inherit an operator's account by omission
         # the way this one does.
-        session_environment = non_interactive_environment(
-            os.environ  # lup: ignore[os-environ] — sessions inherit the console
+        session_environment = account.exported(
+            non_interactive_environment(
+                os.environ  # lup: ignore[os-environ] — sessions inherit the console
+            )
         )
         # Both identities are written, never omitted: a runtime merges the
         # session environment over the launching process's, so a reviewer

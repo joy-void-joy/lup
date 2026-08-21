@@ -449,6 +449,7 @@ def detached(
         auth_probe_delay=AUTH_PROBE_SECONDS,
         max_parallel_workers=4,
         recheck_standing_per_join=False,
+        profile=None,
     ).arguments()
 
 
@@ -481,6 +482,7 @@ def test_a_detached_launch_carries_the_evidence_scope_it_was_given() -> None:
 
 DETACH_CARRIES = [
     "adapter",
+    "profile",
     "run_id",
     "answer",
     "admit",
@@ -586,6 +588,7 @@ def test_a_relaunch_renders_a_declared_flag_for_every_option_it_carries() -> Non
             auth_probe_delay=1.5,
             max_parallel_workers=6,
             recheck_standing_per_join=True,
+            profile="work",
         ).arguments()
         if part.startswith("--")
     ]
