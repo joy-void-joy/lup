@@ -64,6 +64,35 @@ def served_tool_grants(plugin: Plugin) -> list[str]:
     return [f"mcp__plugin_{plugin.name}_{server.name}" for server in plugin.mcp_servers]
 
 
+def credential_read_denials(hooks: "HookSet | None") -> list[str]:
+    """The declared credential paths, as deny rules the in-process tools obey.
+
+    The same declaration already renders the sandbox's own credential deny,
+    which governs sandboxed Bash and nothing else. Read, Edit, Grep and Glob
+    run in the session's own process and never reach that boundary, so a path
+    named there was denied to the shell and readable by the file tools —
+    the ssh key included. Both renderings come from the one declaration so
+    they cannot name different paths.
+
+    Two rules per path because the declaration does not say which are
+    directories, and asking the filesystem here would answer for the machine
+    generating the settings rather than the one reading them. The pattern that
+    does not apply matches nothing.
+
+    ``Read`` covers the reading tools whole: Claude Code consults file
+    permissions against ``Read`` and ``Edit`` rules only, and accepts but never
+    consults a ``Grep`` or ``Glob`` path rule — writing one would warn at
+    startup and deny nothing.
+    """
+    if hooks is None or hooks.sandbox is None:
+        return []
+    return [
+        rule
+        for path in hooks.sandbox.credential_paths
+        for rule in (f"Read({path})", f"Read({path}/**)")
+    ]
+
+
 def allowed_network_domains(hooks: HookSet) -> list[str]:
     """Collect fetch-scope hostnames and declared extras, first-seen order.
 
@@ -115,11 +144,11 @@ def project_settings(declared: Settings, plugin: Plugin | None) -> JsonObject:
             f"{plugin.name}@{plugin.marketplace}": True,
         }
     grants: list[JsonValue] = list(served_tool_grants(plugin)) if plugin else []
+    hooks = plugin.hooks if plugin is not None else None
     settings["permissions"] = {
         "allow": [*declared.allowed, *grants],
-        "deny": list(declared.denied),
+        "deny": [*declared.denied, *credential_read_denials(hooks)],
     }
-    hooks = plugin.hooks if plugin is not None else None
     if hooks is None or hooks.sandbox is None:
         return settings
     domains: list[JsonValue] = list(allowed_network_domains(hooks))
