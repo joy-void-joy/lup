@@ -3,8 +3,9 @@
 Classification answers what the vocabulary says about a command. It does not
 answer what happens, because one verdict means different things in different
 sessions: a question needs somebody to put it to, work nobody judged needs to
-know whether a boundary sits beneath it, and a placement is only worth
-declaring where the host can carry it out.
+know whether a boundary sits beneath it, a placement is only worth declaring
+where the host can carry it out, and one the boundary already satisfies is
+not left for anybody to carry at all.
 
 Those facts were a ``match`` over four arms with guards, where the answer to
 "what does a stated reason do" was the *position* of one arm and the answer to
@@ -37,6 +38,7 @@ class SettlementFacts:
     decision: KernelDecision
     escalation: str
     sandboxed: bool
+    contained: bool
     confined: bool
     escapable: bool
     interactive: bool
@@ -47,6 +49,7 @@ class SettlementFacts:
         decision: KernelDecision,
         escalation: str,
         sandboxed: bool,
+        contained: bool,
         confined: bool,
         escapable: bool,
         interactive: bool,
@@ -55,6 +58,7 @@ class SettlementFacts:
         self.decision = decision
         self.escalation = escalation
         self.sandboxed = sandboxed
+        self.contained = contained
         self.confined = confined
         self.escapable = escapable
         self.interactive = interactive
@@ -66,6 +70,7 @@ class SettlementFacts:
             decision,
             self.escalation,
             self.sandboxed,
+            self.contained,
             self.confined,
             self.escapable,
             self.interactive,
@@ -111,6 +116,40 @@ class StatedReason(SettlementRule):
         )
 
 
+class ContainedPlacement(SettlementRule):
+    """A container is the place every placement was asking for.
+
+    ``outside`` names the native per-call sandbox and nothing else. It is
+    what a toolchain declares when that sandbox denies the paths it needs --
+    the runtime's own configuration home, the repository's locks, a route to
+    the remote. A container denies none of them: the checkout is mounted
+    writable, the configuration home is the container's own, and the route
+    out is the egress proxy. So the requirement is met by construction, and
+    what is left to carry is nothing.
+
+    Rewritten to ``ambient`` rather than left standing, because a placement
+    nothing can act on is one the runtimes still act on: Claude Code reads
+    the verdict's placement back as an argument of the call, and a request to
+    leave a sandbox that is not running is a request about nothing.
+
+    This is the reachable half of retiring the placement axis under a
+    container, done where the axis is read rather than by deleting the field
+    the uncontained posture still needs. Measured before it existed: a
+    contained session refused `git status`, `git log`, `dev check` and every
+    other `lup-devtools` command, because git and the toolchain are declared
+    ``outside`` across their whole surface and :class:`TrappedPlacement`
+    below answers for a host with no escape channel -- which a container,
+    having no sandbox to escape, looks exactly like.
+    """
+
+    settles = False
+
+    def reached(self, facts: SettlementFacts) -> KernelDecision | None:
+        if not facts.contained or facts.decision.sandbox == "ambient":
+            return None
+        return KernelDecision(facts.decision.effect, facts.decision.reason)
+
+
 class TrappedPlacement(SettlementRule):
     """A call declared ``outside`` on a host that cannot place it there.
 
@@ -118,6 +157,10 @@ class TrappedPlacement(SettlementRule):
     failure reads as a broken repository rather than as a boundary. Stopped
     here with the reason that says which it was, and no stated reason moves
     it, because approval does not give the host a channel it does not have.
+
+    Answers for a native sandbox only. A container reaches
+    :class:`ContainedPlacement` above and never arrives here, because the
+    thing it cannot escape is also the thing the placement was asking for.
     """
 
     def reached(self, facts: SettlementFacts) -> KernelDecision | None:
@@ -195,6 +238,7 @@ class Standing(SettlementRule):
 
 
 SETTLEMENT_ORDER: list[SettlementRule] = [
+    ContainedPlacement(),
     StatedReason(),
     TrappedPlacement(),
     UnanswerableQuestion(),

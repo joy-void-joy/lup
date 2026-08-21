@@ -1014,6 +1014,7 @@ def decide_shell(
             ),
             escalation=why,
             sandboxed=sandboxed,
+            contained=contained,
             confined=confined,
             escapable=escapable,
             interactive=interactive,
