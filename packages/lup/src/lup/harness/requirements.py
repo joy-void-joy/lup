@@ -334,6 +334,16 @@ class Run(BaseModel, frozen=True):
         description="Text the output must contain; empty means a clean exit suffices",
     )
 
+    def programs(self) -> list[str]:
+        """Which executables this exercise runs, for a reader that has to name them.
+
+        Asked of the exercise rather than read off its fields, so a caller
+        never has to test which member of the union it is holding -- and so a
+        third shape of exercise answers by writing this rather than by being
+        found at every site that enumerated the first two.
+        """
+        return [self.command[0]]
+
     def run(self) -> ExerciseOutcome:
         """Carry the operation out, answering whether it proved the claim."""
         try:
@@ -371,6 +381,12 @@ class AnyOf(BaseModel, frozen=True):
 
     kind: Literal["any_of"] = "any_of"
     alternatives: list[Run] = Field(min_length=1)
+
+    def programs(self) -> list[str]:
+        """Every executable any spelling of this capability would run."""
+        return [
+            name for candidate in self.alternatives for name in candidate.programs()
+        ]
 
     def run(self) -> ExerciseOutcome:
         """Take the first spelling that works, or report what each one said."""

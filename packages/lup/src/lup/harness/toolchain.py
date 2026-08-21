@@ -23,6 +23,7 @@ it is for shell rules.
 
 from pathlib import Path
 
+from lup.devtools.clipboard import clipboard_probes
 from lup.harness.requirements import (
     Advisory,
     AnyOf,
@@ -254,9 +255,19 @@ def clipboard_requirement(
     a clipboard. Said once to whoever is setting a machine up; silent at
     every launch, where it would only teach people to skip the line above it.
 
-    Four spellings, because which one a machine has is a fact about its
-    desktop rather than about any project. Naming only `xclip` reports "no
-    clipboard" on every Wayland session that has a working one.
+    The spellings come off :func:`~lup.devtools.clipboard.clipboard_probes`
+    rather than being listed here, because which one a machine has is a fact
+    about its desktop rather than about any project -- and because a list
+    written twice comes apart. It already had: this named four backends
+    including Wayland while the code that reached for a clipboard tried four
+    that did not, so a Wayland machine was told it had a clipboard and then
+    silently failed to use it.
+
+    Each probe is a *read*. A write would destroy whatever the operator had
+    on their clipboard to establish something they never asked about, and a
+    ``--version`` proves nothing: `wl-copy --version` succeeds with no
+    compositor running and `xclip -version` succeeds with no `DISPLAY`, which
+    is exactly the machine where pasting does nothing.
     """
     return Requirement(
         capability="clipboard",
@@ -264,12 +275,7 @@ def clipboard_requirement(
         where=where,
         checked="setup",
         exercise=AnyOf(
-            alternatives=[
-                Run(command=["wl-copy", "--version"]),
-                Run(command=["xclip", "-version"]),
-                Run(command=["xsel", "--version"]),
-                Run(command=["pbcopy"]),
-            ]
+            alternatives=[Run(command=probe) for probe in clipboard_probes()]
         ),
         absence=Advisory(improves="copying a command to the clipboard"),
         install=install,

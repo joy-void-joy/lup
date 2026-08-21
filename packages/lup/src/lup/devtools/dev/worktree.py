@@ -12,8 +12,8 @@ from pydantic import BaseModel
 from lup.devtools.dev.git_guards import DECLARED_GUARDS, GitGuard, arm, read_guards
 from lup.policy.assets.host import project_environment
 from lup.devtools.layout import get_tree_dir
+from lup.devtools.clipboard import copy_to_clipboard
 from lup.devtools.utils import (
-    copy_to_clipboard,
     decode_stderr,
     format_table,
     git,
@@ -373,6 +373,7 @@ def create(
     launcher: WorktreeLauncher,
     force: bool = False,
     no_record: bool = False,
+    clipboard: bool = False,
     extras: list[str] = GITIGNORED_EXTRAS,
     guards: list[GitGuard] = DECLARED_GUARDS,
 ) -> None:
@@ -470,10 +471,16 @@ def create(
     if hint.agent:
         typer.echo(f"  agent:  {hint.agent}")
 
-    if copy_to_clipboard(hint.shell):
-        typer.echo(f"  shell:  {hint.shell}   [copied to clipboard]")
-    else:
-        typer.echo(f"  shell:  {hint.shell}")
+    # Opt-in, because most runs of this command are an agent's. The clipboard
+    # is the human's own channel and a side effect nobody asked for is still a
+    # side effect: an agent that copied here would silently replace whatever
+    # its operator had put there, for a line the operator never sees. Inside
+    # the session container there is no clipboard to reach at all, so the
+    # default is also the only answer that works everywhere.
+    copied = clipboard and copy_to_clipboard(hint.shell)
+    typer.echo(
+        f"  shell:  {hint.shell}" + ("   [copied to clipboard]" if copied else "")
+    )
 
 
 def worktree_status(path: str) -> str:
