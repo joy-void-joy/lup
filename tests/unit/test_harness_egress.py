@@ -443,6 +443,7 @@ def test_a_proxy_with_no_gateway_anywhere_is_told_so_plainly() -> None:
         attached=True,
         aliases=["egress"],
         legs=[contained.NetworkLeg(network="net", address="10.89.0.29")],
+        route="",
         reached=False,
     )
 
@@ -450,9 +451,20 @@ def test_a_proxy_with_no_gateway_anywhere_is_told_so_plainly() -> None:
     assert any("no route off them at all" in item.text for item in stranded.verdict())
 
 
-def test_a_leg_that_routes_is_not_reported_as_stranded() -> None:
-    """One gateway anywhere is a way out, whatever the internal leg lacks."""
-    bridged = contained.EgressState(
+def test_a_recorded_gateway_is_not_taken_for_a_route() -> None:
+    """The two came apart on the machine this was written for.
+
+    Both of the proxy's legs recorded a gateway — the internal one reporting
+    its own `.1` address, which podman populates whether or not anything
+    routes through it — and the container reached nothing. Only one network
+    provides a container's default route and netavark installs none for an
+    internal network, so membership said yes, metadata said yes, and every
+    packet failed instantly.
+
+    So the verdict asks the routing table. A per-leg gateway stays in the
+    report because it is worth seeing; it is no longer what decides.
+    """
+    recorded = contained.EgressState(
         network="net",
         proxy="proxy",
         alias="egress",
@@ -460,8 +472,54 @@ def test_a_leg_that_routes_is_not_reported_as_stranded() -> None:
             contained.NetworkLeg(
                 network="podman", address="10.88.0.4", gateway="10.88.0.1"
             ),
-            contained.NetworkLeg(network="net", address="10.89.0.29"),
+            contained.NetworkLeg(
+                network="net", address="10.89.0.29", gateway="10.89.0.1"
+            ),
         ],
     )
 
-    assert bridged.routes()
+    assert not recorded.routes()
+    assert recorded.model_copy(update={"route": "via 10.88.0.1 on eth1"}).routes()
+
+
+def test_the_default_route_is_read_in_the_kernel_s_own_byte_order() -> None:
+    """`/proc/net/route` is little-endian hex, which is where a reader goes wrong.
+
+    `0100580A` is 10.88.0.1 and not 1.0.88.10, and a route reported backwards
+    is worse than none: it looks like an answer.
+    """
+    table = (
+        "Iface\tDestination\tGateway \tFlags\tRefCnt\tUse\tMetric\tMask\n"
+        "eth1\t00000000\t0100580A\t0003\t0\t0\t100\t00000000\n"
+        "eth0\t0000590A\t00000000\t0001\t0\t0\t0\t00FFFFFF\n"
+    )
+
+    assert contained.default_route(table) == "via 10.88.0.1 on eth1"
+
+
+def test_a_table_with_no_default_answers_that_rather_than_guessing() -> None:
+    """Two networks and no way off either, which is the state under suspicion.
+
+    Every per-network gateway can be populated while this row is absent:
+    only one network provides the default route and netavark installs none
+    for an internal one, so the metadata and the table disagree exactly here.
+    """
+    table = (
+        "Iface\tDestination\tGateway \tFlags\tRefCnt\tUse\tMetric\tMask\n"
+        "eth0\t0000590A\t00000000\t0001\t0\t0\t0\t00FFFFFF\n"
+        "eth1\t0000580A\t00000000\t0001\t0\t0\t0\t0000FFFF\n"
+    )
+
+    assert contained.default_route(table) == ""
+
+
+def test_an_unreadable_table_is_not_read_as_a_route() -> None:
+    """A proxy that could not be asked is not a proxy that answered `none`.
+
+    Both render the same way here and that is acceptable — the surrounding
+    report says whether the container is running — but neither may raise,
+    since a diagnostic that dies on a missing file diagnoses nothing.
+    """
+    assert contained.default_route("") == ""
+    assert contained.default_route("Iface\tDestination\tGateway\n") == ""
+    assert contained.default_route("garbage\n\n  \n") == ""

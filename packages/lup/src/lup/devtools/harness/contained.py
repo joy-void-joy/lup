@@ -24,6 +24,7 @@ import os
 import time
 from collections import deque
 from contextlib import nullcontext
+from ipaddress import IPv4Address
 from pathlib import Path
 
 import sh
@@ -253,6 +254,28 @@ def running(name: str, engine: ContainerEngine) -> bool:
     except (sh.CommandNotFound, sh.ErrorReturnCode):
         return False
     return str(state).strip() == "true"
+
+
+def default_route(table: str) -> str:
+    """The default route in a kernel routing table, read as the kernel writes it.
+
+    ``/proc/net/route`` rather than ``ip route``, because the proxy image
+    carries no ``iproute2`` and a probe that needed one would report a
+    missing tool as a missing route -- the same shape of false answer this
+    module keeps finding. A file every container has cannot be absent for a
+    reason unrelated to the question.
+
+    The destination and gateway are little-endian hexadecimal in the kernel's
+    own byte order, which :mod:`ipaddress` and :meth:`int.from_bytes` read
+    between them; a default route is the row whose destination is all zeroes.
+    """
+    for row in table.splitlines()[1:]:
+        columns = row.split()
+        if len(columns) < 3 or columns[1] != "00000000":
+            continue
+        gateway = IPv4Address(int.from_bytes(bytes.fromhex(columns[2]), "little"))
+        return f"via {gateway} on {columns[0]}"
+    return ""
 
 
 def proxy_log(name: str, engine: ContainerEngine, lines: int = 20) -> str:
@@ -571,6 +594,21 @@ class EgressState(BaseModel, frozen=True):
             "question asked so far answers correctly and nothing works"
         ),
     )
+    route: str = Field(
+        default="",
+        description=(
+            "The default route the kernel inside the proxy would actually "
+            "use, which is the question a per-network gateway does not "
+            "answer. Only one of a container's networks provides it and "
+            "netavark installs none for an internal one, so a proxy on two "
+            "networks that each *record* a gateway can hold no default route "
+            "at all — and every packet it sends to a public address then "
+            "fails instantly rather than timing out. Read out of "
+            "``/proc/net/route``, which is a file rather than a tool: the "
+            "proxy image carries no ``ip``, and a probe needing one would "
+            "report a missing tool as a missing route"
+        ),
+    )
     resolver: str = Field(
         default="",
         description=(
@@ -668,6 +706,14 @@ class EgressState(BaseModel, frozen=True):
             *(
                 [
                     Notice(
+                        text=(
+                            "default route: "
+                            + (self.route or "none — it reaches only its own networks")
+                        ),
+                        urgency="ready" if self.route else "refusal",
+                        indent=1,
+                    ),
+                    Notice(
                         text=f"resolving through: {self.resolver or 'nothing it names'}",
                         urgency="detail",
                         indent=1,
@@ -694,14 +740,17 @@ class EgressState(BaseModel, frozen=True):
         ]
 
     def routes(self) -> bool:
-        """Whether any network the proxy is on offers it a way off that network.
+        """Whether the proxy holds a default route the kernel would use.
 
-        The question membership does not answer. An ``--internal`` network is
-        precisely one with no gateway, so a proxy correctly attached to the
-        session's network and to nothing else is a proxy that is *there* and
-        can reach nothing — and every cheaper question about it answers yes.
+        Asked of the routing table rather than of the networks, because those
+        two answers came apart on the machine this was written for: both legs
+        recorded a gateway and the container reached nothing. Only one of a
+        container's networks provides the default route, netavark installs
+        none for an internal one, and ``podman inspect`` reports a network's
+        ``.1`` address as its gateway either way. Membership said yes,
+        metadata said yes, and every packet failed instantly.
         """
-        return any(leg.gateway for leg in self.legs)
+        return bool(self.route)
 
     def verdict(self) -> list[Notice]:
         """What the facts above add up to, in the words a session would use.
@@ -869,6 +918,7 @@ def egress_state(
     # `getent` exits 2 on a name it cannot find and says nothing, so the
     # question is carried into the answer and the verdict comes off `worked`.
     looked = within("getent", "hosts", resolving)
+    routed = default_route(within("cat", "/proc/net/route").text)
     nameservers = " ".join(
         line.split()[1]
         for line in within("cat", "/etc/resolv.conf").text.splitlines()
@@ -879,6 +929,7 @@ def egress_state(
         proxy=proxy,
         resolver=nameservers,
         legs=legs,
+        route=routed,
         reached=looked.worked,
         upstream=f"{resolving} -> {looked.text or 'no answer'}",
         alias=egress.alias,
