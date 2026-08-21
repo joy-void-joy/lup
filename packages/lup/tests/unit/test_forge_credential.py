@@ -45,14 +45,33 @@ def test_the_token_reaches_both_the_forge_client_and_git() -> None:
     assert environment["LUP_GIT_TOKEN"] == "tok"
 
 
-def test_no_token_configures_nothing_at_all() -> None:
-    """A rewrite with no credential is a prompt nobody in here can answer.
+def test_no_token_still_makes_the_remote_addressable() -> None:
+    """The rewrite is what a remote needs; the credential is what a push needs.
 
-    Half of this arrangement is worse than none: the remote would be
-    redirected to HTTPS and then ask for a password, in a session with no
-    human at the other end of it.
+    An ssh remote is unreachable from inside for a reason that has nothing to
+    do with credentials -- the session's network resolves no names at all --
+    so withholding the rewrite until a token appeared turned a public fetch
+    that would have worked into a hostname that would not resolve, which
+    reads as a broken container rather than as a boundary.
     """
-    assert GitAccess().environment("", REWRITE) == {}
+    environment = GitAccess().environment("", REWRITE)
+    count = int(environment["GIT_CONFIG_COUNT"])
+    keys = {environment[f"GIT_CONFIG_KEY_{index}"] for index in range(count)}
+    assert "url.https://github.com/.insteadOf" in keys
+    assert "LUP_GIT_TOKEN" not in environment
+    assert "GH_TOKEN" not in environment
+
+
+def test_the_helper_refuses_in_the_name_of_the_variable_that_would_answer() -> None:
+    """Git names the URL it could not authenticate to, never the way in.
+
+    A helper that fails with the variable's name in it is the boundary's only
+    sentence at the moment somebody meets the wall. The launch notice that
+    also named it has scrolled past by then.
+    """
+    helper = GitAccess().helper("")
+    assert "LUP_GIT_TOKEN" in helper.value
+    assert "exit 1" in helper.value
 
 
 def test_the_absence_of_a_token_is_said_at_launch() -> None:
@@ -80,18 +99,18 @@ def test_the_launch_says_the_agent_can_read_the_token() -> None:
 
 
 def test_an_ssh_config_alias_is_taken_apart_rather_than_pattern_matched() -> None:
-    """The case that refuted a prefix list, and it is this repository's own remote.
+    """The case that refuted a prefix list, and what any ssh config produces.
 
-    `jvj:joy-void-joy/lup.git` begins with none of `git@`, `ssh://git@` or
+    `forge:owner/repo.git` begins with none of `git@`, `ssh://git@` or
     `ssh://`. A list of ssh spellings produced no rewrite for it at all, so a
     contained session would have kept an ssh remote with no ssh to reach it,
     and the push would have failed in the transport's vocabulary rather than
     the boundary's.
     """
-    parsed = parse_remote("jvj:joy-void-joy/lup.git")
+    parsed = parse_remote("forge:owner/repo.git")
     assert parsed is not None
-    assert parsed.prefix == "jvj:"
-    assert parsed.host == "jvj"
+    assert parsed.prefix == "forge:"
+    assert parsed.host == "forge"
     assert parsed.proxied is False
 
 
@@ -184,5 +203,7 @@ def test_the_signing_choice_reaches_the_configuration_the_container_starts_with(
     None
 ):
     """Otherwise the declaration is a preference nothing acts on."""
-    keys = {item.key for item in GitAccess(signing=AgentKey()).configuration(REWRITE)}
+    keys = {
+        item.key for item in GitAccess(signing=AgentKey()).configuration(REWRITE, "tok")
+    }
     assert "user.signingkey" in keys

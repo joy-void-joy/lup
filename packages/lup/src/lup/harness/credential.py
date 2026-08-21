@@ -220,16 +220,15 @@ def parse_remote(url: str) -> RemoteAddress | None:
     Git accepts three shapes and only one of them is a URL that a parser in
     the standard library reads. ``scheme://[user@]host/path`` is; the
     scp-like ``[user@]host:path`` is not, and neither is a bare local path.
-    Measured rather than assumed: ``urlsplit`` reads ``jvj:owner/repo.git`` as
-    a URL whose *scheme* is ``jvj``, and reads ``git@github.com:owner/repo``
+    Measured rather than assumed: ``urlsplit`` reads ``forge:owner/repo.git``
+    as a URL whose *scheme* is ``forge``, and reads ``git@github.com:owner/repo``
     as a path with no scheme at all -- so it cannot even be used to tell the
     two apart, let alone to take either one apart correctly.
 
     The obvious PyPI parser was tried and refuted for this job. ``giturlparse``
     does handle scp-like syntax, but validates against a roster of known
     forges, so it answers ``valid: False`` for a URL spelled through an ssh
-    config alias -- which is precisely the case this exists for, and is this
-    repository's own remote.
+    config alias -- which is precisely the case this exists for.
 
     A local path yields nothing, which is right: there is no transport to
     rewrite, and a checkout whose remote is a directory keeps working
@@ -262,12 +261,12 @@ def parse_remote(url: str) -> RemoteAddress | None:
 def resolved_host(alias: str) -> str:
     """What ssh says a name actually reaches, which may not be the name itself.
 
-    An ssh config alias is a hostname only ssh knows: ``jvj`` in a remote
+    An ssh config alias is a hostname only ssh knows: ``forge`` in a remote
     reaches ``github.com`` because ``~/.ssh/config`` says so, and nothing in
     the URL records it. Comparing the written name against a forge would
-    therefore miss every remote spelled through an alias -- which is not an
-    exotic arrangement, it is this repository's own, and it is exactly the
-    case a list of prefixes silently failed.
+    therefore miss every remote spelled through an alias -- which is what any
+    checkout looks like once its author keeps an ssh config, and is exactly
+    the case a list of prefixes silently failed.
 
     Asked of ssh rather than read out of its configuration file, because the
     file is not the whole answer: ``Include`` directives, ``Match`` blocks, a
@@ -312,9 +311,9 @@ def remote_rewrites(root: Path, host: str) -> list[RemoteRewrite]:
 
     Decided on the *resolved* host rather than on the URL's spelling, which
     is the whole of what §9.2 meant by remote spellings being unbounded. A
-    first draft matched three prefixes and produced no rewrite at all for
-    this repository's own remote, `jvj:joy-void-joy/lup.git` -- an ssh config
-    alias, which no prefix list can recognize and only ssh can resolve. The
+    first draft matched three prefixes and produced no rewrite at all for a
+    remote spelled `forge:owner/repo.git` -- an ssh config alias, which no
+    prefix list can recognize and only ssh can resolve. The
     container would have kept an ssh remote it has no ssh to reach, and the
     push would have failed in the transport's vocabulary rather than in the
     boundary's.
@@ -369,29 +368,52 @@ class GitAccess(BaseModel, frozen=True):
         description="What a commit made inside the boundary claims, if anything",
     )
 
-    def configuration(self, rewrites: list[RemoteRewrite]) -> list[GitSetting]:
+    def helper(self, token: str) -> GitSetting:
+        """What git answers an authentication challenge with, token or not.
+
+        With a token, the variable is read out of the environment rather than
+        out of a file, so nothing lands in the tree and nothing survives the
+        container: ``store`` would write it into the config home, and a
+        prompt would hang a non-interactive session forever.
+
+        Without one, a helper is installed anyway and refuses on stderr. That
+        is the boundary's only chance to get a sentence in at the moment
+        somebody needs it -- git's own account of an unanswerable challenge
+        names the URL and never the variable that would have answered it, and
+        the launch notice that did name it has scrolled past by then.
+        """
+        answered = (
+            f"echo username={self.username}; echo password=${self.token_variable}"
+            if token
+            else (
+                f'echo "lup: no token in {self.token_variable}, so this '
+                "session cannot authenticate to a forge; export it on the "
+                'host before the launch" >&2; exit 1'
+            )
+        )
+        return GitSetting(key="credential.helper", value=f"!f() {{ {answered}; }}; f")
+
+    def configuration(
+        self, rewrites: list[RemoteRewrite], token: str
+    ) -> list[GitSetting]:
         """Every git setting the container starts with, in one list.
 
-        The rewrites point each ssh spelling at HTTPS, the credential helper
-        answers with the token, and the signing member says what a commit
-        claims. Assembled here because the three are only correct together: a
-        rewrite with no credential is a prompt nobody can answer, and a
-        credential with no rewrite is never reached.
+        The rewrites point each ssh spelling at HTTPS, the helper answers for
+        the token or refuses in its name, and the signing member says what a
+        commit claims.
+
+        A rewrite used to be withheld unless a token came with it, on the
+        reasoning that half this arrangement is worse than none: a remote
+        redirected to HTTPS and then asked for a password, in a session with
+        no human at the other end. What refutes it is that the prompt is
+        gone. Terminal prompting is off inside the image, so the unanswerable
+        challenge that argument feared is now a refusal with a reason, and
+        the rewrite is the only thing making a remote addressable at all.
         """
         return [
             *[rewrite.setting() for rewrite in rewrites],
             *self.signing.configuration(),
-            # Reads the token out of the environment rather than out of a
-            # file, so nothing lands in the tree and nothing survives the
-            # container. `store` would write it into the config home, and a
-            # prompt would hang a non-interactive session forever.
-            GitSetting(
-                key="credential.helper",
-                value=(
-                    f"!f() {{ echo username={self.username}; "
-                    f"echo password=${self.token_variable}; }}; f"
-                ),
-            ),
+            self.helper(token),
         ]
 
     def environment(self, token: str, rewrites: list[RemoteRewrite]) -> EnvVars:
@@ -401,14 +423,25 @@ class GitAccess(BaseModel, frozen=True):
         above every configuration file: nothing inside the checkout can
         override what was decided out here, and nothing has to be written
         into a tree the agent can edit. A file would be both.
+
+        Sent whether or not there is a token, which is the part that used to
+        be withheld. An ssh remote is unreachable from in here for a reason
+        that has nothing to do with credentials -- the session's network
+        resolves no names at all -- so the rewrite is what makes a remote
+        addressable, and a public repository is readable through it on no
+        credential whatsoever. Holding it back until a token appeared turned
+        every tokenless fetch into a hostname that would not resolve, which
+        reads as a broken container rather than as a boundary, and left the
+        signing settings unsent beside it: the launch said commits were
+        unsigned while the checkout's own ``commit.gpgsign`` still stood.
         """
-        if not token:
-            return {}
-        settings = self.configuration(rewrites)
-        return {
-            self.token_variable: token,
+        settings = self.configuration(rewrites, token)
+        carried = (
             # `gh` reads its own variable and shares the one credential.
-            "GH_TOKEN": token,
+            {self.token_variable: token, "GH_TOKEN": token} if token else {}
+        )
+        return {
+            **carried,
             "GIT_CONFIG_COUNT": str(len(settings)),
             **{
                 name: value
@@ -430,13 +463,20 @@ class GitAccess(BaseModel, frozen=True):
         the variable named.
         """
         if not token:
+            reach = (
+                f"{len(rewrites)} ssh remote spelling(s) rewritten to HTTPS, so "
+                "a public repository still reads"
+                if rewrites
+                else "no ssh remote to rewrite"
+            )
             return [
                 Notice(
                     text=(
-                        f"Forge: no token in {self.token_variable}, so nothing "
-                        "in this session can reach a remote. The ssh key is on "
-                        "the host by design and nothing routes to it, so a push "
-                        "or a fetch will fail rather than quietly fall back to it."
+                        f"Forge: no token in {self.token_variable}; {reach}. "
+                        "Whatever needs a credential — a push, a private "
+                        "repository — refuses in that variable's name rather "
+                        "than prompting. The ssh key is on the host by design "
+                        "and nothing routes to it, so nothing falls back to it."
                     ),
                     urgency="warning",
                 ),
