@@ -10,24 +10,6 @@ SPELLING = provenance.Provenance(
 )
 """One checkout, unqualified: this skill turns the library's clone into the project."""
 
-# lup: solved: Initialization never configures the seams. It interviews the domain,
-# prunes scaffolding, and walks the `# lup: template:` markers, but the points a
-# project is meant to settle about *itself* — the `DevProject` declaration, the
-# `HookSet` in its catalog, its path roles, and above all which of the library's
-# scan rules it holds itself to — are left at the library's defaults without
-# ever being put to anyone. A default nobody was shown is not a decision, and
-# `RuleSelection` exists precisely because a repository that settled a
-# convention differently is not defective there. Add a phase that puts each seam
-# to the user, and offer removing the anti-patterns altogether as one of the
-# answers: a domain that does not want them should be able to say so once at
-# init rather than retire thirty ids one at a time, or discover the whole family
-# only when an edit is denied by a rule it never agreed to.
-# lup: solved: `/lup:init` never asks who owns README.md. `human_owned_files` in
-# src/lup_template/devtools/harness/catalog.py locks it, so an initialized
-# domain inherits an approval gate on the one file it most wants the agent to
-# write, and no phase surfaces the choice. Ask it here alongside the other
-# ownership decisions, and make unlocking a `lup-devtools` command that edits
-# the declaration and regenerates — not a hand edit of the catalog.
 SKILL = models.Skill(
     id="skill.init",
     name="init",

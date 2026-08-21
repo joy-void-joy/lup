@@ -409,12 +409,6 @@ def decide_sed_words(
             continue
         if word.startswith("--"):
             name, separator, value = word.partition("=")
-            # lup: solved: Seems counterproductive not to just accept sed here. A
-            # real denial read: "escalated (renaming one keyword argument at 38
-            # identical call sites across 9 files; the substitution is
-            # exact-string and the result is verified by pyright plus the
-            # suite): in-place sed bypasses the edit policy — use Edit". An
-            # escalation carrying that reason should get through.
             if name in ("--in-place", "--inplace"):
                 in_place = True
                 continue
@@ -777,12 +771,6 @@ def uv_package_source(
     return None
 
 
-# lup: solved: (Re)-installing lup, or clearing the cache, should be auto-allowed.
-# `uv cache clean lup && uv lock --upgrade-package lup && uv sync --all-extras`
-# needed a leading escalate marker and *still* asked, on "dependency changes
-# fetch and execute external code" — for a refresh of a dependency the project
-# already declares. The gh block below sits between this note and `decide_uv`,
-# which is its subject.
 def decide_uv(
     words: list[str],
     runner_targets: list[RunnerTargetRow],

@@ -97,9 +97,6 @@ type NativeCapabilityEvidence = (
 )
 
 
-# lup: solved: `claude_composition` and `codex_composition` should probably be ABC
-# implementations instead — one declared seam each runtime fills, rather than
-# two parallel free functions a caller picks between by name.
 class NativeComposer(ABC):
     """How one runtime assembles a project's content into what a CLI opens.
 

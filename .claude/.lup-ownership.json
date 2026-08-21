@@ -324,7 +324,7 @@
     {
       "path": ".claude/plugins/lup/hooks/runtime/kernel/commands.py",
       "category": "generated",
-      "sha256": "9bfdb335809a70709ee6e289f442c343ce38a0a3f8bc5762291066b3132fabc4",
+      "sha256": "3e66b7a8fab2e9f2d4a48948bea5eb020d741038b94e08322e473caad3700eaf",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -338,7 +338,7 @@
     {
       "path": ".claude/plugins/lup/hooks/runtime/kernel/edit.py",
       "category": "generated",
-      "sha256": "4bc284cc3a1410cbc49e3c7895f63a8928c18a5a051de622cc513a5e7654ce72",
+      "sha256": "b2c66bc0e8ec3a4920023632ff9e35ed0d82e9b5b24cb053bd5965b65250cb15",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
