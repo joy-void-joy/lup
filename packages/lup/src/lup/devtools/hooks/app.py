@@ -23,6 +23,7 @@ import typer
 
 from pydantic import AnyHttpUrl
 
+from lup.devtools.hooks.corpus import read_corpus
 from lup.harness.enforcement import declared_path_rules, semantic_policy_for
 from lup.harness.models import HookSet
 from lup.policy.models import Decision, FetchUrl, ShellCommand
@@ -218,5 +219,45 @@ def create_hooks_app(declared: Callable[[], HookSet]) -> typer.Typer:
             typer.echo(f"{'protected':>10}  {root}")
         for path in hooks.human_owned_files:
             typer.echo(f"{'human':>10}  {path}")
+
+    @app.command("learn")
+    def learn_command(
+        as_json: Annotated[bool, typer.Option("--json", help="Emit JSON")] = False,
+    ) -> None:
+        """Review the commands the policy declined to interrupt about.
+
+        The log half of allow-and-log. A deferral hands the call to the
+        runtime's own gate and its reason reaches no human, so this is where
+        it is read back.
+
+        Two lists, and only the first is asking for anything. **Gaps** are
+        commands nobody has ever judged, which a boundary carried rather than
+        a rule -- each is a candidate for a row in the shell vocabulary.
+        **Settled** are commands a rule judged and the boundary answered for,
+        which is the relaxation working; read them to check it is letting
+        through what you meant.
+
+        Nothing here writes a rule, and the refusal is the point: from one
+        deferred `ruff check .`, a row of `ruff` permits `ruff format --write`
+        forever and a row of `ruff check` permits `ruff check --fix`; the same
+        mechanism over `rm tmp/scratch` permits `rm -rf`. What separates them
+        is the judgement you are here to make.
+        """
+        corpus = read_corpus(project_root())
+        if as_json:
+            output_json(corpus.model_dump(mode="json"))
+            return
+        gaps = corpus.gaps()
+        settled = corpus.settled()
+        if not corpus.deferrals:
+            typer.echo("Nothing deferred yet — no command has reached the runtime.")
+            return
+        typer.echo(f"{len(gaps)} unjudged — candidates for a vocabulary row:")
+        for item in gaps:
+            typer.echo(f"  {item.command}")
+            typer.echo(f"      {item.reason}")
+        typer.echo(f"\n{len(settled)} settled by the boundary — the audit trail:")
+        for item in settled:
+            typer.echo(f"  {item.command}")
 
     return app

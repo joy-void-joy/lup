@@ -31,6 +31,7 @@ from host import (
     granted_allowances,
     managed_script_roots,
     recoverable_write_targets,
+    record_deferral,
     resolved_refutations,
     undo_snapshot,
     worktree_path,
@@ -140,6 +141,12 @@ def bash_decision(
     )
     if verdict.effect == "deny":
         return verdict
+    # The log half of allow-and-log. A deferral is this policy declining to
+    # interrupt, which is the one verdict that reaches nobody: the runtime's
+    # own gate decides and the reason goes to no human. Written down here or
+    # it is not written down anywhere.
+    if verdict.effect == "defer":
+        record_deferral(cwd, command, verdict.reason, verdict.recovery != "nothing")
     return undo_point(verdict, reference)
 
 

@@ -183,10 +183,17 @@ class RestoredBySession(SettlementRule):
             # the narrower recovery would give anyway.
             case _:
                 return None
+        # The recovery travels onto the deferral, and is the whole of how a
+        # reader downstream tells this from a deferral nobody looked at. Both
+        # reach the word `defer`, and they are worth opposite things: an
+        # unjudged one is a gap in the vocabulary, and this one is a rule
+        # having looked. Left off, the only difference would be the wording
+        # of a reason, which is not a distinction anything should read.
         return KernelDecision(
             "defer",
             f"{facts.decision.reason} — settled by this session rather than"
             f" asked: {held}",
+            recovery=facts.decision.recovery,
         )
 
 
