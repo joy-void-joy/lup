@@ -51,6 +51,7 @@ from pydantic import BaseModel
 
 from lup.policy.kernel.decision import DecisionEffect, SandboxPlacement
 from lup.policy.kernel.rows import RunnerTargetRow, RuleLevel, ShellRuleRow
+from lup.selection import SelectableRule
 
 type CommandEffect = Literal["allow", "ask", "deny"]
 
@@ -231,8 +232,13 @@ class ShellSubcommandRule(BaseModel, frozen=True):
         )
 
 
-class ShellCommandRule(BaseModel, frozen=True):
+class ShellCommandRule(SelectableRule, frozen=True):
     """One executable — a read-only tool, or a subcommand-gated command.
+
+    Selectable by its executable name, which is also what the kernel matches
+    on, so a project replacing ``git`` replaces exactly the rule that would
+    have judged ``git`` and leaves no second rule under that name for a walk
+    to reach first.
 
     On a subcommand-gated command, ``value_flags`` name the global options that
     consume the following word (``git -C <path>``) so the value is never read
@@ -264,6 +270,9 @@ class ShellCommandRule(BaseModel, frozen=True):
     subcommands: list[ShellSubcommandRule] = []
     sandbox: SandboxPlacement = ROOT_SANDBOX
     reason: str = ""
+
+    def selection_id(self) -> str:
+        return self.name
 
     def declared(self) -> DeclaredAxes:
         """The axes this command states itself, leaving the rest to inherit."""

@@ -589,7 +589,7 @@ def render_codex_rules(source: HookSet) -> str:
         f"prefix_rule(pattern = {json.dumps(prefix)}, decision = "
         '"allow", justification = "Allowed by Lup semantic shell policy")'
         for prefix in codex_allow_prefixes(
-            source.shell_rules,
+            source.resolved_shell_rules(),
             list(source.runner_targets),
             excluded_commands=source.sandbox.excluded_commands
             if source.sandbox
@@ -728,13 +728,14 @@ class CodexHookRenderer(ArtifactRenderer[HookSet]):
                         acceptance_guard=guard.erased()
                         if (guard := source.acceptance_guard)
                         else None,
-                        shell_rules=list(source.shell_rules),
+                        shell_rules=source.resolved_shell_rules(),
+                        edit_rules=source.resolved_edit_rules(),
                         refused_tools=list(source.refused_tools),
                         recoverable_target_limit=source.recoverable_target_limit,
                         runner_targets=list(source.runner_targets),
                         sandbox_excluded_commands=source.excluded_commands(),
                         auto_escape_prefixes=codex_allow_prefixes(
-                            source.shell_rules,
+                            source.resolved_shell_rules(),
                             list(source.runner_targets),
                             source.excluded_commands(),
                         ),

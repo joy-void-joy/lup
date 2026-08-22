@@ -641,7 +641,6 @@ class CodexSessionOpener:
                 await server.close()
 
 
-# lup: ignore[model-free-function] — composition root over the session config
 def create_codex_session_factory(config: CodexSessionConfig) -> SessionFactory:
     """Create the named Codex runtime composition root."""
     return SessionFactory(CodexSessionOpener(config).open_session)

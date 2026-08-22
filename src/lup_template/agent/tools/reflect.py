@@ -193,7 +193,6 @@ open-ended investigation."""
 # The reviewer session is the subject: this composes a factory, runs one query,
 # and returns its verdict. ReflectInput is the `review` tool's input schema,
 # handed over whole, so the operation is the tool's rather than the schema's.
-# lup: ignore[model-free-function] — nested session over the tool's input schema
 async def run_reviewer(
     validated: ReflectInput,
     outputs_dir: Path | None,

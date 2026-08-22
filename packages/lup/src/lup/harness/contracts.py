@@ -50,7 +50,7 @@ class SkillInvocationRenderer(ABC):
         """Render qualification, escaping, and arguments together."""
 
 
-class Spelling(BaseModel, frozen=True):
+class Spelling(BaseModel, ABC, frozen=True):
     """What one runtime says for a portable idea, or why it has nothing to say.
 
     A portable idea one runtime cannot express is the case absence handles
@@ -134,7 +134,7 @@ class Unsupported(Spelling, frozen=True):
         return f"unsupported — {self.reason}"
 
 
-class NativeSpellings(SkillInvocationRenderer):  # lup: ignore[abc-capability]
+class NativeSpellings(SkillInvocationRenderer, ABC):  # lup: ignore[abc-capability]
     """Own one native runtime's spelling of everything portable prose names.
 
     Deliberately wider than the three-method shape the capability rule wants: a

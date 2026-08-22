@@ -45,6 +45,7 @@ from policy_data import (
     ANTI_PATTERN_ROWS,
     RESOLUTION_COMMAND,
     DENIED_FETCH_SCOPES,
+    EDIT_RULES,
     KNOWN_ALLOWANCES,
     MAXIMUM_ADDED_LINES,
     PATH_ROLES,
@@ -429,14 +430,15 @@ def resolved_refutations(
         return None
 
 
-def existing_write_targets(targets: list[str]) -> list[str]:
+def existing_write_targets(targets: list[str], root: Path | None = None) -> list[str]:
     """Report which of a command's write targets already exist on disk.
 
     The kernel never reads the filesystem, so it cannot tell creating a file
     from overwriting one. Resolving that here keeps the decision itself a
     pure function of the command text and this list.
     """
-    return [target for target in targets if (Path.cwd() / target).exists()]
+    where = Path.cwd() if root is None else root
+    return [target for target in targets if (where / target).exists()]
 
 
 def git_answers(arguments: list[str], root: Path) -> list[str] | None:
@@ -583,6 +585,7 @@ def bash_decision(
     sandboxed: bool,
     interactive: bool,
     escapable: bool,
+    cwd: Path | None,
 ) -> KernelDecision:
     """Judge one shell command against the declared vocabulary.
 
@@ -597,6 +600,11 @@ def bash_decision(
     replacing it would cost. Resolving them for only one of the two writing
     forms is what left ``rm f`` granted while ``echo x > f`` asked about the
     same clean, tracked file.
+
+    ``cwd`` is where the calling session is, which the command's relative
+    operands resolve against. It is a parameter rather than a read of this
+    process, because a hook is promised nothing about where it runs, and
+    resolving a target against the wrong tree answers a different question.
 
     ``escapable`` is the one thing here a runtime answers rather than the host:
     whether it can put a single call outside its own sandbox. It arrives as an
@@ -615,13 +623,13 @@ def bash_decision(
         path_roles=PATH_ROLES,
         path_rules=PATH_RULES,
         existing_targets=existing_write_targets(
-            [*shell_write_targets(command), *acted_on]
+            [*shell_write_targets(command), *acted_on], cwd
         ),
         recoverable_targets=recoverable_write_targets(
-            [*shell_write_targets(command), *acted_on]
+            [*shell_write_targets(command), *acted_on], cwd
         ),
-        directory_targets=directory_write_targets(acted_on),
-        empty_directories=empty_directory_targets(acted_on),
+        directory_targets=directory_write_targets(acted_on, cwd),
+        empty_directories=empty_directory_targets(acted_on, cwd),
         recoverable_target_limit=RECOVERABLE_TARGET_LIMIT,
         runner_targets=RUNNER_TARGETS,
         target_tables=RUNNER_TARGET_TABLES,
@@ -670,6 +678,7 @@ def edit_decision(
     after: str | None,
     path_exists: bool,
     autonomous: bool,
+    operation: str = "modify",
 ) -> KernelDecision:
     """Judge one file's before and after against the declared edit policy.
 
@@ -711,6 +720,9 @@ def edit_decision(
         python_source=python_source,
         acceptance_guard=ACCEPTANCE_GUARD,
         refuted=refuted,
+        suffix=suffix,
+        operation=operation,
+        edit_rules=EDIT_RULES,
     )
 
 
@@ -816,6 +828,7 @@ def dispatch(payload):
             # A call's sandbox is an argument of the call here, so a verdict
             # that has to leave the sandbox is carried out rather than refused.
             escapable=True,
+            cwd=Path(payload["cwd"]) if "cwd" in payload else None,
         )
     if name == "WebFetch":
         return fetch_decision(tool_input["url"])
@@ -827,15 +840,19 @@ def dispatch(payload):
             tool_input["new_string"],
             "replace_all" in tool_input and tool_input["replace_all"] is True,
         )
-        return edit_decision(path, before, after, Path(path).exists(), autonomous)
+        return edit_decision(
+            path, before, after, Path(path).exists(), autonomous, "modify"
+        )
     if name == "Write":
         path = tool_input["file_path"]
+        exists = Path(path).exists()
         return edit_decision(
             path,
             read_document(path),
             tool_input["content"],
-            Path(path).exists(),
+            exists,
             autonomous,
+            "overwrite" if exists else "create",
         )
     # Asked of whatever reached here rather than of a listed few: which tools
     # are worth refusing is the declaration's answer, and naming any of them

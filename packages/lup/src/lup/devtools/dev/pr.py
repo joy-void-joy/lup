@@ -32,7 +32,13 @@ from lup.devtools.dev.branches import (
 )
 from lup.devtools.layout import get_tree_dir
 
-from lup.devtools.utils import git, gh, decode_stderr, output_json
+from lup.devtools.utils import (
+    git,
+    gh,
+    decode_stderr,
+    output_json,
+    repository_arguments,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -224,7 +230,6 @@ class CreateResult(PRResult):
 
 
 # The result already answers how to print itself; what is left is the flag.
-# lup: ignore[model-free-function] — subject is the CLI's --json choice
 def output_result(result: PRResult, as_json: bool) -> None:
     if as_json:
         output_json(result)
@@ -260,6 +265,7 @@ def status(
             gh.out(
                 "pr",
                 "list",
+                *repository_arguments(),
                 "--head",
                 branch_name,
                 "--state",
@@ -289,6 +295,7 @@ def status(
                 "pr",
                 "view",
                 str(pr_number),
+                *repository_arguments(),
                 "--json",
                 "reviews,statusCheckRollup,mergeable,mergeStateStatus,reviewDecision",
             )
@@ -354,7 +361,9 @@ def pr_merged(pr_number: int) -> bool:
     """
     try:
         detail = GhPrDetail.model_validate_json(
-            gh.out("pr", "view", str(pr_number), "--json", "state")
+            gh.out(
+                "pr", "view", str(pr_number), *repository_arguments(), "--json", "state"
+            )
         )
     except sh.ErrorReturnCode:
         logger.exception("could not read PR #%s state back", pr_number)
@@ -372,7 +381,14 @@ def pr_head_ref(pr_number: int) -> str:
     """
     try:
         detail = GhPrDetail.model_validate_json(
-            gh.out("pr", "view", str(pr_number), "--json", "headRefName")
+            gh.out(
+                "pr",
+                "view",
+                str(pr_number),
+                *repository_arguments(),
+                "--json",
+                "headRefName",
+            )
         )
     except sh.ErrorReturnCode:
         logger.exception("could not read PR #%s head branch", pr_number)
@@ -430,7 +446,14 @@ def merge(
     head_ref = pr_head_ref(pr_number)
 
     try:
-        gh("pr", "merge", str(pr_number), f"--{method}", *gh_args)
+        gh(
+            "pr",
+            "merge",
+            str(pr_number),
+            *repository_arguments(),
+            f"--{method}",
+            *gh_args,
+        )
         typer.echo(f"Merged PR #{pr_number}")
     except sh.ErrorReturnCode as e:
         if not pr_merged(pr_number):
@@ -588,6 +611,7 @@ def push(
         pr_raw = gh.out(
             "pr",
             "list",
+            *repository_arguments(),
             "--head",
             branch_name,
             "--state",
@@ -656,13 +680,21 @@ def create(
 
     ``gh pr create`` has no ``--json`` flag — on success it prints the new
     PR's URL to stdout. The PR number is the final path segment of that URL.
+
+    The head branch is named rather than left to inference. Naming the
+    repository is what stops the remote-URL inference an alias defeats, and
+    once the repository is given the checkout no longer says which branch the
+    request comes from — so the two go together.
     """
     try:
         raw = gh.out(
             "pr",
             "create",
+            *repository_arguments(),
             "--base",
             base,
+            "--head",
+            current_branch(),
             "--title",
             title,
             "--body",
@@ -692,7 +724,7 @@ def update(
 ) -> None:
     """Update a PR body."""
     try:
-        gh("pr", "edit", str(pr_number), "--body", body)
+        gh("pr", "edit", str(pr_number), *repository_arguments(), "--body", body)
         typer.echo(f"Updated PR #{pr_number}")
     except sh.ErrorReturnCode as e:
         typer.echo(f"Failed to update PR: {decode_stderr(e)}", err=True)

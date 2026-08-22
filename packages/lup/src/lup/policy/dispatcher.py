@@ -1,4 +1,4 @@
-# lup: ignore[model-free-function, constant-declaration]
+# lup: ignore[constant-declaration]
 # Every constant here is a name in the script this module emits — its package,
 # its members, its router, its entry point, its shebang. They are the compiled
 # artifact's own vocabulary, so a caller passing different ones would be
