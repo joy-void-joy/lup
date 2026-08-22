@@ -128,9 +128,22 @@ def annotated_tree(
         return f"{label:<{note_column}} # {described}"
 
     def shown(entry: Path) -> bool:
+        """Whether this entry is part of the layout, rather than beside it.
+
+        The tree is read from the filesystem, so everything a tool leaves in
+        the checkout is visible here — and a diagram of what a reader would
+        import has no room for any of it. A dotted entry is skipped because
+        Python cannot import one; a directory holding no source anywhere
+        beneath it is skipped because the package it used to be has moved,
+        leaving orphaned bytecode where the modules were.
+        """
+        if entry.name.startswith("."):
+            return False
         if entry.name in skipped_names or entry.name.endswith(skipped_suffixes):
             return False
-        return entry.is_dir() or entry.suffix == ".py"
+        if entry.is_dir():
+            return any(entry.rglob("*.py"))
+        return entry.suffix == ".py"
 
     def children(directory: Path) -> list[Path]:
         listed = sorted(directory.iterdir(), key=lambda entry: entry.name)
