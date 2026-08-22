@@ -26,7 +26,6 @@ from lup.policy.kernel.edit import (
     dict_get_sites,
     empty_collection_exempt_lines,
     lines_of,
-    refiner_named,
     slice_exempt_lines,
 )
 from lup.policy.kernel.rows import AntiPatternRow
@@ -423,7 +422,7 @@ def test_audit_catches_directive_comments_wherever_they_sit() -> None:
         assert [(f.kind, f.rule_id) for f in findings] == [("missing", rule_id)], line
 
 
-# ── empty-collection AST refiner ──────────────────────────────────────────
+# ── empty-collection AST exemptions ───────────────────────────────────────
 
 INIT_STATE = """\
 class Scheduler:
@@ -590,20 +589,7 @@ def test_the_matcher_selects_nothing_from_a_fragment_it_cannot_parse() -> None:
     assert dict_get_sites("@app.get(\n") == []
 
 
-def test_declared_refiners_are_the_kernel_refiners() -> None:
-    """A rule's refiner is the same object the hook applies from its row.
-
-    The rule holds the function and its row carries the name, because a row
-    projected into the hermetic runtime cannot carry a callable. Nothing but
-    this keeps them the same: a rule refined on one side only is how a marker
-    becomes one the audit demands gone and the hook refuses to remove.
-    """
-    for rule in PYTHON_ANTI_PATTERNS:
-        expected = None if rule.refiner is None else rule.refiner.exempt
-        assert refiner_named(antipattern_row(rule)["refiner"]) is expected, rule.id
-
-
-def test_refiner_exempts_deliberate_defaults() -> None:
+def test_empty_collection_exempts_deliberate_defaults() -> None:
     assert empty_collection_exempt_lines(INIT_STATE) == {3, 4}
     assert empty_collection_exempt_lines(CLASS_FIELD) == {2}
     assert empty_collection_exempt_lines(CALL_KWARG) == {1}
@@ -612,40 +598,40 @@ def test_refiner_exempts_deliberate_defaults() -> None:
     assert empty_collection_exempt_lines(MODULE_DECLARATION) == {1}
 
 
-def test_refiner_exempts_except_body_fallback() -> None:
+def test_empty_collection_exempts_except_body_fallback() -> None:
     # Degrade-to-empty in a handler is a fallback value, not a fold seed.
     assert empty_collection_exempt_lines(EXCEPT_FALLBACK) == {4}
     # Only DIRECT handler statements: a seed nested in a loop still trips.
     assert empty_collection_exempt_lines(EXCEPT_NESTED_SEED) == set()
 
 
-def test_refiner_exempts_tolerant_folds() -> None:
+def test_empty_collection_exempts_tolerant_folds() -> None:
     # Per-item try/except is exactly what a comprehension cannot express.
     assert empty_collection_exempt_lines(TOLERANT_FOLD) == {2}
     # One tolerant and one plain feeding loop: the plain fold keeps tripping.
     assert empty_collection_exempt_lines(MIXED_FEEDING) == set()
 
 
-def test_refiner_exempts_loop_free_seeds() -> None:
+def test_empty_collection_exempts_loop_free_seeds() -> None:
     # No loop feeds these, so there is no comprehension to prefer.
     assert empty_collection_exempt_lines(CONDITIONAL_BUILD) == {2}
     assert empty_collection_exempt_lines(CLOSURE_ACCUMULATOR) == {2}
-    # Deliberate: mutation through a callee is invisible to the refiner.
+    # Deliberate: mutation through a callee is invisible to the exemption.
     assert empty_collection_exempt_lines(HELPER_FILLED) == {2}
 
 
-def test_refiner_exempts_in_loop_resets() -> None:
+def test_empty_collection_exempts_in_loop_resets() -> None:
     # The reset inside the loop is machinery, not a seed; both function-level
     # seeds feed an unguarded loop and still trip.
     assert empty_collection_exempt_lines(LOOP_RESET) == {7}
 
 
-def test_refiner_keeps_flagging_seeds() -> None:
+def test_empty_collection_keeps_flagging_seeds() -> None:
     assert empty_collection_exempt_lines(LOCAL_SEED) == set()
     assert empty_collection_exempt_lines(MODULE_SEED) == set()
 
 
-def test_refiner_unparseable_source_exempts_nothing() -> None:
+def test_empty_collection_unparseable_source_exempts_nothing() -> None:
     assert empty_collection_exempt_lines("def broken(:\n") == set()
 
 
@@ -692,7 +678,7 @@ ABBREVIATED_SLICE = "short = commit[:12]\n"
 KEPT_SLICE = "preview = summary[:200]\n"
 
 
-def test_slice_refiner_clears_what_is_not_a_cut() -> None:
+def test_slice_exemption_clears_what_is_not_a_cut() -> None:
     assert slice_exempt_lines(DIGEST_SLICE) == {1}
     assert slice_exempt_lines(SPLIT_SLICE) == {1}
     assert slice_exempt_lines(SNIFFED_SLICE) == {1}
@@ -700,7 +686,7 @@ def test_slice_refiner_clears_what_is_not_a_cut() -> None:
     assert slice_exempt_lines(ABBREVIATED_SLICE) == {1}
 
 
-def test_slice_refiner_clears_the_line_the_bracket_sits_on() -> None:
+def test_slice_exemption_clears_the_line_the_bracket_sits_on() -> None:
     """A chain opening on one line and closing on another clears both.
 
     The pattern matches where `[:n]` is written and the node starts at the
@@ -710,11 +696,11 @@ def test_slice_refiner_clears_the_line_the_bracket_sits_on() -> None:
     assert slice_exempt_lines(MULTILINE_DIGEST) == {1, 2, 3}
 
 
-def test_slice_refiner_keeps_flagging_a_kept_prefix() -> None:
+def test_slice_exemption_keeps_flagging_a_kept_prefix() -> None:
     assert slice_exempt_lines(KEPT_SLICE) == set()
 
 
-def test_slice_refiner_unparseable_source_exempts_nothing() -> None:
+def test_slice_exemption_unparseable_source_exempts_nothing() -> None:
     assert slice_exempt_lines("def broken(:\n") == set()
 
 
@@ -1153,7 +1139,7 @@ def test_default_factory_and_empty_collection_never_share_a_line() -> None:
     """The two divide pydantic's ground; neither doubles up on the other's.
 
     The rule prescribes the literal default, and that literal sits on an
-    annotated class declaration — precisely what the other rule's refiner
+    annotated class declaration — precisely what the other rule's matcher
     clears. Were it otherwise, the replacement one gate demands would be the
     line the other refuses.
     """

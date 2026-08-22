@@ -326,12 +326,11 @@ def suppression_placement(violation_line: int) -> str:
 def python_tree(source: str) -> ast.Module | None:
     """One file's parsed syntax tree, or ``None`` where it does not parse.
 
-    Every AST refiner below asks the same question of the same text, and a
+    Every AST reader below asks the same question of the same text, and a
     parse costs more than the walk that follows it — so the tree is built
     once per source and handed to each of them rather than rebuilt per
-    caller. A whole-repository sweep runs five refiners and four other
-    readers over each file, and parsed per caller that is nine parses of
-    every file in the tree.
+    caller. A whole-repository sweep runs nine readers over each file, and
+    parsed per caller that is nine parses of every file in the tree.
 
     Unbounded for the reason the prose map is: the key is text the caller is
     already holding, so evicting an entry frees nothing it was not keeping.
@@ -351,7 +350,7 @@ def python_nodes(tree: ast.Module) -> list[ast.AST]:
     `ast.walk` is a generic breadth-first generator: it allocates a queue and
     reads each node's fields through `getattr` to find the children, and a
     whole-repository sweep runs about ten of those over every file — the
-    refiners, the boundary scans and the import readers all asking the same
+    matchers, the boundary scans and the import readers all asking the same
     tree for the same nodes. The walk is a pure function of the tree, so it
     happens once and the list is what each of them reads.
 
@@ -2224,60 +2223,16 @@ def silent_truncation_sites(source: str) -> list[MatchSite]:
     return sites_at(sliced - slice_exempt_lines(source))
 
 
-def refiner_named(name: str) -> Callable[[str], set[int]] | None:
-    """The AST context one row names, where the row names one.
-
-    A rule earns a refiner when its pattern is wider than the defect it names
-    and the difference is decidable without types. Which rule has which lives
-    at the declaration in `lup.codescan.antipatterns` and travels in the row,
-    so this side holds only the functions a row may name — a rule that gains a
-    refiner reaches the gate by construction rather than by someone also
-    remembering to widen a list of ids here.
-
-    The two here are the exemptions a matcher still subtracts rather than
-    states: whether a seed is one a loop goes on to fill, and whether a
-    prefix leaves its tail somewhere, are properties of the surrounding
-    scope. A rule whose whole shape the grammar can name declares a matcher
-    instead and takes no refiner at all.
-    """
-    match name:
-        case "empty_collection_exempt_lines":
-            return empty_collection_exempt_lines
-        case "slice_exempt_lines":
-            return slice_exempt_lines
-    return None
-
-
-def refined_exempt_lines(
-    source: str, rows: list[AntiPatternRow]
-) -> dict[str, set[int]]:
-    """Where each refined rule is cleared in this source, computed once.
-
-    A row without the field reads as declaring no refiner, which is what an
-    empty name already means here. The table is generated, so a rule can
-    arrive from a branch older than the field — and this gate is compiled
-    into the dispatcher that decides every edit, whose own recovery is
-    regenerating the table. Raising on the malformed table would take down
-    the one path that repairs it, and the rule then simply runs unrefined,
-    which reports more than it should rather than less.
-    """
-    found: dict[str, set[int]] = {}
-    for row in rows:
-        refiner = refiner_named(row["refiner"] if "refiner" in row else "")
-        if refiner is not None:
-            found[row["id"]] = refiner(source)
-    return found
-
-
 def matcher_named(name: str) -> Callable[[str], list[MatchSite]] | None:
     """The AST selector one row names, where the row names one.
 
     A rule earns a matcher when the shape it refuses is one the grammar has a
     word for, which is most of them. Which rule has which lives at the
-    declaration in `lup.codescan.antipatterns` and travels in the row, for the
-    reason the refiners do: this side holds only the functions a row may name,
-    so a rule that gains one reaches the gate by construction rather than by
-    someone also remembering to widen a list of ids here.
+    declaration in `lup.codescan.antipatterns` and travels in the row, because
+    a row projected into the hermetic runtime is primitive and cannot carry a
+    callable: this side holds only the functions a row may name, so a rule
+    that gains one reaches the gate by construction rather than by someone
+    also remembering to widen a list of ids here.
     """
     match name:
         case "import_re_sites":
@@ -2393,10 +2348,9 @@ def matched_lines(source: str, rows: list[AntiPatternRow]) -> dict[str, set[int]
     fail toward silence. The site is seen again the moment the file parses.
 
     A row without the field reads as declaring no matcher, which is what an
-    empty name already means here — the tolerance `refined_exempt_lines`
-    keeps, and for the same reason: this gate is compiled into the dispatcher
-    that decides every edit, and a table from an older branch has to leave
-    that dispatcher able to regenerate it.
+    empty name already means here. This gate is compiled into the dispatcher
+    that decides every edit, so a table from an older branch has to leave
+    that dispatcher able to regenerate it rather than taking it down.
     """
     parses = python_tree(source) is not None
     found: dict[str, set[int]] = {}
@@ -2454,8 +2408,8 @@ def resites_a_suppression(line: str, gone: list[str]) -> bool:
     `# lup: ignore[a, b]` becoming `# lup: ignore[a]` from a suppression
     appearing out of nowhere, and asks about both. The first is the edit the
     audit *demands* when it reports a directive spurious, so asking to approve
-    it makes one gate request what the other grants — the same split
-    `refined_exempt_lines` exists to avoid.
+    it makes one gate request what the other grants — the same split a
+    matcher stating its rule once exists to avoid.
 
     Moving one is the same shape and was refused for the same reason. Adopting
     a placement policy necessarily rewrites the markers the old policy allowed,
@@ -2719,7 +2673,7 @@ def awaits_resolution(
             rows,
             python_code_lines(after),
             mask_python_string_literals(after),
-            refined_exempt_lines(after, rows),
+            {},
             python_comment_columns(after) is not None,
             matched_lines(after, rows),
         )
@@ -2820,7 +2774,7 @@ def antipattern_decision(
         mask_python_string_literals(after) if python_source else original_lines
     )
     code_lines = python_code_lines(after) if python_source else original_lines
-    exempt = refined_exempt_lines(after, rows) if python_source else {}
+    exempt: dict[str, set[int]] = {}
     matched = matched_lines(after, rows) if python_source else {}
     for rule_id, lines in (refuted or {}).items():
         exempt[rule_id] = (
@@ -3181,8 +3135,8 @@ def decide_edit(
     about — while retiring one needs no gate at all: the same decision
     re-reads the uncovered line, allows it where nothing trips, and denies
     where the violation is still live. What makes that verdict trustworthy is
-    :func:`refined_exempt_lines`, without which a rule broader than the defect
-    it names holds its own suppression in place forever.
+    a matcher subtracting its own excess, without which a rule broader than
+    the defect it names holds its own suppression in place forever.
 
     ``acceptance_guard`` is the one gate that answers before the relaxations
     below rather than through them, because it asks whether the file may be
