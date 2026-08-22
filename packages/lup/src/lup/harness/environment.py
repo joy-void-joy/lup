@@ -42,10 +42,17 @@ def non_interactive_environment(
 # process it starts, listed so a caller can take them away rather than guess
 LAUNCHER_DECIDED_ENV: list[str] = [
     "LUP_CONTAINED",
-    "UV_PROJECT_ENVIRONMENT",
     "GIT_CONFIG_COUNT",
 ]
-"""What a launched process is told about where it is, rather than what it does."""
+"""What a launched process is told about where it is, rather than what it does.
+
+Deliberately not ``UV_PROJECT_ENVIRONMENT``, which reads like one and is not.
+It names where this machine's toolchain is, and
+:func:`~lup.policy.assets.host.declared_program` consults it on purpose so a
+declaration can name a program rather than a layout. Taking it away would not
+make a suite posture-independent -- it would make it measure a machine it is
+not running on, and the gate that resolves a bare name would resolve nothing.
+"""
 
 
 def launcher_decided_names(
