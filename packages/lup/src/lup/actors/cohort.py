@@ -138,6 +138,25 @@ class CohortJournal(Journal[ActorRef, CohortEntry]):
             )
         )
 
+    def conversation(self, actor: ActorRef, after_seq: int = -1) -> list[CohortEntry]:
+        """One conversation's own slice of the record, from a cursor forward.
+
+        By conversation rather than by ref, which is what
+        :meth:`~lup.journal.Journal.for_actor` matches. A round is an attempt
+        and not a new agent, so a reader following a worker into its second
+        round would otherwise watch that agent's record stop at the moment it
+        got another go.
+
+        This is the half that makes a *working* agent legible. Its turn events
+        are drained here as they happen, so what it has found so far is on
+        disk long before it returns; what a caller lacked was the read.
+        """
+        return [
+            entry
+            for entry in self.read(after_seq)
+            if entry.actor.conversation() == actor.conversation()
+        ]
+
 
 def submitted_summary(output: BaseModel | None) -> str:
     """What a finished agent found, read off the result it has already given.
@@ -175,7 +194,14 @@ class ActorCohort:
         self.root = root
         self.settles = settles
         self.run_id = run_id or root.name
-        self.journal = journal or CohortJournal(self.root)
+        # What this cohort reads back, which is not always what it writes to.
+        # A consumer keeping a journal of its own keeps one in its own
+        # vocabulary — the resolver's carries what the *run* did as well as
+        # what each actor did — and folding an agent's own stream out of that
+        # is not this layer's to do. The file is the one the root names either
+        # way, so the read is over the cohort's record wherever the writes go.
+        self.record = CohortJournal(self.root)
+        self.journal = journal or self.record
         # Taken rather than always built, because a consumer that already has
         # one must not end up with two. A question mailbox holds mail of its
         # own over the same directory, and a cohort that opened a second

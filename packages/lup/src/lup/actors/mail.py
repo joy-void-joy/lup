@@ -83,7 +83,33 @@ class ActorDelivery(BaseModel, frozen=True):
         return [message for message in self.messages if message.redirect]
 
 
-class MessagePostedEvent(BaseModel, frozen=True):
+class MailEventBase(BaseModel, frozen=True):
+    """One thing that happened to an actor's mail, answering about itself.
+
+    The arrangement the turn events already use, for the same reason: a
+    reader asks the event rather than testing which one it is holding, so a
+    third thing that can happen to a message — expired, forwarded, refused
+    by a closed door — is one class rather than an edit to every fold that
+    would otherwise have to notice it and would not.
+
+    What every kind carries is here. What separates them is whether the
+    actor took the message, which is the one fact a reader cannot infer and
+    the one the sender most needs: a sender is told a message was sent on
+    the strength of the mailbox accepting it, which is not the same as
+    anybody having read it.
+    """
+
+    text: str
+    door: str
+    redirect: bool = False
+
+    @property
+    def delivered(self) -> bool:
+        """Whether the actor took this, or it only ever reached its queue."""
+        raise NotImplementedError
+
+
+class MessagePostedEvent(MailEventBase, frozen=True):
     """A door volunteered something to an actor, or an actor replied.
 
     An intervention belongs in the record beside what it interrupted. A
@@ -93,13 +119,15 @@ class MessagePostedEvent(BaseModel, frozen=True):
     """
 
     type: Literal["message_posted"] = "message_posted"
-    text: str
-    door: str
     in_reply_to: str | None = None
-    redirect: bool = False
+
+    @property
+    def delivered(self) -> bool:
+        """Posted is handed over: this record is written where it lands."""
+        return True
 
 
-class MessageOutstandingEvent(BaseModel, frozen=True):
+class MessageOutstandingEvent(MailEventBase, frozen=True):
     """A message still queued for an actor whose session is being closed.
 
     Recorded because the sender was told the message was sent, and the
@@ -110,9 +138,11 @@ class MessageOutstandingEvent(BaseModel, frozen=True):
     """
 
     type: Literal["message_outstanding"] = "message_outstanding"
-    text: str
-    door: str
-    redirect: bool = False
+
+    @property
+    def delivered(self) -> bool:
+        """Queued and not handed over, which is the whole point of the record."""
+        return False
 
 
 type MailEvent = MessagePostedEvent | MessageOutstandingEvent

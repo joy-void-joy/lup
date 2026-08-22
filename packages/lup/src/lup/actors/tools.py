@@ -32,7 +32,9 @@ from lup.actors.mailbox import (
     QuestionMailbox,
     wait_for_answers,
 )
+from lup.actors.progress import ActorProgress, ProgressWindow, read_progress
 from lup.actors.questions import Question
+from lup.actors.refs import ActorRef
 from lup.actors.roster import SpawnedActor
 from lup.channels.models import Door, utc_now
 from lup.mcp import LupMcpTool, ToolError, lup_tool
@@ -91,6 +93,22 @@ class SpawnSayOutput(BaseModel):
         description=(
             "How much is queued for this spawn and not yet handed over. "
             "Nonzero after a spawn has ended means it read none of it"
+        )
+    )
+
+
+class SpawnReadInput(ProgressWindow):
+    """Which spawn to read, and how much of it.
+
+    The window is inherited rather than nested, so an agent that wants the
+    default page fills in one field and an agent following a fast spawn can
+    reach every knob at the same level.
+    """
+
+    address: str = Field(
+        description=(
+            "Which spawn to read. Anything the spawn listing printed works, "
+            "including the bare id"
         )
     )
 
@@ -303,7 +321,28 @@ def create_cohort_tools[Q: Question](
     Steering is off by default, because handing every member the power to
     redirect its siblings is a real grant. A session that spawned its agents
     holds it naturally; a run whose members each hold a lease should not.
+
+    Listing and reading come together. They are the same grant at two
+    resolutions — what you have running, and what one of them has been doing
+    — and a consumer that hands out one while withholding the other is
+    drawing a line nobody asked it to draw.
     """
+
+    def reaching(address: str) -> ActorRef:
+        """The agent an operator's spelling reaches, or a refusal naming who is.
+
+        One resolution for every verb that takes an address, so a spelling
+        one tool accepts is not a spelling the next one rejects, and a
+        failure says who is actually here instead of only that this was not.
+        """
+        actor = cohort.reaching(address)
+        if actor is None:
+            known = ", ".join(spawn.address for spawn in cohort.live()) or "none"
+            raise ToolError(
+                f"no spawn of this session answers to {address!r}; "
+                f"this session has spawned: {known}"
+            )
+        return actor
 
     @lup_tool(
         "List the agents you have spawned and what each was asked, with the "
@@ -316,6 +355,37 @@ def create_cohort_tools[Q: Question](
     )
     async def spawn_actors(_params: NoInput) -> SpawnListOutput:
         return SpawnListOutput(spawns=cohort.live())
+
+    @lup_tool(
+        "Read what a spawn has found so far, without waiting for it to "
+        "finish. Hands back its own words, the instruments it called, "
+        "anything that refused it, and anything you have said to it — "
+        "oldest first, with a cursor to resume from on the next read.\n\n"
+        "This is what makes steering worth doing. You can already redirect a "
+        "running spawn, but until you can see what it is doing, every "
+        "redirect is a guess about an agent you cannot see. Read it first "
+        "and the same message becomes a correction: it is grinding on a case "
+        "you have already closed, or it has just produced the bound you were "
+        "about to ask for and the useful thing to send is a different "
+        "question.\n\n"
+        "Reach for it when several stances are running against one note and "
+        "you want to know which is getting somewhere before any of them "
+        "return; when one has been going long enough that you wonder whether "
+        "it is stuck rather than thinking; and before any redirect, because "
+        "a redirect aimed at the wrong problem costs that spawn its context "
+        "for nothing.\n\n"
+        "Its reasoning is not carried, and neither is what its calls "
+        "returned: a whole certificate or a search sweep is the artifact "
+        "rather than news about it, and the spawn's own words are what it "
+        "made of one. `running` says whether it is still working, so a quiet "
+        "page is never mistaken for a finished agent, and `skipped` counts "
+        "what moved faster than you read. Returns {address, running, lines: "
+        "[{seq, at, kind, text, tool, door}], cursor, skipped, summary, "
+        "error}.",
+        name="spawn_read",
+    )
+    async def spawn_read(params: SpawnReadInput) -> ActorProgress:
+        return read_progress(cohort, reaching(params.address), params)
 
     @lup_tool(
         "Say something to an agent you spawned, while it is still working. "
@@ -337,13 +407,7 @@ def create_cohort_tools[Q: Question](
         name="spawn_say",
     )
     async def spawn_say(params: SpawnSayInput) -> SpawnSayOutput:
-        actor = cohort.reaching(params.address)
-        if actor is None:
-            known = ", ".join(spawn.address for spawn in cohort.live()) or "none"
-            raise ToolError(
-                f"no spawn of this session answers to {params.address!r}; "
-                f"this session has spawned: {known}"
-            )
+        actor = reaching(params.address)
         cohort.say(actor, params.text, redirect=params.redirect, door=door)
         return SpawnSayOutput(
             address=actor.label(),
@@ -416,7 +480,7 @@ def create_cohort_tools[Q: Question](
         return [queue_questions, await_answers, ask_questions]
 
     return [
-        *([spawn_actors] if roster else []),
+        *([spawn_actors, spawn_read] if roster else []),
         *([spawn_say] if steer else []),
         *([send_message] if report else []),
         *(asking(questions) if questions is not None else []),
