@@ -37,6 +37,15 @@ build context, an editor index — reads the credential along with the code.
 # lup: ignore[constant-declaration] — the keys Codex writes its own state under
 CODEX_CONFIG_STATE_KEYS = ("marketplaces", "plugins")
 
+# lup: ignore[constant-declaration] — Codex's own spelling for where a home
+# records which checkouts it will read the configuration of
+PROJECTS_KEY = "projects"
+
+# lup: ignore[constant-declaration] — Codex's own word for that decision; a
+# caller given it to set would be writing a record the runtime cannot read
+TRUSTED_PROJECT = "trusted"
+"""How a home records that it will read one checkout's own configuration."""
+
 # lup: ignore[constant-declaration] — Codex's own plugin layout, and the same
 # spelling it writes into a trust record; a caller given it to set would be
 # naming a file the runtime looks for somewhere else
@@ -184,6 +193,40 @@ def seed_config(source: Path, target: Path) -> bool:
     return True
 
 
+def trust_project(home: Path, worktree: Path) -> bool:
+    """Record that a scoped home trusts the checkout it was made for.
+
+    The runtime reads a project's own ``.codex/config.toml`` only for a
+    project its home trusts, and says nothing at all when it declines to.
+    That file is where a generated tree declares its tool servers, so a first
+    session in a fresh home opens with every one of them silently absent —
+    the config written, never read, and a session with no instruments looking
+    exactly like one that had none to declare. The same shape
+    :func:`sanitized_codex_config` keeps hook trust for, and the same reason.
+
+    Nothing is granted that was not already: the launch generated that file
+    from this repository's own declaration moments earlier, and trusting what
+    we just wrote is not a decision about anybody's code. Only ever in a home
+    this project made for this checkout — an operator's own home carries
+    their own decisions, and those are not ours to write.
+    """
+    config = home / "config.toml"
+    document = (
+        tomlkit.parse(config.read_text(encoding="utf-8"))
+        if config.is_file()
+        else tomlkit.document()
+    )
+    projects = document.setdefault(PROJECTS_KEY, tomlkit.table(is_super_table=True))
+    named = str(worktree.expanduser().resolve())
+    if named in projects:
+        return False
+    entry = tomlkit.table()
+    entry["trust_level"] = TRUSTED_PROJECT
+    projects[named] = entry
+    config.write_text(tomlkit.dumps(document), encoding="utf-8")
+    return True
+
+
 class CodexLoginState(BaseModel, frozen=True):
     """Whether a home holds a login, and when the issuer stops accepting it."""
 
@@ -254,6 +297,7 @@ class CodexWorktreeHomeStore:
             scoped_home / CODEX_LOGIN.credentials_file,
         )
         seed_config(self.account_home / "config.toml", scoped_home / "config.toml")
+        trust_project(scoped_home, worktree)
         if profile is not None:
             filename = profile_config_filename(profile)
             seed_config(self.account_home / filename, scoped_home / filename)

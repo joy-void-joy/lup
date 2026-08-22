@@ -16,6 +16,7 @@ from lup.adapters.codex.home import (
     declared_hook_records,
     login_state,
     select_codex_home,
+    trust_project,
     untrusted_hooks,
 )
 from lup.adapters.codex.marketplace import CodexMarketplace
@@ -172,10 +173,85 @@ def test_prepare_preserves_scoped_state_after_first_use(tmp_path: Path) -> None:
 
     assert store.prepare(worktree) == scoped
     assert (scoped / "auth.json").read_text(encoding="utf-8") == "scoped-auth"
-    assert (scoped / "config.toml").read_text(encoding="utf-8") == (
-        'model = "scoped"\n'
-    )
+    settings = tomlkit.parse((scoped / "config.toml").read_text(encoding="utf-8"))
+    assert settings["model"] == "scoped"
     assert session.read_text(encoding="utf-8") == "saved\n"
+
+
+def test_a_scoped_home_trusts_the_checkout_it_was_made_for(tmp_path: Path) -> None:
+    """Untrusted, the runtime reads none of a project's own configuration.
+
+    Which is where a generated tree declares its tool servers, so the gap
+    shows up as a session with no instruments rather than as an error.
+    """
+    account = tmp_path / "account"
+    account.mkdir()
+    (account / "config.toml").write_text(ACCOUNT_CONFIG, encoding="utf-8")
+    worktree = tmp_path / "worktree"
+    worktree.mkdir()
+
+    scoped = CodexWorktreeHomeStore(account).prepare(worktree)
+
+    config = tomlkit.parse((scoped / "config.toml").read_text(encoding="utf-8"))
+    projects = config.item("projects")
+    assert isinstance(projects, Table)
+    assert projects[str(worktree.resolve())]["trust_level"] == "trusted"
+    assert config["model"] == "gpt-personal"
+
+
+def test_a_home_made_before_the_trust_was_written_gets_it_on_next_use(
+    tmp_path: Path,
+) -> None:
+    """A home that predates this is exactly the one silently serving nothing."""
+    account = tmp_path / "account"
+    account.mkdir()
+    (account / "config.toml").write_text(ACCOUNT_CONFIG, encoding="utf-8")
+    worktree = tmp_path / "worktree"
+    worktree.mkdir()
+    store = CodexWorktreeHomeStore(account)
+    scoped = store.prepare(worktree)
+    (scoped / "config.toml").write_text('model = "scoped"\n', encoding="utf-8")
+
+    store.prepare(worktree)
+
+    config = tomlkit.parse((scoped / "config.toml").read_text(encoding="utf-8"))
+    projects = config.item("projects")
+    assert isinstance(projects, Table)
+    assert str(worktree.resolve()) in projects
+
+
+def test_a_trust_the_operator_already_recorded_is_left_alone(tmp_path: Path) -> None:
+    """Their decision about their own checkout, whatever they decided."""
+    account = tmp_path / "account"
+    account.mkdir()
+    worktree = tmp_path / "worktree"
+    worktree.mkdir()
+    scoped = CodexWorktreeHomeStore(account).home_for(worktree)
+    scoped.mkdir(parents=True)
+    (scoped / "config.toml").write_text(
+        f'[projects."{worktree.resolve()}"]\ntrust_level = "on-request"\n',
+        encoding="utf-8",
+    )
+
+    assert not trust_project(scoped, worktree)
+    config = tomlkit.parse((scoped / "config.toml").read_text(encoding="utf-8"))
+    projects = config.item("projects")
+    assert isinstance(projects, Table)
+    assert projects[str(worktree.resolve())]["trust_level"] == "on-request"
+
+
+def test_an_explicit_home_is_never_written_to(tmp_path: Path) -> None:
+    """An operator's own home carries their decisions, not ours."""
+    worktree = tmp_path / "worktree"
+    worktree.mkdir()
+    explicit = tmp_path / "personal"
+    explicit.mkdir()
+
+    selection = select_codex_home(explicit, {}, worktree)
+
+    assert selection.path == explicit
+    assert not selection.isolated
+    assert not (explicit / "config.toml").exists()
 
 
 def test_explicit_home_and_environment_bypass_scoped_initialization(
