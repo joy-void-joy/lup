@@ -34,6 +34,7 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 | `dev check` | Run ruff format, ruff check, pyright, and pytest. Read-only by default. |
 | `dev comments` | List unresolved `# lup:` feedback comments, or act on specific ones. |
 | `dev todos` | List `# lup: template:` markers — a scaffold&#x27;s open decisions. |
+| `dev seams` | Show what this project settled about itself, or settle one of them. |
 | `dev refutations` | Resolve one file&#x27;s proposed content and report what it refutes. |
 | `dev directives` | Measure every `# lup: ignore` against the canonical inline placement. |
 | `dev report-friction` | File or correct workflow friction in this checkout&#x27;s repository. |

@@ -57,7 +57,7 @@ src/lup_template/
 │   │       ├── guidance.py  # Canonical repository guidance.
 │   │       ├── provenance.py # What a project settles about where its lup came from.
 │   │       ├── settings.py  # What this repository grants, refuses, and enables for itself.
-│   │       ├── shell_vocabulary.py # This project's shell auto-allow vocabulary, composed from library groups.
+│   │       ├── shell_vocabulary.py # Where this project's shell vocabulary differs from the one lup offers.
 │   │       ├── skills/      # Typed harness content declarations.
 │   │       │   ├── brainstorm.py # Canonical declaration for the brainstorm skill.
 │   │       │   ├── import_skill.py # Canonical declaration for the import skill.

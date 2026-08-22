@@ -84,6 +84,10 @@ class Roster(BaseModel, frozen=True):
             solves="A durable journal of executed cells and the divergence check on replaying one: state is reconstructed by re-running the record rather than by serializing objects. What differs between users is the contract attached. An environment claiming determinism says a replay must reproduce its outcomes, so a divergence there is a defect in a claim; an environment claiming nothing still gets the report, and there the divergence *is* the finding — the result depended on something outside the journal. Both are replayable; only the first is certifiable.",
         ),
         RosterEntry(
+            package="selection",
+            solves="Taking a library table as offered and saying only what differs from it. Three tables reach a project as a starting point rather than a fixture — the anti-patterns it holds its code to, the shell vocabulary it runs, the edit gates it judges its own changes by — and in all three the only way to disagree with one entry was to restate the table around it, where a restatement fallen behind the library looks exactly like a decision. A project names what it drops and adds what the library lacks, keyed on the same id a directive, a denial and the generated reference already use, so an override replaces its namesake in place rather than sitting beside it.",
+        ),
+        RosterEntry(
             package="subagents",
             solves="Spec-driven delegation for engines with no native subagents, dispatching the same `SubagentSpec` roster the native path uses.",
         ),

@@ -79,13 +79,11 @@ def init_ownership_cmd(
         typer.Option(
             "--unlock", help="Stop surfacing every agent edit to this file as an ask"
         ),
-        # lup: ignore[empty-collection] — how typer spells a repeatable option that
-        # was not given, and it is read rather than appended to
     ] = [],
     lock: Annotated[
         list[str],
         typer.Option("--lock", help="Surface every agent edit to this file as an ask"),
-    ] = [],  # lup: ignore[empty-collection] — the same repeatable-option default
+    ] = [],
     dry_run: Annotated[
         bool,
         typer.Option(
