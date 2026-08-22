@@ -1,7 +1,9 @@
 """Evidence-ledger version-drift trigger tests."""
 
+from hashlib import sha256
 from pathlib import Path
 
+import pytest
 from pydantic import BaseModel, Field
 import yaml
 
@@ -10,7 +12,12 @@ from lup.devtools.dev.workflow import WORKFLOW_PATH, write_workflow
 from lup_template.devtools.harness.catalog import WORKFLOW
 from lup.devtools.harness.evidence import (
     EVIDENCE_LEDGER,
+    SCHEMA_COMMAND,
     EvidenceEntry,
+    SchemaDigest,
+    accepted_version,
+    cited_fixture,
+    digest_drift,
     evidence_drift,
     parse_version,
     sdk_evidence_drift,
@@ -87,6 +94,64 @@ def test_shipping_ledger_carries_every_probed_contract() -> None:
     capabilities = [entry.capability for entry in EVIDENCE_LEDGER]
 
     assert capabilities == ["claude-cli", "claude-agent-sdk", "codex-cli"]
+
+
+def test_digest_drift_reports_a_schema_whose_content_moved(tmp_path: Path) -> None:
+    accepted = [
+        SchemaDigest(path="v2/Thread.json", sha256=sha256(b"first").hexdigest())
+    ]
+    target = tmp_path / "v2" / "Thread.json"
+    target.parent.mkdir(parents=True)
+    target.write_bytes(b"first")
+
+    assert digest_drift(tmp_path, accepted) == []
+
+    target.write_bytes(b"second")
+    drift = digest_drift(tmp_path, accepted)
+
+    assert [item.path for item in drift] == ["v2/Thread.json"]
+    assert drift[0].accepted == accepted[0].sha256
+
+
+def test_digest_drift_reports_a_schema_the_generator_stopped_writing(
+    tmp_path: Path,
+) -> None:
+    accepted = [SchemaDigest(path="v2/Gone.json", sha256=sha256(b"kept").hexdigest())]
+
+    drift = digest_drift(tmp_path, accepted)
+
+    assert [item.found for item in drift] == [sha256(b"").hexdigest()]
+
+
+def test_the_page_and_the_probe_read_one_schema_command() -> None:
+    spelled = SCHEMA_COMMAND.spelled("<temporary-directory>")
+
+    assert spelled.startswith(SCHEMA_COMMAND.executable)
+    assert spelled.endswith("<temporary-directory>")
+    assert all(argument in spelled for argument in SCHEMA_COMMAND.arguments)
+
+
+def test_accepted_version_refuses_a_capability_no_row_carries() -> None:
+    assert accepted_version("codex-cli") == accepted_version(
+        "codex-cli", EVIDENCE_LEDGER
+    )
+    with pytest.raises(KeyError):
+        accepted_version("gemini-cli")
+
+
+def test_a_cited_fixture_that_moved_fails_generation(tmp_path: Path) -> None:
+    """The citation is checked against the tree, not retyped beside it.
+
+    A suite that moves leaves prose citing it reading exactly as it did while
+    pointing at nothing, which is the one failure a reader cannot see. Asking
+    the tree turns it into a generation error naming the path to repoint.
+    """
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_present.py").write_text("", encoding="utf-8")
+
+    assert cited_fixture(tmp_path, "tests/test_present.py") == "tests/test_present.py"
+    with pytest.raises(ValueError, match="cited as evidence"):
+        cited_fixture(tmp_path, "tests/test_moved_away.py")
 
 
 def test_native_workflow_probes_even_when_strict_evidence_fails() -> None:

@@ -50,6 +50,15 @@ RULES_REFERENCE = IndexEntry(
 )
 """The one page with no declaring module: it renders from the rule registry."""
 
+COMMAND_REFERENCE = IndexEntry(
+    link="commands.md",
+    answers=(
+        "Every command `lup-devtools` serves, walked from the composed CLI "
+        "rather than listed by hand."
+    ),
+)
+"""Also declared by no module: it renders from the wired app at generation."""
+
 
 def document(
     reference: list[models.Document], project: list[models.Document]
@@ -136,6 +145,7 @@ def document(
                         "library, which typed stand-in for a dict, which "
                         "parser, which resolver tool.",
                     ),
+                    COMMAND_REFERENCE,
                     entry(
                         page["docs.quality-pipeline"],
                         "The three check layers, and what each one uniquely catches.",

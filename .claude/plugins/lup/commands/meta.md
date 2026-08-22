@@ -24,7 +24,7 @@ Based on the user's input above, explore the relevant sources and brainstorm sol
 | .claude/CLAUDE.md under Claude Code, AGENTS.md under Codex | `harness/content/guidance.py` |
 | .claude/plugins/lup/commands/ under Claude Code, .codex/plugins/lup/skills/ under Codex | `harness/content/skills/*.py` |
 | .claude/plugins/lup/agents/ under Claude Code, .codex/agents/ under Codex | `harness/content/agents/*.py` |
-| .claude/plugins/lup/hooks/ under Claude Code, .codex/plugins/lup/hooks/ under Codex | the canonical policy in `packages/lup/src/lup/policy/` |
+| .claude/plugins/lup/hooks/ under Claude Code, .codex/plugins/lup/hooks/ under Codex | the canonical policy in `lup.policy` |
 | .claude/settings.json under Claude Code, .codex/config.toml under Codex | `harness/content/settings.py` and the adapter rendering each tree — the two are not parity, so read both before assuming a setting exists on either side |
 | .claude/plugins/lup/TEMPLATE_CLAUDE.md under Claude Code, .codex/plugins/lup/TEMPLATE_AGENTS.md under Codex | `harness/content/template_sections.py` plus each flavor module |
 

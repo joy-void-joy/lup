@@ -13,8 +13,10 @@ ran.
 
 The suite cannot be trusted to notice, because noticing is exactly what it
 failed to do. So the check sits outside every test: the refs of the enclosing
-repository are read once before the session and once after, and any difference
-fails the run naming the refs that moved. Detection rather than prevention — a
+repository are read once before the session and once after, and a difference
+fails the run naming the refs that moved — except where the ref belongs to
+another worktree of the same repository, which is that worktree's to move and
+so is reported rather than failed on. Detection rather than prevention — a
 ceiling that stopped git discovering the enclosing repository would also stop
 the tests that legitimately read it, and a suite that cannot run is a worse
 trade than one that reports what it broke.
@@ -204,5 +206,119 @@ def guard_report(before: dict[str, str], after: dict[str, str]) -> str:
             "Then find the fixture: it is one that runs git without",
             "`-C <tmp_path>` or without `monkeypatch.chdir` into the",
             "repository it built.",
+        ]
+    )
+
+
+class ForeignCheckouts(BaseModel, frozen=True):
+    """Which refs a worktree other than the one under test has checked out.
+
+    Every worktree cut from a repository shares its ref store, so the guard
+    reading `for-each-ref` in one of them sees every branch the repository
+    holds — twenty-five of them here, of which one is the checkout the suite
+    is running in. A commit landing in a sibling worktree while the suite runs
+    moves a ref for real, and from the refs alone that is indistinguishable
+    from a fixture escaping into the enclosing repository.
+
+    Asking git who holds each branch is what tells them apart. It is a
+    narrower question than "did anything move", and deliberately so: a ref
+    another worktree has checked out is that worktree's to move, while a ref
+    this one owns, or one that appeared from nowhere, is still the suite's to
+    answer for.
+    """
+
+    holders: dict[str, str] = {}
+    """Each checked-out ref, against the worktree path holding it."""
+
+    def holder(self, key: str) -> str | None:
+        """The other worktree that owns this key, when another one does."""
+        # lup: ignore[dict-get] — an open registry keyed by whatever refs the
+        # repository happens to hold, which is the shape the rule exempts
+        return self.holders.get(key)
+
+    def ours(self, state: dict[str, str]) -> dict[str, str]:
+        """The watched state this checkout is answerable for."""
+        return {key: value for key, value in state.items() if not self.holder(key)}
+
+    def theirs(self, state: dict[str, str]) -> dict[str, str]:
+        """The watched state another worktree owns."""
+        return {key: value for key, value in state.items() if self.holder(key)}
+
+    def verdict(self, before: dict[str, str], after: dict[str, str]) -> "GuardVerdict":
+        """What moved, split into what this run answers for and what it does not.
+
+        Config is never anybody else's: it is one shared file rather than a
+        ref a worktree holds, so it stays on the failing side whatever moved.
+        """
+        return GuardVerdict(
+            failure=guard_report(self.ours(before), self.ours(after)),
+            notice=foreign_notice(moved_refs(self.theirs(before), self.theirs(after))),
+        )
+
+    @classmethod
+    def beside(cls, root: Path) -> "ForeignCheckouts":
+        """Every branch checked out in a worktree that is not ``root``.
+
+        Read through `git worktree list`, which is the only thing that knows;
+        a failure to read is reported as no siblings, so a guard that cannot
+        answer the narrower question falls back to failing on everything
+        rather than passing on everything.
+        """
+        try:
+            listed = sh.Command("git")(
+                "-C", str(root), "worktree", "list", "--porcelain", _tty_out=False
+            )
+        except (sh.ErrorReturnCode, sh.CommandNotFound):
+            return cls()
+        return cls(holders=cls.declared(str(listed), root.resolve()))
+
+    @classmethod
+    def declared(cls, listing: str, own: Path) -> dict[str, str]:
+        """Each `branch` line of a porcelain listing, minus ``own``'s entry.
+
+        The format is one stanza per worktree, `worktree <path>` opening each
+        and `branch <ref>` naming what it holds; a detached or bare entry
+        simply carries no branch line and so claims no ref.
+        """
+        held: dict[str, str] = {}  # lup: ignore[empty-collection] — stanza fold
+        at = Path()
+        for line in listing.splitlines():
+            # lup: ignore[string-split] — git's own porcelain, whose key and
+            # value sit either side of one space by that format's definition
+            key, _, value = line.partition(" ")
+            match key:
+                case "worktree":
+                    at = Path(value).resolve()
+                case "branch" if at != own:
+                    held[value] = str(at)
+                case _:
+                    continue
+        return held
+
+
+class GuardVerdict(BaseModel, frozen=True):
+    """What the guard found, split by who is answerable for it."""
+
+    failure: str = ""
+    """The report to fail the run on, empty when nothing this run owns moved."""
+
+    notice: str = ""
+    """What moved in a sibling worktree: worth saying, not worth failing."""
+
+
+def foreign_notice(moved: list[str]) -> str:
+    """What to say about refs a sibling worktree moved under the suite's feet."""
+    if not moved:
+        return ""
+    return "\n".join(
+        [
+            "Refs moved while this suite ran, in worktrees that own them:",
+            "",
+            *(f"  {line}" for line in moved),
+            "",
+            "Another session committing in a sibling worktree is not this run",
+            "writing into the checkout, so the suite is not failed for it. A",
+            "ref this worktree owns, or one that appeared from nowhere, still",
+            "is.",
         ]
     )

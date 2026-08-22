@@ -42,7 +42,7 @@ The placement question between the first two rows is the one that matters, and
 it has a single test: *would another project built on lup want this?* If yes,
 it goes in the library even if only this application uses it today. The
 library never imports the application, so a utility placed wrongly in
-`src/lup_template/` is unreachable from `packages/lup/` and will have to move
+`src/lup_template/` is unreachable from the library and will have to move
 later.
 
 `tmp/` is scratch: gitignored, so nothing written there reaches a diff, a
@@ -128,6 +128,7 @@ Commit early, commit often, and keep commits atomic — if the message needs an
 | `chore` | Maintenance — dependencies, build config |
 | `meta` | Harness content and the trees it generates: guidance, settings, skills, hooks |
 | `data` | Generated data and outputs |
+
 
 A `data` commit of generated outputs may go straight to `dev`; code never
 does. Session data under `notes/` is gitignored here, so such commits arise

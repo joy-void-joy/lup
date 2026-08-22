@@ -33,6 +33,7 @@ from pydantic import BaseModel
 
 import lup.harness.models as models
 from lup.codescan.common import RuleSelection
+from lup.markdown import CodeCell, PlainCell
 
 PLAN_AT_AGENT_SPEED: list[models.PromptPart] = [
     models.TextPart(
@@ -71,9 +72,9 @@ You are not expected to hold this repository's conventions in memory. Gates enfo
 
 **The rule checker.** Executable rules in anti-pattern, boundary, spelling, and architecture families run on every edit and in `dev check`. A denial cites its rule id, and `docs/rules.md` indexes every rule with the shape it matches, its diagnostic, and the module that enforces it — generated from the same registry that runs, so it cannot drift from what stopped you.
 
-Suppress one deliberate site with `# lup: ignore[rule-id]` and a reason, comma-separating ids where a line trips several. The directive sits on the line it guards, or alone directly above it when the reason will not fit inline; nowhere else reaches, and one placed in a file's opening comment block applies file-wide. A bare `# lup: ignore` still parses but is reported untyped. A stale directive blocks. A rule marked **refused** takes no directive at all — its replacement is right every time, so a directive there could only express a decision to keep the defect, and the way past is to write what the diagnostic names. `# noqa`, `# type: ignore`, and `# pyright: ignore` are forbidden shapes rather than suppressions.
+Suppress one deliberate site with `# lup: ignore[rule-id]` and a reason, comma-separating ids where a line trips several. The directive sits on the line it guards, or alone directly above it when the reason will not fit inline; nowhere else reaches, and one placed in a file's opening comment block applies file-wide. A bare `# lup: ignore` still parses but is reported untyped. A stale directive blocks. `uv run lup-devtools dev directives` measures every one in the tree against that placement, so a directive silencing nothing is found by asking rather than by tripping over it later. A rule marked **refused** takes no directive at all — its replacement is right every time, so a directive there could only express a decision to keep the defect, and the way past is to write what the diagnostic names. `# noqa`, `# type: ignore`, and `# pyright: ignore` are forbidden shapes rather than suppressions.
 
-**The permission policy.** Every shell command, URL scope, and edit in a batch is classified. Segments join deny > ask > defer > allow, and malformed input fails conservatively. A denial names what tripped and the recovery, so you rarely need to read the lattice first. `# lup: escalate: <why>` as the leading line of a shell command promotes a classified deny or ask into an approval question carrying that reason.
+**The permission policy.** Every shell command, URL scope, and edit in a batch is classified. Segments join deny > ask > defer > allow, and malformed input fails conservatively. A denial names what tripped and the recovery, so you rarely need to read the lattice first. `uv run lup-devtools dev policy '<command>'` answers the same question before you spend a turn on it, and says why. `# lup: escalate: <why>` as the leading line of a shell command promotes a classified deny or ask into an approval question carrying that reason.
 
 **The edit budget.** A change block of at most three "real" changed lines is auto-allowed, so split large changes — imports in one edit, logic in another. A file declared human-owned surfaces every change as an approval instead: propose the exact edit as a question and let the user apply it, rather than writing it yourself.
 
@@ -232,6 +233,45 @@ Use `"""
     ),
 ]
 
+COMMIT_TYPES: list[models.PromptPart] = [
+    models.MarkdownTable(
+        headers=["Type", "Use"],
+        rows=[
+            [CodeCell(text="feat"), PlainCell(text="New feature or capability")],
+            [CodeCell(text="fix"), PlainCell(text="Bug fix")],
+            [
+                CodeCell(text="refactor"),
+                PlainCell(text="Neither fixes a bug nor adds a feature"),
+            ],
+            [CodeCell(text="docs"), PlainCell(text="Documentation only")],
+            [CodeCell(text="test"), PlainCell(text="Adding or updating tests")],
+            [
+                CodeCell(text="chore"),
+                PlainCell(text="Maintenance — dependencies, build config"),
+            ],
+            [
+                CodeCell(text="meta"),
+                PlainCell(
+                    text="Harness content and the trees it generates: guidance,"
+                    " settings, skills, hooks"
+                ),
+            ],
+            [CodeCell(text="data"), PlainCell(text="Generated data and outputs")],
+        ],
+    ),
+    models.TextPart(text="\n"),
+]
+"""The commit vocabulary, held once because three documents state it.
+
+A skill telling an agent how to commit, the contributing page a human reads,
+and the guidance both compose from were each carrying their own copy of this
+table, worded differently — `refactor` was "code restructuring without
+behavior change" in one and "neither fixes a bug nor adds a feature" in the
+other, for a row that is supposed to say one thing. Rows rather than prose so
+the escaping is the table's, and so a type added here reaches every reader at
+once.
+"""
+
 COMMIT_GUIDELINES: list[models.PromptPart] = [
     models.TextPart(
         text=r"""### Commit Guidelines
@@ -246,4 +286,5 @@ COMMIT_GUIDELINES: list[models.PromptPart] = [
 
 """
     ),
+    *COMMIT_TYPES,
 ]

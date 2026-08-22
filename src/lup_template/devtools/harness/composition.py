@@ -30,7 +30,7 @@ from lup_template.devtools.harness.catalog import (
     declared_hook_set,
     portable_harness,
 )
-from lup_template.devtools.harness.content.docs.catalog import DOCUMENTS
+from lup_template.devtools.harness.content.docs.catalog import documents
 from lup_template.devtools.harness.content.settings import project_settings
 from lup_template.devtools.harness.content.template_claude import (
     DOCUMENT as TEMPLATE_CLAUDE,
@@ -47,7 +47,7 @@ def project_content(root: Path) -> ProjectContent:
     harness = portable_harness(root=root)
     return ProjectContent(
         harness=harness,
-        documents=DOCUMENTS,
+        documents=documents(root),
         assets=[CONTENT_ROOT / "assets" / "file_suggest.sh"],
         settings=project_settings(harness.plugins[0]),
     )

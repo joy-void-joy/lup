@@ -1,24 +1,36 @@
 """Canonical declaration for the add-command skill."""
 
 import lup.harness.models as models
+from lup.devtools.harness.content.application import ApplicationLayout
 
-SKILL = models.Skill(
-    id="skill.add-command",
-    name="add-command",
-    description="Create a new slash command in the lup plugin",
-    arguments=[
-        models.Argument(
-            name="arguments",
-            description="Optional arguments supplied with the skill invocation",
-            required=False,
-        ),
-    ],
-    tools=["Read", "Write", "Edit", "Glob", "Grep", "AskUserQuestion"],
-    argument_hint="[name] [description]",
-    prompt=models.PromptDocument(
-        parts=[
-            models.TextPart(
-                text=r"""# Add New Command
+
+def skill(layout: ApplicationLayout) -> models.Skill:
+    """Author a skill into whichever half of this project owns its subject."""
+    return models.Skill(
+        id="skill.add-command",
+        name="add-command",
+        description="Create a new slash command in the lup plugin",
+        arguments=[
+            models.Argument(
+                name="arguments",
+                description="Optional arguments supplied with the skill invocation",
+                required=False,
+            ),
+        ],
+        tools=[
+            "Bash(uv run lup-devtools:*)",
+            "Read",
+            "Write",
+            "Edit",
+            "Glob",
+            "Grep",
+            "AskUserQuestion",
+        ],
+        argument_hint="[name] [description]",
+        prompt=models.PromptDocument(
+            parts=[
+                models.TextPart(
+                    text=r"""# Add New Command
 
 Declare a new skill in the harness catalog. Every native tree's flavor of it is generated from that one declaration.
 
@@ -27,10 +39,10 @@ Declare a new skill in the harness catalog. Every native tree's flavor of it is 
 Help the user create a new skill. A skill is a `models.Skill` declared in Python; the markdown with YAML frontmatter is what generation renders from it.
 
 **Arguments provided**: """
-            ),
-            models.ArgumentsRef(),
-            models.TextPart(
-                text=r"""
+                ),
+                models.ArgumentsRef(),
+                models.TextPart(
+                    text=r"""
 
 ### How to Parse Arguments
 
@@ -39,23 +51,23 @@ The first word is the **command name**. Everything after is the **description** 
 **Examples:**
 
 - `"""
-            ),
-            models.SkillInvocation(plugin="lup", skill="add-command"),
-            models.TextPart(
-                text=r""" review` — name is `review`, description not provided (ask)
+                ),
+                models.SkillInvocation(plugin="lup", skill="add-command"),
+                models.TextPart(
+                    text=r""" review` — name is `review`, description not provided (ask)
 - `"""
-            ),
-            models.SkillInvocation(plugin="lup", skill="add-command"),
-            models.TextPart(
-                text=r""" review Analyze PR diffs and suggest improvements` — name is `review`, description is "Analyze PR diffs and suggest improvements"
+                ),
+                models.SkillInvocation(plugin="lup", skill="add-command"),
+                models.TextPart(
+                    text=r""" review Analyze PR diffs and suggest improvements` — name is `review`, description is "Analyze PR diffs and suggest improvements"
 
 ### If No Arguments Provided
 
 If `"""
-            ),
-            models.ArgumentsRef(),
-            models.TextPart(
-                text=r"""` is empty, proceed to Phase 1 and ask for everything.
+                ),
+                models.ArgumentsRef(),
+                models.TextPart(
+                    text=r"""` is empty, proceed to Phase 1 and ask for everything.
 
 ## Phase 1: Gather Requirements
 
@@ -64,10 +76,10 @@ Gather any info **not already provided via arguments**, asking the user one ques
 1. **Command name**: What should the command be called? (e.g., `review`, `test`, `deploy`)
 2. **Purpose**: What does this command do?
 3. **Arguments**: Does this command accept arguments? If yes, define an `argument-hint` (e.g., `[target]`, `[file] [--verbose]`, `<required-arg>`). Arguments are passed to the command via `"""
-            ),
-            models.ArgumentsRef(),
-            models.TextPart(
-                text=r"""`.
+                ),
+                models.ArgumentsRef(),
+                models.TextPart(
+                    text=rf"""`.
 4. **Tools needed**: Which tools should be allowed? Every grant is a
    `ToolGrant` from `packages/lup/src/lup/types.py` — read that closed type for
    the spellings. Typical shapes: read-only exploration, the same plus writes
@@ -78,7 +90,7 @@ Gather any info **not already provided via arguments**, asking the user one ques
 
 Commands are generated artifacts. Write the declaration, not the markdown.
 
-1. Decide which half owns it: a skill that automates work *inside* a project is the library's (`packages/lup/src/lup/devtools/harness/content/skills/`); a skill whose subject is standing a project up or keeping it in step with upstream is this repository's (`src/lup_template/devtools/harness/content/skills/`). Create `<name>.py` there, exporting a `SKILL`:
+1. Decide which half owns it: a skill that automates work *inside* a project is the library's (`lup.devtools.harness.content.skills`); a skill whose subject is standing a project up or keeping it in step with upstream is this project's (`{layout.directory("devtools", "harness", "content", "skills")}`). Create `<name>.py` there, exporting a `SKILL`:
 
 ```python
 import lup.harness.models as models
@@ -102,7 +114,9 @@ SKILL = models.Skill(
 
 Build `parts` from `models.TextPart(text=r'...')` for the prose, splicing in `models.ArgumentsRef()` wherever the prompt needs the raw arguments and `models.SkillInvocation(plugin="lup", skill="<other>")` wherever it names another skill. Never hardcode a slash-command string — the invocation part renders the right syntax for each harness. Copy the raw-string style from a neighbouring skill module.
 
-2. Register it in the `content/catalog.py` of that same half: import `SKILL as SKILL_<NAME>` alongside its siblings, then add `SKILL_<NAME>` to `LIBRARY_SKILLS` (library) or `PROJECT_SKILLS` (this repository). Both lists are alphabetical, and the project catalog composes them into the `SKILLS` the plugin ships.
+A skill whose prose names a path inside this project's package exports a builder instead — `def skill(layout: ApplicationLayout) -> models.Skill` — and spells the path as `{{layout.path("agent", "prompts.py")}}` in an `rf` string. Writing the literal instead is correct in exactly one repository and misdirects every project built on it, which is why the library takes the package name rather than assuming it.
+
+2. Register it in the `content/catalog.py` of that same half: import it alongside its siblings, then add it to that half's roster — `library_skills` (library) or `PROJECT_SKILLS` (this project). Both are alphabetical, and the project catalog composes them into the `SKILLS` the plugin ships.
 
 3. Regenerate both native plugins:
 
@@ -111,24 +125,31 @@ uv run lup-devtools harness generate all
 ```
 
 """
-            ),
-            models.PluginPath(
-                plugin="lup", location="skills", member="<name>", scope="every_tree"
-            ),
-            models.TextPart(
-                text=r""" are written by that step — never by hand.
+                ),
+                models.PluginPath(
+                    plugin="lup", location="skills", member="<name>", scope="every_tree"
+                ),
+                models.TextPart(
+                    text=r""" are written by that step — never by hand.
 
 ## Phase 3: Verify
 
 After regenerating:
 
 1. Show the user the declaration module, and confirm the generated artifacts appeared for both harnesses
-2. Run `uv run lup-devtools dev check` — the ownership manifest must record the new artifacts
+2. Check the tree — the ownership manifest must record the new artifacts:
+
+"""
+                ),
+                models.WatchOutput(command="uv run lup-devtools dev check"),
+                models.TextPart(
+                    text=r"""
+
 3. Explain how to invoke it: `"""
-            ),
-            models.SkillPattern(plugin="lup", placeholder="<command-name>"),
-            models.TextPart(
-                text=r"""`
+                ),
+                models.SkillPattern(plugin="lup", placeholder="<command-name>"),
+                models.TextPart(
+                    text=r"""`
 4. Ask if any adjustments are needed
 
 ## Template Examples
@@ -177,14 +198,14 @@ Its `parts` open with the prose, splice `models.ArgumentsRef()` in after `**Argu
 - Declare a question grant for interactive skills, and splice `models.AskUser(...)` where one is asked
 - Set `argument_hint` on the declaration when the skill accepts arguments — use `[optional]` brackets and `<required>` angles
 - Splice `models.ArgumentsRef()` into the prompt parts wherever the body needs `"""
-            ),
-            models.ArgumentsRef(),
-            models.TextPart(
-                text=r"""` — never type that token literally
+                ),
+                models.ArgumentsRef(),
+                models.TextPart(
+                    text=r"""` — never type that token literally
 - Always include a fallback that asks the user when arguments are empty
 - Regenerate after every change; a hand-edited artifact is reverted the next time generation runs
 """
-            ),
-        ]
-    ),
-)
+                ),
+            ]
+        ),
+    )

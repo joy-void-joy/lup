@@ -1,39 +1,43 @@
 """Canonical declaration for the debug skill."""
 
 import lup.harness.models as models
+from lup.devtools.harness.content.application import ApplicationLayout
 
-SKILL = models.Skill(
-    id="skill.debug",
-    name="debug",
-    description="Trace an error through logs to find root cause",
-    arguments=[
-        models.Argument(
-            name="arguments",
-            description="Optional arguments supplied with the skill invocation",
-            required=False,
-        ),
-    ],
-    tools=[
-        "Read",
-        "Grep",
-        "Glob",
-        "Bash(ls:*, wc:*, sort:*, tail:*, stat:*, uv run lup-devtools:*)",
-    ],
-    argument_hint="[error message or fragment]",
-    prompt=models.PromptDocument(
-        parts=[
-            models.TextPart(
-                text=r"""# Debug: Trace an Error
+
+def skill(layout: ApplicationLayout) -> models.Skill:
+    """Trace an error to its root cause, naming this project's own sources."""
+    return models.Skill(
+        id="skill.debug",
+        name="debug",
+        description="Trace an error through logs to find root cause",
+        arguments=[
+            models.Argument(
+                name="arguments",
+                description="Optional arguments supplied with the skill invocation",
+                required=False,
+            ),
+        ],
+        tools=[
+            "Read",
+            "Grep",
+            "Glob",
+            "Bash(ls:*, wc:*, sort:*, tail:*, stat:*, uv run lup-devtools:*)",
+        ],
+        argument_hint="[error message or fragment]",
+        prompt=models.PromptDocument(
+            parts=[
+                models.TextPart(
+                    text=r"""# Debug: Trace an Error
 
 **Do not hypothesize -- trace.** Find the actual logs, read the exact exception, and report what happened. Never list "likely causes" or suggest the user check things.
 
 ## Input
 
 **Error text**: """
-            ),
-            models.ArgumentsRef(),
-            models.TextPart(
-                text=r"""
+                ),
+                models.ArgumentsRef(),
+                models.TextPart(
+                    text=rf"""
 
 ## Process
 
@@ -93,7 +97,7 @@ Structure your report as:
 **If logs are insufficient:**
 
 - State exactly what logging to add and where, so the error is captured next time
-- Be specific: "Add `logger.exception(...)` at `src/lup_template/agent/core.py:42` inside the `except` block"
+- Be specific: "Add `logger.exception(...)` at `{layout.path("agent", "core.py")}:42` inside the `except` block"
 
 ## Rules
 
@@ -102,7 +106,7 @@ Structure your report as:
 - **Read the source.** After finding the error location, read the actual source code to understand the failure.
 - **Be specific about fixes.** Point to exact files and lines, show before/after code.
 """
-            ),
-        ]
-    ),
-)
+                ),
+            ]
+        ),
+    )

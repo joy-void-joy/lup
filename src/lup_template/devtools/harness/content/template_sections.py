@@ -70,7 +70,7 @@ The single most important principle for improving this agent: **give it more too
 | Apply general principles                              | Apply specific pattern patches                     |
 | Communicate principles and the _why_                  | Prescribe rigid mechanical procedures              |
 | Provide state/context via tools                       | Use f-string prompt engineering                    |
-| Set `model=opus 5`, `max_thinking_tokens=128_000-1`   | Compensate for weak reasoning with complex prompts |
+| Ask for the `strongest` tier and a high `effort`      | Compensate for weak reasoning with complex prompts |
 | See what went wrong from first principles             | Make small edits to patch one mistake              |
 | Create subagents for specialized work                 | Build complex pipelines in main agent              |
 
@@ -107,23 +107,13 @@ For agents that exist over time — maintaining conversations, monitoring system
 | Agent parks thoughts (ideas, reminders) for later           | Drop context between interactions           |
 | Expose environment state as tool-readable data              | Hide activity from the agent                |
 
-**The core loop:** The agent never ends its turn. A Stop hook blocks it. Instead it cycles: wake → read context → think → act → meta-assess → sleep. The only way to yield control is `sleep()`, which blocks on an asyncio Event until something wakes it (external event, timer, reminder). This keeps the agent centered — it decides when to engage, when to wait, and when to come back.
-
-**Why not an event queue?** A queue steers the agent by its inputs — every event forces a reaction. The sleep/wake pattern lets the agent stay centered. It can debounce event bursts, schedule actions, set reminders, and park thoughts for later — all on its own terms. The agent continues thinking across sleep cycles rather than starting fresh on each event.
-
-**Library support:** `lup.realtime.scheduler` provides the `Scheduler` class (sleep/wake, debounce, scheduled actions, reminders, delayed actions) and gate presets (`create_stop_guard`, `create_pending_event_guard`, `create_meta_before_sleep_guard`), all built on `create_tool_gate` from `lup.hooks`. On backends whose tools run in a subprocess (Codex, OpenAI-compatible), `lup.realtime.relay` inverts the loop — each wake is one SDK turn, relayed through a file mailbox (`RealtimeMailbox`, `run_relay_session`). See the example tools in `src/<project>/agent/tools/realtime.py`.
+**The core loop:** The agent never ends its turn. Instead it cycles: wake → read context → think → act → meta-assess → sleep. The only way to yield control is `sleep()`, so the agent decides when to engage, when to wait, and when to come back — it can debounce bursts, schedule actions, set reminders, and park thoughts, where a queue would force a reaction to every event.
 
 ### Reflection Pattern
 
-Agents produce better output when forced to self-assess before committing. The reflection pattern has three components:
+Agents produce better output when forced to self-assess before committing. A reflection tool records confidence, uncertainties, and a tool audit, and runs an independent nested reviewer whose verdict opens or holds a gate; the gate rides inside submission, so a gated turn is rejected with a retriable message until the reviewer passes. The tool and its input model are the domain-specific half — add the fields your domain is actually judged on — while the gate is domain-neutral.
 
-1. **Reflection tool** (`agent/tools/reflect.py`): A domain-customizable tool the agent calls to record its self-assessment — confidence, key uncertainties, tool audit, process reflection. Runs an independent nested reviewer agent that returns a structured verdict (skippable per call; a skip or reviewer failure records an approval).
-2. **Review gate** (`lup.reflect`): A `ReviewGate` verdict tracker (approve/warn open the gate; fail re-blocks; 3 consecutive fails auto-open) + `create_reflection_gate()` hook factory (a preset of `create_tool_gate` from `lup.hooks`). Denies a target tool until the reviewer passes; the plain `ReflectionGate` base remains for act-of-reflecting gates (realtime `sleep`).
-3. **Wiring**: The gate rides inside submission — `reflection_submission_gate` adapts the `ReviewGate` to the `SubmissionGate` on the turn's `TurnToolBinding`, rejecting gated submissions with a retriable message until the reviewer passes (persistent agents gate `sleep` instead). Final output always flows through the turn-bound submission tool, whose `submit_output` handler (`lup.runtime.output`) validates against the turn's output model and persists through the bound `SubmittedOutputStore`; `ResilientTurn` sends bounded corrective cycles (`CorrectionConfig`) when a turn ends without a submission, and a turn that still produces none raises `StructuredOutputError`. `create_completion_guard` (`lup.hooks`) remains as optional Stop-hook hardening on backends that expose stop hooks.
-
-**Customizing reflection:** The gate mechanism in `lup.reflect` is domain-neutral and parametric. The reflection _tool_ and its input model (`ReflectInput` in `agent/tools/reflect.py`) are domain-specific — add fields for your domain (e.g., factor analysis for forecasting, move evaluation for games). The reviewer prompt should target your domain's common failure modes.
-
-**When to skip the reviewer:** Set `skip_reviewer=True` for speed-sensitive or trivial tasks. The reviewer adds latency (separate model call with tool access) but catches calibration errors and reasoning gaps.
+[docs/orchestration.md](docs/orchestration.md) carries both patterns in full: the scheduler and relay wirings, which backend inverts the loop and why, the gate's escape hatch after repeated failures, and where each piece lives.
 
 ---
 
@@ -132,36 +122,16 @@ Agents produce better output when forced to self-assess before committing. The r
 
 ## Reference Files
 
-**Agent (customize for your domain):**
+Which file holds what is reference material — consulted once, when you already
+know you need it — so it lives in the generated pages rather than here:
+[docs/template.md](docs/template.md) for the application you customize, and
+[docs/library.md](docs/library.md) for the `lup` package beneath it. Both are
+generated from the same declarations this guidance is, so neither can fall
+behind the tree it describes.
 
-- **src/<project>/agent/core.py**: Main agent orchestration
-- **src/<project>/agent/config.py**: Configuration via pydantic-settings
-- **src/<project>/agent/models.py**: Output models
-- **src/<project>/agent/prompts.py**: System prompt templates
-- **src/<project>/agent/subagents.py**: Subagent definitions
-- **src/<project>/agent/tool_policy.py**: Conditional tool availability (tag-based filtering)
-- **src/<project>/agent/toolsets.py**: Tool-group registry (one source for every backend)
-- **src/<project>/agent/tools/example.py**: Example MCP tools
-- **src/<project>/agent/tools/realtime.py**: Real-time tools template (sleep, context, reply)
-- **src/<project>/agent/tools/reflect.py**: Forced self-review tool with optional nested reviewer agent
-
-**Library (`packages/lup` — the reusable `lup` package, never renamed):**
-
-- **lup/runtime/**: Provider-neutral `SessionFactory`, `Session`, `Turn`, typed requests/results, optional capability handles, output binding, routing, background work, and explicit whole-turn wrappers
-- **lup/adapters/**: Concrete Claude and Codex composition roots. Each adapter owns its native SDK/wire types, immutable component config, profile transforms, harness rendering, event decoding, and process boundary
-- **lup/harness/**: Validated semantic declarations, generated artifact trees, ownership proofs, reconciliation, and atomic materialization
-- **lup/policy/**: Native-neutral semantic edit, shell, fetch, and unknown-tool decisions plus the hermetic generated runtime snapshot
-- **lup/resolver/**: One persisted DAG resolver core with concern leases, worktrees, independent reviews, review-branch integration, verification, and human acceptance
-- **lup/codescan/**: Repository-specific AST checks and typed suppression auditing; Ruff owns standard Python lint rules
-- **lup/workspace/output.py**: `submit_output` finalization + missing-output guard (all backends)
-- **lup/hooks.py**: Hook utilities, composition, and `create_tool_gate` (deny-until-unlocked primitive)
-- **lup/mcp.py**: MCP server creation (`lup_tool`, `LupMcpTool`, `ToolError`)
-- **lup/workspace/paths.py**: Centralized version-aware path constants and helpers
-- **lup/telemetry/trace.py**: Trace logging + event sidecar; console display in `telemetry/display.py`
-- **lup/telemetry/metrics.py**: Tool call tracking
-- **lup/realtime/**: Persistent-agent machinery — `scheduler` (Scheduler core + guards), `models` (tool I/O), `relay` (subprocess file mailbox)
-- **lup/reflect.py**: Reflection gate (enforce reflect-before-output)
-- **lup/resilience/throttle.py**: Rate limiting (concurrency + interval)
+The three you will open first: `agent/prompts.py` for what the agent is told,
+`agent/toolsets.py` for the tool-group registry — the one place a group is
+added — and `agent/core.py` for how a session is composed.
 
 **Versioning:**
 
@@ -178,63 +148,22 @@ Agents produce better output when forced to self-assess before committing. The r
 ## Commands
 
 ```bash
-# Install dependencies
-uv sync
-
-# Add a new dependency (DO NOT modify pyproject.toml directly)
-uv add <package-name>
-
-# Format and lint
-uv run ruff format .
-uv run ruff check .
-uv run pyright
-
-# Run tests
-uv run pytest
-
-# Run a single agent session (Claude backend by default)
-uv run lup run "your task here"
-uv run lup run --session-id my-session "task"
-
-# Same agent on another SDK backend
-AGENT_SDK=codex AGENT_MODEL=gpt-5.5 uv run lup run "task"
-
-# Run multiple sessions with auto-commit
-uv run lup loop "task1" "task2" "task3"
-uv run lup loop --no-commit "task1" "task2"
-
-# Commit uncommitted session results
-uv run lup-devtools feedback commit
-uv run lup-devtools feedback commit --dry-run
-
-# Interactive setup wizard (configure integrations, API keys, env vars)
-uv run lup-devtools setup             # Full walkthrough
-uv run lup-devtools setup status      # Show what's configured
-uv run lup-devtools dashboard         # Same registry in a local web UI
-
-uv run lup --help
+uv sync                                  # install; `uv add <pkg>` to add, never edit pyproject.toml
+uv run lup-devtools dev check            # the pre-flight bar: ruff, pyright, tests
+uv run lup run "your task here"          # one session; --session-id names it
+uv run lup loop "task1" "task2"          # several, auto-committing each
+uv run lup-devtools setup                # keys, integrations, env vars (`dashboard` for the web UI)
 ```
+
+`AGENT_SDK` and `AGENT_MODEL` pick the runtime and the model a session opens
+against. `uv run lup --help` and `uv run lup-devtools --help` are the full
+trees; [docs/contributing.md](docs/contributing.md) is the tour.
 
 ## Testing
 
-```bash
-# Run all tests
-uv run pytest
-
-# Run with verbose output
-uv run pytest -v
-
-# Run specific test file
-uv run pytest tests/test_file.py
-
-# Run tests matching a pattern
-uv run pytest -k "test_name"
-```
-
-**Test organization:**
-
-- `tests/unit/` - Unit tests (mock external APIs)
-- `tests/integration/` - Integration tests (require API keys, use `@pytest.mark.integration`)
+`uv run pytest`, narrowed with `-k "<pattern>"` or a path when you want one
+case. `tests/unit/` mocks external APIs; `tests/integration/` needs real keys
+and is marked `@pytest.mark.integration`.
 
 ## Test Principles
 
@@ -315,7 +244,7 @@ Edit `src/<project>/agent/subagents.py`:
 
 - Create specialized subagents for focused tasks
 - Define which tools each subagent can use
-- Choose models per subagent (Opus-class by default — see Model Selection; cheaper only with an explicit reason)
+- Choose a model tier per subagent (strongest by default — see Model Selection; cheaper only with an explicit reason)
 
 ### Step 4: Configure Tools
 
@@ -492,97 +421,24 @@ data(outputs): add session batch results
     ),
 ]
 
+# lup: solved: Yeah, see. This would be the perfect place to generate these
+# programatically. It's a bit stupid to have these kind of fixed-code
+# implementation when we could do the whole thing without. Can you see
+# everywhere where we do those kind of list in documents, and just directly
+# change their .py generator instead? Would be way better
 DIRECTORY_STRUCTURE_THROUGH_TOOLS: list[models.PromptPart] = [
     models.TextPart(
         text=r"""## Directory Structure
 
-``` #lup: Yeah, see. This would be the perfect place to generate these programatically. It's a bit stupid to have these kind of fixed-code implementation when we could do the whole thing without. Can you see everywhere where we do those kind of list in documents, and just directly change their .py generator instead? Would be way better
-packages/
-└── lup/                        # Standalone library (uv workspace member, never renamed)
-    ├── pyproject.toml
-    ├── README.md
-    └── src/lup/
-        ├── __init__.py         # Public API re-exports (__all__); imports no SDK
-        ├── py.typed            # PEP 561 typing marker
-        ├── adapters/           # Native-only composition and wire-format boundary
-        │   ├── claude/         # Claude SDK runtime, config transforms, profiles, harness, and native events
-        │   ├── codex/          # Codex app-server runtime, config transforms, harness, and native events
-        │   └── harness.py      # Named native harness composition roots
-        ├── runtime/            # Narrow session/turn capabilities, typed output, wrappers, routing, and background work
-        ├── harness/            # Semantic declarations, artifacts, ownership, reconciliation, and materialization
-        ├── policy/             # Canonical native-neutral tool policy and bundled snapshot
-        ├── resolver/           # Persisted concern DAG, leases, worktrees, reviews, integration, and acceptance
-        ├── codescan/           # Source scanning for dev tooling: review notes, forbidden shapes, seam boundaries
-        │   ├── common.py       # Shared scan core: comment/docstring tokenization, ignore matching, line cursor
-        │   ├── markers.py      # `# lup:` / `// lup:` review-marker scanning (dev comments)
-        │   ├── antipatterns.py # Anti-pattern rules: `dev check` imports them; the edit hook mirrors them (test-pinned)
-        │   └── boundaries.py   # Seam-boundary scan: per-engine adapter imports stay inside lup.adapters
-        ├── workspace/          # Session workspace: where a run's data lives and how it's addressed
-        │   ├── paths.py        # Version-aware path layout + active-session relay
-        │   ├── context.py      # SessionContext carried across the subprocess boundary
-        │   ├── history.py      # Session storage/retrieval
-        │   ├── notes.py        # RO/RW directory structure
-        │   └── output.py       # submit_output finalization + missing-output guard (all backends)
-        ├── telemetry/          # What a run records about itself for later analysis
-        │   ├── trace.py        # TraceLogger: markdown trace + machine-readable event sidecar
-        │   ├── display.py      # Color-coded console display of content blocks
-        │   ├── blocks.py       # Shared block-extraction and truncation helpers
-        │   └── metrics.py      # Tool call tracking (+ file-backed flush for subprocesses)
-        ├── sandbox/            # Docker-based Python sandbox (lazy start, orphan sweep)
-        │   ├── models.py       # Tool schemas, result types, mount topology, error types
-        │   ├── process.py      # Pure host helpers: output decode, process liveness, deadlines
-        │   ├── repl.py         # In-container REPL transport (socket protocol, persistent namespace)
-        │   └── container.py    # Sandbox lifecycle (create, mount, sweep, destroy) + cleanup guard
-        ├── resilience/         # Calling flaky or rate-limited services
-        │   ├── retry.py        # Retry decorator with backoff
-        │   └── throttle.py     # Rate limiting (concurrency + interval)
-        ├── realtime/           # Persistent-agent machinery (one concern per module)
-        │   ├── scheduler.py    # Scheduler core (sleep/wake, debounce, reminders) + guards
-        │   ├── models.py       # Shared realtime tool I/O models
-        │   └── relay.py        # Subprocess file-mailbox relay (imports the core)
-        ├── types.py            # Shared vocabulary: blocks, messages, events, Usage, SubagentSpec
-        ├── hooks.py            # SDK-agnostic hook factories (permission, gate, completion guard)
-        ├── mcp.py              # MCP server creation, @lup_tool decorator
-        ├── reflect.py          # Reflection gate (in-memory or file-backed)
-        ├── subagents.py        # run_subagent delegation tool from SubagentSpec
-        └── tool_policy.py      # Tool-availability machinery (BaseToolPolicy)
-src/
-└── <project>/                  # Application package (depends on lup)
-    ├── agent/                  # Domain-specific code (feedback loop improves this)
-    │   ├── core.py             # Main orchestration
-    │   ├── config.py           # Settings via pydantic-settings
-    │   ├── models.py           # Output models (customize for your domain)
-    │   ├── prompts.py          # System prompt templates
-    │   ├── subagents.py        # Subagent definitions
-    │   ├── tool_policy.py      # Conditional tool availability (tag-based filtering)
-    │   ├── toolsets.py         # Tool-group registry (one source for every backend)
-    │   └── tools/
-    │       ├── example.py      # Example MCP tools (customize)
-    │       ├── realtime.py     # Real-time tools template (sleep, context, reply)
-    │       └── reflect.py      # Forced self-review tool (nested reviewer agent)
-    ├── devtools/               # Development CLI (lup-devtools entry point)
-    │   ├── main.py             # Root Typer app composing sub-apps
-    │   ├── agent/              # Agent introspection (inspect, capabilities, serve-tools, repl)
-    │   ├── claude/             # Claude Code runner wired for this project (+ usage)
-    │   ├── py/                 # Python module introspection (info, source, eval, ...)
-    │   ├── dev/                # Worktrees, branches, PRs, and pre-flight checks
-    │   ├── feedback/           # Feedback state, metrics, and session commits
-    │   ├── trace/              # Trace display, search, and analysis
-    │   ├── usage/              # Usage display, filled by each backend's reader
-    │   ├── setup.py            # Shared integration registry + terminal wizard
-    │   ├── dashboard/          # Local setup API and packaged zero-build web UI
-    │   ├── supervisor/         # Live and read-only web supervision of resolver runs
-    │   ├── sync.py             # Upstream sync tracking (feeds """
-    ),
-    models.SkillInvocation(plugin="lup", skill="update"),
-    models.TextPart(
-        text=r""")
-    │   ├── utils.py            # Shared CLI helpers (git command, JSON output)
-    │   └── version.py          # Version display, changelog, and bump
-    └── environment/            # Domain scaffolding (user interaction, game logic)
-        └── cli/
-            └── __main__.py     # Typer CLI — the `lup` entry point (run + loop with auto-commit)
-```
+Where each part of the application sits is in
+[docs/template.md](docs/template.md), which walks the checkout when the page is
+generated rather than describing it from memory, and carries the prose about
+each part beside it.
+
+The library beneath it is described in [docs/library.md](docs/library.md)
+rather than drawn here, because in three of the four ways a project can obtain
+`lup` its source is not on disk at all — a diagram of `packages/lup/` would be
+describing a directory most projects never have.
 
 ---
 
@@ -591,27 +447,29 @@ src/
 
 ## Primary Libraries
 
-- **claude-agent-sdk**: Primary framework for building agents (use `query()` for one-shot LLM calls with structured output)
+- **lup**: The runtime this project composes against, and it is provider-neutral. `SessionFactory` opens a `Session`; a `TurnRequest` carries the prompt and the type the answer must arrive as; a strict `TurnResult[T]` hands back `.output` already validated. `SessionFactory.query(prompt, Model)` is the whole of a one-shot.
 - **pydantic**: For data validation and settings
 - **pydantic-settings**: For configuration (not dotenv)
 
+Which runtimes this project drives is an extra rather than a rewrite —
+`lup[claude]`, `lup[codex]`, or both — and the same declarations render into
+each. A provider's own SDK is that adapter's dependency, never this
+application's.
+
 ## Model Selection
 
-Default to **Opus 5** (`claude-opus-5`) — or **Fable** (`claude-fable-5`) — for the main agent, every subagent, reviewer, and background agent. This runs on a subscription where the best model is the point: reach for Sonnet only when latency or cost provably dominates and quality is non-critical, and for Haiku almost never. A role that genuinely warrants a cheaper model declares it explicitly with a reason; otherwise it inherits the Opus-class default.
+Default to the **strongest** tier for the main agent, every subagent, reviewer, and background agent. This runs on a subscription where the best model is the point: reach for **balanced** only when latency or cost provably dominates and quality is non-critical, and for **fast** almost never. A role that genuinely warrants a cheaper model declares that tier explicitly with a reason; otherwise it inherits the strongest default.
+
+State the tier, not a model id. A declaration says what the role needs and each runtime spells whichever model in its own lineup honors it, so a role pinned to one provider's model name is a role that only works on one runtime and stops being right the next time that lineup moves. The one place a concrete model belongs is the runtime configuration a deployment sets (`AGENT_MODEL`), where naming a specific model is the whole point.
 
 ## Type Safety Requirements
 
 - **Never silently swallow exceptions** -- no `except ...: pass`, no `contextlib.suppress`; log with `logger.exception()`, handle meaningfully, or re-raise. Catch-all `except Exception` is fine at boundaries (task loops, subagent delegation) that do so; bare `except:` and `except BaseException` are never fine
 - **Every function must specify input and output types**
-- **Never use `Any`, `dict[str, Any]`, or `dict[str, object]`** -- Use `TypedDict` for dict-like data, `BaseModel` for validated models, or specific types. These erase type information and defeat static analysis.
-  - **JSON-shaped data**: use `JsonValue` / `JsonObject` from `lup.types` for data whose schema lives elsewhere (tool arguments, JSON Schemas, structured outputs, vendor payloads).
-  - **MCP tool inputs**: The SDK types `@tool` handler args as `dict[str, Any]`. Always `BaseModel.model_validate(args)` immediately — don't pass around the raw dict.
-  - **MCP tool outputs**: Define a `TypedDict` for the return dict (the SDK types it as `dict[str, Any]` but we use our own typed wrapper).
-  - **SDK hooks**: Return `SyncHookJSONOutput` (TypedDict from `claude_agent_sdk.types`) — don't hand-build `dict[str, Any]`. Use the typed hook inputs (`PreToolUseHookInput`, etc.) and specific output types (`PreToolUseHookSpecificOutput`, etc.).
-  - **SDK types to prefer**: Use the SDK's own typed classes instead of raw dicts — `HookMatcher`, `AgentDefinition`, `ClaudeAgentOptions`, `McpServerConfig`, `PermissionResultAllow`/`Deny`, `ContentBlock`, `Message`, `TextBlock`, `ToolUseBlock`, `ToolResultBlock`. Import from top-level `claude_agent_sdk` when available; `SyncHookJSONOutput`, `HookEvent`, and hook-specific output types require `claude_agent_sdk.types`.
+- **Never use `Any`, `dict[str, Any]`, or `dict[str, object]`** -- these erase type information and defeat static analysis. Which typed stand-in replaces one depends on where the dict came from, and [docs/conventions.md](docs/conventions.md) carries the row for each
+- **Provider SDKs are the adapter's, not yours**: application code composes against `lup`'s provider-neutral runtime — `SessionFactory`, `Session`, `TurnRequest`, `TurnResult` — and never imports a provider SDK. Each SDK is one adapter's dependency behind an extra, so importing it here pins the application to one runtime and trips `seam-boundary` outside a composition root that names it.
 - **Use Python 3.12+ generics syntax**: `class A[T]`, not `Generic[T]`
-- Use `TypedDict` and Pydantic models for structured data
-- Never manually parse Claude/agent output -- use structured outputs via Pydantic
+- Never manually parse an agent's output -- ask for it as a type. `TurnRequest(output_type=Model)` binds that turn's own `submit_output` to the schema, and `TurnResult[Model].output` arrives validated
 - **Never use `# type: ignore`** -- Ask the user how to properly fix type errors
 - **`# lup: ignore` escape hatch** -- When `Any` or another anti-pattern is genuinely needed (untyped library boundaries, MCP), add an inline ignore to request user approval. Prefer the typed, pyright-style `# lup: ignore[rule-id]` so a site silences exactly the rule it needs and still trips the others; the bare `# lup: ignore` stays valid but the auditor flags it as untyped. A standalone ignore in the first 10 lines applies file-wide. Each rule id is shown in its deny message; the generated `docs/rules.md` (`uv run lup-devtools dev rules`) indexes every rule family with the `lup.codescan` module that defines it.
 - **Use Pydantic BaseModel instead of dataclasses**
@@ -619,27 +477,13 @@ Default to **Opus 5** (`claude-opus-5`) — or **Fable** (`claude-fable-5`) — 
 
 ## Tool Input Schemas
 
-Define tool inputs as BaseModel classes with `Field(description=...)`. This gives you validation, type-safe access, defaults, and rich JSON Schema generation in one place.
-
-| Do This                                                               | Not This                       |
-| --------------------------------------------------------------------- | ------------------------------ |
-| `class SearchInput(BaseModel): query: str = Field(description="...")` | `{"query": str, "limit": int}` |
-| `SearchInput.model_json_schema()` for `@tool` schema                  | Hand-written dict schemas      |
-| `SearchInput.model_validate(args)` then `params.query`                | `args.get("query", "")`        |
+Define tool inputs as BaseModel classes with `Field(description=...)`: one declaration is where both the `@lup_tool` schema and the validation come from. The decorator infers each schema from the handler's annotations, validates the input before the handler runs, and serializes the returned model — so validating arguments or assembling a response envelope by hand is work already done for you, and a recoverable failure is a raised `ToolError` carrying what to do about it. [docs/conventions.md](docs/conventions.md) puts each typed form beside the raw dict it replaces.
 
 ## No String Manipulation on Structured Data
 
-If you're reaching for `re`, `.replace()`, `.split()`, string slicing, or any string operation to extract, transform, or filter structured data, something is wrong. Operate on the structure directly.
+Reaching for `re`, `.replace()`, `.split()`, or string slicing to extract, transform, or filter structured data means the structured API was missed. Operate on the structure directly: [docs/conventions.md](docs/conventions.md) names a parser per format — web pages, XML, JSON, turn results, dates, URLs, filesystem paths.
 
-- **Web pages**: Use `trafilatura` for text extraction, `beautifulsoup4` for DOM queries
-- **XML**: Use `xml.etree.ElementTree` or `lxml`
-- **JSON**: `json.loads()`, not regex
-- **SDK objects**: Filter `ContentBlock` lists by type and attribute (e.g. `ToolUseBlock.name`, `ToolResultBlock.tool_use_id`)
-- **Dates/timestamps**: Parse to `datetime`, don't compare strings
-- **URLs**: Use `urllib.parse`, not string splitting
-- **File paths**: Use `pathlib.Path`, not string concatenation
-
-String operations are for formatting output. If you're using them to understand or transform data, you're working at the wrong abstraction level. `import re` in particular is a code smell -- if you find yourself writing a regex, stop and look for the structured API.
+String operations are for formatting output. If you are using them to understand or transform data, you are working at the wrong abstraction level, and `import re` in particular is a code smell -- if you find yourself writing a regex, stop and look for the structured API.
 
 ## Use Standard Libraries
 
@@ -774,56 +618,45 @@ Run `uv run lup-devtools --help` for the full command tree.
     ),
 ]
 
-CLAUDE_POLICY_SCOPE = r"""The policy classifies each shell command against the vocabulary declared in `devtools/harness/content/shell_vocabulary.py`, every URL scope, and each edit in a batch. Ask is
-reserved for judged risk; an unjudged command or unparsed construct denies with
-a hint naming the `# lup: escalate: <why>` marker, and that leading marker
-promotes the classified decision to an approval question carrying the agent's
-stated reason. Under a launcher-verified OS sandbox (`LUP_SANDBOX_ACTIVE`),
-unjudged work defers to that boundary instead of denying and a
-`dangerouslyDisableSandbox` escape re-enters the deny lattice; the sandbox
-block in `.claude/settings.json` derives from the same `HookSet` declaration.
-Where a command runs is a second axis a rule declares beside its effect and
-cascades to the levels beneath it, so every `git` verb already runs outside
-the sandbox unasked, and a runtime that cannot place a call renders the
-plain effect.
-Segments join deny > ask > defer > allow — unjudged rides into a judged
-prompt, a judged deny wins the batch. Malformed input fails conservatively,
-a `$(...)` substitution classifies recursively (the inner command joins the
-batch; its opaque result rides only on argument-safe commands; command
-position, deep nesting, and backticks stay conservative), file redirection
-outside repo-relative `tmp/` and the session scratchpad (`$TMPDIR`,
-`/tmp/claude-*`) is never auto-allowed (a heredoc-fed file write denies
-toward the Edit tool), loops, conditionals, and case
-constructs classify recursively over frozen variable bindings, `find -exec`
-payloads and `timeout`/`nice` wrappers recurse to their commands, `sed`/`awk`
-pass read-only script screens, `curl` is screened to read methods within the
-declared URL scopes, and edit decisions include protected
-paths, marker changes, size, and the canonical anti-pattern audit."""
+POLICY_JOIN = r"""The policy classifies every shell command against the vocabulary declared in
+`devtools/harness/content/shell_vocabulary.py`, every URL scope, and every edit
+in a batch. Segments join deny > ask > defer > allow, so a judged deny wins the
+batch and malformed input fails conservatively. Ask is reserved for judged
+risk: an unjudged command denies with a hint naming the
+`# lup: escalate: <why>` marker, and that marker as a command's leading line
+promotes the decision into an approval question carrying your stated reason.
+Under a launcher-verified sandbox (`LUP_SANDBOX_ACTIVE`), unjudged work defers
+to that boundary rather than denying."""
+"""What a reader needs before a denial, which is the shape and the way out.
 
-CODEX_POLICY_SCOPE = r"""The policy classifies each shell command against the vocabulary declared in `devtools/harness/content/shell_vocabulary.py` and every URL scope in a batch. Ask is
-reserved for judged risk; an unjudged command or unparsed construct denies with
-a hint naming the `# lup: escalate: <why>` marker, and that leading marker
-promotes the classified decision to an approval question carrying the agent's
-stated reason. Under a launcher-verified sandbox (`LUP_SANDBOX_ACTIVE`),
-unjudged work defers to the native workspace boundary instead of denying.
-Segments join deny > ask > defer > allow — unjudged rides into a judged
-prompt, a judged deny wins the batch. Malformed input fails conservatively,
-a `$(...)` substitution classifies recursively (the inner command joins the
-batch; its opaque result rides only on argument-safe commands; command
-position, deep nesting, and backticks stay conservative), file redirection
-outside repo-relative `tmp/` and the session scratchpad (`$TMPDIR`,
-`/tmp/claude-*`) is never auto-allowed (a heredoc-fed file write denies
-toward the Edit tool), loops, conditionals, and case
-constructs classify recursively over frozen variable bindings, `find -exec`
-payloads and `timeout`/`nice` wrappers recurse to their commands, `sed`/`awk`
-pass read-only script screens, `curl` is screened to read methods within the
-declared URL scopes, and native `apply_patch` commands are decoded into complete
-before/after batches for the canonical edit policy. Malformed or unsupported
-patches fail closed. Codex's sandbox and approval policy remain the outer
-filesystem and network boundary. Harness generation also compiles every
-prefix-safe shell allow into `.codex/rules/lup.rules`; Codex uses those native
-rules to run matching commands outside the sandbox without prompting, while
-flag-sensitive and content-sensitive forms remain under the hook and sandbox."""
+The rest of the lattice — how substitutions, loops, redirections and wrappers
+classify, and what an edit decision weighs — is in docs/permissions.md, because
+a denial names what tripped and the recovery at the moment it matters. Carrying
+the whole table on every turn buys nothing a reader could not open, and this
+document is the one with a byte budget.
+"""
+
+CLAUDE_POLICY_SCOPE = (
+    POLICY_JOIN
+    + r""" A `dangerouslyDisableSandbox` escape re-enters the deny lattice, and
+the sandbox block in `.claude/settings.json` derives from the same `HookSet`
+declaration. Where a command runs is a second axis a rule declares beside its
+effect and cascades to the levels beneath it, so every `git` verb already runs
+outside the sandbox unasked. [docs/permissions.md](docs/permissions.md) carries
+the full lattice."""
+)
+
+CODEX_POLICY_SCOPE = (
+    POLICY_JOIN
+    + r""" Native `apply_patch` commands are decoded into complete before/after
+batches for the canonical edit policy, and malformed or unsupported patches
+fail closed. Codex's own sandbox and approval policy remain the outer
+filesystem and network boundary. Generation also compiles every prefix-safe
+shell allow into `.codex/rules/lup.rules`, which Codex uses to run matching
+commands outside the sandbox without prompting, while flag- and
+content-sensitive forms stay under the hook.
+[docs/permissions.md](docs/permissions.md) carries the full lattice."""
+)
 
 
 def permission_hooks(policy_scope: str) -> list[models.PromptPart]:

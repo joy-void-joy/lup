@@ -5,12 +5,13 @@ it: a library test reaching for a template fixture passes here and fails where
 the library ships.
 """
 
+import warnings
 from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 
-from lup.gitguard import TEST_IDENTITY, guard_report, repository_state
+from lup.gitguard import TEST_IDENTITY, ForeignCheckouts, repository_state
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -36,8 +37,11 @@ def enclosing_repository_untouched() -> Iterator[None]:
     to one reaches the developer's checkout instead. See :mod:`lup.gitguard`.
     """
     root = Path(__file__).resolve().parents[3]
+    foreign = ForeignCheckouts.beside(root)
     before = repository_state(root)
     yield
-    report = guard_report(before, repository_state(root))
-    if report:
-        pytest.fail(report, pytrace=False)
+    verdict = foreign.verdict(before, repository_state(root))
+    if verdict.notice:
+        warnings.warn(verdict.notice, stacklevel=1)
+    if verdict.failure:
+        pytest.fail(verdict.failure, pytrace=False)

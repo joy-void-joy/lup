@@ -33,6 +33,7 @@ from lup.adapters.harness import (
     compile_codex,
 )
 from lup.codescan.registry import RULE_REFERENCE
+from lup.devtools.dev.commands import COMMAND_REFERENCE
 from lup.devtools.harness.drift import roster_gaps
 from lup.harness.banner import (
     ARTIFACT_COMMENT_ROUTER,
@@ -123,7 +124,7 @@ from lup_template.devtools.harness.catalog import (
     declared_hook_set,
     portable_harness,
 )
-from lup_template.devtools.harness.content.docs.catalog import DOCUMENTS
+from lup_template.devtools.harness.content.docs.catalog import documents
 from lup_template.devtools.harness.content.guidance import document as guidance_document
 from lup_template.devtools.harness.content.settings import project_settings
 from lup.devtools.harness import launch
@@ -285,7 +286,7 @@ def test_claude_tree_renders_every_typed_support_document() -> None:
     assert Path(".claude/plugins/lup/TEMPLATE_CLAUDE.md") in paths
     assert Path(".claude/plugins/lup/scripts/file_suggest.sh") in paths
     assert Path(".claude/settings.json") in paths
-    assert {document.path for document in DOCUMENTS} <= paths
+    assert {document.path for document in documents(Path.cwd())} <= paths
 
 
 def test_every_published_document_is_generated_and_banners_itself() -> None:
@@ -299,13 +300,17 @@ def test_every_published_document_is_generated_and_banners_itself() -> None:
         artifact.path: artifact
         for artifact in claude_target(Path.cwd()).recipe.desired.artifacts
     }
-    published = {document.path for document in DOCUMENTS}
+    roster = documents(Path.cwd())
+    published = {document.path for document in roster}
     unmanaged = sorted(
         path for path in Path("docs").glob("*.md") if path not in published
     )
 
-    assert unmanaged == [Path(RULE_REFERENCE)]
-    for document in DOCUMENTS:
+    # The two pages a repository writer produces rather than the docs roster:
+    # both render from something walked at generation time — the rule registry
+    # and the composed CLI — so neither has a declaring content module.
+    assert unmanaged == [Path(COMMAND_REFERENCE), Path(RULE_REFERENCE)]
+    for document in roster:
         banner = GeneratedBanner(
             source=document.document.declared_source(), command=REGENERATE_COMMAND
         )

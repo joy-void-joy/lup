@@ -1,24 +1,28 @@
 """Canonical declaration for the fb-investigate skill."""
 
 import lup.harness.models as models
+from lup.devtools.harness.content.application import ApplicationLayout
 
-SKILL = models.Skill(
-    id="skill.fb-investigate",
-    name="fb-investigate",
-    description="Deep trace reading and error classification for selected sessions",
-    tools=[
-        "Bash(uv run lup-devtools:*)",
-        "Read",
-        "Grep",
-        "Glob",
-        "Task",
-        "AskUserQuestion",
-    ],
-    argument_hint="<session_id1> [session_id2 ...]",
-    prompt=models.PromptDocument(
-        parts=[
-            models.TextPart(
-                text=r"""# Investigate: Trace Deep-Dive
+
+def skill(layout: ApplicationLayout) -> models.Skill:
+    """Classify session errors against this project's own tool sources."""
+    return models.Skill(
+        id="skill.fb-investigate",
+        name="fb-investigate",
+        description="Deep trace reading and error classification for selected sessions",
+        tools=[
+            "Bash(uv run lup-devtools:*)",
+            "Read",
+            "Grep",
+            "Glob",
+            "Agent",
+            "AskUserQuestion",
+        ],
+        argument_hint="<session_id1> [session_id2 ...]",
+        prompt=models.PromptDocument(
+            parts=[
+                models.TextPart(
+                    text=r"""# Investigate: Trace Deep-Dive
 
 Build first-hand understanding of what happened in each target session.
 
@@ -27,14 +31,14 @@ Build first-hand understanding of what happened in each target session.
 For the deep pass (the 5-10 selected target sessions), read the traces directly — first-hand reading is the point of this phase. When the session list is larger, or you need cross-cutting patterns over many sessions, delegate the bulk reading to the `trace-explorer` agent instead of reading every trace in this conversation: it reads traces in its own context window and returns a compact pattern report.
 
 """
-            ),
-            models.Delegate(
-                subagent_type="lup:trace-explorer",
-                prompt="Analyze traces for sessions <ids>; report tool failures, "
-                "capability gaps, reasoning quality",
-            ),
-            models.TextPart(
-                text=r"""
+                ),
+                models.Delegate(
+                    subagent_type="lup:trace-explorer",
+                    prompt="Analyze traces for sessions <ids>; report tool failures, "
+                    "capability gaps, reasoning quality",
+                ),
+                models.TextPart(
+                    text=r"""
 
 Use its report to pick which sessions deserve the direct deep read below.
 
@@ -43,15 +47,15 @@ Use its report to pick which sessions deserve the direct deep read below.
 One delegation per session, launched in parallel when investigating several:
 
 """
-            ),
-            models.Delegate(
-                subagent_type="lup:trace-explorer",
-                prompt="Investigate session <session_id> following the per-session "
-                "steps below. Report: tool call inventory, errors with quoted output, "
-                "workflow assessment, outcome classification, counterfactuals.",
-            ),
-            models.TextPart(
-                text=r"""
+                ),
+                models.Delegate(
+                    subagent_type="lup:trace-explorer",
+                    prompt="Investigate session <session_id> following the per-session "
+                    "steps below. Report: tool call inventory, errors with quoted output, "
+                    "workflow assessment, outcome classification, counterfactuals.",
+                ),
+                models.TextPart(
+                    text=rf"""
 
 Before presenting findings, spot-check each report against the trace itself (`uv run lup-devtools trace show <session_id>`) — quoted errors must appear verbatim in the trace, not paraphrased from a truncated read.
 
@@ -74,9 +78,9 @@ uv run lup-devtools trace show <session_id> --tool-calls
 ### 2. Tool use audit
 
 - **Tool call inventory**: List every tool call — what the agent tried to learn, whether it succeeded, whether the result was useful.
-- **Tool errors**: For each failure — what happened (quote the error), why it failed (read the tool source in `src/lup_template/agent/tools/`), was recovery reasonable.
+- **Tool errors**: For each failure — what happened (quote the error), why it failed (read the tool source in `{layout.directory("agent", "tools")}`), was recovery reasonable.
 - **Subtle bugs**: Cases where a tool *succeeded* but returned misleading or incomplete data.
-- **Missing tool calls**: Tools the agent *should* have called but didn't. Check available tools in `src/lup_template/agent/tools/`.
+- **Missing tool calls**: Tools the agent *should* have called but didn't. Check available tools in `{layout.directory("agent", "tools")}`.
 
 ### 3. Workflow assessment
 
@@ -116,15 +120,15 @@ Show:
 3. Top 2-3 counterfactuals
 
 Then """
-            ),
-            models.AskUser(
-                question="whether to proceed to analysis, dig deeper on particular "
-                "sessions, or skip ahead to implementation"
-            ),
-            models.TextPart(
-                text=r"""
+                ),
+                models.AskUser(
+                    question="whether to proceed to analysis, dig deeper on particular "
+                    "sessions, or skip ahead to implementation"
+                ),
+                models.TextPart(
+                    text=r"""
 """
-            ),
-        ]
-    ),
-)
+                ),
+            ]
+        ),
+    )

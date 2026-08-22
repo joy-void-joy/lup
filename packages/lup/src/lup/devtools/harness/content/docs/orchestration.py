@@ -1,18 +1,20 @@
-# lup: ignore[native-spelling]
-# This portable orchestration guide names the hook event it teaches adopters to use.
 """Canonical agent-orchestration patterns guidance."""
 
 import lup.harness.models as models
+from lup.devtools.harness.content.application import ApplicationLayout
 
-DOCUMENT = models.PromptDocument(
-    source=__name__,
-    parts=[
-        models.TextPart(
-            text=r"""# Agent Orchestration Patterns
+
+def document(layout: ApplicationLayout) -> models.PromptDocument:
+    """The delegation catalog, pointing at this project's own worked examples."""
+    return models.PromptDocument(
+        source=__name__,
+        parts=[
+            models.TextPart(
+                text=rf"""# Agent Orchestration Patterns
 
 How work is delegated across agents in this project — what runs where, and who sees it. The recurring *code* shapes live in [docs/patterns.md](patterns.md); daily development guidance is in the agent guidance document your runtime loads.
 
-**Model selection:** every pattern below — subagents, reviewers, nested and background agents — defaults to Opus 5 (`claude-opus-5`) or Fable (`claude-fable-5`). Drop to a cheaper model only with an explicit, justified reason (see § Model Selection in the agent guidance).
+**Model selection:** every pattern below — subagents, reviewers, nested and background agents — defaults to the **strongest** tier. Drop to `balanced` or `fast` only with an explicit, justified reason (see § Model Selection in the agent guidance). A declaration states the tier and each runtime spells whichever model it can honor, so naming a model id here would pin one provider's lineup into a library that is provider-neutral, and pin it to a lineup that moves.
 
 **Vocabulary:** two kinds of delegated agents look alike and must not be conflated:
 
@@ -42,7 +44,7 @@ For agents that exist over time — maintaining conversations, monitoring system
 
 **Two wirings, one pattern:** On Claude, tools run in-process — `sleep` blocks on the Scheduler directly and a Stop hook keeps the single turn open forever. On backends whose tools run in a subprocess (Codex, OpenAI-compatible), the loop inverts: **each wake is one SDK turn**. The served tools (`lup.realtime.relay`) relay through files in `session_dir/realtime/`: `reply` and the timing tools append events a parent-side watcher applies mid-turn, `sleep` records a request and the agent ends its turn, and the parent loop (`run_relay_session`) consumes the request, sleeps on the Scheduler, and opens the next turn with a wake message. An agent that ends a turn without sleeping gets bounded corrective turns — the relay counterpart of the Stop hook. Enforcement is in-handler on both wirings (meta-before-sleep, unread-events guard), so no hooks are required.
 
-**Library support:** `packages/lup/src/lup/realtime/scheduler.py` provides the `Scheduler` class and hook factories (`create_stop_guard`, `create_pending_event_guard`); `packages/lup/src/lup/realtime/relay.py` provides the subprocess wiring (`RealtimeMailbox`, `create_realtime_relay_tools`, `run_relay_session`), sharing the tool I/O models in `packages/lup/src/lup/realtime/models.py`. Construction goes through the engine seam: `run_persistent_agent` in `agent/core.py` serves the `session` tool group into the subprocess engine, builds the parent-side session mailbox itself, and drives it via `run_relay_session` — the engine never touches the relay. See example tools in `src/lup_template/agent/tools/realtime.py`.
+**Library support:** `lup.realtime.scheduler` provides the `Scheduler` class and hook factories (`create_stop_guard`, `create_pending_event_guard`); `lup.realtime.relay` provides the subprocess wiring (`RealtimeMailbox`, `create_realtime_relay_tools`, `run_relay_session`), sharing the tool I/O models in `lup.realtime.models`. Construction goes through the engine seam: `run_persistent_agent` in `agent/core.py` serves the `session` tool group into the subprocess engine, builds the parent-side session mailbox itself, and drives it via `run_relay_session` — the engine never touches the relay. See example tools in `{layout.path("agent", "tools", "realtime.py")}`.
 
 ---
 
@@ -103,7 +105,7 @@ accepts a `TurnInput` or a prepared `turn_request(...)` in place of the prompt. 
 tools, limits, and compatible endpoints are validated when the application
 constructs the factory; unsupported settings are never silently dropped.
 
-**Example:** `src/lup_template/agent/tools/nested.py` is the dedicated copyable template — a minimal `critique` tool (input model → `query()` → augmented output, exported as `NESTED_TOOLS`, unwired by default). For organic usages, see the reviewer inside `agent/tools/reflect.py` (`run_reviewer`, called from the `review` tool) — an independent one-shot `query()` whose critique the tool folds into its structured output — and the `extract` path of `fetch_example` in `agent/tools/example.py` (`extract_answer`), the same shape applied to data augmentation.
+**Example:** `{layout.path("agent", "tools", "nested.py")}` is the dedicated copyable template — a minimal `critique` tool (input model → `query()` → augmented output, exported as `NESTED_TOOLS`, unwired by default). For organic usages, see the reviewer inside `agent/tools/reflect.py` (`run_reviewer`, called from the `review` tool) — an independent one-shot `query()` whose critique the tool folds into its structured output — and the `extract` path of `fetch_example` in `agent/tools/example.py` (`extract_answer`), the same shape applied to data augmentation.
 
 **Routing whole tool families:** there is a standing tension between the bitter-lesson instinct — give the agent every tool and let the model decide — and context economy: every schema wired into the main agent occupies its context, and a large enough surface starts deferring schemas on Claude harnesses (see [Deferred Tool Schemas](#deferred-tool-schemas-tool-search)). The settled middle ground is **one delegating tool per family**: instead of serving every data tool to the main agent, expose a single `research` tool whose handler runs a nested agent holding the whole data-gathering family (search, fetch, markets, news). The main context carries one schema and receives structured findings; the specialist schemas — and the reasoning that used them — stay in the nested agent's context. Accept a batch of questions in one call so the handler can fan them out in parallel, and persist findings when later tasks will reuse them. The aib downstream repo (`refs/aib` when linked) carries a full-scale reference: its `research` tool moves ~35 data tools off the main agent, batches questions, resumes prior research sessions for follow-ups, and persists findings to a worldview store.
 
@@ -140,7 +142,7 @@ session context cleanup aborts an unfinished native turn.
 **Library support:** `lup.runtime.background.BackgroundAgent` composes only a
 `SessionFactory`, `state_to_request`, typed result/error callbacks, and
 `BackgroundConfig`. See the observer example in
-`src/lup_template/agent/tools/realtime.py`.
+`{layout.path("agent", "tools", "realtime.py")}`.
 
 **Customizing:** The `state_to_request` callback is the main extension point.
 It translates immutable application state into a typed request without knowing
@@ -270,10 +272,10 @@ Tools that fetch external data should **enrich it inside the tool** before retur
 2. **Null-filling** — Multi-source fallback pipelines that recover missing fields from alternative endpoints or sibling records (e.g., primary API withholds fields → fallback endpoint fills the gaps).
 3. **Extraction** — Nested agent calls that distill large text blocks into focused answers (see [Nested Agent Pattern](#nested-agent-pattern)).
 
-**Example:** `src/lup_template/agent/tools/example.py` is the template for all three forms — `fetch_example` routes known hosts to a specialized handler (`fetch_wiki_article`, domain dispatch) and distills fetched pages through a nested `query()` call (`extract_answer`, extraction); `search_example` recovers missing snippet fields from a fallback source (`fill_missing_snippets`, null-filling).
+**Example:** `{layout.path("agent", "tools", "example.py")}` is the template for all three forms — `fetch_example` routes known hosts to a specialized handler (`fetch_wiki_article`, domain dispatch) and distills fetched pages through a nested `query()` call (`extract_answer`, extraction); `search_example` recovers missing snippet fields from a fallback source (`fill_missing_snippets`, null-filling).
 
 **Customizing:** Domain dispatch routes belong in `agent/tools/`. Build them lazily to avoid circular imports. Null-filling logic lives in API wrappers. Extraction uses `query(factory, request)` (see [Nested Agent Pattern](#nested-agent-pattern)).
 """
-        ),
-    ],
-)
+            ),
+        ],
+    )

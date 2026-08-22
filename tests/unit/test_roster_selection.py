@@ -14,11 +14,23 @@ throwaway Typer apps rather than a whole declaration.
 
 import typer
 
-from lup.devtools.harness.content.catalog import LIBRARY_CONTENT
+from lup.devtools.harness.content.application import ApplicationLayout
+from lup.devtools.harness.content.catalog import library_content
+from lup.devtools.harness.content.docs.catalog import library_documents
 from lup.devtools.roster import LIBRARY_ROSTER, LIBRARY_SPECS
 from lup.devtools.subapps import SubApp, SubAppSelection, subapp
 from lup.harness.models import ContentSelection
+from lup.workspace.paths import project_root
+from lup_template.devtools.harness.content.catalog import project_skills
 from lup_template.devtools.subapps import APPLICATION_SPECS, SELECTION, SUBAPP_SPECS
+
+LIBRARY_CONTENT = library_content(ApplicationLayout(package="worked_example"))
+"""The whole library roster, under a package name that is nobody's real one.
+
+Selection is what these exercise, and it does not read a path — so naming a
+package here that no checkout has keeps a roster assertion from passing only
+because the layout happened to match this repository's own.
+"""
 
 RETIRED = SubAppSelection(retired=["dashboard", "report"])
 
@@ -102,6 +114,78 @@ def test_extending_keeps_the_inherited_half_first() -> None:
     extended = LIBRARY_CONTENT.selected(ContentSelection()).extended([], [])
 
     assert extended.skills == LIBRARY_CONTENT.skills
+
+
+def test_no_library_declaration_names_the_template_package() -> None:
+    """A library skill must name the reading project's package, not the template's.
+
+    The template's own package is `lup_template`, and for most of this
+    library's life every declaration that needed to name an application path
+    wrote that literal. It reads correctly in exactly one repository: the
+    renamer rewrites imports and dotted module paths but not prose, and a
+    project resolving lup from the index, from git, or from a linked checkout
+    never renames the library at all. So the literal survives into every
+    downstream tree and sends its reader to a directory that is not there.
+
+    Built here under a package no checkout has, so the assertion cannot pass
+    by the layout happening to match this repository's own.
+    """
+    declarations = [*LIBRARY_CONTENT.skills, *LIBRARY_CONTENT.agents]
+    leaked = {
+        declaration.id
+        for declaration in declarations
+        for part in declaration.prompt.parts
+        if "lup_template" in (part.text_payload or "")
+    }
+
+    assert leaked == set()
+
+
+def test_no_published_page_names_the_template_package() -> None:
+    """The pages lup publishes answer for the literal the same way its skills do.
+
+    `docs/` is generated into whichever repository runs generation, so a page
+    naming `src/lup_template/` sends every downstream reader to a directory
+    that is not theirs — the same defect as in a skill, and invisible in this
+    repository for the same reason.
+    """
+    pages = library_documents(
+        LIBRARY_CONTENT.skills,
+        LIBRARY_CONTENT.agents,
+        "lup",
+        [],
+        [],
+        ApplicationLayout(package="worked_example"),
+        project_root(),
+    )
+    leaked = {
+        page.semantic_id
+        for page in pages
+        for part in page.document.parts
+        if "lup_template" in (part.text_payload or "")
+    }
+
+    assert leaked == set()
+
+
+def test_only_the_skills_about_renaming_name_the_template_package() -> None:
+    """This repository's own skills answer for the literal the same way.
+
+    Two of them may keep it, because for those the literal is the subject
+    rather than a path: `/lup:init` renames `src/lup_template/` and `/lup:install`
+    teaches that rename, so both have to spell the directory they are about.
+    Every other declaration names a path a renamed project still has to find,
+    and takes it from the layout.
+    """
+    allowed = {"skill.init", "skill.install"}
+    named = {
+        skill.id
+        for skill in project_skills(ApplicationLayout(package="worked_example"))
+        for part in skill.prompt.parts
+        if "lup_template" in (part.text_payload or "")
+    }
+
+    assert named == allowed
 
 
 def test_this_repository_declines_nothing_without_saying_so() -> None:

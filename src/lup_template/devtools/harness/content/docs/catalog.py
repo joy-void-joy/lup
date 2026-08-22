@@ -13,14 +13,21 @@ declared here does not exist and a file under ``docs/`` that is not produced
 from here is deleted as unowned. Nothing beneath ``docs/`` is hand-written.
 """
 
+from pathlib import Path
+
 import lup.harness.models as models
 from lup.adapters.claude.harness import CLAUDE_DISPATCHER
 from lup.adapters.codex.harness import CODEX_DISPATCHER
 from lup.devtools.harness.content.docs.catalog import library_documents, published
-from lup_template.devtools.harness.content.catalog import AGENTS, PLUGIN_NAME, SKILLS
+from lup_template.devtools.harness.content.catalog import (
+    AGENTS,
+    LAYOUT,
+    PLUGIN_NAME,
+    SKILLS,
+)
 from lup_template.devtools.harness.content.docs import decisions, index, template
 
-CONTENT_ROOT = "src/lup_template/devtools/harness/content"
+CONTENT_ROOT = LAYOUT.path("devtools", "harness", "content")
 """Directory every content module this repository authors lives beneath."""
 
 DOCS_ROOT = f"{CONTENT_ROOT}/docs"
@@ -29,29 +36,51 @@ DOCS_ROOT = f"{CONTENT_ROOT}/docs"
 GENERATED_GUIDE = "docs/harness.md"
 """Document that explains what generated output is and how to change it."""
 
-REFERENCE = library_documents(
-    SKILLS,
-    AGENTS,
-    PLUGIN_NAME,
-    CLAUDE_DISPATCHER.routed_tools,
-    CODEX_DISPATCHER.routed_tools,
-)
-"""The pages lup publishes about the machinery this repository is built on.
 
-The parity audit reads what each runtime decodes from the runtime itself, so
-composing them is what this root is for: the pages stay portable while the
-table they publish cannot claim a decoded set that stopped being true.
-"""
+def reference_pages(root: Path) -> list[models.Document]:
+    """The pages lup publishes about the machinery this repository is built on.
 
-PROJECT = [
-    published("template", "template.md", template.DOCUMENT, DOCS_ROOT),
-    published("decisions", "dev-tooling-decisions.md", decisions.DOCUMENT, DOCS_ROOT),
-]
-"""The pages only this repository has, because only it has their subject."""
+    The parity audit reads what each runtime decodes from the runtime itself,
+    so composing them is what this root is for: the pages stay portable while
+    the table they publish cannot claim a decoded set that stopped being true.
 
-DOCUMENTS: list[models.Document] = [
-    published("index", "README.md", index.document(REFERENCE, PROJECT), DOCS_ROOT),
-    *REFERENCE,
-    *PROJECT,
-]
-"""Every document under ``docs/``, the index first because it teaches the rest."""
+    Takes the checkout because the library page walks it for its own package
+    roster — the same reason :func:`project_pages` does, and the same reason
+    neither is a module-level constant.
+    """
+    return library_documents(
+        SKILLS,
+        AGENTS,
+        PLUGIN_NAME,
+        CLAUDE_DISPATCHER.routed_tools,
+        CODEX_DISPATCHER.routed_tools,
+        LAYOUT,
+        root,
+    )
+
+
+def project_pages(root: Path) -> list[models.Document]:
+    """The pages only this repository has, because only it has their subject.
+
+    Built against a checkout rather than declared, because one of them draws
+    the application's layout by walking it. Importing this module therefore
+    reads no filesystem — which is what lets the CLI be imported from a
+    directory that is not this repository at all.
+    """
+    return [
+        published("template", "template.md", template.document(root), DOCS_ROOT),
+        published(
+            "decisions", "dev-tooling-decisions.md", decisions.DOCUMENT, DOCS_ROOT
+        ),
+    ]
+
+
+def documents(root: Path) -> list[models.Document]:
+    """Every document under ``docs/``, the index first because it teaches the rest."""
+    reference = reference_pages(root)
+    project = project_pages(root)
+    return [
+        published("index", "README.md", index.document(reference, project), DOCS_ROOT),
+        *reference,
+        *project,
+    ]

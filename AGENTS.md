@@ -27,9 +27,9 @@ You are not expected to hold this repository's conventions in memory. Gates enfo
 
 **The rule checker.** Executable rules in anti-pattern, boundary, spelling, and architecture families run on every edit and in `dev check`. A denial cites its rule id, and `docs/rules.md` indexes every rule with the shape it matches, its diagnostic, and the module that enforces it — generated from the same registry that runs, so it cannot drift from what stopped you.
 
-Suppress one deliberate site with `# lup: ignore[rule-id]` and a reason, comma-separating ids where a line trips several. The directive sits on the line it guards, or alone directly above it when the reason will not fit inline; nowhere else reaches, and one placed in a file's opening comment block applies file-wide. A bare `# lup: ignore` still parses but is reported untyped. A stale directive blocks. A rule marked **refused** takes no directive at all — its replacement is right every time, so a directive there could only express a decision to keep the defect, and the way past is to write what the diagnostic names. `# noqa`, `# type: ignore`, and `# pyright: ignore` are forbidden shapes rather than suppressions.
+Suppress one deliberate site with `# lup: ignore[rule-id]` and a reason, comma-separating ids where a line trips several. The directive sits on the line it guards, or alone directly above it when the reason will not fit inline; nowhere else reaches, and one placed in a file's opening comment block applies file-wide. A bare `# lup: ignore` still parses but is reported untyped. A stale directive blocks. `uv run lup-devtools dev directives` measures every one in the tree against that placement, so a directive silencing nothing is found by asking rather than by tripping over it later. A rule marked **refused** takes no directive at all — its replacement is right every time, so a directive there could only express a decision to keep the defect, and the way past is to write what the diagnostic names. `# noqa`, `# type: ignore`, and `# pyright: ignore` are forbidden shapes rather than suppressions.
 
-**The permission policy.** Every shell command, URL scope, and edit in a batch is classified. Segments join deny > ask > defer > allow, and malformed input fails conservatively. A denial names what tripped and the recovery, so you rarely need to read the lattice first. `# lup: escalate: <why>` as the leading line of a shell command promotes a classified deny or ask into an approval question carrying that reason.
+**The permission policy.** Every shell command, URL scope, and edit in a batch is classified. Segments join deny > ask > defer > allow, and malformed input fails conservatively. A denial names what tripped and the recovery, so you rarely need to read the lattice first. `uv run lup-devtools dev policy '<command>'` answers the same question before you spend a turn on it, and says why. `# lup: escalate: <why>` as the leading line of a shell command promotes a classified deny or ask into an approval question carrying that reason.
 
 **The edit budget.** A change block of at most three "real" changed lines is auto-allowed, so split large changes — imports in one edit, logic in another. A file declared human-owned surfaces every change as an approval instead: propose the exact edit as a question and let the user apply it, rather than writing it yourself.
 
@@ -94,11 +94,22 @@ Use `$lup:merge` (with no argument) for guided conflict resolution. See the comm
 
 **Format:** `type(scope): description`
 
+| Type | Use |
+| --- | --- |
+| `feat` | New feature or capability |
+| `fix` | Bug fix |
+| `refactor` | Neither fixes a bug nor adds a feature |
+| `docs` | Documentation only |
+| `test` | Adding or updating tests |
+| `chore` | Maintenance — dependencies, build config |
+| `meta` | Harness content and the trees it generates: guidance, settings, skills, hooks |
+| `data` | Generated data and outputs |
+
 ---
 
 ## Code Conventions
 
-Build on claude-agent-sdk and pydantic; `docs/conventions.md` names each library and what it is for, and puts each typed form beside the raw dict it replaces — including tool inputs, which are BaseModel classes with `Field(description=...)` that give both the `@tool` schema and the validation.
+Build on `lup` and pydantic. The runtime an application composes against is provider-neutral — `SessionFactory`, `Session`, `TurnRequest`, `TurnResult` — and each provider's SDK is one adapter's dependency behind an extra (`lup[claude]`, `lup[codex]`), not a framework the application talks to: no module under `src/lup_template/` imports one, and `seam-boundary` keeps concrete adapter imports to the composition roots that name them. `docs/conventions.md` names each library and what it is for, and puts each typed form beside the raw dict it replaces — including tool inputs, which are BaseModel classes with `Field(description=...)` that give both the `@lup_tool` schema and the validation.
 
 Use existing libraries from PyPI before writing raw HTTP or rebuilding a wheel.
 
@@ -106,7 +117,7 @@ Use existing libraries from PyPI before writing raw HTTP or rebuilding a wheel.
 
 **Error handling.** A `@lup_tool` handler takes a validated model and returns one; raise `ToolError` to send a recoverable failure back as an MCP error, with a message saying what to do about it. The `is_error` envelope and the input-validation reply are the decorator's, not yours to assemble. Elsewhere, agent code raises for unrecoverable errors, wraps transient failures in `with_retry`, and validates inputs early with Pydantic. Never swallow one silently — log it, handle it, or re-raise. A catch-all `except Exception` is fine at a boundary that does one of those, such as a task loop or subagent delegation, which is why no rule refuses it.
 
-**Placement, in this repository.** Reusable utilities belong in `packages/lup/`; what only this application needs belongs in `src/lup_template/`. If logic already exists in `lup`, import it rather than copying it. `docs/library.md` carries the criterion and the target layout.
+**Placement, in this repository.** Reusable utilities belong in `packages/lup/`; what only this application needs belongs in `src/lup_template/`. If logic already exists in `lup`, import it rather than copying it. `docs/library.md` carries the criterion and the target layout. Deciding a module belongs on the other side is one line of judgement and a hundred lines of consequence, which is where the judgement usually gets abandoned — so the consequence is a command: `uv run lup-devtools dev relocate old.module=new.module` repoints every import of what moved and reports the mentions it deliberately left for you to read.
 
 ### Design Principles
 
@@ -136,6 +147,8 @@ A rule states the shape it refuses. These carve-outs are ours, and its diagnosti
 
 `uv` is the package manager — `uv add <package>`, never edit pyproject.toml directly. Formatting and linting are ruff, type checking is pyright; `docs/contributing.md` carries the commands that have to be green.
 
+`lup` itself is the one dependency not added that way. How a project obtains it — vendored here, from the package index, from git, or from a checkout on the same disk — is a mode `dev library` reads and rewrites, and the mode decides what upgrading even means. Ask `dev library status` before assuming lup's source is on disk to edit: in three of the four modes it is not. `docs/library.md` carries the modes and the move between them.
+
 When policy says a command genuinely has to run outside the sandbox, put that command through the runtime's native per-call sandbox escalation on its first attempt. Do not replace the whole session with an unsandboxed one; the semantic policy still judges the escalated call, so an allowed command can be approved at that narrower boundary.
 
 ### lup-devtools
@@ -146,7 +159,7 @@ If you find yourself running the same command repeatedly, **add a command** — 
 
 `tmp/` is scratch: gitignored, so nothing written there reaches a diff, a reviewer, or the human — which is why it does not execute. Match the rung to the question: to **read** code, `py info`/`py source`/`py search`/`py imports` plus the codeintel tools answer without running anything; to **compute** something, `lup-devtools py eval '<expression>'` auto-imports and evaluates in the sandbox; with no sandbox available, add a devtools command. `docs/contributing.md` carries the rest of the ladder, down to a heredoc behind a `# lup: escalate: <why>` marker. The argument is reviewability, not power — an agent may already edit `devtools/` and run it.
 
-Run `uv run lup-devtools --help` for the command tree; `docs/template.md` lists the sub-apps, rendered from the same typed roster the CLI itself wires.
+`docs/commands.md` carries every command the CLI serves with a line on what each does, walked from the wired app at generation time rather than listed by hand — so a command exists there by existing, and reading it is how you find one you did not know to look for. `uv run lup-devtools <command> --help` gives its arguments and options; `docs/template.md` lists the sub-apps, rendered from the same typed roster the CLI itself wires.
 
 ### Generated Trees
 

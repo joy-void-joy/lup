@@ -1,6 +1,15 @@
-"""Canonical declaration for the fb-status skill."""
+"""Canonical declaration for the fb-status skill.
+
+The analysis directory is read from :func:`lup.workspace.paths.feedback_path`
+rather than spelled, so the prose cannot name a directory the code stopped
+writing to.
+"""
 
 import lup.harness.models as models
+from lup.workspace.paths import feedback_path, project_root
+
+ANALYSIS_DIRECTORY = feedback_path().relative_to(project_root()).as_posix()
+"""Where an analysis lands, relative to the checkout, as prose names it."""
 
 SKILL = models.Skill(
     id="skill.fb-status",
@@ -10,7 +19,7 @@ SKILL = models.Skill(
     prompt=models.PromptDocument(
         parts=[
             models.TextPart(
-                text=r"""# Status: Feedback Loop Entry Point
+                text=rf"""# Status: Feedback Loop Entry Point
 
 Get the current state of the agent and select analysis targets.
 
@@ -25,13 +34,15 @@ uv run lup-devtools feedback status
 
 ### 2. Previous session
 
-Read the most recent analysis file in `notes/feedback_loop/`:
+`feedback status` above reports the analysis state. For what the last pass
+actually concluded, read the most recent `*_analysis.md` under
+`{ANALYSIS_DIRECTORY}` with your own file tools — the directory may not exist
+yet in a project that has never run this loop, and that is an answer rather
+than an error.
 
-```bash
-ls -t notes/feedback_loop/*_analysis.md 2>/dev/null | head -1
-```
-
-If it exists, read it. Note what was already fixed — don't re-investigate.
+Note what was already fixed, and don't re-investigate it. What the last pass
+deliberately parked is not in that file: it is a `# lup: defer:` note at the
+site it concerns, which `uv run lup-devtools dev comments` lists.
 
 ### 3. Select targets
 

@@ -13,6 +13,7 @@ is a type-checking error rather than a page that quietly stopped publishing.
 from pathlib import Path
 
 import lup.harness.models as models
+from lup.devtools.harness.content.application import ApplicationLayout
 from lup.devtools.harness.content.docs import (
     architecture,
     contributing,
@@ -57,6 +58,8 @@ def library_documents(
     plugin: models.NativeName,
     claude_decodes: list[str],
     codex_decodes: list[str],
+    layout: ApplicationLayout,
+    checkout: Path,
     root: str = LIBRARY_DOCS_ROOT,
 ) -> list[models.Document]:
     """Every page lup publishes, in the order the index teaches them.
@@ -67,11 +70,19 @@ def library_documents(
     additionally takes what each runtime's hook decodes, which only a root
     composing the concrete runtimes may name — reading it here would put a
     native implementation behind every page this module publishes.
+
+    ``checkout`` is the tree the library page walks for its own package
+    roster and the capability page resolves its cited fixtures against,
+    threaded in for the same reason the project pages take one: no module
+    here may read a filesystem at import.
     """
     return [
-        published("library", "library.md", library.DOCUMENT, root),
+        published("library", "library.md", library.document(layout, checkout), root),
         published(
-            "harness", "harness.md", harness.document(skills, agents, plugin), root
+            "harness",
+            "harness.md",
+            harness.document(skills, agents, plugin, layout),
+            root,
         ),
         published("architecture", "architecture.md", architecture.DOCUMENT, root),
         published("permissions", "permissions.md", permissions.DOCUMENT, root),
@@ -81,24 +92,28 @@ def library_documents(
             "platform_differentiation",
             "platform-differentiation.md",
             platform_differentiation.document(
-                skills, agents, claude_decodes, codex_decodes
+                skills, agents, claude_decodes, codex_decodes, layout
             ),
             root,
         ),
         published(
             "native_capabilities",
             "native-capabilities.md",
-            native_capabilities.DOCUMENT,
+            native_capabilities.document(checkout),
             root,
         ),
         published(
             "self_improvement", "self-improvement.md", self_improvement.DOCUMENT, root
         ),
-        published("contributing", "contributing.md", contributing.DOCUMENT, root),
+        published(
+            "contributing", "contributing.md", contributing.document(layout), root
+        ),
         published("conventions", "conventions.md", conventions.DOCUMENT, root),
         published(
             "quality_pipeline", "quality-pipeline.md", quality_pipeline.DOCUMENT, root
         ),
-        published("orchestration", "orchestration.md", orchestration.DOCUMENT, root),
+        published(
+            "orchestration", "orchestration.md", orchestration.document(layout), root
+        ),
         published("patterns", "patterns.md", patterns.DOCUMENT, root),
     ]

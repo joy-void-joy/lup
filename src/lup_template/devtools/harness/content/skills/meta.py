@@ -1,42 +1,46 @@
 """Canonical declaration for the meta skill."""
 
 import lup.harness.models as models
+from lup.devtools.harness.content.application import ApplicationLayout
 
-SKILL = models.Skill(
-    id="skill.meta",
-    name="meta",
-    description="Review and modify the generated harness trees, brainstorm improvements interactively",
-    arguments=[
-        models.Argument(
-            name="arguments",
-            description="Optional arguments supplied with the skill invocation",
-            required=False,
-        ),
-    ],
-    tools=[
-        "Bash(ls:*, uv run lup-devtools:*)",
-        "Read",
-        "Grep",
-        "Glob",
-        "Edit",
-        "Write",
-        "Agent",
-        "AskUserQuestion",
-    ],
-    prompt=models.PromptDocument(
-        parts=[
-            models.TextPart(
-                text=r"""# Meta: Harness Structure Review & Improvement
+
+def skill(layout: ApplicationLayout) -> models.Skill:
+    """Review the generated trees against the sources this project keeps them in."""
+    return models.Skill(
+        id="skill.meta",
+        name="meta",
+        description="Review and modify the generated harness trees, brainstorm improvements interactively",
+        arguments=[
+            models.Argument(
+                name="arguments",
+                description="Optional arguments supplied with the skill invocation",
+                required=False,
+            ),
+        ],
+        tools=[
+            "Bash(ls:*, uv run lup-devtools:*)",
+            "Read",
+            "Grep",
+            "Glob",
+            "Edit",
+            "Write",
+            "Agent",
+            "AskUserQuestion",
+        ],
+        prompt=models.PromptDocument(
+            parts=[
+                models.TextPart(
+                    text=r"""# Meta: Harness Structure Review & Improvement
 
 You are reviewing the generated harness trees and brainstorming improvements with the user.
 
 ## User's Direction
 
 """
-            ),
-            models.ArgumentsRef(),
-            models.TextPart(
-                text=r"""
+                ),
+                models.ArgumentsRef(),
+                models.TextPart(
+                    text=r"""
 
 ## Your Task
 
@@ -45,69 +49,69 @@ Based on the user's input above, explore the relevant sources and brainstorm sol
 | Artifact | Source |
 | --- | --- |
 | """
-            ),
-            models.NativePath(location="guidance_file", scope="every_tree"),
-            models.TextPart(
-                text=r""" | `harness/content/guidance.py` |
+                ),
+                models.NativePath(location="guidance_file", scope="every_tree"),
+                models.TextPart(
+                    text=r""" | `harness/content/guidance.py` |
 | """
-            ),
-            models.PluginPath(plugin="lup", location="skills", scope="every_tree"),
-            models.TextPart(
-                text=r""" | `harness/content/skills/*.py` |
+                ),
+                models.PluginPath(plugin="lup", location="skills", scope="every_tree"),
+                models.TextPart(
+                    text=r""" | `harness/content/skills/*.py` |
 | """
-            ),
-            models.PluginPath(plugin="lup", location="agents", scope="every_tree"),
-            models.TextPart(
-                text=r""" | `harness/content/agents/*.py` |
+                ),
+                models.PluginPath(plugin="lup", location="agents", scope="every_tree"),
+                models.TextPart(
+                    text=r""" | `harness/content/agents/*.py` |
 | """
-            ),
-            models.PluginPath(plugin="lup", location="hooks", scope="every_tree"),
-            models.TextPart(
-                text=r""" | the canonical policy in `packages/lup/src/lup/policy/` |
+                ),
+                models.PluginPath(plugin="lup", location="hooks", scope="every_tree"),
+                models.TextPart(
+                    text=r""" | the canonical policy in `lup.policy` |
 | """
-            ),
-            models.NativePath(location="project_settings", scope="every_tree"),
-            models.TextPart(
-                text=r""" | `harness/content/settings.py` and the adapter rendering each tree — the two are not parity, so read both before assuming a setting exists on either side |
+                ),
+                models.NativePath(location="project_settings", scope="every_tree"),
+                models.TextPart(
+                    text=r""" | `harness/content/settings.py` and the adapter rendering each tree — the two are not parity, so read both before assuming a setting exists on either side |
 | """
-            ),
-            models.PluginPath(
-                plugin="lup", location="guidance_template", scope="every_tree"
-            ),
-            models.TextPart(
-                text=r""" | `harness/content/template_sections.py` plus each flavor module |
+                ),
+                models.PluginPath(
+                    plugin="lup", location="guidance_template", scope="every_tree"
+                ),
+                models.TextPart(
+                    text=rf""" | `harness/content/template_sections.py` plus each flavor module |
 
-Content paths above are relative to `src/lup_template/devtools/`. Every tree carries its own """
-            ),
-            models.NativePath(location="ownership_manifest"),
-            models.TextPart(
-                text=r""" recording which artifacts generation owns — consult the one for the tree you are changing whenever a path's source is not obvious.
+Content paths above are relative to `{layout.directory("devtools")}`. Every tree carries its own """
+                ),
+                models.NativePath(location="ownership_manifest"),
+                models.TextPart(
+                    text=r""" recording which artifacts generation owns — consult the one for the tree you are changing whenever a path's source is not obvious.
 
 Read the relevant sources based on what the user is asking about, then propose specific changes or additions and """
-            ),
-            models.RequestApproval(
-                action="editing any source the table names",
-                reason="one edit re-renders into every tree at once",
-            ),
-            models.TextPart(
-                text=r""" Regenerate with `uv run lup-devtools harness generate all` after any accepted change.
+                ),
+                models.RequestApproval(
+                    action="editing any source the table names",
+                    reason="one edit re-renders into every tree at once",
+                ),
+                models.TextPart(
+                    text=rf""" Regenerate with `uv run lup-devtools harness generate all` after any accepted change.
 
 ## Rendered layout
 
 Each tree lays the same declarations out its own way, and `docs/platform-differentiation.md` maps every intended difference between them. Read that rather than re-deriving a tree from memory: the table above is the mapping you need to make a change, and the layout only tells you where the result landed.
 
-**Note:** Python CLI tooling (API inspection, trace analysis, feedback collection, worktree management, etc.) lives in `src/lup_template/devtools/` and is exposed as the `lup-devtools` CLI entry point. See the lup-devtools section in the guidance.
+**Note:** Python CLI tooling (API inspection, trace analysis, feedback collection, worktree management, etc.) lives in `{layout.directory("devtools")}` and is exposed as the `lup-devtools` CLI entry point. See the lup-devtools section in the guidance.
 
 ### When to Add to the Plugin
 
 - **Skills**: Reusable workflows invoked by their qualified name, e.g. `"""
-            ),
-            models.SkillPattern(plugin="lup", placeholder="command-name"),
-            models.TextPart(
-                text=r"""`
+                ),
+                models.SkillPattern(plugin="lup", placeholder="command-name"),
+                models.TextPart(
+                    text=rf"""`
 - **Hooks**: Permission rules in the canonical policy — auto-allow, deny, or quality gates
 - **Agents**: Subagent definitions for specialized tasks
-- **Devtools**: Python CLI tools go in `src/lup_template/devtools/` (exposed as `lup-devtools`), not in the plugin
+- **Devtools**: Python CLI tools go in `{layout.directory("devtools")}` (exposed as `lup-devtools`), not in the plugin
 
 ## Brainstorming Principles
 
@@ -159,7 +163,7 @@ When considering changes, ask:
 5. **Reflect on this skill's execution** and propose updates to its own declaration if warranted
 6. Continue brainstorming or summarize changes made
 """
-            ),
-        ]
-    ),
-)
+                ),
+            ]
+        ),
+    )

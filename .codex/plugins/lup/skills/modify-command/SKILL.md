@@ -26,20 +26,17 @@ The first word is the **command name** to modify. Everything after is the **delt
 - Delta: "Add verbose flag"
 - New argument hints: `[error] [--verbose]`
 
-When `--args` is provided, update the command's `argument-hint` frontmatter to the specified hints and ensure `the arguments supplied with this skill invocation` is handled in the command body.
+When `--args` is provided, set `argument_hint` on the declaration to the specified hints — the `argument-hint` frontmatter is what generation renders from it, never a place to edit — and ensure `the arguments supplied with this skill invocation` is handled in the command body.
 
 ### If No Arguments Provided
 
-If `the arguments supplied with this skill invocation` is empty, ask the user:
-
-- Which command should be modified?
-- What changes should be made?
+If `the arguments supplied with this skill invocation` is empty, Ask the user directly, offering concrete options, and wait for the answer: which command to modify, and what changes to make to it
 
 ### Steps
 
 1. **Parse** the command name and delta from the arguments
 2. **Find** the source -- search in these locations, in order:
-   - `packages/lup/src/lup/devtools/harness/content/skills/<name>.py`, then `src/lup_template/devtools/harness/content/skills/<name>.py` (lup skills, including every `lup:name` variant -- the underscored module name; the library half holds the skills about agent work, this repository's the ones about being a template)
+   - `lup.devtools.harness.content.skills.<name>`, then `src/lup_template/devtools/harness/content/skills/<name>.py` (lup skills, including every `lup:name` variant -- the underscored module name; the library half holds the skills about agent work, this project's the ones about being a template). Where lup is not vendored here, read its modules with `uv run lup-devtools py source` rather than by path
    - a command the project or the person defined natively, outside any plugin
 
    Files under .claude/plugins/lup/commands/ under Claude Code, .codex/plugins/lup/skills/ under Codex are generated from the declarations -- read them to see the rendered result, never to edit.
@@ -53,7 +50,7 @@ If `the arguments supplied with this skill invocation` is empty, ask the user:
    before/after for key sections if helpful, then Request explicit user approval before writing the changed declaration. Reason: the change reaches every tree the declaration renders into.
 6. **Apply** the changes -- edit the declaration's prompt parts
 7. **Update the `tools` list** if needed (e.g., new grants for added functionality)
-8. **Regenerate** with `uv run lup-devtools harness claude` and `harness codex` when the source was a lup skill
+8. **Regenerate** with `uv run lup-devtools harness generate all` when the source was a lup skill — not `harness claude` or `harness codex`, which regenerate one target and then launch it
 9. **Confirm** the modification and show a summary
 
 ### Guidelines

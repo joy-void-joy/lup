@@ -136,6 +136,17 @@ class SemanticPart(BaseModel, ABC, frozen=True):
         """Whether this part reaches the arguments its invocation supplied."""
         return False
 
+    @property
+    def shell_command(self) -> str | None:
+        """The shell command this part tells its reader to run, if it names one.
+
+        A part that names a command is asking the agent to run it, so the
+        skill carrying it has to have granted the shell that takes. Asking
+        the part is what lets that be checked where the two are declared,
+        rather than discovered by an agent whose own instructions are denied.
+        """
+        return None
+
 
 class TextPart(SemanticPart, frozen=True):
     type: Literal["text"] = "text"
@@ -429,6 +440,10 @@ class WatchOutput(SemanticPart, frozen=True):
     def spell(self, renderer: "PromptRenderer") -> str:
         return renderer.own.watch_output(self.command)
 
+    @property
+    def shell_command(self) -> str:
+        return self.command
+
 
 class ResolverEntry(SemanticPart, frozen=True):
     type: Literal["resolver_entry"] = "resolver_entry"
@@ -548,6 +563,38 @@ class Argument(BaseModel, frozen=True):
     required: bool = False
 
 
+class BashGrant(BaseModel, frozen=True):
+    """What one declared ``Bash`` grant lets its holder run.
+
+    A grant reaches a declaration as a constrained string, because that is the
+    vocabulary the runtimes read it back in. The shape inside it still has to
+    be understood to answer whether a command is covered, and reading it once
+    here is what keeps each caller from re-deriving it with its own slicing.
+    """
+
+    prefixes: list[str] = []
+    """Command prefixes admitted, empty when the grant admits every command."""
+
+    def admits(self, command: str) -> bool:
+        """Whether this grant lets its holder run ``command``."""
+        if not self.prefixes:
+            return True
+        return any(command.startswith(prefix) for prefix in self.prefixes)
+
+    @classmethod
+    def read(cls, grant: ToolGrant) -> "BashGrant | None":
+        """This grant as Bash coverage, or ``None`` when it grants another tool."""
+        if grant == "Bash":
+            return cls()
+        if not grant.startswith("Bash(") or not grant.endswith(")"):
+            return None
+        scoped = grant.removeprefix("Bash(").removesuffix(")")
+        # lup: ignore[string-split] — the parenthesized specifier is a runtime's
+        # own grant syntax, which no stdlib parser reads
+        specifiers = scoped.split(",")
+        return cls(prefixes=[scope.strip().removesuffix(":*") for scope in specifiers])
+
+
 class Skill(BaseModel, frozen=True):
     id: str
     name: NativeName
@@ -577,6 +624,33 @@ class Skill(BaseModel, frozen=True):
             raise ValueError(
                 f"skill {self.id!r} argument declarations and ArgumentsRef disagree"
             )
+        return self
+
+    @model_validator(mode="after")
+    def commands_it_names_are_commands_it_may_run(self) -> "Skill":
+        """A command this skill tells its reader to run must be one it granted.
+
+        The two are declared side by side and nothing made them agree, so a
+        skill could instruct a step its own `tools` list forbids — and did:
+        one told the agent to watch a `dev check` while granting no shell at
+        all. That failure surfaces as a denial mid-run, to an agent following
+        instructions correctly, which is the worst place to learn it. An empty
+        grant list restricts nothing and is left alone.
+        """
+        if not self.tools:
+            return self
+        granted = [
+            read for grant in self.tools if (read := BashGrant.read(grant)) is not None
+        ]
+        for part in self.prompt.parts:
+            command = part.shell_command
+            if command is None:
+                continue
+            if not any(grant.admits(command) for grant in granted):
+                raise ValueError(
+                    f"skill {self.id!r} names the command {command!r} but grants "
+                    "no Bash that runs it: add the grant, or stop naming it"
+                )
         return self
 
 

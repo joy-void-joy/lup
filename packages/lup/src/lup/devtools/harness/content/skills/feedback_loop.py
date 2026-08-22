@@ -46,7 +46,11 @@ Run the full feedback loop by invoking subcommands in sequence. Each subcommand 
             models.TextPart(
                 text=r"""
 
-When trace content is provided, run a focused single-trace deep analysis using the `/fb-investigate` process (Steps 1-5) on the pasted content, then stop. Do not proceed to the full loop.
+When trace content is provided, run a focused single-trace deep analysis using the """
+            ),
+            models.SkillInvocation(plugin="lup", skill="fb-investigate"),
+            models.TextPart(
+                text=r""" process (Steps 1-5) on the pasted content, then stop. Do not proceed to the full loop.
 
 ## Three Levels of Analysis
 
@@ -71,7 +75,11 @@ A good feedback loop session produces changes at multiple levels. If you only ma
 
 ## Sequence
 
-### 1. `/fb-status` — State + targets
+### 1. """
+            ),
+            models.SkillInvocation(plugin="lup", skill="fb-status"),
+            models.TextPart(
+                text=r""" — State + targets
 
 Pass """
             ),
@@ -79,19 +87,35 @@ Pass """
             models.TextPart(
                 text=r""" through. Ends with a gate — confirm targets before proceeding.
 
-### 2. `/fb-investigate` — Deep trace reading
+### 2. """
+            ),
+            models.SkillInvocation(plugin="lup", skill="fb-investigate"),
+            models.TextPart(
+                text=r""" — Deep trace reading
 
 Read and analyze the selected sessions deeply. Ends with a gate — confirm findings before proceeding.
 
-### 3. `/fb-analyze` — Tool health + capability gaps + patterns
+### 3. """
+            ),
+            models.SkillInvocation(plugin="lup", skill="fb-analyze"),
+            models.TextPart(
+                text=r""" — Tool health + capability gaps + patterns
 
 Aggregate findings from metrics and traces to identify systemic patterns.
 
-### 4. `/fb-reflect` — Meta + meta-meta reflection
+### 4. """
+            ),
+            models.SkillInvocation(plugin="lup", skill="fb-reflect"),
+            models.TextPart(
+                text=r""" — Meta + meta-meta reflection
 
 Is the agent tracking enough data? Is this feedback loop working? Update subcommands and devtools as needed.
 
-### 5. `/fb-implement` — Make changes + queue evaluation
+### 5. """
+            ),
+            models.SkillInvocation(plugin="lup", skill="fb-implement"),
+            models.TextPart(
+                text=r""" — Make changes + queue evaluation
 
 Implement prioritized changes (tools first, prompts last). Bump version. Queue evaluation sessions.
 
