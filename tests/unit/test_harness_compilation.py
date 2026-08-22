@@ -2774,6 +2774,40 @@ def test_both_runtimes_grant_the_declared_servers_the_same_way() -> None:
     assert len(set(served_tool_grants(plugin))) == len(declared)
 
 
+def test_a_declared_startup_deadline_reaches_the_runtime_that_waits_on_one() -> None:
+    """A group resolving its package before it imports anything starts slowly.
+
+    The runtime's own default is set for a server already installed, and
+    missing it drops that one server while the session keeps the rest — so
+    the symptom is a group simply absent from a session that otherwise
+    works, which reads as flakiness rather than as a configured limit.
+    """
+    source = portable_harness()
+    plugin = source.plugins[0]
+    deadlined = source.model_copy(
+        update={
+            "plugins": [
+                plugin.model_copy(
+                    update={
+                        "mcp_servers": [
+                            server.model_copy(update={"startup_timeout_seconds": 60.0})
+                            for server in plugin.mcp_servers
+                        ]
+                    }
+                )
+            ]
+        }
+    )
+    parsed = tomllib.loads(codex_project_config(deadlined, CodexSpellings()))
+    assert parsed["mcp_servers"]["notes"]["startup_timeout_sec"] == 60.0
+
+
+def test_a_server_naming_no_deadline_keeps_the_runtimes_own() -> None:
+    """Declaring nothing leaves the default, rather than this file's opinion."""
+    parsed = tomllib.loads(codex_project_config(portable_harness(), CodexSpellings()))
+    assert "startup_timeout_sec" not in parsed["mcp_servers"]["notes"]
+
+
 def test_a_named_session_is_what_makes_a_native_server_serve_real_tools() -> None:
     """No adapter relays a context to a natively launched server; it opens one."""
     assert collect_tools_by_server(None).keys() == {EXAMPLE_GROUP}

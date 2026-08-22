@@ -794,6 +794,22 @@ class McpServer(BaseModel, frozen=True):
     a configuration home reaches none of them unless they are named here.
     """
 
+    startup_timeout_seconds: float | None = None
+    """How long this server gets to come up before a runtime abandons it.
+
+    Declared per server because the answer belongs to the server and not to
+    the machine: a group that resolves its package before importing anything
+    is slow on a cold checkout and instant on a warm one, while a runtime's
+    own default is chosen for a server already installed. Unset leaves that
+    default in force, which is right for a server whose start costs nothing.
+
+    Only a runtime that spawns under a deadline reads it; one that waits
+    renders nothing. What makes the deadline worth declaring is the shape of
+    missing it — the server is dropped and the session keeps the rest, so it
+    arrives as a group that is simply absent rather than as an error naming a
+    limit.
+    """
+
     def command_line(self, runtime: "NativeSpellings") -> list[str]:
         """Spell every argument for the runtime that will spawn this server."""
         return [argument.spell_in(runtime) for argument in self.arguments]

@@ -437,6 +437,11 @@ def codex_project_config(
     operator to ask held every server it had been given and could call none
     of them, refusing each with its approval policy rather than with anything
     naming the servers.
+
+    ``startup_timeout_sec`` is where a declared deadline lands, in this
+    runtime's own unit. It renders only when the declaration names one, so a
+    server that says nothing keeps the runtime's default instead of being
+    given this file's opinion of one.
     """
     document = tomlkit.document()
     features = tomlkit.table()
@@ -451,6 +456,8 @@ def codex_project_config(
             entry["args"] = server.command_line(spellings)
             if server.env_vars:
                 entry["env_vars"] = server.env_vars
+            if server.startup_timeout_seconds is not None:
+                entry["startup_timeout_sec"] = server.startup_timeout_seconds
             entry["default_tools_approval_mode"] = "approve"
             servers[server.name] = entry
     if servers:
