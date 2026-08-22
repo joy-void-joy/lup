@@ -486,6 +486,16 @@ and the launch says which of the two it is. The fallback needs no bridge: open
 the URL yourself, and the page shows a code to paste back at the
 `Paste code here if prompted` prompt.
 
+**A bridged sign-in ends on a browser error, and that is not the bridge
+failing.** The CLI asks to be redirected to a loopback port it is listening on;
+that port is the container's and the browser resolving it is the operator's, so
+the tab lands on `Unable to connect` with the answer sitting in its address
+bar. Copy `code` and `state` out of it, join them with `#`, and paste that at
+the same prompt — the CLI splits the pasted value on `#` into exactly those two.
+Carrying the reply back instead would mean opening a path inward, which is the
+one thing the bridge is shaped to refuse, so the launch says this up front
+rather than leaving an operator to debug a pipe that is working.
+
 #### What the config home holds, and how long
 
 The container's configuration home is a volume, named per **repository** rather

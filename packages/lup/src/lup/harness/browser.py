@@ -22,6 +22,16 @@ host is compared after parsing, against a declared list of the addresses a
 sign-in actually visits, so a page is opened for the flow this exists for and
 for nothing else.
 
+One-way is a decision with a visible cost, and it is better stated here than
+rediscovered. The CLI asks to be redirected to a loopback port it is listening
+on; that port is the container's, and the browser resolving it is the
+operator's, so the sign-in ends on a browser error every time. The flow has a
+second half for exactly this -- the page's code, pasted back at the prompt --
+and the launch says so, because an operator who is not told reads the dead tab
+as the bridge being broken and goes looking in the wrong place. Carrying the
+reply back would mean opening a path inward, which is the one thing this
+module is shaped to refuse.
+
 The comparison is the part worth being careful about, because every cheap
 version of it is wrong in the same direction. ``startswith`` admits
 ``https://claude.ai.evil.test``; ``in`` admits
@@ -190,7 +200,18 @@ class BrowserBridge(BaseModel, frozen=True):
                     "dropped rather than opened."
                 ),
                 urgency="boundary",
-            )
+            ),
+            Notice(
+                text=(
+                    "Sign-in: the page that opens comes back to a loopback "
+                    "address that exists only inside this container, so the "
+                    "tab lands on `Unable to connect`. Nothing has gone "
+                    "wrong — copy `code` and `state` out of its address bar, "
+                    "join them with `#`, and paste that at the `Paste code "
+                    "here if prompted` prompt."
+                ),
+                urgency="detail",
+            ),
         ]
 
     def serve(self) -> Path | None:

@@ -127,3 +127,19 @@ def test_an_unbridged_launch_says_what_to_do_instead() -> None:
     """The documented fallback: open the URL yourself, paste the code back."""
     said = "\n".join(item.text for item in BrowserBridge().notice(False))
     assert "Paste code here" in said
+
+
+def test_a_bridged_launch_says_the_callback_will_not_come_back() -> None:
+    """The half a working bridge makes it easy to leave out.
+
+    Carrying the URL out is the visible success, and it ends on a browser
+    error every time: the CLI asked to be redirected to a loopback port that
+    is the container's, and the browser resolving it is the operator's. An
+    operator not told that reads `Unable to connect` as this bridge failing
+    and debugs the pipe, which is working. So the same fallback the unbridged
+    launch prints has to be here too, where it is less obviously needed.
+    """
+    said = "\n".join(item.text for item in BrowserBridge().notice(True))
+
+    assert "Paste code here" in said
+    assert "#" in said
