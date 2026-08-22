@@ -127,14 +127,26 @@ def conflicted_manifest_repo(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
-def documented_launcher(conflicted_manifest_repo: Path) -> sh.Command:
+def documented_launcher(
+    conflicted_manifest_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> sh.Command:
     """The console script reached exactly as the conflict workflow spells it.
 
     Nothing could sync an environment into the scratch repository from a
     manifest that does not parse, so the path the documentation names points
     at the console script this suite is running under — the same artifact a
     real worktree holds from before the merge that broke its manifest.
+
+    `UV_PROJECT_ENVIRONMENT` is taken away because this fixture builds the
+    layout it would contradict. The variable is a fact about the machine and
+    stays set for the rest of the suite — the session image uses it to put the
+    environment outside the mounted checkout — but here it names a directory
+    that is real, is not under this scratch repository, and is therefore
+    reached by a bare name. `launcher_invocation` would then be right about
+    this container and wrong about the repository it was asked about, and the
+    notice would name a spelling that is not the one built two lines below.
     """
+    monkeypatch.delenv("UV_PROJECT_ENVIRONMENT", raising=False)
     launcher = conflicted_manifest_repo / conflicts.DOCUMENTED_LAUNCHER
     launcher.parent.mkdir(parents=True)
     launcher.symlink_to(Path(sys.executable).parent / "lup-devtools")
