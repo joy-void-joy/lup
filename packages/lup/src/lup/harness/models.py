@@ -822,7 +822,23 @@ class HookSandbox(BaseModel, frozen=True):
     """
 
     extra_domains: list[str] = []
-    credential_paths: list[str] = []
+    credential_paths: list[str] = Field(
+        default=[],
+        description=(
+            "Paths holding a secret nothing an agent runs should read. One "
+            "declaration renders one deny per boundary, because a boundary "
+            "governs the tools it governs and no others: Claude Code's "
+            "sandbox credential block covers commands the shell runs, and "
+            "the in-process reading tools walk past it — so the same paths "
+            "also render ``Read`` denies, and the two cannot name different "
+            "files. A second in-process tool that reads a path needs its own "
+            "render here rather than a second list to keep in step. Codex "
+            "renders neither: it has no in-process file-read tool to deny, "
+            "and its generated configuration carries no sandbox block, so "
+            "personal sandbox defaults stay in the operator's own file and "
+            "these paths reach nothing there"
+        ),
+    )
     excluded_commands: list[str] = Field(
         default=[],
         description=(
