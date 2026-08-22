@@ -26,19 +26,33 @@ from pydantic import AnyHttpUrl
 from lup.devtools.hooks.corpus import read_corpus
 from lup.harness.enforcement import declared_path_rules, semantic_policy_for
 from lup.harness.models import HookSet
+from lup.policy.foreign import foreign_warnings
 from lup.policy.models import Decision, FetchUrl, ShellCommand
 from lup.workspace.paths import project_root
 from lup.devtools.utils import output_json
 
 
-def report(subject: str, decision: Decision, as_json: bool) -> None:
+def report(
+    subject: str, decision: Decision, as_json: bool, warnings: list[str] | None = None
+) -> None:
     """Print one verdict, and exit non-zero on anything but an allow.
 
     The exit code is what makes this usable from a sweep: a batch of commands
     a project expects to pass fails the run when one of them stops passing.
+
+    ``warnings`` carry gates that are not this policy's, and they deliberately
+    reach neither the effect nor the exit code. This command answers what lup
+    decides; a runtime's own rail is somebody else's code on somebody else's
+    release schedule, so folding it into the verdict would be refusing work in
+    lup's name for a gate lup does not own — and a sweep would start failing
+    on the day upstream changed a token set. Said beside the verdict instead,
+    where a reader who is about to run the command sees it and a reader
+    checking the policy is not misled about whose refusal it is.
     """
     if as_json:
-        output_json({"subject": subject, **decision.model_dump()})
+        output_json(
+            {"subject": subject, **decision.model_dump(), "warnings": warnings or []}
+        )
     else:
         typer.echo(f"{decision.effect:>5}  {subject}")
         match decision.sandbox:
@@ -50,6 +64,8 @@ def report(subject: str, decision: Decision, as_json: bool) -> None:
                 typer.echo(f"       runs {placement} the sandbox")
         if decision.reason:
             typer.echo(f"       {decision.reason}")
+        for said in warnings or []:
+            typer.echo(f"       warning: {said}")
     if decision.effect != "allow":
         raise typer.Exit(1)
 
@@ -126,17 +142,23 @@ def create_hooks_app(declared: Callable[[], HookSet]) -> typer.Typer:
     ) -> None:
         """Say what the policy decides about one shell command, and why.
 
+        A verdict is this policy's. Beneath it may sit a warning about a gate
+        that is not — a runtime rail this project can recognise and neither
+        predict nor lift. It never moves the effect or the exit code.
+
         Examples::
 
             $ uv run lup-devtools hooks classify 'gh api /repos/o/r/pulls/1'
             $ uv run lup-devtools hooks classify 'rm build/out' --json
             $ uv run lup-devtools hooks classify 'rm -rf build' --contained
             $ uv run lup-devtools hooks classify 'uv run lup-devtools dev check' --trapped
+            $ uv run lup-devtools hooks classify 'grep -c eval file.py'
         """
         report(
             command,
             shell_decision(command, autonomous, not headless, trapped, contained),
             as_json,
+            foreign_warnings(command),
         )
 
     @app.command("classify-fetch")
