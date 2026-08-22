@@ -7,7 +7,6 @@ the rewrite that makes the token reachable has to be decided outside, and it
 has to arrive somewhere the confined thing cannot reach behind.
 """
 
-import os
 from pathlib import Path
 
 import pytest
@@ -216,25 +215,21 @@ def test_the_signing_choice_reaches_the_configuration_the_container_starts_with(
 
 @pytest.fixture
 def only_this_checkout_answers(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Take away every git scope outside the repository a test builds itself.
+    """Take away the git files a developer machine answers from.
 
-    Git resolves an identity across system, global, local and worktree, and
-    above all four the environment scope of `GIT_CONFIG_COUNT` and its
-    numbered pairs -- which is the same precedence
-    :meth:`GitAccess.environment` relies on to put the launcher's decision
-    where the confined thing cannot edit it.
+    Git resolves an identity across system, global, local and worktree, which
+    is the whole reason :func:`committer` asks git instead of reading a file
+    -- and it means a machine with a global `user.email` answers before the
+    repository a test builds gets to.
 
-    So taking away the files is not enough, and the gap is exactly the one
-    this module builds. A session launched by this harness carries that
-    environment scope, and a test asserting what an *absent* identity does
-    was answered by the launcher before its repository existed.
+    The scope above all four is the environment's, which is where
+    :meth:`GitAccess.environment` puts the launcher's decision so the
+    confined thing cannot edit it. That one is the session's to clear, in
+    `launcher_decisions_taken_away`, because a suite inheriting it is not a
+    fault of this module's tests alone.
     """
     monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(tmp_path / "absent-global"))
     monkeypatch.setenv("GIT_CONFIG_SYSTEM", str(tmp_path / "absent-system"))
-    for index in range(int(os.environ.get("GIT_CONFIG_COUNT", "0"))):
-        monkeypatch.delenv(f"GIT_CONFIG_KEY_{index}", raising=False)
-        monkeypatch.delenv(f"GIT_CONFIG_VALUE_{index}", raising=False)
-    monkeypatch.delenv("GIT_CONFIG_COUNT", raising=False)
 
 
 def test_a_commit_made_inside_is_authored_as_the_checkout_authors(
