@@ -44,7 +44,7 @@
     {
       "path": ".codex/config.toml",
       "category": "generated",
-      "sha256": "b4eba516c8f27f6efb1f27f87ccc79a14ae467e8ed5ec93310917d7ebde6cc39",
+      "sha256": "eff496ebfb5c66fe1141301a94a47e0663ce87bf3abe35348d961fbba47a6ef6",
       "semantic_id": "harness.project-config",
       "executable": false
     },

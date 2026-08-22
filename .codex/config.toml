@@ -12,11 +12,14 @@ hooks = true
 [mcp_servers.notes]
 command = "uv"
 args = ["run", "--directory", ".", "lup-devtools", "agent", "serve-tools", "--server", "notes", "--session", "harness"]
+default_tools_approval_mode = "approve"
 
 [mcp_servers.sandbox]
 command = "uv"
 args = ["run", "--directory", ".", "lup-devtools", "agent", "serve-tools", "--server", "sandbox", "--session", "harness"]
+default_tools_approval_mode = "approve"
 
 [mcp_servers.codeintel]
 command = "uv"
 args = ["run", "--directory", ".", "lup-devtools", "agent", "serve-tools", "--server", "codeintel", "--session", "harness"]
+default_tools_approval_mode = "approve"

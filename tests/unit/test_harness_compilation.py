@@ -39,6 +39,7 @@ from lup.adapters.harness import (
 from lup.codescan.registry import RULE_REFERENCE
 from lup.devtools.dev.commands import COMMAND_REFERENCE
 from lup.devtools.harness.drift import roster_gaps
+from lup.devtools.harness.settings import served_tool_grants
 from lup.harness.banner import (
     ARTIFACT_COMMENT_ROUTER,
     REGENERATE_COMMAND,
@@ -2749,6 +2750,62 @@ def test_a_server_naming_no_environment_renders_no_key_at_all() -> None:
     """An absent key leaves the runtime's own default, not an empty allowlist."""
     parsed = tomllib.loads(codex_project_config(portable_harness(), CodexSpellings()))
     assert "env_vars" not in parsed["mcp_servers"]["notes"]
+
+
+def test_both_runtimes_grant_the_declared_servers_the_same_way() -> None:
+    """Serving a tool and being allowed to call it are different claims.
+
+    A session with no operator to ask holds every server it was given and
+    can call none of them, refusing each with its approval policy rather
+    than with anything naming a server — which reads as an agent that chose
+    not to use its instruments. The grant is derived from the declaration on
+    both runtimes so neither can be the one that forgot.
+    """
+    source = portable_harness()
+    parsed = tomllib.loads(codex_project_config(source, CodexSpellings()))
+    approved = {
+        name
+        for name, entry in parsed["mcp_servers"].items()
+        if entry["default_tools_approval_mode"] == "approve"
+    }
+    plugin = source.plugins[0]
+    declared = {server.name for server in plugin.mcp_servers}
+    assert approved == declared
+    assert len(set(served_tool_grants(plugin))) == len(declared)
+
+
+def test_a_declared_startup_deadline_reaches_the_runtime_that_waits_on_one() -> None:
+    """A group resolving its package before it imports anything starts slowly.
+
+    The runtime's own default is set for a server already installed, and
+    missing it drops that one server while the session keeps the rest — so
+    the symptom is a group simply absent from a session that otherwise
+    works, which reads as flakiness rather than as a configured limit.
+    """
+    source = portable_harness()
+    plugin = source.plugins[0]
+    deadlined = source.model_copy(
+        update={
+            "plugins": [
+                plugin.model_copy(
+                    update={
+                        "mcp_servers": [
+                            server.model_copy(update={"startup_timeout_seconds": 60.0})
+                            for server in plugin.mcp_servers
+                        ]
+                    }
+                )
+            ]
+        }
+    )
+    parsed = tomllib.loads(codex_project_config(deadlined, CodexSpellings()))
+    assert parsed["mcp_servers"]["notes"]["startup_timeout_sec"] == 60.0
+
+
+def test_a_server_naming_no_deadline_keeps_the_runtimes_own() -> None:
+    """Declaring nothing leaves the default, rather than this file's opinion."""
+    parsed = tomllib.loads(codex_project_config(portable_harness(), CodexSpellings()))
+    assert "startup_timeout_sec" not in parsed["mcp_servers"]["notes"]
 
 
 def test_a_named_session_is_what_makes_a_native_server_serve_real_tools() -> None:
