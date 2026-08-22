@@ -44,6 +44,7 @@ tidiness one.
 
 import atexit
 import os
+import shlex
 import shutil
 import tempfile
 import threading
@@ -123,6 +124,21 @@ class BrowserBridge(BaseModel, frozen=True):
             "a channel out of the boundary and its width is this list"
         ),
     )
+    paste_back: str = Field(
+        default=(
+            "The tab lands on `Unable to connect`: that address is a loopback "
+            "port inside this container, and the browser resolving it is on "
+            "your machine. Nothing has gone wrong — copy `code` and `state` "
+            "out of its address bar, join them with `#`, and paste that at "
+            "the `Paste code here if prompted` prompt."
+        ),
+        description=(
+            "How the second half of the flow is asked for. Held once and "
+            "rendered twice -- into the launch notice and into the opener -- "
+            "because two spellings of one instruction drift, and the one "
+            "that drifts is the one nobody reads until a sign-in is stuck"
+        ),
+    )
 
     def path(self) -> str:
         """The pipe, spelled as the container sees it."""
@@ -142,11 +158,21 @@ class BrowserBridge(BaseModel, frozen=True):
         take the sign-in with it. Printing first means the URL survives that
         either way, which is the whole of what the flow needs from this in
         the worst case.
+
+        Says how the flow ends at the moment it starts one, which is the
+        difference between an instruction and a warning nobody has. The
+        launch says the same thing, but it says it among every other
+        boundary notice and minutes before anyone types `/login`; this runs
+        as the tab opens, and the operator reads it while looking at the
+        error it is about. Quoted by :mod:`shlex` rather than by hand,
+        because the text is prose someone will edit and one apostrophe in it
+        would close the string and leave the rest as shell.
         """
         return "\n".join(
             [
                 "#!/bin/sh",
                 "printf '\\nlup: opening on the host:\\n  %s\\n\\n' \"$1\" >&2",
+                f"printf '  %s\\n\\n' {shlex.quote(self.paste_back)} >&2",
                 f'[ -p "{self.path()}" ] || exit 0',
                 f'timeout 5 sh -c \'printf "%s\\n" "$1" > "$2"\' _ "$1" '
                 f'"{self.path()}" 2>/dev/null || true',
@@ -202,14 +228,7 @@ class BrowserBridge(BaseModel, frozen=True):
                 urgency="boundary",
             ),
             Notice(
-                text=(
-                    "Sign-in: the page that opens comes back to a loopback "
-                    "address that exists only inside this container, so the "
-                    "tab lands on `Unable to connect`. Nothing has gone "
-                    "wrong — copy `code` and `state` out of its address bar, "
-                    "join them with `#`, and paste that at the `Paste code "
-                    "here if prompted` prompt."
-                ),
+                text=f"Sign-in: {self.paste_back}",
                 urgency="detail",
             ),
         ]

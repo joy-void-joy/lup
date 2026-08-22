@@ -143,3 +143,47 @@ def test_a_bridged_launch_says_the_callback_will_not_come_back() -> None:
 
     assert "Paste code here" in said
     assert "#" in said
+
+
+def test_the_opener_says_how_the_flow_ends_at_the_moment_it_starts_one() -> None:
+    """The launch says this too, and says it where it gets scrolled away.
+
+    An operator reads the launch notices once, minutes before typing
+    `/login`, among every other boundary notice. The dead tab arrives later
+    and on its own, so the instruction for it belongs in the one output that
+    is on screen when it does -- and in an unbridged launch too, where the
+    URL is opened by hand and the callback fails exactly the same way.
+    """
+    bridge = BrowserBridge()
+
+    assert bridge.paste_back in bridge.script()
+    assert bridge.script().index("Unable to connect") < bridge.script().index("-p ")
+
+
+def test_the_instruction_is_held_once_and_rendered_twice() -> None:
+    """Two spellings of one instruction drift, and drift is silent here.
+
+    The notice and the opener ask for the same paste-back. Held apart, one
+    gets corrected and the other keeps telling an operator something that is
+    no longer how the flow works.
+    """
+    bridge = BrowserBridge()
+    said = "\n".join(item.text for item in bridge.notice(True))
+
+    assert bridge.paste_back in said
+    assert bridge.paste_back in bridge.script()
+
+
+def test_an_apostrophe_in_the_instruction_does_not_become_shell(
+    tmp_path: Path,
+) -> None:
+    """It is prose in a shell string, which is a quoting bug waiting to be typed.
+
+    Nobody editing this sentence is thinking about `sh`, so the quoting has
+    to survive the edit rather than be re-derived by whoever makes it.
+    """
+    bridge = BrowserBridge(paste_back="it is the operator's tab; echo pwned")
+    written = tmp_path / "lup-open"
+    written.write_text(bridge.script(), encoding="utf-8")
+
+    sh.Command("sh")("-n", str(written))

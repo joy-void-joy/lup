@@ -493,8 +493,12 @@ the tab lands on `Unable to connect` with the answer sitting in its address
 bar. Copy `code` and `state` out of it, join them with `#`, and paste that at
 the same prompt — the CLI splits the pasted value on `#` into exactly those two.
 Carrying the reply back instead would mean opening a path inward, which is the
-one thing the bridge is shaped to refuse, so the launch says this up front
-rather than leaving an operator to debug a pipe that is working.
+one thing the bridge is shaped to refuse, so this is said rather than left for
+an operator to debug a pipe that is working. Said twice, from `paste_back` held
+once: the launch states it among the boundary notices, and the opener repeats it
+as the tab opens, which is where somebody looking at `Unable to connect` is
+actually reading. An unbridged launch prints it too — the URL opened by hand
+comes back to the same loopback and fails the same way.
 
 #### What the config home holds, and how long
 
