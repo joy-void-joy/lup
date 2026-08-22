@@ -5,6 +5,7 @@ it: a library test reaching for a template fixture passes here and fails where
 the library ships.
 """
 
+import os
 import warnings
 from collections.abc import Iterator
 from pathlib import Path
@@ -12,6 +13,24 @@ from pathlib import Path
 import pytest
 
 from lup.gitguard import TEST_IDENTITY, ForeignCheckouts, repository_state
+from lup.harness.environment import launcher_decided_names
+
+
+@pytest.fixture(scope="session", autouse=True)
+def launcher_decisions_taken_away() -> Iterator[None]:
+    """Measure the code, not the session this suite happens to run in.
+
+    Autouse and session-scoped for the same reason as the guard below: no
+    test can be asked to notice it. A variable the launcher set answers the
+    question a test meant to put to the code, and answers it consistently —
+    so the test passes on the machine that wrote it, and fails inside the
+    container that machine builds, which is where every one of these was
+    found. See :func:`~lup.harness.environment.launcher_decided_names`.
+    """
+    with pytest.MonkeyPatch.context() as environment:
+        for name in launcher_decided_names(os.environ):
+            environment.delenv(name, raising=False)
+        yield
 
 
 @pytest.fixture(scope="session", autouse=True)
