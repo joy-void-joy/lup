@@ -10,7 +10,6 @@ answered "nothing resolved" would pass every unit test in the suite and ask
 about every `.get(` an agent ever writes.
 """
 
-import sys
 from pathlib import Path
 
 import pytest
@@ -23,20 +22,20 @@ pytestmark = pytest.mark.skipif(
     langserver_path() is None, reason="pyright-langserver is not installed"
 )
 
-RESOLUTION_COMMAND = [
-    str(Path(sys.executable).parent / "lup-devtools"),
-    "dev",
-    "refutations",
-]
-"""The toolchain of the environment running this suite, asked for by that.
+RESOLUTION_COMMAND = ["lup-devtools", "dev", "refutations"]
+"""The bare name this project really declares, resolved the way the gate does.
 
-Not `.venv/bin`, which is where `uv` puts one by default and not where this
-project's own environment always is: `UV_PROJECT_ENVIRONMENT` redirects it,
-which is how the session image puts it outside the checkout entirely. A
-hardcoded path there names nothing inside the container, and
+Spelled `.venv/bin/lup-devtools` before, which is `uv`'s default layout and
+not where this project's environment always is: `UV_PROJECT_ENVIRONMENT`
+redirects it, and the session image puts it outside the checkout entirely.
+So the path named nothing inside the container — and
 :func:`resolved_refutations` reports a resolver that is not installed as the
-same silence as none declared -- so this test would pass its own assertion
-about silence while proving nothing about the chain it exists to prove.
+same silence as none declared, which is an answer this test asserts about
+elsewhere. It passed by proving nothing about the chain it exists to prove.
+
+The bare name is also what :func:`~lup.policy.assets.host.declared_program`
+is for, so declaring it here exercises that resolution rather than routing
+around it.
 """
 
 PROPOSED = 'import httpx\n\nresponse = httpx.get("https://example.com")\n'

@@ -46,6 +46,20 @@ def tree_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return tree
 
 
+@pytest.fixture
+def the_worktree_holds_its_own_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ask about this worktree's environment, not one shared with it.
+
+    `UV_PROJECT_ENVIRONMENT` moves where a sync lands, which is how one
+    environment is shared across worktrees and how the session image puts it
+    outside the checkout. That is a fact about the machine and stays set for
+    the suite -- but it makes :meth:`SyncedEnvironment.satisfied` read a
+    directory that is there whatever the sync did, so these two cases, whose
+    whole subject is a sync that produced nothing, take it away.
+    """
+    monkeypatch.delenv("UV_PROJECT_ENVIRONMENT", raising=False)
+
+
 def repo_git(work: Path) -> sh.Command:
     return sh.Command("git").bake("-C", str(work), _tty_out=False)
 
@@ -130,7 +144,10 @@ def test_a_half_made_worktree_is_finished_by_re_running(
 
 
 def test_a_half_made_worktree_does_not_report_success(
-    repo: Path, tree_dir: Path, monkeypatch: pytest.MonkeyPatch
+    repo: Path,
+    tree_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    the_worktree_holds_its_own_environment: None,
 ) -> None:
     """An unfinishable step exits non-zero rather than claiming the worktree is ready.
 
@@ -153,6 +170,7 @@ def test_the_steps_that_did_not_run_are_named(
     tree_dir: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
+    the_worktree_holds_its_own_environment: None,
 ) -> None:
     """Naming the missing step is what costs less than the diagnosis it prevents."""
     interrupted_creation(repo, tree_dir, "topic")
