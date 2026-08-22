@@ -103,7 +103,7 @@ def test_a_line_the_engine_shaped_differently_is_skipped() -> None:
 def repository(tmp_path: Path) -> Path:
     """A bare repository with two linked worktrees, which is the arrangement."""
     bare = tmp_path / "project.git"
-    git("init", "--bare", "-q", str(bare))
+    git("init", "--bare", "-q", "-b", "main", str(bare))
     git("-C", str(bare), "config", "user.email", "test@example.invalid")
     git("-C", str(bare), "config", "user.name", "Test")
     seed = tmp_path / "seed"
