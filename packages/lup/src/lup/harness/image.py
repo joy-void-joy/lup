@@ -866,10 +866,28 @@ USER $UID:$GID
         the earlier attempt to avoid needing it, by addressing the proxy
         under a DNS alias, is what put a resolver on the internal network and
         left the proxy unable to resolve anything at all.
+
+        ``--init`` is what makes the bound beside it survivable, and the two
+        are one subject. Without it PID 1 is the agent runtime, which does not
+        reap: every child a session orphans -- a ``git`` the runtime spawned
+        and stopped waiting on, a worker thread's helper -- is reparented to
+        it and stays a zombie for the life of the container, so the process
+        table fills monotonically and never drains. Measured in a session a
+        few hours old: 4,045 zombies against a limit of 4,096, of which 3,933
+        were ``[git] <defunct>``.
+
+        What that costs is not a message about processes. It is
+        ``RuntimeError: can't start new thread`` and ``fork: Resource
+        temporarily unavailable`` scattered through a suite -- 94 failures and
+        151 errors in one run -- which reads exactly like the change under
+        test having broken something, and cost a whole bisection of a change
+        that was fine. Both engines take the flag and put a real reaper at PID
+        1, so the class stops existing rather than being watched for.
         """
         return [
             *engine.identity_arguments(uid, gid),
             *self.egress.attachment_arguments(checkout.name),
+            "--init",
             "--pids-limit",
             str(self.pids_limit),
             *[

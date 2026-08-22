@@ -25,6 +25,7 @@ from lup.harness.toolchain import (
     metadata_refused_requirement,
     proxy_reachable_requirement,
     proxy_tunnels_requirement,
+    reaped_orphans_requirement,
     same_path_mount_requirement,
     terminal_handoff_requirement,
     typescript_requirement,
@@ -60,6 +61,15 @@ def manifest() -> Manifest:
     refused, and the operator's terminal having arrived. Each was a thing the
     first contained session found broken and no preflight was in a position
     to see, because the image half had been declared and never run.
+
+    The fifth is about the container rather than the boundary, and is here for
+    the same reason as the four: it was found by a session collapsing rather
+    than by anything asking. A container with no reaper at PID 1 keeps every
+    orphan it ever made, so the process bound is reached by a session that
+    leaked -- and what announces that is an unrelated suite failing to start
+    threads. Declared beside them because the cure and the check belong to the
+    same argv, and a flag nothing measures is one that comes off in a refactor
+    and is missed hours later by somebody bisecting their own change.
     """
     return Manifest(
         requirements=[
@@ -80,6 +90,7 @@ def manifest() -> Manifest:
             proxy_tunnels_requirement(),
             metadata_refused_requirement(),
             terminal_handoff_requirement(),
+            reaped_orphans_requirement(),
             bun_requirement(),
             typescript_requirement(),
             agent_session_requirement(),

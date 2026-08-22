@@ -712,6 +712,81 @@ def terminal_handoff_requirement(
     )
 
 
+def reaped_orphans_requirement(
+    where: Side = "image",
+    install: list[Package] = [],
+    settle: int = 3,
+) -> Requirement:
+    """Whether anything at PID 1 reaps the children a session abandons.
+
+    The bound this checks is not the one that gets hit. `Image.pids_limit`
+    caps a session at 4,096 processes so that a runaway fork loop is refused
+    rather than taking the host down, and a session doing ordinary work never
+    approaches it -- unless nothing drains what accumulates. PID 1 in a
+    container started without a reaper is the agent runtime itself, which
+    waits on the children it means to wait on and no others, so every orphan
+    is reparented to it and stays a zombie until the container ends. The table
+    then fills monotonically over hours, and the limit is reached by a session
+    that leaked rather than by one doing too much.
+
+    Worth a probe rather than trust because of how the failure presents. It is
+    not "out of processes": it is `RuntimeError: can't start new thread` and
+    `/bin/bash: fork: retry: Resource temporarily unavailable` spread across a
+    suite, and a pre-commit hook dying of signal 6. Measured once as 94
+    failures and 151 errors, read as a change having broken the tests, and
+    bisected for a while before anybody counted zombies. A defect whose whole
+    signature is *other things appearing broken* is one no reader diagnoses
+    twice, so it is measured on the way in instead.
+
+    Behavioural rather than a look at what PID 1 is. Reading `/proc/1/comm`
+    would name the reaper on the engines that install one and prove nothing
+    about whether it reaps -- and the property wanted here is the reaping. So
+    the exercise abandons a child on purpose: an inner shell starts one and
+    exits while it still runs, which is what reparents it, and the count is
+    taken after it has had time to exit under whatever inherited it.
+
+    ``settle`` is the only guess, and it is a guess about scheduling rather
+    than about reaping: the orphan has to have exited before anything is
+    counted, or a live child reads as a reaped one and this passes on an
+    engine that reaps nothing.
+    """
+    return Requirement(
+        capability="abandoned children are reaped",
+        purpose="a long session reaching its process bound only by really using it",
+        where=where,
+        checked="setup",
+        exercise=Run(
+            command=[
+                "sh",
+                "-c",
+                # The inner shell exits while its child still runs, which is
+                # what reparents the child to PID 1; `settle` outlasts the
+                # child so what is counted is a process that has exited.
+                'sh -c "sleep 1 & exit 0"; '
+                f"sleep {settle}; "
+                'zombies=$(ps -eo stat= | grep -c "^Z"); '
+                "reaper=$(cat /proc/1/comm); "
+                'printf "pid1=%s zombies=%s\n" "$reaper" "$zombies"; '
+                '[ "$zombies" = "0" ] || { '
+                'echo "pid 1 is $reaper, which left $zombies zombie(s) behind '
+                "after one abandoned child — nothing here reaps, so this "
+                "session's process table only fills\" >&2; "
+                "exit 1; }",
+            ]
+        ),
+        absence=LostCapability(
+            capability=(
+                "a session that stays healthy for its whole length — this one "
+                "accumulates a zombie per abandoned child until it cannot fork, "
+                "and reports that as whatever work was running being broken. "
+                "`--init` on the run argv is the whole fix, and both engines "
+                "take it"
+            )
+        ),
+        install=install,
+    )
+
+
 def default_manifest() -> Manifest:
     """Every requirement at its offered default -- the batteries-included roster.
 

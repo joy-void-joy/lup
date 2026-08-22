@@ -199,6 +199,20 @@ def test_a_session_container_is_given_a_process_bound_it_can_name() -> None:
     assert arguments[arguments.index("--pids-limit") + 1] == "4096"
 
 
+def test_a_session_container_is_given_something_at_pid_one_that_reaps() -> None:
+    """The bound above is only survivable while something drains what fills it.
+
+    Absent the flag, PID 1 is the agent runtime, which does not reap. Every
+    orphaned child is reparented to it and stays a zombie for the life of the
+    container, so the bound is reached by a session that leaked rather than by
+    one doing too much at once -- and what that announces itself as is
+    `can't start new thread` across an unrelated suite.
+    """
+    arguments = Image().run_arguments(Path("/checkout"), 1000, 1000)
+
+    assert "--init" in arguments
+
+
 def test_an_image_no_longer_installs_a_sandbox_it_cannot_start() -> None:
     """Those two packages bought silence about a boundary that was not there."""
     assert Image().inner_sandbox == []
