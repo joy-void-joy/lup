@@ -771,11 +771,35 @@ if [ ! -f "$config/.claude.json" ]; then
      /opt/lup/trust-seed.json > "$config/.claude.json"
 fi
 # The stored login, copied in rather than mounted over the path it lives at.
-# Only when the config home has none, which is what keeps the two directions
-# from fighting: a login made in here is never overwritten by the host's, and
-# the host's file is never written by anything in here. After the copy this
-# container owns its credential outright, so `/login` completes and an
-# expiring token renews -- neither of which a read-only mount allowed.
+# Only when the config home holds none that could still reach an account,
+# which is what keeps the two directions from fighting: a login usable in here
+# is never overwritten by the host's, and the host's file is never written by
+# anything in here. After the copy this container owns its credential
+# outright, so `/login` completes and an expiring token renews -- neither of
+# which a read-only mount allowed.
+#
+# "Usable" rather than "present" because the config home outlives the
+# credential in it. The volume is keyed on the repository and kept, the copy
+# ages on its own schedule, and a home left alone past the refresh
+# credential's life holds a file that is a login by every test except the one
+# that matters. Read as present, it suppresses the seed and the session opens
+# demanding a sign-in -- and a sign-in is the one thing this boundary cannot
+# finish, because the callback comes back to a loopback address that only
+# exists inside. So the seed answers the question the failure actually turns
+# on, and nothing is lost by replacing a credential no request will be
+# answered for: it is not a login for its own account either.
+#
+# What decides that is the runtime's, and arrives per launch beside the
+# filename. A runtime declaring no test is taken at its word rather than
+# guessed at -- it keeps the older present-or-absent rule, and a launch that
+# cannot renew what it holds falls back to the printed URL.
+#
+# The copy replaces the file whole, which is the unit it always was, so
+# whatever else the runtime keeps beside the login in there goes with it --
+# Claude Code stores its MCP authorizations in this same file, and they come
+# back as the host's rather than surviving as this home's. That is the price
+# of the seed being a copy, and it is paid only for a home whose login had
+# already stopped working.
 #
 # The filename is the runtime's own word and arrives per launch, because one
 # image starts every runtime the harness declares and they do not agree on it.
@@ -787,11 +811,21 @@ fi
 # ownership -- the directory is ours and the file is not, so it is removed
 # rather than written through. An empty credential is not a login by anyone's
 # definition, so nothing is lost by replacing one.
+usable() {{
+  [ -s "$1" ] || return 1
+  [ -n "$LUP_CREDENTIAL_RENEWABLE" ] || return 0
+  jq -e "$LUP_CREDENTIAL_RENEWABLE" "$1" >/dev/null 2>&1
+}}
 seed={self.credential_seed}
-if [ -n "$LUP_CREDENTIAL_NAME" ] && [ -f "$seed" ] && [ ! -s "$config/$LUP_CREDENTIAL_NAME" ]; then
-  rm -f "$config/$LUP_CREDENTIAL_NAME"
-  cp "$seed" "$config/$LUP_CREDENTIAL_NAME"
-  chmod 600 "$config/$LUP_CREDENTIAL_NAME"
+stored="$config/$LUP_CREDENTIAL_NAME"
+if [ -n "$LUP_CREDENTIAL_NAME" ] && usable "$seed" && ! usable "$stored"; then
+  if [ -s "$stored" ]; then
+    echo "lup: the login in this config home can no longer be renewed," >&2
+    echo "lup: so it was replaced by the host's, which still can." >&2
+  fi
+  rm -f "$stored"
+  cp "$seed" "$stored"
+  chmod 600 "$stored"
 fi
 exec "$@"
 ENTRY
@@ -934,6 +968,7 @@ USER $UID:$GID
         state_volume: str,
         config_home_env: str,
         credential_file: str = ".credentials.json",
+        credential_renewable: str = "",
         credential: Path | None = None,
         host_config_home: Path | None = None,
         engine: ContainerEngine = Docker(),
@@ -960,9 +995,11 @@ USER $UID:$GID
         policy would be off with nothing having failed.
 
         ``credential`` is offered read-only at :attr:`credential_seed` and
-        copied into the config home by the entrypoint when that home has
-        none. It used to be mounted read-only at the path the CLI keeps a
-        login, which looked right and was not: the CLI writes that file back
+        copied into the config home by the entrypoint when that home holds
+        none that could still be renewed -- ``credential_renewable`` is the
+        runtime's own test for that, and an empty one keeps the older rule of
+        seeding only an absent login. It used to be mounted read-only at the
+        path the CLI keeps a login, which looked right and was not: the CLI writes that file back
         both when a login completes and when it renews an expiring token, so
         a read-only mount meant `/login` could not finish inside the boundary
         and a long session could not renew what it started with. The mount
@@ -1003,6 +1040,8 @@ USER $UID:$GID
                 f"{credential}:{self.credential_seed}:ro",
                 "-e",
                 f"LUP_CREDENTIAL_NAME={credential_file}",
+                "-e",
+                f"LUP_CREDENTIAL_RENEWABLE={credential_renewable}",
             ]
             if credential is not None
             else []
