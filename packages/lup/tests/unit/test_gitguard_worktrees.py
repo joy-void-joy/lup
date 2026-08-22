@@ -132,3 +132,102 @@ def test_the_checkout_under_test_never_counts_as_foreign() -> None:
     listing = "worktree /a\nHEAD abc\nbranch refs/heads/mine\n"
 
     assert ForeignCheckouts.declared(listing, Path("/a").resolve()) == {}
+
+
+def bare_remote(tmp_path: Path) -> Path:
+    """Somewhere for a sibling to push to."""
+    origin = tmp_path / "origin.git"
+    sh.Command("git")("init", "--bare", "-b", "trunk", str(origin), _tty_out=False)
+    return origin
+
+
+def repository_with_a_remote(tmp_path: Path) -> Path:
+    """A checkout and its sibling, with a remote both can push to."""
+    main = repository_with_a_sibling(tmp_path)
+    sh.Command("git")(
+        "-C",
+        str(main),
+        "remote",
+        "add",
+        "origin",
+        str(bare_remote(tmp_path)),
+        _tty_out=False,
+    )
+    return main
+
+
+def pushed(where: Path, refspec: str) -> None:
+    """Push ``refspec`` from ``where``, without setting anything up first."""
+    sh.Command("git")("-C", str(where), "push", "origin", refspec, _tty_out=False)
+
+
+def test_a_siblings_first_push_is_noticed_without_failing(tmp_path: Path) -> None:
+    """The half the branch relation misses: the config arrives with the push.
+
+    Nothing tracks anything when the guard reads the repository, so a branch's
+    upstream cannot name the ref that is about to appear. The correspondence
+    `git push` uses has to be claimed ahead of it or the routine event fails
+    the run, which is the whole complaint.
+    """
+    main = repository_with_a_remote(tmp_path)
+    foreign = ForeignCheckouts.beside(main)
+    before = repository_state(main)
+    pushed(tmp_path / "sibling", "sibling")
+
+    verdict = foreign.verdict(before, repository_state(main))
+
+    assert verdict.failure == ""
+    assert "refs/remotes/origin/sibling" in verdict.notice
+
+
+def test_a_remote_ref_for_the_branch_this_checkout_holds_still_fails(
+    tmp_path: Path,
+) -> None:
+    """Narrowing who answers for a push must not excuse this checkout's own."""
+    main = repository_with_a_remote(tmp_path)
+    foreign = ForeignCheckouts.beside(main)
+    before = repository_state(main)
+    pushed(main, "trunk")
+
+    verdict = foreign.verdict(before, repository_state(main))
+
+    assert "refs/remotes/origin/trunk" in verdict.failure
+
+
+def test_a_remote_ref_matching_no_sibling_branch_still_fails(tmp_path: Path) -> None:
+    """A ref that appeared from nowhere is nobody else's, remote or not."""
+    main = repository_with_a_remote(tmp_path)
+    foreign = ForeignCheckouts.beside(main)
+    before = repository_state(main)
+    sh.Command("git")(
+        "-C",
+        str(main),
+        "update-ref",
+        "refs/remotes/origin/nobody",
+        "HEAD",
+        _tty_out=False,
+    )
+
+    verdict = foreign.verdict(before, repository_state(main))
+
+    assert "refs/remotes/origin/nobody" in verdict.failure
+
+
+def test_a_branch_tracking_a_differently_named_remote_is_attributed(
+    tmp_path: Path,
+) -> None:
+    """Why `upstream` is asked for rather than the two names being joined."""
+    main = repository_with_a_remote(tmp_path)
+    sibling = tmp_path / "sibling"
+    sh.Command("git")(
+        "-C", str(sibling), "push", "-u", "origin", "sibling:renamed", _tty_out=False
+    )
+
+    foreign = ForeignCheckouts.beside(main)
+
+    assert foreign.holder("refs/remotes/origin/renamed") == str(sibling.resolve())
+
+
+def test_no_remote_is_claimed_when_git_cannot_say(tmp_path: Path) -> None:
+    """The module's rule: a guard that cannot answer fails on everything."""
+    assert ForeignCheckouts.remotes(tmp_path / "nowhere") == []
