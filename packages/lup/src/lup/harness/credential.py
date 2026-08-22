@@ -424,6 +424,33 @@ class GitAccess(BaseModel, frozen=True):
         default=SigningOff(),
         description="What a commit made inside the boundary claims, if anything",
     )
+    maintains: bool = Field(
+        default=False,
+        description=(
+            "Whether a session runs git's own repository maintenance. False "
+            "because it cannot: the gitdir's root is mounted read-only, so "
+            "the `pack-refs` task the automatic run starts fails on "
+            "`packed-refs.lock` and prints three errors after every commit "
+            "that otherwise landed — which made one commit read as failed "
+            "when it had not. A project mounting its gitdir writable turns "
+            "this back on and gets git's ordinary housekeeping"
+        ),
+    )
+
+    def maintenance(self) -> list[GitSetting]:
+        """Whether git may start its own housekeeping, as a setting or nothing.
+
+        Nothing when it may, so a session that can maintain its repository is
+        one this said nothing about rather than one told to do what it would
+        have done anyway.
+
+        Not about the forge, unlike everything else here, and it sits beside
+        them because :meth:`configuration` is the one channel a contained
+        session's git settings travel through -- ``GIT_CONFIG_COUNT`` has to
+        match the pairs beneath it, so a second assembly would be a second
+        thing to keep in step with this one.
+        """
+        return [] if self.maintains else [GitSetting(key="maintenance.auto", value="0")]
 
     def helper(self, token: str) -> GitSetting:
         """What git answers an authentication challenge with, token or not.
@@ -474,6 +501,7 @@ class GitAccess(BaseModel, frozen=True):
             *[rewrite.setting() for rewrite in rewrites],
             *(identity.configuration() if identity is not None else []),
             *self.signing.configuration(),
+            *self.maintenance(),
             self.helper(token),
         ]
 

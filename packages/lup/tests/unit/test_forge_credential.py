@@ -213,6 +213,31 @@ def test_the_signing_choice_reaches_the_configuration_the_container_starts_with(
     assert "user.signingkey" in keys
 
 
+def test_a_session_is_told_not_to_start_maintenance_it_cannot_finish() -> None:
+    """The gitdir's root is read-only, so `pack-refs` cannot take its lock.
+
+    Git starts the automatic run after an ordinary commit and reports the
+    failure as three errors on stderr, after the commit has already landed.
+    Nothing is wrong and it reads exactly as though something is — one commit
+    was read as failed on the strength of it.
+    """
+    settings = {item.key: item.value for item in GitAccess().configuration(REWRITE, "")}
+
+    assert settings["maintenance.auto"] == "0"
+
+
+def test_a_writable_gitdir_is_left_to_keep_house_for_itself() -> None:
+    """Saying nothing is what a project whose git can maintain itself gets.
+
+    Sending `maintenance.auto=0` there would be this harness overruling git
+    about git's own housekeeping, on the strength of a mount topology that
+    project does not have.
+    """
+    keys = {item.key for item in GitAccess(maintains=True).configuration(REWRITE, "")}
+
+    assert "maintenance.auto" not in keys
+
+
 @pytest.fixture
 def only_this_checkout_answers(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Take away the git files a developer machine answers from.
