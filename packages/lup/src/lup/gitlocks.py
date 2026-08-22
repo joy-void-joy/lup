@@ -19,7 +19,7 @@ filesystem for the next unconfined run to trip over.
 """
 
 import os
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 from collections.abc import Iterator, Sequence
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -89,7 +89,7 @@ def render_age(age: timedelta) -> str:
             return f"{seconds // 86400} days"
 
 
-class LockObstruction(BaseModel, frozen=True):
+class LockObstruction(BaseModel, ABC, frozen=True):
     """One reason a config write cannot take its lock, and what clears it.
 
     Whatever a caller needs to know about an obstruction is declared here and

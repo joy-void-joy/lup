@@ -239,7 +239,6 @@ def block_hook(reason: str) -> LupHookOutput:
     return LupHookOutput(decision="block", reason=reason)
 
 
-# lup: ignore[model-free-function] — a merge of two configs, neither the subject
 def merge_hooks(base: LupHooksConfig, additional: LupHooksConfig) -> LupHooksConfig:
     """Merge two hook configurations. Base hooks run first."""
     return LupHooksConfig(

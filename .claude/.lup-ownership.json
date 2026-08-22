@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "3975c9c36e156372f6cfe8fd26efc18e14b2658ca8727ba56aa7c915c5a2d61c",
+  "source_digest": "f7a8c7d95e2535ce156e31c570a7f63c5b1910d4e74707a1189caf88b5c04b50",
   "target_requirements": [
     "claude-code"
   ],
@@ -9,7 +9,7 @@
     {
       "path": ".claude/CLAUDE.md",
       "category": "generated",
-      "sha256": "6dac4edef91fc4c01f505bd9f84a9220ba38ea85429f70e2f0d992497b65954f",
+      "sha256": "06a995ac37a815533f525a5958fb3dedfde601182577013f38eaf3ba3d9e456e",
       "semantic_id": "harness.guidance",
       "executable": false
     },
@@ -338,7 +338,7 @@
     {
       "path": ".claude/plugins/lup/hooks/runtime/kernel/edit.py",
       "category": "generated",
-      "sha256": "e7957242d04fa8b8d9e9cbef7a33ea6855190420583d77025455357e81b1ec43",
+      "sha256": "99111ae6656debe5025ba649387af33b453d3bc7d576935f58282d1ab177f139",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },

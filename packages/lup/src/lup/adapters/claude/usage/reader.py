@@ -174,7 +174,6 @@ def priced(rates: list[ModelRate], model_id: str, tokens: int) -> float:
     return tokens * rate
 
 
-# lup: ignore[model-free-function] — the bucket is the subject; the spec names it
 def pacing_window(spec: BucketSpec, bucket: UsageBucket | None) -> PacingWindow | None:
     """One published window, dropped where it does not say when it clears."""
     if bucket is None:

@@ -26,20 +26,20 @@ matched last-to-first, a project's additions are the ones a broad library
 statement no longer covers.
 """
 
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 
 from pydantic import BaseModel
 
 
-class SelectableRule(BaseModel, frozen=True):
+class SelectableRule(BaseModel, ABC, frozen=True):
     """A rule a project may retire or replace by name.
 
     The id is a method rather than a field because the three tables already
     name their rules and had no reason to agree on the spelling: an
     anti-pattern carries an ``id``, a shell command and an edit rule carry a
     ``name``. Asking each what its id *is* leaves those spellings alone, and
-    pydantic's metaclass being an ``ABCMeta`` means a rule that never answers
-    cannot be built at all — a new table cannot join this by omission.
+    naming ``ABC`` among the bases says outright that a rule which never
+    answers cannot be built — a new table cannot join this by omission.
 
     Frozen, because a selection resolves one table out of two and hands the
     result to a policy that will be asked the same question many times. A rule

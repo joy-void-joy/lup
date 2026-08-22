@@ -183,7 +183,6 @@ def composes_natively(rel_path: Path) -> bool:
 
 # The library's own roots and the adopter's are two tables, and only one of them
 # is a model; `ApplicationRoots.sanctions` carries that one's half.
-# lup: ignore[model-free-function] — the path is the subject, the roots its table
 def path_is_sanctioned(
     rel_path: Path, application: ApplicationRoots = NO_APPLICATION
 ) -> bool:
@@ -201,7 +200,6 @@ def library_placement_path_is_audited(rel_path: Path) -> bool:
     return posix.startswith(LIBRARY_ROOT) and "lup/adapters/" not in posix
 
 
-# lup: ignore[model-free-function] — the path is the subject, the roots its table
 def native_spelling_path_is_sanctioned(
     rel_path: Path, application: ApplicationRoots = NO_APPLICATION
 ) -> bool:
@@ -682,7 +680,6 @@ def library_default_violations(
     ]
 
 
-# lup: ignore[model-free-function] — the audited path and text are the subject
 def constant_declaration_violations(
     rel_path: Path,
     text: str,
@@ -707,7 +704,6 @@ def constant_declaration_violations(
     ]
 
 
-# lup: ignore[model-free-function] — the project's sources are the subject
 def audit_constant_declarations(
     sources: list[PythonSource], application: ApplicationRoots = NO_APPLICATION
 ) -> list[RuleFinding]:
@@ -846,7 +842,6 @@ def audit_boundaries(text: str) -> list[BoundaryAuditFinding]:
     ]
 
 
-# lup: ignore[model-free-function] — the audited path and text are the subject
 def audit_path_boundaries(
     rel_path: Path, text: str, application: ApplicationRoots = NO_APPLICATION
 ) -> list[BoundaryAuditFinding]:

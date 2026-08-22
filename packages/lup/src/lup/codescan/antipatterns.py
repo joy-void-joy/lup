@@ -55,7 +55,6 @@ import re
 
 from pydantic import BaseModel, Field
 
-from lup.codescan.behaviour import RULE_ID as MODEL_FREE_FUNCTION_RULE_ID
 from lup.codescan.boundaries import (
     CONSTANT_DECLARATION_RULE_ID,
     LIBRARY_DEFAULT_RULE_ID,
@@ -645,7 +644,6 @@ FOREIGN_RULE_IDS: frozenset[str] = frozenset(  # lup: ignore[frozenset-shape]
         ABC_CAPABILITY_RULE_ID,
         CONSTANT_DECLARATION_RULE_ID,
         LIBRARY_DEFAULT_RULE_ID,
-        MODEL_FREE_FUNCTION_RULE_ID,
         NATIVE_SPELLING_RULE_ID,
         OWN_MODEL_DISPATCH_RULE_ID,
         SEAM_BOUNDARY_RULE_ID,
@@ -752,7 +750,6 @@ def antipattern_set_for(
 
 
 # `AntiPatternSet.for_suffix` is the operation; this binds the default table to it.
-# lup: ignore[model-free-function] — the suffix is the subject, the set its table
 def patterns_for_suffix(
     suffix: str, rules: AntiPatternSet | None = None
 ) -> list[AntiPattern] | None:

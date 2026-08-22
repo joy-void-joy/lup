@@ -581,7 +581,12 @@ def deleted_lines(previous: str, updated: str) -> set[int]:
 
 
 def note_bodies(notes: list[LocatedNote]) -> Counter[str]:
-    """How many times each note's words appear, so duplicates stay distinct."""
+    """How many times each note's words appear in a revision.
+
+    A tally rather than a set because the claims an edit *added* are the
+    difference between two of these, and a difference needs counts to be
+    taken. What reads the result asks only whether a body is present.
+    """
     return Counter(note_body(note["text"]) for note in notes)
 
 
@@ -598,6 +603,11 @@ def spent_notes(
     words, it was converted into a claim this edit added, or the code it
     annotated went with it. Anything else is feedback stripped off code that
     is still there, which is the one act the gate exists to refuse.
+
+    Survival is asked of the words, not of each copy of them. A file holding
+    the same note twice holds one piece of feedback written in two places, so
+    a reader who finds either has it — and counting copies would make tidying
+    a duplicate read as a deletion, freezing the code that carried it.
     """
     added_claims = note_bodies(
         notes_in_prose(updated, SOLVED_NOTE_RE, python_source) or []
@@ -608,7 +618,6 @@ def spent_notes(
     for note in was_open:
         body = note_body(note["text"])
         if survived[body] > 0:
-            survived[body] -= 1
             continue
         subject = note_subject(lines, note["line"])
         # A note annotating nothing in particular is about the file, so only
@@ -677,8 +686,8 @@ def marker_decision(
     # file's last conflict marker is what makes it parse for the first time.
     was_open = notes_in_prose(previous, OPEN_NOTE_RE, python_source)
     is_open = notes_in_prose(updated, OPEN_NOTE_RE, python_source)
-    claimed_now = solved_note_count(updated, python_source)
-    claimed_before = solved_note_count(previous, python_source)
+    claimed_now = notes_in_prose(updated, SOLVED_NOTE_RE, python_source)
+    claimed_before = notes_in_prose(previous, SOLVED_NOTE_RE, python_source)
     if (
         was_open is None
         or is_open is None
@@ -700,7 +709,12 @@ def marker_decision(
                 "withdraw it with `dev comments --withdraw file:line --reason`",
             ),
         )
-    if claimed_now < claimed_before:
+    # Asked of the words, as survival is for open notes: a claim is lost when
+    # nothing in the revision still carries it. A second copy tidied away
+    # retires nothing, because the review pass still finds the claim standing
+    # and can still check it against what was asked.
+    surviving_claims = note_bodies(claimed_now)
+    if any(surviving_claims[note_body(note["text"])] == 0 for note in claimed_before):
         return MarkerVerdict(
             gate="claim-removed",
             decision=KernelDecision(

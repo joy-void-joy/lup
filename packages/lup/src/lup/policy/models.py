@@ -6,7 +6,7 @@ tool); the policies in :mod:`lup.policy.rules` and :mod:`lup.policy.chain`
 consume them and return a :class:`Decision`.
 """
 
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Literal, Self
 
@@ -114,7 +114,7 @@ def undeclared(family: str) -> "Decision":
     )
 
 
-class SemanticToolBase(BaseModel, frozen=True):
+class SemanticToolBase(BaseModel, ABC, frozen=True):
     """One native call as policy understands it, judging itself.
 
     Each kind knows which declared family judges it, so routing is the tool

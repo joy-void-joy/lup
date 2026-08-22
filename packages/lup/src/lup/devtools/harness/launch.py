@@ -547,7 +547,6 @@ def companion_plugin_directories(root: Path, generated: str) -> list[Path]:
 # vector, and a mode is one optional argument among them; moving it onto
 # LaunchMode would make the model answerable for starting a runtime it knows
 # nothing about, and leave a project declaring no mode with no launcher at all.
-# lup: ignore[model-free-function] — a launcher is not an operation on a mode.
 def launch_claude(
     composition: NativeHarnessComposition,
     extra_args: list[str],
@@ -622,7 +621,6 @@ def launch_claude(
 
 # For the reason spelled at `launch_claude`: the mode is one optional argument
 # among the ones that actually decide how a runtime starts.
-# lup: ignore[model-free-function] — a launcher is not an operation on a mode.
 def launch_codex(
     composition: NativeHarnessComposition,
     extra_args: list[str],
