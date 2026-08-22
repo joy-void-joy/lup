@@ -526,7 +526,12 @@ class Sandbox:
         self.filtered_network.connect(self.egress_proxy, aliases=["egress"])
 
     def stop_filtered_egress(self) -> None:
-        """Remove the proxy, its network, and the rendered configuration."""
+        """Remove the proxy, its network, and the rendered configuration.
+
+        Every step reports what it could not clean up rather than raising:
+        teardown runs when a session is already ending, and a cleanup that
+        aborts leaves more behind than the one thing it failed to remove.
+        """
         if self.egress_proxy is not None:
             try:
                 self.egress_proxy.stop(timeout=5)
@@ -542,7 +547,10 @@ class Sandbox:
                 logger.warning("Failed to clean up sandbox network: %s", error)
             finally:
                 self.filtered_network = None
-        self.proxy_config_path.unlink(missing_ok=True)
+        try:
+            self.proxy_config_path.unlink(missing_ok=True)
+        except OSError as error:
+            logger.warning("Failed to remove egress configuration: %s", error)
 
     def remove_stale_container(self) -> None:
         """Remove a pre-existing container with the same name, if any."""

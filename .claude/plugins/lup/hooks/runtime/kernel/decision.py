@@ -138,7 +138,9 @@ def sandbox_escaped(sandbox: SandboxPlacement, agent_escaped: bool) -> bool:
 # lup: ignore[library-default] — the stdlib the kernel actually imports; the hermetic guarantee it exists to hold
 KERNEL_IMPORT_ALLOWLIST = (
     "ast",
+    "collections",
     "collections.abc",
+    "difflib",
     "fnmatch",
     "io",
     "pathlib",

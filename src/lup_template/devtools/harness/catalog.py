@@ -34,6 +34,7 @@ from lup.harness.models import (
 from lup.adapters.claude.harness import ClaudeSpellings
 from lup.adapters.codex.harness import CodexSpellings
 from lup.codescan.boundaries import ApplicationRoots, generated_tree_paths
+from lup.codescan.common import RuleSelection
 from lup.devtools.dev.workflow import WorkflowSpec
 from lup.devtools.project import DevProject
 from lup.harness.contracts import NativeSpellings
@@ -225,6 +226,10 @@ def dev_project() -> DevProject:
         subapps=SELECTION,
         content=RETIRED,
         path_roles=declared_role_rows(list(hooks.path_roles)),
+        # This file: what this repository settled about itself is written
+        # here, so `dev seams` reads and edits it rather than looking
+        # somewhere a library guessed at.
+        catalog=Path(__file__).resolve().relative_to(project_root()),
     )
 
 
@@ -252,6 +257,14 @@ def portable_harness(version: str = "0.2.0", root: Path | None = None) -> Harnes
         hooks=HookSet(
             id="hooks.lup-policy",
             policy_ids=["fetch", "shell", "edit", "unknown-tool"],
+            # lup: template: which of the library's scan rules this domain holds
+            # itself to. Spelled empty rather than left to the default, because
+            # a default nobody was shown is not a decision — and a repository
+            # that settled a convention differently is not defective there. Name
+            # the few it drops with `dev seams --retire <rule-id>`, or drop the
+            # family outright with `--retire-all`, which is one answer here
+            # instead of thirty retirements one denial at a time.
+            rules=RuleSelection(retired=[]),
             allowed_fetch=[
                 HookUrlScope(origin=AnyHttpUrl("https://docs.claude.com")),
                 HookUrlScope(origin=AnyHttpUrl("http://docs.claude.com")),
@@ -296,12 +309,21 @@ def portable_harness(version: str = "0.2.0", root: Path | None = None) -> Harnes
                     for host in ("127.0.0.1", "localhost")
                 ),
             ],
+            # lup: template: which trees this domain will not let an agent edit
+            # without a question. What is here answers for a framework that
+            # generates its own plugin trees and carries its own policy; a
+            # domain whose sensitive files are a data directory, a migration
+            # set or a deployment manifest says so instead.
             protected_edit_roots=[
                 Path(".claude"),
                 Path("pyproject.toml"),
                 Path("sync.json"),
                 Path("downstream.json"),
             ],
+            # lup: template: what each tree in this domain is *for*. A role is
+            # how a gate tells a fixture from production and a build product
+            # from work — so a domain with a data directory, a notebook tree or
+            # a generated client says so here, and every gate reads it at once.
             path_roles=[
                 HookPathRole(root=Path("tests"), role="test"),
                 HookPathRole(root=Path("packages/lup/tests"), role="test"),
@@ -340,6 +362,13 @@ def portable_harness(version: str = "0.2.0", root: Path | None = None) -> Harnes
                 # untracked, which is not the same claim as disposable, and
                 # a role is the place that claim gets made explicitly.
             ],
+            # lup: template: who owns README.md, and anything else this domain
+            # wants proposed rather than written. A human-owned file surfaces
+            # every change as an approval and the agent does not write it —
+            # which is right for a scaffold whose README describes the scaffold,
+            # and often wrong for a domain whose README is the one file it most
+            # wants written for it. `dev seams --disown README.md` is the answer
+            # to that, and it edits this line rather than asking anyone to.
             human_owned_files=[Path("README.md")],
             refused_tools=REFUSED_TOOLS,
             # Which checker answers for an edit is this project's toolchain,

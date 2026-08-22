@@ -493,6 +493,33 @@ class TestOrphanSweep:
 
 
 class TestDestroy:
+    def test_teardown_survives_an_unremovable_egress_config(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`missing_ok` answers absence, which is not the only way unlink fails.
+
+        A read-only or permission-denied location raises rather than reporting
+        the file gone, and that escaped a teardown whose every other step logs
+        and continues — so a container and its volume were left behind over a
+        configuration file, at the one moment nothing is left to retry.
+        """
+        client = FakeDockerClient()
+        sandbox = make_sandbox(client)
+        active = FakeContainer(sandbox.container_name, {})
+        volume = FakeVolume(sandbox.volume_name)
+        client.volumes.existing[volume.name] = volume
+        sandbox.active_container = as_container(active)
+
+        def refuse(*_args: object, **_kwargs: object) -> None:
+            raise OSError(30, "Read-only file system")
+
+        monkeypatch.setattr(Path, "unlink", refuse)
+
+        sandbox.destroy_container()
+
+        assert active.removed and volume.removed
+        assert sandbox.active_container is None
+
     def test_container_and_volume_are_removed(self) -> None:
         client = FakeDockerClient()
         sandbox = make_sandbox(client)

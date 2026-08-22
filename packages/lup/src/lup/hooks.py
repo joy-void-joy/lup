@@ -98,6 +98,11 @@ class LupHookInput(BaseModel):
     (Write/Edit/Read/Glob/Grep) have their target directory resolved once,
     into :attr:`tool_path`, rather than re-extracted from :attr:`tool_input`
     by each factory.
+
+    :attr:`cwd` is the directory the calling session is in, which a shell
+    command's relative operands resolve against. It is carried rather than
+    read from the process, because a hook does not always run where the
+    session it judges is running.
     """
 
     event: LupHookEvent
@@ -105,6 +110,7 @@ class LupHookInput(BaseModel):
     tool_input: JsonObject = {}
     tool_path: str = ""
     tool_result: str = ""
+    cwd: str = ""
     stop_hook_active: bool = False
 
 

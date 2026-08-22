@@ -28,12 +28,14 @@ import lup.devtools.dev.traces as traces
 import lup.devtools.dev.model_config as model_config_mod
 import lup.devtools.dev.plugin as plugin_mod
 import lup.devtools.dev.policy_explain as policy_explain
+import lup.devtools.dev.seams as seams
 import lup.devtools.dev.pr as pr
 import lup.devtools.dev.relocate as relocate_mod
 import lup.devtools.dev.resolve_review as resolve_review
 import lup.devtools.dev.rules as rules
 import lup.devtools.dev.worktree as worktree
 from lup.codescan.markers import NoteKind
+from lup.codescan.registry import all_rules
 from lup.devtools.utils import repository_slug
 from lup.devtools.harness.composition import NativeTargets
 from lup.devtools.harness.drift import RepositoryWriter
@@ -631,6 +633,20 @@ def create_dev_app(
                 help="With --restore and one target: the still-outstanding text",
             ),
         ] = None,
+        withdraw: Annotated[
+            bool,
+            typer.Option(
+                "--withdraw",
+                help="Retract the notes named as file:line; needs --reason",
+            ),
+        ] = False,
+        reason: Annotated[
+            str | None,
+            typer.Option(
+                "--reason",
+                help="With --withdraw: why the note should not have been written",
+            ),
+        ] = None,
     ) -> None:
         """List unresolved `# lup:` feedback comments, or act on specific ones.
 
@@ -640,13 +656,26 @@ def create_dev_app(
 
         With --retire or --restore, applies the verify-solved pass's verdicts to
         `# lup: solved:` claims — and only to claims: any other note is refused.
+
+        With --withdraw and --reason, retracts notes that should not have been
+        written at all. Conversion to `# lup: solved:` is for a note that was
+        answered; a note that was mistaken has no answer to claim, and the
+        reason is committed alongside the removal in its place.
         """
-        if sum([clear, retire, restore]) > 1:
-            typer.echo("--clear, --retire, and --restore are exclusive", err=True)
+        if sum([clear, retire, restore, withdraw]) > 1:
+            typer.echo(
+                "--clear, --retire, --restore, and --withdraw are exclusive", err=True
+            )
             raise typer.Exit(2)
         if narrow is not None and (not restore or len(targets or []) != 1):
             typer.echo("--narrow needs --restore and exactly one target", err=True)
             raise typer.Exit(2)
+        if (reason is not None) != withdraw:
+            typer.echo("--withdraw and --reason require each other", err=True)
+            raise typer.Exit(2)
+        if withdraw and reason is not None:
+            comments.withdraw_notes(targets or [], reason)
+            return
         if retire or restore:
             comments.revise_claims(targets or [], retire=retire, narrow=narrow)
             return
@@ -671,6 +700,67 @@ def create_dev_app(
         same scan, same file/line/text/context shape, narrowed to that flavor.
         """
         comments.report(as_json, commit=False, kind=NoteKind.template)
+
+    @app.command("seams")
+    def seams_cmd(
+        own: Annotated[
+            list[str] | None,
+            typer.Option("--own", help="Hand a file to its human owner (repeatable)"),
+        ] = None,
+        disown: Annotated[
+            list[str] | None,
+            typer.Option("--disown", help="Let the agent write this file again"),
+        ] = None,
+        retire: Annotated[
+            list[str] | None,
+            typer.Option("--retire", help="Stop holding this project to a rule id"),
+        ] = None,
+        keep: Annotated[
+            list[str] | None,
+            typer.Option("--keep", help="Hold this project to a rule id again"),
+        ] = None,
+        retire_all: Annotated[
+            bool,
+            typer.Option("--retire-all", help="Retire every rule the library ships"),
+        ] = False,
+    ) -> None:
+        """Show what this project settled about itself, or settle one of them.
+
+        With no options this prints each seam, its current value and where it
+        is written — which is what makes putting them to a person possible at
+        all, during initialization or afterwards. A default nobody was shown
+        is not a decision, and neither is one whose declaration somebody would
+        have to go find.
+
+        The options write that declaration rather than asking anyone to edit
+        it, and print what to regenerate. Nothing regenerates here: what
+        compiles from a declaration is the project's own set of trees, and a
+        command that guessed at them would be answering for a layout it does
+        not own.
+        """
+        catalog = declared().project.catalog
+        answers = seams.Answers(
+            own=own or [],
+            disown=disown or [],
+            retire=retire or [],
+            keep=keep or [],
+            retire_all=retire_all,
+        )
+        if not answers.given():
+            for line in seams.survey(catalog):
+                typer.echo(line)
+            return
+        if catalog is None:
+            raise typer.BadParameter(
+                "this project declares no catalog path, so there is nothing to "
+                "write a seam into; name one on its `DevProject`"
+            )
+        # Every id the library ships, not every id this project still keeps:
+        # retiring all of them has to name the ones already retired too, or
+        # the answer would silently exclude what a previous answer dropped.
+        shipped = [rule.id for rule in all_rules()]
+        for line in answers.settled(catalog, shipped):
+            typer.echo(line)
 
     @app.command("refutations")
     def refutations_cmd(
@@ -886,7 +976,9 @@ def create_dev_app(
         ] = False,
     ) -> None:
         """Show every shell form the declared vocabulary judges, and how."""
-        rules = default_vocabulary() if offered else list(declared().hooks.shell_rules)
+        rules = (
+            default_vocabulary() if offered else declared().hooks.resolved_shell_rules()
+        )
         policy_explain.survey(rules, as_json, output, provenance)
 
     # -- plugin commands --

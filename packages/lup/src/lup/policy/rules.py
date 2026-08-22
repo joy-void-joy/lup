@@ -44,6 +44,7 @@ from lup.policy.kernel.rows import (
 )
 from lup.policy.kernel.shell import decide_shell, decide_shell_segment, shell_context
 from lup.policy.kernel.words import command_words as kernel_command_words
+from lup.policy.edit_rules import EditRule, erase_edit_rules
 from lup.policy.shell_rules import (
     RunnerTargetRule,
     ShellCommandRule,
@@ -312,6 +313,7 @@ class EditPolicy(DecisionPolicy[EditBatch]):
         path_roles: list[PathRoleRow] | None = None,
         grants: LeaseGrants | None = None,
         acceptance_guard: AcceptanceGuardRow | None = None,
+        edit_rules: list[EditRule] | None = None,
     ) -> None:
         self.acceptance_guard = acceptance_guard
         self.path_roles = path_roles or []
@@ -319,6 +321,10 @@ class EditPolicy(DecisionPolicy[EditBatch]):
         self.protected = list(protected)
         self.maximum_added_lines = maximum_added_lines
         self.autonomous = autonomous
+        # Erased once here rather than per change: the table is a declaration
+        # that does not move while this policy answers, and the generated
+        # dispatchers read rows that were erased the same way at generation.
+        self.edit_rules = erase_edit_rules(edit_rules or [])
 
     def decide(self, event: EditBatch) -> Decision:
         decisions = [self.decide_change(change) for change in event.changes]
@@ -349,5 +355,8 @@ class EditPolicy(DecisionPolicy[EditBatch]):
                 allowances=self.grants.granted(),
                 python_source=suffix in (".py", ".pyi"),
                 acceptance_guard=self.acceptance_guard,
+                suffix=suffix,
+                operation=change.operation,
+                edit_rules=self.edit_rules,
             )
         )

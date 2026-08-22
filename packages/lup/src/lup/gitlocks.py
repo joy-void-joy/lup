@@ -32,7 +32,7 @@ def on_read_only_mount(path: Path) -> bool:
     return path.exists() and bool(os.statvfs(path).f_flag & os.ST_RDONLY)
 
 
-def refuses_a_new_file(directory: Path) -> bool:
+def refuses_a_new_file(directory: Path, probe_prefix: str = ".lup-lock-probe") -> bool:
     """Whether a directory refuses the lock file a config write has to create.
 
     Creating is the permission the lock protocol needs, and creating is the
@@ -40,10 +40,39 @@ def refuses_a_new_file(directory: Path) -> bool:
     beside `config` and renames over it, so a `config` nobody may write is
     still rewritten inside a directory they may. Asking the mode bits of the
     config instead would call a plain `chmod 444` a sandbox.
+
+    Asked by attempting that create rather than by reading permission bits,
+    because the two answers disagree exactly where it matters. `os.access`
+    and the mount flags answer the kernel's own permission question, and a
+    confinement that mediates the syscall above the kernel can leave both
+    saying yes while still refusing `O_CREAT | O_EXCL` — a sandbox where a
+    plain `touch` succeeds and git's lock create does not. Read that way the
+    directory looks unconfined, so the lock beside it is diagnosed as debris
+    somebody should wait out, and the reader is handed a remedy that cannot
+    work. Attempting the create asks the only question with an answer: not
+    who may write here, but whether this write happens.
+
+    The attempt is the whole probe, since a read-only mount refuses it for
+    the same reason under a different name.
+
+    ``probe_prefix`` is never `config.lock`: a probe wearing the lock's name
+    would be taking the lock it is trying to diagnose, and would race the git
+    that may still hold it. The pid distinguishes two runs probing at once,
+    and the name is the caller's to change where something else in an admin
+    directory already claims it.
     """
     if not directory.exists():
         return False
-    return not os.access(directory, os.W_OK) or on_read_only_mount(directory)
+    probe = directory / f"{probe_prefix}.{os.getpid()}"
+    try:
+        handle = os.open(probe, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    except OSError:
+        return True
+    try:
+        os.close(handle)
+    finally:
+        probe.unlink(missing_ok=True)
+    return False
 
 
 def render_age(age: timedelta) -> str:

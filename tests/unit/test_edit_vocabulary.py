@@ -1,0 +1,235 @@
+"""What a project's declared edit table does to the gates the kernel decides.
+
+Two things are pinned here, and the first matters more than the second: an
+empty table decides exactly what the kernel decided before a table existed. A
+seam that quietly moved a verdict for projects that never declared one would
+be a worse defect than the rigidity it was built to fix.
+
+The second is the resolution rule — last match wins, `.gitignore`-style — held
+against the shapes a real declaration takes: a broad statement narrowed by an
+exception, a threshold moved without touching who decides, and a gate a
+project has no business softening but is nonetheless able to reach.
+"""
+
+from lup.policy.edit_rules import EditRule, erase_edit_rules
+from lup.policy.kernel.edit import decide_edit
+from lup.policy.kernel.rows import EditRuleRow, PathRoleRow
+
+ROLES: list[PathRoleRow] = [{"root": "src", "role": "production"}]
+
+NOTED = "# lup: this note names work somebody owes\n"
+
+
+def verdict(
+    path: str,
+    before: str | None,
+    after: str | None,
+    rules: list[EditRule] | None = None,
+    operation: str = "modify",
+    path_exists: bool = True,
+) -> str:
+    """What the kernel decides about one change under one declared table."""
+    return decide_edit(
+        path,
+        before,
+        after,
+        path_exists=path_exists,
+        path_rules=[],
+        antipattern_rows=[],
+        path_roles=ROLES,
+        suffix=path[path.rfind(".") :],
+        operation=operation,
+        edit_rules=erase_edit_rules(rules or []),
+    ).effect
+
+
+# ---------------------------------------------------------------------------
+# An undeclared project sees the lattice it always saw
+# ---------------------------------------------------------------------------
+
+
+def test_an_empty_table_still_asks_about_a_whole_file_write() -> None:
+    assert verdict("src/a.py", None, "x = 1\n", operation="create") == "ask"
+
+
+def test_an_empty_table_still_defers_a_large_edit() -> None:
+    grown = "".join(f"line {number}\n" for number in range(40))
+    assert verdict("src/a.py", "line 0\n", grown) == "defer"
+
+
+def test_an_empty_table_still_allows_a_small_edit() -> None:
+    assert verdict("src/a.py", "x = 1\n", "x = 2\n") == "allow"
+
+
+def test_an_empty_table_still_denies_removing_feedback() -> None:
+    assert verdict("src/a.py", NOTED + "x = 1\n", "x = 1\n") == "deny"
+
+
+# ---------------------------------------------------------------------------
+# Last match wins
+# ---------------------------------------------------------------------------
+
+BROAD_THEN_NARROW = [
+    EditRule(
+        name="content-gates-stop-at-prose",
+        gates=["full-write", "size"],
+        effect="allow",
+        reason="reviewed in the diff, not at the hook",
+    ),
+    EditRule(
+        name="python-source-is-still-read",
+        gates=["full-write", "size"],
+        suffixes=[".py", ".pyi"],
+        effect="ask",
+        reason="full-file writes require approval",
+    ),
+]
+
+
+def test_a_broad_rule_frees_the_files_no_exception_names() -> None:
+    assert verdict("src/notes.md", None, "# title\n", BROAD_THEN_NARROW, "create") == (
+        "allow"
+    )
+    assert (
+        verdict(
+            "src/Thing.lean",
+            None,
+            "theorem t : True := trivial\n",
+            BROAD_THEN_NARROW,
+            "overwrite",
+        )
+        == "allow"
+    )
+
+
+def test_the_later_exception_wins_over_the_broad_rule() -> None:
+    """The whole point of last-match: the narrowing is written after."""
+    assert verdict("src/a.py", None, "x = 1\n", BROAD_THEN_NARROW, "create") == "ask"
+
+
+def test_order_is_the_semantics_so_reversing_it_reverses_the_verdict() -> None:
+    assert (
+        verdict(
+            "src/a.py", None, "x = 1\n", list(reversed(BROAD_THEN_NARROW)), "create"
+        )
+        == "allow"
+    )
+
+
+def test_a_rule_constrains_only_the_axes_it_names() -> None:
+    """An unnamed axis matches every value of it, rather than none."""
+    everything = [EditRule(name="nothing-is-reviewed-here", effect="allow")]
+    grown = "".join(f"line {number}\n" for number in range(40))
+
+    assert verdict("src/a.py", None, "x = 1\n", everything, "create") == "allow"
+    assert verdict("src/a.py", "line 0\n", grown, everything) == "allow"
+
+
+def test_an_operation_axis_tells_creating_from_overwriting() -> None:
+    creation_only = [
+        EditRule(
+            name="new-files-are-free",
+            gates=["full-write"],
+            operations=["create"],
+            effect="allow",
+            reason="a file that did not exist has nothing to lose",
+        )
+    ]
+
+    assert verdict("src/a.py", None, "x = 1\n", creation_only, "create") == "allow"
+    assert verdict("src/a.py", None, "x = 1\n", creation_only, "overwrite") == "ask"
+
+
+# ---------------------------------------------------------------------------
+# The threshold moves on its own axis
+# ---------------------------------------------------------------------------
+
+
+def test_a_threshold_moves_without_restating_who_decides() -> None:
+    generous = [
+        EditRule(name="prose-grows-freely", suffixes=[".md"], maximum_added_lines=100)
+    ]
+    grown = "".join(f"line {number}\n" for number in range(40))
+
+    assert verdict("src/notes.md", "line 0\n", grown, generous) == "allow"
+    assert verdict("src/notes.md", "line 0\n", grown) == "defer"
+
+
+def test_a_rule_that_decides_nothing_cannot_shadow_one_that_does() -> None:
+    """A threshold-only rule is not a match for the verdict lookup behind it."""
+    table = [
+        EditRule(name="python-writes-are-fine", gates=["full-write"], effect="allow"),
+        EditRule(name="just-a-threshold", maximum_added_lines=100),
+    ]
+
+    assert verdict("src/a.py", None, "x = 1\n", table, "create") == "allow"
+
+
+def test_erasure_drops_a_rule_that_states_neither() -> None:
+    silent = EditRule(name="says-nothing", suffixes=[".py"])
+
+    assert erase_edit_rules([silent]) == []
+
+
+# ---------------------------------------------------------------------------
+# Every gate is reachable, including the ones a project should not move
+# ---------------------------------------------------------------------------
+
+
+def test_a_project_can_reach_even_the_feedback_gate() -> None:
+    """Reachable on purpose: an escape hatch in a reviewed file beats a fork.
+
+    That it *can* be moved is the design; that moving it is visible in a
+    declaration somebody reads is what makes the design defensible.
+    """
+    softened = [
+        EditRule(
+            name="feedback-deletion-is-ours-to-judge",
+            gates=["feedback-removed"],
+            effect="ask",
+            reason="this project reviews note deletion by hand",
+        )
+    ]
+
+    assert verdict("src/a.py", NOTED + "x = 1\n", "x = 1\n") == "deny"
+    assert verdict("src/a.py", NOTED + "x = 1\n", "x = 1\n", softened) == "ask"
+
+
+def test_moving_one_gate_leaves_its_neighbours_alone() -> None:
+    """The gate ids are separate because the verdicts are about different things."""
+    softened = [
+        EditRule(name="only-this-one", gates=["feedback-removed"], effect="ask")
+    ]
+    claimed = "# lup: solved: the note this answers\n"
+
+    assert verdict("src/a.py", claimed + "x = 1\n", "x = 1\n", softened) == "deny"
+
+
+def test_an_unknown_effect_in_a_row_falls_back_to_the_kernel() -> None:
+    """A hand-written row cannot vote itself a verdict the kernel does not have."""
+    row: EditRuleRow = {
+        "name": "malformed",
+        "gates": [],
+        "suffixes": [],
+        "roles": [],
+        "operations": [],
+        "effect": "encourage",
+        "maximum_added_lines": None,
+        "reason": "",
+    }
+
+    assert (
+        decide_edit(
+            "src/a.py",
+            None,
+            "x = 1\n",
+            path_exists=False,
+            path_rules=[],
+            antipattern_rows=[],
+            path_roles=ROLES,
+            suffix=".py",
+            operation="create",
+            edit_rules=[row],
+        ).effect
+        == "ask"
+    )

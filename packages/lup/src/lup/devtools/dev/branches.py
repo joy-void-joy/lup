@@ -135,6 +135,46 @@ class BranchInfo(BaseModel):
     """
 
 
+class RemoteBranchInfo(BaseModel):
+    """A branch on a remote that no local branch corresponds to.
+
+    A sweep classifies what ``refs/heads`` holds, so a branch whose local
+    copy was deleted once its work landed leaves nothing behind to resolve
+    to a verb — it stops being mentioned rather than being reported done.
+    The remote keeps it regardless, and the next sweep is blind to it in
+    exactly the same way, which is the one shape a sweep exists to surface
+    and the one it could not express.
+
+    Kept apart from ``BranchInfo`` rather than folded into it: that model
+    answers what to do with a checkout, and its worktree, lease, and
+    dirty-state figures describe things a ref on a remote cannot have.
+    Reporting one through the other would mean carrying a row whose every
+    such column is a placeholder, which reads as measured and is not.
+    """
+
+    name: str
+    remote: str
+    commit: str
+    contained_in_integration: bool
+    pr: PRStatus | None
+    unique_commits: int
+    disposition: BranchStatus
+    reason: str
+
+    def qualified(self) -> str:
+        """How git names this ref, which is also how a comparison must spell it."""
+        return f"{self.remote}/{self.name}"
+
+    def delete_command(self) -> str:
+        """The push that removes it, for a reader who has to run it.
+
+        Spelled against the branch rather than the tracking ref: a delete
+        names what the remote calls the branch, and the ``remote/`` prefix
+        that identifies it locally is not part of that name.
+        """
+        return f"git push {self.remote} --delete {self.name}"
+
+
 class RunHold(BaseModel):
     """One resolver run and the branches it is still holding out of the sweep.
 
@@ -155,6 +195,14 @@ class SurveyResult(BaseModel):
     current_branch: str
     branches: list[BranchInfo]
     runs: list[RunHold] = []
+    remote_branches: list[RemoteBranchInfo] = []
+    """Branches on a remote that no local branch corresponds to.
+
+    Separate from ``branches`` so a consumer reading local dispositions is
+    not handed rows it has no verb for, and present at all so the ones whose
+    work already landed stop being invisible to the sweep that would clear
+    them.
+    """
 
 
 def runs_holding(leased: dict[str, HeldLease]) -> list[RunHold]:
@@ -235,6 +283,66 @@ def parse_worktrees() -> dict[str, str]:  # lup: ignore[dict-str-payload]
             mapping[line.removeprefix("branch refs/heads/")] = current_path
 
     return mapping
+
+
+class ParsedRemoteBranch(TypedDict):
+    """One remote-tracking ref, split into the remote and the branch on it."""
+
+    remote: str
+    name: str
+    commit: str
+
+
+def fetch_remote_tracking() -> None:
+    """Refresh remote-tracking refs, naming the refspec rather than assuming one.
+
+    ``git clone --bare`` configures no ``remote.<name>.fetch``, so a plain
+    ``git fetch --prune`` in such a clone writes ``FETCH_HEAD`` and nothing
+    else: ``refs/remotes`` stays empty, and every branch that exists only on
+    the remote is invisible to whatever reads it. The failure is silent in
+    the worst direction — the survey that follows looks complete, because a
+    branch it cannot see is indistinguishable from one that is not there.
+
+    Naming the standard refspec is what a non-bare clone already does from
+    its own configuration, so the repaired clone is the only one whose
+    behaviour changes, and nothing is written to the repository's config to
+    do it. Failures propagate to the caller, which already logs a fetch it
+    could not complete and surveys the refs it has.
+    """
+    for remote in git.lines("remote"):
+        git("fetch", "--prune", remote, f"+refs/heads/*:refs/remotes/{remote}/*")
+
+
+def parse_remote_branches() -> list[ParsedRemoteBranch]:
+    """Structured remote-tracking rows via ``git for-each-ref``, per remote.
+
+    Iterating the remotes and stripping a known prefix length keeps the
+    remote and the branch separate without splitting a ref name on ``/`` —
+    a branch is allowed to contain one, so surgery on the joined form would
+    report ``feat`` for ``origin/feat/x`` and be wrong exactly where branch
+    names are most conventional.
+
+    ``%(symref)`` is set for ``origin/HEAD`` alone, which names another ref
+    rather than a branch of its own: counting it would report the default
+    branch a second time, under a name no push can delete.
+    """
+
+    def parse(remote: str, row: str) -> ParsedRemoteBranch | None:
+        name, commit, symref = row.split("\x00")  # lup: ignore[string-split] — NUL
+        if symref:
+            return None
+        return {"remote": remote, "name": name, "commit": commit}
+
+    return [
+        parsed
+        for remote in git.lines("remote")
+        for row in git.lines(
+            "for-each-ref",
+            f"refs/remotes/{remote}",
+            "--format=%(refname:lstrip=3)%00%(objectname:short)%00%(symref)",
+        )
+        if (parsed := parse(remote, row)) is not None
+    ]
 
 
 def build_containment(branch_names: list[str]) -> dict[str, list[str]]:
@@ -1307,7 +1415,7 @@ def survey(as_json: bool) -> None:
         if not as_json:
             typer.echo("Fetching and pruning remote...", err=True)
         try:
-            git("fetch", "--prune")
+            fetch_remote_tracking()
         except sh.ErrorReturnCode as e:
             logger.warning("Failed to fetch: %s", decode_stderr(e))
 
@@ -1318,10 +1426,19 @@ def survey(as_json: bool) -> None:
     worktrees = parse_worktrees()
     branch_names = [b["name"] for b in raw_branches]
     containment = build_containment(branch_names)
+    # A branch the remote still carries after its local copy is gone is the
+    # one shape a local sweep cannot express: nothing in refs/heads names
+    # it, so no row is emitted and no verb is owed, and the next sweep is
+    # blind in exactly the same way. Matched by name, which is what a local
+    # branch and its counterpart on the remote share.
+    local_names = {b["name"] for b in raw_branches}
+    remote_rows = parse_remote_branches() if has_remote else []
+    remote_only = [row for row in remote_rows if row["name"] not in local_names]
 
     if has_remote and not as_json:
         typer.echo("Querying PR status...", err=True)
-    pr_map: dict[str, PRStatus] = fetch_pr_status(branch_names) if has_remote else {}
+    pr_named = branch_names + [row["name"] for row in remote_only]
+    pr_map: dict[str, PRStatus] = fetch_pr_status(pr_named) if has_remote else {}
     # A run records every branch it ever leased, and a completed run keeps
     # reporting the ones its cleanup did not delete. Only what is still on
     # disk is a branch this sweep can say anything about.
@@ -1374,13 +1491,51 @@ def survey(as_json: bool) -> None:
             changes=worktree_changes(checkout) if checkout else None,
         )
 
+    def remote_info(row: ParsedRemoteBranch) -> RemoteBranchInfo:
+        """Resolve one remote-only branch through the same classifier.
+
+        Reusing ``disposition_for`` is the point rather than a convenience:
+        a second verb table for remote branches would answer the same
+        question a little differently the first time either changed. What a
+        ref on a remote cannot have — a worktree, a lease, being the current
+        branch — is left at the defaults that say so.
+        """
+        name = row["name"]
+        ref = f"{row['remote']}/{name}"
+        related = shares_history(ref, integration)
+        contained = related and is_ancestor(ref, integration)
+        unique = (
+            0 if contained or not related else count_unique_commits(ref, integration)
+        )
+        verdict = disposition_for(
+            name,
+            integration=integration,
+            current=cur,
+            contained_in=[integration] if contained else [],
+            pr=pr_map.get(name),  # lup: ignore[dict-get] — open map
+            unique_commits=unique,
+            related=related,
+        )
+        return RemoteBranchInfo(
+            name=name,
+            remote=row["remote"],
+            commit=row["commit"],
+            contained_in_integration=contained,
+            pr=pr_map.get(name),  # lup: ignore[dict-get] — open map
+            unique_commits=unique,
+            disposition=verdict.status,
+            reason=verdict.reason,
+        )
+
     branches_list = [info(b) for b in raw_branches]
+    remote_list = [remote_info(row) for row in remote_only]
 
     result = SurveyResult(
         integration_branch=integration,
         current_branch=cur,
         branches=branches_list,
         runs=runs_holding(leased),
+        remote_branches=remote_list,
     )
 
     if as_json:
@@ -1413,6 +1568,26 @@ def survey(as_json: bool) -> None:
             "Reason",
         )
         typer.echo(format_table(headers, [display_row(bi) for bi in branches_list]))
+
+        if result.remote_branches:
+            typer.echo("\nOn the remote, with no local branch:\n")
+
+            def remote_row(rb: RemoteBranchInfo) -> list[str]:
+                pr_str = f"#{rb.pr.number} {rb.pr.state}" if rb.pr else "-"
+                return [
+                    rb.qualified(),
+                    rb.disposition,
+                    str(rb.unique_commits),
+                    pr_str,
+                    rb.reason,
+                ]
+
+            typer.echo(
+                format_table(
+                    ("Remote branch", "Disposition", "Unique", "PR", "Reason"),
+                    [remote_row(rb) for rb in result.remote_branches],
+                )
+            )
 
         for hold in result.runs:
             if not hold.alive:
@@ -1765,8 +1940,15 @@ def delete_branch(
     dry_run: bool,
     force: bool,
     remote: bool | None = None,
+    preserved: str = "",
 ) -> None:
-    """Delete a branch and its worktree, and origin's copy if it is spent."""
+    """Delete a branch and its worktree, and origin's copy if it is spent.
+
+    ``preserved`` names the ref a caller has already parked the commits at,
+    for the one path — :func:`run_retirement` — that preserves them before
+    deleting. Empty means nobody has, which is the case the warning below is
+    written for.
+    """
     cur = git.out("branch", "--show-current")
     if name == cur:
         typer.echo(f"Error: cannot delete the current branch ({name})", err=True)
@@ -1789,7 +1971,7 @@ def delete_branch(
         typer.echo("Use --force to override.", err=True)
         raise typer.Exit(1)
 
-    if plan.delete_remote and not is_ancestor(name, "HEAD"):
+    if plan.delete_remote and not is_ancestor(name, "HEAD") and not preserved:
         typer.echo(
             f"Warning: {name} holds commits HEAD does not, and origin/{name} "
             "is going with it — after this the work is in no branch. To keep "
@@ -2036,7 +2218,13 @@ def retire_branch(
         raise typer.Exit(1)
 
     number = run_retirement(plan, reason)
-    delete_branch(name, dry_run=False, force=True, remote=True)
+    delete_branch(
+        name,
+        dry_run=False,
+        force=True,
+        remote=True,
+        preserved=f"refs/pull/{number}/head",
+    )
     typer.echo(
         f"Retired {name}: recover with `git fetch origin refs/pull/{number}/head`"
     )

@@ -94,6 +94,9 @@ class ClaudeHookPayload(BaseModel, frozen=True):
 
     tool_name: str
     tool_input: JsonObject = {}
+    cwd: Path | None = None
+    """Where the calling session is, which a shell command's operands resolve
+    against. The hook itself does not always run there."""
 
 
 def parse_claude_before_tool(payload: ClaudeHookPayload) -> ClaudeBeforeToolEvent:
@@ -110,9 +113,11 @@ def parse_claude_before_tool(payload: ClaudeHookPayload) -> ClaudeBeforeToolEven
         case "Write", {"file_path": str(path), "content": str(content)}:
             operation = ClaudeWriteOperation(path=Path(path), content=content)
         case "Bash", {"command": str(command), "dangerouslyDisableSandbox": True}:
-            operation = ClaudeShellOperation(command=command, unsandboxed=True)
+            operation = ClaudeShellOperation(
+                command=command, cwd=payload.cwd, unsandboxed=True
+            )
         case "Bash", {"command": str(command)}:
-            operation = ClaudeShellOperation(command=command)
+            operation = ClaudeShellOperation(command=command, cwd=payload.cwd)
         case "WebFetch", {"url": str(url)}:
             operation = ClaudeFetchOperation(url=url)
         case "WebSearch", {"query": str(query)}:
@@ -136,7 +141,23 @@ class ClaudeEventDecoder(NativeEventDecoder[ClaudeBeforeToolEvent]):
                 )
                 name = "Edit"
             case ClaudeWriteOperation(path=path, content=content):
-                tool = EditBatch(changes=[EditChange(path=path, after=content)])
+                # Whether this replaces a file or makes one is the difference
+                # between an overwrite and a creation, and only the tree can
+                # answer it. Naming it here is what lets `as_documents` fetch
+                # the preimage an overwrite carries no copy of — without which
+                # the marker gate compares a file's notes against nothing,
+                # finds none of them missing, and admits a write that erased
+                # every one. The generated dispatchers read that document
+                # themselves; this path had no equivalent.
+                tool = EditBatch(
+                    changes=[
+                        EditChange(
+                            path=path,
+                            after=content,
+                            operation="overwrite" if path.exists() else "create",
+                        )
+                    ]
+                )
                 name = "Write"
             case ClaudeEditBatchOperation(changes=changes):
                 tool = EditBatch(changes=changes)

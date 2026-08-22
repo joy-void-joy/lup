@@ -68,6 +68,21 @@ One table covering every branch, ordered `LAND` first (that is the work at risk)
 
 **Offer only the branches no sibling contains.** A branch listed in another's `contained_in` lands when that one does, so proposing both asks for a decision that has already been made. Name the ones riding along under the branch that carries them, so nothing looks dropped.
 
+### 4b. The branches that exist only on a remote
+
+`remote_branches` is every branch a remote carries that no local branch corresponds to. Read it as part of the sweep, not as an appendix: a branch whose local copy went when its work landed leaves nothing in `branches` to classify, so without this list nothing mentions it again and the remote keeps it for good. That is the silent bucket this command exists to empty, one clone removed.
+
+Each row carries the same `disposition` the local classifier gave it, so it means what it means everywhere else. What differs is the verb — a push, not a local delete — and that a remote branch has no worktree, no lease, and no dirt to weigh:
+
+| Disposition | What it means here | Action |
+| --- | --- | --- |
+| `DELETE` | Its PR merged, or the integration branch already contains it | Offer `git push <remote> --delete <branch>`. Nothing is lost: the commits are in the integration branch, and where a PR exists GitHub keeps its head at `refs/pull/<number>/head` after the branch, the local copy, and the remote copy are all gone |
+| `LAND` | Holds commits the integration branch lacks, with nothing driving them | **Never delete it.** The work exists only on the remote, and no local branch names it. Report it and ask whether to fetch it into a local branch — `git fetch <remote> <branch>:<branch>` — and take it through step 6 from there |
+| `KEEP` | Protected, or an open PR is driving it | Leave it. An open PR is step 7's business, and it will be driving a local branch too where one exists |
+| `UNRELATED` | Shares no history with the integration branch | Report it and ask, exactly as for a local one. A default branch still holding an initial import is the usual cause, and replacing it is a decision about the repository rather than a step in a sweep |
+
+**A remote delete is a push, so it takes the same explicit approval as everything else in step 8** — per branch, naming the branch and the PR that merged it. Nothing here is carried out because the disposition says so.
+
 ## Acting on Dispositions (both modes)
 
 ### 5. Act on each disposition
@@ -119,7 +134,7 @@ Request explicit user approval before deleting a branch, merging a PR, or pushin
 
 ### 9. Report results
 
-What landed, what merged, what was deleted, and what was deliberately left alone.
+What landed, what merged, what was deleted locally, what was cleared from a remote, and what was deliberately left alone.
 
 ## Guidelines
 
