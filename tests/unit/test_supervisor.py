@@ -31,6 +31,7 @@ from lup.runtime.models import TurnEvent
 from lup.actors.mailbox import AnswerDoor, RecordedAnswer
 from lup.actors.questions import QuestionAnswer
 from lup.actors.refs import ActorRef
+from lup.actors.roster import ROSTER_FILE, Roster
 from lup.resolver.mailbox import PendingQuestion, QuestionMailbox
 from lup.resolver.models import (
     AcceptanceCriterion,
@@ -498,10 +499,10 @@ def test_a_redirect_reports_who_it_is_queued_for_rather_than_that_it_sent(
     that stopped a worker mid-design.
     """
     build_run(tmp_path)
-    journal = Journal(tmp_path / "run-1")
-    journal.append(
-        ActorRef(kind="worker", id="alpha", round=2),
-        PhaseChangedEvent(phase=ResolvePhase.WORKERS),
+    # The population record, which is what a door resolves an address
+    # against — the run announces each round as it opens one.
+    Roster(tmp_path / "run-1" / ROSTER_FILE).spawned(
+        ActorRef(kind="worker", id="alpha", round=2), "resolve alpha"
     )
 
     with pytest.MonkeyPatch.context() as patch:

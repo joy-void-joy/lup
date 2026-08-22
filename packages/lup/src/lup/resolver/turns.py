@@ -23,11 +23,12 @@ from pydantic import BaseModel
 
 from lup.harness.contracts import SkillInvocationRenderer
 from lup.harness.models import ResolveSpec
+from lup.hooks import LupHooksConfig
 from lup.policy.identity import ConcernAllowance
 from lup.actors.mailbox import ParkRequest
 from lup.actors.questions import QuestionAnswer
 from lup.actors.refs import ActorRef
-from lup.actors.sessions import ActorSession, ActorSessions
+from lup.actors.cohort import ActorCohort, ActorRecipe
 from lup.resolver.grants import GrantLedger, concern_grants, lease_grants
 from lup.resolver.join_desk import (
     JoinPlan,
@@ -41,6 +42,7 @@ from lup.resolver.models import (
     Concern,
     DropCandidate,
     MergeReport,
+    ReviewerContext,
     ReviewReport,
     WorkAssignment,
     WorkerContext,
@@ -50,11 +52,11 @@ from lup.resolver.models import (
 from lup.resolver.run import ResolveRun, ResolverInvariantError
 from lup.resolver.tools import WAIT_CONTRACT
 from lup.runtime.factory import SessionFactory
-from lup.runtime.models import TurnInput, turn_request
+from lup.runtime.models import TurnInput, TurnRequest, TurnResult, turn_request
 from lup.runtime.wrappers import CorrectionConfig, decorated_session_factory
 
 type WorkerFactoryRecipe = Callable[[WorkerContext], SessionFactory]
-type ReviewerFactoryRecipe = Callable[[Path], SessionFactory]
+type ReviewerFactoryRecipe = Callable[[ReviewerContext], SessionFactory]
 
 
 def corrective[T](
@@ -78,7 +80,19 @@ def corrective[T](
 ASK_PREAMBLE = (
     "When a decision is not yours to make, ask through the resolver's question "
     "tools — queue_questions, await_answers, ask_questions — rather than "
-    "guessing or ending your turn to report it. " + WAIT_CONTRACT
+    "guessing or ending your turn to report it. " + WAIT_CONTRACT + " "
+    # Naming the other half of the channel, because a worker told only about
+    # questions uses questions for everything. Two workers in one run parked
+    # on housekeeping — a stray temp file, a broken venv — each spending a
+    # human round trip on something that carried no decision, while the tool
+    # that says a thing without stopping was in their toolset all along and
+    # in none of their instructions.
+    "When what you have is not a decision — something you found that whoever "
+    "merges your work should know, or something blocking you that a human "
+    "would simply fix, like a gate that refused you or a file you cannot "
+    "remove — use send_message instead. It reaches the humans watching, it "
+    "never parks you, and it costs nobody a round trip. Reserve questions for "
+    "what genuinely cannot proceed until somebody decides."
 )
 
 # lup: ignore[constant-declaration] — one instruction every worker prompt states
@@ -227,7 +241,7 @@ class TurnRunner:
         self,
         spec: ResolveSpec,
         run: ResolveRun,
-        actors: ActorSessions,
+        actors: ActorCohort,
         mailbox: QuestionMailbox,
         worker_factory: WorkerFactoryRecipe,
         reviewer_factory: ReviewerFactoryRecipe,
@@ -244,10 +258,15 @@ class TurnRunner:
         self.invocation_renderer = invocation_renderer
         self.ledger: list[LedgerEntry] = []
 
-    def worker_session(
-        self, actor: ActorRef, root: Path, allowances: list[ConcernAllowance]
-    ) -> ActorSession:
-        """One writing actor's session, authorized for the gates it was granted.
+    def worker_recipe(
+        self, root: Path, allowances: list[ConcernAllowance]
+    ) -> ActorRecipe:
+        """How one writing actor's session opens, authorized for its gates.
+
+        A recipe rather than an opened session, because opening is the
+        cohort's: it announces the round as it opens one, and a caller that
+        opened its own left the population record with nothing to say about
+        the agent now working in it.
 
         The gates are published to this lease's document and the session is
         handed the reader for it, not the list: an answer that arrives after
@@ -261,21 +280,24 @@ class TurnRunner:
         reader had already seen would take it away — and be reported as the
         withdrawal it is indistinguishable from.
         """
-        return self.actors.session(
-            actor,
-            self.worker_factory(
+
+        def recipe(opened: ActorRef, hooks: LupHooksConfig) -> SessionFactory:
+            """Configure this worker's session around the mail that reaches it."""
+            return self.worker_factory(
                 WorkerContext(
                     root=root,
-                    concern_id=actor.id,
-                    actor=actor,
+                    concern_id=opened.id,
+                    actor=opened,
                     grants=self.grants.lease(
-                        actor.id,
-                        lease_grants(actor.id, allowances, self.recorded_answers()),
+                        opened.id,
+                        lease_grants(opened.id, allowances, self.recorded_answers()),
                         self.park_lease,
                     ),
+                    hooks=hooks,
                 )
-            ),
-        )
+            )
+
+        return recipe
 
     def recorded_answers(self) -> list[QuestionAnswer]:
         """Every answer this run has settled, from the record that settles them.
@@ -292,9 +314,24 @@ class TurnRunner:
         """Stop the run because a human took back what a lease was granted."""
         self.mailbox.park(ParkRequest(run_id=self.run.require().run_id, reason=reason))
 
-    def reviewer_session(self, actor: ActorRef, worktree: Path) -> ActorSession:
-        """One reading actor's session, opened over the tree it judges."""
-        return self.actors.session(actor, self.reviewer_factory(worktree))
+    def reviewer_recipe(self, worktree: Path) -> ActorRecipe:
+        """How one reading actor's session opens over the tree it judges."""
+        return lambda _opened, hooks: self.reviewer_factory(
+            ReviewerContext(root=worktree, hooks=hooks)
+        )
+
+    async def reviewer_round[T: BaseModel](
+        self, actor: ActorRef, worktree: Path, request: TurnRequest[T]
+    ) -> TurnResult[T]:
+        """One turn of a reading actor, announced against its own address.
+
+        Called again for a correction, which is the same round and so the
+        same conversation: what it just judged is still in the session, and
+        the population record keeps one start for the round either way.
+        """
+        return await self.actors.round(
+            actor, request, self.reviewer_recipe(worktree), task=actor.id
+        )
 
     def worker_invocation(self) -> str:
         """The rendered call for this run's declared worker skill."""
@@ -351,11 +388,14 @@ class TurnRunner:
                 "anything: if it already satisfies the criteria, submit it as it "
                 "stands and say so rather than redoing it.\n\n" + prompt
             )
-        result = await self.worker_session(
+        result = await self.actors.round(
             ActorRef(kind="worker", id=assignment.concern.id, round=round_number),
-            assignment.lease.root,
-            self.granted_for(assignment.concern),
-        ).turn(turn_request(TurnInput(text=prompt), WorkerReport))
+            turn_request(TurnInput(text=prompt), WorkerReport),
+            self.worker_recipe(
+                assignment.lease.root, self.granted_for(assignment.concern)
+            ),
+            task=assignment.concern.id,
+        )
         if result.output.concern_id != assignment.concern.id:
             raise ResolverInvariantError("worker returned a foreign concern id")
         return result.output
@@ -407,13 +447,15 @@ class TurnRunner:
                 f"Worker report:\n{worker.model_dump_json(indent=2)}\n\n"
                 f"{span}{answered}"
             )
-        reviewer = self.reviewer_session(
-            ActorRef(kind="reviewer", id=concern.id, round=round_number), worktree
+        reviewer = ActorRef(kind="reviewer", id=concern.id, round=round_number)
+        result = await self.reviewer_round(
+            reviewer, worktree, turn_request(TurnInput(text=prompt), ReviewReport)
         )
-        result = await reviewer.turn(turn_request(TurnInput(text=prompt), ReviewReport))
         if result.output.concern_id != concern.id:
             raise ResolverInvariantError("reviewer returned a foreign concern id")
-        return await self.declared_labels_only(reviewer, concern, result.output)
+        return await self.declared_labels_only(
+            reviewer, worktree, concern, result.output
+        )
 
     async def join_turn(
         self,
@@ -478,8 +520,8 @@ class TurnRunner:
             + format_tips(remaining)
             + format_carried(plan.carried)
         )
-        result = await self.merger_session(lease).turn(
-            turn_request(TurnInput(text=prompt), JoinReport)
+        result = await self.merger_round(
+            lease, turn_request(TurnInput(text=prompt), JoinReport)
         )
         return result.output
 
@@ -537,8 +579,8 @@ class TurnRunner:
             + f"Conflicted paths:\n{format_paths(conflicted)}\n\n"
             + f"Unaccounted content:\n{format_candidates(owed)}"
         )
-        result = await self.merger_session(lease).turn(
-            turn_request(TurnInput(text=prompt), MergeReport)
+        result = await self.merger_round(
+            lease, turn_request(TurnInput(text=prompt), MergeReport)
         )
         return result.output
 
@@ -546,7 +588,8 @@ class TurnRunner:
         self, lease: WritableRootLease, problems: list[str]
     ) -> MergeReport:
         """Name what the last report left unmet, on the session that wrote it."""
-        result = await self.merger_session(lease).turn(
+        result = await self.merger_round(
+            lease,
             turn_request(
                 TurnInput(
                     text=(
@@ -559,16 +602,29 @@ class TurnRunner:
                     )
                 ),
                 MergeReport,
-            )
+            ),
         )
         return result.output
 
-    def merger_session(self, lease: WritableRootLease) -> ActorSession:
-        """The one merger conversation this lease's joins are settled in."""
-        return self.worker_session(
+    def merger_recipe(self, lease: WritableRootLease) -> ActorRecipe:
+        """How the merger conversation this lease's joins are settled in opens."""
+        return self.worker_recipe(lease.root, self.merge_allowances())
+
+    async def merger_round[T: BaseModel](
+        self, lease: WritableRootLease, request: TurnRequest[T]
+    ) -> TurnResult[T]:
+        """One turn of that conversation, announced against the merger's address.
+
+        Every join this lease settles is the same merger on the same round:
+        a join is not an attempt at a concern, it is the concern's work. So
+        the address is stable and the population record carries one merger
+        per lease rather than one per parent it took.
+        """
+        return await self.actors.round(
             ActorRef(kind="merger", id=lease.concern_id),
-            lease.root,
-            self.merge_allowances(),
+            request,
+            self.merger_recipe(lease),
+            task=lease.concern_id,
         )
 
     def record_join(self, parent: str, merge: MergeReport) -> None:
@@ -695,7 +751,11 @@ class TurnRunner:
         )
 
     async def declared_labels_only(
-        self, reviewer: ActorSession, concern: Concern, report: ReviewReport
+        self,
+        reviewer: ActorRef,
+        worktree: Path,
+        concern: Concern,
+        report: ReviewReport,
     ) -> ReviewReport:
         """Correct a report crediting an id this concern never declared.
 
@@ -723,8 +783,8 @@ class TurnRunner:
             "acceptance criteria. Resubmit the same verdict with criteria_met "
             "drawn only from the declared ids: " + ", ".join(declared)
         )
-        result = await reviewer.turn(
-            turn_request(TurnInput(text=correction), ReviewReport)
+        result = await self.reviewer_round(
+            reviewer, worktree, turn_request(TurnInput(text=correction), ReviewReport)
         )
         if result.output.concern_id != concern.id:
             raise ResolverInvariantError("reviewer returned a foreign concern id")

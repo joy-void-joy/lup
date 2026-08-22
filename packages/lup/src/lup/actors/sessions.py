@@ -25,7 +25,6 @@ import json
 import logging
 from collections.abc import AsyncIterator
 from contextlib import AsyncExitStack
-from pathlib import Path
 from typing import Protocol
 
 from pydantic import BaseModel, TypeAdapter
@@ -39,7 +38,6 @@ from lup.actors.mail import (
     MessagePostedEvent,
 )
 from lup.actors.refs import ActorRef
-from lup.channels.models import publish_atomic
 from lup.hooks import (
     LupHookInput,
     LupHookMatcher,
@@ -59,10 +57,6 @@ from lup.runtime.models import (
 )
 
 logger = logging.getLogger(__name__)
-
-# lup: ignore[constant-declaration] — the run directory's own layout, which a
-# resumed run must spell exactly as the run that wrote it
-SESSION_DIR = "sessions"
 
 
 type ActorEvent = TurnEvent | MailEvent
@@ -433,83 +427,3 @@ class ActorSession:
     async def close(self) -> None:
         await self.stack.aclose()
         self.handle = None
-
-
-class ActorSessions:
-    """Every actor's session for one run, and their persisted identities.
-
-    Sessions are addressed by actor rather than created per turn, so asking
-    for the same actor twice continues one conversation. Closing is the run's
-    job and happens once, at the end of the run or at a park.
-    """
-
-    def __init__(self, root: Path, journal: ActorJournal, mail: ActorMail) -> None:
-        self.root = root / SESSION_DIR
-        self.journal = journal
-        self.mail = mail
-        self.sessions: dict[str, ActorSession] = {}
-        self.inboxes: dict[str, ActorInbox] = {}
-
-    def path(self, actor: ActorRef) -> Path:
-        return self.root / f"{actor.conversation()}.json"
-
-    def inbox(self, actor: ActorRef) -> ActorInbox:
-        """This conversation's mail, kept current with the round it is on.
-
-        One object per conversation rather than one per caller, because the
-        hook that interrupts a live turn and the collection that heads the
-        next one are two views of one stream. Handing each its own left
-        them with two positions over it, and a message could sit behind
-        both.
-        """
-        held = self.inboxes.get(actor.conversation())  # lup: ignore[dict-get] presence
-        if held is None:
-            held = ActorInbox(self.mail, self.journal, actor)
-            self.inboxes[actor.conversation()] = held
-        held.actor = actor
-        return held
-
-    def persisted(self, actor: ActorRef) -> ActorRecord | None:
-        """The identity this actor left behind, if it has run before."""
-        path = self.path(actor)
-        if not path.exists():
-            return None
-        try:
-            return RECORD_ADAPTER.validate_json(path.read_text("utf-8"))
-        except ValueError:
-            logger.exception("Discarding unreadable actor record at %s", path)
-            return None
-
-    def session(self, actor: ActorRef, factory: SessionFactory) -> ActorSession:
-        """This actor's session, resumed from its record the first time."""
-        inbox = self.inbox(actor)
-        held = self.sessions.get(actor.conversation())  # lup: ignore[dict-get] presence
-        if held is not None:
-            held.actor = actor
-            return held
-        opened = ActorSession(
-            actor, factory, self.journal, self.persisted(actor), inbox
-        )
-        self.sessions[actor.conversation()] = opened
-        return opened
-
-    def save(self, actor: ActorRef) -> None:
-        """Persist one actor's identity so a resumed run reattaches to it."""
-        held = self.sessions.get(actor.conversation())  # lup: ignore[dict-get] presence
-        if held is not None:
-            publish_atomic(self.path(actor), held.record)
-
-    async def close(self) -> None:
-        """Close every open session, recording what each was never handed.
-
-        A sender is told a message was sent on the strength of the mailbox
-        accepting it, which is not the same as anyone reading it. What is
-        still queued as the sessions close is therefore recorded against the
-        actor it was for — outstanding across a park, and never read at all
-        on a run that ended.
-        """
-        for held in list(self.sessions.values()):
-            self.save(held.actor)
-            self.inbox(held.actor).record_outstanding()
-            await held.close()
-        self.sessions.clear()

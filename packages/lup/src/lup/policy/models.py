@@ -274,6 +274,13 @@ class Decision(BaseModel, frozen=True):
     effect: DecisionEffect
     reason: str = ""
     sandbox: SandboxPlacement = "ambient"
+    escalated: str = ""
+    """Why the agent said this call was worth a human, where it said so.
+
+    Survives a collapse to ``deny``, so a host that cannot ask can still
+    relay what was asked for. See
+    :attr:`~lup.policy.kernel.decision.KernelDecision.escalated`.
+    """
 
     @field_validator("sandbox")
     @classmethod
@@ -290,11 +297,14 @@ class Decision(BaseModel, frozen=True):
 
     def placed(self, escapable: bool, agent_escalates: bool) -> "Decision":
         """This verdict as a runtime that can, or cannot, place a call sees it."""
-        kernel = KernelDecision(self.effect, self.reason, self.sandbox).placed(
-            escapable, agent_escalates
-        )
+        kernel = KernelDecision(
+            self.effect, self.reason, self.sandbox, self.escalated
+        ).placed(escapable, agent_escalates)
         return Decision(
-            effect=kernel.effect, reason=kernel.reason, sandbox=kernel.sandbox
+            effect=kernel.effect,
+            reason=kernel.reason,
+            sandbox=kernel.sandbox,
+            escalated=kernel.escalated,
         )
 
 

@@ -16,14 +16,16 @@ from lup.policy.identity import ConcernAllowance
 from lup.actors.mailbox import AnswerDoor, RecordedAnswer
 from lup.actors.questions import QuestionAnswer
 from lup.resolver.mailbox import QuestionMailbox
-from lup.resolver.tools import (
+from lup.actors.tools import (
+    AskedQuestion,
     AwaitAnswersInput,
     AwaitAnswersOutput,
-    AskedQuestion,
-    CheckDeclarationInput,
-    CheckDeclarationOutput,
     QueueQuestionsInput,
     QueueQuestionsOutput,
+)
+from lup.resolver.tools import (
+    CheckDeclarationInput,
+    CheckDeclarationOutput,
     RequestAllowanceInput,
     ResolverToolContext,
     create_question_tools,

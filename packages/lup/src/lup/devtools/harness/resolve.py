@@ -22,6 +22,7 @@ from lup.harness.enforcement import semantic_policy_for
 from lup.harness.models import HookSet
 from lup.hooks import LupHooksConfig
 from lup.policy.enforcement import (
+    EscalationRelay,
     NativeSemantics,
     SandboxPosture,
     create_policy_hooks,
@@ -41,7 +42,6 @@ from lup.resolver.contracts import (
     ResolverObserver,
     WorktreePreparer,
 )
-from lup.actors.sessions import create_inbox_hooks
 from lup.resolver.core import ASSEMBLY_QUESTION_ID, ResolverCore
 from lup.resolver.journal import Journal
 from lup.resolver.orchestrator import WorktreeOrchestrator
@@ -62,6 +62,7 @@ from lup.resolver.models import (
     ResolvePhase,
     ResolveRequest,
     ResolverConfig,
+    ReviewerContext,
     RunTally,
     SourceSnapshot,
     VerificationCommand,
@@ -95,6 +96,7 @@ from lup.devtools.dev.worktree import (
 )
 from lup.devtools.harness.generate import NativeHarnessComposition
 from lup.devtools.supervisor.page import SUPERVISOR_PORT
+from lup.devtools.utils import refuse_blocked_config_writes
 from lup.devtools.supervisor.projection import answer_recipe as rerun_recipe
 from lup.devtools.supervisor.projection import PendingQuestionView, question_views
 
@@ -1245,6 +1247,7 @@ def worker_policy_hooks(
     grants: LeaseGrants,
     semantics: NativeSemantics,
     sandbox: SandboxPosture,
+    relay: EscalationRelay | None = None,
 ) -> LupHooksConfig:
     """Judge a worker's calls by the policy every plugin enforces.
 
@@ -1268,6 +1271,14 @@ def worker_policy_hooks(
     policy judges. It is a parameter rather than a constant because both
     runtimes have that decode now, and hardcoding one was what left the
     other's workers judged by nothing.
+
+    ``relay`` is where an escalation goes when there is nobody here to answer
+    it. The marker exists to route a judgement to a human who can weigh the
+    actual command, and a worker session has none attached — so for a worker
+    the three tiers collapsed to two and every escalation was a guaranteed
+    refusal, in exactly the context that most needs one. It still refuses,
+    because nothing here can approve what no human saw; what it stops doing
+    is refusing in silence.
 
     ``sandbox`` is the session's own confinement, read from the declaration
     the factory opens it with rather than from the runtime. Taking the
@@ -1302,6 +1313,7 @@ def worker_policy_hooks(
         ),
         semantics.also_refusing(declared_hooks.refused_tools),
         sandbox=sandbox,
+        relay=relay,
     )
 
 
@@ -1439,6 +1451,14 @@ def run_resolve(
     if not ResolverStateRepository(state_root, resolved_run_id).exists():
         if abort_reason is None:
             require_fresh_base(probe_base_freshness(launcher, root))
+    # A run leases a worktree per concern, and `worktree add` writes git
+    # config three times over — so a confinement that owns `config.lock` stops
+    # this run at its first lease, however many concerns it planned, with a
+    # bare `File exists` that names nothing about a sandbox. Said once here
+    # instead, before anything is planned or leased. Aborting takes no lease,
+    # so it is the one path that still runs confined.
+    if abort_reason is None:
+        refuse_blocked_config_writes(root)
 
     async def execute() -> None:
         from lup.adapters.claude.runtime import (
@@ -1647,19 +1667,34 @@ def run_resolve(
             a sibling. ``core`` is read at call time, which is after it is
             built — the wake event only exists once the core does.
 
-            The inbox is the run's own for this actor, not a second reader
-            opened here. Two readers over one message stream each began at
-            whatever its head was when they were made, so a message posted
-            while a turn was in flight sat behind both of them.
+            The delivery hooks arrive in the context rather than being
+            fetched here. They are the run's own inbox for this actor, and
+            opening a second reader over one message stream gave the two
+            positions that each began at whatever the head was when they were
+            made — so a message posted while a turn was in flight sat behind
+            both of them.
             """
             cwd = context.root
-            inbox = core.actors.inbox(context.actor)
             tool_context = ResolverToolContext(
                 run_dir=state_root / resolved_run_id,
                 concern_id=context.concern_id,
                 lease_root=cwd,
                 actor_kind=context.actor.kind,
             )
+
+            def relay(why: str, refusal: str) -> None:
+                """Put a refused escalation where a human running this will see it.
+
+                Addressed to the run rather than broadcast, so it lands in the
+                one inbox `resolve actors` prints for a person rather than in
+                every sibling worker's context.
+                """
+                core.actors.tell_spawner(
+                    f"{context.actor.label()} was refused a command it escalated.\n"
+                    f"Its reason: {why}\n"
+                    f"The refusal: {refusal}"
+                )
+
             # Grants are per-concern, and the environment names where this
             # lease's are written rather than carrying them: a gate granted
             # after this session starts reaches it, and one taken back stops
@@ -1718,11 +1753,12 @@ def run_resolve(
                                         context.grants,
                                         CLAUDE_SEMANTICS,
                                         claude_worker_sandbox.posture(),
+                                        relay,
                                     ),
                                 ),
                                 create_git_inspection_hook(),
                             ),
-                            create_inbox_hooks(inbox),
+                            context.hooks,
                         ),
                     )
                 )
@@ -1745,8 +1781,9 @@ def run_resolve(
                             context.grants,
                             CODEX_SEMANTICS,
                             codex_worker_sandbox,
+                            relay,
                         ),
-                        create_inbox_hooks(inbox),
+                        context.hooks,
                     ),
                     environment=concern_environment,
                     mcp_servers={
@@ -1765,7 +1802,13 @@ def run_resolve(
                 )
             )
 
-        def reviewer_factory(cwd: Path) -> SessionFactory:
+        def reviewer_factory(context: ReviewerContext) -> SessionFactory:
+            # A reviewer takes the same mail every other actor does. It used
+            # to take none, being the one kind whose recipe was handed a bare
+            # path, so the actor best placed to use a late fact — a criterion
+            # already settled elsewhere, a base that moved under the tree it
+            # is judging — was the one nobody could tell.
+            cwd = context.root
             if adapter == "claude":
                 return create_claude_session_factory(
                     ClaudeSessionConfig(
@@ -1779,14 +1822,18 @@ def run_resolve(
                         environment=isolated_claude_environment(
                             reviewer_environment, cwd
                         ),
-                        hooks=create_permission_hooks([], [cwd]),
+                        hooks=merge_hooks(
+                            create_permission_hooks([], [cwd]), context.hooks
+                        ),
                     )
                 )
             return create_codex_session_factory(
                 CodexSessionConfig(
                     model=session_model,
                     approval_policy="on-request",
-                    hooks=create_permission_hooks([], [cwd]),
+                    hooks=merge_hooks(
+                        create_permission_hooks([], [cwd]), context.hooks
+                    ),
                     developer_instructions=(
                         "Independently review the persisted resolver change."
                     ),

@@ -36,6 +36,7 @@ from lup.resolver.models import (
     InventoryNote,
     ResolveRequest,
     ResolverConfig,
+    ReviewerContext,
     SourceSnapshot,
     VerificationCommand,
     WorkerContext,
@@ -236,13 +237,14 @@ async def test_miniature_resolver_run_on_a_fixture_repository(tmp_path: Path) ->
             )
         )
 
-    def reviewer_factory(cwd: Path) -> SessionFactory:
+    def reviewer_factory(context: ReviewerContext) -> SessionFactory:
         return create_claude_session_factory(
             ClaudeSessionConfig(
                 model=CLAUDE_SMOKE_MODEL,
                 system_prompt="Independently review the persisted resolver change.",
-                cwd=cwd,
-                add_dirs=[cwd],
+                cwd=context.root,
+                add_dirs=[context.root],
+                hooks=context.hooks,
             )
         )
 

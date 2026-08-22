@@ -65,7 +65,10 @@ from lup.policy.models import (
 def pydantic_decision(decision: KernelDecision) -> Decision:
     """Restore the validated public decision at the kernel boundary."""
     return Decision(
-        effect=decision.effect, reason=decision.reason, sandbox=decision.sandbox
+        effect=decision.effect,
+        reason=decision.reason,
+        sandbox=decision.sandbox,
+        escalated=decision.escalated,
     )
 
 
