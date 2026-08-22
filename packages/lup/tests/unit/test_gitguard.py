@@ -20,6 +20,7 @@ from lup.gitguard import (
     repository_state,
     watched_config,
 )
+from lup.policy.assets.host import undo_namespace
 
 
 def test_every_installed_hook_scrubs_the_environment_before_its_check() -> None:
@@ -157,6 +158,70 @@ def test_refs_are_read_from_a_real_repository(tmp_path: Path) -> None:
 def test_a_directory_outside_any_repository_yields_no_refs(tmp_path: Path) -> None:
     """A suite run outside a checkout must not fail on the guard's own footing."""
     assert repository_refs(tmp_path / "nowhere") == {}
+
+
+def guarded_repository(tmp_path: Path) -> sh.Command:
+    """A checkout with one commit, bound to a git that commits as somebody."""
+    git = sh.Command("git").bake(
+        "-C",
+        str(tmp_path),
+        "-c",
+        "user.email=guard@example.test",
+        "-c",
+        "user.name=Guard",
+        _tty_out=False,
+    )
+    git("init", "-b", "main")
+    git("commit", "--allow-empty", "-m", "one")
+    return git
+
+
+def test_a_snapshot_taken_while_the_suite_runs_is_not_the_suites_doing(
+    tmp_path: Path,
+) -> None:
+    """The dispatcher writes one of these in front of every command it allows.
+
+    So an agent running the suite has refs appearing under that namespace
+    throughout, from outside the suite and on a schedule it does not control.
+    Failing on them made every agent-run check report eight teardown failures,
+    one per worker, naming refs no fixture had touched — which is the guard
+    crying wolf on exactly the runs somebody was watching it.
+    """
+    git = guarded_repository(tmp_path)
+    before = repository_state(tmp_path)
+    git("update-ref", f"{undo_namespace()}/20260822T030458856293-25ed70890b45", "HEAD")
+
+    assert moved_refs(before, repository_state(tmp_path)) == []
+
+
+def test_a_branch_moving_beside_a_snapshot_is_still_caught(tmp_path: Path) -> None:
+    """Narrowing what is watched must not narrow what the narrowing was for."""
+    git = guarded_repository(tmp_path)
+    before = repository_state(tmp_path)
+    git("update-ref", f"{undo_namespace()}/20260822T030502482427-25ed70890b45", "HEAD")
+    git("branch", "escaped")
+
+    assert moved_refs(before, repository_state(tmp_path)) == [
+        "refs/heads/escaped: created"
+    ]
+
+
+def test_a_suite_watching_its_own_namespace_still_watches_the_real_one(
+    tmp_path: Path,
+) -> None:
+    """`undo_snapshot` takes a namespace, so the guard has to take the same one.
+
+    A suite exercising snapshots points them somewhere of its own; the refs it
+    must still be answerable for are the ones the dispatcher would have
+    written, which is the namespace it is not using.
+    """
+    git = guarded_repository(tmp_path)
+    before = repository_state(tmp_path, namespace="refs/lup/undo-under-test")
+    git("update-ref", f"{undo_namespace()}/20260822T030505499617-25ed70890b45", "HEAD")
+
+    assert moved_refs(
+        before, repository_state(tmp_path, "refs/lup/undo-under-test")
+    ) == [f"{undo_namespace()}/20260822T030505499617-25ed70890b45: created"]
 
 
 def test_a_fixture_that_writes_a_committer_identity_is_caught(tmp_path: Path) -> None:
