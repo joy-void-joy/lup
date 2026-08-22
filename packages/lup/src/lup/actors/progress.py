@@ -32,7 +32,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from lup.actors.cohort import ActorCohort, CohortEntry
-from lup.actors.mail import MessageOutstandingEvent, MessagePostedEvent
+from lup.actors.mail import MailEventBase
 from lup.actors.refs import ActorRef
 from lup.actors.roster import SpawnedActor
 from lup.runtime.models import TurnMessage
@@ -147,6 +147,19 @@ def arguments(values: JsonObject, chars: int) -> str:
     )
 
 
+def mail_kind(mail: MailEventBase) -> ProgressKind:
+    """Which line one message is, read off what the mail says about itself.
+
+    Three outcomes rather than two, because a sender needs all three apart:
+    something that reached the agent, something that stopped it, and
+    something it never took — and the last is the failure of an operation
+    somebody performed, which the other two would hide.
+    """
+    if not mail.delivered:
+        return "unread"
+    return "redirected" if mail.redirect else "received"
+
+
 def progress_lines(entries: Sequence[CohortEntry], chars: int) -> list[ProgressLine]:
     """Fold one conversation's records into the lines a reader outside it needs."""
     # Which call each result answers, so a refusal names the instrument that
@@ -205,21 +218,26 @@ def progress_lines(entries: Sequence[CohortEntry], chars: int) -> list[ProgressL
                 yield stamped(entry, "said", brief(said, chars))
 
     def lines(entry: CohortEntry) -> Iterator[ProgressLine]:
-        """Whatever one record says happened, as lines stamped with its place."""
+        """Whatever one record says happened, as lines stamped with its place.
+
+        One narrowing, and it separates the two families rather than the
+        members of either. Mail answers through its base and a turn through
+        its own accessor, so a kind added to either side is carried by
+        whichever question it already answers instead of falling through a
+        filter that stopped being complete.
+        """
         match entry.event:
-            case MessagePostedEvent() as posted:
+            # The two families, not the members of either. `ActorEvent` unions
+            # mail with turn events across two layers, so there is no common
+            # base for both to answer through: one narrowing separates them
+            # and each side is then asked rather than tested. A kind added to
+            # either family rides the accessor its family already answers, and
+            # a third family fails to type-check right here, because the
+            # capture below would no longer carry `completed_message`.
+            # lup: ignore[own-model-dispatch] — separates the families, not their members
+            case MailEventBase() as mail:
                 yield stamped(
-                    entry,
-                    "redirected" if posted.redirect else "received",
-                    brief(posted.text, chars),
-                    door=posted.door,
-                )
-            case MessageOutstandingEvent() as outstanding:
-                yield stamped(
-                    entry,
-                    "unread",
-                    brief(outstanding.text, chars),
-                    door=outstanding.door,
+                    entry, mail_kind(mail), brief(mail.text, chars), door=mail.door
                 )
             case turn:
                 message = turn.completed_message
