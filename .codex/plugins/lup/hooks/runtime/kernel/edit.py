@@ -686,8 +686,8 @@ def marker_decision(
     # file's last conflict marker is what makes it parse for the first time.
     was_open = notes_in_prose(previous, OPEN_NOTE_RE, python_source)
     is_open = notes_in_prose(updated, OPEN_NOTE_RE, python_source)
-    claimed_now = solved_note_count(updated, python_source)
-    claimed_before = solved_note_count(previous, python_source)
+    claimed_now = notes_in_prose(updated, SOLVED_NOTE_RE, python_source)
+    claimed_before = notes_in_prose(previous, SOLVED_NOTE_RE, python_source)
     if (
         was_open is None
         or is_open is None
@@ -709,7 +709,12 @@ def marker_decision(
                 "withdraw it with `dev comments --withdraw file:line --reason`",
             ),
         )
-    if claimed_now < claimed_before:
+    # Asked of the words, as survival is for open notes: a claim is lost when
+    # nothing in the revision still carries it. A second copy tidied away
+    # retires nothing, because the review pass still finds the claim standing
+    # and can still check it against what was asked.
+    surviving_claims = note_bodies(claimed_now)
+    if any(surviving_claims[note_body(note["text"])] == 0 for note in claimed_before):
         return MarkerVerdict(
             gate="claim-removed",
             decision=KernelDecision(
