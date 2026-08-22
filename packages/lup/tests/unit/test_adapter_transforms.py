@@ -410,13 +410,17 @@ CLAUDE_HOOK_CASES = [
         ),
     ),
     HookCase(
-        name="write-is-a-change-with-no-predecessor",
+        name="write-to-a-path-the-tree-lacks-is-a-creation",
         arm="Write(file_path, content)",
         tool_name="Write",
         tool_input={"file_path": "/repo/new.py", "content": "body"},
         expected=BeforeTool(
             tool=EditBatch(
-                changes=[EditChange(path=Path("/repo/new.py"), after="body")]
+                changes=[
+                    EditChange(
+                        path=Path("/repo/new.py"), after="body", operation="create"
+                    )
+                ]
             ),
             identity=ToolIdentity(original_name="Write"),
         ),
@@ -594,7 +598,11 @@ CLAUDE_OPERATION_CASES = [
         name="ClaudeWriteOperation",
         operation=ClaudeWriteOperation(path=Path("a.py"), content="body"),
         expected=BeforeTool(
-            tool=EditBatch(changes=[EditChange(path=Path("a.py"), after="body")]),
+            tool=EditBatch(
+                changes=[
+                    EditChange(path=Path("a.py"), after="body", operation="create")
+                ]
+            ),
             identity=ToolIdentity(original_name="Write"),
         ),
     ),
@@ -836,3 +844,52 @@ def test_each_codex_operation_decodes_to_the_tool_it_names(
     event = CodexBeforeToolEvent(operation=case.operation)
 
     assert CodexEventDecoder().decode(event) == case.expected
+
+
+def test_a_write_over_an_existing_file_carries_the_file_as_its_preimage(
+    tmp_path: Path,
+) -> None:
+    """The gap that let a whole-file write erase a file's review notes unseen.
+
+    A `Write` states only what the file is about to become, so the decoder is
+    the last place that can still see what it is about to stop being. Handed
+    no preimage, the marker gate compares the new text against `""`, counts no
+    notes lost, and admits the write.
+
+    The generated dispatchers read that document themselves; this path did
+    not, which also meant a session composed in process decided differently
+    from the plugin its own declaration generates.
+    """
+    target = tmp_path / "noted.py"
+    target.write_text("# lup: work somebody owes\nx = 1\n", encoding="utf-8")
+
+    decoded = ClaudeEventDecoder().decode(
+        ClaudeBeforeToolEvent(
+            operation=ClaudeWriteOperation(path=target, content="x = 2\n")
+        )
+    )
+    batch = decoded.tool
+    assert isinstance(batch, EditBatch)
+    change = batch.as_documents().changes[0]
+
+    assert change.operation == "overwrite"
+    assert change.before == "# lup: work somebody owes\nx = 1\n"
+
+
+def test_a_write_to_a_missing_path_stays_a_creation_with_no_preimage(
+    tmp_path: Path,
+) -> None:
+    """Nothing to read, and nothing that reading it could protect."""
+    decoded = ClaudeEventDecoder().decode(
+        ClaudeBeforeToolEvent(
+            operation=ClaudeWriteOperation(
+                path=tmp_path / "absent.py", content="x = 1\n"
+            )
+        )
+    )
+    batch = decoded.tool
+    assert isinstance(batch, EditBatch)
+    change = batch.as_documents().changes[0]
+
+    assert change.operation == "create"
+    assert change.before is None

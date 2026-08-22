@@ -1,8 +1,10 @@
 """The independently replaceable resolver capability contracts."""
 
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from pathlib import Path
 
+from lup.runtime.errors import TurnError
 from lup.resolver.models import (
     ConcernProgress,
     MaterialQuestion,
@@ -65,6 +67,45 @@ class ResolverDrained(Exception):
         super().__init__(f"resolver run drained at a safe boundary: {reason}")
         self.reason = reason
         self.concerns = concerns
+
+
+def settles_the_actor(
+    error: BaseException, environmental: Callable[[str], bool] = lambda _: False
+) -> bool:
+    """Whether a raise out of an agent's work means that agent is done.
+
+    Three of this run's failures stop a piece of work without ending the
+    agent doing it: a park is waiting on a human, a drain is an operator
+    asking the run to stop where stopping is free, and a host fault says
+    nothing about the work at all. Each expects the same agent to carry on —
+    a resume reattaches to that conversation rather than opening a fresh one,
+    and a run retrying past a host fault keeps every conversation it holds.
+    An agent recorded finished while its work is merely suspended is the
+    report that sends somebody looking for a failure that did not happen.
+
+    Anything else did end the agent, and is recorded against its address by
+    whoever catches it.
+
+    Here rather than on either wave that passes it, because the suspension
+    vocabulary is declared here and both waves answer to it. A worker's and a
+    reviewer's are the same judgement, and two copies of it agree only for as
+    long as somebody keeps them agreeing.
+
+    A host fault is asked of the raw :class:`TurnError` as well as of the
+    resolver exception it eventually becomes. That promotion happens in the
+    executor, one frame above the turn — so by the time a fault is spelled
+    ``ResolverEnvironmentFault`` the agent has already met its turn's own
+    failure path, and testing only for the resolver spelling protects the one
+    place the fault has already left. ``environmental`` is the same classifier
+    the executor consults, defaulting to answering no: a library with no
+    adapter attributes a fault to the work, since treating a real failure as
+    the host's would retry it forever.
+    """
+    if isinstance(error, TurnError):
+        return not (error.failure.environmental or environmental(error.failure.message))
+    return not isinstance(
+        error, ResolverAwaitingAnswers | ResolverDrained | ResolverEnvironmentFault
+    )
 
 
 class ResolverAssemblyDeferred(Exception):

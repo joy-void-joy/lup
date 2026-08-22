@@ -38,8 +38,33 @@ from lup.policy.models import (
 )
 
 
+type EscalationRelay = Callable[[str, str], None]
+"""Where an escalation goes on a host that has no human to put it to.
+
+Takes the agent's stated reason and the refusal it was answering. A relay
+never grants: a host with nobody to ask cannot approve, and a marker that
+resolved to a run would be the instrument for summoning a human turned into
+the instrument for bypassing the table. What it does is make the request
+arrive somewhere a person will read it, so the agent stops being the only
+party that knows it is stuck.
+"""
+
+# lup: ignore[constant-declaration] — refusal wording, declared beside the
+# verdict that returns it: these words are a true statement about what this
+# arm just did, so a caller free to reword them is a caller free to tell an
+# agent its request was relayed when it was not
+RELAYED_NOTICE = (
+    "\n\nThis has been relayed to whoever is supervising this run, with your "
+    "stated reason. Nobody will answer it here — carry on with whatever does "
+    "not depend on it. Raise a question only if you genuinely cannot proceed."
+)
+
+
 def policy_hook_output(
-    decision: Decision, escapable: bool = False, agent_escalates: bool = False
+    decision: Decision,
+    escapable: bool = False,
+    agent_escalates: bool = False,
+    relay: EscalationRelay | None = None,
 ) -> LupHookOutput:
     """Render one policy verdict as the portable hook decision.
 
@@ -61,6 +86,15 @@ def policy_hook_output(
             return allow_hook(decision.sandbox, decision.reason)
         case "ask":
             return ask_hook(decision.reason, decision.sandbox)
+        case "deny" if decision.escalated and relay is not None:
+            # The refusal stands — nothing here can approve what no human
+            # saw. What changes is that the request reaches somebody. A
+            # marker denied in silence made the documented escape hatch inert
+            # in exactly the session that has no other route, so a worker
+            # blocked on a stray temp file had to park a human question over
+            # housekeeping, or give up.
+            relay(decision.escalated, decision.reason)
+            return deny_hook(decision.reason + RELAYED_NOTICE)
         case "deny":
             return deny_hook(decision.reason)
         case "defer":
@@ -212,13 +246,13 @@ class NativeSemantics(BaseModel, frozen=True):
 
 # A composition root over policy and semantics together; on either one it would
 # be that half constructing hooks out of the other.
-# lup: ignore[model-free-function] — composition root
 def create_policy_hooks(
     policy: DecisionPolicy[SemanticTool],
     semantics: NativeSemantics,
     *,
     sandbox: SandboxPosture = SandboxPosture(),
     tag: str = "semantic_policy",
+    relay: EscalationRelay | None = None,
 ) -> LupHooksConfig:
     """Create a PreToolUse hook that enforces *policy* on the tools it judges.
 
@@ -267,6 +301,7 @@ def create_policy_hooks(
             policy.decide(semantics.decode(event).as_documents()),
             semantics.escapes_from(sandbox),
             semantics.escalates_from(sandbox),
+            relay,
         )
 
     return LupHooksConfig(

@@ -22,6 +22,7 @@ it cost a run its budget re-deriving an acceptance it already had.
 
 from collections.abc import Callable
 
+from lup.actors.refs import ActorRef
 from lup.resolver.contracts import (
     ResolverAwaitingAnswers,
     ResolverDrained,
@@ -104,6 +105,31 @@ class ConcernExecutor:
         failure as the host's would retry it forever.
         """
 
+    async def settled_actors(
+        self, concern_id: str, summary: str = "", error: str = ""
+    ) -> None:
+        """Let go of the worker that carried one concern, once it has settled.
+
+        The worker only. Its lease work is over and nothing consults it
+        again, so holding its session past here costs a conversation for no
+        reader. The reviewer is not done at the same moment: a join asks it
+        again, over the merged tree, whether the criteria it accepted still
+        hold — and retiring it here made every such re-check open a fresh
+        session, which is the reviewer re-deriving cold what it had just
+        judged. That path already carries the concern record for the times a
+        session genuinely cannot survive; making that the normal case spends
+        a turn on every concern to save one session.
+
+        Only where the concern is actually settled, either. A parked or
+        drained concern keeps its worker too, because what resumes reattaches
+        to that conversation rather than opening a new one — and an agent
+        recorded finished while its work is merely suspended is the report
+        that sends somebody looking for a failure that did not happen.
+        """
+        await self.runner.actors.finish(
+            ActorRef(kind="worker", id=concern_id), summary=summary, error=error
+        )
+
     async def execute_concern(
         self,
         concern: Concern,
@@ -113,7 +139,15 @@ class ConcernExecutor:
     ) -> ConcernExecution:
         """Execute one concern while persisting a terminal failure on exceptions."""
         try:
-            return await self.execute_concern_inner(concern, lease, commits, builder)
+            execution = await self.execute_concern_inner(
+                concern, lease, commits, builder
+            )
+            await self.settled_actors(
+                concern.id,
+                summary=execution.outcome.settled_summary(),
+                error=execution.outcome.failure or "",
+            )
+            return execution
         except ResolverAwaitingAnswers:
             await self.run.transition_concern(
                 concern.id,
@@ -145,9 +179,14 @@ class ConcernExecutor:
                 await self.run.transition_concern(
                     concern.id, ConcernStatus.FAILED, str(error)
                 )
+                await self.settled_actors(concern.id, error=str(error))
                 raise
+            # An environmental fault settles nothing, so the agents stand:
+            # what the host refused this run will retry, on the conversations
+            # it already holds.
             raise ResolverEnvironmentFault(str(error), [concern.id]) from error
         except Exception as error:
+            await self.settled_actors(concern.id, error=str(error))
             await self.run.transition_concern(
                 concern.id, ConcernStatus.FAILED, str(error)
             )

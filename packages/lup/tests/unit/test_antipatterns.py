@@ -9,6 +9,7 @@ projection and audit missing, untyped, and spurious suppressions.
 import re
 
 import pytest
+from pydantic import ValidationError
 
 from lup.codescan.antipatterns import (
     PYTHON_ANTI_PATTERNS,
@@ -16,15 +17,15 @@ from lup.codescan.antipatterns import (
     audit_text,
     python_anti_patterns,
 )
-from lup.codescan.common import AntiPattern
+from lup.codescan.common import AntiPattern, RuleExample
 from lup.harness.contracts import Spelled, Unsupported
 from lup.policy.bundle import bundled_antipattern_rows
 from lup.policy.kernel.edit import (
     antipattern_decision,
-    default_factory_exempt_lines,
-    dict_get_exempt_lines,
+    default_factory_sites,
+    dict_get_sites,
     empty_collection_exempt_lines,
-    refiner_named,
+    lines_of,
     slice_exempt_lines,
 )
 from lup.policy.kernel.rows import AntiPatternRow
@@ -421,7 +422,7 @@ def test_audit_catches_directive_comments_wherever_they_sit() -> None:
         assert [(f.kind, f.rule_id) for f in findings] == [("missing", rule_id)], line
 
 
-# ── empty-collection AST refiner ──────────────────────────────────────────
+# ── empty-collection AST exemptions ───────────────────────────────────────
 
 INIT_STATE = """\
 class Scheduler:
@@ -553,12 +554,12 @@ os.environ.get("PATH")
 """
 
 
-def test_refiner_exempts_route_decorators() -> None:
+def test_the_matcher_passes_over_route_decorators() -> None:
     """`.get(` on a decorator names a route; the call below it is real."""
-    assert dict_get_exempt_lines(ROUTE_DECORATOR) == {1, 6, 7, 8}
+    assert lines_of(dict_get_sites(ROUTE_DECORATOR)) == {3}
 
 
-def test_refiner_exempts_a_call_on_an_imported_module() -> None:
+def test_the_matcher_passes_over_a_call_on_an_imported_module() -> None:
     """A module is not a mapping, and which names are modules is in the tree.
 
     The audit resolves `httpx.get` to a function declared inside no class and
@@ -566,37 +567,29 @@ def test_refiner_exempts_a_call_on_an_imported_module() -> None:
     opposite states: the kernel demands a directive the audit then reports
     spurious, and no version of the file passes both.
     """
-    assert dict_get_exempt_lines(MODULE_QUALIFIED_GET) == {5}
+    assert 5 not in lines_of(dict_get_sites(MODULE_QUALIFIED_GET))
 
 
-def test_the_refiner_keeps_a_lookup_reached_through_a_module() -> None:
+def test_the_matcher_keeps_a_lookup_reached_through_a_module() -> None:
     """`os.environ.get` is a keyed lookup that a module only happens to hold.
 
     Only a name `import` binds directly is a module. Walking an attribute
-    chain back to its root would clear this one, which is exactly the access
+    chain back to its root would drop this one, which is exactly the access
     the rule exists for.
     """
-    assert 6 not in dict_get_exempt_lines(MODULE_QUALIFIED_GET)
+    assert lines_of(dict_get_sites(MODULE_QUALIFIED_GET)) == {6}
 
 
-def test_refiner_survives_a_fragment_it_cannot_parse() -> None:
-    assert dict_get_exempt_lines("@app.get(\n") == set()
+def test_the_matcher_selects_nothing_from_a_fragment_it_cannot_parse() -> None:
+    """No tree, no shapes. `dict-get` is soft, so the pattern still answers.
 
-
-def test_declared_refiners_are_the_kernel_refiners() -> None:
-    """A rule's refiner is the same object the hook applies from its row.
-
-    The rule holds the function and its row carries the name, because a row
-    projected into the hermetic runtime cannot carry a callable. Nothing but
-    this keeps them the same: a rule refined on one side only is how a marker
-    becomes one the audit demands gone and the hook refuses to remove.
+    Which is what :func:`~lup.codescan.antipatterns.selected_lines` reads an
+    empty answer as: an absent entry rather than a rule that found nothing.
     """
-    for rule in PYTHON_ANTI_PATTERNS:
-        expected = None if rule.refiner is None else rule.refiner.exempt
-        assert refiner_named(antipattern_row(rule)["refiner"]) is expected, rule.id
+    assert dict_get_sites("@app.get(\n") == []
 
 
-def test_refiner_exempts_deliberate_defaults() -> None:
+def test_empty_collection_exempts_deliberate_defaults() -> None:
     assert empty_collection_exempt_lines(INIT_STATE) == {3, 4}
     assert empty_collection_exempt_lines(CLASS_FIELD) == {2}
     assert empty_collection_exempt_lines(CALL_KWARG) == {1}
@@ -605,40 +598,40 @@ def test_refiner_exempts_deliberate_defaults() -> None:
     assert empty_collection_exempt_lines(MODULE_DECLARATION) == {1}
 
 
-def test_refiner_exempts_except_body_fallback() -> None:
+def test_empty_collection_exempts_except_body_fallback() -> None:
     # Degrade-to-empty in a handler is a fallback value, not a fold seed.
     assert empty_collection_exempt_lines(EXCEPT_FALLBACK) == {4}
     # Only DIRECT handler statements: a seed nested in a loop still trips.
     assert empty_collection_exempt_lines(EXCEPT_NESTED_SEED) == set()
 
 
-def test_refiner_exempts_tolerant_folds() -> None:
+def test_empty_collection_exempts_tolerant_folds() -> None:
     # Per-item try/except is exactly what a comprehension cannot express.
     assert empty_collection_exempt_lines(TOLERANT_FOLD) == {2}
     # One tolerant and one plain feeding loop: the plain fold keeps tripping.
     assert empty_collection_exempt_lines(MIXED_FEEDING) == set()
 
 
-def test_refiner_exempts_loop_free_seeds() -> None:
+def test_empty_collection_exempts_loop_free_seeds() -> None:
     # No loop feeds these, so there is no comprehension to prefer.
     assert empty_collection_exempt_lines(CONDITIONAL_BUILD) == {2}
     assert empty_collection_exempt_lines(CLOSURE_ACCUMULATOR) == {2}
-    # Deliberate: mutation through a callee is invisible to the refiner.
+    # Deliberate: mutation through a callee is invisible to the exemption.
     assert empty_collection_exempt_lines(HELPER_FILLED) == {2}
 
 
-def test_refiner_exempts_in_loop_resets() -> None:
+def test_empty_collection_exempts_in_loop_resets() -> None:
     # The reset inside the loop is machinery, not a seed; both function-level
     # seeds feed an unguarded loop and still trip.
     assert empty_collection_exempt_lines(LOOP_RESET) == {7}
 
 
-def test_refiner_keeps_flagging_seeds() -> None:
+def test_empty_collection_keeps_flagging_seeds() -> None:
     assert empty_collection_exempt_lines(LOCAL_SEED) == set()
     assert empty_collection_exempt_lines(MODULE_SEED) == set()
 
 
-def test_refiner_unparseable_source_exempts_nothing() -> None:
+def test_empty_collection_unparseable_source_exempts_nothing() -> None:
     assert empty_collection_exempt_lines("def broken(:\n") == set()
 
 
@@ -685,7 +678,7 @@ ABBREVIATED_SLICE = "short = commit[:12]\n"
 KEPT_SLICE = "preview = summary[:200]\n"
 
 
-def test_slice_refiner_clears_what_is_not_a_cut() -> None:
+def test_slice_exemption_clears_what_is_not_a_cut() -> None:
     assert slice_exempt_lines(DIGEST_SLICE) == {1}
     assert slice_exempt_lines(SPLIT_SLICE) == {1}
     assert slice_exempt_lines(SNIFFED_SLICE) == {1}
@@ -693,7 +686,7 @@ def test_slice_refiner_clears_what_is_not_a_cut() -> None:
     assert slice_exempt_lines(ABBREVIATED_SLICE) == {1}
 
 
-def test_slice_refiner_clears_the_line_the_bracket_sits_on() -> None:
+def test_slice_exemption_clears_the_line_the_bracket_sits_on() -> None:
     """A chain opening on one line and closing on another clears both.
 
     The pattern matches where `[:n]` is written and the node starts at the
@@ -703,11 +696,11 @@ def test_slice_refiner_clears_the_line_the_bracket_sits_on() -> None:
     assert slice_exempt_lines(MULTILINE_DIGEST) == {1, 2, 3}
 
 
-def test_slice_refiner_keeps_flagging_a_kept_prefix() -> None:
+def test_slice_exemption_keeps_flagging_a_kept_prefix() -> None:
     assert slice_exempt_lines(KEPT_SLICE) == set()
 
 
-def test_slice_refiner_unparseable_source_exempts_nothing() -> None:
+def test_slice_exemption_unparseable_source_exempts_nothing() -> None:
     assert slice_exempt_lines("def broken(:\n") == set()
 
 
@@ -1053,6 +1046,10 @@ def test_a_strong_rule_refuses_every_suppression() -> None:
     strong = AntiPattern(
         id="probe-strong",
         pattern=re.compile(r"\bforbidden\b"),
+        examples=[
+            RuleExample(code="value = forbidden()", verdict="flagged"),
+            RuleExample(code="value = allowed()", verdict="cleared"),
+        ],
         message="use the replacement",
         strength="strong",
     )
@@ -1079,6 +1076,10 @@ def test_a_soft_rule_still_honours_its_suppression() -> None:
     soft = AntiPattern(
         id="probe-soft",
         pattern=re.compile(r"\bforbidden\b"),
+        examples=[
+            RuleExample(code="value = forbidden()", verdict="flagged"),
+            RuleExample(code="value = allowed()", verdict="cleared"),
+        ],
         message="prefer something else",
     )
 
@@ -1130,15 +1131,15 @@ def test_default_factory_flags_the_empty_collection_form() -> None:
 def test_default_factory_clears_a_factory_that_does_work() -> None:
     """The near miss: a factory no annotated literal could have said."""
     assert audit_text(WORKING_FACTORY_FIELD, PYTHON_ANTI_PATTERNS) == []
-    assert default_factory_exempt_lines(WORKING_FACTORY_FIELD) == {5}
-    assert default_factory_exempt_lines(DEFAULT_FACTORY_FIELD) == set()
+    assert default_factory_sites(WORKING_FACTORY_FIELD) == []
+    assert lines_of(default_factory_sites(DEFAULT_FACTORY_FIELD)) == {5}
 
 
 def test_default_factory_and_empty_collection_never_share_a_line() -> None:
     """The two divide pydantic's ground; neither doubles up on the other's.
 
     The rule prescribes the literal default, and that literal sits on an
-    annotated class declaration — precisely what the other rule's refiner
+    annotated class declaration — precisely what the other rule's matcher
     clears. Were it otherwise, the replacement one gate demands would be the
     line the other refuses.
     """
@@ -1232,3 +1233,107 @@ def test_pdf_extraction_names_no_tool_until_a_runtime_spells_one() -> None:
     assert neutral.message == declined.message
     assert spelled.message.endswith("Hand the path to the Read tool.")
     assert spelled.message.startswith(declined.message)
+
+
+# Every rule carries the snippets it is about, so this covers the whole table
+# by construction: a rule added without examples does not import, and one
+# added with examples arrives here without anyone widening a list of ids.
+EXAMPLE_CASES = [
+    pytest.param(
+        rule,
+        example,
+        python,
+        id=f"{rule.id}-{index}-{example.verdict}",
+    )
+    for table, python in ((PYTHON_ANTI_PATTERNS, True), (TS_ANTI_PATTERNS, False))
+    for rule in table
+    for index, example in enumerate(rule.examples)
+]
+
+
+def hook_denies(rule: AntiPattern, code: str, python: bool) -> bool:
+    """Whether the edit hook refuses this snippet over this one rule.
+
+    ``refuted={}`` says a checker ran and took nothing back, which is what
+    separates the two answers a resolution-required rule can give: without it
+    the gate asks rather than denying, and every `dict-get` example would
+    read the same whatever its receiver was.
+    """
+    decision = antipattern_decision(
+        None, f"{code}\n", [antipattern_row(rule)], python, refuted={}
+    )
+    return decision is not None and decision.effect == "deny"
+
+
+def audit_reports(rule: AntiPattern, code: str) -> list[str]:
+    """The rule ids the whole-file audit reports as unguarded in this snippet."""
+    return [
+        finding.rule_id
+        for finding in audit_text(f"{code}\n", [rule])
+        if finding.kind == "missing"
+    ]
+
+
+@pytest.mark.parametrize(("rule", "example", "python"), EXAMPLE_CASES)
+def test_each_rule_answers_its_own_examples(
+    rule: AntiPattern, example: RuleExample, python: bool
+) -> None:
+    """Both gates say about each snippet what its rule declared they would.
+
+    The two surfaces are checked together because the split between them is
+    the failure this guards: a shape the hook denies and the audit calls a
+    spurious marker is a change one gate demands and the other refuses, and
+    nothing in a single-surface test would show it.
+
+    ``refuted`` is the one verdict where they differ on purpose — the hook
+    sees a spelling it cannot decide and the audit resolves the receiver — so
+    the hook side is asserted here and `test_grammar` carries the resolution.
+    """
+    denied = hook_denies(rule, example.code, python)
+    reported = audit_reports(rule, example.code)
+
+    match example.verdict:
+        case "flagged" | "refuted":
+            assert denied, f"the hook admits {rule.id} at: {example.code}"
+            assert reported == [rule.id], (
+                f"the audit missed {rule.id} at: {example.code}"
+            )
+        case "cleared":
+            assert not denied, f"the hook refuses {rule.id} at: {example.code}"
+            assert reported == [], f"the audit reports {rule.id} at: {example.code}"
+
+
+def test_a_refuted_example_belongs_to_a_rule_that_declares_a_family() -> None:
+    """Only a rule with a type oracle behind it may claim the third verdict.
+
+    ``refuted`` says the sweep will take this finding back. A rule declaring
+    no family has nothing that could, so the claim would leave a contributor
+    waiting for a verdict that never changes — and a directive is the only
+    thing that would have helped.
+    """
+    refined = {
+        rule.id
+        for table in (PYTHON_ANTI_PATTERNS, TS_ANTI_PATTERNS)
+        for rule in table
+        if rule.family is not None
+    }
+    claiming = {
+        rule.id
+        for table in (PYTHON_ANTI_PATTERNS, TS_ANTI_PATTERNS)
+        for rule in table
+        if any(example.verdict == "refuted" for example in rule.examples)
+    }
+
+    assert claiming, "the third verdict has no customer"
+    assert claiming <= refined, sorted(claiming - refined)
+
+
+def test_a_rule_stating_only_what_it_catches_does_not_import() -> None:
+    """The near-miss is half the rule, so a declaration missing it is refused."""
+    with pytest.raises(ValidationError, match="one it clears"):
+        AntiPattern(
+            id="one-sided",
+            pattern=re.compile(r"\bnope\b"),
+            examples=[RuleExample(code="nope = 1", verdict="flagged")],
+            message="states only what it catches",
+        )

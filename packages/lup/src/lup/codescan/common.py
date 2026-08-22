@@ -14,20 +14,22 @@ views a context-aware rule scans, and `LineCursor` is the shared line walk that
 lets a scanner absorb a note's continuation lines without index bookkeeping.
 
 `PythonSource` is the unit whole-project scanners consume, and `Refutation`
-the shape a refiner returns when it proves a matched line is not what its rule
+the shape a checker returns when it proves a matched line is not what its rule
 is about — the one mechanism by which a broad regex hit is dropped with a
 reason attached.
 """
 
 import re
 from collections.abc import Callable, Set as AbstractSet
+from functools import cache
 from pathlib import Path, PurePosixPath
-from typing import Literal, Self
+from typing import Literal, Self, get_args
 
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 from lup.policy.kernel.edit import (
     FILE_IGNORE_RE,
+    MatchSite,
     file_level_line,
     docstring_lines as python_docstring_lines,
     mask_python_string_literals,
@@ -54,19 +56,104 @@ on it. Those are refused, and the message says to write the replacement.
 type RuleContext = Literal["code", "comment"]
 """The syntactic surface a scan rule inspects: masked code, or comment text."""
 
+RULE_CONTEXTS: tuple[RuleContext, ...] = get_args(RuleContext.__value__)
+"""Every context a rule may declare, read off the alias that names them.
 
-class Refiner(BaseModel, arbitrary_types_allowed=True):
-    """An AST context that narrows one rule, and what a cleared match really is.
+Taken from the alias rather than spelled again beside it, so a context added
+there reaches every scan that projects a line per context without anyone
+having to widen a second list.
+"""
 
-    ``exempt`` returns the lines the context clears, and ``evidence`` says why
-    in the words a refuted finding carries. The kernel owns these functions
-    because the hook must apply them with no types and no dependencies to
-    hand; the rule holds the same object so the narrowing is visible where
-    the rule is declared.
+
+class Matcher(BaseModel, arbitrary_types_allowed=True):
+    """The AST shape one rule selects, where the source parses.
+
+    ``select`` returns the sites carrying the shape — the violations
+    themselves, not a net around them. A rule that declares one is decided by
+    the tree, and its ``pattern`` becomes the fallback for source no tree can
+    be had from: a file mid-edit that will not parse, or a language this
+    grammar is not for.
+
+    Sites rather than lines, because a rule is asked two questions and both
+    are about the same nodes. Every gate asks which line fires, which is what
+    :func:`~lup.policy.kernel.edit.lines_of` projects. A rule whose verdict
+    turns on a type is also asked which symbol settles it, and a site carries
+    the position for that — so a resolution pass reads the sites this already
+    chose instead of walking the tree again to rediscover them. A second
+    selector is the same rule stated twice, and two statements of one rule
+    are two that can disagree.
+
+    Stating the shape here is what keeps it stated once. A rule whose regex
+    nets more than the defect it names would otherwise need a second pass to
+    read the tree and take the excess back out — the rule written twice, once
+    too widely and once as the correction, with a reader having to hold both
+    to know what it refuses. A matcher says it once, in the terms the
+    language actually has.
+
+    The kernel owns these functions because the hook applies them with no
+    types and no dependencies to hand, and the rule holds the same object so
+    what it selects is visible where it is declared.
     """
 
-    exempt: Callable[[str], set[int]]
-    evidence: str
+    select: Callable[[str], list[MatchSite]]
+
+
+class TypeFamily(BaseModel, frozen=True):
+    """A named set of declaring classes a resolved subject is measured against.
+
+    ``classes`` names the declarations that constitute the family. A subject
+    belongs when the class it resolves to is one of them, or inherits one —
+    which is what carries `os._Environ(MutableMapping[AnyStr, AnyStr])` and a
+    project's own `dict` subclass into the mapping family without listing
+    either.
+
+    Named classes rather than rendered type strings, because a name a checker
+    prints for display is not a contract and a declaration is: `dict` in
+    typeshed's `builtins.pyi` is the same declaration however the type
+    holding it is spelled at the site.
+    """
+
+    name: str
+    classes: list[str]
+
+
+type ExampleVerdict = Literal["flagged", "cleared", "refuted"]
+"""What the gates say about one example, in the three answers they can give.
+
+``flagged`` is the shape the rule refuses, reported by every surface.
+
+``cleared`` is the near-miss the tree settles on its own: the same spelling
+doing something else — a one-argument `.replace` that renames a file, an
+argless `.split` tokenizing prose, a `tuple[X, ...]` that is a sequence. Both
+gates stay silent and a directive there would be reported spurious.
+
+``refuted`` is the case no tree can decide, so the two surfaces answer
+differently on purpose: the edit hook flags the spelling, and the whole-file
+audit takes it back once a type oracle resolves what the receiver actually is.
+`.get` on an HTTP client is the one this exists for. It is a third answer
+rather than a cleared example, because a contributor who meets the denial
+needs to know that waiting for the sweep is the way past it — and that adding
+a directive is not.
+"""
+
+
+class RuleExample(BaseModel, frozen=True):
+    """One snippet a rule is checked against, and the verdict it must return.
+
+    A rule declares near-misses as well as violations, because one stated only
+    by what it catches is one whose reach nobody wrote down — and every false
+    positive this set has produced was a near-miss nobody had named. Most of
+    these rules turn on what the subject *is* rather than on how it is spelled,
+    so the cleared examples are where that is written down: `.replace` renaming
+    a path, `.get` reaching a module's own function, `Field(default_factory=…)`
+    doing work no literal expresses.
+
+    A cleared snippet is often the replacement the rule's message asks for, so
+    the set bounds the rule and shows the way out of it at once.
+    """
+
+    code: str
+    verdict: ExampleVerdict
 
 
 class AntiPattern(BaseModel, arbitrary_types_allowed=True):
@@ -89,22 +176,57 @@ class AntiPattern(BaseModel, arbitrary_types_allowed=True):
     TypeScript-family table, text that fails to tokenize) every rule scans the
     raw line — those rules are genuinely text-shaped.
 
-    ``refiner`` is present when the regex is wider than the defect the rule
-    names and an AST context settles the difference. It carries the function
-    itself, so reading the rule tells you what narrows it rather than only
-    that something does. The row carries its name, which
-    :func:`lup.policy.kernel.edit.refiner_named` resolves back to the function,
-    because a row projected into the hermetic runtime is primitive and cannot
-    carry a callable; ``test_declared_refiners_are_the_kernel_refiners`` pins
-    the two to the same objects, since a rule refined on one side only is
-    exactly the split that makes a marker unremovable.
+    ``matcher`` is present when the tree decides the rule outright: it selects
+    the violating lines itself, and ``pattern`` is what the gate falls back to
+    where no tree can be had — a file mid-edit that will not parse, or the
+    TypeScript-family table, which this grammar is not for. Where the regex
+    is wider than the defect the rule names, the matcher subtracts the excess
+    itself rather than leaving a second pass to take it back out, so the rule
+    is stated once and a reader has one place to read it.
+
+    ``examples`` are the snippets the rule is checked against, and carrying
+    them on the declaration is what makes a rule impossible to add untested:
+    a table-driven test runs every one of them through the gate, so there is
+    no separate list of covered ids for a new rule to be missing from. The
+    generated reference renders them too, which is why they are written as
+    code somebody could paste rather than as the regex that happens to catch
+    them.
     """
 
     id: str
     pattern: re.Pattern[str]
+    examples: list[RuleExample]
     message: str
     context: RuleContext = "code"
-    refiner: Refiner | None = None
+    matcher: Matcher | None = None
+    family: TypeFamily | None = None
+    """The classes a site's subject must resolve into for this rule to stand.
+
+    Present when the shape alone cannot settle the rule and only the type of
+    what it is written on can: `.get` on a mapping hides a schema, the same
+    spelling on an HTTP client is a request. The sites the ``matcher`` chose
+    carry the positions, this names what they must resolve to, and
+    `lup.codescan.resolution` refutes every site shown to be outside it.
+
+    Declared here rather than in a table keyed by rule id, because a rule is
+    one thing. A second list saying which rules resolve is a list that can
+    disagree with the rules it describes, and every gate that needed to know
+    — the hermetic row, the reference page, the audit — had to perform the
+    same join to find out.
+
+    A rule with no family never reaches a checker at all, which is most of
+    them: nothing about a bare `except` or an `import re` turns on a type.
+    """
+
+    refinement: str = ""
+    """How resolution sharpens this rule, in the words the reference shows.
+
+    Beside the family it explains, so a change to what the gate resolves and
+    a change to what the page claims it resolves are one edit. This is the
+    prose a contributor reads after a denial, and the failure it guards
+    against is the page describing a verdict the gate stopped giving.
+    """
+
     strength: RuleStrength = "soft"
     """Whether a `# lup: ignore` may silence this rule at all.
 
@@ -114,6 +236,66 @@ class AntiPattern(BaseModel, arbitrary_types_allowed=True):
     every time — then a suppression is not a reasoned exception but the defect
     with a comment on it, and this refuses to be silenced.
     """
+
+    @model_validator(mode="after")
+    def examples_bound_the_rule(self) -> Self:
+        """Refuse a rule whose examples state only one half of its reach.
+
+        A rule is two claims — this shape is refused, and that neighbouring
+        one is not — and a declaration carrying only violations asserts the
+        first while leaving the second to whatever the pattern happens to do.
+        Requiring both here rather than in the test is what keeps the answer
+        at the declaration: a rule with one polarity missing does not import.
+
+        ``refuted`` is not one of the two. It says the gates answer this site
+        differently on purpose, which presumes both of them already have an
+        answer to state.
+        """
+        verdicts = {example.verdict for example in self.examples}
+        if not {"flagged", "cleared"} <= verdicts:
+            raise ValueError(
+                f"rule {self.id} needs at least one example it flags and one it "
+                f"clears — the cleared one is what says where the rule stops"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def a_family_reaches_the_sites_it_judges(self) -> Self:
+        """Refuse a family declared on a rule whose sites carry no symbol.
+
+        A family is measured against what a site's subject resolves to, and
+        only a selector that recorded a position has given anything to
+        resolve. Declared on a rule whose matcher yields bare lines, it is
+        silently inert: nothing is asked, nothing is refuted, and the rule
+        goes on giving the broad verdict while its reference page describes
+        the narrowing that never happens.
+
+        Checked against the rule's own flagged examples, which is the one
+        thing on hand that is guaranteed to be a site this rule fires on.
+        """
+        if self.family is None:
+            return self
+        if self.matcher is None:
+            raise ValueError(
+                f"rule {self.id} declares the {self.family.name} family but no "
+                f"matcher — a family is measured against sites, and only a "
+                f"matcher selects them"
+            )
+        flagged = [
+            example.code for example in self.examples if example.verdict == "flagged"
+        ]
+        if not any(
+            "member" in site
+            for code in flagged
+            for site in self.matcher.select(f"{code}\n")
+        ):
+            raise ValueError(
+                f"rule {self.id} declares the {self.family.name} family, but its "
+                f"matcher records no symbol to resolve on any example it flags "
+                f"— nothing would ever be asked about, and the refinement its "
+                f"reference page promises would never happen"
+            )
+        return self
 
 
 class RuleSelection(BaseModel, frozen=True):
@@ -254,12 +436,13 @@ def sources_from_paths(
 
 
 class Refutation(BaseModel, frozen=True):
-    """One rule hit a refiner proved does not apply, and the proof.
+    """One rule hit something proved does not apply, and the proof.
 
-    A refiner sharpens a broad line rule after the fact: the regex says the
-    shape is present, the refiner says this instance is not what the rule is
-    about. The AST exemptions for deliberate empty-collection defaults and the
-    typed grammar's receiver resolution both speak this shape, so the audit
+    A broad line rule is sharpened by what reads more than the line does: the
+    regex says the shape is present, and the tree or a checker says this
+    instance is not what the rule is about. The AST exemptions for deliberate
+    empty-collection defaults and the receiver resolution both speak this
+    shape, so the audit
     has one mechanism for "matched, but refuted" — and a `# lup: ignore` left
     guarding a refuted line becomes a dead directive the audit reports.
 
@@ -285,7 +468,20 @@ class PythonContext(BaseModel):
     docstring_lines: set[int]
 
     @classmethod
+    @cache
     def parse(cls, text: str) -> Self:
+        """One file's prose map, remembered for the audits that follow.
+
+        Where prose lives is a pure function of the text, and a sweep asks
+        several audits about the same file — so computed per caller it
+        tokenizes every file once per audit that reads it. The instance is
+        shared rather than copied, which is safe because both queries below
+        only read it and nothing else reaches the fields.
+
+        Unbounded because a bound would save nothing: the key is text a sweep
+        is already holding for every file it walks, so evicting an entry
+        keeps no memory that the caller was not keeping anyway.
+        """
         return cls(
             comment_columns=python_comment_columns(text),
             docstring_lines=python_docstring_lines(text),

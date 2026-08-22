@@ -341,6 +341,19 @@ def fetch_cache_path() -> Path:
     return project_root() / ".cache" / "fetch"
 
 
+def refutation_cache_path() -> Path:
+    """Return ``<root>/.cache/refutations.json``, what the checker last said.
+
+    Beside the fetch cache and for the same reason: disposable and
+    reconstructible, ignored by the manifest, so an answer remembered from the
+    last sweep cannot reach a diff. Deliberately not version-scoped — every
+    entry names the rules and the environment it was resolved under, so an
+    answer that no longer applies is a key that no longer matches rather than
+    a directory nobody cleared.
+    """
+    return project_root() / ".cache" / "refutations.json"
+
+
 # -- Timestamp helpers --------------------------------------------------------
 
 # lup: ignore[constant-declaration] — the stamp already written into every

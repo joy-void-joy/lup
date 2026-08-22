@@ -80,7 +80,7 @@ def write_atomic(path: Path, content: bytes) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(f".{path.name}.tmp")
     temporary.write_bytes(content)
-    temporary.replace(path)  # lup: ignore[string-replace] — atomic Path rename
+    temporary.replace(path)
 
 
 def publish_atomic(

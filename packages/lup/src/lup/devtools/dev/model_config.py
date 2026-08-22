@@ -49,7 +49,7 @@ import os
 import sys
 import tarfile
 import tempfile
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 from collections import Counter
 from collections.abc import Iterator, Sequence
 from pathlib import Path, PurePosixPath
@@ -252,7 +252,7 @@ class SourcePosition(BaseModel, frozen=True):
     column: int = 0
 
 
-class Rewrite(BaseModel, frozen=True):
+class Rewrite(BaseModel, ABC, frozen=True):
     """One edit to a file's lines, ordered by where in the file it applies.
 
     Edits are applied last-first so an earlier one never invalidates a later

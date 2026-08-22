@@ -373,7 +373,8 @@ every git side effect (leases, worktrees, commits, dependency bases);
 `mailbox.py` carries questions and answers as files so any door can write
 while the run holds its lease. Each phase is a collaborator over those rather
 than a method on one class: `questions.py` publishes and promotes,
-`actors.py` holds one durable session per actor, `turns.py` puts the prompts
+the `actors` package holds the population and one durable session per member,
+`turns.py` puts the prompts
 to them, `joins.py` brings branches together and settles what that breaks,
 `verification.py` runs one tree through the verification set, and
 `execution.py` drives one concern's revision loop. `core.py` composes them

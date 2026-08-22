@@ -60,6 +60,7 @@ from lup.policy.kernel.decision import (
 from lup.policy.kernel.edit import decide_edit
 from lup.policy.kernel.rows import PathRoleRow
 from lup.policy.refused_tools import RefusedTool, erase_refused_tools
+from lup.policy.edit_rules import EditRule
 from lup.policy.shell_rules import (
     RunnerTargetRule,
     ShellOperationRule,
@@ -88,7 +89,15 @@ from lup.policy.rules import (
 
 from lup.policy.vocabulary import runner_target_rules
 from lup_template.devtools.harness.catalog import declared_hook_set, portable_harness
-from lup_template.devtools.harness.content.shell_vocabulary import SHELL_RULES
+
+SHELL_RULES = declared_hook_set().resolved_shell_rules()
+"""This project's vocabulary as the runtime resolves it, not as it is declared.
+
+Asked of the hook set rather than of the selection module, because what these
+cases are about is the table a session and a generated dispatcher actually
+walk. A test that resolved the selection its own way could agree with the
+declaration while disagreeing with everything that reads it.
+"""
 
 
 class DecisionCase(BaseModel, frozen=True):
@@ -1307,6 +1316,26 @@ def assembled_edit_decision(
     )
 
 
+# lup: ignore[constant-declaration] — a fixture table, deliberately shaped
+FIXTURE_EDIT_RULES: list[EditRule] = [
+    EditRule(
+        name="fixture-suffix-nothing-else-uses",
+        suffixes=[".fixture"],
+        effect="deny",
+        reason="declared only to prove the rows cross the boundary",
+    )
+]
+"""An edit table that renders and matches nothing the edit cases exercise.
+
+The point of this test is that the assembled kernel decides identically with
+no lup on the path, so the table must not move any case's verdict. What it has
+to prove is narrower and still worth proving: that a declared table survives
+erasure, renders into the generated data, imports under `-I -S`, and is
+accepted by the kernel beside it — which an empty list would not show, since
+an empty list is what the renderer emits when the field is missing entirely.
+"""
+
+
 def test_assembled_kernel_runs_without_site_packages(tmp_path: Path) -> None:
     runtime = tmp_path / "runtime"
     runtime.mkdir()
@@ -1337,6 +1366,7 @@ def test_assembled_kernel_runs_without_site_packages(tmp_path: Path) -> None:
             path_roles=FIXTURE_PATH_ROLES,
             acceptance_guard=None,
             shell_rules=SHELL_RULES,
+            edit_rules=FIXTURE_EDIT_RULES,
             refused_tools=FIXTURE_REFUSED_TOOLS,
             recoverable_target_limit=FIXTURE_RECOVERABLE_LIMIT,
             runner_targets=FIXTURE_RUNNER_TARGETS,
@@ -1372,9 +1402,10 @@ def test_assembled_kernel_runs_without_site_packages(tmp_path: Path) -> None:
         "from kernel.shell import decide_shell\n"
         "from policy_data import (\n"
         "    ALLOWED_FETCH_SCOPES, ANTI_PATTERN_ROWS, DENIED_FETCH_SCOPES,\n"
-        "    MAXIMUM_ADDED_LINES, PATH_ROLES, PATH_RULES, RUNNER_TARGETS,\n"
-        "    SANDBOX_EXCLUDED_COMMANDS, SHELL_RULES,\n"
+        "    EDIT_RULES, MAXIMUM_ADDED_LINES, PATH_ROLES, PATH_RULES,\n"
+        "    RUNNER_TARGETS, SANDBOX_EXCLUDED_COMMANDS, SHELL_RULES,\n"
         ")\n"
+        "assert EDIT_RULES, 'the declared edit table did not reach the runtime'\n"
         "fixtures = json.loads(\n"
         "    (Path(__file__).parent / 'fixtures.json').read_text(encoding='utf-8')\n"
         ")\n"
@@ -1406,6 +1437,7 @@ def test_assembled_kernel_runs_without_site_packages(tmp_path: Path) -> None:
         "        maximum_added_lines=MAXIMUM_ADDED_LINES,\n"
         "        autonomous=case['autonomous'],\n"
         "        python_source=suffix in ('.py', '.pyi'),\n"
+        "        suffix=suffix, edit_rules=EDIT_RULES,\n"
         "    )\n"
         "    assert decision.effect == case['effect'], case\n",
         encoding="utf-8",
@@ -2408,13 +2440,14 @@ def test_an_uncovered_violation_denies_whatever_else_the_edit_declares() -> None
     assert every_one_covered.effect == "ask"
 
 
-def test_the_gate_refuses_the_marker_the_refiner_already_refutes() -> None:
-    """Both gates reach one verdict, because one refiner answers both.
+def test_the_gate_refuses_the_marker_the_tree_already_settles() -> None:
+    """Both gates reach one verdict, because one matcher answers both.
 
-    A route decorator trips the `dict-get` regex and the AST refutes it, so a
-    marker written there guards nothing. The audit reports that afterwards;
-    the exemption it reads is the kernel's own, so the same verdict is
-    available at the point of writing, which is where it is worth having.
+    A route decorator is not payload access, and the `dict-get` matcher says
+    so from the tree alone, so a marker written there guards nothing. The
+    audit reports that afterwards; the selector it reads is the kernel's own,
+    so the same verdict is available at the point of writing, which is where
+    it is worth having.
     """
     policy = EditPolicy(protected=[])
     refuted = EditBatch(
@@ -2544,12 +2577,12 @@ def test_a_rule_another_scanner_owns_is_not_refused_over() -> None:
 
 
 def test_a_fragment_with_no_tree_is_not_refused_over_a_guess() -> None:
-    """A refiner reads an AST, and an exemption from a missing one is a guess.
+    """A matcher reads an AST, and a verdict from a missing one is a guess.
 
-    `tuple_shape_exempt_lines` clears every line where the source does not
-    parse, so a gate that read clearance as proof would refuse a directive for
-    its own blindness. With no tree there is no hit either, so what is left is
-    the ordinary ask.
+    `tuple-shape` is strong, so no directive may answer it and a denial from
+    the pattern alone would be one with no escape. Where the fragment will
+    not parse the rule fires nowhere, so what is left is the ordinary ask
+    about the directive itself.
     """
     policy = EditPolicy(protected=[])
     fragment = EditBatch(
@@ -2867,10 +2900,10 @@ def test_a_note_in_a_test_is_still_gated() -> None:
 def test_retiring_a_suppression_the_ast_refutes_is_allowed() -> None:
     """The gate that demanded this marker gone must not be the one refusing it.
 
-    A route decorator trips the `dict-get` regex and nothing else, so before
-    the refiner the audit called the marker spurious while the kernel denied
-    every edit that removed it — a change one gate required and the other
-    forbade, with no operation in between.
+    A route decorator trips the `dict-get` regex and nothing else, so while
+    the rule was only a regex the audit called the marker spurious and the
+    kernel denied every edit that removed it — a change one gate required and
+    the other forbade, with no operation in between.
     """
     policy = EditPolicy(protected=[])
     batch = EditBatch(
@@ -3165,7 +3198,10 @@ def test_fragment_edits_are_judged_as_the_documents_they_produce(
     """A marker mentioned inside a string literal is prose, not feedback.
 
     The path is repo-relative because the session scratchpad is exempt from
-    the marker gate by role, and the gate is what this test drives.
+    the marker gate by role, and the gate is what this test drives. The
+    fragment strips the marker off a line that survives, which is a deletion
+    under any reading — so what separates the two answers is only whether the
+    text is seen as a document, which is the point.
     """
     monkeypatch.chdir(tmp_path)
     Path("content.py").write_text(
@@ -3177,7 +3213,7 @@ def test_fragment_edits_are_judged_as_the_documents_they_produce(
             EditChange(
                 path=Path("content.py"),
                 before="A note spells itself as # lup: fix this here.\n",
-                after="",
+                after="A note spells itself as\n",
             )
         ]
     )
@@ -3261,6 +3297,83 @@ def test_a_real_note_deletion_is_still_denied_when_both_sides_parse() -> None:
     assert "removes inline review feedback" in decision.reason
 
 
+def marker_effect(before: str, after: str) -> str:
+    """What the lattice answers for one edit, with only the marker gate live."""
+    return decide_edit(
+        "a.py",
+        before,
+        after,
+        path_exists=True,
+        path_rules=[],
+        antipattern_rows=[],
+        allowances=[],
+        python_source=True,
+    ).effect
+
+
+def test_a_note_is_spent_by_the_deletion_of_the_code_it_annotated() -> None:
+    """Feedback whose subject is gone asks nothing of anybody.
+
+    The gate protects a reader owed an answer. Delete the function a note
+    sits on and there is no longer a question outstanding, so refusing the
+    deletion only preserves a note about code that is not there — which is
+    why deleting annotated code, a whole file, or a block being moved
+    elsewhere all have to pass.
+    """
+    assert (
+        marker_effect("# lup: unreachable?\ndef dead():\n    return 1\n", "") == "allow"
+    )
+    assert (
+        marker_effect(
+            "# lup: unreachable?\ndef dead():\n    return 1\n\n\ndef live():\n    return 2\n",
+            "def live():\n    return 2\n",
+        )
+        == "allow"
+    )
+    assert marker_effect("x = 1  # lup: right?\ny = 2\n", "y = 2\n") == "allow"
+
+
+def test_rewriting_the_annotated_line_does_not_spend_its_note() -> None:
+    """Absent is not the same act as deleted.
+
+    Comparing revisions as sets would make editing the code under a note a
+    way to drop the note with it — the subject is missing from the new text
+    either way. Only a line removed outright spends its feedback; a line
+    rewritten in place still carries the question it was asked.
+    """
+    assert (
+        marker_effect(
+            "# lup: is this right?\nx = 1\n", "# lup: is this right?\nx = 2\n"
+        )
+        == "allow"
+    )
+    assert marker_effect("# lup: is this right?\nx = 1\n", "x = 2\n") == "deny"
+
+
+def test_a_deletion_hidden_inside_a_conversion_is_still_refused() -> None:
+    """Counting notes let one be dropped whenever another was converted.
+
+    Deltas that cancel read as though nothing left: resolve note A, delete
+    note B, add note C, and the tally is unchanged while B is gone for good.
+    Matching notes by their words is what closes it, and is the reason the
+    gate identifies rather than counts.
+    """
+    assert (
+        marker_effect(
+            "# lup: note A\nx = 1\n# lup: note B\ny = 2\n",
+            "# lup: solved: note A\nx = 1\ny = 2\n# lup: note C\n",
+        )
+        == "deny"
+    )
+    assert (
+        marker_effect(
+            "# lup: note A\nx = 1\n",
+            "# lup: solved: note A\nx = 1\n",
+        )
+        == "allow"
+    )
+
+
 def test_a_declared_checker_naming_the_environment_is_refused() -> None:
     """The layout it spells is the only one it answers for.
 
@@ -3304,3 +3417,75 @@ def test_a_vendored_program_may_still_be_declared_by_path() -> None:
     )
 
     assert hooks.diagnostics_command[0] == "tools/mychecker"
+
+
+def test_one_copy_of_a_duplicated_note_may_go_while_the_text_survives() -> None:
+    """A note written twice is one piece of feedback, not two.
+
+    A tally cannot tell a deleted note from a duplicated one being tidied,
+    so it denied both — which left a file holding the same note twice unable
+    to lose either copy, and froze whatever code carried them.
+    """
+    decision = decide_edit(
+        "a.py",
+        "def a() -> None:\n    pass  # lup: solved: check the total\n"
+        "def b() -> None:\n    pass  # lup: solved: check the total\n",
+        "def a() -> None:\n    pass  # lup: solved: check the total\n",
+        path_exists=True,
+        path_rules=[],
+        antipattern_rows=[],
+        allowances=[],
+        python_source=True,
+    )
+
+    assert "removes a `# lup: solved:` claim" not in decision.reason
+
+
+def test_losing_the_last_copy_of_a_claim_is_still_denied() -> None:
+    """The relaxation is about duplicates, not about claims going missing."""
+    decision = decide_edit(
+        "a.py",
+        "def a() -> None:\n    pass  # lup: solved: check the total\n",
+        "def a() -> None:\n    pass\n",
+        path_exists=True,
+        path_rules=[],
+        antipattern_rows=[],
+        allowances=[],
+        python_source=True,
+    )
+
+    assert decision.effect == "deny"
+    assert "removes a `# lup: solved:` claim" in decision.reason
+
+
+def test_dropping_one_of_two_different_notes_is_still_denied() -> None:
+    """Two notes that merely sit together are two pieces of feedback."""
+    decision = decide_edit(
+        "a.py",
+        "x = 1  # lup: reconsider this\ny = 2  # lup: and this\n",
+        "x = 1  # lup: reconsider this\ny = 2\n",
+        path_exists=True,
+        path_rules=[],
+        antipattern_rows=[],
+        allowances=[],
+        python_source=True,
+    )
+
+    assert decision.effect == "deny"
+    assert "removes inline review feedback" in decision.reason
+
+
+def test_resolving_a_note_into_a_claim_is_still_not_a_deletion() -> None:
+    """The open marker goes and the same words return under `solved:`."""
+    decision = decide_edit(
+        "a.py",
+        "x = 1  # lup: reconsider this\n",
+        "x = 1  # lup: solved: reconsider this\n",
+        path_exists=True,
+        path_rules=[],
+        antipattern_rows=[],
+        allowances=[],
+        python_source=True,
+    )
+
+    assert "removes inline review feedback" not in decision.reason

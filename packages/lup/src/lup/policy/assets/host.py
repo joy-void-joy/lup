@@ -396,14 +396,15 @@ def resolved_refutations(
         return None
 
 
-def existing_write_targets(targets: list[str]) -> list[str]:
+def existing_write_targets(targets: list[str], root: Path | None = None) -> list[str]:
     """Report which of a command's write targets already exist on disk.
 
     The kernel never reads the filesystem, so it cannot tell creating a file
     from overwriting one. Resolving that here keeps the decision itself a
     pure function of the command text and this list.
     """
-    return [target for target in targets if (Path.cwd() / target).exists()]
+    where = Path.cwd() if root is None else root
+    return [target for target in targets if (where / target).exists()]
 
 
 def git_answers(arguments: list[str], root: Path) -> list[str] | None:

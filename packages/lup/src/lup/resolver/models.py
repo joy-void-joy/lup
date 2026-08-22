@@ -1,6 +1,6 @@
 """Immutable, schema-versioned semantic resolver records."""
 
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
 from datetime import datetime
 from enum import StrEnum
@@ -13,6 +13,7 @@ from lup.actors.questions import Question, QuestionAnswer
 from lup.actors.refs import ActorRef
 from lup.codescan.symbols import DefinedSymbol
 from lup.harness.models import ResolveSpec
+from lup.hooks import LupHooksConfig
 from lup.policy.grants import LeaseGrants
 from lup.policy.identity import ConcernAllowance
 
@@ -628,6 +629,26 @@ class WorkerContext(BaseModel, frozen=True, arbitrary_types_allowed=True):
     session runs has no other way to reach it, and one they take back has no
     other way to stop applying. The document it names is the same one the
     lease's own deployed dispatcher reads."""
+    hooks: LupHooksConfig = Field(default_factory=LupHooksConfig)
+    """The mid-turn delivery this session must open with, handed over rather
+    than fetched. Delivery works only if the hook is in the options the
+    session is built from, so a recipe that had to remember to go and get it
+    could be written once without it — producing a worker that looks addressed
+    and reads nothing anyone sends it."""
+
+
+class ReviewerContext(BaseModel, frozen=True, arbitrary_types_allowed=True):
+    """What one reading session needs: the tree it judges, and its own mail.
+
+    A reviewer once took only a path, which is why it was the one actor kind
+    nobody could say anything to. Judging is where a fact arriving late is
+    most worth having — a criterion already checked elsewhere, a base that
+    moved under the tree — so it carries the same delivery every other actor
+    does.
+    """
+
+    root: Path
+    hooks: LupHooksConfig = Field(default_factory=LupHooksConfig)
 
 
 class WorkerReport(BaseModel, frozen=True, extra="forbid"):
@@ -793,6 +814,18 @@ class ConcernOutcome(BaseModel, frozen=True):
     notes_cleared: list[ReviewNote] = []
     notes_missing: list[ReviewNote] = []
 
+    def settled_summary(self) -> str:
+        """How this concern ended, in the one line a roster entry carries.
+
+        The rounds are named because they are what a reader sizing the next
+        pass wants and cannot get from the verdict: two concerns both
+        verified are not the same result when one took four rounds.
+        """
+        if not self.verified:
+            return ""
+        spent = f" in {len(self.rounds)} round{'' if len(self.rounds) == 1 else 's'}"
+        return f"verified{spent}"
+
 
 class ConcernExecution(BaseModel, frozen=True):
     base: DependencyBase
@@ -945,7 +978,7 @@ type InventoryPlanner = Callable[["ResolveRequest"], Awaitable["ResolveInventory
 """How a source carrying raw evidence has it organized into concerns."""
 
 
-class ResolverSource(BaseModel, frozen=True):
+class ResolverSource(BaseModel, ABC, frozen=True):
     """What a resolver run starts from, able to yield the inventory it runs.
 
     A run begins either from concerns already organized or from the review
@@ -1348,35 +1381,6 @@ class RunTally(BaseModel, frozen=True):
         if include_joins and self.join_total:
             line += f" · joins {self.joined}/{self.join_total}"
         return line
-
-
-# lup: ignore[model-free-function] — dead: every caller uses ResolveState.tally,
-# which computes the same aggregate. It should be deleted, and cannot be: it
-# carries a copy of an open note, and the removal gate counts open notes across
-# the file rather than checking the text survives, so removing either copy reads
-# as destroying feedback. Delete both once that check compares text.
-def run_tally(state: ResolveState) -> RunTally:
-    """Fold one persisted state into the aggregate a watcher wants."""
-    statuses = [item.status for item in state.progress]
-    return RunTally(
-        phase=state.phase,
-        total=len(statuses),
-        by_status={
-            status: statuses.count(status) for status in dict.fromkeys(statuses)
-        },
-        joined=state.join_progress.landed() if state.join_progress else 0,
-        # lup: solved: This counts every concern holding a commit, but `integrate`
-        # joins only the verified ones, so the total over-reads by each concern
-        # that failed or retired still holding work — and the bar can never reach
-        # it. Measured on resolve-9e060ad9bb53: 22 against 20 real parents, the two
-        # extras being composition-seam-abc (failed) and git-sandbox-lock-diagnosis
-        # (retired), both of which the assembly gate lists as exclusions rather
-        # than merging. Count what that gate will actually join. If the wider
-        # number is worth showing, it is a second figure — "20 of 22 on the
-        # table" says something true, where one number pretending to be both
-        # cannot.
-        join_total=len(state.join_progress.planned) if state.join_progress else 0,
-    )
 
 
 class ResolveManifest(BaseModel, frozen=True):

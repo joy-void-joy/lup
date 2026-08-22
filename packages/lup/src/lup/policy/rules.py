@@ -15,7 +15,6 @@ from pydantic import AnyHttpUrl, BaseModel, Field
 
 from lup.codescan.antipatterns import patterns_for_suffix
 from lup.codescan.common import AntiPattern
-from lup.codescan.grammar import GRAMMAR_RULES
 from lup.policy.contracts import DecisionPolicy
 from lup.policy.grants import LeaseGrants
 from lup.policy.kernel.decision import KernelDecision
@@ -44,6 +43,7 @@ from lup.policy.kernel.rows import (
 )
 from lup.policy.kernel.shell import decide_shell, decide_shell_segment, shell_context
 from lup.policy.kernel.words import command_words as kernel_command_words
+from lup.policy.edit_rules import EditRule, erase_edit_rules
 from lup.policy.shell_rules import (
     RunnerTargetRule,
     ShellCommandRule,
@@ -64,7 +64,10 @@ from lup.policy.models import (
 def pydantic_decision(decision: KernelDecision) -> Decision:
     """Restore the validated public decision at the kernel boundary."""
     return Decision(
-        effect=decision.effect, reason=decision.reason, sandbox=decision.sandbox
+        effect=decision.effect,
+        reason=decision.reason,
+        sandbox=decision.sandbox,
+        escalated=decision.escalated,
     )
 
 
@@ -81,7 +84,6 @@ class UrlScope(BaseModel, frozen=True):
 # The three erasures to the kernel's primitive rows read alike on purpose, and
 # `antipattern_row` erases a model another module declares, so it could not be
 # a method even if these two were.
-# lup: ignore[model-free-function] — one of that erasure family
 def url_scope_row(scope: UrlScope) -> UrlScopeRow:
     """Erase a validated URL scope into the kernel's primitive row."""
     parsed = urlsplit(str(scope.origin))
@@ -241,7 +243,6 @@ class PathRule(BaseModel, frozen=True):
         )
 
 
-# lup: ignore[model-free-function] — the same erasure family as url_scope_row
 def path_rule_row(rule: PathRule) -> PathRuleRow:
     """Erase one validated path rule into the kernel's primitive row."""
     return PathRuleRow(
@@ -276,15 +277,12 @@ def antipattern_row(rule: AntiPattern) -> AntiPatternRow:
         pattern=rule.pattern.pattern,
         message=rule.message,
         context=rule.context,
-        refiner="" if rule.refiner is None else rule.refiner.exempt.__name__,
+        matcher="" if rule.matcher is None else rule.matcher.select.__name__,
         strength=rule.strength,
-        # Derived from the grammar rather than declared beside it: a gate has
-        # to know which of its verdicts turn on a resolution it may not have,
-        # and a second list saying so is one that can disagree with the rules
-        # it describes — which is the disagreement it would exist to prevent.
-        resolution="required"
-        if any(refined.id == rule.id for refined in GRAMMAR_RULES)
-        else "",
+        # Read off the rule's own family: a gate has to know which of its
+        # verdicts turn on a resolution it may not have, and the rule that
+        # names what it resolves against is the only thing that can say.
+        resolution="required" if rule.family is not None else "",
     )
 
 
@@ -314,6 +312,7 @@ class EditPolicy(DecisionPolicy[EditBatch]):
         path_roles: list[PathRoleRow] | None = None,
         grants: LeaseGrants | None = None,
         acceptance_guard: AcceptanceGuardRow | None = None,
+        edit_rules: list[EditRule] | None = None,
     ) -> None:
         self.acceptance_guard = acceptance_guard
         self.path_roles = path_roles or []
@@ -321,6 +320,10 @@ class EditPolicy(DecisionPolicy[EditBatch]):
         self.protected = list(protected)
         self.maximum_added_lines = maximum_added_lines
         self.autonomous = autonomous
+        # Erased once here rather than per change: the table is a declaration
+        # that does not move while this policy answers, and the generated
+        # dispatchers read rows that were erased the same way at generation.
+        self.edit_rules = erase_edit_rules(edit_rules or [])
 
     def decide(self, event: EditBatch) -> Decision:
         decisions = [self.decide_change(change) for change in event.changes]
@@ -351,5 +354,8 @@ class EditPolicy(DecisionPolicy[EditBatch]):
                 allowances=self.grants.granted(),
                 python_source=suffix in (".py", ".pyi"),
                 acceptance_guard=self.acceptance_guard,
+                suffix=suffix,
+                operation=change.operation,
+                edit_rules=self.edit_rules,
             )
         )

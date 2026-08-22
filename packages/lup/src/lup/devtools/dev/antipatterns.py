@@ -15,7 +15,7 @@ fact:
   typed `# lup: ignore[id]` directives is gradual.
 
 The set is shared with the hook; the verdicts need not be. This sweep reads
-whole parseable files, so it hands `lup.codescan.grammar` a type oracle and
+whole parseable files, so it hands `lup.codescan.resolution` a type oracle and
 decides some rules more narrowly than a hook judging an untyped edit fragment
 ever could. Every finding that narrowing drops is reported as a **refuted**
 row carrying the declaration that settled it, and the directive that used to
@@ -23,7 +23,11 @@ guard it turns up as spurious on the next line of the report.
 """
 
 from collections import Counter, defaultdict
+import cProfile
+import pstats
 from collections.abc import Iterator, Sequence, Set as AbstractSet
+from concurrent.futures import ThreadPoolExecutor
+from functools import partial
 from pathlib import Path
 
 import typer
@@ -36,9 +40,8 @@ from lup.codescan.antipatterns import (
     audit_text,
     patterns_for_suffix,
 )
-from lup.codescan.behaviour import audit_model_free_functions
 from lup.codescan.boundaries import audit_constant_declarations, audit_path_boundaries
-from lup.codescan.capabilities import audit_capabilities
+from lup.codescan.capabilities import audit_abstract_declarations, audit_capabilities
 from lup.codescan.common import (
     PACKAGE_ROOTS,
     AntiPattern,
@@ -49,8 +52,11 @@ from lup.codescan.common import (
     module_name,
 )
 from lup.codescan.dispatch import audit_own_model_dispatch
-from lup.codescan.grammar import refute
+from lup.codescan.resolution import refute
+from lup.devtools.dev.refutations import remembered_refutations
+from lup.workspace.paths import project_root, refutation_cache_path
 from lup.codescan.narrowing import audit_isinstance_chains
+from lup.codescan.project import retired_suppressions
 from lup.codescan.registry import RULE_REFERENCE
 from lup.policy.kernel.edit import (
     IGNORE_RE,
@@ -103,6 +109,39 @@ class AntiPatternScan(BaseModel):
     refuted: list[FoundRefutation]
 
 
+def within_scope(rel: str, paths: Sequence[str] | None) -> bool:
+    """Whether one repository-relative path is inside a sweep's scope.
+
+    ``None`` is the whole repository. An empty scope is a scope rather than an
+    absent one, so a tree that changed nothing is read for nothing rather than
+    read entirely. A named path covers itself and everything beneath it, so a
+    caller scopes by file or by directory without having to say which it meant.
+
+    This is what keeps a lease answerable for its own concern. A lease holds
+    one concern's changes and `dev check` judges it; reading the whole
+    repository made that verdict depend on state no worker in the run
+    controls, so one finding nobody introduced blocked every lease at once
+    with no revision able to converge on it.
+    """
+    return paths is None or any(
+        rel == path or rel.startswith(f"{path}/") for path in paths
+    )
+
+
+def declared_rules(project: DevProject) -> AntiPatternSet:
+    """The rule set this project actually holds itself to, in one place.
+
+    The tables this library ships plus whatever the project added, less
+    whatever it turned off. Both the walk that decides which rules a file is
+    read against and the resolution that decides which of them a checker is
+    asked about read this, because a rule the project switched off is one no
+    language server should be spending a session on.
+    """
+    return AntiPatternSet(
+        python=[*PYTHON_ANTI_PATTERNS, *project.anti_patterns]
+    ).selected(project.rules)
+
+
 def scanned_files(
     project: DevProject, paths: Sequence[str] | None = None
 ) -> list[ScannedFile]:
@@ -115,9 +154,7 @@ def scanned_files(
     never enforces in a test or scratch tree is not read there either.
     """
     roles = project.path_roles
-    declared = AntiPatternSet(
-        python=[*PYTHON_ANTI_PATTERNS, *project.anti_patterns]
-    ).selected(project.rules)
+    declared = declared_rules(project)
 
     def found() -> Iterator[ScannedFile]:
         for rel in git.lines("ls-files", "--cached", "--others", "--exclude-standard"):
@@ -125,9 +162,7 @@ def scanned_files(
             patterns = patterns_for_suffix(path.suffix.lower(), declared)
             if patterns is None or path_role(rel, roles) != "production":
                 continue
-            if paths is not None and not any(
-                rel == p or rel.startswith(f"{p}/") for p in paths
-            ):
+            if not within_scope(rel, paths):
                 continue
             try:
                 text = path.read_text(encoding="utf-8")
@@ -174,7 +209,47 @@ def scan_antipatterns(
         for item in scanned
         if item.path.suffix.lower() in {".py", ".pyi"}
     ]
-    refuted = refute(sources, default_oracle())
+    # A whole-repository sweep remembers what the checker said, because it
+    # holds every module a refutation could resolve through and can therefore
+    # key an answer by all of them. A scoped sweep holds only the files it was
+    # asked about, so that key would be blind to a module it resolves through
+    # and could not notice one changing — and a scoped run is the cheap one
+    # anyway, since asking only about what changed is what remembering is for.
+    resolved_rules = declared_rules(project).python
+    resolving_refutations = (
+        partial(
+            remembered_refutations,
+            sources,
+            default_oracle(),
+            resolved_rules,
+            refutation_cache_path(),
+            project_root(),
+        )
+        if paths is None
+        else partial(refute, sources, default_oracle(), resolved_rules)
+    )
+    # The resolve spends most of its time waiting on a language server, and
+    # every audit below waits on nothing, so the sweep reads while it waits
+    # rather than after it. Only the text audit reads a refutation; the rest
+    # are assembled in their own order once both halves are in.
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        resolving = pool.submit(resolving_refutations)
+        declared = [
+            *audit_capabilities(sources),
+            *audit_abstract_declarations(sources),
+            *audit_own_model_dispatch(sources),
+            *audit_isinstance_chains(sources),
+            *audit_constant_declarations(sources, project.roots),
+        ]
+        boundary_findings = [
+            (source.path, finding)
+            for source in sources
+            for finding in audit_path_boundaries(
+                source.path, source.text, project.roots
+            )
+        ]
+        refuted = resolving.result()
+
     results = [
         FoundAntiPattern(file=item.rel, **finding.model_dump())
         for item in scanned
@@ -193,19 +268,8 @@ def scan_antipatterns(
             message=finding.message,
             rule_id=finding.rule_id,
         )
-        for finding in [
-            *audit_capabilities(sources),
-            *audit_model_free_functions(sources),
-            *audit_own_model_dispatch(sources),
-            *audit_isinstance_chains(sources),
-            *audit_constant_declarations(sources, project.roots),
-        ]
+        for finding in declared
     )
-    boundary_findings = [
-        (source.path, finding)
-        for source in sources
-        for finding in audit_path_boundaries(source.path, source.text, project.roots)
-    ]
     foreign_untyped = {
         (path.as_posix(), finding.line)
         for path, finding in boundary_findings
@@ -317,6 +381,42 @@ def place_directives(
     return list(moved())
 
 
+class RetiredDirectiveFile(BaseModel, frozen=True):
+    """One file a rule's retirement changed, and where it changed it."""
+
+    rel: str
+    removed: list[int] = []
+
+
+def retire_directives(project: DevProject, rule_id: str) -> list[RetiredDirectiveFile]:
+    """Stop every tracked file from naming a rule this project has retired.
+
+    A rule that stops running leaves its directives covering nothing, and the
+    audit reports each one as spurious — so retiring a rule and sweeping its
+    directives are one operation rather than two, and doing the second by
+    hand across a tree is how a reason gets deleted along with the id that
+    justified it. Each file reports the lines it lost, so the sweep can be
+    read rather than trusted.
+    """
+
+    def swept() -> Iterator[RetiredDirectiveFile]:
+        for item in scanned_files(project):
+            if item.path.suffix.lower() not in {".py", ".pyi"}:
+                continue
+            source = PythonSource(
+                path=item.path,
+                module=module_name(item.path, scanned_roots(project)),
+                text=item.text,
+            )
+            revised = retired_suppressions(source, rule_id)
+            if revised.text == item.text:
+                continue
+            item.path.write_text(revised.text, encoding="utf-8")
+            yield RetiredDirectiveFile(rel=item.rel, removed=revised.removed)
+
+    return list(swept())
+
+
 def report_directives(
     project: DevProject, as_json: bool, limit: int = SUPPRESSION_COLUMN_LIMIT
 ) -> None:
@@ -364,6 +464,30 @@ def report_directives(
     )
     for site in sorted(overflow, key=lambda site: site.inline_width, reverse=True):
         typer.echo(f"{site.file}:{site.line} [{site.inline_width}] {site.text}")
+
+
+PROFILE_ROWS = 40
+"""Rows a profile prints, as a default a caller may raise."""
+
+
+def profile(
+    project: DevProject,
+    paths: Sequence[str] | None = None,
+    rows: int = PROFILE_ROWS,
+) -> None:
+    """Run one sweep under a profiler and report where its time went.
+
+    The sweep reads every production file several times over — a parse per
+    audit, then a walk per rule, then a language server resolving what the
+    walk selected — and which of those dominates decides whether the answer
+    is to parse once, to read fewer files, or to remember the last answer.
+    A stopwatch around the whole command cannot tell them apart; this can.
+    """
+    profiler = cProfile.Profile()
+    profiler.enable()
+    scan_antipatterns(project, paths)
+    profiler.disable()
+    pstats.Stats(profiler).sort_stats("cumulative").print_stats(rows)
 
 
 ADVISORY_KINDS = {"untyped"}
@@ -475,7 +599,7 @@ def report(
 
 
 def report_refutations(project: DevProject, path: Path, text: str) -> None:
-    """Emit what the typed grammar refutes in one file's proposed content.
+    """Emit what resolution refutes in one file's proposed content.
 
     The edit gate's answer for a rule whose verdict turns on a declaration.
     It holds the text before anything is written, so what is on disk is not
@@ -495,7 +619,7 @@ def report_refutations(project: DevProject, path: Path, text: str) -> None:
     source = PythonSource(
         path=path, module=module_name(path, scanned_roots(project)), text=text
     )
-    found = refute([source], oracle)
+    found = refute([source], oracle, declared_rules(project).python)
     rows = found[path.as_posix()] if path.as_posix() in found else []
     output_json(
         {

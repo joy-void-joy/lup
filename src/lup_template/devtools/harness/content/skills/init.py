@@ -28,6 +28,17 @@ SPELLING = provenance.Provenance(
 # write, and no phase surfaces the choice. Ask it here alongside the other
 # ownership decisions, and make unlocking a `lup-devtools` command that edits
 # the declaration and regenerates — not a hand edit of the catalog.
+# lup: defer[branch:content-overhaul]: that branch answers the ownership seam a
+# second way, with `dev init ownership --lock/--unlock`, and rewrote these same
+# two claims into `solved:` by way of it. So merging conflicts exactly here,
+# which is the right place for the collision to surface — but the standing
+# merge guidance biases toward inclusion, and inclusion is the wrong answer to
+# a duplicate. `dev seams` is the one to keep: it settles all four seams rather
+# than ownership alone, it sits in the library where every adopter reaches it
+# rather than in this application, and it wires install as well as init. Drop
+# `dev init ownership` from src/lup_template/devtools/dev/init.py and its
+# command in that package's app.py when the branch merges, leaving one
+# `solved:` pair here rather than two.
 SKILL = models.Skill(
     id="skill.init",
     name="init",
@@ -174,6 +185,21 @@ Before customizing, decide which optional patterns this domain actually needs. T
                 text=r""" — deleting is the expected answer for most of them, so say which you would
 delete and why. Then **delete the files and their wiring** for everything not
 kept before proceeding. The customization steps below apply only to what you kept.
+
+## Phase 1.6: Settle the Seams
+
+A seam is a place the library holds an opinion this domain is meant to overrule, and every one of them ships at a default. **A default nobody was shown is not a decision** — so put each of them to the user rather than letting the scaffold's answer become theirs by silence.
+
+Run `uv run lup-devtools dev seams`. It prints each seam, what it currently holds, and where it is written. Take them one at a time:
+
+- **Who owns which files.** A human-owned file surfaces every change as an approval and the agent does not write it — it proposes the edit instead. `README.md` ships owned, which is right for a scaffold whose README describes the scaffold and often wrong for a domain whose README is the one file it most wants written for it. Ask; `dev seams --disown README.md` or `--own <path>` writes the answer.
+- **Which trees an edit needs approval into.** What ships answers for a framework that generates its own plugin trees and carries its own policy. A domain whose sensitive files are a data directory, a migration set or a deployment manifest says so instead.
+- **What each tree is for.** A role is how every gate tells a fixture from production and a build product from work, so a data directory, a notebook tree or a generated client belongs here — once, where all of them read it.
+- **Which scan rules this domain holds itself to.** A convention is a judgement, and a repository that settled one differently is not defective there. Offer three answers and mean all three: keep them, drop a named few (`dev seams --retire <rule-id>`), or **drop the family outright** (`dev seams --retire-all`). Dropping the family is a legitimate answer given once here, rather than thirty retirements discovered one denial at a time.
+
+Every one of these is also a `# lup: template:` marker in the catalog, so `dev todos` lists any left standing and Phase 4 meets them again. Answering here is what keeps that list from being the first time anyone sees the choice.
+
+Each answer edits the declaration; **regenerate afterwards** with `uv run lup-devtools harness generate all`, because the compiled plugin trees are what the gates actually read.
 
 ## Phase 2: Rename Package
 

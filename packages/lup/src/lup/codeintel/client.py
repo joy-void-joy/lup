@@ -16,10 +16,12 @@ truth to an agent want opposite things from a server that will not start.
 
 import asyncio
 import json
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import asynccontextmanager
 from email.parser import BytesParser
 from pathlib import Path
+
+from pydantic import BaseModel
 
 from lup.types import JsonObject, JsonValue
 
@@ -28,6 +30,24 @@ def utf16_column(line: str, column: int) -> int:
     """Convert a UTF-8 byte offset into the UTF-16 offset LSP positions use."""
     prefix = line.encode("utf-8")[:column].decode("utf-8", errors="ignore")
     return len(prefix.encode("utf-16-le")) // 2
+
+
+class Call(BaseModel, frozen=True):
+    """One question in a batch: a method to ask, and the params to ask it with."""
+
+    method: str
+    params: JsonObject
+
+
+class Answer(BaseModel, frozen=True):
+    """One reply, carrying the position of the call it answers.
+
+    The position travels with the result because a batch is answered in
+    whatever order the server finishes, and the caller asked in its own.
+    """
+
+    offset: int
+    result: JsonValue
 
 
 class LspSession:
@@ -67,21 +87,55 @@ class LspSession:
         message: JsonObject = json.loads(await self.stdout.readexactly(int(declared)))
         return message
 
-    async def request(self, method: str, params: JsonObject) -> JsonValue:
-        """Ask one question and return its answer, skipping unrelated traffic.
+    async def requests(self, calls: list[Call]) -> list[JsonValue]:
+        """Ask many questions at once, and answer them in the order asked.
 
-        A server interleaves diagnostics and progress with the replies it
-        owes, so the reply is matched by id rather than by arrival order.
+        Every frame goes out before the first reply is read, so the questions
+        queue inside the server rather than in the round trip. Asked one at a
+        time, a repository sweep pays a full round trip per site and leaves
+        the server idle across each one; the protocol carries the pairing, so
+        which answer arrives first is the server's business rather than the
+        caller's.
+
+        A server interleaves diagnostics, progress, and requests of its own
+        with the replies it owes. A response carries an id and no method,
+        which is what separates the answer to our third question from the
+        server asking its own third — with a batch in flight, both ids exist.
         """
-        self.asked += 1
-        asked = self.asked
-        await self.frame(
-            {"jsonrpc": "2.0", "method": method, "params": params, "id": asked}
-        )
-        while True:
-            message = await self.receive()
-            if "id" in message and message["id"] == asked:
-                return message["result"] if "result" in message else None
+        first = self.asked + 1
+        self.asked += len(calls)
+        pending = {first + offset: offset for offset in range(len(calls))}
+        for identifier, offset in pending.items():
+            await self.frame(
+                {
+                    "jsonrpc": "2.0",
+                    "method": calls[offset].method,
+                    "params": calls[offset].params,
+                    "id": identifier,
+                }
+            )
+
+        async def answered() -> AsyncIterator[Answer]:
+            outstanding = dict(pending)
+            while outstanding:
+                message = await self.receive()
+                if "method" in message or "id" not in message:
+                    continue
+                identifier = message["id"]
+                if not isinstance(identifier, int) or identifier not in outstanding:
+                    continue
+                yield Answer(
+                    offset=outstanding.pop(identifier),
+                    result=message["result"] if "result" in message else None,
+                )
+
+        replies = {answer.offset: answer.result async for answer in answered()}
+        return [replies[offset] for offset in range(len(calls))]
+
+    async def request(self, method: str, params: JsonObject) -> JsonValue:
+        """Ask one question and return its answer, skipping unrelated traffic."""
+        answers = await self.requests([Call(method=method, params=params)])
+        return answers[0]
 
     async def open(self, path: Path, text: str | None = None) -> list[str]:
         """Open a document once per session and return its lines.

@@ -119,9 +119,6 @@ SHAPING_RULES: list[ShapingRule] = [
         steers_to="a capability ABC is an engine, never a surface a consumer holds",
     ),
     ShapingRule(
-        id="model-free-function", steers_to="a model carries its own operations"
-    ),
-    ShapingRule(
         id="constant-declaration",
         steers_to="a judgement reaches its caller as an overridable default",
     ),

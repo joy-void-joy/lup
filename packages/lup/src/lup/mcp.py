@@ -78,7 +78,7 @@ def response_text(response: ToolResponse) -> str:
     result's text means two narrowings no caller should repeat — and one that
     skips them reads an image block's absent ``text``.
     """
-    content = response.get("content", [])  # lup: ignore[dict-get] — optional key
+    content = response.get("content", [])
     return "\n".join(block["text"] for block in content if block["type"] == "text")
 
 
@@ -252,7 +252,6 @@ def server_tool_names(server: McpServerEntry) -> list[str]:
             return []
 
 
-# lup: ignore[model-free-function] — a process entrypoint owning signals and transport
 def serve_stdio(config: LupMcpServerConfig) -> None:
     """Serve an in-process MCP server over stdio (blocking).
 

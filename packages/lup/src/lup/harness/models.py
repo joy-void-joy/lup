@@ -8,7 +8,7 @@ beside its managing module instead (see the package docstring).
 """
 
 import re  # lup: ignore[import-re] — prose has no parser; its shape is the rule
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Annotated, Literal
 
@@ -30,7 +30,10 @@ from lup.mcp import ToolDeclaration
 from lup.policy.kernel.rows import AcceptanceGuardRow, PathRoleName
 from lup.policy.models import PolicyId, UrlPathPrefix
 from lup.policy.refused_tools import RefusedTool
+from lup.policy.edit_rules import EditRule
 from lup.policy.shell_rules import RunnerTargetRule, ShellCommandRule
+from lup.policy.vocabulary import default_vocabulary
+from lup.selection import Selection
 from lup.types import JsonValue, ToolGrant, ToolName
 
 if TYPE_CHECKING:
@@ -86,7 +89,7 @@ invariant is answered where an author writes the words rather than by a scan
 over the harness they eventually compose into."""
 
 
-class SemanticPart(BaseModel, frozen=True):
+class SemanticPart(BaseModel, ABC, frozen=True):
     """One element of a prompt document, answering every question about itself.
 
     Whatever the rest of the harness needs to know about a part is declared
@@ -297,7 +300,7 @@ type PathMember = Annotated[
 """One leaf inside a location: a name, a ``<placeholder>``, or ``*``."""
 
 
-class LocatedPart(SemanticPart, frozen=True):
+class LocatedPart(SemanticPart, ABC, frozen=True):
     """One path a prompt names, spelled by whichever adapter renders it.
 
     Scope is the same question for every location — whether the reader's own
@@ -726,7 +729,7 @@ class ContentRoster(BaseModel, frozen=True):
         )
 
 
-class McpWord(BaseModel, frozen=True):
+class McpWord(BaseModel, ABC, frozen=True):
     """One word of the command line that starts an MCP server.
 
     A server the harness offers has to be reachable from wherever the runtime
@@ -947,11 +950,25 @@ class HookSet(BaseModel, frozen=True):
             "fixed acceptance tests, and wrong for one that runs the resolver"
         ),
     )
-    shell_rules: list[ShellCommandRule] = Field(
-        default=[],
+    shell_rules: Selection[ShellCommandRule] = Field(
+        default=Selection[ShellCommandRule](),
         description=(
-            "The whole shell vocabulary this project judges safe, asked, or "
-            "denied; declare a downstream toolchain here, not in the kernel"
+            "How this project differs from the shell vocabulary the library "
+            "ships — a downstream toolchain to add, a command it judges "
+            "differently, one it drops. An empty selection is "
+            "`default_vocabulary()` unchanged, so a project declares `lake` "
+            "without restating `ls`, `grep` and `git` around it"
+        ),
+    )
+    edit_rules: Selection[EditRule] = Field(
+        default=Selection[EditRule](),
+        description=(
+            "How this project moves the edit gates the kernel decides on its "
+            "own — which whole-file writes it reviews at the hook, how much "
+            "counts as a small change, and for which files. An empty "
+            "selection decides exactly what the kernel decides unaided, so a "
+            "project states only its differences and every gate it says "
+            "nothing about keeps the library's answer"
         ),
     )
     diagnostics_command: list[str] = Field(
@@ -1068,6 +1085,26 @@ class HookSet(BaseModel, frozen=True):
         first asking whether a sandbox exists to have an opinion.
         """
         return list(self.sandbox.excluded_commands) if self.sandbox else []
+
+    def resolved_shell_rules(self) -> list[ShellCommandRule]:
+        """The shell vocabulary this project actually judges by.
+
+        Asked here rather than resolved at each caller, because the canonical
+        policy and both generated dispatchers have to walk the same table. A
+        second place that knew which defaults a selection layers over is the
+        shape of a policy that decides one way in a session and another way in
+        the plugin that session's own declaration generated.
+        """
+        return self.shell_rules.over(default_vocabulary())
+
+    def resolved_edit_rules(self) -> list[EditRule]:
+        """The edit table this project layers over the kernel's own verdicts.
+
+        Resolved over an empty library table on purpose: the defaults for this
+        family live in the gates themselves, where a selection cannot retire
+        one out from under the project that never asked to.
+        """
+        return self.edit_rules.over([])
 
 
 class ResolveSpec(BaseModel, frozen=True):

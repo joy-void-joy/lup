@@ -121,7 +121,6 @@ def fmt_countdown(dt: datetime) -> str:
 
 # `beyond` is what the lookup answers with past the last threshold, so the
 # PaceLabel here is a result the caller supplies rather than a value acted on.
-# lup: ignore[model-free-function] — the ratio is the subject, PaceLabel the answer
 def pace_label(
     ratio: float,
     thresholds: list[PaceThreshold] = PACE_LABEL_THRESHOLDS,

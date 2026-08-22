@@ -53,9 +53,17 @@ class ActorRef(BaseModel, frozen=True):
         operator addressing the label listed a round ago is not addressing a
         different agent, and nothing they could read would tell them the
         label had moved on.
+
+        This answers "is this me?" and nothing else. The empty string used to
+        be here, as the way to reach everyone, which made every actor's list
+        match a message whose target was merely left blank — so a worker
+        telling *the humans* something told its siblings, who consumed it,
+        while no surface a person reads ever showed it. Reaching everyone is
+        still one message
+        (:data:`~lup.actors.mail.EVERYONE`), addressed on purpose; what it is
+        no longer is the value a caller arrives at by filling nothing in.
         """
         return [
-            "",
             self.id,
             f"{self.kind}:{self.id}",
             *(f"{self.kind}:{self.id}#{taken}" for taken in range(1, self.round + 1)),

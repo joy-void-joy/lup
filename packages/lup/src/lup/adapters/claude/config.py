@@ -65,7 +65,6 @@ class ClaudeProfileResolver(ProfileResolver[ClaudeSessionConfig]):
 
 # The registry declares which account is selected; naming the resolver and the
 # session factory that act on it would put both inside the declaration.
-# lup: ignore[model-free-function] — composition root over the registry
 def claude_profile_selector(
     registry: ClaudeProfileRegistry,
 ) -> ProfileSelector[ClaudeSessionConfig]:

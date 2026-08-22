@@ -52,12 +52,19 @@ CLAUDE_HOME_LAYOUT = SessionHomeLayout(private_files=[CLAUDE_CONFIG_FILE])
 
 
 class ClaudeConfigUnreadable(RuntimeError):
-    """A configuration document exists but does not parse as one.
+    """A configuration document exists but cannot be read as one.
 
     Raised rather than treated as absent: an unreadable document holds every
     project the profile has been trusted in, so continuing from an empty one
     would start each session with the repository's declared permissions
     silently dropped — the exact degradation a caller reads this to avoid.
+
+    Unparseable and unopenable are the same fact to a caller, and the reason
+    above does not distinguish them: a document behind a permission the
+    session lacks holds those projects exactly as a malformed one does. Only
+    the first was caught, so the second escaped as a bare `PermissionError`
+    past every caller written to answer this — the fault report that exists
+    to say a run cannot open a session anywhere crashed instead of saying it.
     """
 
 
@@ -109,7 +116,13 @@ def load_document(path: Path) -> JsonObject:
     if not path.exists():
         return {}
     try:
-        decoded = json.loads(path.read_text(encoding="utf-8"))
+        text = path.read_text(encoding="utf-8")
+    except OSError as error:
+        raise ClaudeConfigUnreadable(
+            f"Claude configuration at {path} cannot be read: {error}"
+        ) from error
+    try:
+        decoded = json.loads(text)
     except json.JSONDecodeError as error:
         raise ClaudeConfigUnreadable(
             f"Claude configuration at {path} does not parse: {error}"

@@ -24,6 +24,7 @@ import lup.policy.kernel as kernel
 from lup.policy.kernel.rows import (
     AcceptanceGuardRow,
     AntiPatternRow,
+    EditRuleRow,
     PathRoleRow,
     PathRuleRow,
     RefusedToolRow,
@@ -31,6 +32,7 @@ from lup.policy.kernel.rows import (
     ShellRuleRow,
     UrlScopeRow,
 )
+from lup.policy.edit_rules import EditRule, erase_edit_rules
 from lup.policy.refused_tools import RefusedTool, erase_refused_tools
 from lup.policy.shell_rules import (
     RunnerTargetRule,
@@ -312,6 +314,44 @@ def shell_rule_rows_literal(rows: list[ShellRuleRow]) -> str:
     return "\n".join(lines)
 
 
+def edit_rule_rows_literal(rows: list[EditRuleRow]) -> str:
+    """Render erased edit rules as Ruff-stable dict literals, in declared order.
+
+    Order is the semantics for this table — the last matching rule decides —
+    so the rows are rendered exactly as they arrive and never sorted into a
+    shape that reads more tidily.
+    """
+    if not rows:
+        return "[]"
+    lines = ["["]
+    for row in rows:
+        lines.append("    {")
+        lines.append(f'        "name": {json.dumps(row["name"])},')
+        for name, values in (
+            ("gates", row["gates"]),
+            ("suffixes", row["suffixes"]),
+            ("roles", row["roles"]),
+            ("operations", row["operations"]),
+        ):
+            if values:
+                lines.append(f'        "{name}": [')
+                lines.extend(f"            {json.dumps(value)}," for value in values)
+                lines.append("        ],")
+            else:
+                lines.append(f'        "{name}": [],')
+        lines.append(f'        "effect": {json.dumps(row["effect"])},')
+        maximum = row["maximum_added_lines"]
+        lines.append(
+            '        "maximum_added_lines": '
+            + ("None" if maximum is None else json.dumps(maximum))
+            + ","
+        )
+        lines.append(f'        "reason": {json.dumps(row["reason"])},')
+        lines.append("    },")
+    lines.append("]")
+    return "\n".join(lines)
+
+
 POLICY_DATA_BANNER = GeneratedBanner(source=__name__, command=REGENERATE_COMMAND)
 """Provenance every adapter's rendered policy-data module opens with."""
 
@@ -326,6 +366,7 @@ def render_policy_data(
     path_roles: list[PathRoleRow],
     acceptance_guard: AcceptanceGuardRow | None,
     shell_rules: list[ShellCommandRule],
+    edit_rules: list[EditRule],
     refused_tools: list[RefusedTool],
     recoverable_target_limit: int,
     runner_targets: list[RunnerTargetRule],
@@ -358,6 +399,8 @@ def render_policy_data(
             + acceptance_guard_literal(acceptance_guard),
             "SHELL_RULES: list[ShellRuleRow] = "
             + shell_rule_rows_literal(erase_shell_rules(shell_rules)),
+            "EDIT_RULES: list[EditRuleRow] = "
+            + edit_rule_rows_literal(erase_edit_rules(edit_rules)),
             "REFUSED_TOOLS: list[RefusedToolRow] = "
             + refused_tool_rows_literal(erase_refused_tools(refused_tools)),
             "AUTONOMOUS_AGENT_IDENTITIES: list[str] = "
@@ -386,6 +429,7 @@ def render_policy_data(
         "from kernel.rows import (\n"
         "    AcceptanceGuardRow,\n"
         "    AntiPatternRow,\n"
+        "    EditRuleRow,\n"
         "    PathRoleRow,\n"
         "    PathRuleRow,\n"
         "    RefusedToolRow,\n"

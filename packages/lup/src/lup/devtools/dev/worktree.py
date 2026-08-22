@@ -1,7 +1,7 @@
 """Worktree create, list, and remove operations."""
 
 import shutil
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 from collections.abc import Callable, Iterator, Sequence
 from pathlib import Path
 
@@ -113,7 +113,7 @@ def register_merge_driver() -> None:
     git("config", f"merge.{OWNERSHIP_MERGE_DRIVER}.driver", "true")
 
 
-class SetupStep(BaseModel, frozen=True):
+class SetupStep(BaseModel, ABC, frozen=True):
     """One part of making a worktree usable, checkable on its own.
 
     A worktree is registered by one git call and made usable by several more,

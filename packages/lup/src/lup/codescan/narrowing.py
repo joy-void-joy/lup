@@ -41,6 +41,7 @@ from collections import Counter
 from collections.abc import Iterator
 
 from lup.codescan.common import PythonSource
+from lup.policy.kernel.edit import python_nodes, python_tree
 from lup.codescan.project import (
     RuleFinding,
     RuleViolation,
@@ -92,22 +93,21 @@ def chain_arms(head: ast.If) -> Iterator[ast.If]:
 
 def source_violations(source: PythonSource) -> Iterator[RuleViolation]:
     """Every chain in one module that narrows a subject in more than one arm."""
-    try:
-        tree = ast.parse(source.text)
-    except SyntaxError:
+    tree = python_tree(source.text)
+    if tree is None:
         return
 
     # An `elif` is an `ast.If` in its own right, so walking every node would
     # report one chain once per arm. Only chain heads are reported.
     continuations = {
         id(arm)
-        for node in ast.walk(tree)
+        for node in python_nodes(tree)
         if isinstance(node, ast.If)
         for arm in chain_arms(node)
         if arm is not node
     }
 
-    for node in ast.walk(tree):
+    for node in python_nodes(tree):
         if not isinstance(node, ast.If) or id(node) in continuations:
             continue
         arms = list(chain_arms(node))

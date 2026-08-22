@@ -17,6 +17,7 @@ bare, or guarding nothing at all.
 """
 
 import ast
+from functools import cache
 from pathlib import Path
 from typing import Literal
 
@@ -31,6 +32,7 @@ from lup.codescan.common import (
 )
 from lup.policy.kernel.edit import (
     IGNORE_RE,
+    python_tree,
     suppression_placement,
     suppression_reaches,
 )
@@ -185,9 +187,8 @@ def build_symbol_index(sources: list[PythonSource]) -> dict[str, ClassSymbol]:
     """Build import-resolved class symbols for all parseable supplied modules."""
     symbols: dict[str, ClassSymbol] = {}
     for source in sources:
-        try:
-            tree = ast.parse(source.text)
-        except SyntaxError:
+        tree = python_tree(source.text)
+        if tree is None:
             continue
         aliases = imported_names(tree, source.module)
         for node in tree.body:
@@ -264,8 +265,105 @@ def descendants_of(symbols: dict[str, ClassSymbol], ancestors: set[str]) -> set[
         reached = expanded
 
 
+class RetiredDirectives(BaseModel, frozen=True):
+    """One file rewritten to stop naming a rule, and the lines that went."""
+
+    text: str
+    """The file's revised content, identical where the rule was never named."""
+
+    removed: list[int] = []
+    """Line numbers taken out, so a sweep can print what it deleted."""
+
+
+def retired_suppressions(source: PythonSource, rule_id: str) -> RetiredDirectives:
+    """Take a retired rule out of every directive one file writes.
+
+    Retiring a rule strands every directive naming it: the violation it
+    covered stops existing, so the directive covers nothing and is reported
+    as spurious. Doing that by hand across a tree is where a reason gets
+    deleted along with the id that justified it, which is why the lines that
+    go are reported rather than only the text — a caller prints them, and
+    nothing is dropped silently.
+
+    A directive naming other rules keeps them and loses only this id. One
+    naming this rule alone goes entirely, and the comment lines carrying the
+    rest of its reason go with it: a standalone directive heads its own
+    block, which is the relationship :func:`suppression_reaches` reads from
+    the other side, so prose left behind would be a sentence explaining a
+    rule nothing runs any more. Prose written *above* a directive is not its
+    reason and stays.
+
+    A rewrite that would stop the file parsing is returned untouched — the
+    same refusal the placement rewriter makes.
+    """
+    context = PythonContext.parse(source.text)
+    lines = source.text.splitlines()
+
+    def carries_directive(number: int) -> bool:
+        """Whether a line opens a real comment holding a directive."""
+        if number < 1 or number > len(lines):
+            return False
+        found = IGNORE_RE.search(lines[number - 1])
+        return found is not None and context.comment_at(number, found.start())
+
+    def reason_below(number: int) -> int:
+        """Comment lines under a standalone directive that finish its reason."""
+        extra = 0
+        while number + extra < len(lines):
+            if not lines[number + extra].lstrip().startswith(("#", "//")):
+                break
+            if carries_directive(number + extra + 1):
+                break
+            extra += 1
+        return extra
+
+    removed: list[int] = []
+
+    def kept():
+        resume = 0
+        for number, line in enumerate(lines, start=1):
+            if number < resume:
+                continue
+            match = IGNORE_RE.search(line)
+            if match is None or not carries_directive(number):
+                yield line
+                continue
+            spelled = match.group("ids") or ""
+            named = [item.strip() for item in spelled.split(",") if item.strip()]
+            if rule_id not in named:
+                yield line
+                continue
+            remaining = [item for item in named if item != rule_id]
+            if remaining:
+                kept_ids = ", ".join(remaining)
+                head, tail = line[: match.start()], line[match.end() :]
+                yield f"{head}# lup: ignore[{kept_ids}]{tail}"
+                continue
+            if line[: match.start()].strip():
+                removed.append(number)
+                yield line[: match.start()].rstrip()
+                continue
+            span = 1 + reason_below(number)
+            removed.extend(range(number, number + span))
+            resume = number + span
+
+    revised = "\n".join(kept()) + ("\n" if source.text.endswith("\n") else "")
+    try:
+        ast.parse(revised)
+    except SyntaxError:
+        return RetiredDirectives(text=source.text)
+    return RetiredDirectives(text=revised, removed=removed)
+
+
+@cache
 def directives_for(source: PythonSource) -> list[Directive]:
-    """Collect actual inline and file-level suppression comments."""
+    """Collect actual inline and file-level suppression comments.
+
+    Remembered per source because :func:`audit_suppressions` gathers every
+    file's directives once for each rule it grades, and which comments a file
+    carries is a property of the file rather than of the rule asking. The
+    list is read and never rewritten, so the one instance is shared.
+    """
     context = PythonContext.parse(source.text)
     file_ignore = file_level_ignore(source.text)
     directives: list[Directive] = []
