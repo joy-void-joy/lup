@@ -337,10 +337,36 @@ def finish(steps: Sequence[SetupStep]) -> Iterator[SetupStep]:
             yield step
 
 
+def descends_from(branch: str, base: str) -> bool:
+    """Whether `base` is already in `branch`'s history."""
+    try:
+        git("merge-base", "--is-ancestor", base, branch)
+        return True
+    except sh.ErrorReturnCode:
+        return False
+
+
 def register_worktree(name: str, worktree_path: Path, base_branch: str | None) -> None:
     """Register the worktree itself, the one step nothing else can precede."""
     git("worktree", "prune")
     already_exists = branch_exists(name)
+
+    # A named base that re-attaching cannot honour, refused rather than
+    # dropped. `worktree add <path> <branch>` takes a branch where it already
+    # is, so the flag reaches nothing -- and the caller then writes against a
+    # tree they did not ask for, which is the expensive way to find out. The
+    # branch is never moved to answer this: whatever sits on it would go.
+    if already_exists and base_branch and not descends_from(name, base_branch):
+        typer.echo(
+            f"{name} already exists and does not descend from {base_branch}, "
+            f"so --base {base_branch} would reach nothing: re-attaching takes "
+            "a branch where it already stands.\n"
+            "Drop --base to re-attach it there, pick a name that does not "
+            f"exist yet to cut a fresh branch from {base_branch}, or move "
+            f"{name} yourself first if discarding what is on it is meant.",
+            err=True,
+        )
+        raise typer.Exit(1)
 
     if already_exists:
         typer.echo(f"Re-attaching worktree: {worktree_path}")
