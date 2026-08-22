@@ -7,6 +7,7 @@ the rewrite that makes the token reachable has to be decided outside, and it
 has to arrive somewhere the confined thing cannot reach behind.
 """
 
+import os
 from pathlib import Path
 
 import pytest
@@ -213,8 +214,31 @@ def test_the_signing_choice_reaches_the_configuration_the_container_starts_with(
     assert "user.signingkey" in keys
 
 
+@pytest.fixture
+def only_this_checkout_answers(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Take away every git scope outside the repository a test builds itself.
+
+    Git resolves an identity across system, global, local and worktree, and
+    above all four the environment scope of `GIT_CONFIG_COUNT` and its
+    numbered pairs -- which is the same precedence
+    :meth:`GitAccess.environment` relies on to put the launcher's decision
+    where the confined thing cannot edit it.
+
+    So taking away the files is not enough, and the gap is exactly the one
+    this module builds. A session launched by this harness carries that
+    environment scope, and a test asserting what an *absent* identity does
+    was answered by the launcher before its repository existed.
+    """
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(tmp_path / "absent-global"))
+    monkeypatch.setenv("GIT_CONFIG_SYSTEM", str(tmp_path / "absent-system"))
+    for index in range(int(os.environ.get("GIT_CONFIG_COUNT", "0"))):
+        monkeypatch.delenv(f"GIT_CONFIG_KEY_{index}", raising=False)
+        monkeypatch.delenv(f"GIT_CONFIG_VALUE_{index}", raising=False)
+    monkeypatch.delenv("GIT_CONFIG_COUNT", raising=False)
+
+
 def test_a_commit_made_inside_is_authored_as_the_checkout_authors(
-    tmp_path: Path,
+    tmp_path: Path, only_this_checkout_answers: None
 ) -> None:
     """Otherwise git assembles one from the container hostname and refuses it.
 
@@ -236,32 +260,22 @@ def test_a_commit_made_inside_is_authored_as_the_checkout_authors(
 
 
 def test_half_an_identity_is_no_identity(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, only_this_checkout_answers: None
 ) -> None:
     """Git needs both, so a name alone would be a launch that reported success.
 
     The commit fails identically either way; carrying half of it would move
     the failure past the one notice that could have named it.
-
-    The outer scopes are taken away rather than assumed empty. Git resolves
-    an identity across system, global, local and worktree, which is the whole
-    reason :func:`committer` asks git instead of reading a file -- and it
-    means a developer machine with a global `user.email` answers this
-    question before the fixture gets to.
     """
-    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(tmp_path / "absent-global"))
-    monkeypatch.setenv("GIT_CONFIG_SYSTEM", str(tmp_path / "absent-system"))
     git("-C", str(tmp_path), "init", "-q")
     git("-C", str(tmp_path), "config", "user.name", "Some One")
     assert committer(tmp_path) is None
 
 
 def test_an_absent_identity_is_said_at_launch_rather_than_at_the_commit(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, only_this_checkout_answers: None
 ) -> None:
     """The one moment the boundary can name what git will not."""
-    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(tmp_path / "absent-global"))
-    monkeypatch.setenv("GIT_CONFIG_SYSTEM", str(tmp_path / "absent-system"))
     git("-C", str(tmp_path), "init", "-q")
     lines = "\n".join(
         item.text for item in GitAccess().notice("", REWRITE, committer(tmp_path))
