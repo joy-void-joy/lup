@@ -19,7 +19,8 @@ from lup.codeintel.tools import (
     create_codeintel_tools,
 )
 from lup.codescan.common import PythonSource
-from lup.codescan.grammar import refute
+from lup.codescan.antipatterns import PYTHON_ANTI_PATTERNS
+from lup.codescan.resolution import refute
 from lup.workspace.edition import publish_edition
 from lup.workspace.paths import project_root
 from lup.devtools.dev.pyright_oracle import PyrightOracle, langserver_path
@@ -227,34 +228,164 @@ async def test_a_relative_path_follows_where_editing_is_happening(
     assert result["sites"][0]["path"].endswith("helpers.py")
 
 
-def test_the_oracle_resolves_a_buffer_that_disk_does_not_hold(tmp_path: Path) -> None:
-    """An edit is judged before it is written, so disk is the wrong source.
+RESOLVED_SUBJECTS = '''from typing import TypedDict
 
-    The file on disk here holds none of the code being asked about — a
-    checker that read it would find nothing at the queried position and
-    answer with silence, which the grammar reads as "cannot resolve" and
-    leaves the broad verdict standing. The refutation only happens if the
-    server was told the text the audit is actually reading.
+
+class Row(TypedDict):
+    name: str
+
+
+class Base(dict[str, int]):
+    """A mapping the family names only through what it inherits."""
+
+
+class Middle(Base):
+    """Declares the member itself, so resolving it lands here, not on `dict`."""
+
+    def get(self, key: str, default: int | None = None) -> int | None:
+        return default
+
+
+class Client:
+    def get(self, url: str) -> str:
+        return url
+
+
+def mapping(payload: dict[str, str], key: str) -> str | None:
+    return payload.get(key)
+
+
+def typed_dict(row: Row) -> str | None:
+    return row.get("name")
+
+
+def descended(holder: Middle, key: str) -> int | None:
+    return holder.get(key)
+
+
+def client(session: Client, url: str) -> str:
+    return session.get(url)
+
+
+def keywords(key: str, **kwargs: str) -> str | None:
+    return kwargs.get(key)
+
+
+def untyped(anything, key):
+    return anything.get(key)
+'''
+"""One file holding every shape resolution has a different answer for.
+
+Every receiver is named once, so a test names the code it is about rather
+than a line number that moves whenever this grows.
+"""
+
+
+def resolved(root: Path, text: str) -> dict[str, str]:
+    """What the real server makes of each site, keyed by the call it is about.
+
+    The file written to disk holds none of this, so an answer can only come
+    from the buffer: the position the server is asked about and the
+    declaration it reports back are both inside text that was never saved.
     """
     server = langserver_path()
     assert server is not None
-    (tmp_path / "pyproject.toml").write_text("[project]\nname = 'other'\n")
-    (tmp_path / "vendor.py").write_text(
-        "class Client:\n    def get(self, url): ...\n\n\ndef get(url): ...\n",
-        encoding="utf-8",
-    )
-    edited = tmp_path / "caller.py"
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "pyproject.toml").write_text("[project]\nname = 'other'\n")
+    edited = root / "subjects.py"
     edited.write_text("x = 1\n", encoding="utf-8")
-    proposed = 'import vendor\n\nresponse = vendor.get("https://example.com")\n'
 
     refutations = refute(
-        [PythonSource(path=edited, module="caller", text=proposed)],
-        PyrightOracle(server, tmp_path),
+        [PythonSource(path=edited, module="subjects", text=text)],
+        PyrightOracle(server, root),
+        PYTHON_ANTI_PATTERNS,
     )
+    lines = text.splitlines()
+    found = refutations[edited.as_posix()] if edited.as_posix() in refutations else []
+    return {lines[row.line - 1].strip(): row.evidence for row in found}
 
-    refuted = refutations[edited.as_posix()]
-    assert [row.rule_id for row in refuted] == ["dict-get"]
-    assert "the module-level `get`" in refuted[0].evidence
+
+def test_a_mapping_receiver_keeps_its_finding_against_the_real_server(
+    tmp_path: Path,
+) -> None:
+    """The access the rule exists for survives a checker that can see it."""
+    assert "return payload.get(key)" not in resolved(tmp_path, RESOLVED_SUBJECTS)
+
+
+def test_a_client_receiver_is_refuted_on_its_own_class(tmp_path: Path) -> None:
+    """The same spelling on something that is not a mapping, named as such."""
+    evidence = resolved(tmp_path, RESOLVED_SUBJECTS)["return session.get(url)"]
+    assert "`Client`" in evidence
+    assert "outside the mapping family" in evidence
+
+
+def test_a_typed_dict_is_refuted_on_its_own_class(tmp_path: Path) -> None:
+    """Its `get` is synthesized, so only the receiver query reaches the class.
+
+    Asking the member alone answers nothing here, which is the same reply a
+    subject the checker cannot type at all gives — so a genuine `TypedDict`
+    was dropped with an evidence sentence naming the wrong reason.
+    """
+    evidence = resolved(tmp_path, RESOLVED_SUBJECTS)['return row.get("name")']
+    assert "`Row`" in evidence
+    assert "inferred no type" not in evidence
+
+
+def test_a_subject_descending_from_the_family_keeps_its_finding(
+    tmp_path: Path,
+) -> None:
+    """`Middle(Base(dict))` is a mapping, however many links down it says so."""
+    assert "return holder.get(key)" not in resolved(tmp_path, RESOLVED_SUBJECTS)
+
+
+def test_keyword_arguments_are_a_mapping_and_keep_their_finding(
+    tmp_path: Path,
+) -> None:
+    """`**kwargs` is a `dict`, and the reference used to claim otherwise.
+
+    It said the finding was refuted for resolving to nothing. The server
+    resolves it to `dict.get` in typeshed, so the finding stands — and a
+    contributor reading that a directive there would be reported spurious
+    was reading the opposite of what the gate does.
+    """
+    assert "return kwargs.get(key)" not in resolved(tmp_path, RESOLVED_SUBJECTS)
+
+
+def test_an_untyped_subject_is_refuted_for_being_untyped(tmp_path: Path) -> None:
+    """Nothing shown is not membership, and the evidence says which happened."""
+    evidence = resolved(tmp_path, RESOLVED_SUBJECTS)["return anything.get(key)"]
+    assert "inferred no type" in evidence
+
+
+def test_a_buffer_that_disk_does_not_hold_answers_the_same_wherever_it_sits(
+    tmp_path: Path,
+) -> None:
+    """An edit is judged before it is written, so disk is the wrong source.
+
+    Both halves of a resolution have to be told about the buffer: the
+    position the server is asked about, and the file the declaration it
+    reports back is read out of. Reading that second one from disk answered
+    about a file nobody audited — and the line the server reported is a line
+    in the buffer, so on disk it landed wherever the two copies had drifted
+    to, which flipped a confirmed mapping into "nothing resolved".
+    """
+    header = "".join(f"# a line disk does not have {n}\n" for n in range(12))
+
+    def verdicts(root: Path, text: str) -> dict[str, str]:
+        """Each site's verdict, less where the declaration settling it sits.
+
+        The location is what legitimately differs: a header pushes every
+        declaration down, and the evidence cites where each one really is.
+        What must not differ is which sites refuted and what they resolved to.
+        """
+        return {
+            call: evidence.partition(" declared at ")[0]
+            for call, evidence in resolved(root, text).items()
+        }
+
+    assert verdicts(tmp_path / "plain", RESOLVED_SUBJECTS) == verdicts(
+        tmp_path / "moved", header + RESOLVED_SUBJECTS
+    )
 
 
 @pytest.mark.asyncio

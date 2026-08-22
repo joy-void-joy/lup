@@ -22,9 +22,13 @@ INTRODUCTION = (
     "module that defines and enforces each rule. An edit-hook denial cites its "
     "rule id and this reference. Lup rules enforce repository-specific "
     "architecture and editing conventions; Ruff remains the source of standard "
-    "Python diagnostics. The matching examples for anti-patterns are their "
-    "canonical regular-expression shapes, so this reference cannot drift from "
-    "the edit hook or repository auditor.\n\n"
+    "Python diagnostics. Each anti-pattern's examples are declared on the rule "
+    "itself and run through both the edit hook and the repository auditor by "
+    "the suite, so a shape shown here is one both gates decide that way. The "
+    "cleared column is the neighbouring shape a rule spares — a one-argument "
+    "`.replace` renaming a file, an argless `.split` tokenizing prose — which "
+    "is what says whether a site a denial named is really this rule's "
+    "subject.\n\n"
     "## Typed suppressions\n\n"
     "Suppress one deliberate site with `# lup: ignore[rule-id]` and a reason. "
     "Comma-separated ids cover a line that intentionally matches several rules. "
@@ -56,17 +60,22 @@ ANTI_PATTERN_HEADING = "\n## Edit anti-patterns\n\n"
 # why the audit decides more narrowly than the hook
 REFINEMENT_INTRODUCTION = (
     "\n## Audit-side refinements\n\n"
-    "The edit hook sees a fragment of a proposed edit: no parse tree, no "
-    "types, and a hermetic kernel that may not reach a type checker. So it "
-    "decides on the spelling alone, and every rule above means exactly its "
-    "matching example there. The whole-file audit reads finished source and "
-    "resolves what a matched name refers to through the type oracle in "
-    "`lup.codescan.oracle`, so the rules below decide more narrowly in "
-    "`lup-devtools dev check` than they do at edit time — a hook denial you "
-    "believe is wrong is answered by the audit, which reports the "
+    "Both gates read the same finished source and both parse it, so a rule "
+    "that names a shape the grammar has a word for decides identically at "
+    "edit time and in `lup-devtools dev check`. What separates them is "
+    "types: the hermetic kernel may not reach a type checker, while the "
+    "whole-file audit resolves what a matched name refers to through the "
+    "type oracle in `lup.codescan.oracle`. So the rules below — and only "
+    "these — decide more narrowly in the audit than at edit time. A hook "
+    "denial you believe is wrong is answered by the audit, which reports the "
     "declaration that settled it. Where the oracle is unavailable the audit "
-    "falls back to the hook's broad verdict, and a `# lup: ignore` left "
-    "guarding a refuted line is reported as a dead directive.\n\n"
+    "falls back to the hook's verdict, and a `# lup: ignore` left guarding a "
+    "refuted line is reported as a dead directive.\n\n"
+    "Source that will not parse has no shapes to read. There a rule that "
+    "declares a matcher falls back to its pattern where a directive could "
+    "still answer it, and reports nothing at all where none could — a "
+    "**refused** rule admits no suppression, so a verdict its matcher never "
+    "confirmed would be a denial with no way past.\n\n"
 )
 
 
@@ -87,6 +96,7 @@ def rule_table(rules: list[RegisteredRule]) -> models.MarkdownTable:
             "Family",
             "Scope",
             "Matching example",
+            "Cleared instead",
             "Diagnostic",
             "Suppression",
             "Defined in",
@@ -96,9 +106,11 @@ def rule_table(rules: list[RegisteredRule]) -> models.MarkdownTable:
                 CodeCell(text=rule.id),
                 PlainCell(text=rule.family),
                 PlainCell(text=rule.scope),
-                # A matching shape is a regular expression that may quote a
-                # backtick, which no fence survives.
+                # An example may quote a backtick, which no fence survives.
                 HtmlCodeCell(text=rule.example),
+                HtmlCodeCell(text=rule.cleared)
+                if rule.cleared
+                else PlainCell(text="—"),
                 PlainCell(text=rule.message),
                 suppression_cell(rule.strength),
                 CodeCell(text=rule.defined_in),

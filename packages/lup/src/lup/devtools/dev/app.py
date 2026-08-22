@@ -527,6 +527,14 @@ def create_dev_app(
                 "of listing each — the sweep triage view",
             ),
         ] = False,
+        profiled: Annotated[
+            bool,
+            typer.Option(
+                "--profile",
+                help="With --antipatterns: report where the sweep spent its time "
+                "instead of what it found — parsing, walking, or resolving",
+            ),
+        ] = False,
         as_json: Annotated[
             bool,
             typer.Option(
@@ -553,7 +561,9 @@ def create_dev_app(
         """Run ruff format, ruff check, pyright, and pytest. Read-only by default."""
         declarations = declared()
         if antipatterns:
-            if stats:
+            if profiled:
+                antipatterns_mod.profile(declarations.project, path)
+            elif stats:
                 antipatterns_mod.summarize(declarations.project, as_json, path)
             else:
                 antipatterns_mod.report(declarations.project, as_json, path)

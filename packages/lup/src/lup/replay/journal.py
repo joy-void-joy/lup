@@ -224,5 +224,5 @@ class JournalStore:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         temporary = self.path.with_suffix(".tmp")
         temporary.write_text(journal.model_dump_json(indent=2), encoding="utf-8")
-        temporary.replace(self.path)  # lup: ignore[string-replace] — atomic rename
+        temporary.replace(self.path)
         return journal

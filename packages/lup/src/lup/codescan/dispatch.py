@@ -21,8 +21,10 @@ on every builtin, standard-library, and vendor type.
 """
 
 import ast
+from collections.abc import Iterator
 
 from lup.codescan.common import PythonSource
+from lup.policy.kernel.edit import python_nodes, python_tree
 from lup.codescan.project import (
     RuleFinding,
     RuleViolation,
@@ -62,50 +64,57 @@ def dispatch_violations(
     sources: list[PythonSource], models: set[str]
 ) -> list[RuleViolation]:
     """Find every site that branches on a project model's own type."""
-    violations: list[RuleViolation] = []
-    for source in sources:
-        try:
-            tree = ast.parse(source.text)
-        except SyntaxError:
-            continue
-        aliases = imported_names(tree, source.module)
 
-        def report(node: ast.expr | ast.pattern, message: str) -> None:
-            violations.append(
-                RuleViolation(path=source.path, line=node.lineno, message=message)
-            )
+    def found() -> Iterator[RuleViolation]:
+        for source in sources:
+            tree = python_tree(source.text)
+            if tree is None:
+                continue
+            aliases = imported_names(tree, source.module)
 
-        def matched_model(name: str) -> str | None:
-            resolved = resolve_name(name, source.module, aliases)
-            return resolved.rsplit(".", 1)[-1] if resolved in models else None
+            def reported(node: ast.expr | ast.pattern, message: str) -> RuleViolation:
+                return RuleViolation(
+                    path=source.path, line=node.lineno, message=message
+                )
 
-        for node in ast.walk(tree):
-            match node:
-                case ast.Call(func=ast.Name(id=call), args=[_, checked, *_]) if (
-                    call in NARROWING_CALLS
-                ):
-                    for name in named_types(checked):
-                        if (model := matched_model(name)) is not None:
-                            report(
+            def matched_model(name: str) -> str | None:
+                resolved = resolve_name(name, source.module, aliases)
+                return resolved.rsplit(".", 1)[-1] if resolved in models else None
+
+            for node in python_nodes(tree):
+                match node:
+                    case ast.Call(func=ast.Name(id=call), args=[_, checked, *_]) if (
+                        call in NARROWING_CALLS
+                    ):
+                        for name in named_types(checked):
+                            if (model := matched_model(name)) is not None:
+                                yield reported(
+                                    node,
+                                    f"{call} branches on {model}, a model we declare "
+                                    f"— {REMEDY}",
+                                )
+                    case ast.MatchClass(cls=pattern):
+                        name = dotted_name(pattern)
+                        if (
+                            name is not None
+                            and (model := matched_model(name)) is not None
+                        ):
+                            yield reported(
                                 node,
-                                f"{call} branches on {model}, a model we declare "
+                                f"case arm matches {model}, a model we declare "
                                 f"— {REMEDY}",
                             )
-                case ast.MatchClass(cls=pattern):
-                    name = dotted_name(pattern)
-                    if name is not None and (model := matched_model(name)) is not None:
-                        report(
+                    case ast.Call(func=ast.Name(id=call)) if (
+                        call == EXHAUSTIVENESS_CALL
+                    ):
+                        yield reported(
                             node,
-                            f"case arm matches {model}, a model we declare — {REMEDY}",
+                            f"{EXHAUSTIVENESS_CALL} nets a union we declare — a base "
+                            "that declines by default leaves nothing to be exhaustive "
+                            "about",
                         )
-                case ast.Call(func=ast.Name(id=call)) if call == EXHAUSTIVENESS_CALL:
-                    report(
-                        node,
-                        f"{EXHAUSTIVENESS_CALL} nets a union we declare — a base "
-                        "that declines by default leaves nothing to be exhaustive "
-                        "about",
-                    )
-    return violations
+
+    return list(found())
 
 
 def audit_own_model_dispatch(sources: list[PythonSource]) -> list[RuleFinding]:

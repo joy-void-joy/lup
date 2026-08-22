@@ -1309,7 +1309,7 @@ def branch_status(branch: str | None, as_json: bool) -> None:
 
     def row(r: BranchClassification) -> list[str]:
         marker = status_markers[r["status"]]
-        wt = " [worktree]" if r.get("worktree") else ""  # lup: ignore[dict-get]
+        wt = " [worktree]" if r.get("worktree") else ""
         return [f"[{marker}] {r['branch']}", r["status"], f"{r['reason']}{wt}"]
 
     typer.echo(format_table(("Branch", "Status", "Reason"), [row(r) for r in results]))

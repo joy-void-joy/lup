@@ -41,8 +41,8 @@ DEFAULT_BUILTINS: Namespace = {
     "list": list,
     "dict": dict,
     "tuple": tuple,
-    "set": set,  # lup: ignore[set-shape] — the builtin itself
-    "frozenset": frozenset,  # lup: ignore[frozenset-shape] — the builtin
+    "set": set,
+    "frozenset": frozenset,
     "sorted": sorted,
     "reversed": reversed,
     "enumerate": enumerate,
@@ -130,7 +130,7 @@ def sandbox_program(expression: str) -> str:
 
 
 def format_eval_result(result: object) -> str:  # lup: ignore[bare-object] — eval result
-    containers = (dict, list, tuple, set, frozenset)  # lup: ignore[frozenset-shape]
+    containers = (dict, list, tuple, set, frozenset)
     if isinstance(result, containers):
         try:
             return json.dumps(result, indent=2, default=repr)

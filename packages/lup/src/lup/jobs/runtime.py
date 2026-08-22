@@ -205,7 +205,7 @@ class JobStore:
         destination.parent.mkdir(parents=True, exist_ok=True)
         temporary = destination.with_suffix(".tmp")
         temporary.write_text(record.model_dump_json(indent=2), encoding="utf-8")
-        temporary.replace(destination)  # lup: ignore[string-replace] — atomic rename
+        temporary.replace(destination)
 
     def read_record(self, job_id: str) -> JobRecord:
         """Read one required scheduler record."""

@@ -81,7 +81,7 @@ def record_attempt(store: SubmittedOutputStore, message: str) -> None:
                 encoding="utf-8",
                 newline="\n",
             )
-            temporary.replace(store.attempts_path)  # lup: ignore[string-replace]
+            temporary.replace(store.attempts_path)
         case _:
             return
 

@@ -142,6 +142,7 @@ KERNEL_IMPORT_ALLOWLIST = (
     "collections.abc",
     "difflib",
     "fnmatch",
+    "functools",
     "io",
     "pathlib",
     "posixpath",
