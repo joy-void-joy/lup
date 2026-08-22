@@ -20,7 +20,11 @@ from lup.codeintel.tools import CODEINTEL_TOOL_DECLARATIONS
 from lup.policy.identity import AGENT_IDENTITY_ENV
 from lup.types import JsonObject
 from lup.adapters.claude.harness import CLAUDE_DISPATCHER, ClaudeSpellings
-from lup.adapters.codex.harness import CODEX_DISPATCHER, CodexSpellings
+from lup.adapters.codex.harness import (
+    CODEX_DISPATCHER,
+    CodexSpellings,
+    codex_project_config,
+)
 from lup.adapters.codex.harness_runtime import (
     PluginCacheConfig,
     directory_digest,
@@ -2699,6 +2703,52 @@ def test_codex_tree_offers_the_tool_servers_in_its_project_config() -> None:
     assert parsed["features"]["hooks"] is True
     assert sorted(parsed["mcp_servers"]) == sorted(tool_group_names(realtime=False))
     assert parsed["mcp_servers"]["notes"]["command"] == "uv"
+
+
+def relaying_harness() -> Harness:
+    """The example harness with one environment name asked for by every server."""
+    source = portable_harness()
+    plugin = source.plugins[0]
+    return source.model_copy(
+        update={
+            "plugins": [
+                plugin.model_copy(
+                    update={
+                        "mcp_servers": [
+                            server.model_copy(update={"env_vars": ["LUP_SESSION_DIR"]})
+                            for server in plugin.mcp_servers
+                        ]
+                    }
+                )
+            ]
+        }
+    )
+
+
+def test_only_the_runtime_that_forwards_nothing_is_told_what_to_forward() -> None:
+    """A name is asked for exactly where a server would otherwise never see it.
+
+    One runtime hands a server it spawns the whole environment, so its
+    declaration has nothing to say about any of it. The other hands one a
+    fixed base and forwards only what it was asked for, so a relay this list
+    omits is a relay that never arrives — and a tool that binds to nothing
+    serves an empty surface rather than failing.
+    """
+    relayed = relaying_harness()
+    parsed = tomllib.loads(codex_project_config(relayed, CodexSpellings()))
+    assert parsed["mcp_servers"]["notes"]["env_vars"] == ["LUP_SESSION_DIR"]
+    declaration = next(
+        artifact
+        for artifact in compile_claude(relayed).artifacts
+        if artifact.path == Path(".claude/plugins/lup/.mcp.json")
+    )
+    assert "env_vars" not in json.loads(declaration.content)["mcpServers"]["notes"]
+
+
+def test_a_server_naming_no_environment_renders_no_key_at_all() -> None:
+    """An absent key leaves the runtime's own default, not an empty allowlist."""
+    parsed = tomllib.loads(codex_project_config(portable_harness(), CodexSpellings()))
+    assert "env_vars" not in parsed["mcp_servers"]["notes"]
 
 
 def test_a_named_session_is_what_makes_a_native_server_serve_real_tools() -> None:

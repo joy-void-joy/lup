@@ -781,6 +781,19 @@ class McpServer(BaseModel, frozen=True):
     command: str = Field(min_length=1)
     arguments: list[McpCommandWord] = []
 
+    env_vars: list[str] = []
+    """Environment variable names that must reach this server from the launch.
+
+    Names, never values: this is compiled into a committed tree, and a value
+    belongs to one machine and one run. Which runtimes have to be told is a
+    rendering decision, and they differ. One spawns a server as its own child
+    and hands it the whole environment, so naming a variable changes nothing
+    there. The other hands a spawned server a fixed base environment — a
+    shell's worth of HOME and PATH and no more — and forwards exactly the
+    names it was given, so a server needing a session relay, a credential or
+    a configuration home reaches none of them unless they are named here.
+    """
+
     def command_line(self, runtime: "NativeSpellings") -> list[str]:
         """Spell every argument for the runtime that will spawn this server."""
         return [argument.spell_in(runtime) for argument in self.arguments]

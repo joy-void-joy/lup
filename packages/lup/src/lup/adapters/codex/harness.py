@@ -420,6 +420,13 @@ def codex_project_config(
     ``project_doc_max_bytes``: the runtime truncates project guidance at its
     own default, so a document that passed generation would still reach the
     model short if the two disagreed.
+
+    ``env_vars`` is rendered here and nowhere else because only this runtime
+    needs telling. Codex starts a stdio server under a fixed base environment
+    and forwards nothing else it was not asked for, so a server whose session
+    relay or credential arrives as an environment variable gets neither
+    unless the config names it; the other runtime hands its servers the whole
+    environment and the same declaration is already satisfied there.
     """
     document = tomlkit.document()
     features = tomlkit.table()
@@ -432,6 +439,8 @@ def codex_project_config(
             entry = tomlkit.table()
             entry["command"] = server.command
             entry["args"] = server.command_line(spellings)
+            if server.env_vars:
+                entry["env_vars"] = server.env_vars
             servers[server.name] = entry
     if servers:
         document["mcp_servers"] = servers
