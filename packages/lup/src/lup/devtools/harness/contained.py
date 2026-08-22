@@ -1525,6 +1525,7 @@ def contained_argv(
         state_volume=state_volume_name(root),
         config_home_env=login.config_home_env,
         credential_file=login.credentials_file,
+        credential_renewable=login.renewable,
         credential=credential,
         host_config_home=host_config_home,
         engine=client,

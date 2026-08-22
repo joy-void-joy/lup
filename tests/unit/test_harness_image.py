@@ -246,6 +246,7 @@ def test_the_credential_crosses_as_one_read_only_file_outside_the_config_home() 
         state_volume="v",
         config_home_env="CLAUDE_CONFIG_DIR",
         credential=Path("/home/u/.claude/.credentials.json"),
+        credential_renewable=".a > 1",
     )
     assert f"/home/u/.claude/.credentials.json:{image.credential_seed}:ro" in started
     assert image.credential_seed.startswith(f"{image.config_home}/") is False
@@ -253,24 +254,46 @@ def test_the_credential_crosses_as_one_read_only_file_outside_the_config_home() 
     # runtime the harness declares, so the entrypoint is told rather than
     # assuming Claude Code's.
     assert "LUP_CREDENTIAL_NAME=.credentials.json" in started
+    # And so is what counts as a login still worth keeping, for the same
+    # reason: the entrypoint cannot read a format it was not told.
+    assert "LUP_CREDENTIAL_RENEWABLE=.a > 1" in started
 
 
-def test_the_entrypoint_seeds_a_login_only_into_a_config_home_without_one() -> None:
+def test_the_entrypoint_seeds_a_login_only_where_none_can_still_be_renewed() -> None:
     """Both directions have to be safe, and only this order makes them so.
 
     Copying unconditionally would overwrite a login made inside with the
     host's at every launch, which is the feature undone. Writing back to the
     host's file would let a contained agent rotate the credential every host
-    session depends on. Copying once, into an empty home, is neither.
+    session depends on. Seeding only where nothing usable sits is neither.
+
+    The seed is tested the same way as the target, which is the half a first
+    draft would leave out: copying a host login that has itself aged out
+    replaces one credential nothing will answer with another, and reports a
+    recovery that did not happen.
     """
     entrypoint = Image().dockerfile(Manifest())
-    assert 'cp "$seed" "$config/$LUP_CREDENTIAL_NAME"' in entrypoint
+    assert 'cp "$seed" "$stored"' in entrypoint
+    assert 'usable "$seed" && ! usable "$stored"' in entrypoint
     # Size rather than presence, and a removal first. Every config home that
     # predates this holds an empty file here -- the mount point the old
     # read-only bind needed, owned by the uid that created it -- which a
     # presence test reads as a login and a copy cannot write through.
-    assert '[ ! -s "$config/$LUP_CREDENTIAL_NAME" ]' in entrypoint
-    assert 'rm -f "$config/$LUP_CREDENTIAL_NAME"' in entrypoint
+    assert '[ -s "$1" ] || return 1' in entrypoint
+    assert 'rm -f "$stored"' in entrypoint
+
+
+def test_a_runtime_that_declares_no_renewal_test_keeps_the_older_rule() -> None:
+    """An unanswerable question must not read as the answer "expired".
+
+    Codex states no deadline in its stored login, so the filter is empty for
+    it -- and an empty filter reaching `jq` would evaluate to nothing and
+    condemn every login it was asked about, re-seeding a working one at every
+    launch. The guard is what keeps "cannot be asked" and "past renewing"
+    apart.
+    """
+    entrypoint = Image().dockerfile(Manifest())
+    assert '[ -n "$LUP_CREDENTIAL_RENEWABLE" ] || return 0' in entrypoint
 
 
 def test_the_entrypoint_reads_the_config_home_the_image_baked() -> None:

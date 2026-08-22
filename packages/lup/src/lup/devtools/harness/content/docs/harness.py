@@ -496,15 +496,36 @@ every feature a config home created empty: default theme, trust re-seeded, each
 preference set by hand again. What it costs is that worktrees of one repository
 share trust and session history, which is what a host home already does.
 
-The stored login is **copied in** on the first launch that finds the home
-without one, not mounted over. Mounted read-only at the path the CLI keeps a
-login — which is what it was — it looked right and was not: that file is written
-back both when a sign-in completes and when an expiring token is renewed, so
-signing in inside the boundary could reach the servers, get its code, and fail
-at the last step. Copying once, into an empty home, is what makes both
-directions safe: a login made inside is never overwritten by the host's, and the
-host's file is never written by anything in here. The two are then free to be
-different accounts, which is the point.
+The stored login is **copied in** on any launch that finds the home holding
+none that could still be renewed, not mounted over. Mounted read-only at the
+path the CLI keeps a login — which is what it was — it looked right and was not:
+that file is written back both when a sign-in completes and when an expiring
+token is renewed, so signing in inside the boundary could reach the servers,
+get its code, and fail at the last step. Copying, into a home with nothing
+usable in it, is what makes both directions safe: a login that still works
+inside is never overwritten by the host's, and the host's file is never written
+by anything in here. The two are then free to be different accounts, which is
+the point.
+
+**Renewable, not current** — and the difference is the whole reason the test
+exists. An access token expires in hours and renews itself; a refresh
+credential expires in weeks, and once it has, the file is inert. A config home
+is keyed on the repository and kept, so one left alone past that second
+deadline holds a login by every test except the one that matters — and read as
+present, it suppresses the seed and opens a session demanding a sign-in, which
+is precisely what this boundary cannot finish. Nothing is lost by replacing a
+credential no request will be answered for; it is not a login for its own
+account either. The copy replaces the file whole, so anything the runtime keeps
+beside the login in it — Claude Code stores its MCP authorizations there — comes
+back as the host's.
+
+Which test to run is the runtime's own word, declared on its `ProviderLogin`
+beside the filename. Claude Code reads `claudeAiOauth.refreshTokenExpiresAt`.
+**Codex declares none**, because its `auth.json` states no deadline to read:
+it carries `last_refresh`, which records when renewing last worked rather than
+when it stops. So Codex keeps the older rule — seeded only into a home with no
+login at all — and a Codex home whose login has aged out needs the paste-back
+fallback above.
 
 The checkout's `user.name` and `user.email` cross the same way the remote
 rewrites do — read on the host, passed in — because git's fallback is to
