@@ -81,6 +81,13 @@ def top_level_names(
 
     Names rather than paths, because a caller keying authored prose by import
     name should not have to strip a suffix to match `foo.py` to `foo`.
+
+    A dotted entry is skipped whatever it holds. Python cannot import one, so
+    it is never a name a roster could owe a row — and the tree is read from
+    the filesystem rather than from git, which means anything a tool leaves
+    beside the source is visible here. A checkout carrying `.claude` or
+    `.venv` under the library would otherwise fail generation asking what an
+    editor's scratch directory solves.
     """
     base = root / subtree
     if not base.is_dir():
@@ -88,7 +95,8 @@ def top_level_names(
     return sorted(
         entry.stem if entry.is_file() else entry.name
         for entry in base.iterdir()
-        if entry.name not in skipped_names
+        if not entry.name.startswith(".")
+        and entry.name not in skipped_names
         and not entry.name.endswith(DEFAULT_SKIPPED_SUFFIXES)
         and (entry.is_dir() or entry.suffix == ".py")
     )
