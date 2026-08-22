@@ -264,6 +264,27 @@ def test_an_absent_document_is_not_an_error(tmp_path: Path) -> None:
     assert load_document(tmp_path / CLAUDE_CONFIG_FILE) == {}
 
 
+def test_a_document_behind_a_permission_reads_as_unreadable(tmp_path: Path) -> None:
+    """Unopenable and unparseable are one fact to every caller of this.
+
+    A document the session may not open holds the trusted projects exactly as
+    a malformed one does, so it owes the same typed answer. Escaping as a bare
+    `PermissionError` took out the fault report written to say a run cannot
+    open a session anywhere — it crashed instead of saying so.
+    """
+    document = tmp_path / CLAUDE_CONFIG_FILE
+    document.write_text('{"projects": {}}', encoding="utf-8")
+    document.chmod(0o000)
+
+    try:
+        if os.access(document, os.R_OK):
+            pytest.skip("this user reads a mode-000 file, so nothing is denied")
+        with pytest.raises(ClaudeConfigUnreadable):
+            load_document(document)
+    finally:
+        document.chmod(0o600)
+
+
 def backup(home: Path, name: str, content: str) -> Path:
     """One file where Claude Code copies a document it could not read."""
     written = home / CLAUDE_BACKUP_DIR / f"{CLAUDE_CONFIG_FILE}.backup.{name}"

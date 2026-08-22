@@ -24,7 +24,7 @@ from lup.hooks import LupHooksConfig
 from lup.policy.enforcement import SemanticToolPolicy, create_policy_hooks
 from lup.policy.rules import ShellPolicy, UrlScope
 from lup.runtime.query import query
-from lup_template.devtools.harness.content.shell_vocabulary import SHELL_RULES
+from lup_template.devtools.harness.catalog import declared_hook_set
 
 from examples.common import Summary
 
@@ -52,7 +52,7 @@ def policy_hooks() -> LupHooksConfig:
     the recipe for reshaping or escalating it.
     """
     policy = ShellPolicy(
-        SHELL_RULES,
+        declared_hook_set().resolved_shell_rules(),
         allowed_urls=[UrlScope(origin=DOCS_ORIGIN, path_prefix="/api")],
         denied_urls=[UrlScope(origin=DOCS_ORIGIN, path_prefix="/private")],
     )

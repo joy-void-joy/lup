@@ -19,10 +19,11 @@ from lup.resolver.contracts import (
     ResolverObserver,
     ResolverRegression,
     WorktreePreparer,
+    settles_the_actor,
 )
 from lup.actors.mailbox import ANSWER_POLL_SECONDS
 from lup.actors.refs import ActorRef
-from lup.actors.sessions import ActorSessions
+from lup.actors.cohort import ActorCohort
 from lup.resolver.dag import ConcernGraph
 from lup.resolver.execution import ConcernExecutor
 from lup.resolver.grants import GrantLedger
@@ -370,8 +371,17 @@ class ResolverCore:
         )
         self.mailbox = QuestionMailbox(self.repository.root)
         self.journal = Journal(self.repository.root)
-        self.actors = ActorSessions(
-            self.repository.root, self.journal, self.mailbox.mail
+        # The run's own ref is the spawner, so a worker telling the humans
+        # something has an address to send it to. It was already constructed
+        # to attribute the run's own journal entries; nothing delivered to it,
+        # so a worker's only route out was a blocking question.
+        self.actors = ActorCohort(
+            self.repository.root,
+            journal=self.journal,
+            mail=self.mailbox.mail,
+            spawner=self.journal.run,
+            parallel=config.max_parallel_workers,
+            settles=lambda error: settles_the_actor(error, environmental_fault),
         )
         self.run_state = ResolveRun(self.repository, self.journal, observer)
         self.rebaser = BaseRefresher(self.run_state, self.worktrees, self.journal)
@@ -509,9 +519,7 @@ class ResolverCore:
             f"user.{reserved}"
             f"\n\nReview evidence:\n{request.model_dump_json(indent=2)}"
         )
-        planner = self.turns.reviewer_session(
-            ActorRef(kind="planner", id=self.config.run_id), self.config.workspace
-        )
+        planner = ActorRef(kind="planner", id=self.config.run_id)
         # A retry is a second turn on the planner's own session, so the
         # correction is the whole input: it already holds the evidence and the
         # partition it just proposed, and restating both would invite it to
@@ -519,8 +527,10 @@ class ResolverCore:
         attempt = prompt
         complaint: str | None = None
         for _ in range(attempts):
-            result = await planner.turn(
-                turn_request(TurnInput(text=attempt), ConcernInventory)
+            result = await self.turns.reviewer_round(
+                planner,
+                self.config.workspace,
+                turn_request(TurnInput(text=attempt), ConcernInventory),
             )
             referenced = [
                 index
@@ -945,27 +955,32 @@ class ResolverCore:
                         unmet,
                     )
                     completed_ids.add(blocked.id)
+
                 # Capped rather than gathered wholesale. A concern still
                 # waiting on the cap has started nothing and recorded
                 # nothing, so an interruption leaves it exactly as the lease
                 # phase left it and the next batch selects it again — which
                 # is what makes a cut wave resumable rather than lost.
-                admitted = asyncio.Semaphore(self.config.max_parallel_workers)
+                #
+                # The population's own wave rather than one assembled here.
+                # How many agents run at once, which of them are running, and
+                # what a close reaches are three facts about the population,
+                # and a phase that fanned out for itself answered the last
+                # two differently from the roster every door reads.
+                runnable_by_id = {concern.id: concern for concern in runnable}
 
-                async def execute_when_admitted(
-                    concern: Concern,
-                ) -> ConcernExecution:
-                    async with admitted:
-                        return await self.executor.execute_concern(
-                            concern,
-                            lease_by_concern[concern.id],
-                            commits,
-                            builder,
-                        )
+                async def execute_for(opened: ActorRef) -> ConcernExecution:
+                    """This address's concern, carried through its whole work."""
+                    return await self.executor.execute_concern(
+                        runnable_by_id[opened.id],
+                        lease_by_concern[opened.id],
+                        commits,
+                        builder,
+                    )
 
-                results = await asyncio.gather(
-                    *[execute_when_admitted(concern) for concern in runnable],
-                    return_exceptions=True,
+                results = await self.actors.work_all(
+                    execute_for,
+                    [ActorRef(kind="worker", id=concern.id) for concern in runnable],
                 )
                 failures = [
                     result for result in results if isinstance(result, BaseException)

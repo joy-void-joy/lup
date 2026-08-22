@@ -219,3 +219,41 @@ class ShellRuleRow(TypedDict):
     read_verbs: list[str]
     value_flags: list[str]
     reason: str
+
+
+type EditOperation = Literal["create", "overwrite", "modify", "delete"]
+"""What a change does to the file it names.
+
+Carried from the adapter rather than inferred, because the two whole-file
+operations are indistinguishable once a preimage is resolved: a ``Write`` over
+an existing file and an ``Edit`` that happens to replace every line both
+arrive as one whole document replacing another. The native call knows which it
+was, so it says.
+"""
+
+
+class EditRuleRow(TypedDict):
+    """One erased edit rule: which changes it speaks about, and what it says.
+
+    ``gates``, ``suffixes``, ``roles`` and ``operations`` are the axes a rule
+    may constrain, each empty where the rule is silent about it — so matching
+    a row is four containment tests and nothing composed. Unlike
+    :class:`ShellRuleRow`, which is matched by name and answers alone, these
+    rows overlap deliberately and the *last* one matching decides, the way
+    `.gitignore` reads: a broad statement first, its exceptions after it.
+
+    ``effect`` is ``""`` where a rule moves only the threshold, and
+    ``maximum_added_lines`` is ``None`` where it moves only the verdict. The
+    two are separate fields because a rule may state either without the other,
+    and a single optional verdict could not say "leave who decides alone, but
+    count differently here".
+    """
+
+    name: str
+    gates: list[str]
+    suffixes: list[str]
+    roles: list[str]
+    operations: list[str]
+    effect: str
+    maximum_added_lines: int | None
+    reason: str

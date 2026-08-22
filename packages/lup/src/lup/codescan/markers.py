@@ -57,9 +57,12 @@ MARKER_RE = re.compile(r"(#|//)\s*lup\s*:", re.IGNORECASE)
 
 # `# lup: defer: <text>` parks work; a `defer[<gate>]: <text>` head parks it
 # behind a gate somebody other than this note can check ("until the v2 API
-# ships"). The bare spelling is the default, because nothing evaluates a
-# condition mechanically: one that only restates that this code might change
-# again is invention dressed as a trigger. The optional bracket deliberately
+# ships"). A condition spelled the way `lup.devtools.dev.gates` declares is
+# resolved on every `dev check` and fails it the run it comes true; anything
+# else is prose, carried to a reader and gating nothing. Both are real ways to
+# park work, and the bare spelling stays the default. What the bracket must
+# never hold either way is a restatement that this code might change again,
+# which is invention dressed as a trigger. The optional bracket deliberately
 # mirrors the typed `# lup: ignore[rule-id]` escape hatch — which means a
 # condition may itself contain brackets (`defer[when ignore[dict-get] sites
 # migrate]: ...`), so the head ends at the first `]` that is followed by a
@@ -462,7 +465,6 @@ class NoteRemoval(BaseModel):
     missing: list[NoteTarget]
 
 
-# lup: ignore[model-free-function] — the line buffer is the subject, the note a span
 def without_note(lines: list[str], note: MarkerComment) -> None:
     """Drop a standalone note whole; leave an inline note's code behind."""
     head = lines[note.start_line - 1]

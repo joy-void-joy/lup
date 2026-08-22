@@ -59,7 +59,7 @@ Examples:
 
 import asyncio
 import logging
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Annotated, Literal
@@ -122,7 +122,7 @@ text via ``run_relay_session(missing_sleep_message=...)``."""
 # =====================================================================
 
 
-class RelayEvent(BaseModel):
+class RelayEvent(BaseModel, ABC):
     """One thing the agent did, answering every question the parent asks of it.
 
     Applying an event to the parent's Scheduler mirrors what the in-process

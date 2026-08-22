@@ -40,7 +40,8 @@ from lup.resolver.models import (
     WritableRootLease,
     allowance_question_id,
 )
-from lup.actors.sessions import ActorSessions
+from lup.actors.cohort import ActorCohort
+from lup.actors.refs import ActorRef
 from lup.resolver.questions import QuestionBroker
 from lup.resolver.run import ResolveRun
 from lup.resolver.state import ResolverStateRepository
@@ -189,10 +190,15 @@ def turn_runner(desk: QuestionBroker, recipe: RecordingRecipe) -> TurnRunner:
     return TurnRunner(
         desk.run.require().spec,
         desk.run,
-        ActorSessions(desk.mailbox.root, desk.journal, desk.mailbox.mail),
+        ActorCohort(
+            desk.mailbox.root,
+            journal=desk.journal,
+            mail=desk.mailbox.mail,
+            spawner=desk.journal.run,
+        ),
         desk.mailbox,
         recipe,
-        lambda _worktree: session_factory(IdleSession()),
+        lambda _context: session_factory(IdleSession()),
         LiteralRenderer(),
         desk.grants,
     )
@@ -329,12 +335,16 @@ def test_a_later_turn_on_the_same_lease_does_not_take_a_mid_lease_grant_back(
         root=tmp_path / "integration",
         branch="resolve/grant-run/review",
     )
-    turns.merger_session(lease)
+    turns.actors.session(
+        ActorRef(kind="merger", id=lease.concern_id), turns.merger_recipe(lease)
+    )
     policy = judge(recipe.opened[0].grants)
     human_grants(desk, INTEGRATION_CONCERN_ID, "grant")
     assert policy.decide(CREATION).effect == "allow"
 
-    turns.merger_session(lease)
+    turns.actors.session(
+        ActorRef(kind="merger", id=lease.concern_id), turns.merger_recipe(lease)
+    )
 
     assert policy.decide(CREATION).effect == "allow"
     parked(desk)

@@ -1,7 +1,7 @@
 """The edit gate's route to a checker, end to end.
 
 The unit tests pin each half against a fake: the kernel asks when nothing
-resolved a receiver and admits the line when something did, and the grammar
+resolved a receiver and admits the line when something did, and resolution
 refutes a declaration outside the family. What neither can show is that the
 host half actually reaches a checker and comes back with an answer the kernel
 can read — a chain of a subprocess, a CLI, a language server and a JSON
@@ -25,16 +25,22 @@ pytestmark = pytest.mark.skipif(
 RESOLUTION_COMMAND = [".venv/bin/lup-devtools", "dev", "refutations"]
 
 PROPOSED = (
-    "import queue\n\npending: queue.Queue[str] = queue.Queue()\nvalue = pending.get()\n"
+    "import httpx\n"
+    "\n"
+    "\n"
+    "def read(client: httpx.Client, url: str) -> httpx.Response:\n"
+    "    return client.get(url)\n"
 )
-"""A receiver only a checker settles, declaring a `get` outside the mapping family.
+"""A receiver only a checker can settle: an HTTP client, outside the family.
 
-A module-qualified `httpx.get` would not do: the tree rules that out on its
-own, so no site is selected and nothing is asked of a checker — which is the
-point of ruling it out, and the reason it cannot stand in for one that is.
-`queue.Queue` declares a real `get` and is no mapping, so a refutation here
-is evidence the chain resolved a declaration and read a class out of it.
+A module-qualified `httpx.get` would not do. The tree rules that one out on
+its own, so it never becomes a site and no checker is asked about it — which
+is the point of stating the shape once, and also why it cannot stand in for
+the case this test is about.
 """
+
+REFUTED_LINE = 5
+"""Where `client.get(url)` sits in the proposed content above."""
 
 
 def unwritten(root: Path) -> str:
@@ -52,7 +58,7 @@ def test_the_host_resolves_a_receiver_the_gate_could_not() -> None:
 
     refuted = resolved_refutations(unwritten(root), PROPOSED, RESOLUTION_COMMAND)
 
-    assert refuted == {"dict-get": [4]}
+    assert refuted == {"dict-get": [REFUTED_LINE]}
     assert not Path(unwritten(root)).exists(), "resolving wrote the file"
 
 

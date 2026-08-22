@@ -26,9 +26,9 @@ from pathlib import Path
 
 from pydantic import BaseModel, ValidationError
 
-from lup.codescan.common import PythonSource, Refutation
-from lup.codescan.grammar import GRAMMAR_RULES, refute
-from lup.codescan.oracle import DefinitionOracle
+from lup.codescan.common import AntiPattern, PythonSource, Refutation
+from lup.codescan.oracle import TypeOracle
+from lup.codescan.resolution import refute
 from lup.policy.kernel.edit import python_nodes, python_tree
 from lup.types import StringMap
 
@@ -147,13 +147,18 @@ def digest_of(parts: list[str]) -> str:
     return running.hexdigest()
 
 
-def environment_fingerprint(root: Path) -> str:
+def environment_fingerprint(rules: list[AntiPattern], root: Path) -> str:
     """What the checker resolves against, beyond this repository's own text.
 
     The rule set, because a rule asking a different question of a site gets a
     different answer; and the locked dependency set, because a receiver
     declared in an installed package or a stub is resolved out of one, and an
     upgrade moves every such declaration at once.
+
+    A rule states its whole family here, not just its name. Adding a class to
+    one changes which subjects belong without changing anything else about
+    the rule, and an entry keyed on the name alone would serve back the
+    verdict from before the class was there.
     """
     try:
         locked = (root / "uv.lock").read_text(encoding="utf-8")
@@ -161,7 +166,11 @@ def environment_fingerprint(root: Path) -> str:
         locked = ""  # unlocked is a state of its own, and every entry shares it
     return digest_of(
         [
-            *(f"{rule.id}:{rule.family.name}" for rule in GRAMMAR_RULES),
+            *(
+                f"{rule.id}:{rule.family.name}:{','.join(rule.family.classes)}"
+                for rule in rules
+                if rule.family is not None
+            ),
             hashlib.sha256(locked.encode("utf-8")).hexdigest(),
         ]
     )
@@ -195,7 +204,8 @@ def entry_keys(sources: list[PythonSource], fingerprint: str) -> StringMap:
 
 def remembered_refutations(
     sources: list[PythonSource],
-    oracle: DefinitionOracle | None,
+    oracle: TypeOracle | None,
+    rules: list[AntiPattern],
     store_path: Path,
     root: Path,
 ) -> dict[str, list[Refutation]]:
@@ -208,7 +218,7 @@ def remembered_refutations(
     if oracle is None:
         return {}
 
-    keys = entry_keys(sources, environment_fingerprint(root))
+    keys = entry_keys(sources, environment_fingerprint(rules, root))
     store = RefutationStore.read(store_path)
     held = {
         path: store.entries[path].refutations
@@ -216,7 +226,7 @@ def remembered_refutations(
         if path in store.entries and store.entries[path].key == key
     }
     asked = [source for source in sources if source.path.as_posix() not in held]
-    resolved = refute(asked, oracle)
+    resolved = refute(asked, oracle, rules)
 
     # Every file asked about is recorded, the ones that refuted nothing
     # included: an unrecorded answer is a miss, so a file with no refutations

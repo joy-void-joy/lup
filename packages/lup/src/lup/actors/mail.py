@@ -30,6 +30,22 @@ from lup.channels.stream import Stream
 MESSAGE_FILE = "messages.jsonl"
 DELIVERY_DIR = "delivery"
 
+EVERYONE = "*"
+"""The address every actor answers to, for one message meant for all of them.
+
+A token rather than a blank, because these are different acts and the blank
+spelled both. `to_actor` is optional on more than one door, so leaving it out
+used to broadcast: a worker's report to the humans was delivered into every
+sibling's context and consumed there, and no surface a person reads ever held
+it. An unaddressed message now reaches nobody, which is the safe direction for
+a field somebody forgot.
+
+One record rather than one per member, so an actor spawned after the broadcast
+still receives it — its cursor starts behind the record, and the record is
+still addressed to it. A fan-out at send time cannot do that, because it can
+only name the members that existed when it ran.
+"""
+
 
 class ActorMessage(BaseModel, frozen=True):
     """One thing a door told an actor. This never settles anything.
@@ -137,8 +153,19 @@ class ActorMail:
         position = self.cursors.offset(actor.conversation())
         found = self.stream.read_from(position)
         reaching = actor.addresses()
+
+        def addressed(message: ActorMessage) -> bool:
+            """Whether this actor is a recipient, alone or among everyone.
+
+            The broadcast is matched here rather than by putting a token in
+            every actor's own addresses, so identity stays the answer to "is
+            this me?" and a door asking which actor `*` names correctly gets
+            none.
+            """
+            return message.to_actor == EVERYONE or message.to_actor in reaching
+
         return ActorDelivery(
-            messages=[pair.item for pair in found if pair.item.to_actor in reaching],
+            messages=[pair.item for pair in found if addressed(pair.item)],
             through=found[-1].commit_offset if found else position,
         )
 

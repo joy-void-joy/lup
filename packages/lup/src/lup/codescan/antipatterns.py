@@ -58,7 +58,6 @@ import re
 
 from pydantic import BaseModel, Field
 
-from lup.codescan.behaviour import RULE_ID as MODEL_FREE_FUNCTION_RULE_ID
 from lup.codescan.boundaries import (
     CONSTANT_DECLARATION_RULE_ID,
     LIBRARY_DEFAULT_RULE_ID,
@@ -77,70 +76,109 @@ from lup.codescan.common import (
     RuleSelection,
     RULE_CONTEXTS,
     RuleContext,
+    TypeFamily,
     file_level_ignore,
     ignore_rule_ids,
 )
 from lup.harness.contracts import Spelling, Unsupported
 from lup.policy.kernel.edit import (
-    namedtuple_lines,
-    noqa_lines,
-    pyright_ignore_lines,
-    type_ignore_lines,
-    all_export_lines,
-    bare_except_lines,
-    except_baseexception_lines,
-    global_statement_lines,
-    model_config_lines,
-    private_class_lines,
-    private_function_lines,
-    private_variable_lines,
-    any_type_lines,
-    bare_basemodel_lines,
-    bare_object_lines,
-    frozenset_shape_lines,
-    set_shape_lines,
-    dict_str_object_lines,
-    dict_str_payload_lines,
-    generic_base_lines,
-    typing_generics_lines,
-    typing_union_lines,
-    cast_lines,
-    eval_exec_lines,
-    os_environ_lines,
-    os_file_ops_lines,
-    os_path_lines,
-    os_shell_lines,
-    re_call_lines,
-    string_replace_lines,
-    string_split_lines,
-    string_strip_lines,
-    suppress_lines,
-    utcnow_lines,
-    argparse_lines,
-    dataclass_lines,
-    import_re_lines,
-    pdf_extraction_lines,
-    rich_progress_lines,
-    subprocess_lines,
-    suppress_import_lines,
+    namedtuple_sites,
+    noqa_sites,
+    pyright_ignore_sites,
+    type_ignore_sites,
+    all_export_sites,
+    bare_except_sites,
+    except_baseexception_sites,
+    global_statement_sites,
+    model_config_sites,
+    private_class_sites,
+    private_function_sites,
+    private_variable_sites,
+    any_type_sites,
+    bare_basemodel_sites,
+    bare_object_sites,
+    frozenset_shape_sites,
+    set_shape_sites,
+    dict_str_object_sites,
+    dict_str_payload_sites,
+    generic_base_sites,
+    typing_generics_sites,
+    typing_union_sites,
+    cast_sites,
+    eval_exec_sites,
+    os_environ_sites,
+    os_file_ops_sites,
+    os_path_sites,
+    os_shell_sites,
+    re_call_sites,
+    string_replace_sites,
+    string_split_sites,
+    string_strip_sites,
+    suppress_sites,
+    utcnow_sites,
+    argparse_sites,
+    dataclass_sites,
+    import_re_sites,
+    pdf_extraction_sites,
+    rich_progress_sites,
+    subprocess_sites,
+    suppress_import_sites,
     IGNORE_RE,
     continues_comment_block,
+    lines_of,
     python_tree,
-    default_factory_lines,
-    dict_get_lines,
-    empty_collection_lines,
-    silent_truncation_lines,
+    default_factory_sites,
+    dict_get_sites,
+    empty_collection_sites,
+    silent_truncation_sites,
     suppression_placement,
     suppression_reaches,
-    tuple_shape_lines,
+    tuple_shape_sites,
 )
 
+
+MAPPING_FAMILY = TypeFamily(
+    name="mapping",
+    classes=[
+        "dict",
+        "Mapping",
+        "MutableMapping",
+        "MappingProxyType",
+        "UserDict",
+        "Counter",
+        "OrderedDict",
+        "defaultdict",
+        "ChainMap",
+    ],
+)
+"""Declarations that make a `.get` receiver a keyed lookup rather than a client.
+
+A `TypedDict` is deliberately absent. It is a mapping at runtime, and reading
+an optional key out of one with `.get` is how the language says to — but it
+is also the modelling `dict-get` exists to ask for, so a site that resolves
+to one has already done what the rule wanted and is refuted by saying so.
+"""
+
+TEXT_FAMILY = TypeFamily(
+    name="text",
+    classes=["str", "bytes", "bytearray", "UserString"],
+)
+"""Declarations that make a `.replace` receiver text rather than something else.
+
+The rule is about substituting one piece of text for another inside a string.
+The tree already tells that from the rename wearing the same name, by arity —
+a bound `Path.replace` takes only the destination. What arity cannot reach is
+a two-argument `replace` on a value that is not text at all: a dataframe
+filling missing values, a datetime rebuilt with a field changed. Those spell
+the rule's shape exactly and are not its subject, and only the receiver's own
+declaration says so.
+"""
 
 PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
     AntiPattern(
         id="any-type",
         pattern=re.compile(r"\bAny\b"),
-        matcher=Matcher(select=any_type_lines),
+        matcher=Matcher(select=any_type_sites),
         examples=[
             RuleExample(
                 code="def handle(payload: Any) -> None: ...", verdict="flagged"
@@ -158,7 +196,7 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
     AntiPattern(
         id="type-ignore",
         pattern=re.compile(r"#\s*type:\s*ignore"),
-        matcher=Matcher(select=type_ignore_lines),
+        matcher=Matcher(select=type_ignore_sites),
         examples=[
             RuleExample(
                 code="total = count + label  # type: ignore", verdict="flagged"
@@ -182,7 +220,7 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
     AntiPattern(
         id="pyright-ignore",
         pattern=re.compile(r"#\s*pyright:\s*ignore"),
-        matcher=Matcher(select=pyright_ignore_lines),
+        matcher=Matcher(select=pyright_ignore_sites),
         examples=[
             RuleExample(
                 code="total = count + label  # pyright: ignore", verdict="flagged"
@@ -202,7 +240,7 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
     AntiPattern(
         id="noqa",
         pattern=re.compile(r"#\s*noqa\b"),
-        matcher=Matcher(select=noqa_lines),
+        matcher=Matcher(select=noqa_sites),
         examples=[
             RuleExample(code="import json  # noqa", verdict="flagged"),
             RuleExample(
@@ -219,7 +257,7 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
     ),
     AntiPattern(
         id="generic-base",
-        matcher=Matcher(select=generic_base_lines),
+        matcher=Matcher(select=generic_base_sites),
         strength="strong",
         pattern=re.compile(r"\bGeneric\["),
         examples=[
@@ -230,7 +268,7 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
     ),
     AntiPattern(
         id="typing-union",
-        matcher=Matcher(select=typing_union_lines),
+        matcher=Matcher(select=typing_union_sites),
         strength="strong",
         pattern=re.compile(r"\b(?:Optional|Union)\["),
         examples=[
@@ -248,7 +286,7 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
     ),
     AntiPattern(
         id="typing-generics",
-        matcher=Matcher(select=typing_generics_lines),
+        matcher=Matcher(select=typing_generics_sites),
         strength="strong",
         pattern=re.compile(r"\b(?:List|Dict|Tuple|Set)\["),
         examples=[
@@ -269,7 +307,7 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
     AntiPattern(
         id="all-export",
         pattern=re.compile(r"__all__\s*[=:]"),
-        matcher=Matcher(select=all_export_lines),
+        matcher=Matcher(select=all_export_sites),
         examples=[
             RuleExample(
                 code='__all__ = ["Session", "SessionOpener"]', verdict="flagged"
@@ -286,7 +324,7 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
     AntiPattern(
         id="dict-str-object",
         pattern=re.compile(r"\b(?:dict|Mapping)\[\s*str\s*,\s*object\s*\]"),
-        matcher=Matcher(select=dict_str_object_lines),
+        matcher=Matcher(select=dict_str_object_sites),
         examples=[
             RuleExample(
                 code="def load(row: dict[str, object]) -> None: ...", verdict="flagged"
@@ -311,7 +349,7 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
             r"\b(?:dict|Mapping|MutableMapping)\[\s*str\s*,"
             r"\s*(?:str|int|float|bool|bytes|complex)\b"
         ),
-        matcher=Matcher(select=dict_str_payload_lines),
+        matcher=Matcher(select=dict_str_payload_sites),
         examples=[
             RuleExample(
                 code="def render(fields: dict[str, str]) -> None: ...",
@@ -349,7 +387,24 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         # typed non-mapping receiver takes none, since the audit refutes it.
         id="dict-get",
         pattern=re.compile(r"\.get\s*\("),
-        matcher=Matcher(select=dict_get_lines),
+        matcher=Matcher(select=dict_get_sites),
+        family=MAPPING_FAMILY,
+        refinement=(
+            "The audit resolves what each site's receiver is and keeps the "
+            "finding only where that class is in the mapping family. An HTTP "
+            "client, an SDK object, a vendor type carrying a `get` of its own "
+            "are each refuted, and so is a receiver nothing can be shown "
+            "about — an unannotated parameter, a value the checker infers "
+            "nothing for — because a rule about mappings has nothing to say "
+            "about a value nobody can show is one, and a denial nobody can "
+            "substantiate leaves a directive as the only way past it. A "
+            "`TypedDict` resolves to its own class and is refuted there: it "
+            "is already the modelling this rule asks for. What the tree "
+            "settles it settles alone, so route decorators and calls on an "
+            "imported module never become sites and never reach a checker. "
+            "Where no checker answers at all every finding keeps its "
+            "unresolved verdict and the gate asks instead of refusing."
+        ),
         examples=[
             RuleExample(code='name = payload.get("name")', verdict="flagged"),
             # Reached *through* a module rather than on one, so still a keyed
@@ -376,7 +431,7 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
     AntiPattern(
         id="bare-object",
         pattern=re.compile(r"(?:(?<!\w)(?!_)\w+\s*:|->)\s*object\b"),
-        matcher=Matcher(select=bare_object_lines),
+        matcher=Matcher(select=bare_object_sites),
         examples=[
             RuleExample(
                 code="def store(value: object) -> None: ...", verdict="flagged"
@@ -393,7 +448,7 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
     AntiPattern(
         id="bare-basemodel",
         pattern=re.compile(r"(?:(?<!\[)\b\w+\s*:|->)\s*BaseModel\b(?!\s*[\]|])"),
-        matcher=Matcher(select=bare_basemodel_lines),
+        matcher=Matcher(select=bare_basemodel_sites),
         examples=[
             RuleExample(
                 code="def render(part: BaseModel) -> str: ...", verdict="flagged"
@@ -414,7 +469,7 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         id="tuple-shape",
         strength="strong",
         pattern=re.compile(r"\btuple\["),
-        matcher=Matcher(select=tuple_shape_lines),
+        matcher=Matcher(select=tuple_shape_sites),
         examples=[
             RuleExample(
                 code="def span(text: str) -> tuple[int, int]: ...", verdict="flagged"
@@ -437,7 +492,7 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         # legitimate site — `# lup: ignore[frozenset-shape]` marks it.
         id="frozenset-shape",
         pattern=re.compile(r"\bfrozenset\b"),
-        matcher=Matcher(select=frozenset_shape_lines),
+        matcher=Matcher(select=frozenset_shape_sites),
         examples=[
             RuleExample(
                 code='ROLES: frozenset[str] = frozenset({"worker"})', verdict="flagged"
@@ -461,7 +516,7 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         # its "set" is not a standalone word.
         id="set-shape",
         pattern=re.compile(r"(?<!\.)\bset[\[(]|(?::|->)\s*set\b"),
-        matcher=Matcher(select=set_shape_lines),
+        matcher=Matcher(select=set_shape_sites),
         examples=[
             RuleExample(
                 code="def known(names: set[str]) -> None: ...", verdict="flagged"
@@ -489,7 +544,7 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         # this rule owns the factory spelling and that one owns the seed.
         id="default-factory",
         pattern=re.compile(r"\bdefault_factory\s*="),
-        matcher=Matcher(select=default_factory_lines),
+        matcher=Matcher(select=default_factory_sites),
         examples=[
             RuleExample(
                 code="class Run(BaseModel):\n    steps: list[Step] = Field(default_factory=list)",
@@ -519,7 +574,7 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         # default-factory owns. The lookbehind keeps `==`/`!=`/`<=`/`>=` out.
         id="empty-collection",
         pattern=re.compile(r"(?<![=!<>])=\s*(?:\{\}|\[\]|set\(\))"),
-        matcher=Matcher(select=empty_collection_lines),
+        matcher=Matcher(select=empty_collection_sites),
         examples=[
             RuleExample(
                 code="names = []\nfor row in rows:\n    names.append(row.name)",
@@ -542,7 +597,7 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
     AntiPattern(
         id="cast",
         pattern=re.compile(r"\bcast\s*\("),
-        matcher=Matcher(select=cast_lines),
+        matcher=Matcher(select=cast_sites),
         examples=[
             RuleExample(code="value = cast(str, raw)", verdict="flagged"),
             RuleExample(
@@ -557,7 +612,7 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
     AntiPattern(
         id="import-re",
         pattern=re.compile(r"\bimport\s+re\b|\bfrom\s+re\s+import\b"),
-        matcher=Matcher(select=import_re_lines),
+        matcher=Matcher(select=import_re_sites),
         examples=[
             RuleExample(code="import re", verdict="flagged"),
             RuleExample(code="from re import compile", verdict="flagged"),
@@ -572,7 +627,7 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         pattern=re.compile(
             r"\bre\.(compile|search|match|fullmatch|sub|findall|split)\s*\("
         ),
-        matcher=Matcher(select=re_call_lines),
+        matcher=Matcher(select=re_call_sites),
         examples=[
             RuleExample(code="host = re.search(pattern, url)", verdict="flagged"),
             RuleExample(code="host = urlparse(url).netloc", verdict="cleared"),
@@ -591,7 +646,21 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         # rules stay coherent: this one is only about string surgery.
         id="string-replace",
         pattern=re.compile(r"(?<!\bos)(?<![Pp]ath)\.replace\s*\("),
-        matcher=Matcher(select=string_replace_lines),
+        matcher=Matcher(select=string_replace_sites),
+        family=TEXT_FAMILY,
+        refinement=(
+            "The hook decides this one by arity, which tells text surgery "
+            "from the file rename wearing the same name and reaches no "
+            "further. The audit resolves what each site's receiver is and "
+            "keeps the finding only where that class is text. A dataframe "
+            "filling missing values, a datetime rebuilt with one field "
+            "changed, a vendor object carrying a `replace` of its own all "
+            "spell this rule's shape and none of them is its subject, so "
+            "each is refuted — as is a receiver nothing can be shown about, "
+            "since a rule about strings has nothing to say about a value "
+            "nobody can show is one. Where no checker answers, the arity "
+            "verdict stands alone and the gate asks rather than refusing."
+        ),
         examples=[
             RuleExample(code='name = source.replace(".py", ".pyi")', verdict="flagged"),
             RuleExample(
@@ -621,7 +690,7 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         # lookahead exempts it.
         id="string-split",
         pattern=re.compile(r"\.r?split\s*\((?!\s*\))|\.r?partition\s*\("),
-        matcher=Matcher(select=string_split_lines),
+        matcher=Matcher(select=string_split_sites),
         examples=[
             RuleExample(code='host = url.split("/")[2]', verdict="flagged"),
             # Partition always takes a separator, so the variant is no dodge.
@@ -642,7 +711,7 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         # negative lookahead exempts it, mirroring string-split's argless rule.
         id="string-strip",
         pattern=re.compile(r"\.[lr]?strip\s*\((?!\s*\))"),
-        matcher=Matcher(select=string_strip_lines),
+        matcher=Matcher(select=string_strip_sites),
         examples=[
             RuleExample(code='name = field.strip("<>")', verdict="flagged"),
             # Argless stripping is whitespace framing, which has no parser.
@@ -662,7 +731,7 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         # the digests, splits, and sniffs that also wear it.
         id="silent-truncation",
         pattern=re.compile(r"\[\s*:\s*(?:\d[\d_]*\d|[A-Z][A-Z0-9_]{2,})\s*\]"),
-        matcher=Matcher(select=silent_truncation_lines),
+        matcher=Matcher(select=silent_truncation_sites),
         examples=[
             RuleExample(code="preview = body[:200]", verdict="flagged"),
             RuleExample(code="preview = body[:SNIPPET_LENGTH]", verdict="flagged"),
@@ -683,7 +752,7 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
     AntiPattern(
         id="bare-except",
         pattern=re.compile(r"\bexcept\s*:"),
-        matcher=Matcher(select=bare_except_lines),
+        matcher=Matcher(select=bare_except_sites),
         examples=[
             RuleExample(code="try:\n    load()\nexcept:\n    pass", verdict="flagged"),
             RuleExample(
@@ -696,7 +765,7 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
     AntiPattern(
         id="except-baseexception",
         pattern=re.compile(r"\bexcept\s+BaseException\b"),
-        matcher=Matcher(select=except_baseexception_lines),
+        matcher=Matcher(select=except_baseexception_sites),
         examples=[
             RuleExample(
                 code="try:\n    load()\nexcept BaseException:\n    raise",
@@ -711,7 +780,7 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
     AntiPattern(
         id="suppress",
         pattern=re.compile(r"\bcontextlib\.suppress\b"),
-        matcher=Matcher(select=suppress_lines),
+        matcher=Matcher(select=suppress_sites),
         examples=[
             RuleExample(
                 code="with contextlib.suppress(KeyError):\n    load()",
@@ -729,7 +798,7 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
     AntiPattern(
         id="suppress-import",
         pattern=re.compile(r"\bfrom\s+contextlib\s+import\b.*\bsuppress\b"),
-        matcher=Matcher(select=suppress_import_lines),
+        matcher=Matcher(select=suppress_import_sites),
         examples=[
             RuleExample(code="from contextlib import suppress", verdict="flagged"),
             RuleExample(
@@ -745,7 +814,7 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         pattern=re.compile(
             r"@dataclass|\bimport\s+dataclasses\b|\bfrom\s+dataclasses\s+import\b"
         ),
-        matcher=Matcher(select=dataclass_lines),
+        matcher=Matcher(select=dataclass_sites),
         examples=[
             RuleExample(code="from dataclasses import dataclass", verdict="flagged"),
             RuleExample(
@@ -761,7 +830,7 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         # collections.namedtuple factory alike.
         id="namedtuple",
         pattern=re.compile(r"\bNamedTuple\b|\bnamedtuple\b"),
-        matcher=Matcher(select=namedtuple_lines),
+        matcher=Matcher(select=namedtuple_sites),
         examples=[
             RuleExample(
                 code="class Span(NamedTuple):\n    start: int", verdict="flagged"
@@ -782,7 +851,7 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         # inside a docstring or comment is already blank by the time it matches.
         id="model-config",
         pattern=re.compile(r"^\s*model_config\s*[:=]"),
-        matcher=Matcher(select=model_config_lines),
+        matcher=Matcher(select=model_config_sites),
         examples=[
             RuleExample(
                 code="class Run(BaseModel):\n    model_config = ConfigDict(frozen=True)",
@@ -807,7 +876,7 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
     AntiPattern(
         id="subprocess",
         pattern=re.compile(r"\bimport\s+subprocess\b|\bfrom\s+subprocess\s+import\b"),
-        matcher=Matcher(select=subprocess_lines),
+        matcher=Matcher(select=subprocess_sites),
         examples=[
             RuleExample(code="import subprocess", verdict="flagged"),
             RuleExample(code="import sh", verdict="cleared"),
@@ -817,7 +886,7 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
     AntiPattern(
         id="os-shell",
         pattern=re.compile(r"\bos\.(?:system|popen|exec[lv]\w*)\s*\("),
-        matcher=Matcher(select=os_shell_lines),
+        matcher=Matcher(select=os_shell_sites),
         examples=[
             RuleExample(code='os.system("git status")', verdict="flagged"),
             RuleExample(code="sh.git.status()", verdict="cleared"),
@@ -829,7 +898,7 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
     AntiPattern(
         id="argparse",
         pattern=re.compile(r"\bimport\s+argparse\b|\bfrom\s+argparse\s+import\b"),
-        matcher=Matcher(select=argparse_lines),
+        matcher=Matcher(select=argparse_sites),
         examples=[
             RuleExample(code="import argparse", verdict="flagged"),
             RuleExample(code="import typer", verdict="cleared"),
@@ -839,7 +908,7 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
     AntiPattern(
         id="rich-progress",
         pattern=re.compile(r"\brich\.progress\b|\bfrom\s+rich\.progress\s+import\b"),
-        matcher=Matcher(select=rich_progress_lines),
+        matcher=Matcher(select=rich_progress_sites),
         examples=[
             RuleExample(code="from rich.progress import track", verdict="flagged"),
             RuleExample(code="from tqdm import tqdm", verdict="cleared"),
@@ -851,7 +920,7 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
     AntiPattern(
         id="os-path",
         pattern=re.compile(r"\bos\.path\b"),
-        matcher=Matcher(select=os_path_lines),
+        matcher=Matcher(select=os_path_sites),
         examples=[
             RuleExample(code="parent = os.path.dirname(source)", verdict="flagged"),
             RuleExample(code="parent = Path(source).parent", verdict="cleared"),
@@ -870,7 +939,7 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
             r"removedirs|remove|unlink|rename|renames|replace|link|symlink|"
             r"readlink|stat|lstat|chmod|chown)\s*\("
         ),
-        matcher=Matcher(select=os_file_ops_lines),
+        matcher=Matcher(select=os_file_ops_sites),
         examples=[
             RuleExample(code="os.mkdir(destination)", verdict="flagged"),
             RuleExample(code="Path(destination).mkdir()", verdict="cleared"),
@@ -883,7 +952,7 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
     AntiPattern(
         id="os-environ",
         pattern=re.compile(r"\bos\.(?:environ|getenv)\b"),
-        matcher=Matcher(select=os_environ_lines),
+        matcher=Matcher(select=os_environ_sites),
         examples=[
             RuleExample(code='token = os.environ["LUP_TOKEN"]', verdict="flagged"),
             RuleExample(code='token = os.getenv("LUP_TOKEN")', verdict="flagged"),
@@ -894,7 +963,7 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
     AntiPattern(
         id="eval-exec",
         pattern=re.compile(r"(?<![.\w])(?:eval|exec)\s*\("),
-        matcher=Matcher(select=eval_exec_lines),
+        matcher=Matcher(select=eval_exec_sites),
         examples=[
             RuleExample(code="value = eval(source)", verdict="flagged"),
             RuleExample(code="value = ast.literal_eval(source)", verdict="cleared"),
@@ -907,7 +976,7 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
     ),
     AntiPattern(
         id="utcnow",
-        matcher=Matcher(select=utcnow_lines),
+        matcher=Matcher(select=utcnow_sites),
         strength="strong",
         pattern=re.compile(r"\butcnow\s*\("),
         examples=[
@@ -919,7 +988,7 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
     AntiPattern(
         id="global-statement",
         pattern=re.compile(r"^global\s+\w"),
-        matcher=Matcher(select=global_statement_lines),
+        matcher=Matcher(select=global_statement_sites),
         examples=[
             RuleExample(
                 code="def install(session):\n    global CURRENT\n    CURRENT = session",
@@ -942,7 +1011,7 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
     AntiPattern(
         id="private-function",
         pattern=re.compile(r"\bdef\s+_[a-zA-Z]"),
-        matcher=Matcher(select=private_function_lines),
+        matcher=Matcher(select=private_function_sites),
         examples=[
             RuleExample(code="def _resolve(name: str) -> str: ...", verdict="flagged"),
             RuleExample(code="def resolve(name: str) -> str: ...", verdict="cleared"),
@@ -953,7 +1022,7 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
     AntiPattern(
         id="private-class",
         pattern=re.compile(r"\bclass\s+_[A-Z]"),
-        matcher=Matcher(select=private_class_lines),
+        matcher=Matcher(select=private_class_sites),
         examples=[
             RuleExample(code="class _Cache: ...", verdict="flagged"),
             RuleExample(code="class Cache: ...", verdict="cleared"),
@@ -963,7 +1032,7 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
     AntiPattern(
         id="private-variable",
         pattern=re.compile(r"^_[a-zA-Z]\w*\s*(?::[^=]*)?=(?!=)(?!.*,\s*$)"),
-        matcher=Matcher(select=private_variable_lines),
+        matcher=Matcher(select=private_variable_sites),
         examples=[
             RuleExample(code="_CACHE = Cache()", verdict="flagged"),
             RuleExample(code="CACHE = Cache()", verdict="cleared"),
@@ -1018,7 +1087,7 @@ def pdf_extraction_rule(document_reader: Spelling) -> AntiPattern:
             r"\b(?:import|from)\s+"
             r"(?:fitz|pymupdf|pypdf|PyPDF2|PyPDF4|pdfplumber|pdfminer|pypdfium2)\b"
         ),
-        matcher=Matcher(select=pdf_extraction_lines),
+        matcher=Matcher(select=pdf_extraction_sites),
         examples=[
             RuleExample(code="import pypdf", verdict="flagged"),
             RuleExample(code="from pdfminer import high_level", verdict="flagged"),
@@ -1235,7 +1304,6 @@ FOREIGN_RULE_IDS: frozenset[str] = frozenset(  # lup: ignore[frozenset-shape]
         ABC_CAPABILITY_RULE_ID,
         CONSTANT_DECLARATION_RULE_ID,
         LIBRARY_DEFAULT_RULE_ID,
-        MODEL_FREE_FUNCTION_RULE_ID,
         NATIVE_SPELLING_RULE_ID,
         OWN_MODEL_DISPATCH_RULE_ID,
         SEAM_BOUNDARY_RULE_ID,
@@ -1316,7 +1384,6 @@ def antipattern_set_for(
 
 
 # `AntiPatternSet.for_suffix` is the operation; this binds the default table to it.
-# lup: ignore[model-free-function] — the suffix is the subject, the set its table
 def patterns_for_suffix(
     suffix: str, rules: AntiPatternSet | None = None
 ) -> list[AntiPattern] | None:
@@ -1341,7 +1408,7 @@ def selected_lines(text: str, patterns: list[AntiPattern]) -> dict[str, set[int]
     """
     parses = python_tree(text) is not None
     return {
-        pattern.id: pattern.matcher.select(text) if parses else set()
+        pattern.id: lines_of(pattern.matcher.select(text)) if parses else set()
         for pattern in patterns
         if pattern.matcher is not None and (parses or pattern.strength == "strong")
     }
