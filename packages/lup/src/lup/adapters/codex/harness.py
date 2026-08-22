@@ -427,6 +427,16 @@ def codex_project_config(
     relay or credential arrives as an environment variable gets neither
     unless the config names it; the other runtime hands its servers the whole
     environment and the same declaration is already satisfied there.
+
+    ``default_tools_approval_mode`` grants every declared server outright,
+    which is the same decision the other runtime's settings artifact already
+    compiles into its served-tool grants, derived from the same fact: a
+    server named in a plugin here is this project's own code, wired in
+    deliberately, so asking per call would make the declaration a suggestion.
+    Undeclared, the two runtimes disagreed on it — a session opened with no
+    operator to ask held every server it had been given and could call none
+    of them, refusing each with its approval policy rather than with anything
+    naming the servers.
     """
     document = tomlkit.document()
     features = tomlkit.table()
@@ -441,6 +451,7 @@ def codex_project_config(
             entry["args"] = server.command_line(spellings)
             if server.env_vars:
                 entry["env_vars"] = server.env_vars
+            entry["default_tools_approval_mode"] = "approve"
             servers[server.name] = entry
     if servers:
         document["mcp_servers"] = servers
