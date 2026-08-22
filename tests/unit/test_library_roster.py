@@ -70,3 +70,23 @@ def test_a_tiered_package_is_not_owed_a_roster_row(tmp_path: Path) -> None:
     )
 
     assert len(roster.table(tmp_path).rows) == 1
+
+
+def test_a_dotted_directory_is_owed_no_row(tmp_path: Path) -> None:
+    """A tool's scratch directory beside the source is not a package.
+
+    The roster walks the filesystem rather than git, so anything left beside
+    the library is visible to it — and a checkout that has run an agent
+    carries `.claude` there, gitignored and untracked. Python cannot import a
+    dotted name, so no roster could ever owe it a row; generation failing to
+    ask what an editor's scratch directory solves is the bug this pins.
+    """
+    subtree = library_at(tmp_path, "ordinary")
+    (subtree / ".claude" / ".cc-writes").mkdir(parents=True)
+    (subtree / ".venv").mkdir()
+    roster = Roster(
+        entries=[RosterEntry(package="ordinary", solves="The only row owed.")]
+    )
+
+    assert roster.owed(tmp_path) == ["ordinary"]
+    assert len(roster.table(tmp_path).rows) == 1
