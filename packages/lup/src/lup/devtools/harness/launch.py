@@ -200,8 +200,15 @@ class LaunchMode(BaseModel, frozen=True, arbitrary_types_allowed=True):
     thing a mode usually adds — a tool server, a hook, a document — has to
     reach the session through an artifact the runtime reads at startup."""
 
-    model: str | None = None
-    """The native model this kind of session runs on, absent an explicit one."""
+    model: Callable[[str], str | None] | None = None
+    """What this kind of session runs on, given the runtime that will run it.
+
+    Per runtime for the reason :attr:`arguments` is. A model name is one
+    provider's vocabulary, so a mode declaring "the best available" means a
+    different word on each, and one name shared between them reaches the
+    other as a model that does not exist — a failure that arrives from the
+    provider's API mid-session, naming neither the mode nor the launch that
+    chose it. Absent an explicit ``--model``, which still wins."""
 
     record_root: Callable[[], Path] | None = None
     """Where this mode's transcripts are rooted, resolved at launch.
@@ -224,6 +231,10 @@ class LaunchMode(BaseModel, frozen=True, arbitrary_types_allowed=True):
     def command_words(self, provider: str) -> list[str]:
         """Words this mode contributes to one runtime's command line, if any."""
         return self.arguments(provider) if self.arguments is not None else []
+
+    def native_model(self, provider: str) -> str | None:
+        """What this mode runs one runtime on, when it names anything at all."""
+        return self.model(provider) if self.model is not None else None
 
     def transcript_root(self) -> Path | None:
         """Where this launch keeps its record, resolved now, not at import."""
@@ -564,7 +575,9 @@ def launch_claude(
     # A mode's model is a default rather than a fixture: it says what this kind
     # of session runs on when nobody said otherwise, and an explicit --model
     # still wins, because overriding the model is why a caller passes one.
-    selected_model = model or (mode.model if mode is not None else None)
+    selected_model = model or (
+        mode.native_model("claude") if mode is not None else None
+    )
     if selected_model is not None:
         arguments.extend(["--model", selected_model])
     root = project_root()
@@ -649,7 +662,7 @@ def launch_codex(
     arguments: list[str] = list(envelope)
     if profile is not None:
         arguments.extend(["--profile", profile])
-    selected_model = model or (mode.model if mode is not None else None)
+    selected_model = model or (mode.native_model("codex") if mode is not None else None)
     if selected_model is not None:
         arguments.extend(["--model", selected_model])
     arguments.extend(mode.command_words("codex") if mode is not None else [])

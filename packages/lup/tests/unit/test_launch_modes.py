@@ -57,9 +57,27 @@ def test_a_mode_carries_its_model_and_record_root() -> None:
         name="syra",
         help="research session",
         targets=NativeTargets(builders={}),
-        model="fable",
+        model=lambda provider: "fable" if provider == "claude" else "gpt-5.6-sol",
         record_root=lambda: Path("notes/research/sessions"),
     )
-    assert declared.model == "fable"
+    assert declared.native_model("claude") == "fable"
     assert declared.record_root is not None
     assert declared.record_root() == Path("notes/research/sessions")
+
+
+def test_a_mode_names_each_runtime_a_model_in_that_runtime_s_own_words() -> None:
+    """One name shared between them reaches the other as an unknown model."""
+    declared = LaunchMode(
+        name="syra",
+        help="research session",
+        targets=NativeTargets(builders={}),
+        model=lambda provider: "fable" if provider == "claude" else "gpt-5.6-sol",
+    )
+    assert declared.native_model("claude") != declared.native_model("codex")
+
+
+def test_a_mode_naming_no_model_leaves_every_runtime_its_own_default() -> None:
+    """Absent a declaration the launcher passes no --model at all."""
+    declared = mode("audit")
+    assert declared.native_model("claude") is None
+    assert declared.native_model("codex") is None
