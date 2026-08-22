@@ -155,6 +155,37 @@ def test_restore_narrowed_keeps_only_the_outstanding_part(repo: Path) -> None:
     assert "across the lines below" not in text
 
 
+def test_withdraw_removes_a_note_and_commits_why(repo: Path) -> None:
+    """A withdrawal has to leave behind what its absence otherwise lacks.
+
+    Conversion suits a note that was answered. One that was mistaken has no
+    answer to claim, so the reason takes the claim's place — committed with
+    the note's own words so the two stay together where a later reader looks.
+    """
+    comments.withdraw_notes(["code.py:6"], "delta is generated; renaming it is moot")
+
+    text = (repo / "code.py").read_text(encoding="utf-8")
+    assert "rename delta" not in text
+    assert "delta = 4" in text  # the code the note trailed is untouched
+    message = sh.Command("git")(
+        "-C", str(repo), "log", "-1", "--format=%B", _tty_out=False
+    )
+    assert "delta is generated; renaming it is moot" in message
+    assert "rename delta" in message  # the withdrawn words survive in history
+
+
+def test_withdraw_refuses_to_sweep_up_other_uncommitted_work(repo: Path) -> None:
+    """The commit must be the withdrawal and nothing else, or it proves nothing."""
+    (repo / "code.py").write_text(
+        PY_SOURCE.replace("alpha = 1", "alpha = 99"), encoding="utf-8"
+    )
+
+    with pytest.raises(typer.Exit):
+        comments.withdraw_notes(["code.py:6"], "unrelated")
+
+    assert "rename delta" in (repo / "code.py").read_text(encoding="utf-8")
+
+
 DEFER_SOURCE = """\
 epsilon = 5
 # lup: defer[until the cache rework lands]: revisit epsilon

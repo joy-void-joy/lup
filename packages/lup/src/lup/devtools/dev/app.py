@@ -633,6 +633,20 @@ def create_dev_app(
                 help="With --restore and one target: the still-outstanding text",
             ),
         ] = None,
+        withdraw: Annotated[
+            bool,
+            typer.Option(
+                "--withdraw",
+                help="Retract the notes named as file:line; needs --reason",
+            ),
+        ] = False,
+        reason: Annotated[
+            str | None,
+            typer.Option(
+                "--reason",
+                help="With --withdraw: why the note should not have been written",
+            ),
+        ] = None,
     ) -> None:
         """List unresolved `# lup:` feedback comments, or act on specific ones.
 
@@ -642,13 +656,26 @@ def create_dev_app(
 
         With --retire or --restore, applies the verify-solved pass's verdicts to
         `# lup: solved:` claims — and only to claims: any other note is refused.
+
+        With --withdraw and --reason, retracts notes that should not have been
+        written at all. Conversion to `# lup: solved:` is for a note that was
+        answered; a note that was mistaken has no answer to claim, and the
+        reason is committed alongside the removal in its place.
         """
-        if sum([clear, retire, restore]) > 1:
-            typer.echo("--clear, --retire, and --restore are exclusive", err=True)
+        if sum([clear, retire, restore, withdraw]) > 1:
+            typer.echo(
+                "--clear, --retire, --restore, and --withdraw are exclusive", err=True
+            )
             raise typer.Exit(2)
         if narrow is not None and (not restore or len(targets or []) != 1):
             typer.echo("--narrow needs --restore and exactly one target", err=True)
             raise typer.Exit(2)
+        if (reason is not None) != withdraw:
+            typer.echo("--withdraw and --reason require each other", err=True)
+            raise typer.Exit(2)
+        if withdraw and reason is not None:
+            comments.withdraw_notes(targets or [], reason)
+            return
         if retire or restore:
             comments.revise_claims(targets or [], retire=retire, narrow=narrow)
             return
