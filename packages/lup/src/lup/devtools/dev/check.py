@@ -265,7 +265,10 @@ def run_checks(
     if blocking:
         typer.echo(f"antipatterns: FAIL ({len(blocking)} finding(s){refined})")
         for finding in blocking:
-            typer.echo(f"  {finding.file}:{finding.line} [{finding.kind}]")
+            typer.echo(
+                f"  {finding.file}:{finding.line} "
+                f"[{finding.kind} {finding.rule_id or '(bare)'}] {finding.message}"
+            )
         results.append(CheckOutcome(name="antipatterns", passed=False))
     else:
         advisory = len(scoped.owned) - len(blocking)
@@ -274,7 +277,8 @@ def run_checks(
         results.append(CheckOutcome(name="antipatterns", passed=True))
     for finding in scoped.outside:
         typer.echo(
-            f"  outside this scope: {finding.file}:{finding.line} [{finding.kind}]"
+            f"  outside this scope: {finding.file}:{finding.line} "
+            f"[{finding.kind} {finding.rule_id or '(bare)'}] {finding.message}"
         )
 
     breaches = scan_boundaries(project)
