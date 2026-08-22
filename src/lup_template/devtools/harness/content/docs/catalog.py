@@ -44,8 +44,9 @@ def reference_pages(root: Path) -> list[models.Document]:
     so composing them is what this root is for: the pages stay portable while
     the table they publish cannot claim a decoded set that stopped being true.
 
-    Takes the checkout because the library page walks it for its own package
-    roster — the same reason :func:`project_pages` does, and the same reason
+    Takes the checkout because this repository is the tree holding lup's own
+    suite, which the capability page resolves its fixture citations against —
+    the same reason :func:`project_pages` takes one, and the same reason
     neither is a module-level constant.
     """
     return library_documents(

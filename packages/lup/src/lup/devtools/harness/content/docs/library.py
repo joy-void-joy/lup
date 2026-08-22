@@ -17,6 +17,19 @@ from lup.devtools.harness.content.application import ApplicationLayout
 from lup.devtools.harness.content.tree import top_level_names
 from lup.markdown import CodeCell, PlainCell
 
+LIBRARY_PACKAGE = Path(__file__).resolve().parents[4]
+"""This library's own package directory, wherever the reader installed it from.
+
+Derived rather than resolved against the reading project's checkout, because
+the two answers differ for everyone who is not lup itself. A project that
+vendors lup at ``packages/lup`` walks the same tree either way; a project that
+takes it as a distribution has no such subtree at all, and a page that looked
+for one failed generation rather than describing the library that project
+actually runs. Asking the imported package where it lives answers for both,
+and answers about the code in use rather than about a directory that may be a
+different revision — which is the stronger claim the roster wanted anyway.
+"""
+
 
 class RosterEntry(BaseModel, frozen=True):
     """One top-level entry, and the authored answer to why it is one."""
@@ -152,7 +165,22 @@ class Roster(BaseModel, frozen=True):
     """
 
     subtree: str = "packages/lup/src/lup"
-    """Where the package this describes lives, relative to a checkout."""
+    """Where the package this describes lives inside lup's own repository.
+
+    Prose only: what the walk reads is :attr:`source`, which is where the
+    reader's own copy actually sits. This is the path a reader opens to find
+    the source, which is a fact about lup's repository rather than theirs.
+    """
+
+    source: Path = LIBRARY_PACKAGE
+    """The package directory this roster is checked against.
+
+    A default rather than a constant, for the reason every default here is
+    one: a project that vendors lup somewhere else describes the copy it
+    actually has. It is also what lets the drift check be tested at all — a
+    walk that could only read its own installation has no way to be shown a
+    tree that has drifted.
+    """
 
     tiered: list[TieredEntry] = [
         TieredEntry(package="types", section="tier 1"),
@@ -165,16 +193,16 @@ class Roster(BaseModel, frozen=True):
     ]
     """Entries a section above the roster describes at length instead."""
 
-    def owed(self, root: Path) -> list[str]:
-        """Every entry beneath ``subtree`` that this roster has to describe."""
+    def owed(self) -> list[str]:
+        """Every entry in the library's own package this roster has to describe."""
         elsewhere = {entry.package: entry.section for entry in self.tiered}
         return [
             name
-            for name in top_level_names(root, self.subtree)
+            for name in top_level_names(self.source.parent, self.source.name)
             if name not in elsewhere
         ]
 
-    def table(self, root: Path) -> models.MarkdownTable:
+    def table(self) -> models.MarkdownTable:
         """The roster as a table, refusing any disagreement with the tree.
 
         Raises rather than rendering a partial roster: a page that quietly
@@ -182,16 +210,16 @@ class Roster(BaseModel, frozen=True):
         difficulty. Generation fails loudly instead, naming what to write or
         what to delete.
         """
-        owed = self.owed(root)
+        owed = self.owed()
         described = {entry.package: entry.solves for entry in self.entries}
         if missing := [name for name in owed if name not in described]:
             raise ValueError(
-                f"{self.subtree} carries {missing}, which this page neither "
+                f"{self.source} carries {missing}, which this page neither "
                 "tiers nor describes: write a row saying what each solves"
             )
         if vanished := [name for name in described if name not in owed]:
             raise ValueError(
-                f"the roster describes {vanished}, which {self.subtree} no "
+                f"the roster describes {vanished}, which {self.source} no "
                 "longer carries: delete those rows"
             )
         return models.MarkdownTable(
@@ -207,13 +235,13 @@ LIBRARY = Roster()
 """This library's own roster, checked against this library's own tree."""
 
 
-def document(layout: ApplicationLayout, root: Path) -> models.PromptDocument:
+def document(layout: ApplicationLayout) -> models.PromptDocument:
     """The library guide, naming the application half by its own name.
 
-    Takes the checkout rather than finding one, for the same reason the
-    template page does: a document that resolved its own root would read the
-    filesystem at import, which makes importing this module — and so every
-    CLI command that composes it — fail anywhere but inside a lup project.
+    Takes no checkout, because the one tree it walks is the library's own and
+    :data:`LIBRARY_PACKAGE` already names it. The filesystem is still read at
+    call time rather than at import, so composing this module stays possible
+    from anywhere.
     """
     return models.PromptDocument(
         source=__name__,
@@ -415,14 +443,16 @@ Every remaining top-level entry, and what makes it one. `types` is tier 1
 above and `__init__` is the front door; the rest each answer a question no
 sibling answers.
 
-Which entries this table has to cover is walked from `{LIBRARY.subtree}` when
-the page is generated, and generation fails naming any package that is neither
-described here nor tiered above. So a package added to the library cannot be
-quietly missing from its own roster — the way six of them once were.
+Which entries this table has to cover is walked from the installed `lup`
+package when the page is generated — `{LIBRARY.subtree}` in this repository,
+and wherever a downstream project resolved the dependency to. Generation fails
+naming any package that is neither described here nor tiered above, so a
+package added to the library cannot be quietly missing from its own roster —
+the way six of them once were.
 
 """
             ),
-            LIBRARY.table(root),
+            LIBRARY.table(),
             models.TextPart(
                 text=rf"""
 ### The target layout

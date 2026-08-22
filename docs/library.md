@@ -196,10 +196,12 @@ Every remaining top-level entry, and what makes it one. `types` is tier 1
 above and `__init__` is the front door; the rest each answer a question no
 sibling answers.
 
-Which entries this table has to cover is walked from `packages/lup/src/lup` when
-the page is generated, and generation fails naming any package that is neither
-described here nor tiered above. So a package added to the library cannot be
-quietly missing from its own roster — the way six of them once were.
+Which entries this table has to cover is walked from the installed `lup`
+package when the page is generated — `packages/lup/src/lup` in this repository,
+and wherever a downstream project resolved the dependency to. Generation fails
+naming any package that is neither described here nor tiered above, so a
+package added to the library cannot be quietly missing from its own roster —
+the way six of them once were.
 
 | Package | Solves |
 | --- | --- |

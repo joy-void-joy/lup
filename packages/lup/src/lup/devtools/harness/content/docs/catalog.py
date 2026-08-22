@@ -59,7 +59,7 @@ def library_documents(
     claude_decodes: list[str],
     codex_decodes: list[str],
     layout: ApplicationLayout,
-    checkout: Path,
+    library_checkout: Path | None,
     root: str = LIBRARY_DOCS_ROOT,
 ) -> list[models.Document]:
     """Every page lup publishes, in the order the index teaches them.
@@ -71,13 +71,15 @@ def library_documents(
     composing the concrete runtimes may name — reading it here would put a
     native implementation behind every page this module publishes.
 
-    ``checkout`` is the tree the library page walks for its own package
-    roster and the capability page resolves its cited fixtures against,
-    threaded in for the same reason the project pages take one: no module
-    here may read a filesystem at import.
+    ``library_checkout`` is the tree holding lup's own suite: lup's checkout
+    where these pages are generated from it, and ``None`` for a project that
+    took lup as a distribution and has none of its fixtures. Every page here
+    describes the library, so the reading project's own tree is not among
+    what any of them needs — and passing one was what made two of these pages
+    demand paths only lup's repository has.
     """
     return [
-        published("library", "library.md", library.document(layout, checkout), root),
+        published("library", "library.md", library.document(layout), root),
         published(
             "harness",
             "harness.md",
@@ -99,7 +101,7 @@ def library_documents(
         published(
             "native_capabilities",
             "native-capabilities.md",
-            native_capabilities.document(checkout),
+            native_capabilities.document(library_checkout),
             root,
         ),
         published(

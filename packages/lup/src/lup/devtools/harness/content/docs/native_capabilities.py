@@ -21,17 +21,52 @@ from lup.devtools.harness.evidence import (
 from lup.markdown import CodeCell
 
 
-def document(checkout: Path) -> models.PromptDocument:
-    """This page, with every version read from the ledger the doctor uses."""
+def cited_library_fixture(library: Path | None, path: str) -> str:
+    """One of lup's own fixture citations, checked where the tree holds it."""
+    return path if library is None else cited_fixture(library, path)
+
+
+LIBRARY_RUNTIME_FIXTURES = "packages/lup/tests/unit/test_adapter_runtime.py"
+"""Where the adapter-runtime fixtures live in lup's repository.
+
+A default rather than a constant, for the reason :data:`LIBRARY_DOCS_ROOT` is
+one: a project that vendors lup elsewhere cites the copy it actually has.
+"""
+
+LIBRARY_DISPATCHER_FIXTURES = "tests/unit/test_harness_compilation.py"
+"""Where the compiled-dispatcher fixtures live in lup's repository.
+
+Lup's rather than the reading project's, even though the path is repository-
+relative and a project has a `tests/unit/` of its own. What these pin is the
+dispatcher lup compiles, which a downstream inherits whole — so the evidence
+for it sits where the compilation does, and a project that never wrote such a
+fixture was citing a file it did not have.
+"""
+
+
+def document(
+    library: Path | None,
+    runtime_fixtures_at: str = LIBRARY_RUNTIME_FIXTURES,
+    dispatcher_fixtures_at: str = LIBRARY_DISPATCHER_FIXTURES,
+) -> models.PromptDocument:
+    """This page, with every version read from the ledger the doctor uses.
+
+    ``library`` is the tree holding lup's own suite: its own checkout where
+    the page is generated from lup, and ``None`` for a project that took lup
+    as a distribution, where the fixtures are simply not present — a built
+    distribution ships the code they pin and none of them.
+
+    Both citations still name where the evidence is, which is a fact about
+    lup's repository and true read from anywhere. Existence is checked only
+    against a tree that could hold them, so the check keeps failing loudly
+    where a fixture could actually move, and no downstream is asked to prove
+    a path its dependency never gave it.
+    """
     claude_cli = accepted_version("claude-cli")
     claude_sdk = accepted_version("claude-agent-sdk")
     codex_cli = accepted_version("codex-cli")
-    runtime_fixtures = cited_fixture(
-        checkout, "packages/lup/tests/unit/test_adapter_runtime.py"
-    )
-    dispatcher_fixtures = cited_fixture(
-        checkout, "tests/unit/test_harness_compilation.py"
-    )
+    runtime_fixtures = cited_library_fixture(library, runtime_fixtures_at)
+    dispatcher_fixtures = cited_library_fixture(library, dispatcher_fixtures_at)
     return models.PromptDocument(
         source=__name__,
         parts=[
