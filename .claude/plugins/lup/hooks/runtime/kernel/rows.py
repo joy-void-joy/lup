@@ -110,23 +110,17 @@ class AntiPatternRow(TypedDict):
     pattern: str
     message: str
     context: str
-    refiner: str
-    """The exemption function this rule declares, or ``""`` where it declares none.
-
-    Named rather than carried, because a row crossing into the hermetic
-    runtime is primitive and a callable is not. The association lives at the
-    declaration and travels here, so the gate resolves a rule's refiner from
-    the row it is already matching on instead of from a second list of ids
-    that has to be kept in step with it.
-    """
     matcher: str
     """The AST selector this rule declares, or ``""`` where it declares none.
 
-    Named rather than carried, for the reason ``refiner`` is: a row crossing
-    into the hermetic runtime is primitive and a callable is not. Where a row
-    names one and the source parses, the selector decides the rule and
-    ``pattern`` is not consulted; where the source will not parse, the
-    pattern is all there is and it decides alone.
+    Named rather than carried, because a row crossing into the hermetic
+    runtime is primitive and a callable is not. The association lives at the
+    declaration and travels here, so the gate resolves a rule's selector from
+    the row it is already matching on instead of from a second list of ids
+    that has to be kept in step with it. Where a row names one and the source
+    parses, the selector decides the rule and ``pattern`` is not consulted;
+    where the source will not parse, the pattern is all there is and it
+    decides alone.
     """
     strength: str
     """"strong" when no directive may silence this rule, "soft" when one may.
@@ -137,9 +131,12 @@ class AntiPatternRow(TypedDict):
     resolution: str
     """"required" when this rule's verdict turns on a resolved declaration.
 
-    The regex is wider than the defect for these, and what settles the
-    difference is what a receiver's declaration resolves to — which the audit
-    has a checker for and this gate may not. Denying one unresolved states a
+    The tree is wider than the defect for these, and what settles the
+    difference is what a receiver's declaration resolves to. The kernel never
+    resolves anything itself — it is a pure function of its inputs — so the
+    answer arrives as an input, from whatever the dispatcher was able to run.
+    This flag is what tells the dispatcher an answer is worth paying for, and
+    almost no edit trips a rule carrying it. Denying one unresolved states a
     verdict the audit then contradicts, and the two block on opposite states
     with no version of the file passing both. So the gate says what it knows:
     resolved, it decides; unresolved, it asks.

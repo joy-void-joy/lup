@@ -2440,13 +2440,14 @@ def test_an_uncovered_violation_denies_whatever_else_the_edit_declares() -> None
     assert every_one_covered.effect == "ask"
 
 
-def test_the_gate_refuses_the_marker_the_refiner_already_refutes() -> None:
-    """Both gates reach one verdict, because one refiner answers both.
+def test_the_gate_refuses_the_marker_the_tree_already_settles() -> None:
+    """Both gates reach one verdict, because one matcher answers both.
 
-    A route decorator trips the `dict-get` regex and the AST refutes it, so a
-    marker written there guards nothing. The audit reports that afterwards;
-    the exemption it reads is the kernel's own, so the same verdict is
-    available at the point of writing, which is where it is worth having.
+    A route decorator is not payload access, and the `dict-get` matcher says
+    so from the tree alone, so a marker written there guards nothing. The
+    audit reports that afterwards; the selector it reads is the kernel's own,
+    so the same verdict is available at the point of writing, which is where
+    it is worth having.
     """
     policy = EditPolicy(protected=[])
     refuted = EditBatch(
@@ -2899,10 +2900,10 @@ def test_a_note_in_a_test_is_still_gated() -> None:
 def test_retiring_a_suppression_the_ast_refutes_is_allowed() -> None:
     """The gate that demanded this marker gone must not be the one refusing it.
 
-    A route decorator trips the `dict-get` regex and nothing else, so before
-    the refiner the audit called the marker spurious while the kernel denied
-    every edit that removed it — a change one gate required and the other
-    forbade, with no operation in between.
+    A route decorator trips the `dict-get` regex and nothing else, so while
+    the rule was only a regex the audit called the marker spurious and the
+    kernel denied every edit that removed it — a change one gate required and
+    the other forbade, with no operation in between.
     """
     policy = EditPolicy(protected=[])
     batch = EditBatch(
