@@ -45,6 +45,7 @@ from lup.resolver.contracts import (
     ResolverEnvironmentFault,
     ResolverObserver,
     WorktreePreparer,
+    settles_the_actor,
 )
 from lup.runtime.errors import ProviderTurnError, TurnFailure
 from lup.resolver.core import (
@@ -62,7 +63,6 @@ from lup.resolver.journal import Journal, LeaseDriftEvent
 from lup.resolver.models import (
     AdmissionRequest,
     AnswerBatch,
-    run_tally,
     AcceptanceCriterion,
     CarriedParent,
     Concern,
@@ -394,6 +394,37 @@ def running_on(statuses: dict[str, ConcernStatus]) -> ResolveState:
             for name, status in statuses.items()
         ],
     )
+
+
+def test_a_host_fault_suspends_its_agent_in_the_spelling_the_turn_raises() -> None:
+    """The fault has to be recognised before the executor renames it.
+
+    A revoked credential leaves the provider as a `TurnError` and only becomes
+    a `ResolverEnvironmentFault` one frame above the turn, in the executor that
+    classifies it. The population sees the first spelling, so a judgement
+    testing only for the second finishes the worker on exactly the failure that
+    says nothing about its work — and the retry the fault exists for reattaches
+    to nothing, because the conversation it wanted was recorded finished.
+
+    Both halves of the classification, too: the adapter's flag and the message
+    the executor's own classifier reads, since the flag is set where the
+    exception is first caught and several layers re-wrap it on the way up.
+    """
+    flagged = ProviderTurnError(TurnFailure(message="401", environmental=True))
+    by_message = ProviderTurnError(TurnFailure(message="429 quota exhausted"))
+    refused = ProviderTurnError(TurnFailure(message="the tests do not pass"))
+
+    assert settles_the_actor(flagged) is False
+    assert settles_the_actor(by_message, lambda text: "429" in text) is False
+    assert settles_the_actor(by_message) is True, "unclassified is the work's"
+    assert settles_the_actor(refused, lambda text: "429" in text) is True
+
+    # The three the executor raises in its own vocabulary still suspend, and
+    # an ordinary failure still settles.
+    assert settles_the_actor(ResolverAwaitingAnswers([], [])) is False
+    assert settles_the_actor(ResolverDrained("operator asked", [])) is False
+    assert settles_the_actor(ResolverEnvironmentFault("revoked", [])) is False
+    assert settles_the_actor(RuntimeError("died")) is True
 
 
 def test_a_concern_is_stamped_with_the_moment_it_settles(tmp_path: Path) -> None:
@@ -866,7 +897,7 @@ def planning_core(tmp_path: Path, response: ResolverResponse) -> ResolverCore:
         ),
         resolve_spec(),
         lambda context: resolver_test_factory(context.root, response),
-        lambda root: resolver_test_factory(root, response),
+        lambda context: resolver_test_factory(context.root, response),
         LiteralInvocationRenderer(),
         recording_launcher(),
     )
@@ -1016,7 +1047,7 @@ async def test_one_note_raising_two_issues_reaches_both_concerns(
         ),
         resolve_spec(),
         worker_recipe(tmp_path / "state", recording_launcher(), reviewer_response),
-        lambda root: resolver_test_factory(root, reviewer_response),
+        lambda context: resolver_test_factory(context.root, reviewer_response),
         LiteralInvocationRenderer(),
         recording_launcher(),
     )
@@ -1076,7 +1107,7 @@ async def test_inventory_planner_clusters_every_contextual_note_once(
         ),
         resolve_spec(),
         worker_recipe(tmp_path / "state", recording_launcher(), reviewer_response),
-        lambda root: resolver_test_factory(root, reviewer_response),
+        lambda context: resolver_test_factory(context.root, reviewer_response),
         LiteralInvocationRenderer(),
         recording_launcher(),
     )
@@ -1227,7 +1258,7 @@ def test_the_join_tally_counts_the_parents_that_will_be_merged() -> None:
         ),
     )
 
-    tally = run_tally(state)
+    tally = state.tally()
 
     assert (tally.joined, tally.join_total) == (3, 13)
     assert "joins 3/13" in tally.concerns_line()
@@ -2102,7 +2133,7 @@ async def test_complete_resolver_lifecycle_uses_real_isolated_git_worktrees(
         ),
         resolve_spec(),
         worker_recipe(tmp_path / "state", launcher, worker_response),
-        lambda root: resolver_test_factory(root, reviewer_response),
+        lambda context: resolver_test_factory(context.root, reviewer_response),
         LiteralInvocationRenderer(),
         launcher,
     )
@@ -2138,6 +2169,25 @@ async def test_complete_resolver_lifecycle_uses_real_isolated_git_worktrees(
     }
     assert git("branch", "--show-current") == source_branch
     assert git("rev-parse", "HEAD") == source_commit
+
+    # The population record, which is what an outside door reads. It was
+    # empty for every resolver run: the run drove its own sessions, so
+    # nothing ever announced an agent, and `resolve actors` answered from a
+    # full scan of a journal that reaches tens of megabytes instead.
+    members = {member.address: member for member in core.actors.live()}
+    assert {"worker:a#2", "worker:b#1", "worker:c#1"} <= set(members)
+    # One member per worker, not one per round: a's second round is the
+    # agent that took its first.
+    assert members["worker:a#2"].actor.round == 2
+    assert members["worker:a#2"].running is False
+    assert members["worker:a#2"].summary == "verified in 2 rounds"
+    # Every kind the run opens, not only the writing ones.
+    assert {"reviewer-a", "reviewer-b", "reviewer-c", "merger-c"} <= {
+        member.actor.conversation() for member in core.actors.live()
+    }
+    # And it resolves the addresses it prints, from the record alone.
+    assert core.actors.reaching("worker:a#1") == members["worker:a#2"].actor
+    assert core.actors.reaching("b") == members["worker:b#1"].actor
 
     assert [record.action for record in manifest.cleanup] == [
         "removed",
@@ -2276,7 +2326,7 @@ async def test_resume_after_a_kill_past_workers_completes_without_backward_phase
             ),
             resolve_spec(),
             worker_recipe(tmp_path / "state", launcher, worker_response),
-            lambda root: resolver_test_factory(root, reviewer_response),
+            lambda context: resolver_test_factory(context.root, reviewer_response),
             LiteralInvocationRenderer(),
             launcher,
         )
@@ -2445,7 +2495,7 @@ def failure_leg_core(
         ),
         resolve_spec(),
         worker_recipe(tmp_path / "state", launcher, worker_response),
-        lambda root: resolver_test_factory(root, reviewer_response),
+        lambda context: resolver_test_factory(context.root, reviewer_response),
         LiteralInvocationRenderer(),
         launcher,
         environmental_fault=environmental_fault,
@@ -3049,7 +3099,7 @@ async def test_aborting_a_parked_run_frees_its_leases_and_refuses_resumption(
             ),
             resolve_spec(),
             worker_recipe(tmp_path / "state", launcher, worker_response),
-            lambda root: resolver_test_factory(root, lambda *_: {}),
+            lambda context: resolver_test_factory(context.root, lambda *_: {}),
             LiteralInvocationRenderer(),
             launcher,
         )
@@ -3132,7 +3182,7 @@ async def test_midrun_question_parks_the_concern_and_resumes_after_answers(
             ),
             resolve_spec(),
             worker_recipe(tmp_path / "state", launcher, worker_response),
-            lambda root: resolver_test_factory(root, reviewer_response),
+            lambda context: resolver_test_factory(context.root, reviewer_response),
             LiteralInvocationRenderer(),
             launcher,
         )
@@ -3848,7 +3898,7 @@ async def test_a_finished_run_releases_itself_without_a_human_gate(
             ),
             resolve_spec(),
             worker_recipe(tmp_path / "state", launcher, worker_response),
-            lambda root: resolver_test_factory(root, reviewer_response),
+            lambda context: resolver_test_factory(context.root, reviewer_response),
             LiteralInvocationRenderer(),
             launcher,
         )
@@ -3882,7 +3932,7 @@ async def test_an_offer_outside_a_closed_gate_never_decides(
         ),
         resolve_spec(),
         worker_recipe(tmp_path / "state", launcher, lambda *_: {}),
-        lambda root: resolver_test_factory(root, lambda *_: {}),
+        lambda context: resolver_test_factory(context.root, lambda *_: {}),
         LiteralInvocationRenderer(),
         launcher,
     )
@@ -3927,7 +3977,7 @@ async def test_a_design_question_records_an_answer_in_the_humans_own_words(
         ),
         resolve_spec(),
         worker_recipe(tmp_path / "state", launcher, lambda *_: {}),
-        lambda root: resolver_test_factory(root, lambda *_: {}),
+        lambda context: resolver_test_factory(context.root, lambda *_: {}),
         LiteralInvocationRenderer(),
         launcher,
     )
@@ -3975,7 +4025,7 @@ def test_an_allowance_answered_in_prose_is_refused_rather_than_read_as_no(
         ),
         resolve_spec(),
         worker_recipe(tmp_path / "state", launcher, lambda *_: {}),
-        lambda root: resolver_test_factory(root, lambda *_: {}),
+        lambda context: resolver_test_factory(context.root, lambda *_: {}),
         LiteralInvocationRenderer(),
         launcher,
     )
@@ -4046,7 +4096,7 @@ def admitting_core(
         ),
         resolve_spec(),
         worker_recipe(tmp_path / "state", launcher, worker_response),
-        lambda root: resolver_test_factory(root, reviewer_response),
+        lambda context: resolver_test_factory(context.root, reviewer_response),
         LiteralInvocationRenderer(),
         launcher,
     )
@@ -4576,7 +4626,7 @@ async def test_observer_receives_every_persisted_transition_in_order(
         ),
         resolve_spec(),
         worker_recipe(tmp_path / "state", launcher, worker_response),
-        lambda root: resolver_test_factory(root, reviewer_response),
+        lambda context: resolver_test_factory(context.root, reviewer_response),
         LiteralInvocationRenderer(),
         launcher,
         observer=observer,
@@ -4834,7 +4884,7 @@ async def test_a_granted_allowance_reaches_the_sessions_launched_next(
         ),
         resolve_spec(),
         recording_worker_factory,
-        lambda root: resolver_test_factory(root, accepting_reviewer),
+        lambda context: resolver_test_factory(context.root, accepting_reviewer),
         LiteralInvocationRenderer(),
         launcher,
     )
@@ -4905,8 +4955,8 @@ def recheck_core(
         ),
         resolve_spec(),
         worker_recipe(tmp_path / "state", recording_launcher(), reviewer_response),
-        lambda root: session_factory(
-            PromptRecordingSession(root, reviewer_response, log)
+        lambda context: session_factory(
+            PromptRecordingSession(context.root, reviewer_response, log)
         ),
         LiteralInvocationRenderer(),
         recording_launcher(),
@@ -5101,7 +5151,7 @@ async def test_completeness_guard_appends_and_names_the_gap(tmp_path: Path) -> N
         recording_worker_recipe(
             tmp_path / "state", launcher, worker_response, worker_prompts
         ),
-        lambda root: resolver_test_factory(root, reviewer_response),
+        lambda context: resolver_test_factory(context.root, reviewer_response),
         LiteralInvocationRenderer(),
         launcher,
     )
@@ -5178,7 +5228,7 @@ async def test_a_carried_residual_takes_the_acceptance_the_reviewer_wrote(
         recording_worker_recipe(
             tmp_path / "state", launcher, worker_response, worker_prompts
         ),
-        lambda root: resolver_test_factory(root, reviewer_response),
+        lambda context: resolver_test_factory(context.root, reviewer_response),
         LiteralInvocationRenderer(),
         launcher,
     )
@@ -5299,7 +5349,7 @@ async def test_a_revision_carries_its_assignment_and_names_its_round(
         recording_worker_recipe(
             tmp_path / "state", launcher, worker_response, worker_prompts
         ),
-        lambda root: resolver_test_factory(root, reviewer_response),
+        lambda context: resolver_test_factory(context.root, reviewer_response),
         LiteralInvocationRenderer(),
         launcher,
     )
@@ -5375,7 +5425,7 @@ async def test_an_answered_question_credited_as_met_is_corrected_not_charged(
         recording_worker_recipe(
             tmp_path / "state", launcher, worker_response, worker_prompts
         ),
-        lambda root: resolver_test_factory(root, reviewer_response),
+        lambda context: resolver_test_factory(context.root, reviewer_response),
         LiteralInvocationRenderer(),
         launcher,
     )
@@ -5449,8 +5499,8 @@ async def test_a_round_that_commits_nothing_neither_charges_nor_reviews_an_empty
         ),
         resolve_spec(),
         worker_recipe(tmp_path / "state", launcher, worker_response),
-        lambda root: session_factory(
-            PromptRecordingSession(root, reviewer_response, reviewer_prompts)
+        lambda context: session_factory(
+            PromptRecordingSession(context.root, reviewer_response, reviewer_prompts)
         ),
         LiteralInvocationRenderer(),
         launcher,
@@ -5517,8 +5567,8 @@ async def test_review_prompt_names_the_range_and_the_rulings(tmp_path: Path) -> 
         ),
         resolve_spec(),
         worker_recipe(tmp_path / "state", launcher, worker_response),
-        lambda root: session_factory(
-            PromptRecordingSession(root, reviewer_response, reviewer_prompts)
+        lambda context: session_factory(
+            PromptRecordingSession(context.root, reviewer_response, reviewer_prompts)
         ),
         LiteralInvocationRenderer(),
         launcher,
@@ -5570,8 +5620,8 @@ async def test_plan_prompt_states_the_marker_stripping_rule(tmp_path: Path) -> N
         ),
         resolve_spec(),
         worker_recipe(tmp_path / "state", recording_launcher(), planner_response),
-        lambda root: session_factory(
-            PromptRecordingSession(root, planner_response, log)
+        lambda context: session_factory(
+            PromptRecordingSession(context.root, planner_response, log)
         ),
         LiteralInvocationRenderer(),
         recording_launcher(),
@@ -6286,7 +6336,7 @@ async def test_the_final_recheck_reads_the_tree_from_a_checkout_of_its_own(
         ),
         resolve_spec(),
         worker_recipe(tmp_path / "state", launcher, reviewer_response),
-        lambda root: resolver_test_factory(root, reviewer_response),
+        lambda context: resolver_test_factory(context.root, reviewer_response),
         LiteralInvocationRenderer(),
         launcher,
     )
@@ -6455,7 +6505,7 @@ async def test_a_capped_wave_holds_the_cap_and_resumes_what_it_never_started(
             ),
             resolve_spec(),
             worker_recipe(tmp_path / "state", launcher, worker_response),
-            lambda root: resolver_test_factory(root, reviewer_response),
+            lambda context: resolver_test_factory(context.root, reviewer_response),
             LiteralInvocationRenderer(),
             launcher,
         )

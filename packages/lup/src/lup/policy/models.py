@@ -6,7 +6,7 @@ tool); the policies in :mod:`lup.policy.rules` and :mod:`lup.policy.chain`
 consume them and return a :class:`Decision`.
 """
 
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Literal, Self
 
@@ -19,6 +19,7 @@ from pydantic import (
     field_validator,
 )
 
+from lup.policy.kernel.rows import EditOperation
 from lup.policy.kernel.decision import (
     DecisionEffect,
     KernelDecision,
@@ -49,11 +50,19 @@ class ToolIdentity(BaseModel, frozen=True):
 
 
 class EditChange(BaseModel, frozen=True):
-    """One named file change within an edit operation."""
+    """One named file change within an edit operation.
+
+    ``operation`` is what the native call was, not what the documents look
+    like: once a preimage is resolved, a whole-file write and an edit that
+    happens to replace every line are the same pair of documents. The adapter
+    knows which it decoded, so it says, and an adapter that has not been
+    taught leaves the default the gates read as an ordinary modification.
+    """
 
     path: Path
     before: str | None = None
     after: str | None = None
+    operation: EditOperation = "modify"
 
     def as_documents(self) -> "EditChange":
         """The whole before and after documents this change would produce.
@@ -65,9 +74,25 @@ class EditChange(BaseModel, frozen=True):
         creation, a deletion, a file this process cannot read, or a preimage
         the file does not hold exactly once stays as declared and is judged
         conservatively on its own evidence.
+
+        A whole-file overwrite is the other shape that needs resolving, and
+        for the opposite reason: it carries no preimage at all, so the file it
+        is about to replace *is* the preimage. Reading it here is what lets
+        the marker gate see an overwrite — handed ``""`` instead, it compares
+        a file's notes against nothing, finds nothing lost, and admits a write
+        that erases every one of them.
         """
-        if self.before is None or self.after is None:
+        if self.after is None:
             return self
+        if self.before is None:
+            if self.operation != "overwrite":
+                return self
+            try:
+                return self.model_copy(
+                    update={"before": self.path.read_text(encoding="utf-8")}
+                )
+            except (OSError, UnicodeDecodeError):
+                return self
         try:
             current = self.path.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
@@ -89,7 +114,7 @@ def undeclared(family: str) -> "Decision":
     )
 
 
-class SemanticToolBase(BaseModel, frozen=True):
+class SemanticToolBase(BaseModel, ABC, frozen=True):
     """One native call as policy understands it, judging itself.
 
     Each kind knows which declared family judges it, so routing is the tool
@@ -249,6 +274,13 @@ class Decision(BaseModel, frozen=True):
     effect: DecisionEffect
     reason: str = ""
     sandbox: SandboxPlacement = "ambient"
+    escalated: str = ""
+    """Why the agent said this call was worth a human, where it said so.
+
+    Survives a collapse to ``deny``, so a host that cannot ask can still
+    relay what was asked for. See
+    :attr:`~lup.policy.kernel.decision.KernelDecision.escalated`.
+    """
 
     @field_validator("sandbox")
     @classmethod
@@ -265,11 +297,14 @@ class Decision(BaseModel, frozen=True):
 
     def placed(self, escapable: bool, agent_escalates: bool) -> "Decision":
         """This verdict as a runtime that can, or cannot, place a call sees it."""
-        kernel = KernelDecision(self.effect, self.reason, self.sandbox).placed(
-            escapable, agent_escalates
-        )
+        kernel = KernelDecision(
+            self.effect, self.reason, self.sandbox, self.escalated
+        ).placed(escapable, agent_escalates)
         return Decision(
-            effect=kernel.effect, reason=kernel.reason, sandbox=kernel.sandbox
+            effect=kernel.effect,
+            reason=kernel.reason,
+            sandbox=kernel.sandbox,
+            escalated=kernel.escalated,
         )
 
 

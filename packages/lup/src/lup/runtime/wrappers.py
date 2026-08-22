@@ -2,6 +2,7 @@
 
 import asyncio
 import hashlib
+import logging
 from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from datetime import timedelta
@@ -42,6 +43,8 @@ from lup.runtime.models import (
     TurnResult,
 )
 from lup.types import Usage, UsageCost
+
+logger = logging.getLogger(__name__)
 
 
 class TimeoutConfig(BaseModel, frozen=True):
@@ -152,18 +155,24 @@ class SwitchingSteer(Steer):
 
 
 class SwitchingEventStream(EventStream):
-    """Join successive native retry streams into one logical live stream."""
+    """Join successive native retry streams into one logical live stream.
+
+    Arriving streams queue rather than replace the one being read. A turn
+    advances on its own task, so a cycle can finish before a consumer has
+    drained the stream it produced, and a switch that overwrote the unread one
+    would drop exactly the events explaining why the cycle happened. What the
+    consumer sees is every native stream in the order the turn produced them.
+    """
 
     def __init__(self, current: EventStream) -> None:
-        self.current: EventStream | None = current
-        self.version = 0
+        self.pending: list[EventStream] = [current]
         self.changed = asyncio.Event()
         self.closed = False
         self.consumed = False
 
     def switch(self, current: EventStream | None) -> None:
-        self.current = current
-        self.version += 1
+        if current is not None:
+            self.pending.append(current)
         self.changed.set()
 
     def close(self) -> None:
@@ -174,12 +183,9 @@ class SwitchingEventStream(EventStream):
         if self.consumed:
             raise RuntimeError("logical live event stream can only be consumed once")
         self.consumed = True
-        observed = -1
         while True:
-            current = self.current
-            version = self.version
-            if current is not None and version != observed:
-                observed = version
+            if self.pending:
+                current = self.pending.pop(0)
                 view = current.live() if deltas else current.events()
                 async for event in view:
                     yield event
@@ -187,7 +193,7 @@ class SwitchingEventStream(EventStream):
             if self.closed:
                 return
             self.changed.clear()
-            if self.closed or self.version != version:
+            if self.closed or self.pending:
                 continue
             await self.changed.wait()
 
@@ -263,8 +269,33 @@ class BudgetTurn[T: BaseModel | None](Turn[T]):
         return result
 
 
+def read_outcome(settled: asyncio.Task[object]) -> None:
+    """Mark a finished turn's outcome read, without consuming it.
+
+    A resilient turn advances whether or not anyone is waiting on it, which is
+    what lets a caller watch its events first. The cost is that a turn nobody
+    ever asks about can fail with no one retrieving it, and asyncio reports
+    that at collection time — a warning naming the garbage collector rather
+    than the turn. Reading it here silences that and nothing else: the task
+    still holds the failure, and ``result`` still raises it.
+    """
+    if settled.cancelled():
+        return
+    failure = settled.exception()
+    if failure is not None:
+        logger.debug("resilient turn failed: %r", failure)
+
+
 class ResilientTurn[T: BaseModel | None](Turn[T]):
-    """Coordinate provider retries and output corrections across one logical turn."""
+    """Coordinate provider retries and output corrections across one logical turn.
+
+    The turn advances on its own task rather than on whichever caller happens
+    to await it. Its cycles are what drive its event stream — each one switches
+    the stream to a fresh native stream, and the last one closes it — so a turn
+    that advanced only while awaited would leave a caller who watched the
+    events first waiting on a close that only the unasked result would cause.
+    Events may be consumed before, during, or after the result is awaited.
+    """
 
     def __init__(
         self,
@@ -285,8 +316,13 @@ class ResilientTurn[T: BaseModel | None](Turn[T]):
         self.interrupt = interrupt
         self.events = events
         self.steer = steer
+        self.settling = asyncio.create_task(self.settle())
+        self.settling.add_done_callback(read_outcome)
 
     async def result(self) -> TurnResult[T]:
+        return await self.settling
+
+    async def settle(self) -> TurnResult[T]:
         current = self.inner
         current_request = self.request
         failures: list[TurnFailure] = []
@@ -607,7 +643,6 @@ class SerializedSession(Session):
 # Each config is one decorator's own settings, and no one of them is the
 # subject: what this does is compose them into a session, which belongs to
 # neither the configs nor the factory alone.
-# lup: ignore[model-free-function] — composition root wiring configs into a factory
 def decorated_session_factory(
     inner: SessionFactory,
     *,

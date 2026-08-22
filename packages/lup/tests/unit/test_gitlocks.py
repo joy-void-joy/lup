@@ -146,6 +146,46 @@ def test_an_admin_directory_that_refuses_the_lock_names_the_sandbox(
     assert "Rerun outside the sandbox" in reported
 
 
+def test_a_directory_that_permits_a_touch_but_refuses_the_lock_is_a_sandbox(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The confinement shape the permission bits cannot see.
+
+    A sandbox that mediates the syscall above the kernel leaves the mode
+    bits and the mount flags saying the directory is writable — a plain
+    `touch` there succeeds — while still refusing git's `O_CREAT | O_EXCL`.
+    Read off `os.access`, such a directory looks unconfined, so the lock
+    beside it is called debris and the reader is told to wait out a holder
+    that does not exist. Asking by attempting the create is what separates
+    them, and this pins that the classification follows the attempt.
+    """
+    root = admin_dir(tmp_path / "admin")
+    aged_lock(root, "config.lock", timedelta(days=2))
+    real_open = os.open
+
+    def refusing_open(path: str | Path, flags: int, mode: int = 0o777) -> int:
+        if Path(path).parent == root and flags & os.O_EXCL:
+            raise PermissionError(13, "Permission denied")
+        return real_open(path, flags, mode)
+
+    monkeypatch.setattr(os, "open", refusing_open)
+    reported = diagnosis(inspect_git_admin(root))
+
+    assert os.access(root, os.W_OK)
+    assert "refuses a new `config.lock`" in reported
+    assert "Rerun outside the sandbox" in reported
+    assert "removing it is the whole fix" not in reported
+
+
+def test_the_probe_leaves_the_admin_directory_as_it_found_it(tmp_path: Path) -> None:
+    """A diagnosis that littered would be one more thing to explain."""
+    root = admin_dir(tmp_path / "admin")
+    before = sorted(entry.name for entry in root.iterdir())
+
+    assert inspect_git_admin(root) == []
+    assert sorted(entry.name for entry in root.iterdir()) == before
+
+
 @pytest.mark.skipif(
     os.geteuid() == 0,
     reason="root writes a mode-444 file, so the mode cannot stand in for a mount",

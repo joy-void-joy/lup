@@ -139,7 +139,6 @@ def render_diff(text: str) -> str:
     return "\n".join(render_line(line) for line in text.splitlines())
 
 
-# lup: ignore[model-free-function] — renderer over a declaration, reading git
 def render_concern(entry: ManifestEntry, base: str) -> str:
     branch = entry.branch or "(none)"
     badges: list[str] = []

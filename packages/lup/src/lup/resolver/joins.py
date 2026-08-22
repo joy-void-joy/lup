@@ -22,7 +22,7 @@ assumed.
 """
 
 import asyncio
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Iterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -604,9 +604,12 @@ class Joiner:
         )
         if not asking:
             return carried
+        asking_by_id = {concern.id: concern for concern in asking}
         async with self.reading_pool(integration, len(asking)) as trees:
 
-            async def examine(concern: Concern) -> MaterialQuestion | None:
+            async def examine(opened: ActorRef) -> MaterialQuestion | None:
+                """This address's concern, re-checked against the merged tree."""
+                concern = asking_by_id[opened.id]
                 tree = await trees.get()
                 try:
                     question = await self.recheck_one(concern, tree, integration)
@@ -624,8 +627,31 @@ class Joiner:
                     )
                 return question
 
-            asked = await asyncio.gather(*[examine(concern) for concern in asking])
-        return [*carried, *[question for question in asked if question is not None]]
+            # The population's own wave rather than one assembled here, for
+            # the reasons the worker wave takes it: how many agents run at
+            # once is the population's cap and not this phase's, the roster
+            # carries the whole re-check rather than only the turns inside
+            # it, and a close reaches what is still reading.
+            asked = await self.runner.actors.work_all(
+                examine,
+                [ActorRef(kind="reviewer", id=concern.id) for concern in asking],
+            )
+
+        def reported() -> Iterator[MaterialQuestion]:
+            """What each re-check found, re-raising the ones that failed.
+
+            The wave answers positionally and keeps every failure rather than
+            propagating one, so the raise is made here instead: a re-check
+            that never reported is not a re-check that found nothing, and
+            integration is about to wait on exactly this list.
+            """
+            for outcome in asked:
+                if isinstance(outcome, BaseException):
+                    raise outcome
+                if outcome is not None:
+                    yield outcome
+
+        return [*carried, *reported()]
 
     @asynccontextmanager
     async def reading_pool(
@@ -729,9 +755,7 @@ class Joiner:
         twice rather than colliding on one id — the second failure is its own
         fact, and it names a different join.
         """
-        reviewer = self.runner.reviewer_session(
-            ActorRef(kind="reviewer", id=concern.id), worktree
-        )
+        reviewer = ActorRef(kind="reviewer", id=concern.id)
         declared = {criterion.id: True for criterion in concern.criteria}
         # The reviewer session may be fresh — a resumed run, a parked actor —
         # so the concern record rides with the prompt rather than being
@@ -745,7 +769,9 @@ class Joiner:
             "above — echo an id verbatim when its criterion still holds, and "
             "omit it when it does not."
         )
-        result = await reviewer.turn(turn_request(TurnInput(text=prompt), ReviewReport))
+        result = await self.runner.reviewer_round(
+            reviewer, worktree, turn_request(TurnInput(text=prompt), ReviewReport)
+        )
         unknown = [
             label for label in result.output.criteria_met if label not in declared
         ]
@@ -756,8 +782,10 @@ class Joiner:
                 + ". Resubmit with criteria_met drawn only from the declared "
                 "ids: " + ", ".join(declared)
             )
-            result = await reviewer.turn(
-                turn_request(TurnInput(text=correction), ReviewReport)
+            result = await self.runner.reviewer_round(
+                reviewer,
+                worktree,
+                turn_request(TurnInput(text=correction), ReviewReport),
             )
         met = {identifier: True for identifier in result.output.criteria_met}
         lost = [

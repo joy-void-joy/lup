@@ -20,7 +20,6 @@ from typing import Literal
 from pydantic import BaseModel
 
 import lup.codescan.antipatterns as antipatterns
-import lup.codescan.behaviour as behaviour
 import lup.codescan.boundaries as boundaries
 import lup.codescan.capabilities as capabilities
 import lup.codescan.dispatch as dispatch
@@ -88,6 +87,23 @@ STRUCTURAL_RULES: list[RegisteredRule] = [
         defined_in=capabilities.__name__,
     ),
     RegisteredRule(
+        id=capabilities.ABSTRACT_DECLARATION_RULE_ID,
+        family="architecture",
+        scope="Python architecture",
+        example="class Part(BaseModel):  # an @abstractmethod inside, no ABC in the bases",
+        message=(
+            "A class declaring an abstract member cannot be constructed, and its "
+            "bases are where it says so. Pydantic's metaclass is an ABCMeta, so on "
+            "a model the member binds and the class turns abstract while the word "
+            "ABC never appears — leaving the fact readable only to whoever knows "
+            "that about the dependency. Name ABC among the bases: nothing changes "
+            "at runtime, and abc-capability reads the same list to tell a "
+            "capability seam from a variant union. A Protocol is exempt, being "
+            "satisfied structurally rather than by declaration."
+        ),
+        defined_in=capabilities.__name__,
+    ),
+    RegisteredRule(
         id=dispatch.RULE_ID,
         family="architecture",
         scope="Python architecture",
@@ -102,24 +118,6 @@ STRUCTURAL_RULES: list[RegisteredRule] = [
             "pydantic.BaseModel."
         ),
         defined_in=dispatch.__name__,
-    ),
-    RegisteredRule(
-        id=behaviour.RULE_ID,
-        family="architecture",
-        scope="Python architecture",
-        example="def render_part(part: TextPart) -> str: ...",
-        message=(
-            "A model we declare carries what can be done with it. A free function "
-            "taking one as a parameter puts that operation where the model cannot "
-            "see it, so the type's behaviour is spread across whichever modules "
-            "call it. Declare it on the model, or on the ABC the model composes. "
-            "Methods are the shape this steers toward and are never reported; nor "
-            "is a constructor (a model named only in the return), a boundary "
-            "converter (a model another module declares), or a function over a "
-            "vendor payload or a builtin, since the rule fires only on project "
-            "classes inheriting pydantic.BaseModel."
-        ),
-        defined_in=behaviour.__name__,
     ),
     RegisteredRule(
         id=narrowing.RULE_ID,
