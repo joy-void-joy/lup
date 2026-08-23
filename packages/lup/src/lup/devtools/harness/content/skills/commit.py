@@ -7,7 +7,7 @@ SKILL = models.Skill(
     id="skill.commit",
     name="commit",
     description="Review all diffs and create atomic commits",
-    tools=["Bash(git:*)", "Read", "Glob", "Grep"],
+    tools=["Bash(uv run lup-devtools:*, git:*)", "Read", "Glob", "Grep"],
     prompt=models.PromptDocument(
         parts=[
             models.TextPart(
@@ -23,10 +23,13 @@ Create commits for all staged and unstaged changes, following conventional commi
 
 Run these commands in parallel:
 
-1. `git status` - See all changed files
+1. `uv run lup-devtools dev pending` - See all real changed files
 2. `git diff` - See unstaged changes
 3. `git diff --cached` - See staged changes
 4. `git log --oneline -10` - See recent commit style
+
+`dev pending` is authoritative because a sandbox may mask sensitive dotfiles
+with device nodes that `git status` misreports as untracked repository content.
 
 ## Phase 2: Group Changes
 
@@ -83,7 +86,7 @@ meta(claude): add new workflow command
 After creating commits:
 
 1. Run `git log --oneline -5` to show what was created
-2. Run `git status` to confirm working directory is clean
+2. Run `uv run lup-devtools dev pending` to confirm the working directory is clean
 
 ## Guidelines
 

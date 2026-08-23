@@ -148,8 +148,8 @@ After the merge (either strategy):
 # Check for leftover conflict markers
 grep -rn "^<<<<<<< \|^=======$\|^>>>>>>> " <changed-files> || echo "No conflict markers found"
 
-# Verify the tree is clean
-git status --short
+# Verify the real tree is clean, excluding sandbox-masked device paths
+uv run lup-devtools dev pending
 
 # Quick sanity check — does it parse/compile?
 # (adapt to the project's tooling)
