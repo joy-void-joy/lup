@@ -209,11 +209,28 @@ marimo/_lsp/
 __marimo__/
 
 # Project-specific
-# Session data (traces, outputs, feedback) stays local by default.
-# /lup:init asks whether this repo commits it (the commit-loop pattern);
-# opting in removes these two notes/ lines.
+# lup: template: does this domain commit its session data? Traces, outputs and
+# feedback rounds stay local by default; a domain whose runs yield an artifact
+# worth versioning removes the notes/* and !notes/.gitkeep pair below, which is
+# the commit-loop decision /lup:init walks. The notes/harness/ line under them
+# is a separate answer, and the default there is no.
 notes/*
 !notes/.gitkeep
+# That answer is no because the harness store holds a different kind of thing
+# from the rest of notes/. Everything else there is what this project's own runs
+# produced -- sessions, outputs, logs, feedback rounds -- filed under the agent
+# version that produced them, read back by the feedback loop, and worth
+# versioning wherever a domain wants its results to have a history. This holds
+# one directory per `lup-devtools harness <runtime>` launch, each an
+# observable.jsonl mirroring an operator's interactive session with a native CLI
+# as it happens: filed under a timestamp, redacted for portability rather than
+# for publication, read back by nothing here, and reaching hundreds of megabytes
+# within days. A domain that does want those versioned deletes this line, having
+# answered a question the one above it never asked.
+# Not notes/traces/<version>/sessions/harness/, which is a different store: the
+# session a natively launched tool server opens, inside the trace store like
+# every other session, and covered by the pair above like every other trace.
+notes/harness/
 worktrees/
 tmp/
 .lup/
