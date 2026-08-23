@@ -267,15 +267,15 @@ def test_every_offered_requirement_lets_a_project_place_and_install_it() -> None
     assert inside.where == "image" and inside.install == ["docker.io"]
 
 
-def test_the_declared_manifest_asks_the_host_for_nothing_image_side() -> None:
-    """bun and typescript live in the image, so a bare host is never faulted."""
+def test_the_declared_manifest_contains_only_host_capabilities() -> None:
+    """Sandbox and image concerns do not belong to this host-only composition."""
     from lup_template.devtools.harness.content.requirements import manifest
 
     MANIFEST = manifest()
 
-    on_host = [item.capability for item in MANIFEST.on_the_host(setting_up=True)]
-    assert "bun" not in on_host and "typescript" not in on_host
-    assert {"bun", "typescript"} <= set(MANIFEST.packages())
+    declared = [item.capability for item in MANIFEST.requirements]
+    assert declared == ["uv", "gh", "clipboard"]
+    assert MANIFEST.packages() == ["gh"]
 
 
 def test_a_finding_carries_the_requirement_that_produced_it() -> None:

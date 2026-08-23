@@ -1,6 +1,3 @@
-# lup: ignore[empty-collection]
-# Every empty list here is a default *parameter* -- the point a project
-# overrules -- and not a collection this module goes on to append to.
 """Requirements lup offers, at defaults a project is expected to overrule.
 
 The same split the shell vocabulary makes. :mod:`lup.harness.requirements` is
