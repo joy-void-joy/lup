@@ -246,7 +246,12 @@ def test_download_command_checkpoints_only_after_retention(
 ) -> None:
     checkpoints: list[Path] = []
 
-    async def download(url: str, root: Path, directory: Path, output: Path) -> Path:
+    async def download(
+        url: str,
+        root: Path,
+        directories: conversation.BrowserDirectories,
+        output: Path,
+    ) -> Path:
         reference = chatgpt.ConversationReference(value=url)
         destination = output / "chatgpt" / reference.identifier()
         destination.mkdir(parents=True)

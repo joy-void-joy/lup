@@ -174,7 +174,12 @@ def test_provider_commands_are_nested_under_conversation(
 ) -> None:
     checkpoints: list[Path] = []
 
-    async def download(url: str, root: Path, directory: Path, output: Path) -> Path:
+    async def download(
+        url: str,
+        root: Path,
+        directories: conversation.BrowserDirectories,
+        output: Path,
+    ) -> Path:
         reference = claude_conversation.ConversationReference(value=url)
         destination = output / "claude" / reference.identifier()
         destination.mkdir(parents=True)

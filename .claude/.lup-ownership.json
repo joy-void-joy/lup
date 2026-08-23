@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "73bb5e5fa32f56a64a96be058646cd9575b6b36c6f2f430ee795170eb8b410bd",
+  "source_digest": "bebe82aa657ecd084d91b615ce23990eadc31303114748770e26ac2f5ad23026",
   "target_requirements": [
     "claude-code"
   ],
@@ -79,7 +79,7 @@
     {
       "path": ".claude/plugins/lup/commands/analyze.md",
       "category": "generated",
-      "sha256": "852c100c936711963f455ebaec138b39a2c1565c51b3b4773f64c325a3738f47",
+      "sha256": "75e9c39d89f55c9ad0ed6b6ac68d235246eef5e1082f9dd99cc09b4ce8d27889",
       "semantic_id": "skill.analyze",
       "executable": false
     },

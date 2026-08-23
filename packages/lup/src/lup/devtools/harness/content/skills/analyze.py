@@ -65,7 +65,7 @@ For a `claude.ai` URL, run the sibling provider command instead:
 uv run lup-devtools conversation claude "<url>"
 ```
 
-An ordinary authenticated URL uses the operator's persistent browser session. If that session is missing or expired, the command opens the requested conversation in a visible login window once and retries after the operator closes that window. Never ask for a cookie, token, password, or exported credential in chat, and never require the user to turn an ordinary conversation into a public share.
+An ordinary authenticated URL uses the operator's persistent browser session through a headless browser. If that session is missing or expired, the command refuses and names the matching `uv run lup-devtools setup conversation <provider>` command. Do not run that setup command implicitly during analysis: it intentionally opens a visible login window. Ask the operator to complete the explicit setup action, then retry retention. Never ask for a cookie, token, password, or exported credential in chat, and never require the user to turn an ordinary conversation into a public share.
 
 The download is successful only when the command reports a path under `tmp/conversations/<provider>/<id>/`. That is the default output root; pass `--output <directory>` when the retained input belongs elsewhere. The command checkpoints a destination only when it is inside the repository and Git does not ignore it. It never force-adds ignored data. It writes one closed delivery:
 
