@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "c064c08c05c0f3704c570642b5c6171db85cdd36ebd5494a138fee52b55fc2e1",
+  "source_digest": "68f9f1abf7cc5e1850a5db19390ba0591e448644e42a5275873aea71ed36114b",
   "target_requirements": [
     "claude-code"
   ],
@@ -74,6 +74,13 @@
       "category": "generated",
       "sha256": "e37dd234884abe016c988449c66ce81bdac91397086718165981b177462cb8a8",
       "semantic_id": "skill.add-command",
+      "executable": false
+    },
+    {
+      "path": ".claude/plugins/lup/commands/analyze.md",
+      "category": "generated",
+      "sha256": "852c100c936711963f455ebaec138b39a2c1565c51b3b4773f64c325a3738f47",
+      "semantic_id": "skill.analyze",
       "executable": false
     },
     {
@@ -191,7 +198,7 @@
     {
       "path": ".claude/plugins/lup/commands/install.md",
       "category": "generated",
-      "sha256": "e4c3f10e630ce4dc894859ccb93bc681084d4b4c1d244de63ef7deb47398bf1e",
+      "sha256": "62fdc1a9c35ef7ce13ad08405ab91ad43bccfa133e28155ab0d58eee24c05b41",
       "semantic_id": "skill.install",
       "executable": false
     },
@@ -457,7 +464,7 @@
     {
       "path": "docs/harness.md",
       "category": "generated",
-      "sha256": "174c9962745f637b545b110d188c5dacf38bc21a3aaabf308bb399da8a00dc4e",
+      "sha256": "dfc87fac2db3440f89dffbbeede60531f1413782353c744db8330a1fdd0cec2a",
       "semantic_id": "docs.harness",
       "executable": false
     },
@@ -499,7 +506,7 @@
     {
       "path": "docs/platform-differentiation.md",
       "category": "generated",
-      "sha256": "382b5236841fe92386df4c560f0129d564901cd6c32804cc414c196dfe3e2c77",
+      "sha256": "8dcd258105e0a1bf0340bbafd961e7079248b53acda02db707442d3e61997682",
       "semantic_id": "docs.platform-differentiation",
       "executable": false
     },
@@ -534,7 +541,7 @@
     {
       "path": "docs/template.md",
       "category": "generated",
-      "sha256": "d0ec4e9d9b62683417b21b55865e35cb11ccffba750fd7558b4cceb6198c47ed",
+      "sha256": "ccbba72bc24ff2f9aab25376dec7c483ccc54df16964f5b492d632ca31a4992c",
       "semantic_id": "docs.template",
       "executable": false
     }

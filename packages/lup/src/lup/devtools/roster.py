@@ -28,6 +28,7 @@ from pathlib import Path
 import typer
 from pydantic import BaseModel
 
+from lup.devtools.conversation.app import create_conversation_app
 from lup.devtools.dashboard.app import create_dashboard_app
 from lup.devtools.dev.app import DevDeclarations, create_dev_app
 from lup.devtools.feedback.app import create_feedback_app
@@ -124,6 +125,12 @@ class RosterEntry(BaseModel, frozen=True, arbitrary_types_allowed=True):
 # lup: ignore[library-default] — the sub-apps this library authors, so the table
 # is what it ships rather than a choice made for an adopter
 LIBRARY_ROSTER = [
+    RosterEntry(
+        spec=SubAppSpec(
+            name="conversation", help="Retain authenticated AI conversations"
+        ),
+        build=lambda declared: create_conversation_app(declared.profiles),
+    ),
     RosterEntry(
         spec=SubAppSpec(name="dashboard", help="Host the local setup dashboard"),
         build=lambda declared: create_dashboard_app(declared.integrations),

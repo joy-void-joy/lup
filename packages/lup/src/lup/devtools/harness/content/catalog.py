@@ -36,6 +36,7 @@ from lup.devtools.harness.content.skills.add_command import (
 from lup.devtools.harness.content.skills.bump import SKILL as SKILL_BUMP
 from lup.devtools.harness.content.skills.close import SKILL as SKILL_CLOSE
 from lup.devtools.harness.content.skills.commit import SKILL as SKILL_COMMIT
+from lup.devtools.harness.content.skills.analyze import SKILL as SKILL_ANALYZE
 from lup.devtools.harness.content.skills.create_investigator import (
     skill as build_create_investigator,
 )
@@ -93,6 +94,7 @@ def library_skills(layout: ApplicationLayout) -> list[models.Skill]:
     # lup: ignore[library-default] — the skills this library authors, so the list is what it ships rather than a choice made for an adopter
     return [
         build_add_command(layout),
+        SKILL_ANALYZE,
         SKILL_BUMP,
         SKILL_CLOSE,
         SKILL_COMMIT,
