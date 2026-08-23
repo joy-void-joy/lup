@@ -167,14 +167,14 @@ class TestParseRemote:
     def test_an_ssh_alias_names_the_host_ssh_will_resolve(self) -> None:
         """What a remote looks like once a person has an `~/.ssh/config`.
 
-        urllib reads `jvj` as the scheme of a URL with no host, so a remote
+        urllib reads `forge` as the scheme of a URL with no host, so a remote
         written this way used to parse as nothing recognizable — and an
         unrecognized remote is one the auth check passes without probing.
         """
         from lup.devtools.dev.remote_auth import RemoteRef, parse_remote
 
-        assert parse_remote("jvj:org/repo.git") == RemoteRef(
-            scheme="ssh", destination="jvj"
+        assert parse_remote("forge:org/repo.git") == RemoteRef(
+            scheme="ssh", destination="forge"
         )
 
     def test_a_windows_drive_is_a_path_rather_than_a_host(self) -> None:

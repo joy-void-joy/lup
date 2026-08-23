@@ -25,6 +25,7 @@ from pydantic import (
 from lup.codescan.common import AntiPattern, RuleSelection
 from lup.devtools.launcher import DEFAULT_ENVIRONMENT
 from lup.harness.banner import ArtifactBanner, GeneratedBanner
+from lup.harness.requirements import Manifest
 from lup.markdown import CodeCell, PlainCell, TableCell, escaped
 from lup.mcp import ToolDeclaration
 from lup.policy.kernel.rows import AcceptanceGuardRow, PathRoleName
@@ -413,7 +414,11 @@ class RelocateSession(SemanticPart, frozen=True):
 
     Runtimes differ on whether a running session can move: one relocates in
     place, another can only be replaced by a session started there. Naming
-    the intent lets each adapter spell the move it actually supports.
+    the intent lets each adapter spell the move it actually supports -- and
+    lets one that supports both spell the cheaper of them, which is why every
+    adapter currently answers with a launch. Relocation is not free where it
+    exists: it arms a runtime's own worktree isolation, whose refusals are
+    about command shape rather than about anything this policy judges.
     """
 
     type: Literal["relocate_session"] = "relocate_session"
@@ -1202,6 +1207,16 @@ class Harness(BaseModel, frozen=True):
     plugins: list[Plugin]
     guidance: PromptDocument
     resolver: ResolveSpec
+    requirements: Manifest = Manifest()
+    """The external programs this project needs, exercised before a launch.
+
+    Empty declares no requirement and checks nothing, which is right for a
+    project whose toolchain is entirely Python: a preflight that invented
+    prerequisites would refuse machines that were fine. What a project does
+    declare here is checked by the launch, printed by the standalone command,
+    and installed into any image built from this harness -- one roster, so
+    the three cannot describe different toolchains.
+    """
 
     @property
     def declared_hooks(self) -> HookSet:
@@ -1212,6 +1227,35 @@ class Harness(BaseModel, frozen=True):
         and what an in-process session enforces cannot come apart.
         """
         return next(plugin.hooks for plugin in self.plugins if plugin.hooks is not None)
+
+    def holding(self, rules: RuleSelection) -> "Harness":
+        """This harness compiled against a different selection of scan rules.
+
+        One way in, for the one caller that has a reason: a launch opening a
+        session the rules are not the point of. Every plugin is rewritten
+        together, because one selection reaches the sweep, the edit hook and
+        the generated reference — and a tree relaxed on one runtime and not
+        another would be two policies wearing one name.
+
+        A copy rather than a mutation, and only generation reads it. What a
+        repository holds itself to stays the declaration in its catalog,
+        which is where a durable answer belongs and where `dev seams` writes
+        one.
+        """
+        return self.model_copy(
+            update={
+                "plugins": [
+                    plugin
+                    if plugin.hooks is None
+                    else plugin.model_copy(
+                        update={
+                            "hooks": plugin.hooks.model_copy(update={"rules": rules})
+                        }
+                    )
+                    for plugin in self.plugins
+                ]
+            }
+        )
 
     @property
     def rendered_ids(self) -> list[str]:
@@ -1479,3 +1523,56 @@ class CapabilityEvidence[C](CapabilityReport, frozen=True):
     """One probe's verdict together with the adapter-shaped proof of it."""
 
     evidence: C
+
+
+class Resumption(BaseModel, frozen=True):
+    """Which earlier session a launch reopens, if any.
+
+    One shape for every launcher, because what an operator is asking for is
+    the same whichever runtime answers and only the spelling differs — a flag
+    on one, a subcommand on another. Declared once rather than as three loose
+    booleans threaded through each launcher, so a runtime added later answers
+    one question instead of being handed three that can disagree.
+
+    Reopening matters beyond convenience, which is what makes it worth a
+    declaration. The policy a session enforces is compiled into a plugin tree
+    its runtime loads at startup, so widening that policy takes effect only in
+    a new process — and a new process that started from nothing costs the whole
+    conversation that established what the widening was for. That price is
+    what pushes an agent toward a per-call escape, which helps once and
+    evaporates. With reopening, the durable path is also the cheap one:
+    propose the declaration edit, have it approved, regenerate, reopen.
+    """
+
+    latest: bool = False
+    """Reopen the most recent session here, without choosing one."""
+
+    pick: bool = False
+    """Offer the runtime's own picker over this project's sessions."""
+
+    session: str | None = None
+    """Reopen one session by the id its runtime knows it as."""
+
+    def wanted(self) -> bool:
+        """Whether this launch is reopening anything at all."""
+        return self.latest or self.pick or self.session is not None
+
+    def contradicted(self) -> str | None:
+        """The complaint, when more than one session was named at once.
+
+        Refused rather than ranked: an order of precedence here would be this
+        module deciding which of two things an operator meant, and being
+        wrong about it silently.
+        """
+        asked = [
+            name
+            for name, given in (
+                ("--continue", self.latest),
+                ("--resume", self.pick),
+                ("--session", self.session is not None),
+            )
+            if given
+        ]
+        if len(asked) < 2:
+            return None
+        return f"a launch reopens one session; got {', '.join(asked)}"

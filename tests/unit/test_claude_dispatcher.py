@@ -49,7 +49,7 @@ Production because the edit gates below are what these tests are about, and
 a test root answers to the test-edit guard before any of them is reached."""
 
 
-def edit_payload(path: str, old: str, new: str, replace_all: bool) -> object:
+def edit_payload(path: str, old: str, new: str, replace_all: bool) -> JsonObject:
     return {
         "tool_name": "Edit",
         "tool_input": {
@@ -251,6 +251,223 @@ def delete_repo(tmp_path: Path) -> Path:
     git("commit", "-m", "chore: base")
     (work / "untracked.py").write_text("value = 2\n", encoding="utf-8")
     return work
+
+
+@pytest.fixture
+def other_repository(tmp_path: Path) -> Path:
+    """A checkout of a different repository, holding one file lup would refuse."""
+    work = tmp_path / "elsewhere"
+    (work / "src").mkdir(parents=True)
+    git = initialized_repo(work, tmp_path / "no-hooks")
+    (work / "src" / "theirs.py").write_text("value = 1\n", encoding="utf-8")
+    git("add", "src")
+    git("commit", "-m", "chore: base")
+    return work
+
+
+def foreign_verdict(path: Path, old: str, new: str, cwd: Path) -> tuple[str, str]:
+    """One edit judged with the session directory a live session always sends."""
+    payload = {
+        **edit_payload(str(path), old, new, False),
+        "cwd": str(cwd),
+    }
+    specific = decide_from(payload, cwd)["hookSpecificOutput"]
+    assert isinstance(specific, dict)
+    return str(specific["permissionDecision"]), str(
+        specific["permissionDecisionReason"]
+    )
+
+
+def test_another_repositorys_file_is_not_judged_by_this_projects_conventions(
+    other_repository: Path,
+) -> None:
+    """The defect #206 and #188 describe, at the dispatcher a session runs.
+
+    `Any` is a production denial here. Applied to a checkout that never
+    adopted these conventions it produced dozens of refusals naming lup rules,
+    and the only ways through were to restyle somebody else's code inside an
+    unrelated diff or to write a suppression directive into a repository with
+    no rule checker to read it.
+    """
+    effect, reason = foreign_verdict(
+        other_repository / "src" / "theirs.py",
+        "value = 1",
+        "from typing import Any",
+        Path.cwd(),
+    )
+
+    assert effect == "ask"
+    assert "different repository" in reason
+    assert "Any" not in reason
+
+
+def test_this_projects_own_file_is_still_judged(other_repository: Path) -> None:
+    """The half that must not move. Lifting the gates on a guess would silence
+    them here, which costs more than friction in somebody else's tree."""
+    decision = decide(
+        edit_payload(
+            "packages/lup/src/lup/devtools/dev/antipatterns.py",
+            "from lup.policy.kernel.roles import path_role",
+            "from typing import Any",
+            False,
+        )
+    )
+    specific = decision["hookSpecificOutput"]
+    assert isinstance(specific, dict)
+    assert specific["permissionDecision"] == "deny"
+
+
+def test_a_sibling_worktree_of_this_repository_is_not_foreign() -> None:
+    """The discriminator is the repository, never the checkout.
+
+    Most work here happens in a worktree, and comparing checkout roots would
+    lift every rule the moment a session edited a file one directory
+    sideways -- in this repository's own code.
+    """
+    judged = "packages/lup/src/lup/devtools/dev/antipatterns.py"
+    siblings = [
+        Path(line.removeprefix("worktree "))
+        for line in str(
+            sh.Command("git")("worktree", "list", "--porcelain")
+        ).splitlines()
+        if line.startswith("worktree ")
+    ]
+    # A sibling that actually carries the file, because an absent preimage
+    # asks for its own reasons and would read here as the gate having fired.
+    # The bare repository is in this listing too and carries no checkout.
+    elsewhere = next(
+        (
+            path
+            for path in siblings
+            if path != Path.cwd().resolve() and (path / judged).exists()
+        ),
+        None,
+    )
+    if elsewhere is None:
+        pytest.skip("this checkout has no sibling worktree carrying the judged file")
+    effect, _reason = foreign_verdict(
+        elsewhere / judged,
+        "from lup.policy.kernel.roles import path_role",
+        "from typing import Any",
+        Path.cwd(),
+    )
+
+    assert effect == "deny"
+
+
+def undo_refs(work: Path) -> list[str]:
+    """Every snapshot this checkout holds, read the way a human would find them."""
+    return [
+        line
+        for line in str(
+            sh.Command("git")(
+                "-C", str(work), "for-each-ref", "--format=%(subject)", "refs/lup/undo"
+            )
+        ).splitlines()
+        if line
+    ]
+
+
+def snapshotting_effect(command: str, cwd: Path) -> tuple[str, str]:
+    """One command judged with the ``cwd`` a live session always sends.
+
+    The other cases here leave it out and are answered correctly anyway,
+    because the runtime spawns a hook with the session's own directory and
+    the filesystem questions resolve against it either way. The snapshot
+    cannot take that route: it *writes*, and a writer that guessed at its
+    tree from the process it happened to be started in would put refs
+    somewhere nobody asked. So it takes no snapshot at all without being told
+    where, and these cases have to say.
+    """
+    payload = {**bash_payload(command), "cwd": str(cwd)}
+    specific = decide_from(payload, cwd)["hookSpecificOutput"]
+    assert isinstance(specific, dict)
+    return str(specific["permissionDecision"]), str(
+        specific["permissionDecisionReason"]
+    )
+
+
+def test_a_command_that_could_destroy_work_is_snapshotted_first(
+    delete_repo: Path,
+) -> None:
+    """The recoverability the relaxed lattice rests on, taken by the dispatcher.
+
+    Nothing else stands in front of a command, so this only passes when the
+    emitted script wrote the snapshot itself -- a devtools subprocess would
+    cost an interpreter start on every mutating command and be the first thing
+    somebody turned off.
+    """
+    effect, _reason = snapshotting_effect("rm untracked.py", delete_repo)
+
+    assert effect == "ask"
+    assert undo_refs(delete_repo) == ["lup undo: rm untracked.py"]
+
+
+def test_the_approval_question_says_the_tree_was_snapshotted(
+    delete_repo: Path,
+) -> None:
+    """The one moment the information changes an answer.
+
+    A human deciding whether to permit something destructive is weighing
+    exactly whether it can be undone, so the question carries the ref. An
+    allowed command stays silent, because a line appended to every mutating
+    command is one nobody reads by the third time.
+    """
+    _effect, reason = snapshotting_effect("rm untracked.py", delete_repo)
+
+    assert "snapshotted" in reason and "refs/lup/undo/" in reason
+
+
+def test_a_command_whose_writes_are_not_in_its_argv_is_snapshotted(
+    delete_repo: Path,
+) -> None:
+    """Coverage is what the net is for, and no trigger delivered it.
+
+    The trigger this replaced fired on the paths a command named plus the
+    verdict the classifier reached, and a build, an installer or a script
+    announces neither: `bun install` rewrites a tracked lockfile from an argv
+    naming no path, under a verdict that waves it through, and was
+    snapshotted by nothing. `git status --short` is that shape without the
+    toolchain — allowed, naming no target, and held anyway.
+    """
+    effect, _reason = snapshotting_effect("git status --short", delete_repo)
+
+    assert effect == "allow"
+    assert undo_refs(delete_repo) == ["lup undo: git status --short"]
+
+
+def test_commands_that_change_nothing_leave_one_snapshot_between_them(
+    delete_repo: Path,
+) -> None:
+    """What makes holding every command affordable, and the listing readable.
+
+    Git addresses content, so a command that changed nothing writes a
+    byte-identical tree and the ref named after it overwrites the earlier
+    one. The listing carries one entry per distinct state the tree was ever
+    in rather than one per command — which is the property the trigger was
+    reached for and did not deliver, since what it mostly caught was
+    commands it did not recognise.
+    """
+    snapshotting_effect("git status --short", delete_repo)
+    snapshotting_effect("ls src", delete_repo)
+
+    assert undo_refs(delete_repo) == ["lup undo: ls src"]
+
+
+def test_an_allowed_delete_is_snapshotted_without_saying_so(
+    delete_repo: Path,
+) -> None:
+    """Allowed-because-recoverable is still a delete, and git's copy is not the tree.
+
+    `rm src/file0.py` is granted because the object store holds that file byte
+    for byte -- but the rest of the working tree is what a mistaken sweep
+    takes with it, and that is what the snapshot holds.
+    """
+    effect, reason = snapshotting_effect("rm src/file0.py", delete_repo)
+
+    assert effect == "allow"
+    assert "snapshotted" not in reason
+    assert undo_refs(delete_repo) == ["lup undo: rm src/file0.py"]
 
 
 def test_removing_a_committed_unmodified_file_is_granted(delete_repo: Path) -> None:
@@ -641,3 +858,50 @@ def test_both_boundaries_place_one_call_the_same_way(
     assert dispatcher_rewrite(placement, call) == claude_placed_input(
         "Bash", call, placement
     )
+
+
+def test_a_loss_the_snapshot_holds_is_handed_to_the_runtime(delete_repo: Path) -> None:
+    """The relaxation, through the only thing a session runs.
+
+    `git reset --hard` destroys working-tree content and nothing else, and
+    the tree is in the object store before the command is judged — so the
+    policy has no permanent loss left to interrupt about. It answers with no
+    verdict at all rather than with a permission: the call goes to the
+    runtime's own gate, which is where an operator's configuration lives, and
+    a session at the runtime's defaults is still asked in the runtime's own
+    words.
+
+    The empty object is that answer on this runtime's wire. The ref is the
+    evidence the snapshot the relaxation rests on was actually taken, and
+    taken *before* the verdict read it.
+    """
+    payload = {**bash_payload("git reset --hard"), "cwd": str(delete_repo)}
+
+    assert decide_from(payload, delete_repo) == {}
+    assert undo_refs(delete_repo) == ["lup undo: git reset --hard"]
+
+
+def test_the_one_loss_the_snapshot_cannot_hold_still_asks(delete_repo: Path) -> None:
+    """`git clean -fdx` is the deliberate exception, not an unannotated gap.
+
+    The snapshot leaves ignored files out — `.env.local`, the resolver's
+    state, a virtual environment — and `git clean -fdx` is the one command
+    whose whole purpose is destroying exactly those. So it keeps asking in
+    the posture where every neighbour of it stops.
+    """
+    effect, _reason = snapshotting_effect("git clean -fdx", delete_repo)
+
+    assert effect == "ask"
+
+
+def test_an_effect_no_boundary_here_reaches_still_asks(delete_repo: Path) -> None:
+    """The blanket relaxation this axis exists to avoid.
+
+    Nothing in a session puts back a deleted remote ref, so relaxing every
+    approval question under a boundary would have handed remote-ref deletion,
+    issue creation and package publication to whatever the runtime's mode
+    happened to be.
+    """
+    effect, _reason = snapshotting_effect("git push --delete origin feat", delete_repo)
+
+    assert effect == "ask"

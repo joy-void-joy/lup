@@ -10,12 +10,13 @@ from functools import partial
 from pathlib import Path
 
 from lup.adapters.claude.login import CLAUDE_LOGIN
+from lup.codescan.common import RuleSelection
 from lup.devtools.dev.rules import write_rule_reference
 from lup.devtools.dev.workflow import write_workflow
 from lup.devtools.harness.composition import (
+    ClaudeComposer,
+    CodexComposer,
     NativeTargets,
-    claude_composition,
-    codex_composition,
     local_profile_directory,
 )
 from lup.devtools.harness.drift import RepositoryWriter
@@ -42,9 +43,17 @@ from lup_template.devtools.harness.content.template_codex import (
 CONTENT_ROOT = Path(__file__).parent / "content"
 
 
-def project_content(root: Path) -> ProjectContent:
-    """Everything this repository publishes beside its compiled plugin tree."""
+def project_content(root: Path, rules: RuleSelection | None = None) -> ProjectContent:
+    """Everything this repository publishes beside its compiled plugin tree.
+
+    ``rules`` is a launch overruling what this repository holds itself to for
+    one session, and nothing else reads it: what the repository actually
+    settled stays the declaration in its catalog, which is what a review sees
+    and what `dev seams` writes.
+    """
     harness = portable_harness(root=root)
+    if rules is not None:
+        harness = harness.holding(rules)
     return ProjectContent(
         harness=harness,
         documents=documents(root),
@@ -64,14 +73,18 @@ def profile_directory() -> ProfileDirectory:
     return local_profile_directory(project_root(), CLAUDE_LOGIN)
 
 
-def claude_target(root: Path) -> NativeHarnessComposition:
+def claude_target(
+    root: Path, rules: RuleSelection | None = None
+) -> NativeHarnessComposition:
     """This project's content, compiled through the Claude adapter."""
-    return claude_composition(root, project_content(root), TEMPLATE_CLAUDE)
+    return ClaudeComposer().compose(root, project_content(root, rules), TEMPLATE_CLAUDE)
 
 
-def codex_target(root: Path) -> NativeHarnessComposition:
+def codex_target(
+    root: Path, rules: RuleSelection | None = None
+) -> NativeHarnessComposition:
     """This project's content, compiled through the Codex adapter."""
-    return codex_composition(root, project_content(root), TEMPLATE_CODEX)
+    return CodexComposer().compose(root, project_content(root, rules), TEMPLATE_CODEX)
 
 
 TARGETS = NativeTargets(builders={"claude": claude_target, "codex": codex_target})

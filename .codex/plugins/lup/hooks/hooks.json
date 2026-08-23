@@ -4,20 +4,20 @@
       {
         "hooks": [
           {
-            "command": "python3 \"$PLUGIN_ROOT/hooks/scripts/policy.py\"",
+            "command": "python3 \"$PLUGIN_ROOT/hooks/scripts/policy.py\" || { status=$?; [ \"$status\" -eq 2 ] || echo \"lup policy: dispatcher exited $status without judging this call; refusing rather than passing it\" >&2; exit 2; }",
             "statusMessage": "Checking Lup policy",
             "timeout": 30,
             "type": "command"
           }
         ],
-        "matcher": "Bash|web_fetch|apply_patch|Artifact|Skill"
+        "matcher": "Bash|web_fetch|apply_patch|Artifact|Skill|EnterWorktree"
       }
     ],
     "PostToolUse": [
       {
         "hooks": [
           {
-            "command": "python3 \"$PLUGIN_ROOT/hooks/scripts/policy.py\"",
+            "command": "python3 \"$PLUGIN_ROOT/hooks/scripts/policy.py\" || { status=$?; [ \"$status\" -eq 2 ] || echo \"lup policy: dispatcher exited $status without judging this call; refusing rather than passing it\" >&2; exit 2; }",
             "statusMessage": "Checking Lup policy",
             "timeout": 30,
             "type": "command"
@@ -30,13 +30,13 @@
       {
         "hooks": [
           {
-            "command": "python3 \"$PLUGIN_ROOT/hooks/scripts/policy.py\"",
+            "command": "python3 \"$PLUGIN_ROOT/hooks/scripts/policy.py\" || { status=$?; [ \"$status\" -eq 2 ] || echo \"lup policy: dispatcher exited $status without judging this call; refusing rather than passing it\" >&2; exit 2; }",
             "statusMessage": "Checking Lup policy",
             "timeout": 30,
             "type": "command"
           }
         ],
-        "matcher": "Bash|web_fetch|apply_patch|Artifact|Skill"
+        "matcher": "Bash|web_fetch|apply_patch|Artifact|Skill|EnterWorktree"
       }
     ]
   }

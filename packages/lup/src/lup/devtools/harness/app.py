@@ -21,10 +21,12 @@ import lup.devtools.harness.drift as drift
 import lup.devtools.harness.launch as launch
 import lup.devtools.harness.reconcile as reconcile
 import lup.devtools.harness.resolve as resolve
+from lup.codescan.registry import every_rule_retired
 from lup.devtools.dev.issues import EXCLUDED_LABEL
 from lup.devtools.harness.composition import NativeTargets, claude_profile_directory
 from lup.devtools.harness.generate import NativeHarnessComposition
 from lup.devtools.harness.profile_app import create_profile_app
+from lup.harness.models import Resumption
 from lup.runtime.profiles import ProfileDirectory
 from lup.devtools.harness.drift import RepositoryWriter
 from lup.devtools.supervisor.app import serve_supervisor
@@ -138,6 +140,48 @@ def create_harness_app(
         """Report installed native runtime evidence without updating either CLI."""
         doctor.run_doctor(targets.resolve(target, project_root()), strict_evidence)
 
+    @app.command("requirements")
+    def requirements_command(
+        target: Annotated[str, typer.Argument(help=selector)] = targets.every,
+        launch_only: Annotated[
+            bool,
+            typer.Option(
+                "--launch-only",
+                help="Skip the conveniences, exactly as a launch does",
+            ),
+        ] = False,
+    ) -> None:
+        """Exercise the external programs this project expects on this machine.
+
+        The roster a launch runs, plus the conveniences it stays quiet about
+        -- so somebody setting a machine up hears everything once, where they
+        can act on it, and every session afterwards hears only what it lost.
+
+        Only host-side requirements are exercised. What the container image
+        is expected to carry is checked where it is needed rather than here,
+        because a machine that will never run a TypeScript toolchain outside
+        a container is not a machine with a problem.
+
+        Exits nonzero when something whose absence costs a capability is not
+        working. An advisory alone never fails this: it is advice, and a
+        machine that declines it is finished being set up.
+        """
+        findings = [
+            finding
+            for composition in targets.resolve(target, project_root())
+            for finding in launch.report_requirements(
+                composition.recipe.source.requirements, setting_up=not launch_only
+            )
+        ]
+        if not findings:
+            typer.echo("No host requirements declared.")
+            return
+        if any(
+            not finding.working and finding.requirement.absence.costly()
+            for finding in findings
+        ):
+            raise typer.Exit(1)
+
     @app.command("serve-resolver-tools")
     def serve_resolver_tools_command() -> None:
         """Serve one worker's question tools over stdio, for out-of-process runtimes."""
@@ -169,6 +213,14 @@ def create_harness_app(
         adapter: Annotated[
             str | None,
             typer.Option("--adapter", help=", ".join(targets.builders)),
+        ] = None,
+        profile: Annotated[
+            str | None,
+            typer.Option(
+                "--profile",
+                "-p",
+                help="Account every session this run opens; defaults to the active one",
+            ),
         ] = None,
         run_id: Annotated[
             str | None,
@@ -382,6 +434,7 @@ def create_harness_app(
                     auth_probe_delay=auth_probe_delay,
                     max_parallel_workers=max_parallel_workers,
                     recheck_standing_per_join=recheck_standing_per_join,
+                    profile=profile,
                 )
             )
             return
@@ -398,6 +451,7 @@ def create_harness_app(
             # core still holds a composition, so ending a run without the flag
             # takes the first declared adapter and never asks it for anything.
             targets.resolve(adapter or next(iter(targets.builders)), project_root())[0],
+            directory.account(profile),
             run_id,
             answer or [],
             abort,
@@ -415,8 +469,8 @@ def create_harness_app(
             start_new,
         )
 
-    # lup: There is no way to open a session that the anti-pattern gate leaves
-    # alone. Both launchers should offer one — `lup-devtools harness claude
+    # lup: solved: There is no way to open a session that the anti-pattern gate
+    # leaves alone. Both launchers should offer one — `lup-devtools harness claude
     # --ignore-antipatterns`, and the same option on `codex` — for the sessions
     # where the rules are not the point: exploring, spiking, or working over
     # code this repository's conventions were never written for. The flag has
@@ -430,20 +484,27 @@ def create_harness_app(
     # reads the same selection, and a session that edited freely under the flag
     # will fail it.
     def selected_target(
-        mode: launch.LaunchMode | None, runtime: str
+        mode: launch.LaunchMode | None, runtime: str, relaxed: bool = False
     ) -> NativeHarnessComposition:
         """The composition to generate and open, under whichever mode is in force.
 
         A mode carries its own targets, so this is where "the tree differs by
         mode" actually happens: everything downstream takes an already
         concrete composition and cannot tell which declaration produced it.
+
+        ``relaxed`` is the other thing that differs by launch, and it reaches
+        the same place for the same reason: the anti-pattern table is
+        projected into each plugin's hermetic edit policy at generation time,
+        so a switch that stopped at this command line would leave the session
+        judged by the tree it opened against rather than by what was asked
+        for.
         """
         source = mode.targets if mode is not None else targets
         build = source.builder(runtime)
         if build is None:
             named = f"--{mode.name} " if mode is not None else ""
             raise typer.BadParameter(f"{named}declares no {runtime} tree")
-        return build(project_root())
+        return build(project_root(), every_rule_retired() if relaxed else None)
 
     def launch_help(subject: str) -> str:
         """One launcher's help, with whatever modes this project declares."""
@@ -475,16 +536,39 @@ def create_harness_app(
                 bool,
                 typer.Option("--generate-only", help="Generate without launching"),
             ] = False,
+            continue_latest: Annotated[
+                bool,
+                typer.Option(
+                    "--continue", "-c", help="Reopen the most recent session here"
+                ),
+            ] = False,
+            resume: Annotated[
+                bool,
+                typer.Option("--resume", help="Pick a session to reopen"),
+            ] = False,
+            session: Annotated[
+                str | None,
+                typer.Option("--session", help="Reopen this session by id"),
+            ] = None,
+            ignore_antipatterns: Annotated[
+                bool,
+                typer.Option(
+                    "--ignore-antipatterns",
+                    help="Open a session the anti-pattern gate leaves alone",
+                ),
+            ] = False,
         ) -> None:
             selection = launch.extract_launch_mode(modes, ctx.args)
             launch.launch_claude(
-                selected_target(selection.mode, "claude"),
+                selected_target(selection.mode, "claude", ignore_antipatterns),
                 selection.arguments,
                 directory,
                 profile,
                 model,
                 generate_only,
                 selection.mode,
+                Resumption(latest=continue_latest, pick=resume, session=session),
+                ignore_antipatterns,
                 checkpoint,
             )
 
@@ -525,10 +609,31 @@ def create_harness_app(
                     help="Reinstall even when the cached digest matches",
                 ),
             ] = False,
+            continue_latest: Annotated[
+                bool,
+                typer.Option(
+                    "--continue", "-c", help="Reopen the most recent session here"
+                ),
+            ] = False,
+            resume: Annotated[
+                bool,
+                typer.Option("--resume", help="Pick a session to reopen"),
+            ] = False,
+            session: Annotated[
+                str | None,
+                typer.Option("--session", help="Reopen this session by id"),
+            ] = None,
+            ignore_antipatterns: Annotated[
+                bool,
+                typer.Option(
+                    "--ignore-antipatterns",
+                    help="Open a session the anti-pattern gate leaves alone",
+                ),
+            ] = False,
         ) -> None:
             selection = launch.extract_launch_mode(modes, ctx.args)
             launch.launch_codex(
-                selected_target(selection.mode, "codex"),
+                selected_target(selection.mode, "codex", ignore_antipatterns),
                 selection.arguments,
                 codex_home,
                 profile,
@@ -536,6 +641,8 @@ def create_harness_app(
                 generate_only,
                 force_install,
                 selection.mode,
+                Resumption(latest=continue_latest, pick=resume, session=session),
+                ignore_antipatterns,
                 checkpoint,
             )
 

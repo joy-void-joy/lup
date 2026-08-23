@@ -30,8 +30,13 @@ from pathlib import Path
 import sh
 from pydantic import BaseModel
 
+from lup.policy.assets.host import undo_namespace
+
 REF_FORMAT = "%(refname) %(objectname)"
 """One ref per line, as `repository_refs` reads it."""
+
+UPSTREAM_FORMAT = "%(refname) %(upstream)"
+"""One ref per line against the remote-tracking ref it follows, where it follows one."""
 
 WATCHED_SETTINGS = ("user.name", "user.email", "core.hooksPath")
 """The config a fixture overwrites and never puts back.
@@ -152,9 +157,43 @@ def watched_config(
     return found
 
 
-def repository_state(root: Path) -> dict[str, str]:
-    """Everything the guard watches: every ref, and the config a fixture can leak."""
-    return {**repository_refs(root), **watched_config(root)}
+def repository_state(root: Path, namespace: str = "") -> dict[str, str]:
+    """Everything the guard watches: every ref, and the config a fixture can leak.
+
+    Minus the undo namespace, which is the one place in this repository that
+    is *written by design* while a suite runs. The permission dispatcher takes
+    a snapshot in front of every command an agent is allowed, so a suite an
+    agent starts has refs appearing under it throughout — measured, twenty-four
+    in the ninety seconds around one `dev check`, and eight identical teardown
+    failures, one per xdist worker, naming refs no fixture had touched.
+
+    Excluded rather than reported, on the strength of what the namespace is.
+    A ref moving there carries no evidence either way: it is written from
+    outside the suite on a schedule the suite does not control, so it is never
+    the suite's doing, and a notice saying so on every agent-run check is the
+    line people learn to skip above the line that mattered. And it cannot be
+    the accident this guard exists for — that accident is a branch moving or a
+    shared identity being overwritten, and a snapshot is a tree hung outside
+    `refs/heads`, pointed at by nothing, that moves no branch and writes no
+    config.
+
+    The namespace is imported from the half that writes it rather than spelled
+    again here, for the reason that half gives for being importable at all:
+    the writer and the reader must not end up looking in two places for one
+    safety net. ``namespace`` is a parameter for the callers that pass their
+    own — the same override :func:`~lup.policy.assets.host.undo_snapshot`
+    takes, so a suite testing snapshots against a namespace of its own is
+    still watched in the real one.
+    """
+    where = namespace or undo_namespace()
+    return {
+        **{
+            name: value
+            for name, value in repository_refs(root).items()
+            if not name.startswith(f"{where}/")
+        },
+        **watched_config(root),
+    }
 
 
 def moved_refs(before: dict[str, str], after: dict[str, str]) -> list[str]:
@@ -211,7 +250,7 @@ def guard_report(before: dict[str, str], after: dict[str, str]) -> str:
 
 
 class ForeignCheckouts(BaseModel, frozen=True):
-    """Which refs a worktree other than the one under test has checked out.
+    """Which refs a worktree other than the one under test answers for.
 
     Every worktree cut from a repository shares its ref store, so the guard
     reading `for-each-ref` in one of them sees every branch the repository
@@ -228,7 +267,12 @@ class ForeignCheckouts(BaseModel, frozen=True):
     """
 
     holders: dict[str, str] = {}
-    """Each checked-out ref, against the worktree path holding it."""
+    """Each ref another worktree answers for, against that worktree's path.
+
+    The branch it has checked out, and the remote-tracking ref that branch
+    follows -- a push moves the second as routinely as a commit moves the
+    first, and neither is this run's doing.
+    """
 
     def holder(self, key: str) -> str | None:
         """The other worktree that owns this key, when another one does."""
@@ -270,7 +314,8 @@ class ForeignCheckouts(BaseModel, frozen=True):
             )
         except (sh.ErrorReturnCode, sh.CommandNotFound):
             return cls()
-        return cls(holders=cls.declared(str(listed), root.resolve()))
+        held = cls.declared(str(listed), root.resolve())
+        return cls(holders=held | cls.tracked(root, held))
 
     @classmethod
     def declared(cls, listing: str, own: Path) -> dict[str, str]:
@@ -294,6 +339,60 @@ class ForeignCheckouts(BaseModel, frozen=True):
                 case _:
                     continue
         return held
+
+    @classmethod
+    def tracked(
+        cls, root: Path, held: dict[str, str], ref_format: str = UPSTREAM_FORMAT
+    ) -> dict[str, str]:
+        """Each held branch's remote-tracking ref, against the same worktree.
+
+        A sibling that commits usually pushes, and the push moves
+        `refs/remotes/<remote>/<branch>` as surely as the commit moved the
+        branch. Only the branch half carries a worktree in `git worktree
+        list` though, because a remote-tracking ref is checked out by nobody
+        -- so without this it reads as a ref that appeared from nowhere, and
+        the routine event fails the run exactly as before.
+
+        Which remote ref belongs to which branch is asked of git as
+        `upstream` rather than assembled from the two names: a branch may
+        track a remote it is not named after, and neither name can be split
+        back out of `refs/remotes/a/b/c` by guesswork.
+
+        Two relations answer that, because neither covers the other. A branch
+        already tracking one names it in `upstream`, which is exact even where
+        the two are named differently. A branch pushed for the first time
+        names nothing yet -- the config arrives with the push, after this has
+        read it -- so the ref it will create is also claimed under each
+        configured remote, which is the correspondence `git push` itself uses.
+
+        Claiming a ref that never appears costs nothing: only refs the run
+        actually saw move are ever looked up. A remote whose branch this
+        checkout holds is never claimed, because that branch never reaches
+        ``held``.
+        """
+        upstreams = repository_refs(root, ref_format)
+        remotes = cls.remotes(root)
+        found: dict[str, str] = {}  # lup: ignore[empty-collection] — two folds
+        for branch, at in held.items():
+            name = branch.removeprefix("refs/heads/")
+            for remote in remotes:
+                found[f"refs/remotes/{remote}/{name}"] = at
+            if branch in upstreams and upstreams[branch]:
+                found[upstreams[branch]] = at
+        return found
+
+    @classmethod
+    def remotes(cls, root: Path) -> list[str]:
+        """Every remote the repository configures, or none when git cannot say.
+
+        None on failure keeps the module's rule that a guard which cannot
+        answer falls back to failing on everything rather than passing on it.
+        """
+        try:
+            listed = sh.Command("git")("-C", str(root), "remote", _tty_out=False)
+        except (sh.ErrorReturnCode, sh.CommandNotFound):
+            return []
+        return [line for line in str(listed).splitlines() if line]
 
 
 class GuardVerdict(BaseModel, frozen=True):

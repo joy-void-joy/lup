@@ -65,9 +65,9 @@ def parse_remote(remote_url: str) -> RemoteRef | None:
     unrecognized remotes.
 
     The presence of ``://`` decides, rather than whether urllib finds a
-    scheme, because it finds one either way: ``jvj:org/repo`` -- an ssh
+    scheme, because it finds one either way: ``forge:org/repo`` -- an ssh
     alias, which is what a remote looks like once a person has an
-    ``~/.ssh/config`` -- parses as the scheme ``jvj`` with no host, and a
+    ``~/.ssh/config`` -- parses as the scheme ``forge`` with no host, and a
     remote nothing recognizes is a remote nothing checks.
 
     :func:`lup.devtools.utils.slug_from_remote` reads the other half of the

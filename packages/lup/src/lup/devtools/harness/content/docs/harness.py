@@ -415,6 +415,66 @@ for the cache. Personal trust state, credentials, active run state, and cache
 contents are never generated and never committed. Review hook trust with the
 native hooks surface after generation.
 
+### Opening a session the anti-pattern gate leaves alone
+
+`--ignore-antipatterns`, on both launchers, for the sessions where the rules
+are not the point: exploring, spiking, or working over code these conventions
+were never written for.
+
+It reaches the gate rather than the command line, which is the only thing that
+would make it work. The anti-pattern table is projected into each plugin's
+hermetic edit policy at generation time, and `ready_to_open` regenerates before
+it opens — so the flag compiles the tree the session actually runs against.
+What it sets is `RuleSelection` with every id retired, spelled as the ids
+rather than as a flag meaning "all of them", because the selection is
+subtractive and a rule added later should be one the selection has visibly not
+answered for.
+
+Three things it deliberately does not do, each announced at launch because each
+bites later and none announces itself:
+
+- **The sweep does not follow.** `dev check --antipatterns` reads the
+  repository's own declaration, so a session that edited freely under the flag
+  will fail it. That is the point rather than an oversight: a transient switch
+  must not quietly become the repository's answer.
+- **The committed tree is rewritten.** Regenerate before committing, or the
+  commit carries a plugin nothing declares.
+- **It is not how a project drops the rules.** `dev seams --retire-all` is,
+  because that writes the decision where a review sees it and `--keep` takes it
+  back.
+
+### Reopening a session, and why a launcher owns it
+
+Both launchers reopen an earlier session, from one declaration and in each
+runtime's own words:
+
+| request | flag | Claude | Codex |
+|---|---|---|---|
+| the most recent session here | `--continue` / `-c` | `--continue` | `resume --last` |
+| choose from a picker | `--resume` | `--resume` | `resume` |
+| one session by id | `--session <id>` | `--resume <id>` | `resume <id>` |
+
+The shapes are genuinely different rather than differently named — a
+subcommand has to lead the argument vector where a flag does not — which is
+why `Resumption` carries the request and each adapter's function carries the
+words. Naming two at once is refused rather than ranked, before anything is
+generated.
+
+This exists for more than convenience. The policy a session enforces is
+compiled into the plugin tree its runtime loads **at startup**, so widening
+that policy takes effect only in a new process. Without reopening, the price
+of every widening is the conversation that established what it was for — which
+is what pushes an agent toward a per-call escape that helps once and
+evaporates. With it the durable path is also the cheap one:
+
+1. The agent proposes the declaration edit. The policy source is a protected
+   path, so the edit surfaces as an approval with the diff in it.
+2. Approve it — what is approved is the rule, not one command.
+3. `harness generate all`, or just relaunch: `ready_to_open` regenerates on
+   the way in.
+4. `harness claude --continue` / `harness codex --continue`. The reopened
+   session is already running against the tree the approval produced.
+
 ### Where a profile comes from
 
 A profile names one account and the configuration home it runs under, and which

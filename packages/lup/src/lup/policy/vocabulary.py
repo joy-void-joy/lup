@@ -41,7 +41,7 @@ from collections.abc import Sequence
 
 from pydantic import BaseModel
 
-from lup.policy.kernel.decision import SandboxPlacement
+from lup.policy.kernel.decision import Recovery, SandboxPlacement
 from lup.policy.shell_rules import (
     RunnerTargetRule,
     ShellCommandRule,
@@ -55,11 +55,23 @@ class JudgedCommand(BaseModel, frozen=True):
 
     name: str
     reason: str
+    recovery: Recovery = "nothing"
+    """What would put back what this command destroys, if anything here does.
+
+    The question this row asks exists because a loss is permanent, so naming
+    the restorer that makes it impermanent is naming when the question stops
+    being worth a human's attention. Silence keeps the question."""
     read_verbs: list[str] = []
     """This command's own spellings of its query action, which de-escalate it.
 
     Without somewhere to say "except this verb", listing an archive is as
     much an approval as extracting one."""
+    write_markers: list[str] = []
+    """Argument prefixes whose absence makes this command read-only.
+
+    The same exception stated negatively, for a command that has no query
+    verb because its query form is the plain one: `dd` writes given an `of=`
+    and reads without it."""
 
 
 def read_only_rules(
@@ -156,21 +168,63 @@ def read_only_rules(
 
 def judged_ask_rules(
     commands: Sequence[JudgedCommand] = (
-        JudgedCommand(name="rm", reason="deleting files requires approval"),
-        JudgedCommand(name="rmdir", reason="deleting directories requires approval"),
-        JudgedCommand(name="mv", reason="moving files requires approval"),
-        JudgedCommand(name="cp", reason="copying over files requires approval"),
+        JudgedCommand(
+            name="rm",
+            reason="deleting files requires approval",
+            recovery="container",
+        ),
+        JudgedCommand(
+            name="rmdir",
+            reason="deleting directories requires approval",
+            recovery="container",
+        ),
+        JudgedCommand(
+            name="mv",
+            reason="moving files requires approval",
+            recovery="container",
+        ),
+        JudgedCommand(
+            name="cp",
+            reason="copying over files requires approval",
+            recovery="container",
+        ),
         JudgedCommand(name="chmod", reason="changing permissions requires approval"),
         JudgedCommand(name="chown", reason="changing ownership requires approval"),
-        JudgedCommand(name="ln", reason="creating links requires approval"),
+        JudgedCommand(
+            name="ln",
+            reason="creating links requires approval",
+            recovery="container",
+        ),
         JudgedCommand(
             name="tee",
             reason="writing files requires approval — prefer the Write tool",
+            recovery="container",
         ),
-        JudgedCommand(name="dd", reason="raw device or file writes require approval"),
-        JudgedCommand(name="truncate", reason="truncating files requires approval"),
-        JudgedCommand(name="kill", reason="terminating processes requires approval"),
-        JudgedCommand(name="pkill", reason="terminating processes requires approval"),
+        JudgedCommand(
+            name="dd",
+            # `dd` writes when handed an `of=` and reads to stdout without
+            # one, so its read-only form is the invocation with nothing extra
+            # in it. No verb list can name that, which is why every
+            # `dd if=x` stopped for approval as a write.
+            write_markers=["of="],
+            reason="raw device or file writes require approval",
+            recovery="container",
+        ),
+        JudgedCommand(
+            name="truncate",
+            reason="truncating files requires approval",
+            recovery="container",
+        ),
+        JudgedCommand(
+            name="kill",
+            reason="terminating processes requires approval",
+            recovery="container",
+        ),
+        JudgedCommand(
+            name="pkill",
+            reason="terminating processes requires approval",
+            recovery="container",
+        ),
         JudgedCommand(
             name="command",
             # Reached only in the query shape: every other spelling runs the
@@ -184,26 +238,31 @@ def judged_ask_rules(
             # `-xzf` also contains: these are tar's own list-mode spellings.
             read_verbs=["-t", "--list", "-tf", "-tvf", "-tzf", "-tzvf", "-tjf", "-tJf"],
             reason="archive operations write files — requires approval",
+            recovery="container",
         ),
         JudgedCommand(
             name="unzip",
             read_verbs=["-l", "-t", "-v", "-z"],
             reason="archive extraction writes files — requires approval",
+            recovery="container",
         ),
         JudgedCommand(
             name="zip",
             read_verbs=["-sf", "--show-files"],
             reason="archive creation writes files — requires approval",
+            recovery="container",
         ),
         JudgedCommand(
             name="gzip",
             read_verbs=["-l", "--list", "-t", "--test"],
             reason="compression rewrites files — requires approval",
+            recovery="container",
         ),
         JudgedCommand(
             name="gunzip",
             read_verbs=["-l", "--list", "-t", "--test"],
             reason="decompression rewrites files — requires approval",
+            recovery="container",
         ),
         JudgedCommand(name="sudo", reason="privilege escalation requires approval"),
         JudgedCommand(name="doas", reason="privilege escalation requires approval"),
@@ -224,15 +283,15 @@ def judged_ask_rules(
             read_verbs=["ls", "list", "view", "outdated", "why", "explain"],
             reason="package tools fetch and execute code — requires approval",
         ),
-        # lup: A full verify line — ruff format, ruff check, pyright, pytest,
+        # lup: solved: A full verify line — ruff format, ruff check, pyright, pytest,
         # then `cd frontend && npx tsc --noEmit` — was refused here with
         # "package tools fetch and execute code". It should probably have been
         # auto-allowed, and so should the `command tsc isn't recognized` probe
         # the same line falls back to.
-        JudgedCommand(
-            name="npx",
-            reason="package tools fetch and execute code — requires approval",
-        ),
+        #
+        # `npx` moved to `typescript_rule`, beside the other package runner, so
+        # the compiler it most often reaches is recognized. What stays here is
+        # the package *managers*, which install rather than run.
         JudgedCommand(
             name="pnpm",
             reason="package tools fetch and execute code — requires approval",
@@ -241,12 +300,36 @@ def judged_ask_rules(
             name="yarn",
             reason="package tools fetch and execute code — requires approval",
         ),
-        JudgedCommand(name="apt", reason="system package changes require approval"),
-        JudgedCommand(name="apt-get", reason="system package changes require approval"),
-        JudgedCommand(name="pacman", reason="system package changes require approval"),
-        JudgedCommand(name="brew", reason="system package changes require approval"),
-        JudgedCommand(name="systemctl", reason="service management requires approval"),
-        JudgedCommand(name="crontab", reason="schedule changes require approval"),
+        JudgedCommand(
+            name="apt",
+            reason="system package changes require approval",
+            recovery="container",
+        ),
+        JudgedCommand(
+            name="apt-get",
+            reason="system package changes require approval",
+            recovery="container",
+        ),
+        JudgedCommand(
+            name="pacman",
+            reason="system package changes require approval",
+            recovery="container",
+        ),
+        JudgedCommand(
+            name="brew",
+            reason="system package changes require approval",
+            recovery="container",
+        ),
+        JudgedCommand(
+            name="systemctl",
+            reason="service management requires approval",
+            recovery="container",
+        ),
+        JudgedCommand(
+            name="crontab",
+            reason="schedule changes require approval",
+            recovery="container",
+        ),
     ),
 ) -> list[ShellCommandRule]:
     """Commands that ask on every production path, with the reason each carries.
@@ -260,6 +343,8 @@ def judged_ask_rules(
             name=command.name,
             default_effect="ask",
             read_verbs=command.read_verbs,
+            write_markers=command.write_markers,
+            recovery=command.recovery,
             reason=command.reason,
         )
         for command in commands
@@ -341,6 +426,7 @@ def guarded_tool_rules() -> list[ShellCommandRule]:
             name="tree",
             default_effect="allow",
             ask_flags=["-o"],
+            recovery="container",
             reason="a tree flag that writes a file requires approval",
         ),
         ShellCommandRule(
@@ -358,12 +444,14 @@ def guarded_tool_rules() -> list[ShellCommandRule]:
             name="base64",
             default_effect="allow",
             ask_flags=["-o", "--output"],
+            recovery="container",
             reason="a base64 flag that writes a file requires approval",
         ),
         ShellCommandRule(
             name="yq",
             default_effect="allow",
             ask_flags=["-i", "--inplace", "--in-place", "-s", "--split-exp"],
+            recovery="container",
             reason=(
                 "a yq flag that edits files in place or splits into files"
                 " requires approval"
@@ -388,6 +476,7 @@ def guarded_tool_rules() -> list[ShellCommandRule]:
             name="find",
             default_effect="allow",
             ask_flags=["-delete", "-fprint", "-fprint0", "-fprintf", "-fls"],
+            recovery="container",
             reason="a mutating find action requires approval",
         ),
         ShellCommandRule(
@@ -395,6 +484,7 @@ def guarded_tool_rules() -> list[ShellCommandRule]:
             name="ss",
             default_effect="allow",
             ask_flags=["-K", "--kill"],
+            recovery="container",
             reason="killing sockets requires approval",
         ),
         ShellCommandRule(
@@ -578,6 +668,7 @@ def git_rule(
                 name=name,
                 effect="allow",
                 ask_flags=["--output"],
+                recovery="container",
                 reason="writing command output to a file requires approval",
             )
             # `--output` names a path on the command line and lands a file
@@ -660,19 +751,28 @@ def git_rule(
             name="apply",
             effect="allow",
             ask_flags=["--unsafe-paths", "--build-fake-ancestor"],
+            recovery="container",
             reason="a patch that writes outside the working area requires approval",
         ),
         ShellSubcommandRule(
             name="restore",
             effect="ask",
+            recovery="snapshot",
             reason="restoring files discards working-tree changes",
         ),
         ShellSubcommandRule(
             name="rm",
             effect="ask",
+            recovery="snapshot",
             reason="removing tracked files requires approval",
         ),
         ShellSubcommandRule(
+            # The one destructive git verb the snapshot does not answer, and
+            # the reason it keeps asking wherever the others stop. `-fdx`
+            # takes ignored files, and ignored files are exactly what the
+            # snapshot leaves out: `.env.local`, the resolver's state, a
+            # virtual environment. Naming a restorer here would relax the one
+            # command whose whole purpose is destroying what nothing holds.
             name="clean",
             effect="ask",
             reason="deleting untracked files is destructive — requires approval",
@@ -695,6 +795,7 @@ def git_rule(
         ShellSubcommandRule(
             name="checkout",
             effect="deny" if redirect_checkout else "ask",
+            recovery="snapshot",
             reason=(
                 "use git switch for branches or git restore for files"
                 if redirect_checkout
@@ -734,9 +835,11 @@ def git_rule(
                     name="view",
                     effect="allow",
                     ask_flags=["--output"],
+                    recovery="container",
                     reason="writing command output to a file requires approval",
                 ),
             ],
+            recovery="snapshot",
             reason="a bisect step moves HEAD across commits",
         ),
         ShellSubcommandRule(
@@ -766,12 +869,14 @@ def git_rule(
             name="reset",
             effect="allow",
             ask_flags=["--hard", "--merge", "--keep"],
+            recovery="snapshot",
             reason="a working-tree-destroying reset requires approval",
         ),
         ShellSubcommandRule(
             name="switch",
             effect="allow",
             ask_flags=["-f", "--force", "--discard-changes"],
+            recovery="snapshot",
             reason="a force switch can discard working-tree changes",
         ),
         ShellSubcommandRule(
@@ -804,6 +909,7 @@ def git_rule(
                     name="list",
                     effect="allow",
                     ask_flags=["--output"],
+                    recovery="container",
                     reason="writing command output to a file requires approval",
                 ),
                 ShellOperationRule(
@@ -811,6 +917,7 @@ def git_rule(
                     name="show",
                     effect="allow",
                     ask_flags=["--output"],
+                    recovery="container",
                     reason="writing command output to a file requires approval",
                 ),
                 ShellOperationRule(name="push", effect="allow"),
@@ -881,6 +988,13 @@ def git_rule(
     return ShellCommandRule(
         name="git",
         default_effect="deny",
+        # `git version` is classified read-only as a subcommand, and the same
+        # question spelled as a flag was reaching the default deny -- so the
+        # policy answered "this git subcommand is not classified" about a
+        # command carrying no subcommand at all. The same shape `bun` fixes
+        # above, and the same class as the pure reads §4.2 closed: asking a
+        # program what it is cannot change anything.
+        allow_flags=["--version", "--help"],
         ask_flags=[
             "-c",
             "--config-env",
@@ -1077,6 +1191,119 @@ def docker_rule() -> ShellCommandRule:
         ],
         reason="container operations require approval",
     )
+
+
+def bun_rule() -> ShellCommandRule:
+    """Compile the bun surface, which is a package manager wearing a runtime.
+
+    `bun` is in the kernel's interpreter set, so without a rule naming it
+    every invocation is refused as inline code — including `bun install`,
+    which carries none. Declaring the safe forms is what separates the two,
+    and it separates them the safe way round: the default is `deny`, so an
+    eval spelling this table never anticipated is refused by falling through
+    rather than by being listed. That matters more than usual, because the
+    ways of handing an interpreter a program are many and growing — `-e`,
+    `--eval`, `-p`, a bare `-` reading stdin, and on a sibling runtime an
+    `eval` *subcommand* that no flag list could have caught.
+
+    The split between allow and ask is what a verb does to the manifest
+    rather than to the filesystem: restoring dependencies somebody already
+    declared is the ordinary case, while adding one, removing one, or
+    fetching a package that is not declared at all changes what this project
+    depends on and is worth a question.
+    """
+    return ShellCommandRule(
+        name="bun",
+        default_effect="deny",
+        # The version banner is not a subcommand and would otherwise fall to
+        # the default deny, which is the wrong answer for a pure read.
+        allow_flags=["--version", "--revision"],
+        subcommands=[
+            ShellSubcommandRule(
+                name="install",
+                effect="allow",
+                sandbox="outside",
+                reason="restoring declared dependencies reaches the registry",
+            ),
+            ShellSubcommandRule(name="run", effect="allow"),
+            ShellSubcommandRule(name="test", effect="allow"),
+            ShellSubcommandRule(name="build", effect="allow"),
+            ShellSubcommandRule(
+                name="add",
+                effect="ask",
+                sandbox="outside",
+                reason="adding a dependency changes what this project needs",
+            ),
+            ShellSubcommandRule(
+                name="remove",
+                effect="ask",
+                reason="removing a dependency changes what this project needs",
+            ),
+            ShellSubcommandRule(
+                name="x",
+                effect="ask",
+                sandbox="outside",
+                reason="running a package that is not a declared dependency",
+            ),
+        ],
+        reason="bare interpreters and inline code are not allowed",
+    )
+
+
+def typescript_rule() -> list[ShellCommandRule]:
+    """Compile the TypeScript compiler: checking allows, emitting asks.
+
+    `--noEmit` is the whole of the read-only form and it still takes
+    operands, so no all-flags test recognizes it — which is what
+    ``read_verbs`` exists for. A bare invocation writes output at paths a
+    configuration file chooses, so nothing in the command bounds what it
+    touches, which is the shape this table asks about everywhere else.
+
+    Both package runners are declared alongside it because reaching a
+    project-local compiler through one is how a pinned version gets used, and
+    a globally installed `tsc` checks against whatever somebody last
+    installed. Each default asks, since a runner will fetch a package that is
+    not a declared dependency rather than report that it is missing — but the
+    compiler they most often reach is named beneath them, so a type check
+    spelled through a runner is the read it is. Without that, a verify line
+    ending in `npx tsc --noEmit` asked about its last segment and made the
+    whole line ask, which is a question about running the type checker.
+
+    They differ on one axis and it is not a preference. `bunx` is placed
+    outside the boundary because reaching the registry is what it is for;
+    `npx` is left unplaced, because the invocation this rule exists to
+    recognize resolves a dependency the project already has and needs no
+    network at all. A project whose runner does have to fetch says so by
+    widening this declaration, which is a change a reviewer sees.
+    """
+    checking = ShellSubcommandRule(
+        name="tsc",
+        effect="ask",
+        read_verbs=["--noEmit", "--version"],
+        reason="emitting compiler output writes files the command does not bound",
+    )
+    return [
+        ShellCommandRule(
+            name="tsc",
+            default_effect="ask",
+            allow_flags=["--version"],
+            read_verbs=["--noEmit"],
+            reason="emitting compiler output writes files the command does not bound",
+        ),
+        ShellCommandRule(
+            name="bunx",
+            default_effect="ask",
+            subcommands=[checking],
+            sandbox="outside",
+            reason="the package runner fetches what is not already a dependency",
+        ),
+        ShellCommandRule(
+            name="npx",
+            default_effect="ask",
+            subcommands=[checking],
+            reason="the package runner fetches what is not already a dependency",
+        ),
+    ]
 
 
 def default_vocabulary() -> list[ShellCommandRule]:

@@ -80,3 +80,17 @@ part of probing.
   command is refused under that flag the seeded hash is stale, and if it still
   runs, `exec` does not consult hooks. Until someone runs it, neither cause is
   established and the conservative reading — ungoverned — is the one to hold.
+- Claude Code's **worktree isolation** refuses a command carrying any of
+  fifteen shell words as an argv element, in any position, whether or not the
+  command is a git command. Read out of the 2.1.237 binary rather than
+  inferred: the set is `dNr` minus `qAv`, leaving `eval source . fc coproc
+  trap enable mapfile readarray hash bind complete compgen alias let`, and the
+  match is `s === "." ? i === 0 : A1p.has(s)` — so `.` alone is gated to
+  `argv[0]`. Its two siblings in the same function *are* gated on git
+  (`ZLa=/^git(?:\.exe|\.real|-[a-z][\w-]*)?$/i` guards both the
+  `xargs`/`parallel` refusal and the `find -execdir/-okdir` one); this third
+  check is not. The refusal is byte-identical with a leading `# lup: escalate:`
+  line, so no marker reaches it. It arms on the relocation tool, not on the
+  working directory: a session launched already rooted in a worktree is not
+  isolated, which is what the workflow in `docs/contributing.md` relies on.
+  Owned by Claude Code; `docs/upstream-reports.md` carries the report to send.

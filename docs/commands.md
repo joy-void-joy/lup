@@ -45,6 +45,8 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 | `dev refutations` | Resolve one file&#x27;s proposed content and report what it refutes. |
 | `dev directives` | Measure every `# lup: ignore` against the canonical inline placement. |
 | `dev report-friction` | File or correct workflow friction in this checkout&#x27;s repository. |
+| `dev upstream` | Print a measured upstream defect, or list the ones declared. |
+| `dev undo` | List the recoverable snapshots of this tree, or take and expire them. |
 | `dev issues` | List the open issues a resolver run would take as evidence. |
 | `dev rules` | Generate the Lup rule and typed-suppression reference. |
 | `dev guidance` | Report what each section of the always-loaded guidance costs. |
@@ -113,6 +115,7 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 | `harness apply-reconciliation` | Apply a stale-base-checked source patch, then regenerate every target. |
 | `harness propose-reconciliation` | Persist a source patch for separate review and stale-base-checked apply. |
 | `harness doctor` | Report installed native runtime evidence without updating either CLI. |
+| `harness requirements` | Exercise the external programs this project expects on this machine. |
 | `harness serve-resolver-tools` | Serve one worker&#x27;s question tools over stdio, for out-of-process runtimes. |
 | `harness claude` | Generate/reconcile Claude artifacts and launch the verified plugin. |
 | `harness codex` | Generate/reconcile Codex artifacts and launch without updating the CLI. |
@@ -142,6 +145,7 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 | `hooks classify-fetch` | Say whether a URL is inside this project&#x27;s declared fetch scopes. |
 | `hooks sweep` | Classify a list of commands at once, and exit non-zero if any is not allowed. |
 | `hooks roots` | List the path roles and protected roots the declaration carries. |
+| `hooks learn` | Review the commands the policy declined to interrupt about. |
 
 ## `py`
 
@@ -149,7 +153,6 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 | --- | --- |
 | `py info` | Inspect a Python object — adapts to modules, classes, functions, values. |
 | `py source` | View source code for a Python object, or a package file tree with --tree. |
-| `py eval` | Evaluate a Python expression in the sandbox, with modules auto-imported. |
 | `py imports` | Show what a module imports, or what imports it (--reverse). |
 | `py search` | Search for symbols across installed packages by name (case-insensitive). |
 

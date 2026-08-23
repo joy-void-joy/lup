@@ -7,8 +7,10 @@ onto those already concrete roots. What a project publishes through them is
 its own ``ProjectContent``, so the builders decide nothing about content.
 """
 
-from collections.abc import Callable, Sequence
+from abc import ABC, abstractmethod
+from collections.abc import Sequence
 from pathlib import Path
+from typing import Protocol, runtime_checkable
 
 import typer
 from pydantic import BaseModel
@@ -24,6 +26,7 @@ from lup.adapters.claude.profile_store import (
     ClaudeProfileNames,
     ClaudeProfileRegistrar,
 )
+from lup.codescan.common import RuleSelection
 from lup.adapters.codex.harness import CodexSpellings
 from lup.adapters.codex.harness_runtime import (
     CodexCliEvidence,
@@ -98,56 +101,113 @@ type NativeCapabilityEvidence = (
 )
 
 
-# lup: `claude_composition` and `codex_composition` should probably be ABC
+# lup: solved: `claude_composition` and `codex_composition` should probably be ABC
 # implementations instead — one declared seam each runtime fills, rather than
 # two parallel free functions a caller picks between by name.
-def claude_composition(
-    root: Path, content: ProjectContent, guidance: PromptDocument | None = None
-) -> NativeHarnessComposition:
+class NativeComposer(ABC):
+    """How one runtime assembles a project's content into what a CLI opens.
+
+    One declared seam rather than a free function per runtime, and the
+    difference is not style. A function is reached by name, so adding a
+    runtime means finding every caller that names one and remembering the new
+    one — and a caller that forgets leaves that runtime silently absent
+    rather than failing. A seam is reached by the object a project declared,
+    so what ``NativeTargets`` holds is the whole of what exists.
+
+    Deliberately one method. What a runtime answers here is a composition,
+    and every part of it — the recipe, the readiness probes, the invocation
+    renderer — is that same runtime's answer, so splitting them into three
+    seams would hand a caller three objects that never vary independently.
+    The composition is the unit that varies.
+    """
+
+    @abstractmethod
+    def compose(
+        self,
+        root: Path,
+        content: ProjectContent,
+        guidance: PromptDocument | None = None,
+    ) -> NativeHarnessComposition:
+        """This runtime's composition over one project's content."""
+
+
+class ClaudeComposer(NativeComposer):
     """Construct the Claude capabilities directly."""
-    plugin = root / ".claude" / "plugins" / content.harness.plugins[0].name
 
-    def readiness() -> Sequence[NativeCapabilityEvidence]:
-        return [probe.probe() for probe in claude_capability_probes(plugin)]
+    def compose(
+        self,
+        root: Path,
+        content: ProjectContent,
+        guidance: PromptDocument | None = None,
+    ) -> NativeHarnessComposition:
+        plugin = root / ".claude" / "plugins" / content.harness.plugins[0].name
 
-    return NativeHarnessComposition(
-        recipe=claude_generation_recipe(root, content, guidance),
-        readiness=readiness,
-        invocation_renderer=ClaudeSpellings(),
-    )
+        def readiness() -> Sequence[NativeCapabilityEvidence]:
+            return [probe.probe() for probe in claude_capability_probes(plugin)]
+
+        return NativeHarnessComposition(
+            recipe=claude_generation_recipe(root, content, guidance),
+            readiness=readiness,
+            invocation_renderer=ClaudeSpellings(),
+        )
 
 
-def codex_composition(
-    root: Path, content: ProjectContent, guidance: PromptDocument | None = None
-) -> NativeHarnessComposition:
+class CodexComposer(NativeComposer):
     """Construct the Codex capabilities directly."""
 
-    def readiness() -> Sequence[NativeCapabilityEvidence]:
-        return [probe.probe() for probe in codex_capability_probes()]
+    def compose(
+        self,
+        root: Path,
+        content: ProjectContent,
+        guidance: PromptDocument | None = None,
+    ) -> NativeHarnessComposition:
+        def readiness() -> Sequence[NativeCapabilityEvidence]:
+            return [probe.probe() for probe in codex_capability_probes()]
 
-    return NativeHarnessComposition(
-        recipe=codex_generation_recipe(root, content, guidance),
-        readiness=readiness,
-        invocation_renderer=CodexSpellings(),
-    )
+        return NativeHarnessComposition(
+            recipe=codex_generation_recipe(root, content, guidance),
+            readiness=readiness,
+            invocation_renderer=CodexSpellings(),
+        )
 
 
-class NativeTargets(BaseModel, frozen=True):
+@runtime_checkable
+class TargetBuilder(Protocol):
+    """How one project turns a root into one runtime's whole composition.
+
+    Takes an optional rule selection because the one caller with a reason to
+    compile a tree against a different one is a launch — a session opened
+    where the conventions are not the point. Declared on the seam rather than
+    reached for through a global, so a project that wants no such launch
+    simply ignores the argument, and one that does cannot be handed it
+    through a channel nothing types.
+    """
+
+    def __call__(
+        self, root: Path, rules: RuleSelection | None = None
+    ) -> NativeHarnessComposition: ...
+
+
+class NativeTargets(BaseModel, frozen=True, arbitrary_types_allowed=True):
     """Every native adapter a CLI selector can name, and how to build each.
 
     A project declares which runtimes it generates a tree for; the commands
     take already concrete compositions and never learn a target's name. The
     builders are keyed rather than listed because the selector a human types
     is the key, and the launch commands are the adapter's own surface.
+
+    Arbitrary types because a builder is a callable seam rather than data:
+    what pydantic would validate here is a signature, which is pyright's
+    question and already answered there.
     """
 
-    builders: dict[str, Callable[[Path], NativeHarnessComposition]]
+    builders: dict[str, "TargetBuilder"]
 
     every: str = "all"
     """The selector reaching every declared tree at once, which is also what
     reaches the generated artifacts belonging to no single one of them."""
 
-    def builder(self, name: str) -> Callable[[Path], NativeHarnessComposition] | None:
+    def builder(self, name: str) -> "TargetBuilder | None":
         """How to build one named target, or nothing when it is not declared."""
         return self.builders.get(name)  # lup: ignore[dict-get]
 

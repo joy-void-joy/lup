@@ -77,6 +77,7 @@ DISPATCHER_STDLIB = (
     "sys",
     "pathlib",
     "subprocess",
+    "datetime",
 )
 """The standard library a compiled dispatcher may reach.
 
@@ -90,6 +91,14 @@ recoverable is a question only a process can answer, and every alternative
 spelling of it — ``sh``, a devtools helper — is exactly the unresolvable
 import this pin exists to reject. Being genuine standard library, it cannot
 produce that failure. Each further entry deserves the same argument.
+
+``datetime`` earns its place the same way. The undo snapshot names each ref
+with a microsecond stamp, and the precision is load-bearing rather than
+decorative: Git records a ref's date from its commit, whose resolution is one
+second, so two snapshots taken in the same second tie — and a tie means the
+listing hands back the older of the two at exactly the moment somebody is
+reaching for the newer one. Nothing already pinned here can produce a
+sub-second stamp.
 """
 
 ROUTER = "dispatch"
@@ -114,6 +123,48 @@ INVOCATION = 'if __name__ == "__main__":\n    main()'
 
 DISPATCHER_SCRIPT = PurePath("policy.py")
 """The file this compiler emits, named to spell its banner as a comment."""
+
+REFUSAL_STATUS = 2
+"""The one exit status either runtime reads as a refusal.
+
+Every other non-zero is a non-blocking error there: the runtime reports it
+and runs the tool anyway. So a status that is not this one is not a weaker
+refusal, it is permission.
+"""
+
+
+def guarded_hook_command(plugin_root_env: str) -> str:
+    """Spell the invocation so a dispatcher that never ran still refuses.
+
+    Shared rather than spelled per runtime for the reason ``RELATIVIZER``
+    above is: a renderer free to write its own could omit the guard, and the
+    permission boundary would then be off on that runtime alone, reporting
+    nothing that distinguishes it from a boundary that allowed the call.
+
+    Not the dispatcher's own to answer. ``failure`` below covers input it
+    cannot decide from, which already presumes it is running -- nothing
+    inside a script can speak for an interpreter that was never there to
+    start it. A missing ``python3`` makes the shell exit 127, which is not
+    ``REFUSAL_STATUS``, so every call in that session proceeds unjudged and
+    the only trace is a non-blocking error beside each one. The guard belongs
+    to the command because the command is what survives that absence.
+
+    A deliberate refusal passes through untouched, having already written its
+    own reason; anything else names the status it exited with, so a missing
+    interpreter and a dispatcher that crashed are told apart by whoever reads
+    the line rather than by rerunning it.
+    """
+    script = f'"${plugin_root_env}/hooks/scripts/{DISPATCHER_SCRIPT}"'
+    complaint = (
+        "lup policy: dispatcher exited $status without judging this call; "
+        "refusing rather than passing it"
+    )
+    return (
+        f"python3 {script} || {{ status=$?; "
+        f'[ "$status" -eq {REFUSAL_STATUS} ] || echo "{complaint}" >&2; '
+        f"exit {REFUSAL_STATUS}; }}"
+    )
+
 
 DispatcherFailure = Literal["conservative_ask", "stderr_exit"]
 """What a dispatcher does with input it cannot decide from.

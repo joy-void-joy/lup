@@ -22,7 +22,20 @@ pytestmark = pytest.mark.skipif(
     langserver_path() is None, reason="pyright-langserver is not installed"
 )
 
-RESOLUTION_COMMAND = [".venv/bin/lup-devtools", "dev", "refutations"]
+RESOLUTION_COMMAND = ["lup-devtools", "dev", "refutations"]
+"""The bare name this project really declares, resolved the way the gate does.
+
+Spelled `.venv/bin/lup-devtools` before, which is `uv`'s default layout and
+not where this project's environment always is: `UV_PROJECT_ENVIRONMENT`
+redirects it. So the path named nothing wherever that redirect points — and
+:func:`resolved_refutations` reports a resolver that is not installed as the
+same silence as none declared, which is an answer this test asserts about
+elsewhere. It passed by proving nothing about the chain it exists to prove.
+
+The bare name is also what :func:`~lup.policy.assets.host.declared_program`
+is for, so declaring it here exercises that resolution rather than routing
+around it.
+"""
 
 PROPOSED = (
     "import httpx\n"

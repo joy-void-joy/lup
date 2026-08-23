@@ -23,6 +23,33 @@ from pathlib import Path
 from pydantic import BaseModel
 
 from lup.runtime.login import ProviderLogin
+from lup.types import EnvVars
+
+
+class SessionAccount(BaseModel, frozen=True):
+    """The account every session one entry point opens will run under.
+
+    Named where a run starts rather than inherited from the console, because
+    inheriting is what makes a new entry point wrong by omission: it takes
+    whichever identity the launching shell happened to export, which is an
+    operator's own account whenever the run was not started from a launcher.
+    Carried as a value so anything that opens sessions has to be handed one —
+    a parameter cannot be forgotten the way an ambient variable can, and that
+    is the whole difference between this and reading the environment.
+
+    A ``home`` of ``None`` is a real answer rather than a gap: a project that
+    keeps no profiles has none, and a session opened inside another one
+    should stay on the account it was started under. It counts as a decision
+    because somebody had to construct this to say it.
+    """
+
+    name: str | None
+    home: Path | None
+    variables: EnvVars = {}
+
+    def exported(self, environment: EnvVars) -> EnvVars:
+        """That environment with this account's identity written into it."""
+        return {**environment, **self.variables}
 
 
 class UnknownProfile(KeyError):
@@ -176,6 +203,22 @@ class ProfileDirectory:
         if selected is None:
             return None
         return self.resolve(selected)
+
+    def account(self, name: str | None) -> SessionAccount:
+        """The account a run naming this profile opens every session under.
+
+        The seam an entry point reaches for instead of reading the console.
+        Resolving once, where the run starts, is what lets everything below
+        take the answer as an argument — so a planner, a worker and a
+        reviewer opened by the same run are on the same account by
+        construction rather than by all happening to inherit one shell.
+        """
+        home = self.launch_home(name)
+        return SessionAccount(
+            name=name or self.names.active_profile(),
+            home=home,
+            variables=self.login.environment(home) if home is not None else dict(),
+        )
 
     def state_dir(self, name: str | None, subdir: str) -> Path | None:
         """One profile-scoped state directory, explicit then active."""

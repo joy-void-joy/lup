@@ -74,6 +74,8 @@ You are not expected to hold this repository's conventions in memory. Gates enfo
 
 **The permission policy.** Every shell command, URL scope, and edit in a batch is classified, and a denial names what tripped and the recovery. `dev policy '<command>'` answers before you spend a turn on it, and `# lup: escalate: <why>` as a command's leading line promotes a deny or ask into an approval question carrying that reason.
 
+`# lup: escalate` is one-off. For recurring walls, **widen the protected declaration** so review approves the rule. Regenerate and reopen with `--continue` to load it at startup while keeping the conversation; it remains drift-checked next session.
+
 **The edit budget.** A change block of at most three "real" changed lines is auto-allowed, so split large changes — imports in one edit, logic in another. A file declared human-owned surfaces every change as an approval: propose the exact edit and let the user apply it.
 
 **The drift check.** Generated trees are regenerated, never hand-edited and never hand-merged. Take either side of a conflict, regenerate, and let the check confirm it settled.

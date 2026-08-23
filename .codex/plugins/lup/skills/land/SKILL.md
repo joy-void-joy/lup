@@ -102,7 +102,7 @@ Land one branch at a time, oldest divergence first — rebase, merge, and push b
 
 Ask the user, per branch, which route to take:
 
-- **Open a PR** — relocate into that branch's worktree: start a session rooted at <the survey's worktree field> and continue there — this runtime cannot move a running session, so work carried on here would land in the checkout it started from. Create one first via `uv run lup-devtools dev worktree create <branch>` when `worktree` is null. Then run `$lup:rebase`.
+- **Open a PR** — get into that branch's worktree: start a session rooted at <the survey's worktree field> and continue there — this runtime cannot move a running session, so work carried on here would land in the checkout it started from. Already running, keep working where you are and address files there by absolute path, which reaches the same branch.. Create one first via `uv run lup-devtools dev worktree create <branch>` when `worktree` is null. Then run `$lup:rebase`.
 - **Merge directly** — take the same route into the worktree and through `$lup:rebase`, then merge from the integration checkout with `$lup:merge <branch>`. `sync-base` has already pulled the integration branch in, so the merge is a fast-forward, and pushing it closes the PR the rebase opened. Suits small, uncontroversial work that needs no review.
 - **Retire it** — the work is not worth landing. After explicit confirmation, `uv run lup-devtools dev retire <branch> --reason "<why>"`, which pushes, opens a pull request, closes it without merging, and only then deletes.
 

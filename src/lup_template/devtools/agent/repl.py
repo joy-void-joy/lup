@@ -2,7 +2,6 @@
 
 import asyncio
 import hashlib
-import io
 import signal
 import time
 from pathlib import Path
@@ -15,21 +14,13 @@ if TYPE_CHECKING:
     from lup.runtime.factory import SessionFactory
     from lup.runtime.models import TurnResult
 
-import sh
 import typer
-from pydantic import BaseModel
 
+from lup.devtools.clipboard import ClipboardImage, clipboard_image, clipboard_text
 from lup.telemetry.display import format_duration
 from lup.runtime.models import turn_request
 from lup_template.agent.config import settings
 from lup_template.devtools.agent.serve import collect_registry_tools
-
-
-class ClipboardImage(BaseModel):
-    """Raw image bytes read from the clipboard, with their MIME type."""
-
-    media_type: str
-    data: bytes
 
 
 # lup: ignore[constant-declaration] — each pair is a media type and the suffix
@@ -65,38 +56,21 @@ CLIPBOARD_IMAGE_MIMES = ("image/png", "image/jpeg", "image/webp")
 
 
 def read_clipboard_image() -> ClipboardImage | None:
-    """Read image data from the system clipboard via xclip.
+    """An image off the clipboard, in the first format this REPL can send.
 
-    Returns ``(media_type, raw_bytes)`` or ``None`` when no image is available.
+    Which formats those are is this application's question rather than the
+    library's -- they are what the model accepts -- so the types are named
+    here and the backend that serves them is found there. Reading through the
+    library is also what makes this work on a Wayland desktop, where the
+    ``xclip`` this used to call either answers for a different clipboard than
+    the one being copied into or is absent entirely.
     """
-    try:
-        xclip = sh.Command("xclip")
-        targets = str(xclip("-selection", "clipboard", "-o", "-t", "TARGETS"))
-    except (sh.ErrorReturnCode, sh.CommandNotFound):
-        return None
-
-    for mime in CLIPBOARD_IMAGE_MIMES:
-        if mime not in targets:
-            continue
-        try:
-            buf = io.BytesIO()
-            xclip("-selection", "clipboard", "-o", "-t", mime, _out=buf)
-            data = buf.getvalue()
-            if data:
-                return ClipboardImage(media_type=mime, data=data)
-        except sh.ErrorReturnCode:
-            continue
-    return None
+    return clipboard_image(CLIPBOARD_IMAGE_MIMES)
 
 
 def read_clipboard_text() -> str | None:
-    """Read text from the system clipboard via xclip."""
-    try:
-        xclip = sh.Command("xclip")
-        text = str(xclip("-selection", "clipboard", "-o"))
-        return text if text else None
-    except (sh.ErrorReturnCode, sh.CommandNotFound):
-        return None
+    """The clipboard as text, through whichever backend this machine has."""
+    return clipboard_text()
 
 
 class Interrupted(Exception):

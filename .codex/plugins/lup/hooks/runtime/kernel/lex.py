@@ -22,6 +22,7 @@ from .words import (
     path_verb_operands,
     protected_write_target,
     refuses_generated_plugin_target,
+    uv_run_words,
 )
 
 
@@ -476,6 +477,38 @@ def redirection_writes(operator: str) -> bool:
     return not ("&" in operator and (operator[-1].isdigit() or operator[-1] == "-"))
 
 
+def python_script_targets(command: str, interpreters: tuple[str, ...]) -> list[str]:
+    """Name every script an interpreter segment of this command would run.
+
+    The ladder allows a script where it refuses inline code, on the grounds
+    that a file can be read afterwards. That makes "which file" a fact worth
+    having: a caller that can reach the filesystem counts how often each one
+    is run, and a script being run over and over is one that stopped being
+    the one-off the rung was for.
+
+    Judged from the lexed segments rather than from the raw string, so a
+    script named inside a pipeline or after a redirection is still found, and
+    a command that does not lex yields nothing.
+    """
+    segments = parse_shell_words(command)
+    if not isinstance(segments, list):
+        return []
+    named: list[str] = []
+    for words in segments:
+        run = uv_run_words(words) if words[:2] == ["uv", "run"] else words
+        if not run or posixpath.basename(run[0]) not in interpreters:
+            continue
+        rest = run[1:]
+        # `-c` and `-m` take their program as the next word, so a plain
+        # "not a flag" filter reads that word as a filename and counts a
+        # script that does not exist. Neither form names a file at all, and
+        # both are refused anyway, so the segment contributes nothing.
+        if any(word in ("-c", "-m") for word in rest):
+            continue
+        named.extend(word for word in rest if not word.startswith("-"))
+    return named
+
+
 def shell_write_targets(command: str, depth: int = 0) -> list[str]:
     """Name every path this command's redirections would open for writing.
 
@@ -747,6 +780,13 @@ def shell_path_verb_targets(command: str) -> list[str]:
             targets.extend([*archived["authored"], *archived["consumed"]])
             if archived["directory"] is not None:
                 targets.append(archived["directory"])
+            continue
+        if posixpath.basename(words[0]) == "sed":
+            # Every literal word, the script included. Over-naming is exactly
+            # what this docstring says is safe: a script is not a file, so
+            # nothing will be reported about it, and which words a rewrite
+            # actually writes stays the kernel's own reading.
+            targets.extend(word for word in words[1:] if not word.startswith("-"))
             continue
         if posixpath.basename(words[0]) not in SCRATCH_VERB_FLAGS:
             continue

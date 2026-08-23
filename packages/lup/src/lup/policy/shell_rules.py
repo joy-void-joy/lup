@@ -49,7 +49,11 @@ from typing import Literal, TypedDict
 
 from pydantic import BaseModel
 
-from lup.policy.kernel.decision import DecisionEffect, SandboxPlacement
+from lup.policy.kernel.decision import (
+    DecisionEffect,
+    Recovery,
+    SandboxPlacement,
+)
 from lup.policy.kernel.rows import RunnerTargetRow, RuleLevel, ShellRuleRow
 from lup.selection import SelectableRule
 
@@ -72,6 +76,16 @@ omission is a statement here rather than a gap, and a command is not made to
 repeat it.
 """
 
+ROOT_RECOVERY: Recovery = "nothing"
+"""What puts back a loss nobody named — nothing does, so the question stands.
+
+The restrictive value, for the reason ``ROOT_EFFECT`` is: this axis is read
+to *relax* an approval question, so the value a forgotten declaration falls
+to has to be the one that relaxes nothing. Annotating a rule is what says a
+boundary answers for it, and silence can then only cost a prompt somebody did
+not need, never a loss nobody could put back.
+"""
+
 
 class DeclaredAxes(BaseModel, frozen=True):
     """What one level of a table states, leaving the rest to the level above.
@@ -82,32 +96,39 @@ class DeclaredAxes(BaseModel, frozen=True):
 
     effect: CommandEffect | None = None
     sandbox: SandboxPlacement | None = None
+    recovery: Recovery | None = None
 
 
 class RowAxes(TypedDict):
-    """The four fields one resolved pair contributes to an erased row."""
+    """The six fields one resolved triple contributes to an erased row."""
 
     effect: DecisionEffect
     effect_source: RuleLevel
     sandbox: SandboxPlacement
     sandbox_source: RuleLevel
+    recovery: Recovery
+    recovery_source: RuleLevel
 
 
 class ResolvedAxes(BaseModel, frozen=True):
-    """Both axes as one level resolved them, and where each value came from."""
+    """All three axes as one level resolved them, and where each came from."""
 
     effect: CommandEffect
     effect_source: RuleLevel
     sandbox: SandboxPlacement
     sandbox_source: RuleLevel
+    recovery: Recovery
+    recovery_source: RuleLevel
 
     def row_fields(self) -> RowAxes:
-        """This pair as the erased row spells it, provenance included."""
+        """This triple as the erased row spells it, provenance included."""
         return RowAxes(
             effect=self.effect,
             effect_source=self.effect_source,
             sandbox=self.sandbox,
             sandbox_source=self.sandbox_source,
+            recovery=self.recovery,
+            recovery_source=self.recovery_source,
         )
 
     def inherit(self, declared: DeclaredAxes, level: RuleLevel) -> "ResolvedAxes":
@@ -122,6 +143,10 @@ class ResolvedAxes(BaseModel, frozen=True):
             effect_source=self.effect_source if declared.effect is None else level,
             sandbox=self.sandbox if declared.sandbox is None else declared.sandbox,
             sandbox_source=self.sandbox_source if declared.sandbox is None else level,
+            recovery=self.recovery if declared.recovery is None else declared.recovery,
+            recovery_source=(
+                self.recovery_source if declared.recovery is None else level
+            ),
         )
 
 
@@ -130,6 +155,8 @@ ROOT_AXES = ResolvedAxes(
     effect_source="root",
     sandbox=ROOT_SANDBOX,
     sandbox_source="root",
+    recovery=ROOT_RECOVERY,
+    recovery_source="root",
 )
 """What the outermost level of every table inherits from."""
 
@@ -196,6 +223,7 @@ class ShellOperationRule(BaseModel, frozen=True):
     effect: CommandEffect = ROOT_EFFECT
     ask_flags: list[str] = []
     sandbox: SandboxPlacement = ROOT_SANDBOX
+    recovery: Recovery = ROOT_RECOVERY
     reason: str = ""
 
     def declared(self) -> DeclaredAxes:
@@ -204,6 +232,7 @@ class ShellOperationRule(BaseModel, frozen=True):
         return DeclaredAxes(
             effect=self.effect if "effect" in supplied else None,
             sandbox=self.sandbox if "sandbox" in supplied else None,
+            recovery=self.recovery if "recovery" in supplied else None,
         )
 
 
@@ -221,6 +250,7 @@ class ShellSubcommandRule(BaseModel, frozen=True):
     read_verbs: list[str] = []
     operations: list[ShellOperationRule] = []
     sandbox: SandboxPlacement = ROOT_SANDBOX
+    recovery: Recovery = ROOT_RECOVERY
     reason: str = ""
 
     def declared(self) -> DeclaredAxes:
@@ -229,6 +259,7 @@ class ShellSubcommandRule(BaseModel, frozen=True):
         return DeclaredAxes(
             effect=self.effect if "effect" in supplied else None,
             sandbox=self.sandbox if "sandbox" in supplied else None,
+            recovery=self.recovery if "recovery" in supplied else None,
         )
 
 
@@ -266,9 +297,20 @@ class ShellCommandRule(SelectableRule, frozen=True):
     ask_flags: list[str] = []
     allow_flags: list[str] = []
     read_verbs: list[str] = []
+    write_markers: list[str] = []
+    """Argument prefixes whose *absence* makes this command read-only.
+
+    Every other de-escalation here is a positive test: some word has to be
+    present for the rule to relax. A few commands are the other way round --
+    `dd` writes only when handed an `of=`, and with no `of=` it is a plain
+    read of `if=` to stdout. There is no verb to list, because the read-only
+    form is the one with nothing extra in it, so a membership test can never
+    recognize it and every such invocation stopped for approval as a write.
+    """
     value_flags: list[str] = []
     subcommands: list[ShellSubcommandRule] = []
     sandbox: SandboxPlacement = ROOT_SANDBOX
+    recovery: Recovery = ROOT_RECOVERY
     reason: str = ""
 
     def selection_id(self) -> str:
@@ -276,9 +318,11 @@ class ShellCommandRule(SelectableRule, frozen=True):
 
     def declared(self) -> DeclaredAxes:
         """The axes this command states itself, leaving the rest to inherit."""
+        supplied = self.model_fields_set
         return DeclaredAxes(
             effect=self.default_effect,
-            sandbox=self.sandbox if "sandbox" in self.model_fields_set else None,
+            sandbox=self.sandbox if "sandbox" in supplied else None,
+            recovery=self.recovery if "recovery" in supplied else None,
         )
 
 
@@ -346,6 +390,7 @@ def erase_shell_rules(rules: list[ShellCommandRule]) -> list[ShellRuleRow]:
                 ask_flags=list(operation.ask_flags),
                 allow_flags=[],
                 read_verbs=[],
+                write_markers=[],
                 value_flags=[],
                 reason=operation.reason,
                 **axes.inherit(operation.declared(), "operation").row_fields(),
@@ -359,6 +404,7 @@ def erase_shell_rules(rules: list[ShellCommandRule]) -> list[ShellRuleRow]:
             ask_flags=list(subcommand.ask_flags),
             allow_flags=[],
             read_verbs=list(subcommand.read_verbs),
+            write_markers=[],
             value_flags=[],
             reason=subcommand.reason,
             **axes.row_fields(),
@@ -374,6 +420,7 @@ def erase_shell_rules(rules: list[ShellCommandRule]) -> list[ShellRuleRow]:
             ask_flags=list(command.ask_flags),
             allow_flags=list(command.allow_flags),
             read_verbs=list(command.read_verbs),
+            write_markers=list(command.write_markers),
             value_flags=list(command.value_flags),
             reason=command.reason,
             **axes.row_fields(),

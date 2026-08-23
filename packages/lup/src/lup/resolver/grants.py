@@ -26,7 +26,7 @@ from lup.policy.grants import (
 from lup.actors.questions import QuestionAnswer
 from lup.policy.identity import ConcernAllowance
 from lup.resolver.models import (
-    ALLOWANCE_GRANTED,
+    AllowanceRuling,
     ConcernShape,
     allowance_question_id,
 )
@@ -54,7 +54,9 @@ def lease_grants(
     environment disagreeing with a document, arrived at from the other side.
     """
     approved = {
-        answer.question_id for answer in answers if answer.value == ALLOWANCE_GRANTED
+        answer.question_id
+        for answer in answers
+        if answer.value == AllowanceRuling.GRANT
     }
     return list(
         dict.fromkeys(

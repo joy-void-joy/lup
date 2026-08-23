@@ -5,6 +5,46 @@ from typing import Literal
 
 type DecisionEffect = Literal["allow", "ask", "deny", "defer"]
 
+type Recovery = Literal["snapshot", "container", "nothing"]
+"""What puts back what a command destroys, which decides who has to be asked.
+
+The vocabulary's own criterion, stated in :mod:`lup.policy.vocabulary`, is
+that what stays guarded is *the direction that removes something no second
+attempt restores*. That is not a fact about the command alone -- it is a fact
+about the command and the session beneath it, and a session with a boundary
+restores more than one without. So the rule declares which restorer its
+question was about, and the settlement order asks whether that restorer is
+present.
+
+The three name *how much* has to be present, so they read as a lattice rather
+than as a menu:
+
+* ``snapshot`` -- the whole loss is working-tree content in this checkout, so
+  the undo layer alone answers it, container or not. ``git reset --hard``,
+  ``git restore``, ``git rm``: verbs that act on the repository they are run
+  in and reach nothing else.
+* ``container`` -- the loss can also land on the machine, so a container is
+  needed *as well as* the snapshot: the container makes the machine
+  disposable, and the one part of it the container does not protect is the
+  bind-mounted checkout, which is what the snapshot holds. ``rm``, ``mv``,
+  ``tar``, ``apt install``, ``systemctl``.
+* ``nothing`` -- neither reaches it. A remote ref, a published artifact, an
+  issue somebody reads, another machine; a command whose argument is another
+  command, which is unbounded by construction; and the parts of this checkout
+  no snapshot holds, which is where ``git clean -fdx`` and ``git stash drop``
+  belong -- ignored files and stashes are outside what it captures.
+
+``nothing`` is the default, and the default is the whole safety of this axis:
+a rule nobody annotated keeps asking, and an annotation is what relaxes it.
+The other direction -- default recoverable, annotate the dangerous -- makes
+every rule anybody forgets a grant.
+
+A row whose guarded flags do not agree takes the weakest of them. ``sort``
+guards ``-o``, which writes a file, beside ``--compress-program``, which runs
+one; the row says ``nothing``, because a reader of the verdict cannot tell
+which flag brought it.
+"""
+
 type SandboxPlacement = Literal["inside", "ambient", "escalable", "outside"]
 """Where a call runs, which is a different question from who decides it.
 
@@ -66,12 +106,14 @@ SANDBOX_ESCALATION_UNSUPPORTED = (
 )
 """What a permission to escalate degrades to where the agent cannot spend it.
 
-The offer withdrawn and the gap stated. Two different absences reach it — a
-runtime that gives the agent no words for leaving, and a session whose host
-refuses an unsandboxed command however it is asked for — and the agent can act
-on neither, so the wording names the outcome rather than the cause. Dropped in
-silence it would read as an offer, and an agent that spends a turn finding out
-otherwise learns nothing it can act on.
+The offer withdrawn and the gap stated. Three different absences reach it — a
+runtime that gives the agent no words for leaving, a session whose host
+refuses an unsandboxed command however it is asked for, and a *tool* with no
+field to carry the escape, since every runtime that offers one offers it on
+the shell tool alone. The agent can act on none of them, so the wording names
+the outcome rather than the cause. Dropped in silence it would read as an
+offer, and an agent that spends a turn finding out otherwise learns nothing it
+can act on.
 """
 
 # lup: ignore[constant-declaration] — the refusal a trapped call is stopped
@@ -93,7 +135,9 @@ success from a session that never ran a command.
 """
 
 
-def escalation_offer(sandbox: SandboxPlacement, reason: str) -> str:
+def escalation_offer(
+    sandbox: SandboxPlacement, reason: str, spendable: bool = True
+) -> str:
     """What a verdict says to the agent rather than about it, if anything.
 
     A permission channel's reason reaches whoever was asked, and that is never
@@ -111,8 +155,19 @@ def escalation_offer(sandbox: SandboxPlacement, reason: str) -> str:
     boundaries deliver it — both hook factories, the in-process renderer, and
     the compiled dispatcher — and a condition spelled out at each is one that
     can be spelled differently at each.
+
+    ``spendable`` is whether *this* call has somewhere to put the escape.
+    Every runtime that offers one offers it as a field of the shell tool's
+    own input, so an edit or a fetch carrying an escalable placement would be
+    handed a permission with nothing to spend it on — granted on the reason
+    channel and unspendable on the rewrite channel, which is the exact
+    mismatch :func:`sandbox_escaped` exists to prevent, in the direction
+    nobody was checking. Nothing declares such a placement today; the default
+    is permissive so that stays true of every caller that has not needed to
+    think about it, and the callers that judge more than one tool say which
+    they are holding.
     """
-    return reason if sandbox == "escalable" else ""
+    return reason if spendable and sandbox == "escalable" else ""
 
 
 def sandbox_escaped(sandbox: SandboxPlacement, agent_escaped: bool) -> bool:
@@ -159,7 +214,26 @@ ESCALATE_HINT = (
     " — reshape the command into the allowed vocabulary, or resubmit with a"
     " leading '# lup: escalate: <why>' line to request approval"
 )
-RESHAPE_HINT = " — reshape the command into the allowed vocabulary"  # lup: ignore[constant-declaration] — refusal wording
+# lup: ignore[constant-declaration] — refusal wording
+RESHAPE_HINT = " — reshape the command into the allowed vocabulary"
+# lup: ignore[constant-declaration] — refusal wording, declared with its verdict
+RELAY_HINT = (
+    " — reshape the command into the allowed vocabulary, or ask for the gate"
+    " with `request_allowance`, which reaches whoever is watching this run"
+)
+"""What a reviewed worker is told, which is not what a headless run is told.
+
+Both are non-interactive and only one of them is alone. A resolver worker
+holds a question mailbox: it can put the ask to the human supervising the
+run and carry on from where it stopped when the answer lands. Telling it to
+reshape the command is telling it the route it has does not exist, and
+measured, it does what anybody would — it queues a *material question*
+instead, which parks the whole run on a decision nobody needed to make.
+
+A genuinely headless run has no such channel and still gets
+:data:`RESHAPE_HINT`, because naming a route that is not there is the same
+failure pointed the other way.
+"""
 # lup: ignore[constant-declaration] — refusal wording, declared with its verdict
 SUBSTITUTION_REASON = (
     "command substitution is denied — run the inner command in its own call"
@@ -182,7 +256,14 @@ word read as opaque — the conservative direction.
 
 
 class KernelDecision:
-    """Dependency-free allow, ask, deny, or defer result, and where it runs."""
+    """Dependency-free allow, ask, deny, or defer result, and where it runs.
+
+    ``recovery`` is the third axis and the only one that says nothing about
+    this call: it says what would put back what the call destroys, so a
+    session that carries that restorer can settle the question differently
+    from one that does not. It survives every effect, because it is a
+    property of the command rather than of the verdict reached about it.
+    """
 
     effect: DecisionEffect
     reason: str
@@ -200,6 +281,7 @@ class KernelDecision:
     stated intent outlives the refusal, so whoever reads the relay sees why
     the agent thought the command was worth running.
     """
+    recovery: Recovery
 
     def __init__(
         self,
@@ -207,14 +289,18 @@ class KernelDecision:
         reason: str = "",
         sandbox: SandboxPlacement = "ambient",
         escalated: str = "",
+        recovery: Recovery = "nothing",
     ) -> None:
         if effect not in ("allow", "ask", "deny", "defer"):
             raise ValueError(f"invalid kernel decision effect {effect!r}")
         if sandbox not in ("inside", "ambient", "escalable", "outside"):
             raise ValueError(f"invalid kernel decision placement {sandbox!r}")
+        if recovery not in ("snapshot", "container", "nothing"):
+            raise ValueError(f"invalid kernel decision recovery {recovery!r}")
         self.effect = effect
         self.reason = reason
         self.escalated = escalated
+        self.recovery = recovery
         # Only a verdict this policy actually reached is placed: a refusal is
         # not softened by where the call would have run, and a deferral hands
         # the whole question over, the session's sandbox status included.
@@ -258,6 +344,7 @@ class KernelDecision:
                 reason,
                 "inside" if escapable else "ambient",
                 self.escalated,
+                self.recovery,
             )
         if self.sandbox == "escalable":
             reason = self.reason + SANDBOX_ESCALATION_OFFER
@@ -266,12 +353,22 @@ class KernelDecision:
                 reason,
                 "escalable" if escapable else "ambient",
                 self.escalated,
+                self.recovery,
             )
         if not escapable:
-            return KernelDecision(self.effect, self.reason, escalated=self.escalated)
+            return KernelDecision(
+                self.effect,
+                self.reason,
+                escalated=self.escalated,
+                recovery=self.recovery,
+            )
         if self.effect == "ask" and self.sandbox == "outside":
             return KernelDecision(
-                "ask", self.reason + SANDBOX_ESCAPE_NOTICE, "outside", self.escalated
+                "ask",
+                self.reason + SANDBOX_ESCAPE_NOTICE,
+                "outside",
+                self.escalated,
+                self.recovery,
             )
         return self
 

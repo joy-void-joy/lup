@@ -24,13 +24,17 @@ against the workspace.
 from pathlib import Path
 
 from host import (
+    script_run_nudge,
     directory_write_targets,
     empty_directory_targets,
     existing_write_targets,
+    foreign_repository,
     granted_allowances,
     managed_script_roots,
     recoverable_write_targets,
+    record_deferral,
     resolved_refutations,
+    undo_snapshot,
     worktree_path,
 )
 from kernel.decision import KernelDecision
@@ -41,7 +45,12 @@ from kernel.edit import (
     relocated_suppressions,
 )
 from kernel.fetch import decide_fetch
-from kernel.lex import shell_path_verb_targets, shell_write_targets
+from kernel.lex import (
+    python_script_targets,
+    shell_path_verb_targets,
+    shell_write_targets,
+)
+from kernel.words import INTERPRETERS
 from kernel.shell import decide_shell
 from kernel.tools import decide_tool
 from policy_data import (
@@ -72,6 +81,7 @@ def bash_decision(
     interactive: bool,
     escapable: bool,
     cwd: Path | None,
+    relayed: bool = False,
 ) -> KernelDecision:
     """Judge one shell command against the declared vocabulary.
 
@@ -98,7 +108,14 @@ def bash_decision(
     passing is a rule that silently stopped applying.
     """
     acted_on = shell_path_verb_targets(command)
-    return decide_shell(
+    # Before the verdict rather than after it, because the verdict reads it:
+    # an approval question exists where a loss is permanent, and a tree the
+    # object store already holds has no permanent loss to ask about. Ordered
+    # the other way the relaxation would be judging a snapshot that did not
+    # exist yet, and a refused command is snapshotted too -- one ref for a
+    # state the tree was already in, which dedup collapses.
+    reference = undo_snapshot(cwd, command)
+    verdict = decide_shell(
         command,
         SHELL_RULES,
         ALLOWED_FETCH_SCOPES,
@@ -120,7 +137,60 @@ def bash_decision(
         runner_targets=RUNNER_TARGETS,
         target_tables=RUNNER_TARGET_TABLES,
         interactive=interactive,
+        # A reviewed worker is non-interactive and not therefore alone: it
+        # holds a mailbox reaching the human supervising its run, and a
+        # refusal that named no route sent it to queue a blocking question
+        # instead.
+        relayed=relayed,
         escapable=escapable,
+        recovered=bool(reference),
+    )
+    if verdict.effect == "deny":
+        return verdict
+    # The log half of allow-and-log. A deferral is this policy declining to
+    # interrupt, which is the one verdict that reaches nobody: the runtime's
+    # own gate decides and the reason goes to no human. Written down here or
+    # it is not written down anywhere.
+    if verdict.effect == "defer":
+        record_deferral(cwd, command, verdict.reason, verdict.recovery != "nothing")
+    pointed = undo_point(verdict, reference)
+    if pointed.effect != "allow":
+        return pointed
+    nudge = script_run_nudge(python_script_targets(command, INTERPRETERS), cwd)
+    if not nudge:
+        return pointed
+    return KernelDecision(
+        pointed.effect,
+        pointed.reason + nudge,
+        pointed.sandbox,
+        pointed.escalated,
+        recovery=pointed.recovery,
+    )
+
+
+def undo_point(verdict: KernelDecision, reference: str) -> KernelDecision:
+    """Say the tree was snapshotted, on the one verdict that changes for it.
+
+    The snapshot itself is taken above, before the verdict, because the
+    verdict reads it. What is left here is what the human is told.
+
+    On an approval question, which is the one moment the information changes
+    an answer: somebody deciding whether to permit something destructive is
+    weighing exactly whether it can be undone. On an allowed command the
+    snapshot is silent, because a line appended to every mutating command is
+    one nobody reads by the third time — and ``dev undo`` is where a snapshot
+    is looked for anyway. On a deferral the reason reaches no human at all;
+    it reaches the record, which is where the relaxation is reviewed.
+    """
+    if not reference or verdict.effect != "ask":
+        return verdict
+    return KernelDecision(
+        verdict.effect,
+        f"{verdict.reason} — the tree was snapshotted first; "
+        f"`lup-devtools dev undo` lists it as {reference}",
+        verdict.sandbox,
+        verdict.escalated,
+        recovery=verdict.recovery,
     )
 
 
@@ -165,6 +235,7 @@ def edit_decision(
     path_exists: bool,
     autonomous: bool,
     operation: str = "modify",
+    cwd: Path | None = None,
 ) -> KernelDecision:
     """Judge one file's before and after against the declared edit policy.
 
@@ -184,12 +255,19 @@ def edit_decision(
     server, which is the difference between a gate that costs a second per
     edit and one that costs a second on the edits that need it.
     """
+    outside_this_repository = foreign_repository(path_text, cwd)
     suffix = Path(path_text).suffix.lower()
     python_source = suffix in (".py", ".pyi")
     rows = ANTI_PATTERN_ROWS[suffix] if suffix in ANTI_PATTERN_ROWS else []
+    # A checker is not started for a file this policy has already decided it
+    # has nothing to say about. It would resolve another repository's imports
+    # against another repository's environment to answer a rule that will not
+    # be applied, and pay a language server's second for the privilege.
     refuted = (
         resolved_refutations(path_text, after, RESOLUTION_COMMAND)
-        if after is not None and awaits_resolution(before, after, rows, python_source)
+        if not outside_this_repository
+        and after is not None
+        and awaits_resolution(before, after, rows, python_source)
         else None
     )
     return decide_edit(
@@ -209,4 +287,5 @@ def edit_decision(
         suffix=suffix,
         operation=operation,
         edit_rules=EDIT_RULES,
+        foreign=outside_this_repository,
     )

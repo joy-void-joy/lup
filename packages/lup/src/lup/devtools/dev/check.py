@@ -331,7 +331,11 @@ def scan_reports(
             passed=not blocking,
             lines=[
                 f"antipatterns: FAIL ({len(blocking)} finding(s){refined})",
-                *(f"  {f.file}:{f.line} [{f.kind}]" for f in blocking),
+                *(
+                    f"  {f.file}:{f.line} "
+                    f"[{f.kind} {f.rule_id or '(bare)'}] {f.message}"
+                    for f in blocking
+                ),
             ]
             if blocking
             else [f"antipatterns: ok{tail}"],

@@ -25,6 +25,7 @@ import lup.devtools.dev.git_guards as git_guards_mod
 import lup.devtools.dev.guidance as guidance
 import lup.devtools.dev.issues as issues_mod
 import lup.devtools.dev.traces as traces
+import lup.devtools.dev.undo as undo
 import lup.devtools.dev.model_config as model_config_mod
 import lup.devtools.dev.plugin as plugin_mod
 import lup.devtools.dev.policy_explain as policy_explain
@@ -34,6 +35,7 @@ import lup.devtools.dev.relocate as relocate_mod
 import lup.devtools.dev.resolve_review as resolve_review
 import lup.devtools.dev.rules as rules
 import lup.devtools.dev.worktree as worktree
+import lup.devtools.harness.content.docs.upstream_reports as upstream_reports
 from lup.codescan.markers import NoteKind
 from lup.codescan.registry import all_rules
 from lup.devtools.dev.conflict_app import create_conflict_app
@@ -125,6 +127,20 @@ def create_dev_app(
                 help="Delete an existing unregistered directory at the worktree path",
             ),
         ] = False,
+        no_record: Annotated[
+            bool,
+            typer.Option(
+                "--no-record",
+                help="Create with no base recorded, instead of refusing to guess",
+            ),
+        ] = False,
+        clipboard: Annotated[
+            bool,
+            typer.Option(
+                "--clipboard",
+                help="Also copy the shell line to your clipboard, for pasting",
+            ),
+        ] = False,
     ) -> None:
         """Create or re-attach a git worktree."""
         worktree.create(
@@ -134,6 +150,8 @@ def create_dev_app(
             base_branch,
             relocation_hint,
             force=force,
+            no_record=no_record,
+            clipboard=clipboard,
             guards=declared().git_guards,
         )
 
@@ -821,6 +839,78 @@ def create_dev_app(
             typer.echo(str(failure), err=True)
             raise typer.Exit(1) from failure
         typer.echo(url)
+
+    @app.command("upstream")
+    def upstream_cmd(
+        slug: Annotated[
+            str,
+            typer.Argument(help="Which report to print; omit to list what is declared"),
+        ] = "",
+    ) -> None:
+        """Print a measured upstream defect, or list the ones declared.
+
+        The body goes to stdout alone so it pipes: each report's own section
+        in `docs/upstream-reports.md` carries the `gh issue create` line that
+        consumes it. Filing is deliberately not done here — an account is the
+        person's, not the tooling's.
+        """
+        roster = upstream_reports.ROSTER
+        if not slug:
+            for report in roster.reports:
+                typer.echo(
+                    f"{report.slug}  ({report.component} {report.version}, "
+                    f"{report.status()})"
+                )
+                typer.echo(f"    {report.title}")
+            return
+        report = roster.named(slug)
+        if report is None:
+            typer.echo(
+                f"No upstream report named {slug!r}; declared: {roster.handles()}",
+                err=True,
+            )
+            raise typer.Exit(1)
+        typer.echo(report.body)
+
+    @app.command("undo")
+    def undo_cmd(
+        take: Annotated[
+            str,
+            typer.Option("--take", help="Snapshot the tree now, naming why"),
+        ] = "",
+        expire_days: Annotated[
+            int | None,
+            typer.Option("--expire", help="Drop snapshots older than this many days"),
+        ] = None,
+    ) -> None:
+        """List the recoverable snapshots of this tree, or take and expire them.
+
+        Restoring is deliberately not offered here. Putting a snapshot back
+        overwrites present work with past work -- the same class of act as
+        the destruction it undoes -- so each entry prints the command that
+        would do it and leaves running it to somebody who can see what is
+        currently there.
+        """
+        root = project_root()
+        if take:
+            taken = undo.snapshot(root, take)
+            typer.echo(
+                f"{taken.ref}  {taken.commit[:12]}"
+                if taken is not None
+                else "No snapshot taken — this checkout could not be written to."
+            )
+            return
+        if expire_days is not None:
+            for gone in undo.expire(root, expire_days):
+                typer.echo(f"expired {gone.ref}")
+            return
+        found = undo.points(root)
+        if not found:
+            typer.echo("No snapshots. `--take <reason>` writes one.")
+            return
+        for item in found:
+            typer.echo(f"{item.taken_at:%Y-%m-%d %H:%M}  {item.reason}")
+            typer.echo(f"    {item.restore_command()}")
 
     @app.command("issues")
     def issues_cmd(

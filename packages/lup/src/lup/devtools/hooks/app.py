@@ -23,21 +23,36 @@ import typer
 
 from pydantic import AnyHttpUrl
 
+from lup.devtools.hooks.corpus import read_corpus
 from lup.harness.enforcement import declared_path_rules, semantic_policy_for
 from lup.harness.models import HookSet
+from lup.policy.foreign import foreign_warnings
 from lup.policy.models import Decision, FetchUrl, ShellCommand
 from lup.workspace.paths import project_root
 from lup.devtools.utils import output_json
 
 
-def report(subject: str, decision: Decision, as_json: bool) -> None:
+def report(
+    subject: str, decision: Decision, as_json: bool, warnings: list[str] | None = None
+) -> None:
     """Print one verdict, and exit non-zero on anything but an allow.
 
     The exit code is what makes this usable from a sweep: a batch of commands
     a project expects to pass fails the run when one of them stops passing.
+
+    ``warnings`` carry gates that are not this policy's, and they deliberately
+    reach neither the effect nor the exit code. This command answers what lup
+    decides; a runtime's own rail is somebody else's code on somebody else's
+    release schedule, so folding it into the verdict would be refusing work in
+    lup's name for a gate lup does not own — and a sweep would start failing
+    on the day upstream changed a token set. Said beside the verdict instead,
+    where a reader who is about to run the command sees it and a reader
+    checking the policy is not misled about whose refusal it is.
     """
     if as_json:
-        output_json({"subject": subject, **decision.model_dump()})
+        output_json(
+            {"subject": subject, **decision.model_dump(), "warnings": warnings or []}
+        )
     else:
         typer.echo(f"{decision.effect:>5}  {subject}")
         match decision.sandbox:
@@ -49,6 +64,8 @@ def report(subject: str, decision: Decision, as_json: bool) -> None:
                 typer.echo(f"       runs {placement} the sandbox")
         if decision.reason:
             typer.echo(f"       {decision.reason}")
+        for said in warnings or []:
+            typer.echo(f"       warning: {said}")
     if decision.effect != "allow":
         raise typer.Exit(1)
 
@@ -58,7 +75,10 @@ def create_hooks_app(declared: Callable[[], HookSet]) -> typer.Typer:
     app = typer.Typer(help="Query the permission policy", no_args_is_help=True)
 
     def shell_decision(
-        command: str, autonomous: bool, interactive: bool, trapped: bool = False
+        command: str,
+        autonomous: bool,
+        interactive: bool,
+        trapped: bool = False,
     ) -> Decision:
         """Classify one shell command exactly as a live session would.
 
@@ -72,12 +92,17 @@ def create_hooks_app(declared: Callable[[], HookSet]) -> typer.Typer:
         it, is told about a command that has to run outside. Left off, the
         answer is the declared verdict — the placement itself, which is what a
         reader wants to see. Turned on, it is the refusal that boundary reaches.
+
+        The undo layer is reported as present either way, because it is: a
+        session snapshots the tree before every command, and a reader asking
+        what they will be asked about should be told what a session is told.
         """
         policy = semantic_policy_for(
             declared(),
             autonomous=autonomous,
             interactive=interactive,
             sandbox_active=trapped,
+            recovered=True,
         )
         return policy.decide(ShellCommand(command=command, cwd=project_root()))
 
@@ -103,14 +128,22 @@ def create_hooks_app(declared: Callable[[], HookSet]) -> typer.Typer:
     ) -> None:
         """Say what the policy decides about one shell command, and why.
 
+        A verdict is this policy's. Beneath it may sit a warning about a gate
+        that is not — a runtime rail this project can recognise and neither
+        predict nor lift. It never moves the effect or the exit code.
+
         Examples::
 
             $ uv run lup-devtools hooks classify 'gh api /repos/o/r/pulls/1'
             $ uv run lup-devtools hooks classify 'rm build/out' --json
             $ uv run lup-devtools hooks classify 'uv run lup-devtools dev check' --trapped
+            $ uv run lup-devtools hooks classify 'grep -c eval file.py'
         """
         report(
-            command, shell_decision(command, autonomous, not headless, trapped), as_json
+            command,
+            shell_decision(command, autonomous, not headless, trapped),
+            as_json,
+            foreign_warnings(command),
         )
 
     @app.command("classify-fetch")
@@ -193,5 +226,45 @@ def create_hooks_app(declared: Callable[[], HookSet]) -> typer.Typer:
             typer.echo(f"{'protected':>10}  {root}")
         for path in hooks.human_owned_files:
             typer.echo(f"{'human':>10}  {path}")
+
+    @app.command("learn")
+    def learn_command(
+        as_json: Annotated[bool, typer.Option("--json", help="Emit JSON")] = False,
+    ) -> None:
+        """Review the commands the policy declined to interrupt about.
+
+        The log half of allow-and-log. A deferral hands the call to the
+        runtime's own gate and its reason reaches no human, so this is where
+        it is read back.
+
+        Two lists, and only the first is asking for anything. **Gaps** are
+        commands nobody has ever judged, which a boundary carried rather than
+        a rule -- each is a candidate for a row in the shell vocabulary.
+        **Settled** are commands a rule judged and the boundary answered for,
+        which is the relaxation working; read them to check it is letting
+        through what you meant.
+
+        Nothing here writes a rule, and the refusal is the point: from one
+        deferred `ruff check .`, a row of `ruff` permits `ruff format --write`
+        forever and a row of `ruff check` permits `ruff check --fix`; the same
+        mechanism over `rm tmp/scratch` permits `rm -rf`. What separates them
+        is the judgement you are here to make.
+        """
+        corpus = read_corpus(project_root())
+        if as_json:
+            output_json(corpus.model_dump(mode="json"))
+            return
+        gaps = corpus.gaps()
+        settled = corpus.settled()
+        if not corpus.deferrals:
+            typer.echo("Nothing deferred yet — no command has reached the runtime.")
+            return
+        typer.echo(f"{len(gaps)} unjudged — candidates for a vocabulary row:")
+        for item in gaps:
+            typer.echo(f"  {item.command}")
+            typer.echo(f"      {item.reason}")
+        typer.echo(f"\n{len(settled)} settled by the boundary — the audit trail:")
+        for item in settled:
+            typer.echo(f"  {item.command}")
 
     return app

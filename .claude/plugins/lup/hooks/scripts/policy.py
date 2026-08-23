@@ -25,6 +25,7 @@ from policy_data import (
     AUTONOMOUS_AGENT_IDENTITIES,
     DIAGNOSTICS_COMMAND,
 )
+from datetime import UTC, datetime
 
 # lup: ignore[subprocess] — `sh` is third-party and this half is compiled into a bare script that has no virtual environment to resolve it from
 import subprocess
@@ -35,7 +36,12 @@ from kernel.edit import (
     relocated_suppressions,
 )
 from kernel.fetch import decide_fetch
-from kernel.lex import shell_path_verb_targets, shell_write_targets
+from kernel.lex import (
+    python_script_targets,
+    shell_path_verb_targets,
+    shell_write_targets,
+)
+from kernel.words import INTERPRETERS
 from kernel.shell import decide_shell
 from kernel.tools import decide_tool
 from policy_data import (
@@ -63,6 +69,160 @@ def sandbox_active() -> bool:
     """Whether the launcher confined this session to an OS sandbox."""
     environ = os.environ  # lup: ignore[os-environ]
     return "LUP_SANDBOX_ACTIVE" in environ and environ["LUP_SANDBOX_ACTIVE"] == "1"
+
+
+def script_run_nudge(
+    scripts: list[str],
+    root: Path | None,
+    after: int = 5,
+    every: int = 10,
+    ledger: str = ".lup/script-runs.json",
+) -> str:
+    """Count each script's runs and say when one has stopped being a one-off.
+
+    The ladder allows a scratch script because computing something once does
+    not earn a command. Nothing in that argument survives the fifth run: by
+    then the thing is a tool, and a tool nobody can invoke by name is one the
+    next session rewrites from scratch. This is what notices, because the
+    agent doing the rewriting has no memory of the previous four.
+
+    Advice rather than a gate. It rides along with a verdict that already
+    allowed the command, so a genuine repeat is a sentence to read and not a
+    wall -- the only form this can take without punishing the case it exists
+    to improve.
+
+    Said once at ``after`` and then only every ``every`` runs, because the
+    two ways to get this wrong are opposite and both fatal to it. On every
+    run it becomes noise attached to a command that worked, which is read
+    once and skipped forever after. Once and never again, and a session that
+    was mid-thought when it arrived never hears it a second time, however
+    many more times it runs the thing.
+
+    A ledger that cannot be read or written yields no nudge. A counter is not
+    worth failing a command over, and a read-only checkout is an ordinary
+    place to be running.
+    """
+    if root is None or not scripts:
+        return ""
+    path = root / ledger
+    try:
+        raw = path.read_text() if path.exists() else ""
+    except OSError:
+        return ""
+    try:
+        loaded = json.loads(raw) if raw else None
+    except ValueError:
+        loaded = None
+    try:
+        counts = loaded if isinstance(loaded, dict) else {}
+        seen = {
+            script: (
+                counts[script]
+                if script in counts and isinstance(counts[script], int)
+                else 0
+            )
+            for script in dict.fromkeys(scripts)
+        }
+        bumped = {
+            script: before + scripts.count(script) for script, before in seen.items()
+        }
+        earned = [
+            script
+            for script, total in bumped.items()
+            if any(
+                seen[script] < point <= total
+                for point in range(after, total + 1, every)
+            )
+        ]
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({**counts, **bumped}, indent=2, sort_keys=True))
+    except OSError:
+        return ""
+    if not earned:
+        return ""
+    counted = ", ".join(f"{script} ({bumped[script]}x)" for script in earned)
+    return (
+        f" — {counted}: more than a one-off by now, so consider making it a"
+        " `lup-devtools` command, which lands in the diff and can be run"
+        " again by name"
+    )
+
+
+def record_deferral(
+    root: Path | None,
+    command: str,
+    reason: str,
+    judged: bool,
+    corpus: str = ".lup/hooks/learned.jsonl",
+) -> str:
+    """Write down one command this policy declined to interrupt about.
+
+    The other half of allow-and-log, and what makes the relaxation honest.
+    The lattice asked about everything unjudged for an *observability*
+    reason, and logging serves that without spending anybody's attention --
+    but only if something is actually written down, or the relaxation is
+    just the asking removed.
+
+    **Two kinds of deferral reach here and they are worth very different
+    things**, which is why ``judged`` is recorded rather than inferred later.
+    An unjudged one is a gap in the vocabulary: nobody has ever said anything
+    about this command, and it is a candidate for a rule. A judged one is the
+    relaxation working -- a rule looked, and the boundary answered for the
+    loss -- and it is an audit trail rather than a candidate. Collapsing them
+    would put `git reset --hard` in the same list as a command nobody has
+    classified, and the list is read to find the second.
+
+    **Written at the moment the verdict exists**, rather than after the
+    command has run. The later event was proposed and refuted: a runtime
+    offers both "yes" and "yes, don't ask again" and the later event cannot
+    tell them apart, and a human may answer by *editing* the command, so it
+    fires for something other than what was judged. None of that touches a
+    deferral, which is nobody's approval and is exactly known here.
+
+    **One line per distinct command.** A session defers the same `grep` fifty
+    times, and fifty identical lines is a list nobody reads -- the same
+    failure the undo layer's dedup exists to prevent, in the same shape. So a
+    command already written down is skipped, and the file is a set: what a
+    diff shows is what this session met that no session had met before.
+
+    Silent about its own failure, and for the reason :func:`undo_snapshot`
+    is: this runs in front of a command somebody asked for, and a read-only
+    checkout is an ordinary place to be running. An empty string says nothing
+    was recorded.
+    """
+    if root is None or not command:
+        return ""
+    path = root / corpus
+    try:
+        seen = path.read_text(encoding="utf-8") if path.exists() else ""
+    except OSError:
+        return ""
+    entry = json.dumps(
+        {
+            "command": command,
+            "reason": reason,
+            "judged": judged,
+            "first_seen": datetime.now(UTC).isoformat(),
+        },
+        sort_keys=True,
+    )
+    # Compared on the command alone, because the rest of the row is what this
+    # session happened to say about it: the same command reached twice under
+    # two reasons is one candidate, and a timestamp differs every time.
+    for line in seen.splitlines():
+        try:
+            held = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(held, dict) and "command" in held and held["command"] == command:
+            return ""
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as sink:
+            sink.write(entry + "\n")
+    except OSError:
+        return ""
+    return entry
 
 
 def managed_script_roots(root: Path | None) -> list[str]:
@@ -156,6 +316,29 @@ def shared_git_directory(path_text: str) -> str:
     if len(linked.parents) < 2:
         return ""
     return str(linked.parents[1])
+
+
+def foreign_repository(path_text: str, root: Path | None) -> bool:
+    """Whether this path belongs to a repository other than the session's.
+
+    The discriminator is the *repository*, never the checkout. A sibling
+    worktree of this repository is still this repository's code and still
+    answers to its conventions, so comparing checkout roots would lift every
+    rule the moment work moved one directory sideways -- which is most of how
+    this project is worked on. :func:`shared_git_directory` is the answer both
+    ends can name alike, whichever worktree either of them is sitting in.
+
+    Undecidable answers say no. A path in no repository, a session in no
+    repository, and an unreadable ``.git`` all leave one side blank, and the
+    honest reading of "cannot tell" is that this project's rules still apply:
+    lifting them on a guess would silence the gates on this repository's own
+    files, where keeping them costs friction somewhere that is not ours.
+    """
+    if root is None:
+        return False
+    here = shared_git_directory(str(root))
+    there = shared_git_directory(path_text)
+    return bool(here) and bool(there) and here != there
 
 
 def publish_edition(path_text: str) -> None:
@@ -446,13 +629,27 @@ def existing_write_targets(targets: list[str], root: Path | None = None) -> list
     return [target for target in targets if (where / target).exists()]
 
 
-def git_answers(arguments: list[str], root: Path) -> list[str] | None:
-    """One read-only Git query's lines, or None when Git cannot answer.
+def git_answers(
+    arguments: list[str],
+    root: Path,
+    # lup: ignore[dict-str-payload] — variable names are an open set the caller
+    # supplies, not an enumerable one this signature could name
+    overrides: dict[str, str] | None = None,
+) -> list[str] | None:
+    """One Git invocation's lines, or None when Git cannot answer.
 
     Git missing, the path outside a repository, a malformed pathspec, and a
     non-zero exit all collapse to None, so a caller reading this as evidence
     that something is safe to destroy treats an unanswerable question as a no.
+
+    ``overrides`` are merged over the inherited environment rather than
+    replacing it, because a replacement drops ``PATH`` and ``HOME`` and the
+    invocation then fails for a reason that has nothing to do with what it
+    was asked. The one caller that passes any is the snapshot, which needs
+    ``GIT_INDEX_FILE`` pointed somewhere other than the index a human is in
+    the middle of composing.
     """
+    environ = os.environ  # lup: ignore[os-environ]
     try:
         finished = subprocess.run(
             ["git", *arguments],
@@ -460,10 +657,103 @@ def git_answers(arguments: list[str], root: Path) -> list[str] | None:
             capture_output=True,
             text=True,
             check=False,
+            env={**environ, **overrides} if overrides else None,
         )
     except OSError:
         return None
     return finished.stdout.splitlines() if finished.returncode == 0 else None
+
+
+def undo_namespace() -> str:
+    """Where snapshots live: a ref namespace of this project's own.
+
+    Under ``refs/`` rather than in a stash so nothing a human does to their
+    stash disturbs them, and outside ``refs/heads`` so no branch listing,
+    push, or fetch treats them as work anybody meant to publish.
+
+    A function rather than a constant because this half is spliced into the
+    compiled dispatcher one function at a time, and a name beside them is
+    dropped on the way in — read by the type checker, absent from the script.
+    Being a function is also what makes it importable by the command that
+    lists snapshots back, so the writer and the reader cannot end up looking
+    in two different places for the same safety net.
+    """
+    return "refs/lup/undo"
+
+
+def undo_snapshot(
+    root: Path | None,
+    reason: str,
+    session: str = "default",
+    namespace: str = "",
+) -> str:
+    """Write the working tree into the object store before something destroys it.
+
+    The whole argument for relaxing a permission lattice is that a mistake can
+    be undone, so this is what has to exist before that relaxation is honest.
+    Tracked content *and* untracked files, through a throwaway index rather
+    than through ``git stash create``: measured, ``stash create`` captures only
+    tracked files that were modified, so the file written thirty seconds ago
+    and not yet added -- precisely what ``rm -rf src/`` destroys -- is absent
+    from it exactly when it is reached for.
+
+    Ignored files are not captured, and that is a stated limit rather than an
+    oversight: on the checkout this was built in, ignored-but-precious content
+    came to 592 MB against a 21 MB object store, so capturing it would write
+    twenty-eight times the repository's whole history before every mutating
+    command. ``git clean -fdx`` therefore keeps asking, because it is the one
+    command whose purpose is destroying what this cannot restore, and a
+    credential belongs outside the checkout rather than inside one.
+
+    Silent about its own failure, and deliberately. This runs in front of a
+    command somebody asked for; a checkout mid-merge, a locked index, and a
+    repository this process cannot write to are all reasons a snapshot cannot
+    be taken, and none of them is a reason to stop the command. An empty
+    string says no snapshot exists, which is what a caller needs to know and
+    all it needs to know.
+
+    In the compiled dispatcher rather than behind ``lup-devtools`` because of
+    what it costs. Measured on a 2,634-file checkout of this repository: 81 ms
+    for the first snapshot of a session, then a median of 11 ms warm and 14 ms
+    with a file changed, against roughly a second of interpreter start for a
+    subprocess that would do the same work. A safety net paid for on every
+    mutating command has to cost what this costs, or it is the first thing
+    somebody turns off -- and the warm figure is the one that matters, because
+    the cold index is paid once and reused for the rest of the session.
+    """
+    if root is None:
+        return ""
+    directory = git_answers(["rev-parse", "--absolute-git-dir"], root)
+    if not directory:
+        return ""
+    private = {"GIT_INDEX_FILE": f"{directory[0]}/lup-undo-{session}.index"}
+    if git_answers(["add", "-A"], root, private) is None:
+        return ""
+    tree = git_answers(["write-tree"], root, private)
+    if not tree:
+        return ""
+    commit = git_answers(["commit-tree", tree[0], "-m", f"lup undo: {reason}"], root)
+    if not commit:
+        return ""
+    # The name carries both, and needs both. The stamp orders the listing
+    # exactly -- git records a commit's date to the second, so two states
+    # reached inside one second would otherwise tie, and a tie in a safety
+    # net's "newest" is wrong at the worst possible moment. The tree hash is
+    # what makes the state findable again: every earlier ref holding this
+    # same tree is retired just below, so the listing carries one entry per
+    # distinct state rather than one per command.
+    held = tree[0][:12]
+    where = namespace or undo_namespace()
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%f")
+    for stale in (
+        git_answers(["for-each-ref", "--format=%(refname)", where], root) or []
+    ):
+        if stale.endswith(f"-{held}"):
+            git_answers(["update-ref", "-d", stale], root)
+    reference = f"{where}/{stamp}-{held}"
+    if git_answers(["update-ref", reference, commit[0]], root) is None:
+        return ""
+    return reference
 
 
 def recoverable_write_targets(
@@ -591,6 +881,7 @@ def bash_decision(
     interactive: bool,
     escapable: bool,
     cwd: Path | None,
+    relayed: bool = False,
 ) -> KernelDecision:
     """Judge one shell command against the declared vocabulary.
 
@@ -617,7 +908,14 @@ def bash_decision(
     passing is a rule that silently stopped applying.
     """
     acted_on = shell_path_verb_targets(command)
-    return decide_shell(
+    # Before the verdict rather than after it, because the verdict reads it:
+    # an approval question exists where a loss is permanent, and a tree the
+    # object store already holds has no permanent loss to ask about. Ordered
+    # the other way the relaxation would be judging a snapshot that did not
+    # exist yet, and a refused command is snapshotted too -- one ref for a
+    # state the tree was already in, which dedup collapses.
+    reference = undo_snapshot(cwd, command)
+    verdict = decide_shell(
         command,
         SHELL_RULES,
         ALLOWED_FETCH_SCOPES,
@@ -639,7 +937,60 @@ def bash_decision(
         runner_targets=RUNNER_TARGETS,
         target_tables=RUNNER_TARGET_TABLES,
         interactive=interactive,
+        # A reviewed worker is non-interactive and not therefore alone: it
+        # holds a mailbox reaching the human supervising its run, and a
+        # refusal that named no route sent it to queue a blocking question
+        # instead.
+        relayed=relayed,
         escapable=escapable,
+        recovered=bool(reference),
+    )
+    if verdict.effect == "deny":
+        return verdict
+    # The log half of allow-and-log. A deferral is this policy declining to
+    # interrupt, which is the one verdict that reaches nobody: the runtime's
+    # own gate decides and the reason goes to no human. Written down here or
+    # it is not written down anywhere.
+    if verdict.effect == "defer":
+        record_deferral(cwd, command, verdict.reason, verdict.recovery != "nothing")
+    pointed = undo_point(verdict, reference)
+    if pointed.effect != "allow":
+        return pointed
+    nudge = script_run_nudge(python_script_targets(command, INTERPRETERS), cwd)
+    if not nudge:
+        return pointed
+    return KernelDecision(
+        pointed.effect,
+        pointed.reason + nudge,
+        pointed.sandbox,
+        pointed.escalated,
+        recovery=pointed.recovery,
+    )
+
+
+def undo_point(verdict: KernelDecision, reference: str) -> KernelDecision:
+    """Say the tree was snapshotted, on the one verdict that changes for it.
+
+    The snapshot itself is taken above, before the verdict, because the
+    verdict reads it. What is left here is what the human is told.
+
+    On an approval question, which is the one moment the information changes
+    an answer: somebody deciding whether to permit something destructive is
+    weighing exactly whether it can be undone. On an allowed command the
+    snapshot is silent, because a line appended to every mutating command is
+    one nobody reads by the third time — and ``dev undo`` is where a snapshot
+    is looked for anyway. On a deferral the reason reaches no human at all;
+    it reaches the record, which is where the relaxation is reviewed.
+    """
+    if not reference or verdict.effect != "ask":
+        return verdict
+    return KernelDecision(
+        verdict.effect,
+        f"{verdict.reason} — the tree was snapshotted first; "
+        f"`lup-devtools dev undo` lists it as {reference}",
+        verdict.sandbox,
+        verdict.escalated,
+        recovery=verdict.recovery,
     )
 
 
@@ -684,6 +1035,7 @@ def edit_decision(
     path_exists: bool,
     autonomous: bool,
     operation: str = "modify",
+    cwd: Path | None = None,
 ) -> KernelDecision:
     """Judge one file's before and after against the declared edit policy.
 
@@ -703,12 +1055,19 @@ def edit_decision(
     server, which is the difference between a gate that costs a second per
     edit and one that costs a second on the edits that need it.
     """
+    outside_this_repository = foreign_repository(path_text, cwd)
     suffix = Path(path_text).suffix.lower()
     python_source = suffix in (".py", ".pyi")
     rows = ANTI_PATTERN_ROWS[suffix] if suffix in ANTI_PATTERN_ROWS else []
+    # A checker is not started for a file this policy has already decided it
+    # has nothing to say about. It would resolve another repository's imports
+    # against another repository's environment to answer a rule that will not
+    # be applied, and pay a language server's second for the privilege.
     refuted = (
         resolved_refutations(path_text, after, RESOLUTION_COMMAND)
-        if after is not None and awaits_resolution(before, after, rows, python_source)
+        if not outside_this_repository
+        and after is not None
+        and awaits_resolution(before, after, rows, python_source)
         else None
     )
     return decide_edit(
@@ -728,6 +1087,7 @@ def edit_decision(
         suffix=suffix,
         operation=operation,
         edit_rules=EDIT_RULES,
+        foreign=outside_this_repository,
     )
 
 
@@ -818,6 +1178,11 @@ def placed_input(payload):
 def dispatch(payload):
     name = payload["tool_name"]
     tool_input = payload["tool_input"]
+    # Where this session is rooted, which is what says whether an edited file
+    # belongs to the repository being worked on or to somebody else's. Read
+    # once, because the shell path and the edit path ask the same question of
+    # it and a second read is a second place it can be forgotten.
+    session_directory = Path(payload["cwd"]) if "cwd" in payload else None
     agent_type = payload["agent_type"] if "agent_type" in payload else ""
     autonomous = (
         agent_type in AUTONOMOUS_AGENT_IDENTITIES
@@ -833,7 +1198,11 @@ def dispatch(payload):
             # A call's sandbox is an argument of the call here, so a verdict
             # that has to leave the sandbox is carried out rather than refused.
             escapable=True,
-            cwd=Path(payload["cwd"]) if "cwd" in payload else None,
+            cwd=session_directory,
+            # A reviewed worker's session has nobody at a keyboard and is not
+            # therefore alone: the run it belongs to carries a mailbox that
+            # reaches whoever is supervising it.
+            relayed=autonomous,
         )
     if name == "WebFetch":
         return fetch_decision(tool_input["url"])
@@ -846,7 +1215,13 @@ def dispatch(payload):
             "replace_all" in tool_input and tool_input["replace_all"] is True,
         )
         return edit_decision(
-            path, before, after, Path(path).exists(), autonomous, "modify"
+            path,
+            before,
+            after,
+            Path(path).exists(),
+            autonomous,
+            "modify",
+            session_directory,
         )
     if name == "Write":
         path = tool_input["file_path"]
@@ -858,6 +1233,7 @@ def dispatch(payload):
             exists,
             autonomous,
             "overwrite" if exists else "create",
+            session_directory,
         )
     # Asked of whatever reached here rather than of a listed few: which tools
     # are worth refusing is the declaration's answer, and naming any of them
@@ -923,7 +1299,9 @@ def rendered(decision, payload, placed):
         "permissionDecision": settled.effect,
         "permissionDecisionReason": settled.reason,
     }
-    offer = escalation_offer(settled.sandbox, settled.reason)
+    offer = escalation_offer(
+        settled.sandbox, settled.reason, payload["tool_name"] == "Bash"
+    )
     if offer:
         answer["additionalContext"] = offer
     if placed is not None and settled.effect != "deny":

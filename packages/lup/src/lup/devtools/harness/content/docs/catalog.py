@@ -29,6 +29,7 @@ from lup.devtools.harness.content.docs import (
     resolver,
     self_improvement,
     supervisor,
+    upstream_reports,
 )
 
 LIBRARY_DOCS_ROOT = "packages/lup/src/lup/devtools/harness/content/docs"
@@ -102,6 +103,12 @@ def library_documents(
             "native_capabilities",
             "native-capabilities.md",
             native_capabilities.document(library_checkout),
+            root,
+        ),
+        published(
+            "upstream_reports",
+            "upstream-reports.md",
+            upstream_reports.document(),
             root,
         ),
         published(

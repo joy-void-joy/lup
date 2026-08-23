@@ -14,7 +14,14 @@ from functools import cache
 from typing import NotRequired, TypedDict
 
 from .decision import KernelDecision
-from .roles import normalized_path, path_role, root_matches
+from .roles import (
+    FOREIGN_REPOSITORY_REFERRAL,
+    GENERATED_PLUGIN_REFUSAL,
+    is_generated_plugin_target,
+    normalized_path,
+    path_role,
+    root_matches,
+)
 from .rows import (
     AcceptanceGuardRow,
     AntiPatternRow,
@@ -3088,7 +3095,7 @@ def edit_threshold(
     return stated[-1] if stated else default
 
 
-# lup: Editing `.claude/` or `.codex/` should be auto-deny here, carrying the
+# lup: solved: Editing `.claude/` or `.codex/` should be auto-deny here, carrying the
 # redirecting guidance that the `.py` generating it is what to modify instead.
 # `GENERATED_PLUGIN_REFUSAL` in the kernel's words module already says exactly
 # that, but only the shell path reaches it — an Edit or Write to the same file
@@ -3120,6 +3127,7 @@ def decide_edit(
     suffix: str = "",
     operation: str = "modify",
     edit_rules: list[EditRuleRow] | None = None,
+    foreign: bool = False,
 ) -> KernelDecision:
     """Apply anti-pattern, path, marker, full-write, deletion, and size gates.
 
@@ -3170,6 +3178,31 @@ def decide_edit(
         name it, rather than inheriting a shift it never asked for.
         """
         return edit_verdict(rows, gate, suffix, role, operation, default)
+
+    # A compiled plugin tree is a build product, and this is the same refusal
+    # the shell path already gives for writing one: the change is reverted by
+    # the next generation and never reaches the runtime that already loaded
+    # it. Judged here rather than by the lattice below, because every verdict
+    # the lattice can reach is wrong for this file — an allow writes something
+    # that will be overwritten, and an ask puts a question to a human whose
+    # only correct answer is "edit the source instead".
+    if is_generated_plugin_target(path):
+        return KernelDecision("deny", GENERATED_PLUGIN_REFUSAL)
+
+    # Below the plugin refusal, which is about a universal fact -- a build
+    # product is overwritten by the next generation, in anybody's repository
+    # -- and above everything else, which is not. The gates that follow
+    # describe how *this* project's code should read, and applying them to
+    # another repository's files judges that repository by conventions it
+    # never adopted: measured, one session produced dozens of denials naming
+    # lup rules against a checkout that had its own hooks, its own size
+    # budget, and no lup rule checker to read a suppression directive. The
+    # edit was refused until the other repository's code had been restyled
+    # into this one's conventions, inside a diff whose subject was something
+    # else entirely. So the honest answer is that this policy has nothing to
+    # say about the file, and the human who launched a session here decides.
+    if foreign:
+        return KernelDecision("ask", FOREIGN_REPOSITORY_REFERRAL)
 
     # Whether this file may be edited at all is prior to how the edit reads,
     # so the guard answers ahead of every gate below — including pure

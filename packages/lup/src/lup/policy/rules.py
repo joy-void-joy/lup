@@ -153,12 +153,14 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
         sandbox_active: bool = False,
         sandbox_excluded_commands: list[str] | None = None,
         escapable: bool = False,
+        recovered: bool = False,
         trusted_script_roots: list[str] | None = None,
         interactive: bool = True,
         path_roles: list[PathRoleRow] | None = None,
         path_rules: list["PathRule"] | None = None,
         recoverable_target_limit: int = 5,
         runner_targets: list[RunnerTargetRule] | None = None,
+        relayed: bool = False,
     ) -> None:
         self.path_rules = [path_rule_row(rule) for rule in path_rules or []]
         self.path_roles = path_roles or []
@@ -166,6 +168,11 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
         self.runner_targets = erase_runner_targets(runner_targets or [])
         self.target_tables = runner_target_tables(runner_targets or [])
         self.escapable = escapable
+        # A fact about the session rather than about any command, and not
+        # discoverable from here: whether the undo layer holds this tree. A
+        # caller that knows says so, and one that does not gets the strict
+        # answer -- the one that relaxes nothing.
+        self.recovered = recovered
         self.rules = erase_shell_rules(rules)
         self.allowed_scopes = [url_scope_row(scope) for scope in allowed_urls or []]
         self.denied_scopes = [url_scope_row(scope) for scope in denied_urls or []]
@@ -173,6 +180,7 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
         self.sandbox_excluded_commands = sandbox_excluded_commands or []
         self.trusted_script_roots = trusted_script_roots or []
         self.interactive = interactive
+        self.relayed = relayed
 
     def decide(self, event: ShellCommand) -> Decision:
         root = event.cwd or Path.cwd()
@@ -203,6 +211,8 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
                 runner_targets=self.runner_targets,
                 target_tables=self.target_tables,
                 escapable=self.escapable,
+                recovered=self.recovered,
+                relayed=self.relayed,
             )
         )
 

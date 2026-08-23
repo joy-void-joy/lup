@@ -9,12 +9,14 @@ from typing import TypedDict
 from .decision import (
     ESCALATE_HINT,
     KernelDecision,
+    RELAY_HINT,
     RESHAPE_HINT,
-    SANDBOX_TRAPPED_REASON,
     SUBSTITUTION_SENTINEL,
+    Recovery,
     SandboxPlacement,
     unjudged,
 )
+from .settlement import SettlementFacts, settle
 from .rows import (
     PathRoleRow,
     PathRuleRow,
@@ -38,6 +40,7 @@ from .words import (
 )
 from .lex import parse_shell_words
 from .commands import (
+    declares_command,
     decide_awk_words,
     decide_command_rows,
     decide_curl_words,
@@ -160,36 +163,17 @@ def decide_find_words(words: list[str], context: ShellContext) -> KernelDecision
     return decide_command_rows(remaining, context["rows"])
 
 
-def decide_shell_segment(segment: list[str], context: ShellContext) -> KernelDecision:
-    """Classify one parsed shell segment against the vocabulary and handlers."""
-    while segment and segment[0] == "!":
-        segment = segment[1:]
-    if not segment:
-        return unjudged("shell segment has no command")
-    if segment[0] == "[[":
-        return KernelDecision("allow", "test expression is read-only")
-    effective = effective_command(segment)
-    words = effective["words"]
-    dangerous = effective["dangerous"]
-    if dangerous:
-        return KernelDecision(
-            "ask", "a security-sensitive environment assignment requires approval"
-        )
-    if not words:
-        return unjudged("shell segment has no command")
-    if SUBSTITUTION_SENTINEL in words[0]:
-        return unjudged("a command substitution in command position is not classified")
-    if any(
-        SUBSTITUTION_SENTINEL in word for word in words[1:]
-    ) and not argument_safe_words(words, context):
-        return unjudged(
-            "a command substitution result could become a guarded flag — run"
-            " it in its own call and splice the literal output"
-        )
+def decide_segment_words(words: list[str], context: ShellContext) -> KernelDecision:
+    """Classify one command's words against the vocabulary and handlers.
+
+    Separate from the segment above it because a verdict and a placement are
+    two axes, and only one of them is a help probe's to answer. Reached with
+    the word list a segment settles to, so a construct that recurses into a
+    payload — ``xargs``, ``find -exec`` — goes back through the segment and
+    meets the same reading of it.
+    """
     executable = posixpath.basename(words[0])
-    if is_help_probe(words[1:]):
-        return KernelDecision("allow", "a help probe only prints usage")
-    if executable in INTERPRETERS:
+    if executable in INTERPRETERS and not declares_command(executable, context["rows"]):
         if len(words) > 1 and is_trusted_script(
             words[1], context["trusted_script_roots"]
         ):
@@ -254,7 +238,13 @@ def decide_shell_segment(segment: list[str], context: ShellContext) -> KernelDec
     if executable == "find":
         return decide_find_words(words, context)
     if executable == "sed":
-        return decide_sed_words(words)
+        return decide_sed_words(
+            words,
+            context["path_roles"],
+            context["recoverable_targets"],
+            context["recoverable_target_limit"],
+            context["path_rules"],
+        )
     if executable in ("awk", "gawk", "mawk"):
         return decide_awk_words(words)
     if executable == "uvx":
@@ -264,6 +254,55 @@ def decide_shell_segment(segment: list[str], context: ShellContext) -> KernelDec
     if executable == "uv" and len(words) > 1:
         return decide_uv(words, context["runner_targets"], context["target_tables"])
     return decide_command_rows(words, context["rows"])
+
+
+def decide_shell_segment(segment: list[str], context: ShellContext) -> KernelDecision:
+    """Classify one parsed shell segment, letting a help probe soften the effect.
+
+    Printing usage says nothing about *where* the command has to run, and the
+    two are separate axes — so the probe replaces the verdict and the walk
+    still answers for the placement. Short-circuited above that walk it
+    answered for both, and dropped every declared placement a ``--help``
+    happened to sit in: measured, ``uv run lup-devtools dev check`` was placed
+    ``outside`` while ``uv run lup-devtools --help`` — the same toolchain, one
+    word apart — was placed ``ambient``, and so was every other help probe in
+    the vocabulary. The depth was incidental; the short circuit was the whole
+    of it.
+
+    Which is the reachable half of that defect: a toolchain declared
+    ``outside`` because it opens agent sessions is asked for its own usage
+    from inside the sandbox that placement exists to escape.
+    """
+    while segment and segment[0] == "!":
+        segment = segment[1:]
+    if not segment:
+        return unjudged("shell segment has no command")
+    if segment[0] == "[[":
+        return KernelDecision("allow", "test expression is read-only")
+    effective = effective_command(segment)
+    words = effective["words"]
+    dangerous = effective["dangerous"]
+    if dangerous:
+        return KernelDecision(
+            "ask", "a security-sensitive environment assignment requires approval"
+        )
+    if not words:
+        return unjudged("shell segment has no command")
+    if SUBSTITUTION_SENTINEL in words[0]:
+        return unjudged("a command substitution in command position is not classified")
+    if any(
+        SUBSTITUTION_SENTINEL in word for word in words[1:]
+    ) and not argument_safe_words(words, context):
+        return unjudged(
+            "a command substitution result could become a guarded flag — run"
+            " it in its own call and splice the literal output"
+        )
+    decision = decide_segment_words(words, context)
+    if is_help_probe(words[1:]):
+        return KernelDecision(
+            "allow", "a help probe only prints usage", decision.sandbox
+        )
+    return decision
 
 
 def loop_leader(segment: list[str]) -> str:
@@ -758,6 +797,21 @@ def decide_segment_list(
     return decisions
 
 
+def joined_recovery(decisions: list[KernelDecision]) -> Recovery:
+    """What puts back what a whole command line destroys.
+
+    The weakest answer any of its segments gave. One line is one act as far
+    as a person deciding about it is concerned, so a segment nothing restores
+    makes the line one nothing restores -- ``ls && git push --delete`` is not
+    made recoverable by the half that only read.
+    """
+    if any(item.recovery == "nothing" for item in decisions):
+        return "nothing"
+    if any(item.recovery == "container" for item in decisions):
+        return "container"
+    return "snapshot"
+
+
 def joined_placement(decisions: list[KernelDecision]) -> SandboxPlacement:
     """Where a whole command runs, given what each of its segments needs.
 
@@ -817,16 +871,22 @@ def classify_shell(
     )
     decisions = decide_segment_list(segments, context)
     placement = joined_placement(decisions)
+    restoration = joined_recovery(decisions)
     denied = next((item for item in decisions if item.effect == "deny"), None)
     if denied is not None:
         return denied
     asked = next((item for item in decisions if item.effect == "ask"), None)
     if asked is not None:
-        return KernelDecision("ask", asked.reason, placement)
+        return KernelDecision("ask", asked.reason, placement, recovery=restoration)
     deferred = next((item for item in decisions if item.effect == "defer"), None)
     if deferred is not None:
         return deferred
-    return KernelDecision("allow", "every shell segment is declared safe", placement)
+    return KernelDecision(
+        "allow",
+        "every shell segment is declared safe",
+        placement,
+        recovery=restoration,
+    )
 
 
 def excluded_prefix(pattern: str) -> list[str]:
@@ -891,105 +951,81 @@ def decide_shell(
     runner_targets: list[RunnerTargetRow] | None = None,
     target_tables: list[ShellRuleRow] | None = None,
     escapable: bool = False,
+    recovered: bool = False,
+    relayed: bool = False,
 ) -> KernelDecision:
     """Classify one command, honoring an escalation marker and hinting denies.
 
-    A leading ``# lup: escalate: <why>`` line promotes a classified deny or
-    ask to an approval question carrying the agent's stated reason, so the
-    human sees intent at the moment of judgment. A deny without a marker names
-    the escalation recipe: unjudged work bounces back to the agent, which
-    reshapes it into the allowed vocabulary or deliberately promotes it.
-    When the execution is sandboxed, unjudged work defers instead: the OS
-    boundary confines it, and only an unsandboxed escape returns to the
-    deny lattice. A command the declaration excludes from the sandbox is
-    such an escape without saying so — the boundary was told to leave it
-    alone — so it is judged as though no sandbox were running at all.
+    Two steps, and only the first is here. This reads the leading
+    ``# lup: escalate: <why>`` line off the command, refuses a marker that
+    states no reason, and hands the classified verdict to the settlement
+    order in ``settlement.py`` along with every session fact that bears on
+    it: whether a boundary is running, whether this host can put one call
+    outside it, and whether there is anybody to ask.
 
-    A non-interactive host has no approval channel, so a question it cannot
-    put to a human is not a question — sandboxed, it rides the same OS
-    boundary as unjudged work; unsandboxed, it fails closed. Such a host is
-    never told to escalate, because that flow cannot complete there. A judged
-    deny is never rescued by the sandbox in either mode.
+    What that order says, in the order it says it. A stated reason turns
+    anything not already permitted into the approval question the agent asked
+    for, carrying the reason it gave. A call declared ``outside`` on a host
+    with no channel to put it there is refused outright, because approval
+    would only move the failure to a bare filesystem error with the boundary
+    misreported as a bug in the code. A question on a host with nobody to put
+    it to is no judgment at all. What nobody judged, a boundary carries — and
+    without one, the refusal names the escalation recipe, so unjudged work
+    bounces back to the agent to be reshaped into the allowed vocabulary or
+    deliberately promoted. A judged deny is never rescued by the sandbox: it
+    is somebody's answer, and running it confined would still be running it.
 
-    ``escapable`` is the third fact of that family: whether this host can put
-    one call outside its own sandbox. A command declared ``outside`` is not
-    advice — confined, it fails on whatever it writes first — so a host that
-    cannot place it stops it here with that reason rather than letting it reach
-    the shell. The pair is what makes the declaration safe to give a toolchain:
-    where the escape is carried out it is unprompted, and where nothing can
-    carry it out the refusal names the sandbox instead of a bare write error.
+    A command the declaration excludes from the sandbox is an escape without
+    saying so — the boundary was told to leave it alone — so it is judged as
+    though no sandbox were running at all, which is what ``confined`` says
+    that ``sandboxed`` does not.
+
+    ``escapable`` is whether this host can put one call outside its own
+    sandbox, and the pair with the declaration is what makes a placement safe
+    to give a toolchain: where the escape is carried out it is unprompted,
+    and where nothing can carry it out the refusal names the sandbox instead
+    of a bare write error.
+
+    ``relayed`` says a non-interactive session is not therefore *alone*. A
+    reviewed worker holds a question mailbox reaching the human supervising
+    the run, so a refusal that told it to reshape the command was naming the
+    only route it had as unavailable — and measured, it did what anybody
+    would and queued a material question instead, parking the whole run on a
+    decision nobody needed to make. Three states rather than two, because
+    "nobody to ask" and "somebody, but not right now" are different answers
+    and were sharing one.
     """
-    hint = ESCALATE_HINT if interactive else RESHAPE_HINT
+    hint = ESCALATE_HINT if interactive else RELAY_HINT if relayed else RESHAPE_HINT
     confined = sandboxed and not sandbox_excluded(command, excluded_commands or [])
 
-    def resolve(decision: KernelDecision) -> KernelDecision:
-        if sandboxed and not escapable and decision.sandbox == "outside":
-            return KernelDecision(
-                "deny", SANDBOX_TRAPPED_REASON, escalated=decision.escalated
-            )
-        match decision.effect:
-            case "allow":
-                return decision
-            case "ask" if interactive:
-                return decision
-            case "defer" | "ask" if confined:
-                return KernelDecision(
-                    "defer", decision.reason, escalated=decision.escalated
-                )
-            case _:
-                # The stated intent outlives the refusal. A host with no human
-                # to ask still has somewhere to send this, and the marker's
-                # whole purpose is reaching whoever can act on it — denied
-                # with the reason dropped, the agent's escalation summoned
-                # nobody, which is the documented escape hatch having no
-                # effect in the one context that most needs one.
-                return KernelDecision(
-                    "deny", decision.reason + hint, escalated=decision.escalated
-                )
-
     marker = ESCALATE_RE.match(command)
-    if marker is not None:
-        why = marker.group("why").strip()
-        if not why:
-            return KernelDecision("deny", "escalation requires a stated reason" + hint)
-        inner = classify_shell(
-            command[marker.end() :],
-            rows,
-            allowed_scopes=allowed_scopes,
-            denied_scopes=denied_scopes,
-            trusted_script_roots=trusted_script_roots,
-            path_roles=path_roles,
-            path_rules=path_rules,
-            existing_targets=existing_targets,
-            recoverable_targets=recoverable_targets,
-            directory_targets=directory_targets,
-            empty_directories=empty_directories,
-            recoverable_target_limit=recoverable_target_limit,
-            runner_targets=runner_targets,
-            target_tables=target_tables,
-        )
-        if inner.effect == "allow":
-            return inner
-        return resolve(
-            KernelDecision(
-                "ask", f"escalated ({why}): {inner.reason}", inner.sandbox, why
-            )
-        )
-    return resolve(
-        classify_shell(
-            command,
-            rows,
-            allowed_scopes=allowed_scopes,
-            denied_scopes=denied_scopes,
-            trusted_script_roots=trusted_script_roots,
-            path_roles=path_roles,
-            path_rules=path_rules,
-            existing_targets=existing_targets,
-            recoverable_targets=recoverable_targets,
-            directory_targets=directory_targets,
-            empty_directories=empty_directories,
-            recoverable_target_limit=recoverable_target_limit,
-            runner_targets=runner_targets,
-            target_tables=target_tables,
+    why = marker.group("why").strip() if marker is not None else ""
+    if marker is not None and not why:
+        return KernelDecision("deny", "escalation requires a stated reason" + hint)
+    return settle(
+        SettlementFacts(
+            classify_shell(
+                command[marker.end() :] if marker is not None else command,
+                rows,
+                allowed_scopes=allowed_scopes,
+                denied_scopes=denied_scopes,
+                trusted_script_roots=trusted_script_roots,
+                path_roles=path_roles,
+                path_rules=path_rules,
+                existing_targets=existing_targets,
+                recoverable_targets=recoverable_targets,
+                directory_targets=directory_targets,
+                empty_directories=empty_directories,
+                recoverable_target_limit=recoverable_target_limit,
+                runner_targets=runner_targets,
+                target_tables=target_tables,
+            ),
+            escalation=why,
+            sandboxed=sandboxed,
+            confined=confined,
+            escapable=escapable,
+            recovered=recovered,
+            interactive=interactive,
+            hint=hint,
         )
     )

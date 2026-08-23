@@ -1,0 +1,242 @@
+"""What the settlement order is, as an order rather than as four outcomes.
+
+The classified verdict and the session facts meet in one place, and what
+happens there used to be the position of an arm in a ``match``. Pinned here
+is the property that made it worth naming: rows compose, so a rule about the
+order can be read off the list instead of derived from where a guard sits.
+"""
+
+from lup.policy.kernel.decision import SANDBOX_TRAPPED_REASON, KernelDecision
+from lup.policy.kernel.settlement import (
+    SETTLEMENT_ORDER,
+    SettlementFacts,
+    SettlementRule,
+    StatedReason,
+    settle,
+)
+
+HINT = " — reshape it"
+
+
+def facts(
+    decision: KernelDecision,
+    escalation: str = "",
+    sandboxed: bool = False,
+    confined: bool = False,
+    escapable: bool = False,
+    recovered: bool = False,
+    interactive: bool = True,
+) -> SettlementFacts:
+    """One verdict and the session judging it, with the defaults of a plain host."""
+    return SettlementFacts(
+        decision,
+        escalation=escalation,
+        sandboxed=sandboxed,
+        confined=confined,
+        escapable=escapable,
+        recovered=recovered,
+        interactive=interactive,
+        hint=HINT,
+    )
+
+
+def test_a_stated_reason_turns_a_refusal_into_the_question_it_asked_for() -> None:
+    settled = settle(facts(KernelDecision("deny", "no"), escalation="I need it"))
+
+    assert (settled.effect, settled.reason) == ("ask", "escalated (I need it): no")
+
+
+def test_a_stated_reason_leaves_a_permission_alone() -> None:
+    """A marker over something already allowed buys a prompt for nothing."""
+    settled = settle(facts(KernelDecision("allow", "fine"), escalation="just in case"))
+
+    assert (settled.effect, settled.reason) == ("allow", "fine")
+
+
+def test_two_rewriting_rows_compose_without_knowing_about_each_other() -> None:
+    """The property the order exists for.
+
+    A stated reason makes a refusal a question; a host with nobody to ask
+    makes a question no judgment; a boundary carries what nobody judged.
+    Three rows, none of which names another, and the answer is the
+    composition — which is what a `match` arm could only express by being in
+    the right place.
+    """
+    settled = settle(
+        facts(
+            KernelDecision("deny", "no"),
+            escalation="I need it",
+            sandboxed=True,
+            confined=True,
+            interactive=False,
+        )
+    )
+
+    assert settled.effect == "defer"
+    assert settled.reason == "escalated (I need it): no"
+
+
+def test_a_question_nobody_can_answer_without_a_boundary_is_refused() -> None:
+    """The same two rewrites, with nothing beneath them to carry the call."""
+    settled = settle(
+        facts(KernelDecision("ask", "risky"), interactive=False, sandboxed=False)
+    )
+
+    assert (settled.effect, settled.reason) == ("deny", "risky" + HINT)
+
+
+def test_no_stated_reason_places_a_call_the_host_cannot_place() -> None:
+    """Approval does not give a host a channel it does not have.
+
+    A call declared ``outside`` where nothing can put it outside fails on
+    whatever it writes first, and the failure reads as a broken repository.
+    That is a refusal about capability, so the row settles rather than
+    rewrites and the marker above it does not survive to the wire.
+    """
+    settled = settle(
+        facts(
+            KernelDecision("ask", "needs the network", "outside"),
+            escalation="please",
+            sandboxed=True,
+            escapable=False,
+        )
+    )
+
+    assert (settled.effect, settled.reason) == ("deny", SANDBOX_TRAPPED_REASON)
+
+
+def test_a_judged_refusal_is_not_rescued_by_a_boundary() -> None:
+    """The distinction the whole lattice rests on.
+
+    Unjudged work is refused for want of anybody having looked, and a
+    boundary answers that. A judged deny is somebody's answer, and running it
+    confined would still be running it.
+    """
+    judged = settle(
+        facts(KernelDecision("deny", "refused"), sandboxed=True, confined=True)
+    )
+    nobody_looked = settle(
+        facts(KernelDecision("defer", "unknown"), sandboxed=True, confined=True)
+    )
+
+    assert judged.effect == "deny"
+    assert nobody_looked.effect == "defer"
+
+
+def test_the_first_settling_row_ends_the_pass() -> None:
+    """Precedence is position, and a row after a settlement is never read."""
+
+    class Loud(SettlementRule):
+        def reached(self, facts: SettlementFacts) -> KernelDecision:
+            return KernelDecision("deny", "never reached")
+
+    settled = settle(
+        facts(KernelDecision("allow", "fine")),
+        order=[*SETTLEMENT_ORDER, Loud()],
+    )
+
+    assert (settled.effect, settled.reason) == ("allow", "fine")
+
+
+def test_the_order_is_the_policy_and_a_shorter_one_is_a_different_policy() -> None:
+    """Taking a row out changes the answer, which is what makes it a rule.
+
+    Without the row that turns a refusal into a question, a stated reason has
+    nothing to say and the refusal stands. That is the whole content of "a
+    marker never leaves a refusal standing", and it lives in one place.
+    """
+    kept = settle(facts(KernelDecision("deny", "no"), escalation="I need it"))
+    without = settle(
+        facts(KernelDecision("deny", "no"), escalation="I need it"),
+        order=[rule for rule in SETTLEMENT_ORDER if not isinstance(rule, StatedReason)],
+    )
+
+    assert kept.effect == "ask"
+    assert without.effect == "deny"
+
+
+def test_a_loss_the_undo_layer_holds_is_settled_rather_than_asked() -> None:
+    """The relaxation, and the axis that keeps it from being a blanket one.
+
+    An approval question exists because a loss is permanent. What makes a
+    loss permanent is a fact about the session, so a rule names the restorer
+    its question was about and this row asks whether that restorer is here.
+    `snapshot` is the narrow one: the loss is working-tree content, which the
+    undo layer holds whether or not a container is running.
+    """
+    settled = settle(
+        facts(
+            KernelDecision("ask", "a reset discards work", recovery="snapshot"),
+            recovered=True,
+        )
+    )
+
+    assert settled.effect == "defer"
+    assert "the tree is in the object store" in settled.reason
+
+
+def test_a_loss_only_a_container_holds_waits_for_one() -> None:
+    """`container` names a loss reaching past the checkout, so no host here holds it.
+
+    A command that writes on this machine would be answered by a container,
+    whose machine is rebuilt from a declaration. The snapshot holds the
+    checkout and nothing else, so it is not that answer, and the question
+    stands wherever the object store is the only boundary.
+    """
+    question = KernelDecision("ask", "extraction writes files", recovery="container")
+
+    assert settle(facts(question, recovered=True)).effect == "ask"
+
+
+def test_a_loss_nothing_holds_keeps_its_question() -> None:
+    """The default, and the whole safety of the axis.
+
+    A rule nobody annotated keeps asking. `git clean -fdx` is the deliberate
+    instance rather than an oversight: it destroys ignored files, which the
+    snapshot leaves out, so it is the one destructive verb that keeps asking
+    in the posture where its neighbours stop.
+    """
+    settled = settle(
+        facts(KernelDecision("ask", "deleting untracked files"), recovered=True)
+    )
+
+    assert settled.effect == "ask"
+
+
+def test_a_stated_reason_keeps_the_question_the_agent_asked_for() -> None:
+    """The marker is a request to be judged, and a boundary does not overrule it.
+
+    Answering it with a deferral would drop both the question and the reason
+    given for it, which is the one thing an escalation exists to put in front
+    of somebody.
+    """
+    settled = settle(
+        facts(
+            KernelDecision("ask", "a reset discards work", recovery="snapshot"),
+            escalation="I need the clean tree",
+            recovered=True,
+        )
+    )
+
+    assert settled.effect == "ask"
+    assert "I need the clean tree" in settled.reason
+
+
+def test_a_judged_deferral_is_not_refused_as_an_unexamined_one() -> None:
+    """The care `defer` needs once it carries a judgement.
+
+    Two things reach the word: :func:`unjudged` means nobody looked, and this
+    row means somebody looked and the boundary answers. `Unjudged` turns the
+    first into a refusal for want of anybody having looked — the one reason
+    that is not true of the second. So this row settles rather than rewrites,
+    and no boundary is needed for it to hold.
+    """
+    settled = settle(
+        facts(
+            KernelDecision("ask", "removing tracked files", recovery="snapshot"),
+            recovered=True,
+        )
+    )
+
+    assert settled.effect == "defer"
+    assert HINT not in settled.reason

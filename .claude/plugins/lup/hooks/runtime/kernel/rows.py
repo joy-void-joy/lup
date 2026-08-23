@@ -2,7 +2,7 @@
 
 from typing import Literal, TypedDict
 
-from .decision import DecisionEffect, SandboxPlacement
+from .decision import DecisionEffect, Recovery, SandboxPlacement
 
 type PathRuleKind = Literal[
     "exact",
@@ -194,17 +194,29 @@ class ShellRuleRow(TypedDict):
     action at a time (``git config --get``): a non-allow row de-escalates to
     allow when a declared verb appears among words that are all literal and
     free of guarded flags, because the verb pins the invocation to its query
-    action regardless of the other words.
+    action regardless of the other words. ``write_markers`` are the same
+    de-escalation stated negatively, for a command whose read-only form is the
+    one with nothing extra in it (``dd if=x`` with no ``of=``): a non-allow row
+    de-escalates when no literal word carries a declared marker. Stated as
+    absence because no membership test can recognize a form defined by what it
+    lacks -- the gap that stopped every read-only ``dd`` as a write.
 
     ``sandbox`` says where this command has to run, independently of who
     decides it: a verb that reaches a remote is unusable confined however the
     effect reads, and a verb whose blast radius wants the OS boundary keeps it
     however ordinary the effect reads.
 
-    Both axes arrive already resolved down the nesting, so matching one row is
-    the whole answer. ``effect_source`` and ``sandbox_source`` say which level
-    supplied each value, which is what a reader needs at a verdict they did not
-    expect; neither is consulted in reaching one.
+    ``recovery`` says what would put back what this command destroys, which
+    is what makes the effect a function of the session rather than of the
+    command alone: an approval question exists because a loss is permanent,
+    and a session carrying the restorer named here has no such loss to ask
+    about.
+
+    All three axes arrive already resolved down the nesting, so matching one
+    row is the whole answer. ``effect_source``, ``sandbox_source`` and
+    ``recovery_source`` say which level supplied each value, which is what a
+    reader needs at a verdict they did not expect; none is consulted in
+    reaching one.
     """
 
     command: str
@@ -214,9 +226,12 @@ class ShellRuleRow(TypedDict):
     effect_source: RuleLevel
     sandbox: SandboxPlacement
     sandbox_source: RuleLevel
+    recovery: Recovery
+    recovery_source: RuleLevel
     ask_flags: list[str]
     allow_flags: list[str]
     read_verbs: list[str]
+    write_markers: list[str]
     value_flags: list[str]
     reason: str
 

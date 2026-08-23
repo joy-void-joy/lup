@@ -45,19 +45,13 @@ from lup_template.agent.toolsets import tool_group_names
 from lup_template.devtools.harness.content.catalog import AGENTS, RETIRED, SKILLS
 from lup_template.devtools.subapps import SELECTION
 from lup_template.devtools.harness.content.guidance import document as guidance_document
+from lup_template.devtools.harness.content.requirements import manifest
 from lup_template.devtools.harness.content.shell_vocabulary import (
     RUNNER_TARGETS,
     SHELL_RULES,
 )
 
 EXCLUDED_COMMANDS = [
-    # `py eval` is the rung the guidance points at for computing anything, and
-    # it computes by talking to the Docker daemon over a Unix socket the
-    # isolation blocks outright — the one incompatibility the runtime's own
-    # documentation names. Excluding the rung leaves the expression evaluated
-    # where it always was, in a container; granting the socket instead would
-    # hand every sandboxed command the host through it.
-    "uv run lup-devtools py eval *",
     # Egress the sandbox proxy cannot carry: it allowlists hostnames over
     # HTTP, and the transport underneath a git remote is SSH on port 22. No
     # narrower lever reaches this — a credential path takes a mode and not a
@@ -91,9 +85,34 @@ back; the report surface is where the same question is answered in a place
 every later session, scan, and gate can reach.
 """
 
+WORKTREE_ENTRY_REFUSAL = (
+    "entering a worktree with this tool arms Claude Code's worktree isolation"
+    " for the rest of the session, which then refuses eval, source, fc, coproc,"
+    " trap, enable, mapfile, readarray, hash, bind, complete, compgen, alias and"
+    " let in any argv position — including in read-only commands with no git in"
+    " them, so `grep -c hash file.py` stops working. Measured: the tool call is"
+    " what arms it, not where the session is. `dev worktree create` already made"
+    " the tree — launch a session rooted in it, or address its files by absolute"
+    " path from here"
+)
+"""Why the tool that moves a session into a worktree is the wrong way in.
+
+The refusal names the cost rather than the rule, because the cost is what is
+hard to believe: a gate that has nothing to do with this project refuses
+fourteen ordinary shell words, for the rest of the session, on a command that
+reads. An agent told only "do not call this" reaches for it the moment the
+guidance is out of context; one told what happens does not.
+
+Not walled off. A deliberate use escalates with the marker the shell lattice
+already uses, and gets an approval question carrying this reason — which is
+the right shape, because a human who knows they are about to lose those words
+may still have a reason to.
+"""
+
 REFUSED_TOOLS = [
     RefusedTool(tool="Artifact", reason=ARTIFACT_REFUSAL),
     RefusedTool(tool="Skill", specifier="artifact-design", reason=ARTIFACT_REFUSAL),
+    RefusedTool(tool="EnterWorktree", reason=WORKTREE_ENTRY_REFUSAL),
 ]
 """The calls this project has decided against, each naming what to reach for.
 
@@ -315,10 +334,25 @@ def portable_harness(version: str = "0.2.0", root: Path | None = None) -> Harnes
             # domain whose sensitive files are a data directory, a migration
             # set or a deployment manifest says so instead.
             protected_edit_roots=[
+                # Both runtimes' trees, because one of them being protected
+                # and the other open is a hole with no reason behind it: the
+                # settings, trust state and hand-written skills under each
+                # decide the same things about the session that reads them.
                 Path(".claude"),
+                Path(".codex"),
                 Path("pyproject.toml"),
                 Path("sync.json"),
                 Path("downstream.json"),
+                # What the agent is allowed to do at all is declared here, and
+                # an agent that can widen its own policy without a question
+                # has a preference rather than a boundary. Protected so the
+                # widening is the thing approved: the agent writes the change,
+                # the diff is in front of whoever answers, and it is durable —
+                # a declaration appears in a review, is drift-checked, and
+                # holds for the next session, where a per-call escape helps
+                # once and evaporates.
+                Path("packages/lup/src/lup/policy"),
+                Path("src/lup_template/devtools/harness/catalog.py"),
             ],
             # lup: template: what each tree in this domain is *for*. A role is
             # how a gate tells a fixture from production and a build product
@@ -406,6 +440,7 @@ def portable_harness(version: str = "0.2.0", root: Path | None = None) -> Harnes
     return Harness(
         generator_version=version,
         source_evidence={"content": "typed-python"},
+        requirements=manifest(),
         plugins=[plugin],
         guidance=guidance_document(plugin.hooks.rules if plugin.hooks else None),
         resolver=ResolveSpec(

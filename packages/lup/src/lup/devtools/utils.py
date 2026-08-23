@@ -267,29 +267,6 @@ def refuse_blocked_config_writes(cwd: Path | None = None) -> None:
         raise typer.Exit(1)
 
 
-def copy_to_clipboard(text: str) -> bool:
-    """Copy text to the system clipboard. Returns True on success.
-
-    Best-effort and cross-platform: tries each platform's clipboard tool
-    in turn (Linux ``xclip``/``xsel``, macOS ``pbcopy``, Windows ``clip``)
-    and stops at the first one that is installed and succeeds. Returns
-    False when none is available so callers can fall back to printing the
-    text for manual copying.
-    """
-    for command, args in (
-        ("xclip", ["-selection", "clipboard"]),
-        ("xsel", ["--clipboard", "--input"]),
-        ("pbcopy", []),
-        ("clip", []),
-    ):
-        try:
-            sh.Command(command)(*args, _in=text)
-            return True
-        except (sh.ErrorReturnCode, sh.CommandNotFound):
-            continue
-    return False
-
-
 def output_json(
     data: object,  # lup: ignore[bare-object] — pretty-printer: any serializable payload
 ) -> None:

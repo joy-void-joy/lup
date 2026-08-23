@@ -8,7 +8,11 @@ from typing import TypedDict
 from .archives import archive_write
 from .decision import KernelDecision, SUBSTITUTION_SENTINEL
 from .edit import path_rule_matches
-from .roles import path_role
+from .roles import (
+    GENERATED_PLUGIN_REFUSAL,
+    is_generated_plugin_target,
+    path_role,
+)
 from .rows import PathRoleRow, PathRuleRow
 
 
@@ -59,8 +63,6 @@ DANGEROUS_ENV_NAMES = (
 )
 # lup: ignore[library-default] — variable prefixes the OS, those runtimes, and these tools read to redirect execution or retarget a command
 DANGEROUS_ENV_PREFIXES = ("LD_", "DYLD_", "PYTHON", "GIT_", "GH_", "BASH_FUNC_")
-# lup: ignore[library-default] — the native runtimes' own plugin directory names
-GENERATED_PLUGIN_ROOTS = (".claude/plugins", ".codex/plugins")
 # lup: ignore[library-default] — real interpreter executables; omitting one is a hole, not a preference
 INTERPRETERS = (
     "python",
@@ -184,38 +186,6 @@ def is_trusted_script(word: str, roots: list[str]) -> bool:
         normalized.startswith(posixpath.join(posixpath.normpath(root), ""))
         for root in roots
         if root.startswith("/") and posixpath.normpath(root) != "/"
-    )
-
-
-# lup: ignore[constant-declaration] — refusal wording, declared with its verdict
-GENERATED_PLUGIN_REFUSAL = (
-    "a native plugin tree is compiled from typed source, and the running"
-    " runtime already loaded it — edit the policy source, run"
-    " `lup-devtools harness generate all`, then ask the user to restart"
-    " claude or codex so the change takes effect"
-)
-
-
-def is_generated_plugin_target(word: str) -> bool:
-    """Recognize a path confined to a native plugin tree the harness renders.
-
-    Every file there is compiled from typed source, so writing one by hand
-    edits a build product: the change is reverted by the next generation and
-    never reaches the runtime that already loaded it. The roots stop at
-    ``plugins`` because their parents also hold settings, trust state, and
-    hand-written skills and commands that no generator can restore.
-
-    The roots are matched as path segments wherever they occur, so an absolute
-    spelling and a sibling worktree's tree are recognized too. A relaxation
-    may safely decline to resolve those, because declining leaves the ask in
-    place; a refusal that only knew the repo-relative spelling would instead
-    fail open on the one form that reaches past this worktree.
-    """
-    segments = posixpath.normpath(word).split("/")
-    return any(
-        segments[index : index + len(parts)] == parts
-        for parts in [root.split("/") for root in GENERATED_PLUGIN_ROOTS]
-        for index in range(len(segments))
     )
 
 
@@ -418,6 +388,58 @@ def asks_before_removing_a_directory(
         "ask",
         "removing a directory is never granted, because nothing in the command"
         " bounds what it holds — name the files instead, or approve this",
+    )
+
+
+def rewrites_only_recoverable_files(
+    targets: list[str],
+    path_roles: list[PathRoleRow],
+    recoverable_targets: list[str] | None = None,
+    recoverable_target_limit: int = 5,
+    path_rules: list[PathRuleRow] | None = None,
+) -> KernelDecision | None:
+    """Grant a rewrite in place whose every named file could be brought back.
+
+    The same question :func:`confined_to_recoverable_roots` asks of a delete,
+    asked of a command that overwrites: what would this cost if it were
+    wrong. A scratch file costs nothing by declaration; a committed file with
+    no uncommitted change costs a checkout and no information. Past the cap
+    it is a sweep rather than an edit, and a sweep is worth a question even
+    where every file in it could be restored.
+
+    What this does *not* answer is the other half of why an in-place rewrite
+    is gated: it walks past the gates an edit is judged by — the anti-pattern
+    table, the review-note gate, the size gate. Those are reviewability, and
+    no boundary and no undo layer answers them. What recoverability does
+    settle is that being wrong is repairable and the whole change stands in
+    the diff, so the grant says which half it granted.
+
+    ``None`` wherever the answer is not established — no targets, a word that
+    expands at run time, a file the host reported nothing about — and ``None``
+    leaves the caller's own refusal standing.
+    """
+    if not targets:
+        return None
+    if any(opaque_argument(word) or "$" in word for word in targets):
+        return None
+    disposable = [word for word in targets if path_role(word, path_roles) == "scratch"]
+    restorable = [
+        word
+        for word in targets
+        if word not in disposable and word in (recoverable_targets or [])
+    ]
+    if len(disposable) + len(restorable) != len(targets):
+        return None
+    if len(restorable) > recoverable_target_limit:
+        return None
+    protected = protected_write_target(targets, path_rules or [], True)
+    if protected is not None:
+        return protected
+    return KernelDecision(
+        "allow",
+        "every file this rewrites is restorable, and the whole change is in the"
+        " diff — but the edit gates did not read it, so the anti-pattern, note"
+        " and size rules are `dev check`'s to catch",
     )
 
 

@@ -8,7 +8,6 @@ native CLI with the non-interactive environment applied.
 import json
 import logging
 import os
-import shutil
 from collections.abc import Callable
 from contextlib import AbstractContextManager, nullcontext
 from datetime import UTC, datetime
@@ -21,14 +20,25 @@ import typer
 from pydantic import BaseModel, Field
 
 from lup.runtime.profiles import ProfileDirectory
+from lup.adapters.claude.harness import ClaudeSpellings
 from lup.adapters.claude.transcripts import ClaudeTranscripts
+from lup.adapters.codex.harness import CodexSpellings
 from lup.adapters.codex.harness_runtime import (
     CodexPluginInstaller,
     PluginCacheConfig,
 )
 from lup.adapters.codex.transcripts import CodexTranscripts
 from lup.harness.environment import non_interactive_environment
-from lup.harness.models import NativeName, Plugin
+from lup.harness.models import NativeName, Plugin, Resumption
+from lup.harness.notice import Notice
+from lup.harness.requirements import (
+    Finding,
+    LostCapability,
+    Manifest,
+    Requirement,
+    Run,
+    refused,
+)
 from lup.harness.process import LocalProcessLauncher
 from lup.telemetry.journal import (
     ArgvRedaction,
@@ -70,17 +80,24 @@ def relocation_hint(worktree_path: Path) -> RelocationHint:
     reached here through one of them is told the move it actually supports.
     Anything else gets the portable shell form alone rather than the name of
     a tool that runtime may not have.
+
+    The wording is asked of the same spelling the guidance is rendered from
+    rather than written again here. Restating it is how the two came to
+    disagree: the guidance named the move a runtime supports, this named a
+    tool, and a workflow change had to find both to land. One of them being
+    an adapter method makes that impossible.
     """
     environ = os.environ  # lup: ignore[os-environ]
     move = f"cd /; cd {worktree_path}"
+    here = "the path above"
     if "CLAUDE_CONFIG_DIR" in environ:
         return RelocationHint(
-            agent="EnterWorktree(path=<the path above>)",
+            agent=ClaudeSpellings().relocate_session(here),
             shell=f"{move}; claude",
         )
     if "CODEX_HOME" in environ:
         return RelocationHint(
-            agent="start a session there — this runtime cannot relocate a running one",
+            agent=CodexSpellings().relocate_session(here),
             shell=f"{move}; codex",
         )
     return RelocationHint(agent="", shell=move)
@@ -377,19 +394,63 @@ def start_harness_transcript(
     )
     diagnostics = capture_watcher_diagnostics(trace_path.parent)
     watcher.start()
-    typer.echo(f"{provider} observable transcript: {trace_path}")
+    Notice(
+        text=f"{provider} observable transcript: {trace_path}",
+        urgency="artifact",
+    ).say()
     return HarnessTranscript(journal=journal, watcher=watcher, diagnostics=diagnostics)
 
 
 def runtime_preflight(composition: NativeHarnessComposition) -> None:
-    """Verify each claimed native requirement immediately before launch."""
+    """Verify each claimed native requirement immediately before launch.
+
+    Two rosters, asked in the order their failures matter. The native probes
+    answer whether this runtime can host a session at all, and a gap there
+    stops the launch. The declared requirements answer what the session will
+    be able to *do*, and almost every gap there costs a capability rather
+    than the session -- so those are named and the launch continues, which is
+    the only posture that works on a machine without a display, a container,
+    or an editor attached.
+    """
     target = composition.recipe.label
     evidence = composition.readiness()
     for item in evidence:
         state = "ready" if item.supported else "missing"
-        typer.echo(f"{target} {item.capability}: {state} ({item.version})")
+        Notice(
+            text=f"{target} {item.capability}: {state} ({item.version})",
+            urgency="ready" if item.supported else "refusal",
+        ).say()
     if any(not item.supported for item in evidence):
         raise typer.BadParameter(f"{target} runtime preflight failed")
+    report_requirements(composition.recipe.source.requirements)
+
+
+def report_requirements(manifest: Manifest, setting_up: bool = False) -> list[Finding]:
+    """Exercise the host-side requirements, printing what each one found.
+
+    Printed on the way past rather than only when something is wrong: a
+    capability that is *absent* is exactly the fact a session needs at the
+    top of its scrollback, because it is the one the agent inside cannot
+    discover except by failing at it.
+
+    *setting_up* widens this to everything checked only at setup, and is off
+    for a launch. Two different things live there and both would be wrong to
+    repeat: a nicety reported before every session becomes a line people learn
+    to skip, along with the line above it that mattered; and an exercise that
+    starts a container is a cost no session should pay to be told something
+    that was equally true yesterday.
+    """
+    environ: EnvVars = dict(os.environ)  # lup: ignore[os-environ]
+    findings = manifest.check(environ, setting_up=setting_up)
+    for finding in findings:
+        for notice in finding.notices():
+            notice.say()
+    stopping = refused(findings)
+    if stopping:
+        raise typer.BadParameter(
+            "; ".join(item.requirement.absence.consequence() for item in stopping)
+        )
+    return findings
 
 
 def codex_login_preflight(home: Path, environment: EnvVars) -> None:
@@ -431,15 +492,34 @@ def apply_sandbox_environment(
     The dispatchers defer unjudged shell only under this flag, so it is set
     exactly when the launch verified the OS boundary; without it the deny
     lattice keeps carrying the escalation recipe.
+
+    Verified by exercising each tool rather than by finding it on PATH. The
+    two answers differ exactly where it matters: a confinement binary that is
+    installed and cannot start a namespace on this kernel is present and
+    useless, and a flag set on its presence tells every dispatcher downstream
+    to relax into a boundary that will not be there. Absence and breakage
+    both leave the lattice standing, which is the safe direction, and the
+    message says which of the two was found rather than only that one was.
     """
     hooks = plugin.hooks
     if hooks is None or hooks.sandbox is None:
         return
-    missing = [tool for tool in required_tools if shutil.which(tool) is None]
-    if missing:
-        typer.echo(
-            f"{label} sandbox: missing {', '.join(missing)} — deny lattice stays active"
-        )
+    findings = [
+        Requirement(
+            capability=tool,
+            purpose="the OS boundary this launch claims",
+            exercise=Run(command=[tool, "--version"]),
+            absence=LostCapability(capability="OS confinement"),
+        ).check(environment)
+        for tool in required_tools
+    ]
+    unusable = [finding for finding in findings if not finding.working]
+    if unusable:
+        for finding in unusable:
+            typer.echo(
+                f"{label} sandbox: {finding.requirement.capability} — {finding.detail}"
+            )
+        typer.echo(f"{label} sandbox: deny lattice stays active")
         return
     environment["LUP_SANDBOX_ACTIVE"] = "1"
     typer.echo(f"{label} sandbox: active — unjudged shell defers to the OS boundary")
@@ -508,6 +588,66 @@ def writable_root_arguments() -> list[str]:
     return ["-c", f'sandbox_workspace_write.writable_roots=["{tree}"]']
 
 
+def announce_relaxed_rules(relaxed: bool, plugin: Plugin) -> None:
+    """Say what a relaxed launch retired, and what it did not.
+
+    The launch is the only moment this is legible. The tree it compiles
+    carries no rules, so nothing downstream can report their absence — a
+    session opened under it simply meets no rule and has no way to tell that
+    from a repository with none. So the count is read off the plugin actually
+    being opened rather than off the declaration it came from.
+
+    Two consequences ride along because both bite later and neither announces
+    itself. The repository is unchanged, so the sweep still holds it to every
+    rule and a session that edited freely under this will fail `dev check`.
+    And the committed tree has just been rewritten, so a commit made from here
+    would carry a plugin nobody declared.
+    """
+    if not relaxed:
+        return
+    retired = len(plugin.hooks.rules.retired if plugin.hooks is not None else [])
+    Notice(
+        text=f"anti-patterns retired for this session: {retired} rules",
+        urgency="warning",
+    ).say()
+    typer.echo(
+        "`dev check --antipatterns` still holds this repository to them; run "
+        "`lup-devtools harness generate all` before committing, or the "
+        "compiled tree carries a policy nothing declares. To retire them for "
+        "good instead, `dev seams --retire-all` writes it where a review sees "
+        "it."
+    )
+
+
+def claude_resume_arguments(resume: Resumption) -> list[str]:
+    """Claude Code's spelling: continuing and resuming are two flags.
+
+    ``--continue`` takes the most recent conversation in the working
+    directory and ``--resume`` opens the picker or takes a session id, so a
+    request reaches the runtime as words rather than as a mode.
+    """
+    if resume.session is not None:
+        return ["--resume", resume.session]
+    if resume.pick:
+        return ["--resume"]
+    return ["--continue"] if resume.latest else []
+
+
+def codex_resume_arguments(resume: Resumption) -> list[str]:
+    """Codex's spelling: reopening is a subcommand, and it leads the vector.
+
+    The same three requests, in the shape this runtime has for them —
+    ``resume`` alone is the picker, ``--last`` is the most recent, and a
+    session id is positional. It comes first because a subcommand does, which
+    is the whole of why the two cannot share one word list.
+    """
+    if resume.session is not None:
+        return ["resume", resume.session]
+    if resume.pick:
+        return ["resume"]
+    return ["resume", "--last"] if resume.latest else []
+
+
 def claude_sandbox_arguments(plugin: Plugin) -> list[str]:
     """Widen the Claude sandbox's writable set over the same sibling tree/.
 
@@ -573,15 +713,21 @@ def launch_claude(
     model: str | None,
     generate_only: bool,
     mode: LaunchMode | None = None,
+    resume: Resumption = Resumption(),
+    relaxed: bool = False,
     checkpoint: LaunchCheckpoint | None = None,
 ) -> None:
     """Generate/reconcile Claude artifacts and launch the verified local plugin."""
+    contradiction = resume.contradicted()
+    if contradiction is not None:
+        raise typer.BadParameter(contradiction)
     if checkpoint is not None and not generate_only:
         checkpoint(provider="claude")
     plugin = composition.recipe.source.plugins[0]
+    announce_relaxed_rules(relaxed, plugin)
     if not ready_to_open(composition, generate_only):
         return
-    arguments: list[str] = []
+    arguments: list[str] = claude_resume_arguments(resume)
     # A mode's model is a default rather than a fixture: it says what this kind
     # of session runs on when nobody said otherwise, and an explicit --model
     # still wins, because overriding the model is why a caller passes one.
@@ -655,12 +801,18 @@ def launch_codex(
     generate_only: bool,
     force_install: bool,
     mode: LaunchMode | None = None,
+    resume: Resumption = Resumption(),
+    relaxed: bool = False,
     checkpoint: LaunchCheckpoint | None = None,
 ) -> None:
     """Generate/reconcile Codex artifacts and launch without updating the CLI."""
+    contradiction = resume.contradicted()
+    if contradiction is not None:
+        raise typer.BadParameter(contradiction)
     if checkpoint is not None and not generate_only:
         checkpoint(provider="codex")
     plugin = composition.recipe.source.plugins[0]
+    announce_relaxed_rules(relaxed, plugin)
     if not ready_to_open(composition, generate_only):
         return
     environment = non_interactive_environment(os.environ)  # lup: ignore[os-environ]
@@ -674,7 +826,10 @@ def launch_codex(
     installer = CodexPluginInstaller(
         PluginCacheConfig(codex_home=selected_home, marketplace=plugin.marketplace)
     )
-    arguments: list[str] = list(envelope)
+    # The subcommand leads, and everything the envelope carries follows it,
+    # because a word placed after a positional session id would be read as
+    # another one.
+    arguments: list[str] = [*codex_resume_arguments(resume), *envelope]
     if profile is not None:
         arguments.extend(["--profile", profile])
     selected_model = model or (mode.native_model("codex") if mode is not None else None)

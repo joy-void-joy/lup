@@ -39,6 +39,7 @@ from lup.resolver.models import (
     AdmissionRequest,
     AnswerBatch,
     CleanupRecord,
+    ConcernApproval,
     Concern,
     ConcernAdmission,
     ConcernEligibility,
@@ -85,10 +86,9 @@ from lup.runtime.models import TurnInput, turn_request
 
 logger = logging.getLogger(__name__)
 
-# The two words an approval answer may carry: a closed vocabulary this module
-# offers the human and then reads back, so both ends spell it the same.
-APPROVE = "approve"  # lup: ignore[constant-declaration] — answer vocabulary
-DEFER = "defer"  # lup: ignore[constant-declaration] — answer vocabulary
+# The two words an approval answer may carry live in `ConcernApproval`, which
+# publishes the choices and is what a reader tests, so neither end can spell
+# one the other does not offer.
 
 
 class ApprovalDecisions(BaseModel, frozen=True):
@@ -235,8 +235,8 @@ def approval_question(concern: Concern) -> MaterialQuestion:
         id=f"integration-approval-{concern.id}",
         concern_id=concern.id,
         prompt=f"Include {concern.title!r} in this resolver run?{grants}",
-        choices=[APPROVE, DEFER],
-        recommendation=APPROVE,
+        choices=ConcernApproval.choices(),
+        recommendation=ConcernApproval.APPROVE,
         closed_choices=True,
     )
 
@@ -294,8 +294,8 @@ def assembly_question(
             f"concern(s) onto {base[:12]}?{stale}\n{merging}"
             + (f"\n{dropping}" if dropping else "")
         ),
-        choices=[APPROVE, DEFER],
-        recommendation=APPROVE,
+        choices=ConcernApproval.choices(),
+        recommendation=ConcernApproval.APPROVE,
         closed_choices=True,
     )
 
@@ -322,7 +322,7 @@ def approval_decisions(
     direct = {
         concern.id
         for concern in gated
-        if answer_values[approval_question(concern).id] == APPROVE
+        if answer_values[approval_question(concern).id] == ConcernApproval.APPROVE
     }
     approved = ConcernGraph(concerns).transitively_approved(direct)
     return ApprovalDecisions(
@@ -1311,7 +1311,7 @@ class ResolverCore:
         )
         self.questions.queue_questions([question], "integration")
         answers = await self.questions.await_questions([question])
-        if any(answer.value == DEFER for answer in answers.answers):
+        if any(answer.value == ConcernApproval.DEFER for answer in answers.answers):
             raise ResolverAssemblyDeferred(
                 [outcome.concern_id for outcome in verified],
                 [outcome.concern_id for outcome in excluded],

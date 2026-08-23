@@ -7,17 +7,32 @@ import re
 from typing import TypedDict
 
 from .decision import KernelDecision, unjudged
-from .rows import PathRuleRow, RunnerTargetRow, ShellRuleRow, UrlScopeRow
+from .rows import (
+    PathRoleRow,
+    PathRuleRow,
+    RunnerTargetRow,
+    ShellRuleRow,
+    UrlScopeRow,
+)
 from .words import (
     INTERPRETERS,
     flag_matches,
     git_restore_operands,
     opaque_argument,
     protected_write_target,
+    rewrites_only_recoverable_files,
     uv_run_words,
 )
 from .fetch import decide_fetch
 
+# lup: ignore[constant-declaration] — refusal wording, declared with its verdict
+IN_PLACE_SED_REFUSAL = (
+    "in-place sed bypasses every gate an edit is judged by — the anti-pattern"
+    " table, the review-note gate, the size gate, and the protected paths. For"
+    " a rename across many sites, `rename_symbol` resolves scopes an"
+    " exact-string substitution cannot tell apart; otherwise make the change"
+    " through the edit tool, which is what those gates read"
+)
 # lup: ignore[constant-declaration] — sed's own short flags, spelled as sed does
 SED_SAFE_SHORT_FLAGS = "nErsuz"
 # lup: ignore[library-default] — sed's own long spellings of the short flags above
@@ -41,7 +56,10 @@ def apply_command_row(row: ShellRuleRow, arguments: list[str]) -> KernelDecision
     argument is exactly one of those flags — the command's declared pure
     read-only form. One with ``read_verbs`` de-escalates when a declared
     verb appears and every word is a literal free of guarded flags — the
-    verb pins the invocation to its query action.
+    verb pins the invocation to its query action. One with ``write_markers``
+    states that de-escalation negatively, for a command whose read-only form
+    is the one carrying nothing extra: it allows when no legible word carries
+    a marker.
     """
     if row["effect"] != "allow" and row["allow_flags"] and arguments:
         if all(word in row["allow_flags"] for word in arguments):
@@ -49,6 +67,7 @@ def apply_command_row(row: ShellRuleRow, arguments: list[str]) -> KernelDecision
                 "allow",
                 "every argument is a declared read-only flag",
                 row["sandbox"],
+                recovery=row["recovery"],
             )
     if row["effect"] != "allow" and row["read_verbs"] and arguments:
         clean = not any(
@@ -60,6 +79,32 @@ def apply_command_row(row: ShellRuleRow, arguments: list[str]) -> KernelDecision
                 "allow",
                 "a declared read-only verb pins the query action",
                 row["sandbox"],
+                recovery=row["recovery"],
+            )
+    if row["effect"] != "allow" and row["write_markers"] and arguments:
+        # Absence is the test, so every word has to be legible: one this
+        # cannot read might carry the marker, and "no marker found" would
+        # otherwise be indistinguishable from "no marker was readable".
+        #
+        # A stricter bar than `opaque_argument`, deliberately. That catches a
+        # `$` opening a word, because what it guards are positive tests where
+        # a missed expansion still leaves the required verb absent. Here a
+        # missed expansion is the whole verdict, and `dd if=$X` splits into
+        # `of=` at runtime if `$X` holds a space — measured allowing until
+        # this test replaced it.
+        legible = not any(
+            opaque_argument(word) or "$" in word or "`" in word for word in arguments
+        )
+        if legible and not any(
+            word.startswith(marker)
+            for word in arguments
+            for marker in row["write_markers"]
+        ):
+            return KernelDecision(
+                "allow",
+                "no declared write marker is present, so this only reads",
+                row["sandbox"],
+                recovery=row["recovery"],
             )
     if row["effect"] == "allow" and row["ask_flags"]:
         opaque = next(
@@ -80,8 +125,11 @@ def apply_command_row(row: ShellRuleRow, arguments: list[str]) -> KernelDecision
                 "ask",
                 row["reason"] or f"{guarded} requires approval",
                 row["sandbox"],
+                recovery=row["recovery"],
             )
-    return KernelDecision(row["effect"], row["reason"], row["sandbox"])
+    return KernelDecision(
+        row["effect"], row["reason"], row["sandbox"], recovery=row["recovery"]
+    )
 
 
 class Subcommand(TypedDict):
@@ -112,6 +160,7 @@ def split_subcommand(
     ask_flags = default["ask_flags"] if default else []
     value_flags = default["value_flags"] if default else []
     placement = default["sandbox"] if default else "ambient"
+    restoration = default["recovery"] if default else "nothing"
     position = 0
     while position < len(arguments):
         word = arguments[position]
@@ -127,9 +176,31 @@ def split_subcommand(
                 "ask",
                 f"{executable} global flag {word} requires approval{redirect}",
                 placement,
+                recovery=restoration,
             )
         position += 2 if word in value_flags else 1
     return Subcommand(word="", remainder=[])
+
+
+def declares_command(executable: str, rows: list[ShellRuleRow]) -> bool:
+    """Whether the vocabulary says anything at all about this executable.
+
+    Asked of an interpreter, which is otherwise refused outright for having
+    an eval mode at all. That blanket refusal denied `bun install` -- a
+    package operation carrying no code -- in the vocabulary of inline code,
+    which is judging a token rather than an effect.
+
+    A positive test, rather than a list of the flags that mean "inline code".
+    Such a list is a denylist carrying a security guarantee, so it has to be
+    complete to be worth anything -- and a first draft of one already missed
+    ``php -r``, the ``-s`` that takes a program on stdin, the bare ``-`` that
+    does the same, and ``deno eval``, which is a subcommand no flag list
+    could catch. Asking whether the vocabulary declares the executable fails
+    the right way instead: an interpreter nothing declares keeps denying
+    entirely, and one a project does declare still denies everything outside
+    the forms it named, including spellings nobody thought of.
+    """
+    return any(row["command"] == executable for row in rows)
 
 
 def decide_command_rows(words: list[str], rows: list[ShellRuleRow]) -> KernelDecision:
@@ -297,18 +368,48 @@ def safe_sed_script(script: str) -> bool:
     return True
 
 
-def decide_sed_words(words: list[str]) -> KernelDecision:
+def decide_sed_words(
+    words: list[str],
+    path_roles: list[PathRoleRow] | None = None,
+    recoverable_targets: list[str] | None = None,
+    recoverable_target_limit: int = 5,
+    path_rules: list[PathRuleRow] | None = None,
+) -> KernelDecision:
     """Allow only read-only sed: safe flags plus a safe script grammar.
 
     ``--sandbox`` makes sed itself reject the write and execute commands, so
-    the script screen is skipped under it; in-place editing and script files
-    stay denied toward the Edit tool and inline scripts.
+    the script screen is skipped under it; a script file stays denied toward
+    an inline script, because nothing screens what is in it.
+
+    In-place editing is two objections wearing one refusal, and only one of
+    them survives a boundary. *Being wrong is unrepairable* is answered by
+    the files themselves: a scratch file costs nothing, a committed file with
+    no uncommitted change costs a checkout, and the whole change stands in
+    the diff either way — the same question a delete is already granted on,
+    asked of the verb that overwrites instead of the one that removes. So a
+    rewrite whose every named file could be brought back is allowed, with the
+    grant saying what it granted.
+
+    *It walks past the gates an edit is judged by* is not answered by
+    anything: the anti-pattern table, the review-note gate and the size gate
+    are reviewability, and no container and no undo layer enforces them. That
+    is what remains once recoverability is established, and it is why the
+    grant names `dev check` as where those rules will still be read.
+
+    Where recoverability is not established — a file the host reported
+    nothing about, a word that expands at run time, more restorable files
+    than a rewrite should sweep — the refusal stands and names the tool that
+    does the job it is usually reached for: a rename across many sites is
+    `rename_symbol`, which resolves scopes an exact-string substitution
+    cannot tell apart. A stated reason still turns that refusal into the
+    question it asks for.
     """
     scripts: list[str] = []
     positional: list[str] = []
     script_expected = False
     script_from_options = False
     sandbox = False
+    in_place = False
     for word in words[1:]:
         if script_expected:
             scripts.append(word)
@@ -316,16 +417,15 @@ def decide_sed_words(words: list[str]) -> KernelDecision:
             continue
         if word.startswith("--"):
             name, separator, value = word.partition("=")
-            # lup: Seems counterproductive not to just accept sed here. A real
-            # denial read: "escalated (renaming one keyword argument at 38
+            # lup: solved: Seems counterproductive not to just accept sed here. A
+            # real denial read: "escalated (renaming one keyword argument at 38
             # identical call sites across 9 files; the substitution is
             # exact-string and the result is verified by pyright plus the
             # suite): in-place sed bypasses the edit policy — use Edit". An
             # escalation carrying that reason should get through.
             if name in ("--in-place", "--inplace"):
-                return KernelDecision(
-                    "deny", "in-place sed bypasses the edit policy — use Edit"
-                )
+                in_place = True
+                continue
             if name == "--file":
                 return KernelDecision(
                     "deny", "sed script files are not screened — inline the script"
@@ -345,9 +445,11 @@ def decide_sed_words(words: list[str]) -> KernelDecision:
         if word.startswith("-") and len(word) > 1:
             flags = word[1:]
             if "i" in flags:
-                return KernelDecision(
-                    "deny", "in-place sed bypasses the edit policy — use Edit"
-                )
+                # `-i` takes its backup suffix attached, so everything after
+                # it is that suffix rather than more flags — which is also
+                # sed's own reading of `-ie`.
+                in_place = True
+                flags = flags[: flags.index("i")]
             if "f" in flags:
                 return KernelDecision(
                     "deny", "sed script files are not screened — inline the script"
@@ -366,7 +468,18 @@ def decide_sed_words(words: list[str]) -> KernelDecision:
         scripts.append(positional.pop(0))
     if not sandbox and not all(safe_sed_script(script) for script in scripts):
         return unjudged("sed script is not classified as read-only")
-    return KernelDecision("allow", "read-only sed script")
+    if not in_place:
+        return KernelDecision("allow", "read-only sed script")
+    granted = rewrites_only_recoverable_files(
+        positional,
+        path_roles or [],
+        recoverable_targets,
+        recoverable_target_limit,
+        path_rules,
+    )
+    return (
+        granted if granted is not None else KernelDecision("deny", IN_PLACE_SED_REFUSAL)
+    )
 
 
 def safe_awk_program(program: str) -> bool:
@@ -552,12 +665,6 @@ def decide_curl_words(
     return KernelDecision("allow", "read-only curl within declared scopes")
 
 
-# lup: (Re)-installing lup, or clearing the cache, should be auto-allowed.
-# `uv cache clean lup && uv lock --upgrade-package lup && uv sync --all-extras`
-# needed a leading escalate marker and *still* asked, on "dependency changes
-# fetch and execute external code" — for a refresh of a dependency the project
-# already declares. The gh block below sits between this note and `decide_uv`,
-# which is its subject.
 # lup: ignore[library-default] — gh's own value-taking flags; misreading one shifts the argument scan
 GH_API_VALUE_FLAGS = (
     "-H",
@@ -634,6 +741,56 @@ def decide_gh_api_words(words: list[str]) -> KernelDecision:
     return KernelDecision("allow", "read-only gh api call")
 
 
+UV_FOREIGN_SOURCE_FLAGS = (
+    "--index",
+    "--index-url",
+    "--extra-index-url",
+    "--default-index",
+    "--find-links",
+    "-f",
+    "--no-build-isolation",
+    "--no-build-isolation-package",
+    "--no-sources",
+    "--no-sources-package",
+)
+"""Where a uv invocation stops obeying what this project declared.
+
+The spellings are uv's; which of them count is a judgement, so this is the
+default a caller overrides rather than a table anybody has to fork. A project
+that pins its own index, or that has a reason to build without isolation,
+says so by naming a different set here.
+"""
+
+
+def uv_package_source(
+    arguments: list[str], guarded: tuple[str, ...] = UV_FOREIGN_SOURCE_FLAGS
+) -> str | None:
+    """The flag naming where packages come from, when one is present.
+
+    A verb obeying the project's own declaration is only obeying it while
+    nothing on the command line redirects where packages come from or removes
+    the isolation their build code runs in. Either makes it a different act
+    wearing the same verb, so it is named back rather than folded into an
+    allow.
+
+    An unreadable word answers too. What is being tested is the absence of a
+    flag, and a word this cannot read might be one, so the conservative
+    direction is to treat it as though it were.
+    """
+    for word in arguments:
+        if opaque_argument(word) or "$" in word or "`" in word:
+            return word
+        if flag_matches(word, list(guarded)):
+            return word
+    return None
+
+
+# lup: solved: (Re)-installing lup, or clearing the cache, should be auto-allowed.
+# `uv cache clean lup && uv lock --upgrade-package lup && uv sync --all-extras`
+# needed a leading escalate marker and *still* asked, on "dependency changes
+# fetch and execute external code" — for a refresh of a dependency the project
+# already declares. The gh block below sits between this note and `decide_uv`,
+# which is its subject.
 def decide_uv(
     words: list[str],
     runner_targets: list[RunnerTargetRow],
@@ -646,22 +803,79 @@ def decide_uv(
     than at each call site — and a target a project refuses is refused here
     rather than falling through to no judgment, which is a different answer:
     it leaves the verdict to the runtime rather than stating one.
+
+    Installing is where a decision was asked for and refused. Fetching a
+    package runs its build code, and that code is the escape a supply-chain
+    compromise arrives through — so `add` and `sync` both ask, and the fact
+    that the packages were declared earlier does not answer it, because the
+    thing that changed is not the declaration but what the index now serves
+    under it. What is written down here rather than re-argued: the verb that
+    reaches the network to install is a question, every time.
+
+    Two verbs sit below that line and one sat above it by omission. `lock`
+    and `remove` write files and fetch nothing to execute. A cache is
+    reproducible by the command that reads it, so clearing one destroys
+    nothing anybody has — and it was reaching no rule at all, which is why a
+    refresh line asked with the cache verb as one of its reasons.
+
+    A flag naming where packages come from, or dropping the isolation build
+    code runs in, is not the verb it rides on: it is a source nobody
+    declared, and it asks even where the bare verb would not — and it is
+    asked *before* the target is looked at, for the same reason. Placed after,
+    it was unreachable for exactly the spelling that matters:
+    ``uv run --with X ruff check .`` asked and
+    ``uv run --with X python script.py`` was allowed, because the interpreter
+    branch answered and returned first. Order was the whole of that defect.
     """
     subcommand = words[1]
     if subcommand in ("add", "sync"):
         return KernelDecision(
-            "ask", "dependency changes fetch and execute external code"
+            "ask", "installing a package fetches and runs its build code"
         )
     if subcommand in ("remove", "lock"):
-        return KernelDecision("allow")
+        redirect = uv_package_source(words[2:])
+        if redirect is not None:
+            return KernelDecision(
+                "ask",
+                f"{redirect} takes packages from somewhere this project does not"
+                " declare — requires approval",
+            )
+        return KernelDecision("allow", "writes what this project already declares")
+    if subcommand == "cache":
+        return KernelDecision(
+            "allow", "a package cache is rebuilt by the command that reads it"
+        )
     if subcommand == "run" and len(words) > 2:
         run_words = uv_run_words(words)
         if not run_words:
             return unjudged("uv run has no command")
         run_command = posixpath.basename(run_words[0])
         bare_target = "/" not in run_words[0]
-        if run_command in INTERPRETERS or run_command in ("-c", "-m", "--script"):
+        # A script file and an inline program are different questions, and
+        # answering them together denied the rung the guidance points at for
+        # computing something once. What the deny is actually about is
+        # reviewability: `-c` leaves nothing behind to read, where a file can
+        # be opened, diffed and run again. So the flags keep the refusal and a
+        # named script does not.
+        rest = run_words[1:]
+        inline = [word for word in rest if word in ("-c", "-m")]
+        named = [word for word in rest if not word.startswith("-")]
+        interpreted = run_command in INTERPRETERS
+        if run_command in ("-c", "-m", "--script") or (
+            interpreted and (inline or not named)
+        ):
             return KernelDecision("deny", "inline code is not allowed")
+        # Between the refusal above and the target's own verdict below, which
+        # is where the lattice would put it anyway: a deny outranks an ask,
+        # and an ask outranks whatever the target says about itself. These
+        # flags are not a property of the target at all -- they name a source
+        # nobody declared and install from it before the target runs -- so
+        # they cannot sit under the target's answer. Measured sitting under
+        # it: `uv run --with X ruff check .` asked while
+        # `uv run --with X python script.py` was allowed, because the
+        # interpreter branch answered and returned first. Then measured
+        # sitting above the refusal, which was worse:
+        # `uv run --with X python -c 'code'` softened from deny to ask.
         risky = ("--with", "--with-editable", "--with-requirements", "--env-file")
         if any(
             word == option or word.startswith(option + "=")
@@ -670,6 +884,10 @@ def decide_uv(
         ):
             return KernelDecision(
                 "ask", "uv run --with fetches and executes external code"
+            )
+        if interpreted:
+            return KernelDecision(
+                "allow", "a script file can be read, where inline code cannot"
             )
         declared = next(
             (row for row in runner_targets if row["name"] == run_command), None

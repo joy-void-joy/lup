@@ -29,6 +29,8 @@ You are not expected to hold this repository's conventions in memory. Gates enfo
 
 **The permission policy.** Every shell command, URL scope, and edit in a batch is classified, and a denial names what tripped and the recovery. `dev policy '<command>'` answers before you spend a turn on it, and `# lup: escalate: <why>` as a command's leading line promotes a deny or ask into an approval question carrying that reason.
 
+`# lup: escalate` is one-off. For recurring walls, **widen the protected declaration** so review approves the rule. Regenerate and reopen with `--continue` to load it at startup while keeping the conversation; it remains drift-checked next session.
+
 **The edit budget.** A change block of at most three "real" changed lines is auto-allowed, so split large changes — imports in one edit, logic in another. A file declared human-owned surfaces every change as an approval: propose the exact edit and let the user apply it.
 
 **The drift check.** Generated trees are regenerated, never hand-edited and never hand-merged. Take either side of a conflict, regenerate, and let the check confirm it settled.
@@ -59,7 +61,7 @@ Resolve open feedback by fixing what it points at, or, for a question, by answer
 
 ## Development Workflow
 
-Work in a **git worktree**, not a branch switched in place, and never commit _code_ directly to `dev`. Create one with `uv run lup-devtools dev worktree create feat-name`, and then start a session rooted at <the path it prints> and continue there — this runtime cannot move a running session, so work carried on here would land in the checkout it started from — creating a worktree does not move the session, and edits left in the old checkout never reach the branch. `docs/contributing.md` carries the branch model and the loop to a merged pull request.
+Use a **git worktree**; never commit code to `dev`. Run `uv run lup-devtools dev worktree create feat-name`, then start a session rooted at <the path it prints> and continue there — this runtime cannot move a running session, so work carried on here would land in the checkout it started from. Already running, keep working where you are and address files there by absolute path, which reaches the same branch. — creation does not move the session, so old-checkout edits miss the branch. Late relocation may persistently reject ordinary shell words anywhere in argv. `docs/contributing.md` carries the branch model, refused-word set, and merge loop.
 
 ### Merge Conflict Resolution
 
@@ -121,17 +123,17 @@ When a command genuinely has to run outside the sandbox, put it through the runt
 
 ### lup-devtools
 
-Development tooling is the `lup-devtools` CLI, composed in `src/lup_template/devtools/main.py` from two halves: the workflow commands in `packages/lup/src/lup/devtools/`, and what only this repository has beside them. **Always use it instead of ad-hoc commands** — `uv run python -c "..."` and bare `python`/`python3` are denied by the Bash hook. Running the same command repeatedly means **add a command**, to whichever half would want it.
-
-Match the rung to the question: to **read** code, `py info`/`py source`/`py search`/`py imports` and the codeintel tools answer without running anything; to **compute**, `py eval '<expression>'` evaluates in the sandbox; with no sandbox, add a command. `docs/contributing.md` carries the rest of that ladder — its argument is reviewability, not power.
+Development tooling is the `lup-devtools` CLI, composed from the reusable commands under `packages/lup/` and this repository's under `src/lup_template/`. **Use it instead of ad-hoc commands.** Inline Python (`-c`, `-m`, a REPL, or bare `python`) is denied; `uv run python <script.py>` is allowed because a file can be reviewed. Running the same command repeatedly means **add a command** to the half that would reuse it.
+`tmp/` is gitignored scratch. To **read** code, use `py info`/`py source`/`py search`/`py imports` or codeintel; to **compute once**, write a script under `tmp/` and run it; to reuse the computation, add a devtools command. `docs/contributing.md` carries the rest of this reviewability ladder.
 
 The `codeintel` group answers questions about code by *resolving* it, through a language server. **Prefer it over grep for anything about a name**, and `rename_symbol` over an edit with `replace_all`, which cannot tell one scope from another. `grep` is still right for what is genuinely characters: a string literal, a comment, a non-Python file.
-
 `docs/commands.md` carries every command the CLI serves, walked from the wired app at generation time rather than listed by hand — so a command exists there by existing, and reading it is how you find one you did not know to look for. `--help` gives its options.
 
 ### Generated Trees
 
 `harness generate all` regenerates every native plugin; `harness <runtime>` regenerates one and launches it. Skills and agents render from typed catalogs — one under `packages/lup/` for what is about agent work, one under `src/lup_template/` for what is about being a template, composing both. Change the catalog that owns the subject, then regenerate.
+
+**Every runtime, same change.** State and build each answer to every policy, flag, hook, or artifact; name substitutes for unsupported concepts. One runtime drops `sandbox="outside"` for lack of a per-call escape. Done means `harness generate all` reconciles both; `docs/permissions.md` maps gaps.
 
 ---
 

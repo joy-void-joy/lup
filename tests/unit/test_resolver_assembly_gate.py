@@ -9,12 +9,10 @@ what the gate now says and what each answer does.
 
 from lup.resolver.contracts import ResolverAssemblyDeferred
 from lup.resolver.core import (
-    APPROVE,
     ASSEMBLY_QUESTION_ID,
-    DEFER,
     assembly_question,
 )
-from lup.resolver.models import ConcernOutcome
+from lup.resolver.models import ConcernApproval, ConcernOutcome
 
 BASE = "f6deb190abcd1234"
 
@@ -91,8 +89,8 @@ def test_the_answer_domain_is_closed_over_two_words() -> None:
     question = assembly_question([verified("alpha")], [], BASE)
 
     assert question.closed_choices
-    assert question.choices == [APPROVE, DEFER]
-    assert question.recommendation == APPROVE
+    assert question.choices == ConcernApproval.choices()
+    assert question.recommendation == ConcernApproval.APPROVE
 
 
 def test_deferring_reports_both_sides_of_what_was_not_assembled() -> None:

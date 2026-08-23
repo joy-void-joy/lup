@@ -50,6 +50,28 @@ nothing for unjudged work to defer to.
 Segments join deny > ask > defer > allow — unjudged rides into a judged
 prompt, a judged deny wins the batch. Malformed input fails conservatively.
 
+What the classified verdict then becomes is a second, ordered pass, declared
+as an order rather than written as a branch. `policy/kernel/settlement.py`
+holds one row per rule, read the way `.gitignore` reads patterns: every row is
+offered the running verdict, a row that rewrites hands its result to the next,
+and the first row that settles ends the pass. So a statement about precedence
+— *a stated reason never leaves a refusal standing*, *a judged deny is not
+rescued by a boundary*, *a question nobody can answer is no judgment* — is one
+row that says it, and changing the policy is moving, adding, or dropping one.
+The rows, in order:
+
+| row | what it says |
+|---|---|
+| `ContainedPlacement` | a container is the place every placement was asking for, so none of them is left to carry |
+| `StatedReason` | a marker turns anything not already permitted into the question it asked for |
+| `TrappedPlacement` | a call declared `outside` where nothing can place it outside cannot run, and no reason moves that |
+| `RestoredBySession` | a question about a loss this session can put back is settled as a deferral rather than asked |
+| `UnanswerableQuestion` | a question on a host with nobody to ask is no judgment |
+| `ConfinedElsewhere` | no judgment, and a boundary beneath it: the boundary carries it |
+| `Unjudged` | no judgment and no boundary: refuse, naming the recipe |
+| `JudgedRefusal` | a rule refused this, and confinement is no answer to somebody's answer |
+| `Standing` | a permission, or an answerable question, stands |
+
 Where a command runs is a second axis beside that verdict, declared per rule
 rather than inferred: `git` states its placement once and every verb beneath
 it runs outside the sandbox, because one confined away from its transport or
@@ -58,7 +80,71 @@ allow placed outside runs there unprompted; an ask placed outside says so in
 the question it asks; a deny short-circuits the axis entirely, and so does a
 defer, which hands the sandbox status over with the rest of the decision.
 Confinement wins a join, so one segment that must stay inside keeps the whole
-line inside. A runtime with no per-call sandbox renders the plain effect.
+line inside. A runtime with no per-call sandbox renders the plain effect. A
+container answers the axis rather than trapping on it: `outside` names the
+native per-call sandbox, a container runs none, and the paths that placement
+was about — the runtime's configuration home, the repository's locks, a route
+to a remote — are all the container's own.
+
+**Recovery** is the third axis, and the one that makes the effect a function
+of the session rather than of the command. The vocabulary guards *the
+direction that removes something no second attempt restores*, and what a
+second attempt restores depends on what is running beneath it — so each rule
+names the restorer its question was about:
+
+| value | what puts the loss back | what carries it |
+|---|---|---|
+| `snapshot` | the whole loss is working-tree content in this checkout | the undo layer, container or not — `git reset --hard`, `git restore`, `git rm` |
+| `container` | the loss can also land on this machine | a container *and* the snapshot beneath it, because the bind-mounted checkout survives the container — `rm`, `tar`, `apt install`, `systemctl` |
+| `nothing` | neither reaches it | nothing, so the question stands — a remote ref, a published artifact, a command whose argument is another command, and the parts of this checkout no snapshot holds |
+
+`nothing` is the default and the whole safety of the axis: a rule nobody
+annotated keeps asking. `git clean -fdx` carries it deliberately rather than
+by omission — it destroys ignored files, which is exactly what the snapshot
+leaves out.
+
+Where the named restorer is present, `RestoredBySession` settles the question
+as a **deferral, not a permission**. Nothing decides the call may run: the
+policy decides it has no reason left to interrupt, and the call goes to the
+runtime's own gate, where an operator's configuration lives. A session run
+with everything approved runs it; one at the runtime's defaults is still
+asked, in the runtime's own words. A `# lup: escalate:` marker keeps its
+question either way — it is the agent asking to be judged, and a boundary
+does not overrule it.
+
+That makes `defer` two things reaching one word, which the rows below it have
+to keep apart: an unjudged deferral means *nobody looked*, and this one means
+*somebody looked and the boundary answers*. `Unjudged` refuses the first for
+want of anybody having looked, so the second settles rather than rewrites and
+never reaches it.
+
+**And it is written down**, which is what makes the relaxation honest rather
+than merely quieter. The lattice asked about everything unjudged for an
+*observability* reason, and a deferral is the one verdict that reaches nobody
+— the runtime's own gate decides and the reason goes to no human. So every
+deferral appends to `.lup/hooks/learned.jsonl`, one line per distinct command,
+and `uv run lup-devtools hooks learn` reads it back as two lists:
+
+- **gaps** — commands nobody has judged, which a boundary carried rather than
+  a rule. Each is a candidate for a row in the shell vocabulary, and this list
+  is the reason the corpus exists.
+- **settled** — commands a rule judged and the boundary answered for. The
+  audit trail: read it to check the relaxation is letting through what you
+  meant.
+
+Nothing writes a rule automatically, and the refusal is the design. From one
+deferred `ruff check .`, a row of `ruff` → allow permits `ruff format --write`
+forever and a row of `ruff check` → allow permits `ruff check --fix`; the same
+mechanism over `rm tmp/scratch` → `rm` → allow permits `rm -rf`. What separates
+the safe generalisation from the catastrophic one is exactly the judgement a
+person is there to make.
+
+Recorded when the verdict is reached rather than after the command has run. The
+later event was the first proposal — learning from what a human approved — and
+it cannot carry that: a runtime offers both *yes* and *yes, don't ask again*
+and the event cannot tell them apart, and a human may answer by editing the
+command, so it fires for something other than what was judged. None of that
+touches a deferral, which is nobody's approval and is exactly known here.
 
 `uv run <target>` is parsed rather than matched against that table, so its
 targets carry the same three answers on a table of their own: each declares
@@ -196,10 +282,15 @@ inside a shell tool call never reaches the dispatcher that judges it.
 The guidance spells both; this is what each one does.
 
 - The escalation marker, `lup: escalate: <why>` as the leading comment line
-  of a shell command, promotes a classified deny or ask into an approval
+  of a shell command, promotes anything not already permitted into an approval
   question carrying that reason. It is the recovery path when work is denied
   as unjudged: reshape the command into the allowed vocabulary, or escalate
-  with a reason.
+  with a reason. It is an **effect**-axis marker and says nothing about
+  placement — it asks whether the call may happen, not where. Two refusals it
+  does not reach, both being statements that the call cannot happen rather
+  than that nobody approved it: a marker stating no reason, which would be
+  authorising itself, and a call declared `outside` on a host with no channel
+  to put it there.
 - The typed suppression marker, `lup: ignore[<rule-id>]` as a comment on the
   offending line, silences exactly the anti-pattern it names and no other, so
   the site still trips every rule it left unnamed. [contributing.md](contributing.md)

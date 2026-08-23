@@ -56,6 +56,7 @@ from lup.policy.dispatcher import (
     DispatcherDeclaration,
     compile_dispatcher,
     dispatcher_banner,
+    guarded_hook_command,
 )
 from lup.policy.kernel.decision import SandboxPlacement
 from lup.policy.kernel.rows import PathRoleRow
@@ -130,7 +131,9 @@ class CodexSpellings(NativeSpellings):
         return Instruction(
             f"start a session rooted at <{path}> and continue there — "
             "this runtime cannot move a running session, so work "
-            "carried on here would land in the checkout it started from"
+            "carried on here would land in the checkout it started from. "
+            "Already running, keep working where you are and address files "
+            "there by absolute path, which reaches the same branch."
         )
 
     def escape_sandbox(self, reason: str) -> Spelling:
@@ -639,7 +642,7 @@ class CodexHookRenderer(ArtifactRenderer[HookSet]):
     def render(self, source: HookSet) -> ArtifactTree:
         policy_hook = {
             "type": "command",
-            "command": 'python3 "$PLUGIN_ROOT/hooks/scripts/policy.py"',
+            "command": guarded_hook_command("PLUGIN_ROOT"),
             "statusMessage": "Checking Lup policy",
             "timeout": 30,
         }
