@@ -415,6 +415,22 @@ def iter_trace_log_files(
         yield from session_logs.glob("*.md")
 
 
+def iter_trace_event_files(
+    session_id: str | None = None,
+    version: str | None = None,
+) -> Iterator[Path]:
+    """Iterate browser event logs across all (or filtered) versions."""
+    ver_dirs = [traces_path() / version] if version else version_dirs()
+    for ver_dir in ver_dirs:
+        logs_base = ver_dir / "logs"
+        if session_id is not None:
+            candidate = logs_base / session_id / "events.json"
+            if candidate.is_file():
+                yield candidate
+        elif logs_base.exists():
+            yield from logs_base.glob("*/events.json")
+
+
 def list_all_session_ids(version: str | None = None) -> list[str]:
     """Return all session IDs across versions, deduplicated."""
     return sorted({d.name for d in iter_session_dirs(version=version)})

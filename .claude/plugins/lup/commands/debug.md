@@ -16,6 +16,18 @@ argument-hint: "[error message or fragment]"
 
 ### 1. Search logs for the error
 
+If the input names a session or run ID, open that exact run first:
+
+```bash
+uv run lup-devtools trace show "<session-or-run-id>" --full
+```
+
+This view includes both reasoning traces and browser events. An empty browser
+event log is evidence: compare its timestamps and files with the run record
+rather than treating silence as absence of a run. Use `Glob` for
+`**/<session-or-run-id>/run.json`; when an application-owned run record exists,
+read it and every sibling artifact to establish how far the run got.
+
 First, check if there are sessions with errors:
 
 ```bash
