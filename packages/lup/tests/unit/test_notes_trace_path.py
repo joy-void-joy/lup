@@ -12,8 +12,9 @@ from pathlib import Path
 import pytest
 
 from lup.workspace import paths
+from lup.devtools.trace.traces import find_trace, session_id_from_path
 from lup.workspace.notes import setup_notes
-from lup.workspace.paths import parse_timestamp
+from lup.workspace.paths import parse_timestamp, traces_path
 
 
 @pytest.fixture
@@ -51,3 +52,17 @@ def test_trace_log_dir_is_created_but_not_writable_grant() -> None:
 
     assert notes.trace_log.parent.is_dir()
     assert all(notes.trace_log.parent != rw for rw in notes.rw)
+
+
+def test_legacy_raw_trace_wins_over_empty_collected_session(
+    tmp_project: Path,
+) -> None:
+    session_id = "legacy-session"
+    raw = traces_path() / session_id / "210412.md"
+    raw.parent.mkdir(parents=True)
+    raw.write_text("full reasoning", encoding="utf-8")
+    collected = traces_path() / "1.2.3" / "sessions" / session_id
+    collected.mkdir(parents=True)
+
+    assert find_trace(session_id) == raw
+    assert session_id_from_path(raw) == session_id

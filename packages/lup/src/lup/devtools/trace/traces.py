@@ -234,7 +234,13 @@ def session_id_from_path(trace_file: Path) -> str:
     """Extract session ID from a trace file path."""
     try:
         rel = trace_file.relative_to(traces_path())
-        return rel.parts[2] if len(rel.parts) > 2 else rel.stem
+        match rel.parts:
+            case [_, "logs" | "sessions", session_id, *_]:
+                return session_id
+            case [session_id, _]:
+                return session_id
+            case _:
+                return rel.stem
     except ValueError:
         return trace_file.stem
 

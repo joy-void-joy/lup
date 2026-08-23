@@ -405,6 +405,15 @@ def iter_trace_log_files(
         else:
             yield from logs_base.rglob("*.md")
 
+    if version is not None or not traces_path().exists():
+        return
+    for session_logs in traces_path().iterdir():
+        if not session_logs.is_dir():
+            continue
+        if session_id is not None and session_logs.name != session_id:
+            continue
+        yield from session_logs.glob("*.md")
+
 
 def list_all_session_ids(version: str | None = None) -> list[str]:
     """Return all session IDs across versions, deduplicated."""
