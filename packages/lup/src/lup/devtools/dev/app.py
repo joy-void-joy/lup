@@ -27,6 +27,7 @@ import lup.devtools.dev.issues as issues_mod
 import lup.devtools.dev.traces as traces
 import lup.devtools.dev.undo as undo
 import lup.devtools.dev.model_config as model_config_mod
+import lup.devtools.dev.pending as pending_mod
 import lup.devtools.dev.plugin as plugin_mod
 import lup.devtools.dev.policy_explain as policy_explain
 import lup.devtools.dev.seams as seams
@@ -242,6 +243,16 @@ def create_dev_app(
         branches.pr_body(base)
 
     # -- branch survey and delete --
+
+    @app.command("pending")
+    def pending_cmd(
+        as_json: Annotated[
+            bool,
+            typer.Option("--json", help="Output as JSON"),
+        ] = False,
+    ) -> None:
+        """Report the real pending changes, excluding sandbox-masked device paths."""
+        pending_mod.report(as_json)
 
     @app.command("survey")
     def survey_cmd(

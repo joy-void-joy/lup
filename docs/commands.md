@@ -30,6 +30,7 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 | `dev base-branch` | Detect the base branch for the current (or specified) branch. |
 | `dev freshness` | Report how far this checkout sits behind its own remote and its base. |
 | `dev pr-body` | Generate a PR body (summary, commits, test plan) from branch commits. |
+| `dev pending` | Report the real pending changes, excluding sandbox-masked device paths. |
 | `dev survey` | Full branch inventory: containment, PRs, unique commits, diff sizes. |
 | `dev merge-driver` | Register the ownership-manifest merge driver `.gitattributes` names. |
 | `dev delete` | Delete a branch and its worktree, and origin&#x27;s copy if it is spent. |
@@ -167,6 +168,8 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 | `setup api-key` | Set up Example API key. |
 | `setup codex` | Set Codex/OpenAI per-MTok pricing (enables budget caps). |
 | `setup timezone` | Set timezone. |
+| `setup conversation chatgpt` | Open a browser to authenticate ChatGPT conversation access. |
+| `setup conversation claude` | Open a browser to authenticate Claude conversation access. |
 | `setup profile list` | Show every profile, and which one a launch selects by default. |
 | `setup profile add` | Register a runtime configuration home under a name. |
 | `setup profile use` | Select the profile a launch uses when none is named. |

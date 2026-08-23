@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "73bb5e5fa32f56a64a96be058646cd9575b6b36c6f2f430ee795170eb8b410bd",
+  "source_digest": "f00879a6751fe0c8ea0a9db1698b6b2ccbbc372805399c913d3442cbd3e48856",
   "target_requirements": [
     "claude-code"
   ],
@@ -9,7 +9,7 @@
     {
       "path": ".claude/CLAUDE.md",
       "category": "generated",
-      "sha256": "110d00b9eee50c4b6f34dd68983c096607c10956bbde6712777fe017771d1e03",
+      "sha256": "c9c1b37a7aef9456c8faa4e31b0448c0f9bdece69ce9de10828e4b54fd49538f",
       "semantic_id": "harness.guidance",
       "executable": false
     },
@@ -79,7 +79,7 @@
     {
       "path": ".claude/plugins/lup/commands/analyze.md",
       "category": "generated",
-      "sha256": "852c100c936711963f455ebaec138b39a2c1565c51b3b4773f64c325a3738f47",
+      "sha256": "75e9c39d89f55c9ad0ed6b6ac68d235246eef5e1082f9dd99cc09b4ce8d27889",
       "semantic_id": "skill.analyze",
       "executable": false
     },
@@ -107,7 +107,7 @@
     {
       "path": ".claude/plugins/lup/commands/commit.md",
       "category": "generated",
-      "sha256": "9eeaf4c452148c327ed57b95df08f801870de6eefa1469db71071a9b98ca2a60",
+      "sha256": "28110cd8110e473946fda9ed89e67ab6c6061ef27b73466320889b272c67b572",
       "semantic_id": "skill.commit",
       "executable": false
     },
@@ -212,7 +212,7 @@
     {
       "path": ".claude/plugins/lup/commands/merge.md",
       "category": "generated",
-      "sha256": "4abad98387959b1e61167e1d494a30c1735c511f4cb19a495821cbf4831c596a",
+      "sha256": "48cb1018dd087791d9ec061a91e59441fc0cfdeda009a2bbcfb95d6390ba40ae",
       "semantic_id": "skill.merge",
       "executable": false
     },

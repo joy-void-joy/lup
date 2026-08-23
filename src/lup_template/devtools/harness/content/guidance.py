@@ -142,6 +142,7 @@ When a command genuinely has to run outside the sandbox, put it through the runt
 ### lup-devtools
 
 Development tooling is the `lup-devtools` CLI, composed from the reusable commands under `packages/lup/` and this repository's under `src/lup_template/`. **Use it instead of ad-hoc commands.** Inline Python (`-c`, `-m`, a REPL, or bare `python`) is denied; `uv run python <script.py>` is allowed because a file can be reviewed. Running the same command repeatedly means **add a command** to the half that would reuse it.
+Sandbox-masked dotfiles can look untracked to Git; read the real tree with `dev pending`.
 `tmp/` is gitignored scratch. To **read** code, use `py info`/`py source`/`py search`/`py imports` or codeintel; to **compute once**, write a script under `tmp/` and run it; to reuse the computation, add a devtools command. `docs/contributing.md` carries the rest of this reviewability ladder.
 
 The `codeintel` group answers questions about code by *resolving* it, through a language server. **Prefer it over grep for anything about a name**, and `rename_symbol` over an edit with `replace_all`, which cannot tell one scope from another. `grep` is still right for what is genuinely characters: a string literal, a comment, a non-Python file.
