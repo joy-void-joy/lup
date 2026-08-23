@@ -41,7 +41,6 @@ from lup.devtools.hooks.app import create_hooks_app
 from lup.devtools.report.app import create_report_app
 from lup.devtools.setup import Integration, create_setup_app
 from lup.devtools.subapps import SubApp, SubAppSpec
-from lup.harness.models import PromptDocument
 from lup.runtime.profiles import ProfileDirectory
 from lup.usage.app import UsageEntry, create_usage_app
 
@@ -67,9 +66,6 @@ class DevtoolsDeclarations(BaseModel, frozen=True, arbitrary_types_allowed=True)
 
     repository_writers: list[RepositoryWriter]
     """Generated files that belong to no single native tree."""
-
-    guidance: PromptDocument
-    """The guidance document the gate weighs against its byte budget."""
 
     prompt: Callable[[], AgentPrompt]
     """This project's system prompt, as the health report weighs it."""
@@ -138,7 +134,6 @@ LIBRARY_ROSTER = [
             declared=declared.dev,
             native_targets=declared.targets,
             repository_writers=declared.repository_writers,
-            guidance=declared.guidance,
             relocate_roots=declared.relocate_roots,
         ),
     ),

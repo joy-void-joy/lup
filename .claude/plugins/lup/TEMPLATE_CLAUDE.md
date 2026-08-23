@@ -328,21 +328,19 @@ This project uses **git worktrees** (not regular branches) to develop multiple f
 
 ### Merge Conflict Resolution
 
-**Never silently drop code during conflict resolution.** The bias is toward inclusion — keeping both sides is always safer than losing features. A rename on one side must not swallow an addition on the other.
+**Never silently drop code during conflict resolution.** Keeping both sides is safer than losing features, and a rename on one side must not swallow an addition on the other. Before completing any merge, **audit for deletions**: compare the result against both parents and verify that every removed function, parameter, or command went deliberately, not as a side effect of choosing one side.
 
-Before completing any merge, **audit for deletions**: compare the result against both parents and verify that every removed function, parameter, or command was intentionally removed, not lost as a side effect of choosing one conflict side.
-
-Use `/lup:merge` (with no argument) for guided conflict resolution. See the command for the full decision tree.
+Use `/lup:merge` for guided conflict resolution; the command carries the decision tree.
 
 ### Commit Guidelines
 
-- **Commit before responding** — Don't accumulate changes across responses
-- **Commit early, commit often** — Frequent commits provide checkpoints
-- **Keep commits atomic** — If you need "and" in your message, it should be two commits
-- **History will be rebased** — Don't worry about perfect messages during development
-- **Meaningful final commits** — After rebasing, each commit should tell what changed and why
+- **Commit before responding**, and often — frequent commits are checkpoints
+- **Keep commits atomic** — if you need "and" in the message, it is two commits
+- **History will be rebased**, so a message need not be perfect while developing; after rebasing, each commit should tell what changed and why
 
 **Format:** `type(scope): description`
+
+**Types:**
 
 | Type | Use |
 | --- | --- |
@@ -354,17 +352,6 @@ Use `/lup:merge` (with no argument) for guided conflict resolution. See the comm
 | `chore` | Maintenance — dependencies, build config |
 | `meta` | Harness content and the trees it generates: guidance, settings, skills, hooks |
 | `data` | Generated data and outputs |
-
-**Types:**
-
-- `feat` -- New feature or capability
-- `fix` -- Bug fix
-- `refactor` -- Code change that neither fixes a bug nor adds a feature
-- `docs` -- Documentation only (README, standalone docs)
-- `test` -- Adding or updating tests
-- `chore` -- Maintenance (dependencies, build config, etc.)
-- `meta` -- Changes to native harness files (guidance, settings, scripts, commands)
-- `data` -- Generated data and outputs
 
 **Examples:**
 

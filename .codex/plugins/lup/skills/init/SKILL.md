@@ -218,6 +218,13 @@ silent truncation. Generation enforces that ceiling and refuses the merged
 declaration, naming the overage — so take the sections this domain will act on,
 and leave the rest to the pages under `docs/` that already carry them.
 
+Clearing the scaffold flag is also what hands this domain its room. While the
+flag stood, the template was held to a *smaller* ceiling than the runtime's,
+holding roughly 12 KiB back on purpose — so what you inherit is a deliberately
+lean document with space to say what is true of this domain, not a full budget
+already spent on somebody else's conventions. `dev guidance` reports what each
+section costs, and after adoption only the runtime ceiling applies.
+
 Which runtimes the project carries is not a choice made here: every tree
 arrives with the clone, and generation writes each one it finds. Dropping a
 runtime is a later removal somebody decides on its own terms.

@@ -395,19 +395,10 @@ WORKFLOW_THROUGH_COMMIT_FORMAT: list[models.PromptPart] = [
     ),
     *conventions.MERGE_CONFLICT_RESOLUTION,
     *conventions.COMMIT_GUIDELINES,
+    models.TextPart(text="**Types:**\n\n"),
+    *conventions.COMMIT_TYPES,
     models.TextPart(
-        text=r"""**Types:**
-
-- `feat` -- New feature or capability
-- `fix` -- Bug fix
-- `refactor` -- Code change that neither fixes a bug nor adds a feature
-- `docs` -- Documentation only (README, standalone docs)
-- `test` -- Adding or updating tests
-- `chore` -- Maintenance (dependencies, build config, etc.)
-- `meta` -- Changes to native harness files (guidance, settings, scripts, commands)
-- `data` -- Generated data and outputs
-
-**Examples:**
+        text=r"""**Examples:**
 
 ```
 feat(agent): add retry logic for API calls
