@@ -43,7 +43,7 @@ evidenced before it could be claimed.
 responder because its transport elicits approvals over the wire that the
 Claude SDK resolves internally.
 
-``harness_runtime.py`` — Codex adds a plugin installer and a cache digest,
+``harness_runtime.py`` — Codex adds a content-addressed plugin installer,
 because its trust model requires an installed, verified plugin where Claude
 trusts a directory it is handed.
 

@@ -464,14 +464,14 @@
     {
       "path": "docs/dev-tooling-decisions.md",
       "category": "generated",
-      "sha256": "cec023e1dc55ff8469d8df55a8b04dea073830ccc590311207118514425425e3",
+      "sha256": "ff5702d5bd92fe7fae9c808eafbbdbc564c53eb0002b50303f52b37cef853211",
       "semantic_id": "docs.dev-tooling-decisions",
       "executable": false
     },
     {
       "path": "docs/harness.md",
       "category": "generated",
-      "sha256": "af5d67856e9e62d098918cf2d4a51c4a538175b64f57d0e169b1de3482a80bd4",
+      "sha256": "22437c9e6efaa6ae4ede18eb3901712a156aaf5bd02fad8550c22c847b0043f5",
       "semantic_id": "docs.harness",
       "executable": false
     },
@@ -513,7 +513,7 @@
     {
       "path": "docs/platform-differentiation.md",
       "category": "generated",
-      "sha256": "8dcd258105e0a1bf0340bbafd961e7079248b53acda02db707442d3e61997682",
+      "sha256": "a0c29bee303028e39f404cef58b49f113cdfa156e8c1c9ffa08a0b510588d2e8",
       "semantic_id": "docs.platform-differentiation",
       "executable": false
     },

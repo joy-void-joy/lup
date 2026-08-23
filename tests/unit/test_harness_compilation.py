@@ -1486,7 +1486,9 @@ def test_codex_cache_digest_requires_an_exact_separate_copy(tmp_path: Path) -> N
             '{"name": "lup", "version": "9.9.9"}\n', encoding="utf-8"
         )
         (root / "plugin.txt").write_text("same\n", encoding="utf-8")
-    config = PluginCacheConfig(codex_home=home, marketplace="lup-template-repository")
+    config = PluginCacheConfig(
+        codex_home=home, marketplace="lup-template-repository", version="9.9.9"
+    )
 
     assert plugin_cache_evidence(source, config).ready
     (installed / "plugin.txt").write_text("stale\n", encoding="utf-8")
