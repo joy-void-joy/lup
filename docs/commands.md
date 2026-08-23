@@ -136,6 +136,7 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 | `hooks classify-fetch` | Say whether a URL is inside this project&#x27;s declared fetch scopes. |
 | `hooks sweep` | Classify a list of commands at once, and exit non-zero if any is not allowed. |
 | `hooks roots` | List the path roles and protected roots the declaration carries. |
+| `hooks learn` | Review the commands the policy declined to interrupt about. |
 
 ## `py`
 

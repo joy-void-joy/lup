@@ -39,6 +39,7 @@ class SettlementFacts:
     sandboxed: bool
     confined: bool
     escapable: bool
+    recovered: bool
     interactive: bool
     hint: str
 
@@ -49,6 +50,7 @@ class SettlementFacts:
         sandboxed: bool,
         confined: bool,
         escapable: bool,
+        recovered: bool,
         interactive: bool,
         hint: str,
     ) -> None:
@@ -57,6 +59,7 @@ class SettlementFacts:
         self.sandboxed = sandboxed
         self.confined = confined
         self.escapable = escapable
+        self.recovered = recovered
         self.interactive = interactive
         self.hint = hint
 
@@ -68,6 +71,7 @@ class SettlementFacts:
             self.sandboxed,
             self.confined,
             self.escapable,
+            self.recovered,
             self.interactive,
             self.hint,
         )
@@ -109,7 +113,9 @@ class StatedReason(SettlementRule):
             f"escalated ({facts.escalation}): {facts.decision.reason}",
             facts.decision.sandbox,
             facts.escalation,
+            facts.decision.recovery,
         )
+
 
 
 class TrappedPlacement(SettlementRule):
@@ -130,6 +136,65 @@ class TrappedPlacement(SettlementRule):
                     escalated=facts.decision.escalated,
                 )
         return None
+
+
+class RestoredBySession(SettlementRule):
+    """An approval question about a loss this session can already put back.
+
+    The vocabulary guards *the direction that removes something no second
+    attempt restores*. What a second attempt restores is a fact about the
+    session and not about the command, and every rule states which restorer
+    its question was about — so where that restorer is present, the loss the
+    question was protecting against does not happen and the question has no
+    subject.
+
+    Settled as a **deferral, not a permission**, and the difference is the
+    whole design. Nothing here decides the call may run: it decides that this
+    policy has no reason left to interrupt, and hands the call to the
+    runtime's own gate, which is where an operator's configuration lives. A
+    session run with everything approved runs it; a session at the runtime's
+    defaults is still asked, in the runtime's own words. The policy stops
+    spending a human's attention on a loss it can undo, and buys no authority
+    with it.
+
+    Which makes ``defer`` two things reaching one word, and the rows below
+    have to keep them apart: a deferral from :func:`unjudged` means *nobody
+    looked*, and this one means *somebody looked and the boundary answers*.
+    So this row settles rather than rewrites. :class:`Unjudged` turns an
+    unexamined deferral into a refusal for want of anybody having looked, and
+    a judged deferral that fell through to it would be refused for the one
+    reason that is not true of it.
+
+    A stated reason keeps its question. `# lup: escalate:` is the agent
+    asking to be judged, and answering it with a deferral would drop both the
+    question and the reason given for it.
+    """
+
+    def reached(self, facts: SettlementFacts) -> KernelDecision | None:
+        if facts.decision.effect != "ask" or facts.escalation:
+            return None
+        match facts.decision.recovery:
+            case "snapshot" if facts.recovered:
+                held = "the tree is in the object store"
+            # `container` is deliberately not answered here. What that grade
+            # names is a loss reaching past the checkout, and a snapshot of
+            # the tree does not hold it -- so on a host whose only boundary
+            # is the object store the question stands, which is the answer
+            # the narrower recovery would give anyway.
+            case _:
+                return None
+        # The recovery travels onto the deferral, and is the whole of how a
+        # reader downstream tells this from a deferral nobody looked at. Both
+        # reach the word `defer`, and they are worth opposite things: an
+        # unjudged one is a gap in the vocabulary, and this one is a rule
+        # having looked. Left off, the only difference would be the wording
+        # of a reason, which is not a distinction anything should read.
+        return KernelDecision(
+            "defer",
+            f"{facts.decision.reason} — settled by this session rather than"
+            f" asked: {held}",
+            recovery=facts.decision.recovery,
+        )
 
 
 class UnanswerableQuestion(SettlementRule):
@@ -212,6 +277,7 @@ class Standing(SettlementRule):
 SETTLEMENT_ORDER: list[SettlementRule] = [
     StatedReason(),
     TrappedPlacement(),
+    RestoredBySession(),
     UnanswerableQuestion(),
     ConfinedElsewhere(),
     Unjudged(),

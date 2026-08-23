@@ -66,6 +66,83 @@ def sandbox_active() -> bool:
     return "LUP_SANDBOX_ACTIVE" in environ and environ["LUP_SANDBOX_ACTIVE"] == "1"
 
 
+def record_deferral(
+    root: Path | None,
+    command: str,
+    reason: str,
+    judged: bool,
+    corpus: str = ".lup/hooks/learned.jsonl",
+) -> str:
+    """Write down one command this policy declined to interrupt about.
+
+    The other half of allow-and-log, and what makes the relaxation honest.
+    The lattice asked about everything unjudged for an *observability*
+    reason, and logging serves that without spending anybody's attention --
+    but only if something is actually written down, or the relaxation is
+    just the asking removed.
+
+    **Two kinds of deferral reach here and they are worth very different
+    things**, which is why ``judged`` is recorded rather than inferred later.
+    An unjudged one is a gap in the vocabulary: nobody has ever said anything
+    about this command, and it is a candidate for a rule. A judged one is the
+    relaxation working -- a rule looked, and the boundary answered for the
+    loss -- and it is an audit trail rather than a candidate. Collapsing them
+    would put `git reset --hard` in the same list as a command nobody has
+    classified, and the list is read to find the second.
+
+    **Written at the moment the verdict exists**, rather than after the
+    command has run. The later event was proposed and refuted: a runtime
+    offers both "yes" and "yes, don't ask again" and the later event cannot
+    tell them apart, and a human may answer by *editing* the command, so it
+    fires for something other than what was judged. None of that touches a
+    deferral, which is nobody's approval and is exactly known here.
+
+    **One line per distinct command.** A session defers the same `grep` fifty
+    times, and fifty identical lines is a list nobody reads -- the same
+    failure the undo layer's dedup exists to prevent, in the same shape. So a
+    command already written down is skipped, and the file is a set: what a
+    diff shows is what this session met that no session had met before.
+
+    Silent about its own failure, and for the reason :func:`undo_snapshot`
+    is: this runs in front of a command somebody asked for, and a read-only
+    checkout is an ordinary place to be running. An empty string says nothing
+    was recorded.
+    """
+    if root is None or not command:
+        return ""
+    path = root / corpus
+    try:
+        seen = path.read_text(encoding="utf-8") if path.exists() else ""
+    except OSError:
+        return ""
+    entry = json.dumps(
+        {
+            "command": command,
+            "reason": reason,
+            "judged": judged,
+            "first_seen": datetime.now(UTC).isoformat(),
+        },
+        sort_keys=True,
+    )
+    # Compared on the command alone, because the rest of the row is what this
+    # session happened to say about it: the same command reached twice under
+    # two reasons is one candidate, and a timestamp differs every time.
+    for line in seen.splitlines():
+        try:
+            held = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(held, dict) and "command" in held and held["command"] == command:
+            return ""
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as sink:
+            sink.write(entry + "\n")
+    except OSError:
+        return ""
+    return entry
+
+
 def managed_script_roots(root: Path | None) -> list[str]:
     """Name the package roots a runtime installed and therefore trusts.
 
@@ -730,6 +807,13 @@ def bash_decision(
     passing is a rule that silently stopped applying.
     """
     acted_on = shell_path_verb_targets(command)
+    # Before the verdict rather than after it, because the verdict reads it:
+    # an approval question exists where a loss is permanent, and a tree the
+    # object store already holds has no permanent loss to ask about. Ordered
+    # the other way the relaxation would be judging a snapshot that did not
+    # exist yet, and a refused command is snapshotted too -- one ref for a
+    # state the tree was already in, which dedup collapses.
+    reference = undo_snapshot(cwd, command)
     verdict = decide_shell(
         command,
         SHELL_RULES,
@@ -758,39 +842,33 @@ def bash_decision(
         # instead.
         relayed=relayed,
         escapable=escapable,
+        recovered=bool(reference),
     )
     if verdict.effect == "deny":
         return verdict
-    return undo_point(
-        command, verdict, [*shell_write_targets(command), *acted_on], cwd
-    )
+    # The log half of allow-and-log. A deferral is this policy declining to
+    # interrupt, which is the one verdict that reaches nobody: the runtime's
+    # own gate decides and the reason goes to no human. Written down here or
+    # it is not written down anywhere.
+    if verdict.effect == "defer":
+        record_deferral(cwd, command, verdict.reason, verdict.recovery != "nothing")
+    return undo_point(verdict, reference)
 
 
-def undo_point(
-    command: str, verdict: KernelDecision, targets: list[str], cwd: Path | None
-) -> KernelDecision:
-    """Snapshot the tree before a command that could destroy work in it.
+def undo_point(verdict: KernelDecision, reference: str) -> KernelDecision:
+    """Say the tree was snapshotted, on the one verdict that changes for it.
 
-    The whole case for relaxing a permission lattice is that a mistake can be
-    put back, so this is what has to exist before that relaxation is honest.
-    What it does not need is a second list of destructive spellings: the
-    vocabulary already draws that line, and draws it more finely than a list
-    of verbs could. ``git reset`` is allowed and ``git reset --hard`` asks;
-    ``git switch`` is allowed and ``git switch --force`` asks. So the mark is
-    the verdict itself — anything the classifier did not wave through — plus
-    the paths the command was already resolved to be writing, which is what
-    catches an allowed-because-recoverable ``rm`` of a tracked file.
+    The snapshot itself is taken above, before the verdict, because the
+    verdict reads it. What is left here is what the human is told.
 
-    Said out loud only on an approval question, which is the one moment the
-    information changes an answer: a human deciding whether to permit
-    something destructive is weighing exactly whether it can be undone. On an
-    allowed command the snapshot is silent, because a line appended to every
-    mutating command is one nobody reads by the third time — and ``dev undo``
-    is where a snapshot is looked for anyway.
+    On an approval question, which is the one moment the information changes
+    an answer: somebody deciding whether to permit something destructive is
+    weighing exactly whether it can be undone. On an allowed command the
+    snapshot is silent, because a line appended to every mutating command is
+    one nobody reads by the third time — and ``dev undo`` is where a snapshot
+    is looked for anyway. On a deferral the reason reaches no human at all;
+    it reaches the record, which is where the relaxation is reviewed.
     """
-    if not targets and verdict.effect == "allow":
-        return verdict
-    reference = undo_snapshot(cwd, command)
     if not reference or verdict.effect != "ask":
         return verdict
     return KernelDecision(
