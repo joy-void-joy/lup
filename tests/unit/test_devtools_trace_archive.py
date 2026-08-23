@@ -1,10 +1,11 @@
-"""Deleting a worktree must not take the only copy of its traces with it.
+"""Deleting a worktree must not take the only copy of its sessions with it.
 
-The trace store is tracked but rarely committed, so a worktree normally holds
-the sole copy of what its sessions did. That makes the loss invisible after the
-fact -- a later reader cannot tell destroyed evidence from sessions that never
-ran -- which is why the archive is wired into the deletion path rather than
-offered as a step, and why these run the real deletion instead of mocking it.
+The notes directory is ignored unless a repository opts into committing session
+data, so a worktree normally holds the sole copy of what its sessions did. That
+makes the loss invisible after the fact -- a later reader cannot tell destroyed
+evidence from sessions that never ran -- which is why the archive is wired into
+the deletion path rather than offered as a step, and why these run the real
+deletion instead of mocking it.
 """
 
 from pathlib import Path
@@ -29,17 +30,22 @@ def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return work
 
 
-def trace(tmp_path: Path, relative: str, text: str) -> Path:
-    """Write one trace inside the linked worktree's trace store."""
-    path = tmp_path / "feature" / "notes" / "traces" / relative
+def record(tmp_path: Path, relative: str, text: str) -> Path:
+    """Write one session record inside the linked worktree's notes directory."""
+    path = tmp_path / "feature" / "notes" / relative
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
     return path
 
 
+def trace(tmp_path: Path, relative: str, text: str) -> Path:
+    """Write one trace inside the linked worktree's trace store."""
+    return record(tmp_path, f"traces/{relative}", text)
+
+
 def archived(repo: Path, relative: str) -> Path:
     """Where a given trace should land once archived."""
-    return traces.archive_root() / "feature" / relative
+    return traces.archive_root() / "feature" / "traces" / relative
 
 
 def test_the_archive_is_beyond_the_worktree_it_outlives(repo: Path) -> None:
@@ -123,20 +129,32 @@ def test_an_archived_trace_is_never_overwritten(repo: Path, tmp_path: Path) -> N
     assert kept.read_text(encoding="utf-8") == "the original\n"
 
 
-def test_the_harness_mirror_is_not_archived(repo: Path, tmp_path: Path) -> None:
-    """Its source is a config directory that outlives every worktree here."""
-    mirror = tmp_path / "feature" / "notes" / "harness" / "claude" / "a.jsonl"
-    mirror.parent.mkdir(parents=True)
-    mirror.write_text(
-        "a mirror of a journal that outlives this tree\n", encoding="utf-8"
-    )
-    trace(tmp_path, "0.3.0/logs/run/events.jsonl", "one event\n")
+def test_the_harness_mirror_is_kept_as_well(repo: Path, tmp_path: Path) -> None:
+    """What it mirrors can be inside the worktree too, so both copies go at once.
+
+    The mirror reads as a derived artifact, and one whose source is safe would
+    not need keeping. That source is a native CLI's configuration home, and a
+    project profile puts it at ``.lup/profiles/`` within the checkout being
+    deleted -- which leaves the mirror the only copy that anything keeps.
+    """
+    record(tmp_path, "harness/claude/run/observable.jsonl", "a launch record\n")
 
     traces.archive("feature", dry_run=False)
 
-    assert list((traces.archive_root() / "feature").rglob("*.jsonl")) == [
-        archived(repo, "0.3.0/logs/run/events.jsonl")
-    ]
+    kept = traces.archive_root() / "feature" / "harness/claude/run/observable.jsonl"
+    assert kept.read_text(encoding="utf-8") == "a launch record\n"
+
+
+def test_a_store_nobody_named_is_kept_by_sitting_where_the_others_do(
+    repo: Path, tmp_path: Path
+) -> None:
+    """Whatever the notes directory grows next is archived without an edit here."""
+    record(tmp_path, "feedback_loop/round.md", "a round of analysis\n")
+
+    traces.archive("feature", dry_run=False)
+
+    kept = traces.archive_root() / "feature" / "feedback_loop/round.md"
+    assert kept.read_text(encoding="utf-8") == "a round of analysis\n"
 
 
 def test_a_branch_with_no_worktree_reports_nothing(repo: Path) -> None:

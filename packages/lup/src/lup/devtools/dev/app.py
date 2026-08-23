@@ -266,7 +266,7 @@ def create_dev_app(
     ) -> None:
         """Delete a branch and its worktree, and origin's copy if it is spent.
 
-        Its session traces are archived first, since the worktree usually holds
+        Its session records are archived first, since the worktree usually holds
         the only copy; a deletion whose archive fails is refused.
         """
         branches.delete_branch(name, dry_run, force, remote)
@@ -301,7 +301,7 @@ def create_dev_app(
     def archive_traces_cmd(
         name: Annotated[
             str,
-            typer.Argument(help="Branch whose worktree traces should be kept"),
+            typer.Argument(help="Branch whose worktree records should be kept"),
         ],
         dry_run: Annotated[
             bool,
@@ -312,7 +312,7 @@ def create_dev_app(
             typer.Option("--json", help="Output as JSON"),
         ] = False,
     ) -> None:
-        """Copy a worktree's session traces into the archive beside the repository.
+        """Copy a worktree's session records into the archive beside the repository.
 
         `delete` already does this, so reach for it to read what a deletion
         would keep before deciding one, or to archive a worktree that is staying.
