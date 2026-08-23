@@ -43,6 +43,9 @@ web = [
     "google-auth-oauthlib>=1.4.0",
     "uvicorn[standard]>=0.49.0",
 ]
+conversation = [
+    "playwright>=1.62.0",
+]
 
 [project.urls]
 Homepage = "https://github.com/joy-void-joy/lup"

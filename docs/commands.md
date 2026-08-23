@@ -15,6 +15,13 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 | `agent serve-tools` | Start SDK tools as an MCP stdio server (the ``notes`` server). |
 | `agent repl` | Interactive REPL — continuous session with the agent via the SDK. |
 
+## `conversation`
+
+| Command | What it does |
+| --- | --- |
+| `conversation chatgpt` | Retain a ChatGPT conversation and all downloadable attachments. |
+| `conversation claude` | Retain a Claude conversation and its API-provided attachment content. |
+
 ## `dev`
 
 | Command | What it does |

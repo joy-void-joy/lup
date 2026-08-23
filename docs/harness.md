@@ -164,6 +164,7 @@ regenerate.
 **Skills:**
 
 - /lup:add-command — Create a new slash command in the lup plugin
+- /lup:analyze — Retain a ChatGPT or Claude conversation and answer from its files
 - /lup:brainstorm — Pre-init design exploration — brainstorm architecture, MCP tools, and agent design
 - /lup:bump — Review changes since last bump and bump agent version
 - /lup:close — Check PR review status, merge if approved, and clean up branches
