@@ -44,6 +44,7 @@ from lup.runtime.profile_tree import (
     ProfileFolders,
     TreeProfileNames,
     TreeProfileRegistrar,
+    TreeProfileStateLocations,
 )
 from lup.runtime.profiles import ProfileDirectory
 
@@ -88,7 +89,10 @@ def local_profile_directory(
     """
     folders = ProfileFolders(root / profile_root, login.home_subdir)
     return ProfileDirectory(
-        TreeProfileNames(folders), TreeProfileRegistrar(folders), login
+        TreeProfileNames(folders),
+        TreeProfileRegistrar(folders),
+        login,
+        TreeProfileStateLocations(folders),
     )
 
 

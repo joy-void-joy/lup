@@ -12,7 +12,7 @@ from pathlib import Path
 from collections.abc import Sequence
 from typing import TypedDict
 
-from lup.devtools.feedback.models import LoadedSession
+from lup.devtools.feedback.models import LoadedSession, SessionLoader
 from lup.devtools.feedback.state import load_sessions_for_versions
 from lup.devtools.trace.traces import (
     CapabilityRequest,
@@ -116,10 +116,14 @@ def gather_error_patterns(sessions: Sequence[LoadedSession]) -> list[ErrorPatter
     )
 
 
-def build_report(version: str | None, all_versions: bool) -> AnalysisReport:
+def build_report(
+    version: str | None,
+    all_versions: bool,
+    loader: SessionLoader = load_sessions_for_versions,
+) -> AnalysisReport:
     """Build a complete analysis report."""
     effective = resolve_version(version, all_versions).versions
-    sessions = load_sessions_for_versions(effective)
+    sessions = loader(effective)
 
     return {
         "version": version,
@@ -129,7 +133,12 @@ def build_report(version: str | None, all_versions: bool) -> AnalysisReport:
     }
 
 
-def analyze(version: str | None, all_versions: bool, output: Path | None) -> None:
+def analyze(
+    version: str | None,
+    all_versions: bool,
+    output: Path | None,
+    loader: SessionLoader = load_sessions_for_versions,
+) -> None:
     """Produce a JSON analysis report to stdout or a file."""
     import json
 
@@ -137,7 +146,7 @@ def analyze(version: str | None, all_versions: bool, output: Path | None) -> Non
 
     from lup.devtools.utils import output_json
 
-    report = build_report(version, all_versions)
+    report = build_report(version, all_versions, loader)
 
     if output:
         output.parent.mkdir(parents=True, exist_ok=True)

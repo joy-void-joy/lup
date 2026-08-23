@@ -15,11 +15,15 @@ import typer
 
 import lup.devtools.feedback.analyze as analyze
 import lup.devtools.feedback.reports as reports
-from lup.devtools.feedback.models import AgentPrompt
+from lup.devtools.feedback.models import AgentPrompt, SessionLoader
+from lup.devtools.feedback.state import load_sessions_for_versions
 from lup.devtools.utils import VERSION_OPT, ALL_VERSIONS_OPT, JSON_OPT
 
 
-def create_feedback_app(prompt: Callable[[], AgentPrompt]) -> typer.Typer:
+def create_feedback_app(
+    prompt: Callable[[], AgentPrompt],
+    session_loader: SessionLoader = load_sessions_for_versions,
+) -> typer.Typer:
     """Wire the feedback tree over one application's assembled prompt."""
     app = typer.Typer(no_args_is_help=True)
 
@@ -29,7 +33,7 @@ def create_feedback_app(prompt: Callable[[], AgentPrompt]) -> typer.Typer:
         all_versions: ALL_VERSIONS_OPT = False,
     ) -> None:
         """Show feedback status: version, data, analysis state, and stats."""
-        reports.status(version, all_versions)
+        reports.status(version, all_versions, session_loader)
 
     @app.command("collect")
     def collect_cmd(
@@ -61,7 +65,15 @@ def create_feedback_app(prompt: Callable[[], AgentPrompt]) -> typer.Typer:
         ] = False,
     ) -> None:
         """Collect feedback metrics from sessions."""
-        reports.collect(since, all_time, version, all_versions, output, dry_run=dry_run)
+        reports.collect(
+            since,
+            all_time,
+            version,
+            all_versions,
+            output,
+            dry_run=dry_run,
+            loader=session_loader,
+        )
 
     @app.command("costs")
     def costs_cmd(
@@ -70,7 +82,7 @@ def create_feedback_app(prompt: Callable[[], AgentPrompt]) -> typer.Typer:
         as_json: JSON_OPT = False,
     ) -> None:
         """Per-backend cost/token rollup from session JSONs (any backend)."""
-        reports.costs(version, all_versions, as_json)
+        reports.costs(version, all_versions, as_json, session_loader)
 
     @app.command("tools")
     def tools_cmd(
@@ -79,7 +91,7 @@ def create_feedback_app(prompt: Callable[[], AgentPrompt]) -> typer.Typer:
         as_json: JSON_OPT = False,
     ) -> None:
         """Show tool usage aggregates."""
-        reports.tools(version, all_versions, as_json)
+        reports.tools(version, all_versions, as_json, session_loader)
 
     @app.command("errors")
     def errors_cmd(
@@ -92,7 +104,7 @@ def create_feedback_app(prompt: Callable[[], AgentPrompt]) -> typer.Typer:
         as_json: JSON_OPT = False,
     ) -> None:
         """Show sessions with high error rates from structured metrics."""
-        reports.errors(limit, version, all_versions, as_json)
+        reports.errors(limit, version, all_versions, as_json, session_loader)
 
     @app.command("trends")
     def trends_cmd(
@@ -105,7 +117,7 @@ def create_feedback_app(prompt: Callable[[], AgentPrompt]) -> typer.Typer:
         as_json: JSON_OPT = False,
     ) -> None:
         """Show metric trends over time."""
-        reports.trends(window, version, all_versions, as_json)
+        reports.trends(window, version, all_versions, as_json, session_loader)
 
     @app.command("history")
     def history_cmd(
@@ -160,7 +172,7 @@ def create_feedback_app(prompt: Callable[[], AgentPrompt]) -> typer.Typer:
         ] = None,
     ) -> None:
         """Produce a structured JSON analysis report (tools, errors, gaps)."""
-        analyze.analyze(version, all_versions, output)
+        analyze.analyze(version, all_versions, output, session_loader)
 
     @app.command("commit")
     def commit_cmd(

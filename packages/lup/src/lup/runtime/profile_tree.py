@@ -17,7 +17,7 @@ project keeping two runtimes' homes keeps them side by side under one name.
 from pathlib import Path
 
 from lup.channels.models import write_atomic
-from lup.runtime.profiles import ProfileNames, ProfileRegistrar
+from lup.runtime.profiles import ProfileNames, ProfileRegistrar, ProfileStateLocations
 
 ACTIVE_FILE = ".active"
 """Default name for the file recording which profile a launch selects."""
@@ -59,6 +59,10 @@ class ProfileFolders:
     def home_for(self, name: str) -> Path:
         """The configuration home that name's directory holds."""
         return self.root / name / self.home_subdir
+
+    def container_for(self, name: str) -> Path:
+        """The directory holding every runtime home for one profile."""
+        return self.root / name
 
     def active(self) -> str | None:
         """The recorded selection, where one has been recorded."""
@@ -139,3 +143,15 @@ class TreeProfileRegistrar(ProfileRegistrar):
             f"a directory profile is {self.folders.root / name}, which holds "
             "its login — remove that directory to remove the profile"
         )
+
+
+class TreeProfileStateLocations(ProfileStateLocations):
+    """Keep auxiliary state beside every runtime home under one profile."""
+
+    def __init__(self, folders: ProfileFolders) -> None:
+        self.folders = folders
+
+    def container_for(self, name: str) -> Path:
+        if name not in self.folders.names():
+            raise KeyError(name)
+        return self.folders.container_for(name)

@@ -117,6 +117,24 @@ class ProfileRegistrar(ABC):
         """Forget name, if this origin knows it."""
 
 
+class ProfileStateLocations(ABC):
+    """Where auxiliary personal state for one named profile belongs."""
+
+    @abstractmethod
+    def container_for(self, name: str) -> Path:
+        """The directory holding every credential and state for one name."""
+
+
+class ConfigHomeStateLocations(ProfileStateLocations):
+    """Keep auxiliary state inside the configuration home itself."""
+
+    def __init__(self, names: ProfileNames) -> None:
+        self.names = names
+
+    def container_for(self, name: str) -> Path:
+        return self.names.config_dir_for(name)
+
+
 class Profile(BaseModel, frozen=True):
     """One profile, resolved far enough for a caller to act on it."""
 
@@ -132,11 +150,16 @@ class ProfileDirectory:
     """Resolve, list, and curate profiles over whichever origin holds them."""
 
     def __init__(
-        self, names: ProfileNames, registrar: ProfileRegistrar, login: ProviderLogin
+        self,
+        names: ProfileNames,
+        registrar: ProfileRegistrar,
+        login: ProviderLogin,
+        state_locations: ProfileStateLocations | None = None,
     ) -> None:
         self.names = names
         self.registrar = registrar
         self.login = login
+        self.state_locations = state_locations or ConfigHomeStateLocations(names)
 
     def unknown(self, name: str) -> UnknownProfile:
         """The error for a name this origin does not answer to, roster included."""
@@ -196,6 +219,19 @@ class ProfileDirectory:
             home=home,
             variables=self.login.environment(home) if home is not None else dict(),
         )
+
+    def state_dir(self, name: str | None, subdir: str) -> Path | None:
+        """One profile-scoped state directory, explicit then active."""
+        child = Path(subdir)
+        if child.parent != Path(".") or child.name != subdir:
+            raise ValueError(f"profile state subdirectory must be one name: {subdir!r}")
+        selected = name or self.names.active_profile()
+        if selected is None:
+            return None
+        try:
+            return self.state_locations.container_for(selected) / child
+        except KeyError as error:
+            raise self.unknown(selected) from error
 
     def add(self, name: str, config_dir: Path | None = None) -> Profile:
         """Register a profile and resolve what registering it produced."""

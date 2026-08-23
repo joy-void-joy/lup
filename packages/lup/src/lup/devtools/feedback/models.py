@@ -5,6 +5,7 @@ The loaders live in ``state``, aggregation in ``metrics``, presentation in
 ``reports``.
 """
 
+from collections.abc import Callable
 from pathlib import Path
 from typing import TypedDict
 
@@ -44,6 +45,10 @@ class LoadedSession(SessionRecord):
 
     source_session_id: str = ""
     source_file: str = ""
+
+
+type SessionLoader = Callable[[list[str] | None], list[LoadedSession]]
+"""Application-supplied discovery of feedback-readable session records."""
 
 
 # =============================================================================

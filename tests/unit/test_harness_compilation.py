@@ -265,13 +265,14 @@ def test_catalog_has_one_portable_skill_per_baseline_command() -> None:
     harness = portable_harness()
     plugin = harness.plugins[0]
 
-    assert len(plugin.skills) == 32
+    assert len(plugin.skills) == len({skill.id for skill in plugin.skills})
     assert len(plugin.agents) == 4
     assert {skill.name for skill in plugin.skills} >= {
         "resolve",
         "implementer",
         "resolve-reviewer",
         "merge",
+        "analyze",
     }
     encoded = harness.model_dump_json()
     assert "/lup:" not in encoded
@@ -1056,11 +1057,15 @@ def test_both_native_trees_compile_deterministically() -> None:
 
     assert claude == compile_claude(harness)
     assert codex == compile_codex(harness)
+    declared_skills = len(harness.plugins[0].skills)
     assert (
         len([item for item in claude.artifacts if "/commands/" in item.path.as_posix()])
-        == 32
+        == declared_skills
     )
-    assert len([item for item in codex.artifacts if item.path.name == "SKILL.md"]) == 32
+    assert (
+        len([item for item in codex.artifacts if item.path.name == "SKILL.md"])
+        == declared_skills
+    )
     assert Path(".codex/plugins/lup/.codex-plugin/plugin.json") in {
         item.path for item in codex.artifacts
     }
