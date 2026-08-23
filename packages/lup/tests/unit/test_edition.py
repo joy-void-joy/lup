@@ -28,6 +28,7 @@ from lup.workspace.edition import Edition, edition_path, read_edition
 def checkout(root: Path) -> Path:
     """A main checkout: `.git` is the git directory itself."""
     (root / ".git").mkdir(parents=True)
+    (root / ".git" / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
     return root
 
 
@@ -71,6 +72,11 @@ def test_a_path_in_no_checkout_names_none(tmp_path: Path) -> None:
     loose.write_text("x = 1\n", encoding="utf-8")
 
     assert worktree_root(str(loose)) == ""
+
+
+def test_lup_metadata_is_not_a_git_marker(tmp_path: Path) -> None:
+    (tmp_path / ".git" / "lup").mkdir(parents=True)
+    assert worktree_root(str(tmp_path)) == ""
 
 
 def test_a_relative_path_names_none() -> None:

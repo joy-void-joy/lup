@@ -116,7 +116,7 @@ Before customizing, decide which optional patterns this domain actually needs. T
 - **Reflection** (`agent/tools/reflect.py` + the gate wiring in `core.py`) — keep only if the agent commits a consequential, judgment-bearing output where self-critique helps.
 - **Realtime / persistent mode** (`agent/tools/realtime.py`, `lup.realtime*`, the Stop-hook/sleep-wake wiring) — keep only for agents that live over time (chat, monitoring, games); delete for one-shot agents.
 - **Feedback loop** (the `feedback` sub-app this project inherits from `lup.devtools`, and the feedback-loop skill) — keep only if ground truth or a feedback signal resolves over time. Dropping it is a line in `devtools/subapps.py`, not a directory to delete: the commands are the library's.
-- **Commit loop** (auto-commit in `environment/cli/__main__.py`) — keep only if each run yields a data artifact worth versioning. Session data is gitignored by default (the `notes/*` lines in `.gitignore`), so traces and outputs stay local; keeping this pattern means removing those two lines so session data can be committed. When deleting the pattern, leave the ignore lines in place.
+- **Commit loop** (auto-commit in `environment/cli/__main__.py`) — keep only if each run yields a data artifact worth versioning. Session data is gitignored by default (the `notes/*` lines in `.gitignore`), so traces and outputs stay local; keeping this pattern means removing the `notes/*` and `!notes/.gitkeep` pair so session data can be committed. The `notes/harness/` line under them is not part of that decision and stays either way — a launch transcript is one native CLI session in full, redacted for portability rather than for publication. When deleting the pattern, leave every ignore line in place.
 
 Ask the user with the AskUserQuestion tool, offering concrete options plus a free-text choice: which of these four patterns this domain keeps, one option per pattern — deleting is the expected answer for most of them, so say which you would
 delete and why. Then **delete the files and their wiring** for everything not
@@ -217,6 +217,13 @@ stops adding at the cap, so an over-budget guidance file is not an error, it is
 silent truncation. Generation enforces that ceiling and refuses the merged
 declaration, naming the overage — so take the sections this domain will act on,
 and leave the rest to the pages under `docs/` that already carry them.
+
+Clearing the scaffold flag is also what hands this domain its room. While the
+flag stood, the template was held to a *smaller* ceiling than the runtime's,
+holding roughly 12 KiB back on purpose — so what you inherit is a deliberately
+lean document with space to say what is true of this domain, not a full budget
+already spent on somebody else's conventions. `dev guidance` reports what each
+section costs, and after adoption only the runtime ceiling applies.
 
 Which runtimes the project carries is not a choice made here: every tree
 arrives with the clone, and generation writes each one it finds. Dropping a

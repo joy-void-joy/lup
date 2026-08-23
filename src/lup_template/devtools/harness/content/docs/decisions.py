@@ -270,6 +270,41 @@ declining is allowed and only its invisibility was the defect. A project
 keeping its own version of a sub-app declares one under that name, since the
 roster resolves last-declaration-wins.
 
+## ADR-016: Hold a scaffold to a share of the guidance budget it passes on
+
+Context: the always-loaded guidance is checked against `GUIDANCE_BYTE_BUDGET`,
+which mirrors a runtime's own `project_doc_max_bytes` — exceed it and nothing
+reports an error, the document is silently truncated. That number is right for
+every project and wrong for one: a repository still shipping as the template
+is not spending its own budget. Every domain built on it starts from this
+document and then has to describe its own architecture, conventions and
+workflow inside what is left. This repository had reached 28654 of 32768 and
+reported 4114 free, which is less than it spent on Code Conventions alone. No
+gate could see the problem, because at the only ceiling anyone had declared
+the document was passing.
+
+Decision: while `[tool.lup] template = true`, a second and stricter row —
+`scaffold budget` — holds guidance to `GUIDANCE_BYTE_BUDGET` less
+`TEMPLATE_GUIDANCE_HEADROOM`, 12 KiB withheld for the adopter. Its own row
+rather than a stricter number in the existing one, because the two answer
+different questions of the same byte count: whether a runtime will truncate
+this tree, true of every project, and whether a scaffold is spending for a
+domain that has not arrived, true of exactly one. The manifest flag that
+already distinguishes those two kinds of repository is the only input, so
+nothing new is added to `pyproject.toml` that adoption would then have to
+clear. The number never reaches the compile gates or the generated runtime
+config: a scaffold's self-restraint is not a fact about any runtime's ceiling.
+
+Consequences: gating, not advisory — a reservation nobody has to honour is
+spent by the first section that wants the room, which is how the headroom went
+missing before anyone had declared one. Landing it required substantial
+condensing, and the criterion the guidance already stated for itself did that
+work: norms no gate fires on stayed, mechanisms shrank to a name and a pointer
+into the generated reference. `dev guidance` reports the per-heading weights,
+because a single number says a cut is needed and nothing about where. A
+project with a thinner scaffold, or none, states its own share through the
+report's `headroom` parameter rather than forking the default.
+
 [README.md](README.md) indexes every guide these decisions govern.
 """
         )

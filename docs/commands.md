@@ -27,7 +27,7 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 | `dev merge-driver` | Register the ownership-manifest merge driver `.gitattributes` names. |
 | `dev delete` | Delete a branch and its worktree, and origin&#x27;s copy if it is spent. |
 | `dev retire` | Retire a branch through a pull request, so its commits outlive it. |
-| `dev archive-traces` | Copy a worktree&#x27;s session traces into the archive beside the repository. |
+| `dev archive-traces` | Copy a worktree&#x27;s session records into the archive beside the repository. |
 | `dev resolve-branch` | Create + switch to the resolve/&lt;id&gt; branch (a resolve editor&#x27;s first step). |
 | `dev resolve-review` | Render a resolve manifest and its branch diffs into one static HTML review. |
 | `dev resolve-summary` | Print per-concern verdicts from a resolve manifest. |
@@ -42,6 +42,7 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 | `dev undo` | List the recoverable snapshots of this tree, or take and expire them. |
 | `dev issues` | List the open issues a resolver run would take as evidence. |
 | `dev rules` | Generate the Lup rule and typed-suppression reference. |
+| `dev guidance` | Report what each section of the always-loaded guidance costs. |
 | `dev relocate` | Repoint every import of a module that moved between the two halves. |
 | `dev policy` | Show what the declared permission policy decides about an input, and why. |
 | `dev vocabulary` | Show every shell form the declared vocabulary judges, and how. |

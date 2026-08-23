@@ -10,9 +10,13 @@ import sh
 import typer
 from pydantic import BaseModel
 
-from lup.adapters.harness import claude_prompt_renderer, codex_prompt_renderer
+from lup.adapters.harness import guidance_artifacts
 from lup.codescan.markers import find_feedback
-from lup.harness.models import GUIDANCE_BYTE_BUDGET, PromptDocument, document_byte_size
+from lup.harness.models import (
+    GUIDANCE_BYTE_BUDGET,
+    TEMPLATE_GUIDANCE_HEADROOM,
+    document_byte_size,
+)
 from lup.workspace.paths import is_template_scaffold, project_root
 
 from lup.devtools.dev.antipatterns import scan_antipatterns
@@ -160,6 +164,85 @@ def inline_notes_lines(found: list[FoundComment], scaffold: bool = False) -> lis
     return lines
 
 
+def guidance_bytes(compositions: list[NativeHarnessComposition]) -> int:
+    """The heaviest always-loaded document any runtime tree renders, in bytes.
+
+    Read off the compiled artifacts rather than re-rendered from the parts,
+    because ``reject_oversized_guidance`` refuses on ``artifact.content`` —
+    banner included — and a row measuring anything else is not measuring the
+    gate it reports for. Re-rendering read 260 bytes light, which is a window
+    where the row says ok about a tree generation would refuse.
+    """
+    sizes = [
+        document_byte_size(artifact.content)
+        for composition in compositions
+        for artifact in guidance_artifacts(composition.recipe.desired)
+    ]
+    if not sizes:
+        raise ValueError(
+            "no target renders an always-loaded guidance artifact, so its "
+            "budget cannot be weighed — a runtime tree lost its "
+            "'harness.guidance' artifact, or no targets were resolved."
+        )
+    return max(sizes)
+
+
+def budget_reports(used: int, scaffold: bool) -> list[CheckReport]:
+    """Every verdict the guidance's weight earns, given what this repository is.
+
+    The runtime ceiling always; the scaffold's share of it only while this
+    repository is still the template, because only then is the document one
+    somebody else inherits and only then is there a reservation to keep.
+    """
+    return [
+        guidance_budget_report(used),
+        *([scaffold_budget_report(used)] if scaffold else []),
+    ]
+
+
+def guidance_budget_report(used: int) -> CheckReport:
+    """Whether a session will load the whole document or a truncated one."""
+    free = GUIDANCE_BYTE_BUDGET - used
+    state = "ok" if free >= 0 else f"FAIL (over by {-free})"
+    return CheckReport(
+        name="guidance budget",
+        passed=free >= 0,
+        lines=[
+            f"guidance budget: {state} — {used}/{GUIDANCE_BYTE_BUDGET} bytes, "
+            f"{free} free"
+        ],
+    )
+
+
+def scaffold_budget_report(
+    used: int, headroom: int = TEMPLATE_GUIDANCE_HEADROOM
+) -> CheckReport:
+    """Whether a scaffold has left its adopter room inside the runtime ceiling.
+
+    A separate verdict from the budget row beside it, because the two ask
+    different questions of the same number. That one asks whether a runtime
+    will truncate this tree, which is true of every project. This one asks
+    whether a repository still shipping as a template is spending guidance
+    budget on itself that the domain adopting it will need for its own
+    architecture and conventions — and there is no domain yet to notice.
+
+    Gating rather than advisory: a reservation nobody has to honour is spent
+    by the first section that wants the room, which is how the headroom
+    disappeared before anyone declared one.
+    """
+    ceiling = GUIDANCE_BYTE_BUDGET - headroom
+    over = used - ceiling
+    state = "ok" if over <= 0 else f"FAIL (over by {over})"
+    return CheckReport(
+        name="scaffold budget",
+        passed=over <= 0,
+        lines=[
+            f"scaffold budget: {state} — {used}/{ceiling} bytes, "
+            f"{headroom} reserved for the adopting domain"
+        ],
+    )
+
+
 def changed_paths(since: str) -> list[str]:
     """Every tracked path this tree changed since a ref, as posix strings.
 
@@ -201,7 +284,6 @@ def scan_reports(
     scope: list[str] | None,
     compositions: list[NativeHarnessComposition],
     repository_writers: list[RepositoryWriter],
-    guidance: PromptDocument,
     git_guards: list[GitGuard],
 ) -> list[CheckReport]:
     """Every check the gate answers itself, in the order it reports them."""
@@ -373,20 +455,7 @@ def scan_reports(
             else ["roster parity: ok"],
         )
 
-        used = max(
-            document_byte_size(claude_prompt_renderer().render(guidance)),
-            document_byte_size(codex_prompt_renderer().render(guidance)),
-        )
-        free = GUIDANCE_BYTE_BUDGET - used
-        state = "ok" if free >= 0 else f"FAIL (over by {-free})"
-        yield CheckReport(
-            name="guidance budget",
-            passed=free >= 0,
-            lines=[
-                f"guidance budget: {state} — {used}/{GUIDANCE_BYTE_BUDGET} bytes, "
-                f"{free} free"
-            ],
-        )
+        yield from budget_reports(guidance_bytes(compositions), scaffold)
 
         # advisory — reports another tree's state, so it never gates this one
         unlanded = unlanded_siblings()
@@ -414,7 +483,6 @@ def run_checks(
     test_roots: list[TestRoot],
     compositions: list[NativeHarnessComposition],
     repository_writers: list[RepositoryWriter],
-    guidance: PromptDocument,
     git_guards: list[GitGuard],
     scope: list[str] | None = None,
     test_workers: int = TEST_WORKERS,
@@ -441,7 +509,6 @@ def run_checks(
         scope,
         compositions,
         repository_writers,
-        guidance,
         git_guards,
     )
 

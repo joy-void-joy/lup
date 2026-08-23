@@ -66,6 +66,13 @@ from lup.devtools.dev.worktree import RelocationHint
 from lup.devtools.layout import get_tree_dir
 
 
+@runtime_checkable
+class LaunchCheckpoint(Protocol):
+    """Application-owned data persistence at native launch boundaries."""
+
+    def __call__(self, *, provider: str) -> None: ...
+
+
 def relocation_hint(worktree_path: Path) -> RelocationHint:
     """Name the follow-through in the vocabulary of the running harness.
 
@@ -708,11 +715,14 @@ def launch_claude(
     mode: LaunchMode | None = None,
     resume: Resumption = Resumption(),
     relaxed: bool = False,
+    checkpoint: LaunchCheckpoint | None = None,
 ) -> None:
     """Generate/reconcile Claude artifacts and launch the verified local plugin."""
     contradiction = resume.contradicted()
     if contradiction is not None:
         raise typer.BadParameter(contradiction)
+    if checkpoint is not None and not generate_only:
+        checkpoint(provider="claude")
     plugin = composition.recipe.source.plugins[0]
     announce_relaxed_rules(relaxed, plugin)
     if not ready_to_open(composition, generate_only):
@@ -776,6 +786,8 @@ def launch_claude(
         raise typer.Exit(error.exit_code) from error
     finally:
         transcript.close(succeeded=succeeded)
+        if checkpoint is not None:
+            checkpoint(provider="claude")
 
 
 # For the reason spelled at `launch_claude`: the mode is one optional argument
@@ -791,11 +803,14 @@ def launch_codex(
     mode: LaunchMode | None = None,
     resume: Resumption = Resumption(),
     relaxed: bool = False,
+    checkpoint: LaunchCheckpoint | None = None,
 ) -> None:
     """Generate/reconcile Codex artifacts and launch without updating the CLI."""
     contradiction = resume.contradicted()
     if contradiction is not None:
         raise typer.BadParameter(contradiction)
+    if checkpoint is not None and not generate_only:
+        checkpoint(provider="codex")
     plugin = composition.recipe.source.plugins[0]
     announce_relaxed_rules(relaxed, plugin)
     if not ready_to_open(composition, generate_only):
@@ -857,3 +872,5 @@ def launch_codex(
         transcript.close(succeeded=succeeded)
         if home.isolated and store.publish(project_root()):
             typer.echo("Returned the refreshed Codex login to the account home")
+        if checkpoint is not None:
+            checkpoint(provider="codex")

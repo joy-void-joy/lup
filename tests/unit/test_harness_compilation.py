@@ -35,7 +35,10 @@ from lup.adapters.harness import (
     codex_prompt_renderer,
     compile_claude,
     compile_codex,
+    guidance_artifacts,
 )
+from lup.devtools.dev.check import budget_reports, scaffold_budget_report
+from lup.workspace.paths import is_template_scaffold
 from lup.codescan.registry import RULE_REFERENCE
 from lup.devtools.dev.commands import COMMAND_REFERENCE
 from lup.devtools.harness.drift import roster_gaps
@@ -56,6 +59,7 @@ from lup.harness.validation import validated_tree
 from lup.harness.models import (
     GUIDANCE_BYTE_BUDGET,
     INVOCATION_SIGILS,
+    TEMPLATE_GUIDANCE_HEADROOM,
     Agent,
     Argument,
     Artifact,
@@ -355,6 +359,95 @@ def test_guidance_stays_within_its_always_loaded_budget() -> None:
             f"{runtime} guidance is {used} bytes, over budget by "
             f"{used - GUIDANCE_BYTE_BUDGET}"
         )
+
+
+def test_the_scaffold_leaves_its_adopter_room_inside_the_runtime_ceiling() -> None:
+    """A template may spend only part of the budget every domain inherits.
+
+    The runtime ceiling is what a session will load. A repository still
+    shipping as the scaffold is writing guidance every domain built on it
+    starts from, and that domain then describes its own architecture and
+    conventions inside whatever is left — so the scaffold is held to the
+    smaller number, and the difference is what the adopter gets.
+    """
+    for composition in (claude_target(Path.cwd()), codex_target(Path.cwd())):
+        for artifact in guidance_artifacts(composition.recipe.desired):
+            used = document_byte_size(artifact.content)
+            ceiling = GUIDANCE_BYTE_BUDGET - TEMPLATE_GUIDANCE_HEADROOM
+            assert used <= ceiling, (
+                f"{artifact.path.as_posix()} is {used} bytes, over the "
+                f"{ceiling} scaffold ceiling by {used - ceiling}. It fits the "
+                f"runtime's {GUIDANCE_BYTE_BUDGET}, but leaves an adopting "
+                f"domain less than the {TEMPLATE_GUIDANCE_HEADROOM} bytes "
+                "reserved for its own guidance."
+            )
+
+
+def test_the_scaffold_ceiling_is_weighed_only_while_the_flag_stands() -> None:
+    """An adopted repository is held to the runtime ceiling and nothing else.
+
+    The reservation exists to stop a scaffold spending its adopter's budget.
+    Once adopted there is no further adopter to reserve for, and a domain that
+    inherited a lean document is entitled to spend what it saved.
+    """
+    fits = GUIDANCE_BYTE_BUDGET - TEMPLATE_GUIDANCE_HEADROOM
+
+    assert [report.name for report in budget_reports(fits, scaffold=True)] == [
+        "guidance budget",
+        "scaffold budget",
+    ]
+    assert [report.name for report in budget_reports(fits, scaffold=False)] == [
+        "guidance budget"
+    ]
+
+
+def test_a_document_between_the_two_ceilings_fails_only_the_scaffold() -> None:
+    """The two rows answer different questions, so they disagree in that band.
+
+    A document over the scaffold's share but inside the runtime's will reach a
+    session whole — nothing is truncated, and the runtime row is right to pass.
+    What it has spent is its adopter's room, which is the only row that can say
+    so. If both rows ever agree on everything, one of them is redundant.
+    """
+    between = GUIDANCE_BYTE_BUDGET - TEMPLATE_GUIDANCE_HEADROOM + 1
+
+    verdicts = {report.name: report.passed for report in budget_reports(between, True)}
+
+    assert verdicts == {"guidance budget": True, "scaffold budget": False}
+
+
+def test_this_repository_is_still_the_scaffold_that_reservation_assumes() -> None:
+    """The ceiling above binds only while the flag stands, so pin that it does.
+
+    Were the flag cleared here, both assertions about the lean document would
+    keep passing while nothing enforced them any more.
+    """
+    assert is_template_scaffold(Path.cwd())
+
+
+def test_the_scaffold_row_reports_the_reservation_it_withholds() -> None:
+    """Over budget, the row names the overage rather than only failing."""
+    ceiling = GUIDANCE_BYTE_BUDGET - TEMPLATE_GUIDANCE_HEADROOM
+
+    fits = scaffold_budget_report(ceiling)
+    over = scaffold_budget_report(ceiling + 1)
+
+    assert fits.passed
+    assert not over.passed
+    assert "over by 1" in over.lines[0]
+    assert str(TEMPLATE_GUIDANCE_HEADROOM) in fits.lines[0]
+
+
+def test_a_project_may_reserve_a_different_share_than_this_one() -> None:
+    """The headroom is this repository's judgement, not a fact about a runtime.
+
+    A downstream project with a thinner scaffold, or none, states its own
+    share rather than forking the module that declares the default.
+    """
+    used = GUIDANCE_BYTE_BUDGET - 1_000
+
+    assert scaffold_budget_report(used, headroom=512).passed
+    assert not scaffold_budget_report(used, headroom=4_096).passed
 
 
 def test_codex_config_states_the_same_ceiling_the_check_enforces() -> None:

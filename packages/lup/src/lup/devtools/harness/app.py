@@ -52,6 +52,7 @@ def create_harness_app(
     model: resolve.ConfiguredModel | None = None,
     profiles: ProfileDirectory | None = None,
     launch_modes: list[launch.LaunchMode] | None = None,
+    checkpoint: launch.LaunchCheckpoint | None = None,
 ) -> typer.Typer:
     """Wire the harness command tree over the targets one project declares.
 
@@ -64,6 +65,8 @@ def create_harness_app(
     to every launcher; selecting one compiles the tree it declares instead of
     the default, so the mode reaches the artifacts a runtime reads at startup
     rather than only the command line this tree assembles.
+
+    ``checkpoint`` saves application data before generation and after closing.
     """
     directory = profiles or claude_profile_directory()
     modes = launch_modes or []
@@ -566,6 +569,7 @@ def create_harness_app(
                 selection.mode,
                 Resumption(latest=continue_latest, pick=resume, session=session),
                 ignore_antipatterns,
+                checkpoint,
             )
 
     codex_target = targets.builder("codex")
@@ -639,6 +643,7 @@ def create_harness_app(
                 selection.mode,
                 Resumption(latest=continue_latest, pick=resume, session=session),
                 ignore_antipatterns,
+                checkpoint,
             )
 
     return app

@@ -556,6 +556,26 @@ however little literal text the declaration holds. Reference material that a
 skill or a denial message surfaces at the right moment belongs in a generated
 document under ``docs/`` instead, reached by a file-path pointer."""
 
+TEMPLATE_GUIDANCE_HEADROOM = 12_288
+"""Bytes a scaffold holds back, out of the budget above, for its adopter.
+
+The ceiling above is what a *runtime* will load. This is what a **template**
+may spend of it, and the difference is the whole point: a repository that is
+still the scaffold is writing guidance every domain built on it inherits, and
+that domain then has to describe its own architecture, conventions and
+workflow inside whatever is left. A scaffold that fills the runtime's ceiling
+has not passed its budget on, it has spent it — and the adopter discovers this
+by writing three paragraphs about its own project and being refused.
+
+12 KiB because that is what this repository's own architecture, conventions
+and tooling sections cost together: enough for a domain to say the equivalent
+about itself, rather than a round number that sounds generous.
+
+Only ``dev check`` weighs this, and only while ``[tool.lup] template = true``.
+It must never reach ``budget`` on the checks above: those decide what a real
+runtime is told to load, and a scaffold's self-restraint is not a fact about
+any runtime's ceiling."""
+
 
 def document_byte_size(text: str) -> int:
     """What a rendered document costs the runtime that loads it, in UTF-8 bytes."""

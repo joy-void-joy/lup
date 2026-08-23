@@ -1,6 +1,7 @@
 """Worktree-scoped Codex home selection and first-use initialization."""
 
 import json
+import plistlib
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -20,6 +21,11 @@ from lup.adapters.codex.home import (
     untrusted_hooks,
 )
 from lup.adapters.codex.marketplace import CodexMarketplace
+from lup.adapters.codex.theme import (
+    TextMateStyle,
+    TextMateThemeDocument,
+    claude_daltonized_theme,
+)
 
 
 ACCOUNT_CONFIG = """\
@@ -153,6 +159,52 @@ def test_prepare_seeds_auth_and_sanitized_personal_settings(tmp_path: Path) -> N
     profile = tomlkit.parse((scoped / "review.config.toml").read_text(encoding="utf-8"))
     assert profile["model_reasoning_effort"] == "high"
     assert "plugins" not in profile
+
+
+def test_claude_daltonized_theme_uses_truecolor_palette() -> None:
+    theme = claude_daltonized_theme()
+    rules = {
+        rule.name: rule.settings
+        for rule in theme.document.settings
+        if rule.name is not None
+    }
+    assert theme.document.settings[0].settings.foreground == "#F8F8F2"
+    assert rules["Comments"].foreground == "#75715E"
+    assert rules["Keywords and operators"].foreground == "#F92672"
+    assert rules["Storage"].foreground == "#66D9EF"
+    assert rules["Strings"].foreground == "#E6DB74"
+    assert rules["Numbers and constants"].foreground == "#BE84FF"
+    assert rules["Diff additions"] == TextMateStyle(
+        background="#001B29", foreground="#51A0C8"
+    )
+    assert rules["Diff deletions"] == TextMateStyle(
+        background="#3D0100", foreground="#DC5A5A"
+    )
+
+
+def test_prepare_generates_theme_without_selecting_it(tmp_path: Path) -> None:
+    account = tmp_path / "account"
+    account.mkdir()
+    worktree = tmp_path / "worktree"
+    worktree.mkdir()
+    store = CodexWorktreeHomeStore(account)
+    theme = claude_daltonized_theme()
+    parsed_theme = TextMateThemeDocument.model_validate(
+        plistlib.loads(theme.render().encode("utf-8"))
+    )
+    assert parsed_theme == theme.document
+
+    scoped = store.prepare(worktree)
+    generated = scoped / "themes" / "claude-daltonized.tmTheme"
+
+    assert generated.read_text(encoding="utf-8") == theme.render()
+    config = tomlkit.parse((scoped / "config.toml").read_text(encoding="utf-8"))
+    assert "tui" not in config
+
+    generated.write_text("stale", encoding="utf-8")
+    store.prepare(worktree)
+
+    assert generated.read_text(encoding="utf-8") == theme.render()
 
 
 def test_prepare_preserves_scoped_state_after_first_use(tmp_path: Path) -> None:

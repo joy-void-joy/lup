@@ -153,6 +153,7 @@ def bundled_dispatcher() -> ModuleType:
 
 def worktree(root: Path) -> Path:
     (root / ".git").mkdir(parents=True)
+    (root / ".git" / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
     return root
 
 
