@@ -38,6 +38,8 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 | `dev refutations` | Resolve one file&#x27;s proposed content and report what it refutes. |
 | `dev directives` | Measure every `# lup: ignore` against the canonical inline placement. |
 | `dev report-friction` | File or correct workflow friction in this checkout&#x27;s repository. |
+| `dev upstream` | Print a measured upstream defect, or list the ones declared. |
+| `dev undo` | List the recoverable snapshots of this tree, or take and expire them. |
 | `dev issues` | List the open issues a resolver run would take as evidence. |
 | `dev rules` | Generate the Lup rule and typed-suppression reference. |
 | `dev relocate` | Repoint every import of a module that moved between the two halves. |

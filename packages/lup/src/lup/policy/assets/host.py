@@ -120,6 +120,29 @@ def shared_git_directory(path_text: str) -> str:
     return str(linked.parents[1])
 
 
+def foreign_repository(path_text: str, root: Path | None) -> bool:
+    """Whether this path belongs to a repository other than the session's.
+
+    The discriminator is the *repository*, never the checkout. A sibling
+    worktree of this repository is still this repository's code and still
+    answers to its conventions, so comparing checkout roots would lift every
+    rule the moment work moved one directory sideways -- which is most of how
+    this project is worked on. :func:`shared_git_directory` is the answer both
+    ends can name alike, whichever worktree either of them is sitting in.
+
+    Undecidable answers say no. A path in no repository, a session in no
+    repository, and an unreadable ``.git`` all leave one side blank, and the
+    honest reading of "cannot tell" is that this project's rules still apply:
+    lifting them on a guess would silence the gates on this repository's own
+    files, where keeping them costs friction somewhere that is not ours.
+    """
+    if root is None:
+        return False
+    here = shared_git_directory(str(root))
+    there = shared_git_directory(path_text)
+    return bool(here) and bool(there) and here != there
+
+
 def publish_edition(path_text: str) -> None:
     """Say which checkout an edit landed in, for the servers that would guess.
 

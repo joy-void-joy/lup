@@ -23,7 +23,7 @@
             "type": "command"
           }
         ],
-        "matcher": "apply_patch|Bash"
+        "matcher": "apply_patch"
       }
     ],
     "PreToolUse": [

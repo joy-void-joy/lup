@@ -24,6 +24,7 @@ from kernel.decision import KernelDecision, SANDBOX_TRAPPED_REASON
 from kernel.shell import auto_escape_matches
 from policy_data import AUTO_ESCAPE_PREFIXES
 from policy_data import AGENT_IDENTITY_ENV, AUTONOMOUS_AGENT_IDENTITIES
+from datetime import UTC, datetime
 
 # lup: ignore[subprocess] — `sh` is third-party and this half is compiled into a bare script that has no virtual environment to resolve it from
 import subprocess
@@ -150,6 +151,29 @@ def shared_git_directory(path_text: str) -> str:
     if len(linked.parents) < 2:
         return ""
     return str(linked.parents[1])
+
+
+def foreign_repository(path_text: str, root: Path | None) -> bool:
+    """Whether this path belongs to a repository other than the session's.
+
+    The discriminator is the *repository*, never the checkout. A sibling
+    worktree of this repository is still this repository's code and still
+    answers to its conventions, so comparing checkout roots would lift every
+    rule the moment work moved one directory sideways -- which is most of how
+    this project is worked on. :func:`shared_git_directory` is the answer both
+    ends can name alike, whichever worktree either of them is sitting in.
+
+    Undecidable answers say no. A path in no repository, a session in no
+    repository, and an unreadable ``.git`` all leave one side blank, and the
+    honest reading of "cannot tell" is that this project's rules still apply:
+    lifting them on a guess would silence the gates on this repository's own
+    files, where keeping them costs friction somewhere that is not ours.
+    """
+    if root is None:
+        return False
+    here = shared_git_directory(str(root))
+    there = shared_git_directory(path_text)
+    return bool(here) and bool(there) and here != there
 
 
 def publish_edition(path_text: str) -> None:
@@ -440,13 +464,27 @@ def existing_write_targets(targets: list[str], root: Path | None = None) -> list
     return [target for target in targets if (where / target).exists()]
 
 
-def git_answers(arguments: list[str], root: Path) -> list[str] | None:
-    """One read-only Git query's lines, or None when Git cannot answer.
+def git_answers(
+    arguments: list[str],
+    root: Path,
+    # lup: ignore[dict-str-payload] — variable names are an open set the caller
+    # supplies, not an enumerable one this signature could name
+    overrides: dict[str, str] | None = None,
+) -> list[str] | None:
+    """One Git invocation's lines, or None when Git cannot answer.
 
     Git missing, the path outside a repository, a malformed pathspec, and a
     non-zero exit all collapse to None, so a caller reading this as evidence
     that something is safe to destroy treats an unanswerable question as a no.
+
+    ``overrides`` are merged over the inherited environment rather than
+    replacing it, because a replacement drops ``PATH`` and ``HOME`` and the
+    invocation then fails for a reason that has nothing to do with what it
+    was asked. The one caller that passes any is the snapshot, which needs
+    ``GIT_INDEX_FILE`` pointed somewhere other than the index a human is in
+    the middle of composing.
     """
+    environ = os.environ  # lup: ignore[os-environ]
     try:
         finished = subprocess.run(
             ["git", *arguments],
@@ -454,10 +492,89 @@ def git_answers(arguments: list[str], root: Path) -> list[str] | None:
             capture_output=True,
             text=True,
             check=False,
+            env={**environ, **overrides} if overrides else None,
         )
     except OSError:
         return None
     return finished.stdout.splitlines() if finished.returncode == 0 else None
+
+
+def undo_namespace() -> str:
+    """Where snapshots live: a ref namespace of this project's own.
+
+    Under ``refs/`` rather than in a stash so nothing a human does to their
+    stash disturbs them, and outside ``refs/heads`` so no branch listing,
+    push, or fetch treats them as work anybody meant to publish.
+
+    A function rather than a constant because this half is spliced into the
+    compiled dispatcher one function at a time, and a name beside them is
+    dropped on the way in — read by the type checker, absent from the script.
+    Being a function is also what makes it importable by the command that
+    lists snapshots back, so the writer and the reader cannot end up looking
+    in two different places for the same safety net.
+    """
+    return "refs/lup/undo"
+
+
+def undo_snapshot(
+    root: Path | None,
+    reason: str,
+    session: str = "default",
+    namespace: str = "",
+) -> str:
+    """Write the working tree into the object store before something destroys it.
+
+    The whole argument for relaxing a permission lattice is that a mistake can
+    be undone, so this is what has to exist before that relaxation is honest.
+    Tracked content *and* untracked files, through a throwaway index rather
+    than through ``git stash create``: measured, ``stash create`` captures only
+    tracked files that were modified, so the file written thirty seconds ago
+    and not yet added -- precisely what ``rm -rf src/`` destroys -- is absent
+    from it exactly when it is reached for.
+
+    Ignored files are not captured, and that is a stated limit rather than an
+    oversight: on the checkout this was built in, ignored-but-precious content
+    came to 592 MB against a 21 MB object store, so capturing it would write
+    twenty-eight times the repository's whole history before every mutating
+    command. ``git clean -fdx`` therefore keeps asking, because it is the one
+    command whose purpose is destroying what this cannot restore, and a
+    credential belongs outside the checkout rather than inside one.
+
+    Silent about its own failure, and deliberately. This runs in front of a
+    command somebody asked for; a checkout mid-merge, a locked index, and a
+    repository this process cannot write to are all reasons a snapshot cannot
+    be taken, and none of them is a reason to stop the command. An empty
+    string says no snapshot exists, which is what a caller needs to know and
+    all it needs to know.
+
+    In the compiled dispatcher rather than behind ``lup-devtools`` because of
+    what it costs. Measured on a 2,634-file checkout of this repository: 81 ms
+    for the first snapshot of a session, then a median of 11 ms warm and 14 ms
+    with a file changed, against roughly a second of interpreter start for a
+    subprocess that would do the same work. A safety net paid for on every
+    mutating command has to cost what this costs, or it is the first thing
+    somebody turns off -- and the warm figure is the one that matters, because
+    the cold index is paid once and reused for the rest of the session.
+    """
+    if root is None:
+        return ""
+    directory = git_answers(["rev-parse", "--absolute-git-dir"], root)
+    if not directory:
+        return ""
+    private = {"GIT_INDEX_FILE": f"{directory[0]}/lup-undo-{session}.index"}
+    if git_answers(["add", "-A"], root, private) is None:
+        return ""
+    tree = git_answers(["write-tree"], root, private)
+    if not tree:
+        return ""
+    commit = git_answers(["commit-tree", tree[0], "-m", f"lup undo: {reason}"], root)
+    if not commit:
+        return ""
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%f")
+    reference = f"{namespace or undo_namespace()}/{stamp}-{commit[0][:8]}"
+    if git_answers(["update-ref", reference, commit[0]], root) is None:
+        return ""
+    return reference
 
 
 def recoverable_write_targets(
@@ -611,7 +728,7 @@ def bash_decision(
     passing is a rule that silently stopped applying.
     """
     acted_on = shell_path_verb_targets(command)
-    return decide_shell(
+    verdict = decide_shell(
         command,
         SHELL_RULES,
         ALLOWED_FETCH_SCOPES,
@@ -634,6 +751,46 @@ def bash_decision(
         target_tables=RUNNER_TARGET_TABLES,
         interactive=interactive,
         escapable=escapable,
+    )
+    if verdict.effect == "deny":
+        return verdict
+    return undo_point(
+        command, verdict, [*shell_write_targets(command), *acted_on], cwd
+    )
+
+
+def undo_point(
+    command: str, verdict: KernelDecision, targets: list[str], cwd: Path | None
+) -> KernelDecision:
+    """Snapshot the tree before a command that could destroy work in it.
+
+    The whole case for relaxing a permission lattice is that a mistake can be
+    put back, so this is what has to exist before that relaxation is honest.
+    What it does not need is a second list of destructive spellings: the
+    vocabulary already draws that line, and draws it more finely than a list
+    of verbs could. ``git reset`` is allowed and ``git reset --hard`` asks;
+    ``git switch`` is allowed and ``git switch --force`` asks. So the mark is
+    the verdict itself — anything the classifier did not wave through — plus
+    the paths the command was already resolved to be writing, which is what
+    catches an allowed-because-recoverable ``rm`` of a tracked file.
+
+    Said out loud only on an approval question, which is the one moment the
+    information changes an answer: a human deciding whether to permit
+    something destructive is weighing exactly whether it can be undone. On an
+    allowed command the snapshot is silent, because a line appended to every
+    mutating command is one nobody reads by the third time — and ``dev undo``
+    is where a snapshot is looked for anyway.
+    """
+    if not targets and verdict.effect == "allow":
+        return verdict
+    reference = undo_snapshot(cwd, command)
+    if not reference or verdict.effect != "ask":
+        return verdict
+    return KernelDecision(
+        verdict.effect,
+        f"{verdict.reason} — the tree was snapshotted first; "
+        f"`lup-devtools dev undo` lists it as {reference}",
+        verdict.sandbox,
     )
 
 
@@ -678,6 +835,7 @@ def edit_decision(
     path_exists: bool,
     autonomous: bool,
     operation: str = "modify",
+    cwd: Path | None = None,
 ) -> KernelDecision:
     """Judge one file's before and after against the declared edit policy.
 
@@ -697,12 +855,19 @@ def edit_decision(
     server, which is the difference between a gate that costs a second per
     edit and one that costs a second on the edits that need it.
     """
+    outside_this_repository = foreign_repository(path_text, cwd)
     suffix = Path(path_text).suffix.lower()
     python_source = suffix in (".py", ".pyi")
     rows = ANTI_PATTERN_ROWS[suffix] if suffix in ANTI_PATTERN_ROWS else []
+    # A checker is not started for a file this policy has already decided it
+    # has nothing to say about. It would resolve another repository's imports
+    # against another repository's environment to answer a rule that will not
+    # be applied, and pay a language server's second for the privilege.
     refuted = (
         resolved_refutations(path_text, after, RESOLUTION_COMMAND)
-        if after is not None and awaits_resolution(before, after, rows, python_source)
+        if not outside_this_repository
+        and after is not None
+        and awaits_resolution(before, after, rows, python_source)
         else None
     )
     return decide_edit(
@@ -722,6 +887,7 @@ def edit_decision(
         suffix=suffix,
         operation=operation,
         edit_rules=EDIT_RULES,
+        foreign=outside_this_repository,
     )
 
 
@@ -824,6 +990,11 @@ def joined(decisions):
 def dispatch(payload, permission_request=False):
     name = payload["tool_name"]
     tool_input = payload["tool_input"]
+    # Where this session is rooted, which is what says whether a patched file
+    # belongs to the repository being worked on or to somebody else's. Read
+    # once, because the shell path and the patch path ask the same question of
+    # it and a second read is a second place it can be forgotten.
+    session_directory = Path(payload["cwd"]) if "cwd" in payload else None
     if name == "Bash":
         requested_escape = spent_escape(tool_input)
         escaped = requested_escape or auto_escape_matches(
@@ -838,7 +1009,7 @@ def dispatch(payload, permission_request=False):
             # request is the other supported route. Both are checked against
             # semantic placement before the hook lets the native boundary act.
             escapable=escaped,
-            cwd=Path(payload["cwd"]) if "cwd" in payload else None,
+            cwd=session_directory,
         )
         # PreToolUse can neither see nor place every native escape. Let Codex's
         # sandbox run a confined call or raise the PermissionRequest where this
@@ -870,6 +1041,7 @@ def dispatch(payload, permission_request=False):
                     change.path_exists,
                     autonomous,
                     change.operation(),
+                    session_directory,
                 )
                 for change in patched_files(tool_input["command"], read_document)
             ]

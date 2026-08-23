@@ -108,6 +108,7 @@ class StatedReason(SettlementRule):
             "ask",
             f"escalated ({facts.escalation}): {facts.decision.reason}",
             facts.decision.sandbox,
+            facts.escalation,
         )
 
 
@@ -123,7 +124,11 @@ class TrappedPlacement(SettlementRule):
     def reached(self, facts: SettlementFacts) -> KernelDecision | None:
         if facts.sandboxed and not facts.escapable:
             if facts.decision.sandbox == "outside":
-                return KernelDecision("deny", SANDBOX_TRAPPED_REASON)
+                return KernelDecision(
+                    "deny",
+                    SANDBOX_TRAPPED_REASON,
+                    escalated=facts.decision.escalated,
+                )
         return None
 
 
@@ -139,7 +144,9 @@ class UnanswerableQuestion(SettlementRule):
 
     def reached(self, facts: SettlementFacts) -> KernelDecision | None:
         if facts.decision.effect == "ask" and not facts.interactive:
-            return KernelDecision("defer", facts.decision.reason)
+            return KernelDecision(
+                "defer", facts.decision.reason, escalated=facts.decision.escalated
+            )
         return None
 
 
@@ -169,7 +176,11 @@ class Unjudged(SettlementRule):
 
     def reached(self, facts: SettlementFacts) -> KernelDecision | None:
         if facts.decision.effect == "defer":
-            return KernelDecision("deny", facts.decision.reason + facts.hint)
+            return KernelDecision(
+                "deny",
+                facts.decision.reason + facts.hint,
+                escalated=facts.decision.escalated,
+            )
         return None
 
 
@@ -183,7 +194,11 @@ class JudgedRefusal(SettlementRule):
 
     def reached(self, facts: SettlementFacts) -> KernelDecision | None:
         if facts.decision.effect == "deny":
-            return KernelDecision("deny", facts.decision.reason + facts.hint)
+            return KernelDecision(
+                "deny",
+                facts.decision.reason + facts.hint,
+                escalated=facts.decision.escalated,
+            )
         return None
 
 
