@@ -22,7 +22,6 @@ import lup.devtools.dev.branches as branches
 import lup.devtools.dev.check as check
 import lup.devtools.dev.comments as comments
 import lup.devtools.dev.git_guards as git_guards_mod
-import lup.devtools.dev.conflicts as conflicts
 import lup.devtools.dev.issues as issues_mod
 import lup.devtools.dev.traces as traces
 import lup.devtools.dev.model_config as model_config_mod
@@ -36,6 +35,7 @@ import lup.devtools.dev.rules as rules
 import lup.devtools.dev.worktree as worktree
 from lup.codescan.markers import NoteKind
 from lup.codescan.registry import all_rules
+from lup.devtools.dev.conflict_app import create_conflict_app
 from lup.devtools.utils import repository_slug
 from lup.devtools.harness.composition import NativeTargets
 from lup.devtools.harness.drift import RepositoryWriter
@@ -79,7 +79,7 @@ def create_dev_app(
     app = typer.Typer(no_args_is_help=True)
     worktree_app = typer.Typer(no_args_is_help=True)
     pr_app = typer.Typer(no_args_is_help=True)
-    conflict_app = typer.Typer(no_args_is_help=True)
+    conflict_app = create_conflict_app()
     plugin_app = typer.Typer(no_args_is_help=True)
     guard_app = typer.Typer(no_args_is_help=True)
     app.add_typer(worktree_app, name="worktree", help="Worktree management")
@@ -379,52 +379,6 @@ def create_dev_app(
         order and approval batches before opening the HTML page.
         """
         resolve_review.summarize(manifest)
-
-    # -- conflict commands --
-
-    @conflict_app.command("list")
-    def conflict_list_cmd(
-        as_json: Annotated[
-            bool,
-            typer.Option("--json", help="Output as JSON"),
-        ] = False,
-    ) -> None:
-        """Show conflicted files with scope classification (in-scope vs out-of-scope)."""
-        conflicts.conflicts(as_json)
-
-    @conflict_app.command("status")
-    def conflict_status_cmd(
-        as_json: Annotated[
-            bool,
-            typer.Option("--json", help="Output as JSON"),
-        ] = False,
-    ) -> None:
-        """Detect conflict state, list files, and show both sides' history."""
-        conflicts.conflict_status(as_json)
-
-    @conflict_app.command("audit")
-    def conflict_audit_cmd(
-        files: Annotated[
-            list[str],
-            typer.Argument(help="Files to audit for accidental deletions"),
-        ],
-        as_json: Annotated[
-            bool,
-            typer.Option("--json", help="Output as JSON"),
-        ] = False,
-    ) -> None:
-        """Post-resolution deletion audit: check for accidentally dropped code."""
-        conflicts.conflict_audit(files, as_json)
-
-    @conflict_app.command("complete")
-    def conflict_complete_cmd(
-        dry_run: Annotated[
-            bool,
-            typer.Option("--dry-run", "-n", help="Show what would happen"),
-        ] = False,
-    ) -> None:
-        """Finalize the merge/rebase/cherry-pick after all conflicts are resolved."""
-        conflicts.conflict_complete(dry_run)
 
     # -- git-hooks commands --
 

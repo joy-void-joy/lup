@@ -12,6 +12,7 @@ workflow has to run there through the launcher the documentation names.
 
 import io
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -245,6 +246,35 @@ def test_whole_conflict_workflow_runs_against_a_conflicted_manifest(
 
     completion = str(documented_launcher("dev", "conflict", "complete", "--dry-run"))
     assert "git commit --no-edit" in completion
+
+
+def test_conflict_workflow_does_not_import_the_project_application(
+    conflicted_manifest_repo: Path,
+    documented_launcher: sh.Command,
+    tmp_path: Path,
+) -> None:
+    """Repair starts while a module imported by the ordinary CLI is conflicted."""
+    shadow = tmp_path / "shadow"
+    application = shadow / "lup_template" / "devtools" / "main.py"
+    application.parent.mkdir(parents=True)
+    (application.parent.parent / "__init__.py").touch()
+    (application.parent / "__init__.py").touch()
+    application.write_text(
+        "<<<<<<< ours\napp = None\n=======\napp = False\n>>>>>>> theirs\n",
+        encoding="utf-8",
+    )
+
+    output = documented_launcher(
+        "dev",
+        "conflict",
+        "status",
+        "--json",
+        _env={**os.environ, "PYTHONPATH": str(shadow)},
+    )
+
+    report = json.loads(str(output))
+    assert report["operation"] == "merge"
+    assert report["conflicted_files"] == [conflicts.MANIFEST]
 
 
 def test_a_started_command_resolves_the_conflicted_project_as_its_root(

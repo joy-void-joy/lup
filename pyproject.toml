@@ -40,7 +40,10 @@ dependencies = [
 
 [project.scripts]
 lup = "lup_template.environment.cli.__main__:app"
-lup-devtools = "lup_template.devtools.main:app"
+lup-devtools = "lup.devtools.entrypoint:main"
+
+[project.entry-points."lup.devtools"]
+application = "lup_template.devtools.main:app"
 
 [project.urls]
 Homepage = "https://github.com/joy-void-joy/lup"
