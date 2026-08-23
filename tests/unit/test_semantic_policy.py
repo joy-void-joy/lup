@@ -55,6 +55,7 @@ from lup.policy.kernel.decision import (
     SANDBOX_ESCALATION_UNSUPPORTED,
     SANDBOX_TRAPPED_REASON,
     SandboxPlacement,
+    escalation_offer,
     sandbox_escaped,
 )
 from lup.policy.kernel.edit import decide_edit
@@ -1718,6 +1719,12 @@ def test_only_an_escalable_placement_reads_what_the_call_already_asked() -> None
         assert sandbox_escaped("outside", spent) is True
         assert sandbox_escaped("inside", spent) is False
         assert sandbox_escaped("escalable", spent) is spent
+
+
+def test_an_escalation_offer_only_reaches_a_tool_that_can_spend_it() -> None:
+    """A permission is not an offer when the tool has no escape field."""
+    assert escalation_offer("escalable", "fine", spendable=True) == "fine"
+    assert escalation_offer("escalable", "fine", spendable=False) == ""
 
 
 def test_fetch_policy_normalizes_origin_and_rejects_lookalikes() -> None:

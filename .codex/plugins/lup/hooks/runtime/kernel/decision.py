@@ -106,12 +106,14 @@ SANDBOX_ESCALATION_UNSUPPORTED = (
 )
 """What a permission to escalate degrades to where the agent cannot spend it.
 
-The offer withdrawn and the gap stated. Two different absences reach it — a
-runtime that gives the agent no words for leaving, and a session whose host
-refuses an unsandboxed command however it is asked for — and the agent can act
-on neither, so the wording names the outcome rather than the cause. Dropped in
-silence it would read as an offer, and an agent that spends a turn finding out
-otherwise learns nothing it can act on.
+The offer withdrawn and the gap stated. Three different absences reach it — a
+runtime that gives the agent no words for leaving, a session whose host
+refuses an unsandboxed command however it is asked for, and a *tool* with no
+field to carry the escape, since every runtime that offers one offers it on
+the shell tool alone. The agent can act on none of them, so the wording names
+the outcome rather than the cause. Dropped in silence it would read as an
+offer, and an agent that spends a turn finding out otherwise learns nothing it
+can act on.
 """
 
 # lup: ignore[constant-declaration] — the refusal a trapped call is stopped
@@ -133,7 +135,9 @@ success from a session that never ran a command.
 """
 
 
-def escalation_offer(sandbox: SandboxPlacement, reason: str) -> str:
+def escalation_offer(
+    sandbox: SandboxPlacement, reason: str, spendable: bool = True
+) -> str:
     """What a verdict says to the agent rather than about it, if anything.
 
     A permission channel's reason reaches whoever was asked, and that is never
@@ -151,8 +155,19 @@ def escalation_offer(sandbox: SandboxPlacement, reason: str) -> str:
     boundaries deliver it — both hook factories, the in-process renderer, and
     the compiled dispatcher — and a condition spelled out at each is one that
     can be spelled differently at each.
+
+    ``spendable`` is whether *this* call has somewhere to put the escape.
+    Every runtime that offers one offers it as a field of the shell tool's
+    own input, so an edit or a fetch carrying an escalable placement would be
+    handed a permission with nothing to spend it on — granted on the reason
+    channel and unspendable on the rewrite channel, which is the exact
+    mismatch :func:`sandbox_escaped` exists to prevent, in the direction
+    nobody was checking. Nothing declares such a placement today; the default
+    is permissive so that stays true of every caller that has not needed to
+    think about it, and the callers that judge more than one tool say which
+    they are holding.
     """
-    return reason if sandbox == "escalable" else ""
+    return reason if spendable and sandbox == "escalable" else ""
 
 
 def sandbox_escaped(sandbox: SandboxPlacement, agent_escaped: bool) -> bool:

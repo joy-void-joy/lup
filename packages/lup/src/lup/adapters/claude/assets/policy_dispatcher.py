@@ -260,7 +260,9 @@ def rendered(decision, payload, placed):
         "permissionDecision": settled.effect,
         "permissionDecisionReason": settled.reason,
     }
-    offer = escalation_offer(settled.sandbox, settled.reason)
+    offer = escalation_offer(
+        settled.sandbox, settled.reason, payload["tool_name"] == "Bash"
+    )
     if offer:
         answer["additionalContext"] = offer
     if placed is not None and settled.effect != "deny":
