@@ -178,7 +178,7 @@ regenerate.
 - /lup:feedback-loop — Full feedback loop — orchestrates status, investigation, analysis, reflection, and implementation
 - /lup:hooks — Inspect and modify the canonical semantic permission policy
 - /lup:implementer — Implement one resolver concern inside its leased worktree
-- /lup:import — Import a specific pattern from a tracked downstream repo
+- /lup:import — Import a feature or pattern from a tracked project or local Git source
 - /lup:init — Initialize the self-improvement loop for a specific domain
 - /lup:install — Install lup plugin and scaffolding into a target repo
 - /lup:land — Land every branch that has not reached the integration branch, and clear the ones that have
