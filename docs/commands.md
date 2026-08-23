@@ -40,6 +40,7 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 | `dev report-friction` | File or correct workflow friction in this checkout&#x27;s repository. |
 | `dev issues` | List the open issues a resolver run would take as evidence. |
 | `dev rules` | Generate the Lup rule and typed-suppression reference. |
+| `dev guidance` | Report what each section of the always-loaded guidance costs. |
 | `dev relocate` | Repoint every import of a module that moved between the two halves. |
 | `dev policy` | Show what the declared permission policy decides about an input, and why. |
 | `dev vocabulary` | Show every shell form the declared vocabulary judges, and how. |

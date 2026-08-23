@@ -55,8 +55,6 @@ from lup_template.devtools.harness.composition import (
     TARGETS,
     profile_directory,
 )
-from lup_template.devtools.harness.catalog import declared_hook_set
-from lup_template.devtools.harness.content.guidance import document as guidance_document
 from lup_template.devtools.setup import INTEGRATIONS
 from lup_template.devtools.subapps import APPLICATION_SPECS, SELECTION
 
@@ -90,7 +88,6 @@ DECLARATIONS = DevtoolsDeclarations(
     dev=dev.declared,
     targets=TARGETS,
     repository_writers=[*REPOSITORY_WIDE, command_reference],
-    guidance=guidance_document(declared_hook_set().rules),
     prompt=assembled_prompt,
     relocate_roots=[
         Path("src"),

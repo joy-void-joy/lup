@@ -22,6 +22,7 @@ import lup.devtools.dev.branches as branches
 import lup.devtools.dev.check as check
 import lup.devtools.dev.comments as comments
 import lup.devtools.dev.git_guards as git_guards_mod
+import lup.devtools.dev.guidance as guidance
 import lup.devtools.dev.issues as issues_mod
 import lup.devtools.dev.traces as traces
 import lup.devtools.dev.model_config as model_config_mod
@@ -41,11 +42,11 @@ from lup.devtools.harness.composition import NativeTargets
 from lup.devtools.harness.drift import RepositoryWriter
 from lup.devtools.harness.launch import relocation_hint
 from lup.devtools.project import DevProject
-from lup.harness.models import HookSet, Plugin, PromptDocument
+from lup.harness.models import HookSet, Plugin
 from lup.harness.process import LocalProcessLauncher
 from lup.policy.kernel.edit import SUPPRESSION_COLUMN_LIMIT
 from lup.policy.vocabulary import default_vocabulary
-from lup.workspace.paths import project_root
+from lup.workspace.paths import is_template_scaffold, project_root
 
 
 class DevDeclarations(BaseModel, frozen=True):
@@ -72,7 +73,6 @@ def create_dev_app(
     declared: Callable[[], DevDeclarations],
     native_targets: NativeTargets,
     repository_writers: list[RepositoryWriter],
-    guidance: PromptDocument,
     relocate_roots: list[Path],
 ) -> typer.Typer:
     """Wire the dev command tree over what one repository declares about itself."""
@@ -535,7 +535,6 @@ def create_dev_app(
             test_roots=declarations.test_roots,
             compositions=native_targets.resolve(native_targets.every, project_root()),
             repository_writers=repository_writers,
-            guidance=guidance,
             git_guards=declarations.git_guards,
             scope=check.changed_paths(since) if since is not None else None,
         )
@@ -857,6 +856,20 @@ def create_dev_app(
             raise typer.Exit(1) from error
         verb = "verified" if check_only else "written"
         typer.echo(f"Lup rule reference {verb}: {destination}")
+
+    @app.command("guidance")
+    def guidance_cmd(
+        by_size: Annotated[
+            bool,
+            typer.Option("--by-size", help="Heaviest section first, not reading order"),
+        ] = False,
+    ) -> None:
+        """Report what each section of the always-loaded guidance costs."""
+        guidance.report(
+            compositions=native_targets.resolve(native_targets.every, project_root()),
+            scaffold=is_template_scaffold(project_root()),
+            by_size=by_size,
+        )
 
     @app.command("relocate")
     def relocate_cmd(

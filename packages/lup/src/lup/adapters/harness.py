@@ -66,6 +66,21 @@ def codex_prompt_renderer() -> SpelledPromptRenderer:
     return prompt_renderer(CodexSpellings())
 
 
+def guidance_artifacts(tree: ArtifactTree) -> list[Artifact]:
+    """Every artifact in a tree that is a copy of the always-loaded document.
+
+    Which artifact that is belongs beside the gate that refuses on its size,
+    so a reader measuring the document and the gate weighing it select it the
+    same way. Codex renders two artifacts and only one is the guidance, so the
+    identity has to be asked rather than assumed from position.
+    """
+    return [
+        artifact
+        for artifact in tree.artifacts
+        if artifact.semantic_id == "harness.guidance"
+    ]
+
+
 def reject_oversized_guidance(
     tree: ArtifactTree, budget: int = GUIDANCE_BYTE_BUDGET
 ) -> None:
@@ -76,9 +91,9 @@ def reject_oversized_guidance(
     Bytes, not characters: that is the unit the runtime's own ceiling counts
     in, and the two differ wherever the document uses non-ASCII punctuation.
     """
-    for artifact in tree.artifacts:
+    for artifact in guidance_artifacts(tree):
         used = document_byte_size(artifact.content)
-        if artifact.semantic_id != "harness.guidance" or used <= budget:
+        if used <= budget:
             continue
         raise ValueError(
             f"rendered guidance {artifact.path.as_posix()} is {used} bytes, "

@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "6eaf76402c7b39d02a4b4b92824c2571d87d947a5eb23bda2a878ea5501b2832",
+  "source_digest": "c064c08c05c0f3704c570642b5c6171db85cdd36ebd5494a138fee52b55fc2e1",
   "target_requirements": [
     "claude-code"
   ],
@@ -9,7 +9,7 @@
     {
       "path": ".claude/CLAUDE.md",
       "category": "generated",
-      "sha256": "f2f35379a9e2110452161d545e97fe03ce211a064e96dd97d5ba3d950715c378",
+      "sha256": "30d42e75235d2c3a1f699055b3bd38109280d8ab826533980048e648f9c74edb",
       "semantic_id": "harness.guidance",
       "executable": false
     },
@@ -37,7 +37,7 @@
     {
       "path": ".claude/plugins/lup/TEMPLATE_CLAUDE.md",
       "category": "generated",
-      "sha256": "ddf67ad61ac3db466af47cf7c8b6f9d0a0c59c105e25afb00db14cc63446d3fc",
+      "sha256": "679aff54a295e25757f285ad0b15bae68873e545df1564c3a7c3f069eadc6682",
       "semantic_id": "harness.template-guidance",
       "executable": false
     },
@@ -184,7 +184,7 @@
     {
       "path": ".claude/plugins/lup/commands/init.md",
       "category": "generated",
-      "sha256": "7435dde72b62ad97673fdf9227f61ffa112444071285ed5076d6d5be4f001550",
+      "sha256": "955e1ad09b12ed308973d98ba6834a0059e58b75e4fc597fdd3a47a5e857c859",
       "semantic_id": "skill.init",
       "executable": false
     },
@@ -436,7 +436,7 @@
     {
       "path": "docs/contributing.md",
       "category": "generated",
-      "sha256": "72bf3e2ecb4ac207afde6e2294c6f19b9c5c426428acd4d306920e6214b3056d",
+      "sha256": "8a5b9447d915584156a85a738512bc03d50f052c7fbe1689df527e314326c1ab",
       "semantic_id": "docs.contributing",
       "executable": false
     },
@@ -450,7 +450,7 @@
     {
       "path": "docs/dev-tooling-decisions.md",
       "category": "generated",
-      "sha256": "b2132f83e64ba49fa77770bb6be92eaa6ea8bde6279b1a526310d499eeaedf23",
+      "sha256": "cec023e1dc55ff8469d8df55a8b04dea073830ccc590311207118514425425e3",
       "semantic_id": "docs.dev-tooling-decisions",
       "executable": false
     },
@@ -506,7 +506,7 @@
     {
       "path": "docs/quality-pipeline.md",
       "category": "generated",
-      "sha256": "3821a63cc26b585bf9e823f32c3c1bf8a39eb003c4a81e5ea9f6f7eae37510e7",
+      "sha256": "2389a3c09f025725e224b7e31b5b676f320cae4759645a318031a7ca16ef7669",
       "semantic_id": "docs.quality-pipeline",
       "executable": false
     },
