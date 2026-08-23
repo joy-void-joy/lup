@@ -43,6 +43,7 @@ from lup.telemetry.trace import (
 )
 from lup.workspace.history import (
     iter_session_dirs,
+    iter_trace_event_files,
     iter_trace_log_files,
     session_backend,
 )
@@ -316,11 +317,16 @@ def scan_for_capability_gaps(
 def find_trace(session_id: str) -> Path | None:
     """Find a showable trace for a session across all versions.
 
-    Prefers a markdown reasoning log, then any ``.md`` in the session dir,
-    then the session dir itself — whose JSON ``trace list`` enumerates, so
-    every listed id is showable (rendered readably by :func:`load_trace`).
+    Prefers the complete log directory, including reasoning and browser events,
+    then any ``.md`` in the session dir, then the session dir itself — whose
+    JSON ``trace list`` enumerates, so every listed id is showable.
     """
     log_files = list(iter_trace_log_files(session_id=session_id))
+    event_files = list(iter_trace_event_files(session_id=session_id))
+    versioned_logs = [path for path in log_files if path.parent.parent.name == "logs"]
+    log_dirs = {path.parent for path in [*versioned_logs, *event_files]}
+    if log_dirs:
+        return sorted(log_dirs)[-1]
     if log_files:
         return sorted(log_files)[-1]
 
@@ -375,9 +381,13 @@ def render_tool_calls(trace_path: Path) -> str:
 
     One line per call — ✓/✗ status, tool name, result brief — read from the
     events sidecar (or the legacy-markdown fallback for traces predating it).
-    Directories and JSON files carry no event stream; ``--full`` is the view
-    for those.
+    A log directory resolves to its newest reasoning trace. Browser-only logs
+    and session JSON carry no tool-call stream; ``--full`` is their view.
     """
+    if trace_path.is_dir():
+        markdown = sorted(trace_path.glob("*.md"))
+        if markdown:
+            trace_path = markdown[-1]
     if trace_path.suffix != ".md":
         return "(no tool-call events for this trace format — use --full)"
     lines = [
@@ -550,6 +560,14 @@ def list_traces(limit: int, effective: list[str] | None, as_json: bool) -> None:
             raw.append(
                 TraceRef(
                     source="logs", session_id=log_file.parent.name, path=log_file.parent
+                )
+            )
+        for event_file in iter_trace_event_files(version=ver):
+            raw.append(
+                TraceRef(
+                    source="logs",
+                    session_id=event_file.parent.name,
+                    path=event_file.parent,
                 )
             )
 

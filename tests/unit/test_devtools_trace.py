@@ -117,9 +117,36 @@ def test_iter_trace_log_files_version_filter(populated_project: Path) -> None:
 
 
 def test_show_prints_trace_content(populated_project: Path) -> None:
+    event_file = next(iter_trace_log_files(session_id="sess-00")).parent / "events.json"
+    event_file.write_text('[{"type": "progress"}]', encoding="utf-8")
     result = runner.invoke(app, ["trace", "show", "sess-00"])
     assert result.exit_code == 0, result.output
     assert "hello from sess-00" in result.output
+    assert '"type": "progress"' in result.output
+
+
+def test_show_prints_browser_events_without_reasoning_trace(
+    populated_project: Path,
+) -> None:
+    log_dir = (
+        populated_project
+        / "notes"
+        / "traces"
+        / LUP_PROJECT_VERSION
+        / "logs"
+        / "browser-only"
+    )
+    log_dir.mkdir(parents=True)
+    (log_dir / "events.json").write_text(
+        json.dumps([{"type": "agent", "status": "running"}]), encoding="utf-8"
+    )
+
+    result = runner.invoke(app, ["trace", "show", "browser-only", "--full"])
+
+    assert result.exit_code == 0, result.output
+    assert "events.json" in result.output
+    assert '"status": "running"' in result.output
+    assert "browser-only" in list_session_ids(["-v", LUP_PROJECT_VERSION])
 
 
 def test_show_missing_session_exits_nonzero(populated_project: Path) -> None:
