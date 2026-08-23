@@ -38,6 +38,7 @@ from lup.devtools.feedback.models import (
     LoadedSession,
     PromptHealthReport,
     PromptSection,
+    SessionLoader,
     ToolUsageEntry,
     TrendEntry,
 )
@@ -148,7 +149,12 @@ def print_aggregate_stats(sessions: list[LoadedSession]) -> None:
         typer.echo(f"  Total:  {total_input + total_output:,}")
 
 
-def costs(version: str | None, all_versions: bool, as_json: bool) -> None:
+def costs(
+    version: str | None,
+    all_versions: bool,
+    as_json: bool,
+    loader: SessionLoader = load_sessions_for_versions,
+) -> None:
     """Per-backend session cost/token rollup from session result JSONs.
 
     The cross-backend counterpart of ``lup-devtools usage claude`` (which is
@@ -161,7 +167,7 @@ def costs(version: str | None, all_versions: bool, as_json: bool) -> None:
     if ver_warning:
         typer.echo(ver_warning)
 
-    sessions = load_sessions_for_versions(effective)
+    sessions = loader(effective)
     rows = rollup_costs(sessions)
 
     if as_json:
@@ -212,6 +218,7 @@ def costs(version: str | None, all_versions: bool, as_json: bool) -> None:
 def status(
     version: str | None,
     all_versions: bool,
+    loader: SessionLoader = load_sessions_for_versions,
 ) -> None:
     """Show feedback status: version, data, analysis state, and aggregate stats."""
     scope = resolve_version(version, all_versions)
@@ -234,7 +241,7 @@ def status(
     typer.echo(f"Analyzed: {sum(1 for i in all_session_ids if i in analyzed)}")
     typer.echo(f"Unanalyzed: {len(unanalyzed_ids)}")
 
-    sessions = load_sessions_for_versions(effective)
+    sessions = loader(effective)
 
     if sessions:
         print_aggregate_stats(sessions)
@@ -260,6 +267,7 @@ def collect(
     output: Path | None,
     *,
     dry_run: bool = False,
+    loader: SessionLoader = load_sessions_for_versions,
 ) -> None:
     """Collect feedback metrics from sessions."""
     if since and all_time:
@@ -282,7 +290,7 @@ def collect(
         since_dt.isoformat() if since_dt else "all time",
     )
 
-    sessions = load_sessions_for_versions(effective)
+    sessions = loader(effective)
     if since_dt:
         sessions = [
             s
@@ -320,13 +328,18 @@ def collect(
     typer.echo(f"\nMetrics saved to: {output}")
 
 
-def tools(version: str | None, all_versions: bool, as_json: bool) -> None:
+def tools(
+    version: str | None,
+    all_versions: bool,
+    as_json: bool,
+    loader: SessionLoader = load_sessions_for_versions,
+) -> None:
     """Show tool usage aggregates."""
     scope = resolve_version(version, all_versions)
     effective, warning = scope.versions, scope.warning
     if warning:
         typer.echo(warning)
-    sessions = load_sessions_for_versions(effective)
+    sessions = loader(effective)
     if not sessions:
         if as_json:
             output_json([])
@@ -400,13 +413,14 @@ def errors(
     version: str | None,
     all_versions: bool,
     as_json: bool,
+    loader: SessionLoader = load_sessions_for_versions,
 ) -> None:
     """Show sessions with high error rates from structured metrics."""
     scope = resolve_version(version, all_versions)
     effective, warning = scope.versions, scope.warning
     if warning:
         typer.echo(warning)
-    sessions = load_sessions_for_versions(effective)
+    sessions = loader(effective)
     if not sessions:
         if as_json:
             output_json([])
@@ -448,13 +462,19 @@ def errors(
                 typer.echo(f"  - {tool_name}: {tool_data['error_count']}")
 
 
-def trends(window: int, version: str | None, all_versions: bool, as_json: bool) -> None:
+def trends(
+    window: int,
+    version: str | None,
+    all_versions: bool,
+    as_json: bool,
+    loader: SessionLoader = load_sessions_for_versions,
+) -> None:
     """Show metric trends over time."""
     scope = resolve_version(version, all_versions)
     effective, warning = scope.versions, scope.warning
     if warning:
         typer.echo(warning)
-    sessions = load_sessions_for_versions(effective)
+    sessions = loader(effective)
     if not sessions:
         if as_json:
             output_json([])
