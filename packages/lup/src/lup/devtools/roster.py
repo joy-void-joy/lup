@@ -35,7 +35,7 @@ from lup.devtools.feedback.models import AgentPrompt
 from lup.devtools.harness.app import create_harness_app
 from lup.devtools.harness.composition import NativeTargets
 from lup.devtools.harness.drift import RepositoryWriter
-from lup.devtools.harness.launch import LaunchMode
+from lup.devtools.harness.launch import LaunchCheckpoint, LaunchMode
 from lup.devtools.harness.resolve import ConfiguredModel
 from lup.devtools.hooks.app import create_hooks_app
 from lup.devtools.report.app import create_report_app
@@ -100,6 +100,9 @@ class DevtoolsDeclarations(BaseModel, frozen=True, arbitrary_types_allowed=True)
     a flag to every launcher, compiles the tree that mode declares while it is
     in force, and opens whatever that kind of session needs around the run."""
 
+    launch_checkpoint: LaunchCheckpoint | None = None
+    """Application data saved before generation and after the native CLI closes."""
+
     def roster(self) -> list[SubApp]:
         """Every sub-app the library ships, wired over these declarations."""
         return [entry.wired(self) for entry in LIBRARY_ROSTER]
@@ -153,6 +156,7 @@ LIBRARY_ROSTER = [
             declared.model,
             declared.profiles,
             declared.launch_modes,
+            declared.launch_checkpoint,
         ),
     ),
     RosterEntry(
