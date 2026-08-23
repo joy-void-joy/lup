@@ -67,7 +67,7 @@ def apply_command_row(row: ShellRuleRow, arguments: list[str]) -> KernelDecision
                 "allow",
                 "every argument is a declared read-only flag",
                 row["sandbox"],
-                row["recovery"],
+                recovery=row["recovery"],
             )
     if row["effect"] != "allow" and row["read_verbs"] and arguments:
         clean = not any(
@@ -79,7 +79,7 @@ def apply_command_row(row: ShellRuleRow, arguments: list[str]) -> KernelDecision
                 "allow",
                 "a declared read-only verb pins the query action",
                 row["sandbox"],
-                row["recovery"],
+                recovery=row["recovery"],
             )
     if row["effect"] != "allow" and row["write_markers"] and arguments:
         # Absence is the test, so every word has to be legible: one this
@@ -104,7 +104,7 @@ def apply_command_row(row: ShellRuleRow, arguments: list[str]) -> KernelDecision
                 "allow",
                 "no declared write marker is present, so this only reads",
                 row["sandbox"],
-                row["recovery"],
+                recovery=row["recovery"],
             )
     if row["effect"] == "allow" and row["ask_flags"]:
         opaque = next(
@@ -125,9 +125,11 @@ def apply_command_row(row: ShellRuleRow, arguments: list[str]) -> KernelDecision
                 "ask",
                 row["reason"] or f"{guarded} requires approval",
                 row["sandbox"],
-                row["recovery"],
+                recovery=row["recovery"],
             )
-    return KernelDecision(row["effect"], row["reason"], row["sandbox"], row["recovery"])
+    return KernelDecision(
+        row["effect"], row["reason"], row["sandbox"], recovery=row["recovery"]
+    )
 
 
 class Subcommand(TypedDict):
@@ -174,7 +176,7 @@ def split_subcommand(
                 "ask",
                 f"{executable} global flag {word} requires approval{redirect}",
                 placement,
-                restoration,
+                recovery=restoration,
             )
         position += 2 if word in value_flags else 1
     return Subcommand(word="", remainder=[])

@@ -399,6 +399,7 @@ def create(
     launcher: WorktreeLauncher,
     force: bool = False,
     no_record: bool = False,
+    clipboard: bool = False,
     extras: list[str] = GITIGNORED_EXTRAS,
     guards: list[GitGuard] = DECLARED_GUARDS,
 ) -> None:
@@ -502,10 +503,14 @@ def create(
     if hint.agent:
         typer.echo(f"  agent:  {hint.agent}")
 
-    if copy_to_clipboard(hint.shell):
-        typer.echo(f"  shell:  {hint.shell}   [copied to clipboard]")
-    else:
-        typer.echo(f"  shell:  {hint.shell}")
+    # Opt-in, because most runs of this command are an agent's. The clipboard
+    # is the human's own channel and a side effect nobody asked for is still a
+    # side effect: an agent that copied here would silently replace whatever
+    # its operator had put there, for a line the operator never sees.
+    copied = clipboard and copy_to_clipboard(hint.shell)
+    typer.echo(
+        f"  shell:  {hint.shell}" + ("   [copied to clipboard]" if copied else "")
+    )
 
 
 def worktree_status(path: str) -> str:

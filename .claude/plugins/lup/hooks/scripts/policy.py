@@ -648,8 +648,22 @@ def undo_snapshot(
     commit = git_answers(["commit-tree", tree[0], "-m", f"lup undo: {reason}"], root)
     if not commit:
         return ""
+    # The name carries both, and needs both. The stamp orders the listing
+    # exactly -- git records a commit's date to the second, so two states
+    # reached inside one second would otherwise tie, and a tie in a safety
+    # net's "newest" is wrong at the worst possible moment. The tree hash is
+    # what makes the state findable again: every earlier ref holding this
+    # same tree is retired just below, so the listing carries one entry per
+    # distinct state rather than one per command.
+    held = tree[0][:12]
+    where = namespace or undo_namespace()
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%f")
-    reference = f"{namespace or undo_namespace()}/{stamp}-{commit[0][:8]}"
+    for stale in (
+        git_answers(["for-each-ref", "--format=%(refname)", where], root) or []
+    ):
+        if stale.endswith(f"-{held}"):
+            git_answers(["update-ref", "-d", stale], root)
+    reference = f"{where}/{stamp}-{held}"
     if git_answers(["update-ref", reference, commit[0]], root) is None:
         return ""
     return reference

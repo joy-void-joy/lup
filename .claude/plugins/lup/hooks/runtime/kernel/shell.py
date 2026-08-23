@@ -877,12 +877,15 @@ def classify_shell(
         return denied
     asked = next((item for item in decisions if item.effect == "ask"), None)
     if asked is not None:
-        return KernelDecision("ask", asked.reason, placement, restoration)
+        return KernelDecision("ask", asked.reason, placement, recovery=restoration)
     deferred = next((item for item in decisions if item.effect == "defer"), None)
     if deferred is not None:
         return deferred
     return KernelDecision(
-        "allow", "every shell segment is declared safe", placement, restoration
+        "allow",
+        "every shell segment is declared safe",
+        placement,
+        recovery=restoration,
     )
 
 

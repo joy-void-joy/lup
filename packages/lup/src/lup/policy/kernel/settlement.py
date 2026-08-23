@@ -117,7 +117,6 @@ class StatedReason(SettlementRule):
         )
 
 
-
 class TrappedPlacement(SettlementRule):
     """A call declared ``outside`` on a host that cannot place it there.
 
