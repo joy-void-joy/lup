@@ -1,20 +1,27 @@
-"""Keep a worktree's session traces when the worktree itself is going away.
+"""Keep a worktree's session evidence when the worktree itself is going away.
 
-``notes/traces/`` is a tracked path that a commit loop rarely reaches, so a
-worktree routinely carries the only copy of what its sessions did. Deleting the
-worktree destroys it, and a feedback loop reading what remains sees sessions
-that never happened rather than evidence that was thrown away -- the one failure
-shape that cannot be noticed after the fact.
+The notes directory is ignored unless a repository opts into committing session
+data, so a worktree routinely carries the only copy of what its sessions did.
+Deleting the worktree destroys it, and a feedback loop reading what remains sees
+sessions that never happened rather than evidence that was thrown away -- the
+one failure shape that cannot be noticed after the fact.
 
 So the archive runs from ``delete_branch`` rather than from a step someone
 remembers: the loss happens at deletion, which is where the guard belongs. A
 deletion whose archive fails is refused, because continuing would produce the
 exact outcome being guarded against.
 
-Only the trace store is copied. A harness journal mirror is left alone: it
-mirrors what a native CLI writes under its own config directory, and that
-directory outlives every worktree, so the mirror is derived from a source that
-was never at risk.
+Everything under that directory is copied, the harness journal mirror included.
+The mirror reads as a derived artifact whose source is safe -- it mirrors what a
+native CLI writes under its own configuration home -- and that holds only where
+the home is the operator's own. A project profile is kept at ``.lup/profiles/``
+inside the checkout, so a launch on one leaves both the mirror and the record it
+mirrors within the worktree, and the deletion takes the pair.
+
+The profile home itself is not archived. It belongs to whichever checkout
+exported it rather than to the branch being deleted -- one home commonly serves
+sessions run from several worktrees -- and it holds the account's credentials
+beside its transcripts.
 
 The archive sits beside the repository's common directory rather than inside a
 worktree, for the reason the whole module exists: an archive kept inside a
@@ -94,27 +101,33 @@ def archive_root(name: str = ARCHIVE_DIRECTORY_NAME) -> Path:
     return resolved / name
 
 
-def traces_within(worktree: Path) -> Path:
-    """The traces directory of another worktree, by this project's own layout.
+def notes_within(worktree: Path) -> Path:
+    """The notes directory of another worktree, by this project's own layout.
 
     The relative segment is taken from the running configuration rather than
     hardcoded, so a tree that moved its notes directory archives from the place
     it actually writes.
+
+    The whole directory rather than one store inside it, so a session record
+    this module was never told about is kept by sitting where the others do.
+    Naming the stores would make each new one a line somebody has to remember,
+    and the failure that omission produces is the silent one this module exists
+    to prevent.
     """
-    return worktree / notes_path().relative_to(project_root()) / "traces"
+    return worktree / notes_path().relative_to(project_root())
 
 
 def archive(branch: str, dry_run: bool) -> ArchivedTraces:
-    """Copy one worktree's traces into the archive, skipping what is there.
+    """Copy one worktree's session records into the archive, skipping what is there.
 
-    Files already archived are left untouched rather than overwritten. A trace
+    Files already archived are left untouched rather than overwritten. A record
     is append-only evidence of a finished session, so a byte that differs from
     its archived copy is corruption somewhere, and silently replacing the
     archived one would destroy the better of the two.
 
     A branch with no worktree reports nothing to archive rather than failing:
     the caller is on its way to deleting a branch, and a branch never checked
-    out anywhere wrote no traces to lose.
+    out anywhere wrote nothing to lose.
     """
     # Imported here because the deletion path archives before it deletes, and a
     # module-level import in both directions is a cycle.
@@ -135,7 +148,7 @@ def archive(branch: str, dry_run: bool) -> ArchivedTraces:
         )
 
     worktree = Path(located)
-    source = traces_within(worktree)
+    source = notes_within(worktree)
     originals = (
         [path for path in sorted(source.rglob("*")) if path.is_file()]
         if source.is_dir()
