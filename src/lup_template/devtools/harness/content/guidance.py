@@ -167,7 +167,9 @@ When the tooling fights you, **fix it** rather than working around it and moving
 
 Either way, record what you observed rather than what you concluded: the exact command, the exact error, the state it left behind, and what the recovery cost. Name the component that owns the fix — a commit message where you fixed it, the issue where you could not. Evidence is worth more than a guess at the cause, and evidence is what the self-improvement loop below consumes.
 
-File that evidence with `uv run lup-devtools dev report-friction`; its required fields preserve the report shape and its repository target comes from this checkout. Pass `--issue NUMBER` to correct a report in place instead of duplicating it. Read `--help` for the exact options.
+File that evidence with `uv run lup-devtools dev report-friction`; its required fields preserve the report shape and its repository target comes from this checkout. Read `--help` for the exact options.
+
+**Read the tracker before adding to it.** `uv run lup-devtools dev issues` lists what is open, and the tracker's own search reaches what is closed — friction that obstructed you once has usually obstructed somebody else already, and a second report splits the evidence across two threads where whoever fixes it needs one. Where a report already covers it, pass `--issue NUMBER` to correct that one in place, adding what this session saw that the first did not; where a closed report describes what you just met, say so there rather than opening its duplicate. Searching costs a command, and a duplicate costs the reading that filing was already spending.
 
 ### External Resources
 
