@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "f00879a6751fe0c8ea0a9db1698b6b2ccbbc372805399c913d3442cbd3e48856",
+  "source_digest": "fc966dd31947dafb8a35f7bd78091bad4ce8081f3cdbe711cdc55b5cdc268a7b",
   "target_requirements": [
     "claude-code"
   ],
@@ -121,7 +121,7 @@
     {
       "path": ".claude/plugins/lup/commands/debug.md",
       "category": "generated",
-      "sha256": "0ede3f198ffd59843dc6b1ff1205a4514e8e88545fdd674b6bcce879b265804b",
+      "sha256": "e0e7b3a710a69c8ee61c160ebb2fe32923b8281b9aed9c4ddf9dcd440797b619",
       "semantic_id": "skill.debug",
       "executable": false
     },
