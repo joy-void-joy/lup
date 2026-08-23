@@ -14,6 +14,7 @@ from pydantic import BaseModel, ValidationError
 from lup.adapters.codex.harness_runtime import CodexPluginInstaller, PluginCacheConfig
 from lup.adapters.codex.login import CODEX_LOGIN
 from lup.adapters.codex.marketplace import CodexMarketplace
+from lup.adapters.codex.theme import claude_daltonized_theme
 from lup.types import EnvVars
 from lup.workspace.paths import declared_project_root, project_root
 
@@ -288,10 +289,11 @@ class CodexWorktreeHomeStore:
         return (declared_project_root(canonical) or canonical) / self.scoped_dir
 
     def prepare(self, worktree: Path, profile: str | None = None) -> Path:
-        """Create a scoped home and seed account files on its first use."""
+        """Refresh Lup-owned files and seed account files into a scoped home."""
         scoped_home = self.home_for(worktree)
         scoped_home.mkdir(mode=0o700, parents=True, exist_ok=True)
         scoped_home.chmod(0o700)
+        claude_daltonized_theme().write(scoped_home)
         sync_credential(
             self.account_home / CODEX_LOGIN.credentials_file,
             scoped_home / CODEX_LOGIN.credentials_file,
