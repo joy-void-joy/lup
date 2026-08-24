@@ -72,9 +72,10 @@ The download is successful only when the command reports a path under `tmp/conve
 - `manifest.json` — source identity, counts, and every attachment digest;
 - `conversation.json` — the untouched service payload;
 - `conversation.md` — the conversation rendered with speaker tags;
-- `attachments/<file-id>/<safe-name>` — ChatGPT's downloaded bytes or the exact attachment extraction Claude placed in its conversation payload.
+- `attachments/<safe-name>` — ChatGPT's user-visible uploads and sandbox-linked outputs, with ` (2)`-style suffixes only when visible names collide;
+- `attachments/<file-id>/<safe-name>` — the exact attachment extraction Claude placed in its conversation payload.
 
-ChatGPT retention fails before replacement or commit when any declared attachment cannot be fetched. Claude's web payload carries extracted file content rather than a binary download URL; its manifest labels that representation explicitly and records provider-reported file and image counts. Do not make either representation sound stronger than it is. A missing file, an image present only in the raw payload, or an empty Claude extraction may be the premise the conversation discusses.
+ChatGPT retention excludes tool-only working files and fails before replacement or commit when any user-visible file cannot be fetched. Claude's web payload carries extracted file content rather than a binary download URL; its manifest labels that representation explicitly and records provider-reported file and image counts. Do not make either representation sound stronger than it is. A missing file, an image present only in the raw payload, or an empty Claude extraction may be the premise the conversation discusses.
 
 ## Step 2 — Read the retained delivery, completely
 
