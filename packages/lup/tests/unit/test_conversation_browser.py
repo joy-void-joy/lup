@@ -3,9 +3,10 @@
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
+from playwright import async_api as playwright_api
 from typer.testing import CliRunner
 
 from lup.adapters.codex.login import CODEX_LOGIN
@@ -17,8 +18,39 @@ from lup.devtools.setup import create_setup_app
 
 
 @pytest.mark.asyncio
-async def test_login_finishes_when_the_browser_window_closes(
+async def test_browser_context_enables_chromium_sandbox(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    context = AsyncMock()
+    chromium = Mock(
+        launch_persistent_context=AsyncMock(return_value=context),
+    )
+    playwright = Mock(chromium=chromium)
+
+    @asynccontextmanager
+    async def started() -> AsyncIterator[Mock]:
+        yield playwright
+
+    monkeypatch.setattr(playwright_api, "async_playwright", started)
+    monkeypatch.setattr(browser, "browser_executable", lambda: "/usr/bin/chromium")
+
+    async with browser.browser_context(tmp_path, headless=True):
+        pass
+
+    chromium.launch_persistent_context.assert_awaited_once_with(
+        str(tmp_path),
+        headless=True,
+        args=[browser.AUTOMATION_FLAG],
+        executable_path="/usr/bin/chromium",
+        chromium_sandbox=True,
+    )
+
+
+@pytest.mark.asyncio
+async def test_login_finishes_when_the_browser_window_closes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     page = AsyncMock()
     context = AsyncMock()
@@ -43,6 +75,9 @@ async def test_login_finishes_when_the_browser_window_closes(
         timeout=60_000,
     )
     page.wait_for_event.assert_awaited_once_with("close", timeout=0)
+    assert capsys.readouterr().out == (
+        "Sign in to ChatGPT in the browser window, then close the window to continue.\n"
+    )
 
 
 def test_a_named_codex_profile_keeps_chatgpt_web_state_beside_its_home(
