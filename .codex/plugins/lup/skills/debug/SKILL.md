@@ -42,6 +42,22 @@ uv run lup-devtools trace search "<distinctive part of error>"
 
 If devtools search doesn't find it, fall back to `grep` over `logs/` with the most specific substring from the error.
 
+For a Lup command-hook error, first use `Glob` for
+`**/plugins/data/**/hook-events.jsonl`. The Lup dispatcher writes one
+metadata-only `started` record and one terminal record there for each hook it
+executes. Correlate by `session_id`, `turn_id`, `tool_use_id`, and timestamp:
+
+- `failed` carries the exact dispatcher exception in `detail`.
+- `completed` with `deny` carries the policy reason in `detail`.
+- `started` with no terminal record means the dispatcher was interrupted.
+- no matching `started` record, while the native runtime reports the hook event,
+  means failure occurred before the plugin command began. Inspect its hook
+  status notification and the trusted/enabled plugin definition; do not infer
+  a dispatcher cause from an execution that never reached it.
+
+The journal deliberately omits `tool_input` and tool output. Read the session
+trace for those only after the identifiers establish which call is relevant.
+
 ### 2. Find the right log file
 
 If multiple log files match, identify the **most recent** one (logs are named by timestamp: `YYYYMMDD-HHMMSS.log` or `YYYYMMDD_HHMMSS.log`).

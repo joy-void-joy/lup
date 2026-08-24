@@ -1568,6 +1568,80 @@ def codex_hook_result(
     )(_in=json.dumps(body), _env=environment, _ok_code=[0, 2], _return_cmd=True)
 
 
+def test_generated_codex_hook_records_metadata_only_evidence(tmp_path: Path) -> None:
+    body: JsonObject = {}
+    body["hook_event_name"] = "PreToolUse"
+    body["session_id"] = "session-one"
+    body["turn_id"] = "turn-one"
+    body["tool_use_id"] = "tool-one"
+    body["tool_name"] = "Bash"
+    body["tool_input"] = {"command": "git status", "secret": "do-not-record"}
+    result = codex_hook_result(body, sandboxed=True, plugin_data=tmp_path)
+    evidence = tmp_path / "hook-events.jsonl"
+    assert result.exit_code == 0
+    assert evidence.is_file()
+    assert "do-not-record" not in evidence.read_text(encoding="utf-8")
+    records = [json.loads(line) for line in evidence.read_text().splitlines()]
+    timestamps = [record.pop("timestamp") for record in records]
+    assert all(timestamp.endswith("+00:00") for timestamp in timestamps)
+    common = {"schema_version": 1, "event_name": "PreToolUse"}
+    common.update(session_id="session-one", turn_id="turn-one")
+    common.update(tool_use_id="tool-one", tool_name="Bash")
+    assert records == [
+        {**common, "phase": "started"},
+        {**common, "phase": "completed", "outcome": "allow"},
+    ]
+
+
+def test_generated_codex_hook_records_dispatch_failure(tmp_path: Path) -> None:
+    body: JsonObject = {
+        "hook_event_name": "PreToolUse",
+        "session_id": "session-two",
+        "tool_name": "Bash",
+    }
+    result = codex_hook_result(body, sandboxed=True, plugin_data=tmp_path)
+    evidence = tmp_path / "hook-events.jsonl"
+    assert result.exit_code == 2
+    records = [json.loads(line) for line in evidence.read_text().splitlines()]
+    timestamps = [record.pop("timestamp") for record in records]
+    assert all(timestamp.endswith("+00:00") for timestamp in timestamps)
+    common = {"schema_version": 1, "event_name": "PreToolUse"}
+    common.update(session_id="session-two", tool_name="Bash")
+    assert records[0] == {**common, "phase": "started"}
+    failed = records[1]
+    assert failed.pop("detail") == "KeyError: 'tool_input'"
+    assert failed == {**common, "phase": "failed", "outcome": "error"}
+
+
+def test_generated_claude_hook_records_metadata_only_evidence(tmp_path: Path) -> None:
+    body: JsonObject = {"hook_event_name": "PreToolUse"}
+    body.update(session_id="session-one", turn_id="turn-one")
+    body.update(tool_use_id="tool-one", tool_name="Bash")
+    body["tool_input"] = {"command": "python -c 1", "secret": "do-not-record"}
+    environment = {**os.environ, "CLAUDE_PLUGIN_DATA": str(tmp_path)}
+    script = Path(".claude/plugins/lup/hooks/scripts/policy.py").resolve()
+    result = sh.Command(str(script))(
+        _in=json.dumps(body), _env=environment, _return_cmd=True
+    )
+    assert isinstance(result, sh.RunningCommand)
+    output = ClaudeHookOutput.model_validate_json(result.stdout)
+    evidence = tmp_path / "hook-events.jsonl"
+    assert output.hook_specific_output.permission_decision == "deny"
+    assert "do-not-record" not in evidence.read_text(encoding="utf-8")
+    records = [json.loads(line) for line in evidence.read_text().splitlines()]
+    timestamps = [record.pop("timestamp") for record in records]
+    assert all(timestamp.endswith("+00:00") for timestamp in timestamps)
+    detail = records[1].pop("detail")
+    assert "interpreters" in detail
+    common = {"schema_version": 1, "event_name": "PreToolUse"}
+    common.update(session_id="session-one", turn_id="turn-one")
+    common.update(tool_use_id="tool-one", tool_name="Bash")
+    assert records == [
+        {**common, "phase": "started"},
+        {**common, "phase": "completed", "outcome": "deny"},
+    ]
+
+
 def test_generated_codex_hook_fails_closed_for_inline_code() -> None:
     script = Path(".codex/plugins/lup/hooks/scripts/policy.py").resolve()
     result = sh.Command(str(script))(

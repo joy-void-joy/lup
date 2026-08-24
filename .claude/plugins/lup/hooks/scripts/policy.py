@@ -71,6 +71,49 @@ def sandbox_active() -> bool:
     return "LUP_SANDBOX_ACTIVE" in environ and environ["LUP_SANDBOX_ACTIVE"] == "1"
 
 
+def append_hook_evidence(path: Path, encoded: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as stream:
+        stream.write(encoded + "\n")
+
+
+def record_hook_evidence(
+    data_root: Path | None,
+    payload: dict,
+    phase: str,
+    outcome: str | None = None,
+    detail: str | None = None,
+) -> None:
+    """Append hook metadata without retaining a tool's input or output."""
+    if data_root is None:
+        return
+    record = {
+        "schema_version": 1,
+        "timestamp": datetime.now(UTC).isoformat(),
+        "phase": phase,
+    }
+    fields = ("session_id", "turn_id", "tool_name", "tool_use_id")
+    record["event_name"] = (
+        payload["hook_event_name"]
+        if "hook_event_name" in payload and isinstance(payload["hook_event_name"], str)
+        else None
+    )
+    record.update(
+        {
+            field: payload[field]
+            for field in fields
+            if field in payload and isinstance(payload[field], str)
+        }
+    )
+    record.update({"outcome": outcome} if outcome is not None else {})
+    record.update({"detail": detail} if detail is not None else {})
+    encoded = json.dumps(record, ensure_ascii=True, separators=(",", ":"))
+    try:
+        append_hook_evidence(data_root / "hook-events.jsonl", encoded)
+    except OSError as error:
+        print(f"lup: could not record hook evidence: {error}", file=sys.stderr)
+
+
 def script_run_nudge(
     scripts: list[str],
     root: Path | None,
@@ -1091,6 +1134,13 @@ def edit_decision(
     )
 
 
+def plugin_data_root():
+    """The plugin-owned writable directory Claude Code gives hook processes."""
+    environ = os.environ  # lup: ignore[os-environ]
+    root = environ["CLAUDE_PLUGIN_DATA"] if "CLAUDE_PLUGIN_DATA" in environ else ""
+    return Path(root) if root else None
+
+
 def managed_root():
     """The root Claude Code installs and trusts packages beneath."""
     environ = os.environ  # lup: ignore[os-environ]
@@ -1341,8 +1391,10 @@ def observe(payload):
 def main():
     payload = {}
     placed = None
+    failed = False
     try:
         payload = json.load(sys.stdin)
+        record_hook_evidence(plugin_data_root(), payload, "started")
         event = payload["hook_event_name"] if "hook_event_name" in payload else ""
         # Watching and deciding are separate events, and this one returns
         # before a verdict exists: the tool has already run, so there is
@@ -1355,9 +1407,14 @@ def main():
             # reaches a debug log nobody reads. Silence when the file checks
             # out, so the channel means something when it is used.
             if found:
-                sys.stderr.write("\n".join(found))
+                detail = "\n".join(found)
+                record_hook_evidence(
+                    plugin_data_root(), payload, "completed", "observed", detail
+                )
+                sys.stderr.write(detail)
                 raise SystemExit(2)
             json.dump({}, sys.stdout)
+            record_hook_evidence(plugin_data_root(), payload, "completed", "observed")
             return
         decision = dispatch(payload)
         placed = placed_input(payload)
@@ -1368,10 +1425,23 @@ def main():
     # Nothing is swallowed: the reason carries whatever went wrong, and an
     # interrupt still passes through as the BaseException it is.
     except Exception as error:
+        failed = True
         decision = KernelDecision(
             "ask", f"Malformed hook input requires approval: {error}"
         )
+        record_hook_evidence(
+            plugin_data_root(),
+            payload,
+            "failed",
+            "error",
+            f"{type(error).__name__}: {error}",
+        )
     json.dump(rendered(decision, payload, placed), sys.stdout)
+    if not failed:
+        detail = decision.reason if decision.effect == "deny" else None
+        record_hook_evidence(
+            plugin_data_root(), payload, "completed", decision.effect, detail
+        )
 
 
 if __name__ == "__main__":
