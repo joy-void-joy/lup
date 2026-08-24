@@ -3,11 +3,13 @@
 import hashlib
 import json
 import os
-from collections.abc import Iterator
-from contextlib import contextmanager
+import shutil
+from collections.abc import Callable
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 import sh
+from packaging.version import Version
 from pydantic import BaseModel, Field
 
 from lup.adapters.codex.login import CODEX_LOGIN
@@ -28,8 +30,8 @@ class PluginCacheConfig(BaseModel, frozen=True):
     # Required for explicit shared homes and for a stable installed-cache path.
     marketplace: str
     plugin: str = "lup"
-    # None derives the cache segment from the plugin manifest — codex caches
-    # an installed plugin under its declared version.
+    # None derives an immutable cachebuster from deployable plugin content.
+    # An explicit value selects an already-versioned external fixture.
     version: str | None = None
 
 
@@ -41,8 +43,8 @@ class PluginCacheEvidence(BaseModel, frozen=True):
     ready: bool
 
 
-def directory_digest(root: Path) -> str | None:
-    """Hash deployable relative paths, modes, and bytes for one plugin tree."""
+def digest_directory(root: Path, read_content: Callable[[Path], bytes]) -> str | None:
+    """Hash deployable relative paths and modes with caller-normalized bytes."""
     if not root.is_dir():
         return None
     digest = hashlib.sha256()
@@ -59,9 +61,27 @@ def directory_digest(root: Path) -> str | None:
         digest.update(b"\0")
         digest.update(b"x" if path.stat().st_mode & 0o111 else b"-")
         digest.update(b"\0")
-        digest.update(path.read_bytes())
+        digest.update(read_content(path))
         digest.update(b"\0")
     return digest.hexdigest()
+
+
+def directory_digest(root: Path) -> str | None:
+    """Hash exact deployable relative paths, modes, and bytes."""
+    return digest_directory(root, lambda path: path.read_bytes())
+
+
+def plugin_content_digest(root: Path) -> str | None:
+    """Hash plugin content while treating its cachebuster version as location."""
+
+    def content(path: Path) -> bytes:
+        if path.relative_to(root) != Path(".codex-plugin/plugin.json"):
+            return path.read_bytes()
+        manifest = json.loads(path.read_text(encoding="utf-8"))
+        manifest["version"] = ""
+        return json.dumps(manifest, sort_keys=True).encode("utf-8")
+
+    return digest_directory(root, content)
 
 
 def plugin_manifest_version(source_root: Path) -> str:
@@ -74,22 +94,29 @@ def plugin_manifest_version(source_root: Path) -> str:
     raise ValueError(f"Codex plugin manifest lacks a version: {manifest}")
 
 
+def cachebusted_plugin_version(source_root: Path, content_digest: str) -> str:
+    """Name an immutable Codex cache revision for this plugin content."""
+    base = Version(plugin_manifest_version(source_root)).public
+    return f"{base}+codex.{content_digest}"
+
+
 def plugin_cache_evidence(
     source_root: Path, config: PluginCacheConfig
 ) -> PluginCacheEvidence:
     """Compare the committed package to the separately installed cached copy."""
-    source = directory_digest(source_root)
+    source = plugin_content_digest(source_root)
     if source is None:
         raise FileNotFoundError(f"Codex plugin source does not exist: {source_root}")
+    version = config.version or cachebusted_plugin_version(source_root, source)
     installed_root = (
         config.codex_home
         / "plugins"
         / "cache"
         / config.marketplace
         / config.plugin
-        / (config.version or plugin_manifest_version(source_root))
+        / version
     )
-    installed = directory_digest(installed_root)
+    installed = plugin_content_digest(installed_root)
     return PluginCacheEvidence(
         source_root=source_root,
         installed_root=installed_root,
@@ -97,6 +124,44 @@ def plugin_cache_evidence(
         installed_digest=installed,
         ready=installed == source,
     )
+
+
+def stage_cachebusted_marketplace(
+    source_root: Path,
+    cwd: Path,
+    config: PluginCacheConfig,
+    version: str,
+) -> Path:
+    """Materialize one immutable marketplace source with a cachebusted manifest."""
+    relative_source = source_root.resolve().relative_to(cwd.resolve())
+    destination = (
+        config.codex_home / "plugins" / "sources" / config.marketplace / version
+    )
+    if destination.is_dir():
+        return destination
+    destination.parent.mkdir(parents=True, exist_ok=True)
+
+    with TemporaryDirectory(
+        prefix=".staging-", dir=destination.parent
+    ) as temporary_text:
+        temporary = Path(temporary_text)
+        marketplace = temporary / ".agents" / "plugins" / "marketplace.json"
+        marketplace.parent.mkdir(parents=True)
+        shutil.copy2(cwd / ".agents" / "plugins" / "marketplace.json", marketplace)
+        staged_source = temporary / relative_source
+        staged_source.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(source_root, staged_source)
+        manifest = staged_source / ".codex-plugin" / "plugin.json"
+        document = json.loads(manifest.read_text(encoding="utf-8"))
+        document["version"] = version
+        manifest.write_text(
+            json.dumps(document, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        )
+        try:
+            temporary.replace(destination)
+        except FileExistsError:
+            return destination
+    return destination
 
 
 class CodexCapabilityProbe(CapabilityProbe[CodexCliEvidence]):
@@ -190,10 +255,12 @@ class CodexPluginInstaller:
         if before.ready and not force:
             return before
         environment = self.plugin_environment()
-        # The marketplace definition lives in the repository
-        # (`.agents/plugins/marketplace.json`). The CLI refuses a name already
-        # registered from a different source — which every sibling worktree and
-        # project is — so the name is dropped before it is re-pointed here.
+        marketplace_root = stage_cachebusted_marketplace(
+            source_root, cwd, self.config, before.installed_root.name
+        )
+        # The staged marketplace carries an immutable manifest version. Repoint
+        # the project-specific name there without removing any installed
+        # revision, because another session may still execute its hooks.
         sh.Command(str(self.executable))(
             "plugin",
             "marketplace",
@@ -207,20 +274,11 @@ class CodexPluginInstaller:
             "plugin",
             "marketplace",
             "add",
-            str(cwd),
+            str(marketplace_root),
             _cwd=str(cwd),
             _env=environment,
         )
         selector = f"{self.config.plugin}@{self.config.marketplace}"
-        if before.installed_digest is not None:
-            sh.Command(str(self.executable))(
-                "plugin",
-                "remove",
-                selector,
-                _cwd=str(cwd),
-                _env=environment,
-                _ok_code=[0, 1],
-            )
         sh.Command(str(self.executable))(
             "plugin",
             "add",
@@ -237,7 +295,7 @@ class CodexPluginInstaller:
         return after
 
     def remove(self, cwd: Path) -> None:
-        """Remove the installed plugin before its temporary marketplace."""
+        """Explicitly remove this plugin and its configured marketplace."""
         environment = self.plugin_environment()
         selector = f"{self.config.plugin}@{self.config.marketplace}"
         sh.Command(str(self.executable))(
@@ -257,13 +315,3 @@ class CodexPluginInstaller:
             _env=environment,
             _ok_code=[0, 1],
         )
-
-    @contextmanager
-    def temporary(
-        self, source_root: Path, cwd: Path, force: bool = False
-    ) -> Iterator[PluginCacheEvidence]:
-        """Install a plugin for one native Codex process."""
-        try:
-            yield self.ensure(source_root, cwd, force)
-        finally:
-            self.remove(cwd)

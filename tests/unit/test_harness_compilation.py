@@ -1486,7 +1486,9 @@ def test_codex_cache_digest_requires_an_exact_separate_copy(tmp_path: Path) -> N
             '{"name": "lup", "version": "9.9.9"}\n', encoding="utf-8"
         )
         (root / "plugin.txt").write_text("same\n", encoding="utf-8")
-    config = PluginCacheConfig(codex_home=home, marketplace="lup-template-repository")
+    config = PluginCacheConfig(
+        codex_home=home, marketplace="lup-template-repository", version="9.9.9"
+    )
 
     assert plugin_cache_evidence(source, config).ready
     (installed / "plugin.txt").write_text("stale\n", encoding="utf-8")
@@ -1620,17 +1622,21 @@ def test_generated_codex_pretool_refuses_an_ambient_escape() -> None:
     assert codex_hook_result(body, sandboxed=True).exit_code == 2
 
 
-def test_generated_codex_permission_request_allows_safe_resolver() -> None:
+@pytest.mark.parametrize(
+    "command",
+    [
+        "UV_CACHE_DIR=/tmp/lup-uv-cache uv run lup-devtools harness resolve --adapter codex",
+        "ENV_VAR=constant git status",
+    ],
+)
+def test_generated_codex_permission_request_allows_safe_assignment(
+    command: str,
+) -> None:
     script = Path(".codex/plugins/lup/hooks/scripts/policy.py").resolve()
     body = {
         "hook_event_name": "PermissionRequest",
         "tool_name": "Bash",
-        "tool_input": {
-            "command": (
-                "UV_CACHE_DIR=/tmp/lup-uv-cache uv run lup-devtools "
-                "harness resolve --adapter codex"
-            )
-        },
+        "tool_input": {"command": command},
     }
     result = sh.Command(str(script))(
         _in=json.dumps(body),
@@ -1643,12 +1649,22 @@ def test_generated_codex_permission_request_allows_safe_resolver() -> None:
     assert output.hook_specific_output.decision.behavior == "allow"
 
 
-def test_generated_codex_permission_request_preserves_human_approval() -> None:
+@pytest.mark.parametrize(
+    "command,expected_exit",
+    [
+        ("# lup: escalate: required diagnostic\npython -c 1", 0),
+        ("PATH=/tmp git status", 0),
+        ("1BAD=constant git status", 2),
+    ],
+)
+def test_generated_codex_permission_request_preserves_assignment_guards(
+    command: str, expected_exit: int
+) -> None:
     script = Path(".codex/plugins/lup/hooks/scripts/policy.py").resolve()
     body = {
         "hook_event_name": "PermissionRequest",
         "tool_name": "Bash",
-        "tool_input": {"command": "# lup: escalate: required diagnostic\npython -c 1"},
+        "tool_input": {"command": command},
     }
     result = sh.Command(str(script))(
         _in=json.dumps(body),
@@ -1656,7 +1672,7 @@ def test_generated_codex_permission_request_preserves_human_approval() -> None:
         _return_cmd=True,
     )
     assert isinstance(result, sh.RunningCommand)
-    assert result.exit_code == 0
+    assert result.exit_code == expected_exit
     assert result.stdout == b""
 
 

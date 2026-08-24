@@ -492,6 +492,19 @@ def test_a_home_trusting_every_declared_hook_would_run_them_all(
     assert untrusted_hooks(home, marketplace) == []
 
 
+def test_a_trusted_hook_without_an_enabled_override_uses_the_native_default(
+    tmp_path: Path,
+) -> None:
+    marketplace = plugin_declaring(tmp_path / "plugin", {"PreToolUse": 1})
+    record = "lup@proj:hooks/hooks.json:pre_tool_use:0:0"
+    home = home_trusting(tmp_path / "home", {record: True})
+    document = tomlkit.parse((home / "config.toml").read_text(encoding="utf-8"))
+    del document["hooks"]["state"][record]["enabled"]
+    (home / "config.toml").write_text(tomlkit.dumps(document), encoding="utf-8")
+
+    assert untrusted_hooks(home, marketplace) == []
+
+
 def test_a_home_trusting_one_event_of_three_names_the_other_two(
     tmp_path: Path,
 ) -> None:

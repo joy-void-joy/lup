@@ -562,7 +562,7 @@ If you find yourself running the same command repeatedly, **add a command** to `
 Run `uv run lup-devtools --help` for the full command tree.
 
 `lup-devtools harness codex` regenerates and verifies the Codex artifacts,
-installs a separately cached copy of the plugin after a digest check, and
+installs an immutable content-addressed copy of the plugin after a digest check, and
 launches the Codex CLI in a persistent per-worktree home seeded from personal
 Codex authentication and settings.
 `lup-devtools usage codex` reports this backend's usage and

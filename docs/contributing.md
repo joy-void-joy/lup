@@ -49,9 +49,9 @@ later.
 reviewer, or a human — which is why it does not execute. One-off work takes
 the first of these that fits:
 
-1. To read code rather than run it: `py info`, `py source`, `py search`,
-   `py imports`, and the codeintel tools, which resolve names through a
-   language server and answer without executing anything.
+1. To read code rather than run it: `py info`, `py source`, `py search`, `py text`,
+   `py imports`, and the codeintel tools. Resolve names with `py search` or
+   codeintel; find literal text in explicitly scoped Python paths with `py text`.
 2. To compute something once: a script under `tmp/`, run directly. It imports
    this checkout the way any other module does, and the session it runs in is
    itself contained, so what used to be the objection — an unreviewable thing

@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "fc966dd31947dafb8a35f7bd78091bad4ce8081f3cdbe711cdc55b5cdc268a7b",
+  "source_digest": "ced13caa91ea27268e5d4020d3f4a32f89545011fa80dfaf925f336a1e59ca75",
   "target_requirements": [
     "claude-code"
   ],
@@ -9,7 +9,7 @@
     {
       "path": ".claude/CLAUDE.md",
       "category": "generated",
-      "sha256": "c9c1b37a7aef9456c8faa4e31b0448c0f9bdece69ce9de10828e4b54fd49538f",
+      "sha256": "fc08a175be75368dc5a3015ed37e82e38213b6d23310e16b6fe8a115edc7eff6",
       "semantic_id": "harness.guidance",
       "executable": false
     },
@@ -198,7 +198,7 @@
     {
       "path": ".claude/plugins/lup/commands/install.md",
       "category": "generated",
-      "sha256": "62fdc1a9c35ef7ce13ad08405ab91ad43bccfa133e28155ab0d58eee24c05b41",
+      "sha256": "2f06b68071e0c32c7f293a86a713bf57abb8e66d7431ff44b3f638412e304b48",
       "semantic_id": "skill.install",
       "executable": false
     },
@@ -450,7 +450,7 @@
     {
       "path": "docs/contributing.md",
       "category": "generated",
-      "sha256": "85e3be9125680b769d4caa5bdd9110d6b0cad7e0f8fcc422dfb7a9593c3fa80b",
+      "sha256": "41af4eb06c3af9d512e5f7fc51be857770e060912750da75665e64352d631e14",
       "semantic_id": "docs.contributing",
       "executable": false
     },
@@ -464,14 +464,14 @@
     {
       "path": "docs/dev-tooling-decisions.md",
       "category": "generated",
-      "sha256": "cec023e1dc55ff8469d8df55a8b04dea073830ccc590311207118514425425e3",
+      "sha256": "ff5702d5bd92fe7fae9c808eafbbdbc564c53eb0002b50303f52b37cef853211",
       "semantic_id": "docs.dev-tooling-decisions",
       "executable": false
     },
     {
       "path": "docs/harness.md",
       "category": "generated",
-      "sha256": "af5d67856e9e62d098918cf2d4a51c4a538175b64f57d0e169b1de3482a80bd4",
+      "sha256": "22437c9e6efaa6ae4ede18eb3901712a156aaf5bd02fad8550c22c847b0043f5",
       "semantic_id": "docs.harness",
       "executable": false
     },
@@ -506,14 +506,14 @@
     {
       "path": "docs/permissions.md",
       "category": "generated",
-      "sha256": "bd36389ef1ebc853e46ff97bdc5112d17e9259a94e3f3b953c829b2fd26bf536",
+      "sha256": "6dd0973588721e2a5d88b87ffc4cf07003b69331b00c050e033a4aa07e00cb00",
       "semantic_id": "docs.permissions",
       "executable": false
     },
     {
       "path": "docs/platform-differentiation.md",
       "category": "generated",
-      "sha256": "8dcd258105e0a1bf0340bbafd961e7079248b53acda02db707442d3e61997682",
+      "sha256": "a0c29bee303028e39f404cef58b49f113cdfa156e8c1c9ffa08a0b510588d2e8",
       "semantic_id": "docs.platform-differentiation",
       "executable": false
     },
@@ -548,7 +548,7 @@
     {
       "path": "docs/template.md",
       "category": "generated",
-      "sha256": "bf178aa572fe409a756478a8b06178fb549c4cf2ef34c7a3df3b398ee89b6e81",
+      "sha256": "be2654403d0db14aed33ed153100c1dd6f20140995f3909ef84855db23edfc4a",
       "semantic_id": "docs.template",
       "executable": false
     },

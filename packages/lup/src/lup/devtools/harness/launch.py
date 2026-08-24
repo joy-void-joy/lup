@@ -852,14 +852,12 @@ def launch_codex(
         nullcontext({}) if mode is None else mode.opened("codex", transcript.journal)
     )
     try:
-        with (
-            installer.temporary(
-                project_root() / ".codex" / "plugins" / plugin.name,
-                project_root(),
-                force=force_install,
-            ) as cache,
-            opening as session,
-        ):
+        cache = installer.ensure(
+            project_root() / ".codex" / "plugins" / plugin.name,
+            project_root(),
+            force=force_install,
+        )
+        with opening as session:
             typer.echo(f"Verified installed Codex plugin: {cache.installed_root}")
             environment.update(session)
             sh.Command("codex")(*arguments, _fg=True, _env=environment)

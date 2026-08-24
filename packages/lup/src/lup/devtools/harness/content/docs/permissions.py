@@ -183,6 +183,12 @@ flag-guarded commands. `find -exec` payloads and `timeout`/`nice` wrappers
 recurse, `sed`/`awk` pass read-only screens, quoted-delimiter heredocs are
 literal data, and `curl` is read-screened within the declared fetch scopes.
 
+Codex's native prefix evaluator deliberately leaves an assignment-bearing
+script opaque. Its permission-request hook still passes literal assignments
+through this same classifier, so `ENV_VAR=constant git status` is approved
+without a prompt. Security-sensitive assignments preserve the prompt, and a
+malformed assignment is refused as an unknown command.
+
 ## Fetch scopes
 
 One declared origin table feeds both `WebFetch` and the `curl` screen. A

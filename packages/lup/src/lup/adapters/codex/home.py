@@ -391,7 +391,8 @@ def untrusted_hooks(home: Path, marketplace: CodexMarketplace) -> list[str]:
     return [
         record
         for record in declared_hook_records(marketplace)
-        if record not in state or not state[record]["enabled"]
+        if record not in state
+        or ("enabled" in state[record] and not state[record]["enabled"])
     ]
 
 

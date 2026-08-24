@@ -144,7 +144,7 @@ The `lup-devtools` CLI (`src/lup_template/devtools/`) gives the meta-agent struc
   - `feedback` — Feedback state, metrics, and commits
   - `harness` — Generate and launch the native harnesses
   - `hooks` — Query the permission policy
-  - `py` — Python module introspection
+  - `py` — Python source and module inspection
   - `report` — Everything left to implement, in one place
   - `setup` — Interactive setup wizard
   - `sync` — Track sync.json repos and review their commits

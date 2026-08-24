@@ -4,9 +4,9 @@ The harness decides whether it may launch a native plugin from these
 seams: a probe must classify a missing or failing CLI as unsupported
 (never crash the doctor), a present CLI must yield its banner as
 evidence, and :class:`CodexPluginInstaller` must short-circuit on a
-verified cache, reinstall a stale one, and refuse to report success
-when the installed digest still differs from the committed source.
-Temporary installations must be removed even when their session fails.
+verified cache, install a missing immutable revision, and refuse to report
+success when the installed digest still differs from the committed source.
+Installed revisions remain available to concurrent sessions.
 Fake executables on disk stand in for the real CLIs, so every branch
 runs offline.
 """
@@ -24,6 +24,7 @@ from lup.adapters.codex.harness_runtime import (
     CodexCapabilityProbe,
     CodexPluginInstaller,
     PluginCacheConfig,
+    plugin_cache_evidence,
 )
 
 
@@ -97,16 +98,17 @@ def write_plugin_source(root: Path) -> None:
 
 
 class TestPluginInstallGate:
-    def cache_root(self, config: PluginCacheConfig) -> Path:
-        # Mirrors codex's layout: the cache segment is the manifest version.
-        return (
-            config.codex_home
-            / "plugins"
-            / "cache"
-            / config.marketplace
-            / config.plugin
-            / "9.9.9"
+    @pytest.fixture(autouse=True)
+    def marketplace(self, tmp_path: Path) -> None:
+        manifest = tmp_path / ".agents" / "plugins" / "marketplace.json"
+        manifest.parent.mkdir(parents=True)
+        manifest.write_text(
+            json.dumps({"name": MARKETPLACE, "plugins": []}) + "\n",
+            encoding="utf-8",
         )
+
+    def cache_root(self, config: PluginCacheConfig, source: Path) -> Path:
+        return plugin_cache_evidence(source, config).installed_root
 
     def test_verified_cache_short_circuits_without_invoking_codex(
         self, tmp_path: Path
@@ -116,7 +118,7 @@ class TestPluginInstallGate:
         config = PluginCacheConfig(
             codex_home=tmp_path / "codex-home", marketplace=MARKETPLACE
         )
-        write_plugin_source(self.cache_root(config))
+        write_plugin_source(self.cache_root(config, source))
         exploding = fake_cli(tmp_path, "codex", "exit 97")
 
         evidence = CodexPluginInstaller(config, exploding).ensure(source, tmp_path)
@@ -124,13 +126,15 @@ class TestPluginInstallGate:
         assert evidence.ready
         assert evidence.installed_digest == evidence.source_digest
 
-    def test_stale_cache_is_removed_then_reinstalled(self, tmp_path: Path) -> None:
+    def test_differing_cache_is_reinstalled_without_removal(
+        self, tmp_path: Path
+    ) -> None:
         source = tmp_path / "source"
         write_plugin_source(source)
         config = PluginCacheConfig(
             codex_home=tmp_path / "codex-home", marketplace=MARKETPLACE
         )
-        cache = self.cache_root(config)
+        cache = self.cache_root(config, source)
         write_plugin_source(cache)
         (cache / "hook.py").write_text("DECISION = 'allow'\n", encoding="utf-8")
         log = tmp_path / "calls.log"
@@ -150,7 +154,6 @@ class TestPluginInstallGate:
         assert log.read_text(encoding="utf-8").splitlines() == [
             "plugin marketplace remove",
             "plugin marketplace add",
-            f"plugin remove {selector}",
             f"plugin add {selector}",
         ]
 
@@ -167,7 +170,7 @@ class TestPluginInstallGate:
         config = PluginCacheConfig(
             codex_home=tmp_path / "codex-home", marketplace=MARKETPLACE
         )
-        cache = self.cache_root(config)
+        cache = self.cache_root(config, source)
         bound = tmp_path / "bound-elsewhere"
         bound.write_text(config.marketplace, encoding="utf-8")
         installer_cli = fake_cli(
@@ -189,7 +192,7 @@ class TestPluginInstallGate:
         assert evidence.ready
         assert not bound.exists()
 
-    def test_temporary_installation_is_removed_when_the_session_exits(
+    def test_installed_revision_remains_available_to_other_sessions(
         self, tmp_path: Path
     ) -> None:
         source = tmp_path / "source"
@@ -197,7 +200,7 @@ class TestPluginInstallGate:
         config = PluginCacheConfig(
             codex_home=tmp_path / "codex-home", marketplace=MARKETPLACE
         )
-        cache = self.cache_root(config)
+        cache = self.cache_root(config, source)
         log = tmp_path / "calls.log"
         installer_cli = fake_cli(
             tmp_path,
@@ -205,27 +208,19 @@ class TestPluginInstallGate:
             f'echo "$1 $2 $3" >> "{log}"\n'
             'if [ "$2" = "add" ]; then\n'
             f'  mkdir -p "{cache}" && cp -R "{source}/." "{cache}/"\n'
-            "fi\n"
-            'if [ "$2" = "remove" ]; then\n'
-            f'  rm -rf "{cache}"\n'
-            "fi",
+            "fi\n",
         )
         installer = CodexPluginInstaller(config, installer_cli)
+        evidence = installer.ensure(source, tmp_path)
 
-        with pytest.raises(RuntimeError, match="session exited"):
-            with installer.temporary(source, tmp_path) as evidence:
-                assert evidence.ready
-                assert cache.exists()
-                raise RuntimeError("session exited")
+        assert evidence.ready
+        assert cache.exists()
 
         selector = f"{config.plugin}@{config.marketplace}"
-        assert not cache.exists()
         assert log.read_text(encoding="utf-8").splitlines() == [
             "plugin marketplace remove",
             "plugin marketplace add",
             f"plugin add {selector}",
-            f"plugin remove {selector}",
-            "plugin marketplace remove",
         ]
 
     def test_install_that_leaves_a_differing_digest_is_refused(

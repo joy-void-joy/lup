@@ -409,11 +409,12 @@ edit/shell/fetch/search vocabulary, shared policy evaluates it, and each
 adapter renders the decision back — Codex `ask` being a documented fail-closed
 exit-code-2 approximation.
 
-Codex packages install through the native plugin CLI only when the separately
-installed cache digest is absent or stale; the source plugin is never mistaken
-for the cache. Personal trust state, credentials, active run state, and cache
-contents are never generated and never committed. Review hook trust with the
-native hooks surface after generation.
+Codex packages install through the native plugin CLI only when a separately
+installed, content-addressed cache revision is absent. Installed revisions are
+immutable and retained so concurrent sessions keep valid hook paths; the source
+plugin is never mistaken for the cache. Personal trust state, credentials,
+active run state, and cache contents are never generated or committed. Review
+hook trust with the native hooks surface after generation.
 
 ### Opening a session the anti-pattern gate leaves alone
 

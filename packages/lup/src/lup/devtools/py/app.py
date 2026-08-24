@@ -1,7 +1,8 @@
-"""Typer command tree for Python introspection: info, source, imports, search."""
+"""Typer commands for Python source, symbol, and import inspection."""
 
 import inspect
 from collections import defaultdict
+from pathlib import Path
 from typing import Annotated
 
 import typer
@@ -25,10 +26,11 @@ from lup.devtools.py.search import (
     scan_module_symbols,
 )
 from lup.devtools.py.source import format_tree
+from lup.devtools.py.text import source_text_matches
 from lup.devtools.subapps import subapp
 
 app = typer.Typer(no_args_is_help=True)
-SUBAPP = subapp("py", "Python module introspection", app)
+SUBAPP = subapp("py", "Python source and module inspection", app)
 
 
 @app.command("info")
@@ -83,8 +85,8 @@ def source_cmd(
     ] = False,
     lines: Annotated[
         int,
-        typer.Option("--lines", "-n", help="Number of lines to show (0 = all)"),
-    ] = 50,
+        typer.Option("--lines", "-n", help="Number of lines to show (default all)"),
+    ] = 0,
     start: Annotated[
         int,
         typer.Option(
@@ -226,6 +228,26 @@ def imports_cmd(
                 typer.echo(f"  {format_import_entry(entry)}")
 
         current_modules = next_modules
+
+
+@app.command("text")
+def text_cmd(
+    pattern: Annotated[str, typer.Argument(help="Literal text to find")],
+    paths: Annotated[
+        list[Path], typer.Argument(help="Python files or directories to search")
+    ],
+    ignore_case: Annotated[
+        bool,
+        typer.Option("--ignore-case", "-i", help="Match without case sensitivity"),
+    ] = False,
+) -> None:
+    """Search literal source text within explicitly selected Python paths."""
+    try:
+        matches = source_text_matches(pattern, paths, ignore_case)
+    except (OSError, UnicodeError, ValueError) as error:
+        fail(str(error))
+    for match in matches:
+        typer.echo(f"{match.path}:{match.line_number}: {match.text}")
 
 
 @app.command("search")

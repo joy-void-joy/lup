@@ -137,12 +137,15 @@ Context: A project plugin source directory is not the installed plugin cache,
 and hook trust is user security state.
 
 Decision: Install through the native plugin CLI only when the separately
-cached digest is absent or stale. Generate source and ownership metadata only.
-Never generate trust, credentials, profiles, or active state.
+cached revision is absent. Stage each revision with a deterministic
+`+codex.<content-digest>` manifest version, and retain installed revisions so a
+live session's `PLUGIN_ROOT` remains valid. Generate source and ownership
+metadata only. Never generate trust, credentials, profiles, or active state.
 
-Consequences: Launch has an explicit installation step and verifies exact
-bytes. CI can use an isolated Codex home; local trust decisions remain personal
-and survive generation.
+Consequences: Launch has an explicit installation step and verifies normalized
+plugin content. Starting or ending another session cannot delete the hook
+scripts an active session executes. CI can use an isolated Codex home; local
+trust decisions remain personal and survive generation.
 
 ## ADR-010: Use submitted output as the typed result mechanism
 
