@@ -1,6 +1,7 @@
 """Authenticated ChatGPT retention and its analysis-facing artifacts."""
 
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import pytest
 from typer.testing import CliRunner
@@ -114,6 +115,113 @@ def test_reference_recognizes_authenticated_and_shared_urls(
 def test_reference_refuses_urls_that_cannot_name_a_safe_delivery(url: str) -> None:
     with pytest.raises(chatgpt.ChatGPTDownloadError):
         chatgpt.ConversationReference(value=url).identifier()
+
+
+@pytest.mark.asyncio
+async def test_private_payload_uses_bearer_from_browser_session() -> None:
+    reference = chatgpt.ConversationReference(
+        value="https://chatgpt.com/c/conversation-1"
+    )
+    session_response = AsyncMock(status=200, url="https://chatgpt.com/api/auth/session")
+    session_response.json.return_value = {"accessToken": "session-token"}
+    payload_response = AsyncMock(
+        status=200,
+        url="https://chatgpt.com/backend-api/conversation/conversation-1",
+    )
+    payload_response.json.return_value = sample_payload()
+    request = AsyncMock()
+    request.get.side_effect = [session_response, payload_response]
+
+    session = await chatgpt.fetch_session(request, reference)
+    payload = await chatgpt.fetch_payload(request, reference, session)
+
+    assert payload == sample_payload()
+    assert "session-token" not in repr(session)
+    assert request.get.await_args_list[1].kwargs["headers"] == {
+        "Referer": "https://chatgpt.com/c/conversation-1",
+        "Accept": "application/json",
+        "Authorization": "Bearer session-token",
+    }
+
+
+@pytest.mark.asyncio
+async def test_public_snapshot_does_not_request_an_authenticated_session() -> None:
+    request = AsyncMock()
+    reference = chatgpt.ConversationReference(value="https://chatgpt.com/share/share-1")
+
+    session = await chatgpt.fetch_session(request, reference)
+
+    assert session is None
+    request.get.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_private_session_without_access_token_requires_login() -> None:
+    response = AsyncMock(status=200, url="https://chatgpt.com/api/auth/session")
+    response.json.return_value = {"user": {"name": "Ada"}}
+    request = AsyncMock()
+    request.get.return_value = response
+    reference = chatgpt.ConversationReference(
+        value="https://chatgpt.com/c/conversation-1"
+    )
+
+    with pytest.raises(chatgpt.ChatGPTAuthenticationRequired, match="access token"):
+        await chatgpt.fetch_session(request, reference)
+
+
+@pytest.mark.asyncio
+async def test_authenticated_404_reports_an_unavailable_conversation() -> None:
+    response = AsyncMock(
+        status=404,
+        url="https://chatgpt.com/backend-api/conversation/conversation-1",
+    )
+    request = AsyncMock()
+    request.get.return_value = response
+    reference = chatgpt.ConversationReference(
+        value="https://chatgpt.com/c/conversation-1"
+    )
+    session = chatgpt.ChatGPTSession.model_validate({"accessToken": "session-token"})
+
+    with pytest.raises(chatgpt.ChatGPTDownloadError, match="404") as captured:
+        await chatgpt.fetch_payload(request, reference, session)
+
+    assert type(captured.value) is chatgpt.ChatGPTDownloadError
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("download_url", "expected_headers"),
+    [
+        (
+            "https://chatgpt.com/backend-api/files/file-one/download",
+            {"Authorization": "Bearer session-token"},
+        ),
+        ("https://files.oaiusercontent.com/file.bin", {}),
+    ],
+)
+async def test_attachment_bearer_is_scoped_to_chatgpt(
+    download_url: str, expected_headers: dict[str, str]
+) -> None:
+    response = AsyncMock(
+        status=200,
+        headers={"content-type": "application/octet-stream"},
+    )
+    response.body.return_value = b"retained file"
+    request = AsyncMock()
+    request.get.return_value = response
+    attachment = chatgpt.ChatGPTAttachment.model_validate(
+        {"id": "file-one", "name": "notes.md", "download_url": download_url}
+    )
+    session = chatgpt.ChatGPTSession.model_validate({"accessToken": "session-token"})
+
+    fetched = await chatgpt.fetch_attachment(request, attachment, session)
+
+    assert fetched.body == b"retained file"
+    request.get.assert_awaited_once_with(
+        download_url,
+        headers=expected_headers,
+        fail_on_status_code=False,
+    )
 
 
 def test_selected_branch_is_rendered_without_losing_unknown_content() -> None:
