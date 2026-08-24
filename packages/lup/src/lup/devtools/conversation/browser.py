@@ -67,6 +67,7 @@ async def browser_context(
                 str(directory),
                 headless=headless,
                 args=arguments,
+                chromium_sandbox=True,
                 executable_path=executable,
             )
         except PlaywrightError as error:
@@ -98,7 +99,7 @@ async def login(directory: Path, page_url: str, label: str) -> None:
         page = context.pages[0] if context.pages else await context.new_page()
         await page.goto(page_url, wait_until="domcontentloaded", timeout=60_000)
         typer.echo(
-            f"Sign in to {label} in the browser window, open the conversation, "
+            f"Sign in to {label} in the browser window, "
             "then close the window to continue."
         )
         try:
