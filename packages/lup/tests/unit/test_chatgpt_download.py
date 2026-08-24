@@ -19,7 +19,7 @@ def sample_payload() -> JsonValue:
             "root": {
                 "id": "root",
                 "parent": None,
-                "children": ["user", "branch"],
+                "children": ["user", "branch", "tool"],
                 "message": None,
             },
             "user": {
@@ -36,6 +36,7 @@ def sample_payload() -> JsonValue:
                                 "id": "file-one",
                                 "name": "../../notes.md",
                                 "mime_type": "text/markdown",
+                                "source": "local",
                             }
                         ]
                     },
@@ -51,7 +52,7 @@ def sample_payload() -> JsonValue:
                     "content": {
                         "content_type": "multimodal_text",
                         "parts": [
-                            "Answer",
+                            "Answer\n\n[Download report](sandbox:/mnt/data/report.pdf)",
                             {"content_type": "code", "code": "result = 1"},
                         ],
                     },
@@ -72,6 +73,25 @@ def sample_payload() -> JsonValue:
                                 "id": "file-two",
                                 "name": "notes.md",
                                 "mime_type": "text/markdown",
+                            }
+                        ]
+                    },
+                },
+            },
+            "tool": {
+                "id": "tool",
+                "parent": "root",
+                "children": [],
+                "message": {
+                    "id": "message-tool",
+                    "author": {"role": "tool"},
+                    "content": {"content_type": "execution_output", "parts": []},
+                    "metadata": {
+                        "attachments": [
+                            {
+                                "id": "internal-render",
+                                "name": "/mnt/data/_renders/page-12.png",
+                                "mime_type": "image/png",
                             }
                         ]
                     },
@@ -194,7 +214,10 @@ async def test_authenticated_404_reports_an_unavailable_conversation() -> None:
     [
         (
             "https://chatgpt.com/backend-api/files/file-one/download",
-            {"Authorization": "Bearer session-token"},
+            {
+                "Referer": "https://chatgpt.com/c/one",
+                "Authorization": "Bearer session-token",
+            },
         ),
         ("https://files.oaiusercontent.com/file.bin", {}),
     ],
@@ -213,8 +236,9 @@ async def test_attachment_bearer_is_scoped_to_chatgpt(
         {"id": "file-one", "name": "notes.md", "download_url": download_url}
     )
     session = chatgpt.ChatGPTSession.model_validate({"accessToken": "session-token"})
+    reference = chatgpt.ConversationReference(value="https://chatgpt.com/c/one")
 
-    fetched = await chatgpt.fetch_attachment(request, attachment, session)
+    fetched = await chatgpt.fetch_attachment(request, reference, attachment, session)
 
     assert fetched.body == b"retained file"
     request.get.assert_awaited_once_with(
@@ -222,6 +246,42 @@ async def test_attachment_bearer_is_scoped_to_chatgpt(
         headers=expected_headers,
         fail_on_status_code=False,
     )
+
+
+@pytest.mark.asyncio
+async def test_sandbox_link_uses_the_interpreter_download_endpoint() -> None:
+    envelope = AsyncMock(
+        status=200,
+        url="https://chatgpt.com/backend-api/conversation/conversation-1/interpreter/download",
+        headers={"content-type": "application/json"},
+    )
+    envelope.json.return_value = {
+        "download_url": "https://files.oaiusercontent.com/report.pdf"
+    }
+    download = AsyncMock(
+        status=200,
+        headers={"content-type": "application/pdf"},
+    )
+    download.body.return_value = b"generated report"
+    request = AsyncMock()
+    request.get.side_effect = [envelope, download]
+    reference = chatgpt.ConversationReference(
+        value="https://chatgpt.com/c/conversation-1"
+    )
+    session = chatgpt.ChatGPTSession.model_validate({"accessToken": "session-token"})
+    attachment = sample_conversation().attachments()[1]
+
+    fetched = await chatgpt.fetch_attachment(request, reference, attachment, session)
+
+    assert fetched.body == b"generated report"
+    first = request.get.await_args_list[0]
+    assert first.args == (
+        "https://chatgpt.com/backend-api/conversation/conversation-1/interpreter/download",
+    )
+    assert first.kwargs["params"] == {
+        "message_id": "message-assistant",
+        "sandbox_path": "/mnt/data/report.pdf",
+    }
 
 
 def test_selected_branch_is_rendered_without_losing_unknown_content() -> None:
@@ -235,18 +295,46 @@ def test_selected_branch_is_rendered_without_losing_unknown_content() -> None:
     assert "<assistant>\nAnswer" in rendered
     assert "result = 1" in rendered
     assert "Discarded" not in rendered
-    assert "attachments/file-one/notes.md" in rendered
+    assert "attachments/notes.md" in rendered
+    assert "attachments/report.pdf" in rendered
     assert "complete branched payload" in rendered
 
 
-def test_every_branch_contributes_attachments_and_names_cannot_escape() -> None:
+def test_visible_files_are_flat_named_and_collision_safe() -> None:
     attachments = sample_conversation().attachments()
 
-    assert [item.identifier for item in attachments] == ["file-one", "file-two"]
-    assert [item.relative_path().as_posix() for item in attachments] == [
-        "attachments/file-one/notes.md",
-        "attachments/file-two/notes.md",
+    assert [item.stored_name() for item in attachments] == [
+        "notes.md",
+        "report.pdf",
+        "notes.md",
     ]
+    assert [
+        path.as_posix() for path in chatgpt.attachment_paths(attachments).values()
+    ] == [
+        "attachments/notes.md",
+        "attachments/report.pdf",
+        "attachments/notes (2).md",
+    ]
+
+
+def test_visible_file_paths_cannot_escape_the_attachments_directory() -> None:
+    attachment = chatgpt.ChatGPTAttachment.model_validate(
+        {"id": "file-one", "name": ".."}
+    )
+
+    with pytest.raises(chatgpt.ChatGPTDownloadError, match="parent"):
+        attachment.relative_path()
+
+
+def test_sandbox_file_paths_cannot_traverse_out_of_mnt_data() -> None:
+    attachment = chatgpt.ChatGPTAttachment(
+        representation="sandbox",
+        message_id="message-one",
+        sandbox_path="/mnt/data/../secret.txt",
+    )
+
+    with pytest.raises(chatgpt.ChatGPTDownloadError, match="malformed"):
+        attachment.identity()
 
 
 def fetched_attachments() -> list[chatgpt.FetchedAttachment]:
@@ -255,7 +343,7 @@ def fetched_attachments() -> list[chatgpt.FetchedAttachment]:
         chatgpt.FetchedAttachment(declaration=declaration, body=body)
         for declaration, body in zip(
             sample_conversation().attachments(),
-            (b"first attachment", b"second attachment"),
+            (b"first attachment", b"generated report", b"second attachment"),
             strict=True,
         )
     ]
@@ -276,14 +364,26 @@ def test_delivery_keeps_raw_mapping_rendering_files_and_digests(tmp_path: Path) 
     assert (destination / "conversation.json").is_file()
     assert "Question" in (destination / "conversation.md").read_text()
     assert (
-        destination / "attachments" / "file-one" / "notes.md"
+        destination / "attachments" / "notes.md"
     ).read_bytes() == b"first attachment"
+    assert (
+        destination / "attachments" / "report.pdf"
+    ).read_bytes() == b"generated report"
+    assert (
+        destination / "attachments" / "notes (2).md"
+    ).read_bytes() == b"second attachment"
     manifest = chatgpt.DownloadManifest.model_validate_json(
         (destination / "manifest.json").read_text()
     )
-    assert manifest.mapping_node_count == 4
+    assert manifest.mapping_node_count == 5
     assert manifest.active_message_count == 2
+    assert [record.representation for record in manifest.attachments] == [
+        "metadata",
+        "sandbox",
+        "metadata",
+    ]
     assert [record.size_bytes for record in manifest.attachments] == [
+        16,
         16,
         17,
     ]

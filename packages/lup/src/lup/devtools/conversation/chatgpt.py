@@ -7,9 +7,13 @@ import mimetypes
 import shutil
 import tempfile
 from datetime import UTC, datetime
+from functools import cache
+from itertools import count
 from pathlib import Path, PurePosixPath
-from urllib.parse import ParseResult, quote, urljoin, urlparse
+from typing import Literal
+from urllib.parse import ParseResult, quote, unquote, urljoin, urlparse
 
+from markdown_it import MarkdownIt
 from playwright.async_api import (
     APIRequestContext,
     APIResponse,
@@ -126,10 +130,46 @@ class ConversationReference(BaseModel, frozen=True):
             ]
         return [f"https://chatgpt.com/backend-api/conversation/{identifier}"]
 
+    def interpreter_download_url(self, conversation_id: str = "") -> str:
+        """The authenticated endpoint resolving one visible sandbox file."""
+        identifier = conversation_id or self.identifier()
+        if not identifier or not all(
+            character.isalnum() or character in {"-", "_"} for character in identifier
+        ):
+            raise ChatGPTDownloadError("ChatGPT conversation id is malformed")
+        return (
+            "https://chatgpt.com/backend-api/conversation/"
+            f"{quote(identifier, safe='')}/interpreter/download"
+        )
+
+
+class AttachmentIdentity(BaseModel, frozen=True):
+    """The provider coordinates distinguishing one visible file."""
+
+    representation: Literal["metadata", "sandbox"]
+    identifier: str = ""
+    message_id: str = ""
+    sandbox_path: str = ""
+
+
+class SandboxDownloadParameters(BaseModel, frozen=True):
+    """The query identifying one code-interpreter file."""
+
+    message_id: str
+    sandbox_path: str
+
+
+class AttachmentRequest(BaseModel, frozen=True):
+    """One provider request capable of resolving a visible file."""
+
+    url: str
+    params: SandboxDownloadParameters | None = None
+
 
 class ChatGPTAttachment(Payload, frozen=True):
     """One file referenced by a conversation message."""
 
+    representation: Literal["metadata", "sandbox"] = "metadata"
     identifier: str = Field(default="", validation_alias=AliasChoices("id", "file_id"))
     name: str = Field(default="", validation_alias=AliasChoices("name", "file_name"))
     mime_type: str = ""
@@ -137,29 +177,81 @@ class ChatGPTAttachment(Payload, frozen=True):
         default=0, validation_alias=AliasChoices("size_bytes", "size")
     )
     download_url: str = ""
+    message_id: str = ""
+    sandbox_path: str = ""
 
     def stored_name(self) -> str:
         """A single safe filename, with a useful fallback."""
-        if "\x00" in self.name:
+        supplied = self.sandbox_path if self.representation == "sandbox" else self.name
+        if "\x00" in supplied:
             raise ChatGPTDownloadError("Attachment filename contains a null byte")
-        named = PurePosixPath(self.name).name
+        named = PurePosixPath(supplied).name
+        if named == "..":
+            raise ChatGPTDownloadError("Attachment filename selects its parent")
         if named:
             return named
         extension = mimetypes.guess_extension(self.mime_type) or ""
         return f"attachment{extension}"
 
+    def identity(self) -> AttachmentIdentity:
+        """A stable provider identity for deduplication and path allocation."""
+        match self.representation:
+            case "sandbox":
+                path = PurePosixPath(self.sandbox_path)
+                root = PurePosixPath("/mnt/data")
+                if (
+                    not self.message_id
+                    or not path.is_absolute()
+                    or not path.is_relative_to(root)
+                    or path == root
+                    or ".." in path.parts
+                ):
+                    raise ChatGPTDownloadError("Sandbox attachment path is malformed")
+                return AttachmentIdentity(
+                    representation=self.representation,
+                    message_id=self.message_id,
+                    sandbox_path=path.as_posix(),
+                )
+            case "metadata":
+                if not self.identifier or not all(
+                    character.isalnum() or character in {"-", "_"}
+                    for character in self.identifier
+                ):
+                    raise ChatGPTDownloadError(
+                        f"Attachment {self.stored_name()!r} has no safe file id"
+                    )
+                return AttachmentIdentity(
+                    representation=self.representation, identifier=self.identifier
+                )
+
+    def requests(
+        self, reference: ConversationReference, conversation_id: str = ""
+    ) -> list[AttachmentRequest]:
+        """Provider requests for this file, in preferred fallback order."""
+        self.identity()
+        match self.representation:
+            case "sandbox":
+                return [
+                    AttachmentRequest(
+                        url=reference.interpreter_download_url(conversation_id),
+                        params=SandboxDownloadParameters(
+                            message_id=self.message_id,
+                            sandbox_path=self.sandbox_path,
+                        ),
+                    )
+                ]
+            case "metadata":
+                identifier = quote(self.identifier, safe="")
+                urls = [
+                    self.download_url,
+                    f"/backend-api/files/{identifier}/download",
+                    f"/backend-api/files/{identifier}",
+                ]
+                return [AttachmentRequest(url=url) for url in urls if url]
+
     def relative_path(self) -> Path:
-        """The collision-proof path this attachment occupies in a delivery."""
-        if not self.identifier:
-            raise ChatGPTDownloadError(
-                f"Attachment {self.stored_name()!r} has no downloadable file id"
-            )
-        directory = PurePosixPath(self.identifier).name
-        if directory != self.identifier or not all(
-            character.isalnum() or character in {"-", "_"} for character in directory
-        ):
-            raise ChatGPTDownloadError("Attachment file id is not path-safe")
-        return Path("attachments") / directory / self.stored_name()
+        """The direct named path preferred when this filename is unique."""
+        return Path("attachments") / self.stored_name()
 
 
 class ChatGPTMetadata(Payload, frozen=True):
@@ -190,6 +282,41 @@ class ChatGPTMessage(Payload, frozen=True):
     content: ChatGPTContent = ChatGPTContent()
     metadata: ChatGPTMetadata = ChatGPTMetadata()
 
+    def attachments(self) -> list[ChatGPTAttachment]:
+        """Files presented by this user-visible message."""
+        if self.author.role == "tool":
+            return []
+        found = list(self.metadata.attachments)
+        if self.content.content_type not in {"text", "multimodal_text"}:
+            return found
+        fragments = [part for part in self.content.parts if isinstance(part, str)]
+        if self.content.text:
+            fragments.append(self.content.text)
+        for fragment in fragments:
+            tokens = MarkdownIt("commonmark").parse(fragment)
+            inline = [child for token in tokens for child in token.children or []]
+            for token in inline:
+                match token.type:
+                    case "link_open":
+                        target = token.attrGet("href")
+                    case "image":
+                        target = token.attrGet("src")
+                    case _:
+                        continue
+                if not isinstance(target, str):
+                    continue
+                parsed = urlparse(target)
+                if parsed.scheme != "sandbox":
+                    continue
+                found.append(
+                    ChatGPTAttachment(
+                        representation="sandbox",
+                        message_id=self.id,
+                        sandbox_path=unquote(parsed.path),
+                    )
+                )
+        return found
+
 
 class ChatGPTNode(Payload, frozen=True):
     """One node in ChatGPT's branched conversation mapping."""
@@ -204,6 +331,7 @@ class ChatGPTConversation(Payload, frozen=True):
     """The complete mapping and selected branch returned for one conversation."""
 
     title: str = ""
+    conversation_id: str = ""
     create_time: float | None = None
     update_time: float | None = None
     mapping: dict[str, ChatGPTNode]
@@ -231,33 +359,55 @@ class ChatGPTConversation(Payload, frozen=True):
         return list(messages)
 
     def attachments(self) -> list[ChatGPTAttachment]:
-        """Every distinct attachment anywhere in the complete mapping."""
+        """Every distinct user-visible file anywhere in the complete mapping."""
         attachments = [
             attachment
             for node in self.mapping.values()
             if node.message is not None
-            for attachment in node.message.metadata.attachments
+            for attachment in node.message.attachments()
         ]
-        missing = next(
-            (attachment for attachment in attachments if not attachment.identifier),
-            None,
+        return list(
+            {attachment.identity(): attachment for attachment in attachments}.values()
         )
-        if missing is not None:
-            raise ChatGPTDownloadError(
-                f"Attachment {missing.stored_name()!r} has no file id"
-            )
-        return list({item.identifier: item for item in attachments}.values())
+
+
+def attachment_paths(
+    attachments: list[ChatGPTAttachment],
+) -> dict[AttachmentIdentity, Path]:
+    """Allocate direct filenames, adding a familiar numeric suffix on collision."""
+
+    @cache
+    def selected_name(position: int) -> str:
+        """Name one file against every preceding allocation."""
+        attachment = attachments[position]
+        name = attachment.stored_name()
+        occupied = {selected_name(index) for index in range(position)}
+        if name not in occupied:
+            return name
+        supplied = Path(name)
+        candidates = (
+            f"{supplied.stem} ({index}){supplied.suffix}" for index in count(2)
+        )
+        return next(candidate for candidate in candidates if candidate not in occupied)
+
+    return {
+        attachment.identity(): Path("attachments") / selected_name(position)
+        for position, attachment in enumerate(attachments)
+    }
 
 
 class AttachmentRecord(BaseModel, frozen=True):
     """The retained identity and digest of one downloaded file."""
 
+    representation: Literal["metadata", "sandbox"]
     id: str
     name: str
     mime_type: str
     relative_path: str
     size_bytes: int
     sha256: str
+    message_id: str = ""
+    sandbox_path: str = ""
 
 
 class DownloadManifest(BaseModel, frozen=True):
@@ -302,12 +452,9 @@ def conversation_from(payload: JsonValue) -> ChatGPTConversation:
         ) from error
 
 
-def attachment_marker(attachment: ChatGPTAttachment) -> str:
+def attachment_marker(attachment: ChatGPTAttachment, path: Path) -> str:
     """The transcript pointer to one retained attachment."""
-    return (
-        f"[Attachment: {attachment.stored_name()} → "
-        f"{attachment.relative_path().as_posix()}]"
-    )
+    return f"[Attachment: {attachment.stored_name()} → {path.as_posix()}]"
 
 
 def render_part(part: JsonValue) -> str:
@@ -327,12 +474,17 @@ def render_part(part: JsonValue) -> str:
             )
 
 
-def render_message(message: ChatGPTMessage) -> str:
+def render_message(
+    message: ChatGPTMessage, paths: dict[AttachmentIdentity, Path]
+) -> str:
     """One speaker-tagged message plus the files it names."""
     content = [render_part(part) for part in message.content.parts]
     if message.content.text:
         content.append(message.content.text)
-    content.extend(attachment_marker(item) for item in message.metadata.attachments)
+    content.extend(
+        attachment_marker(item, paths[item.identity()])
+        for item in message.attachments()
+    )
     body = "\n\n".join(text for text in content if text)
     if not body:
         body = "[empty message payload; see conversation.json]"
@@ -345,8 +497,9 @@ def render_conversation(
 ) -> str:
     """The selected branch as speaker-tagged Markdown beside the raw mapping."""
     title = conversation.title or "Untitled ChatGPT conversation"
+    paths = attachment_paths(conversation.attachments())
     messages = "\n\n".join(
-        render_message(message) for message in conversation.active_messages()
+        render_message(message, paths) for message in conversation.active_messages()
     )
     return (
         f"# {title}\n\n"
@@ -483,26 +636,30 @@ async def attachment_response_body(
 
 async def fetch_attachment(
     request: APIRequestContext,
+    reference: ConversationReference,
     attachment: ChatGPTAttachment,
     session: ChatGPTSession | None,
+    *,
+    conversation_id: str = "",
 ) -> FetchedAttachment:
     """Download one declared attachment or fail the whole retention pass."""
-    identifier = quote(attachment.identifier, safe="")
-    candidates = [
-        attachment.download_url,
-        f"/backend-api/files/{identifier}/download",
-        f"/backend-api/files/{identifier}",
-    ]
     refusals: tuple[str, ...] = ()
-    for candidate in candidates:
-        if not candidate:
-            continue
-        url = allowed_download_url(candidate)
-        response = await request.get(
-            url,
-            headers=session.headers_for(url) if session is not None else {},
-            fail_on_status_code=False,
-        )
+    for candidate in attachment.requests(reference, conversation_id):
+        url = allowed_download_url(candidate.url)
+        headers = session.headers_for(url) if session is not None else {}
+        if urlparse(url).hostname == "chatgpt.com":
+            headers = {"Referer": reference.page_url(), **headers}
+        if candidate.params is None:
+            response = await request.get(
+                url, headers=headers, fail_on_status_code=False
+            )
+        else:
+            response = await request.get(
+                url,
+                params=candidate.params.model_dump(),
+                headers=headers,
+                fail_on_status_code=False,
+            )
         if response.status == 200:
             body = await attachment_response_body(request, response)
             return FetchedAttachment(declaration=attachment, body=body)
@@ -522,10 +679,11 @@ def write_delivery(
     output: Path | None = None,
 ) -> Path:
     """Atomically replace one retained conversation with a complete download."""
-    expected = {item.identifier for item in conversation.attachments()}
-    received = {item.declaration.identifier for item in fetched}
+    expected = {item.identity() for item in conversation.attachments()}
+    received = {item.declaration.identity() for item in fetched}
     if expected != received:
         raise ChatGPTDownloadError("Downloaded attachments do not match the payload")
+    paths = attachment_paths(conversation.attachments())
     workspace = (
         (output if output is not None else root / "tmp" / "conversations") / "chatgpt"
     ).resolve()
@@ -548,17 +706,21 @@ def write_delivery(
         )
         records: tuple[AttachmentRecord, ...] = ()
         for item in fetched:
-            path = staged / item.declaration.relative_path()
+            relative_path = paths[item.declaration.identity()]
+            path = staged / relative_path
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(item.body)
             records += (
                 AttachmentRecord(
+                    representation=item.declaration.representation,
                     id=item.declaration.identifier,
                     name=item.declaration.stored_name(),
                     mime_type=item.declaration.mime_type,
-                    relative_path=item.declaration.relative_path().as_posix(),
+                    relative_path=relative_path.as_posix(),
                     size_bytes=len(item.body),
                     sha256=hashlib.sha256(item.body).hexdigest(),
+                    message_id=item.declaration.message_id,
+                    sandbox_path=item.declaration.sandbox_path,
                 ),
             )
         manifest = DownloadManifest(
@@ -605,7 +767,13 @@ async def download_chatgpt(
         raw = await fetch_payload(context.request, reference, session)
         conversation = conversation_from(raw)
         fetched = [
-            await fetch_attachment(context.request, attachment, session)
+            await fetch_attachment(
+                context.request,
+                reference,
+                attachment,
+                session,
+                conversation_id=conversation.conversation_id,
+            )
             for attachment in conversation.attachments()
         ]
     return write_delivery(root, reference, raw, conversation, fetched, output)
