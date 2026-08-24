@@ -41,6 +41,7 @@ from host import (
     declared_identity,
     publish_edition,
     read_document,
+    record_hook_evidence,
     sandbox_active,
 )
 from kernel.decision import KernelDecision, SANDBOX_TRAPPED_REASON
@@ -53,6 +54,13 @@ def hook_environment():
     """The native environment passed to this bare hook process."""
     # lup: ignore[os-environ] — bare hooks have no settings package
     return os.environ
+
+
+def plugin_data_root():
+    """The plugin-owned writable directory Codex gives hook processes."""
+    environ = hook_environment()
+    root = environ["PLUGIN_DATA"] if "PLUGIN_DATA" in environ else ""
+    return Path(root) if root else None
 
 
 def managed_root():
@@ -283,8 +291,10 @@ def observe(payload):
 
 
 def main():
+    payload = {}
     try:
         payload = json.load(sys.stdin)
+        record_hook_evidence(plugin_data_root(), payload, "started")
         # Watching and deciding are separate events, and this one returns
         # before a verdict exists: the patch has already applied, so there is
         # nothing left to permit, and the fail-closed exit below would refuse
@@ -292,6 +302,7 @@ def main():
         event = payload["hook_event_name"] if "hook_event_name" in payload else ""
         if event == "PostToolUse":
             observe(payload)
+            record_hook_evidence(plugin_data_root(), payload, "completed", "observed")
             return
         permission_request = event == "PermissionRequest"
         permission_evidenced = event == "PreToolUse" and spend_approval(payload)
@@ -318,6 +329,13 @@ def main():
     # Nothing is swallowed: the reason carries whatever went wrong, and an
     # interrupt still passes through as the BaseException it is.
     except Exception as error:
+        record_hook_evidence(
+            plugin_data_root(),
+            payload,
+            "failed",
+            "error",
+            f"{type(error).__name__}: {error}",
+        )
         sys.stderr.write(f"Malformed hook input requires approval: {error}")
         raise SystemExit(2) from error
     if permission_request and decision.effect == "allow":
@@ -330,15 +348,22 @@ def main():
             },
             sys.stdout,
         )
+        record_hook_evidence(plugin_data_root(), payload, "completed", "allow")
         return
     if permission_request and decision.effect == "ask":
+        record_hook_evidence(plugin_data_root(), payload, "completed", "ask")
         return
     if decision.effect in ("allow", "defer"):
+        record_hook_evidence(plugin_data_root(), payload, "completed", decision.effect)
         return
     # A refusal that arrives while an approval is pending is two failures
     # wearing one face -- the policy declining a call, and the correlation
     # between a native approval and the call it approved not landing. They
     # read identically without this, which is how #180 reads as the first
     # when it is the second.
-    sys.stderr.write(decision.reason + uncorrelated(payload))
+    detail = decision.reason + uncorrelated(payload)
+    record_hook_evidence(
+        plugin_data_root(), payload, "completed", decision.effect, detail
+    )
+    sys.stderr.write(detail)
     raise SystemExit(2)

@@ -32,6 +32,49 @@ def sandbox_active() -> bool:
     return "LUP_SANDBOX_ACTIVE" in environ and environ["LUP_SANDBOX_ACTIVE"] == "1"
 
 
+def append_hook_evidence(path: Path, encoded: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as stream:
+        stream.write(encoded + "\n")
+
+
+def record_hook_evidence(
+    data_root: Path | None,
+    payload: dict,
+    phase: str,
+    outcome: str | None = None,
+    detail: str | None = None,
+) -> None:
+    """Append hook metadata without retaining a tool's input or output."""
+    if data_root is None:
+        return
+    record = {
+        "schema_version": 1,
+        "timestamp": datetime.now(UTC).isoformat(),
+        "phase": phase,
+    }
+    fields = ("session_id", "turn_id", "tool_name", "tool_use_id")
+    record["event_name"] = (
+        payload["hook_event_name"]
+        if "hook_event_name" in payload and isinstance(payload["hook_event_name"], str)
+        else None
+    )
+    record.update(
+        {
+            field: payload[field]
+            for field in fields
+            if field in payload and isinstance(payload[field], str)
+        }
+    )
+    record.update({"outcome": outcome} if outcome is not None else {})
+    record.update({"detail": detail} if detail is not None else {})
+    encoded = json.dumps(record, ensure_ascii=True, separators=(",", ":"))
+    try:
+        append_hook_evidence(data_root / "hook-events.jsonl", encoded)
+    except OSError as error:
+        print(f"lup: could not record hook evidence: {error}", file=sys.stderr)
+
+
 def script_run_nudge(
     scripts: list[str],
     root: Path | None,

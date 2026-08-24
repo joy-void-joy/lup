@@ -42,6 +42,7 @@ from host import (
     file_diagnostics,
     publish_edition,
     read_document,
+    record_hook_evidence,
     sandbox_active,
 )
 from kernel.decision import KernelDecision, escalation_offer, sandbox_escaped
@@ -50,6 +51,13 @@ from policy_data import (
     AUTONOMOUS_AGENT_IDENTITIES,
     DIAGNOSTICS_COMMAND,
 )
+
+
+def plugin_data_root():
+    """The plugin-owned writable directory Claude Code gives hook processes."""
+    environ = os.environ  # lup: ignore[os-environ]
+    root = environ["CLAUDE_PLUGIN_DATA"] if "CLAUDE_PLUGIN_DATA" in environ else ""
+    return Path(root) if root else None
 
 
 def managed_root():
@@ -302,8 +310,10 @@ def observe(payload):
 def main():
     payload = {}
     placed = None
+    failed = False
     try:
         payload = json.load(sys.stdin)
+        record_hook_evidence(plugin_data_root(), payload, "started")
         event = payload["hook_event_name"] if "hook_event_name" in payload else ""
         # Watching and deciding are separate events, and this one returns
         # before a verdict exists: the tool has already run, so there is
@@ -316,9 +326,14 @@ def main():
             # reaches a debug log nobody reads. Silence when the file checks
             # out, so the channel means something when it is used.
             if found:
-                sys.stderr.write("\n".join(found))
+                detail = "\n".join(found)
+                record_hook_evidence(
+                    plugin_data_root(), payload, "completed", "observed", detail
+                )
+                sys.stderr.write(detail)
                 raise SystemExit(2)
             json.dump({}, sys.stdout)
+            record_hook_evidence(plugin_data_root(), payload, "completed", "observed")
             return
         decision = dispatch(payload)
         placed = placed_input(payload)
@@ -329,7 +344,20 @@ def main():
     # Nothing is swallowed: the reason carries whatever went wrong, and an
     # interrupt still passes through as the BaseException it is.
     except Exception as error:
+        failed = True
         decision = KernelDecision(
             "ask", f"Malformed hook input requires approval: {error}"
         )
+        record_hook_evidence(
+            plugin_data_root(),
+            payload,
+            "failed",
+            "error",
+            f"{type(error).__name__}: {error}",
+        )
     json.dump(rendered(decision, payload, placed), sys.stdout)
+    if not failed:
+        detail = decision.reason if decision.effect == "deny" else None
+        record_hook_evidence(
+            plugin_data_root(), payload, "completed", decision.effect, detail
+        )

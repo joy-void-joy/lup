@@ -324,6 +324,25 @@ actually would. `dev vocabulary` prints every shell form the vocabulary
 judges and where each rule came from, which is the one to reach for when the
 question is "what *would* be allowed here" rather than "is this".
 
+## Hook execution evidence
+
+Plugin hooks receive a writable data directory: `PLUGIN_DATA` under Codex and
+`CLAUDE_PLUGIN_DATA` under Claude Code. Each dispatcher appends
+`hook-events.jsonl` there as it runs: a `started` record after input parsing,
+then `completed` with the final policy outcome or `failed` with the exact
+dispatcher exception. Records carry the event, session, turn, tool, tool-use
+id, and UTC timestamp. They deliberately omit tool input and output, which may
+contain commands, patches, or credentials.
+
+This journal distinguishes failures whose UI is otherwise identical. A
+`failed` record is a dispatcher failure; `completed` with `deny` is an
+intentional policy refusal; `started` without a terminal record is an
+interrupted dispatcher. If the native runtime reports a hook event but no
+correlated `started` record exists, the plugin command never began, so the
+investigation belongs at its trust, hook-definition, or process-launch
+boundary rather than in policy logic. An unwritable journal reports its own
+diagnostic but does not change the decision the hook reached.
+
 ## How one decision reaches two runtimes
 
 The generated plugins enforce permissions without importing lup, yet decide
