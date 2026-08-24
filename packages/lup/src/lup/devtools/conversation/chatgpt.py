@@ -15,7 +15,14 @@ from playwright.async_api import (
     APIResponse,
     Error as PlaywrightError,
 )
-from pydantic import AliasChoices, BaseModel, Field, TypeAdapter, model_validator
+from pydantic import (
+    AliasChoices,
+    BaseModel,
+    Field,
+    SecretStr,
+    TypeAdapter,
+    model_validator,
+)
 
 from lup.types import JsonValue
 from lup.devtools.conversation.browser import browser_context
@@ -42,6 +49,22 @@ class Payload(BaseModel, frozen=True, extra="ignore"):
         if not isinstance(data, dict):
             return data
         return {name: value for name, value in data.items() if value is not None}
+
+
+class ChatGPTSession(Payload, frozen=True):
+    """The bearer credential returned for one authenticated browser session."""
+
+    access_token: SecretStr = Field(
+        default=SecretStr(""), validation_alias="accessToken"
+    )
+
+    # lup: ignore[dict-str-payload] — Playwright requires an open HTTP header map
+    def headers_for(self, value: str) -> dict[str, str]:
+        """Authorize only requests sent to ChatGPT's exact web origin."""
+        parsed = urlparse(urljoin("https://chatgpt.com", value))
+        if parsed.scheme != "https" or parsed.hostname != "chatgpt.com":
+            return {}
+        return {"Authorization": f"Bearer {self.access_token.get_secret_value()}"}
 
 
 class ConversationReference(BaseModel, frozen=True):
@@ -344,22 +367,59 @@ async def response_json(response: APIResponse) -> JsonValue:
         ) from error
 
 
-async def fetch_payload(
+async def fetch_session(
     request: APIRequestContext, reference: ConversationReference
+) -> ChatGPTSession | None:
+    """Resolve bearer authorization for a private conversation when required."""
+    if reference.route() == "share":
+        return None
+    url = "https://chatgpt.com/api/auth/session"
+    response = await request.get(
+        url,
+        headers={"Referer": reference.page_url(), "Accept": "application/json"},
+        fail_on_status_code=False,
+    )
+    if response.status in {401, 403}:
+        raise ChatGPTAuthenticationRequired(
+            f"The ChatGPT browser session returned HTTP {response.status}"
+        )
+    if response.status != 200:
+        raise ChatGPTDownloadError(
+            f"ChatGPT refused its browser session endpoint with HTTP {response.status}"
+        )
+    try:
+        session = ChatGPTSession.model_validate(await response_json(response))
+    except ValueError as error:
+        raise ChatGPTDownloadError("ChatGPT session payload changed shape") from error
+    if not session.access_token.get_secret_value():
+        raise ChatGPTAuthenticationRequired(
+            "The ChatGPT browser session returned no access token"
+        )
+    return session
+
+
+async def fetch_payload(
+    request: APIRequestContext,
+    reference: ConversationReference,
+    session: ChatGPTSession | None,
 ) -> JsonValue:
     """Fetch one complete conversation through the browser's live session."""
     refusals: tuple[str, ...] = ()
     for url in reference.api_urls():
         response = await request.get(
             url,
-            headers={"Referer": reference.page_url(), "Accept": "application/json"},
+            headers={
+                "Referer": reference.page_url(),
+                "Accept": "application/json",
+                **(session.headers_for(url) if session is not None else {}),
+            },
             fail_on_status_code=False,
         )
         if response.status == 200:
             return await response_json(response)
         refusals += (f"{response.status} from {url}",)
     if reference.route() == "conversation" and any(
-        refusal.startswith(("401 ", "403 ", "404 ")) for refusal in refusals
+        refusal.startswith(("401 ", "403 ")) for refusal in refusals
     ):
         raise ChatGPTAuthenticationRequired(
             "The ChatGPT browser session is missing or expired"
@@ -422,7 +482,9 @@ async def attachment_response_body(
 
 
 async def fetch_attachment(
-    request: APIRequestContext, attachment: ChatGPTAttachment
+    request: APIRequestContext,
+    attachment: ChatGPTAttachment,
+    session: ChatGPTSession | None,
 ) -> FetchedAttachment:
     """Download one declared attachment or fail the whole retention pass."""
     identifier = quote(attachment.identifier, safe="")
@@ -436,7 +498,11 @@ async def fetch_attachment(
         if not candidate:
             continue
         url = allowed_download_url(candidate)
-        response = await request.get(url, fail_on_status_code=False)
+        response = await request.get(
+            url,
+            headers=session.headers_for(url) if session is not None else {},
+            fail_on_status_code=False,
+        )
         if response.status == 200:
             body = await attachment_response_body(request, response)
             return FetchedAttachment(declaration=attachment, body=body)
@@ -535,10 +601,11 @@ async def download_chatgpt(
 ) -> Path:
     """Fetch, validate, and retain one conversation and every attachment."""
     async with browser_context(directory, headless=True) as context:
-        raw = await fetch_payload(context.request, reference)
+        session = await fetch_session(context.request, reference)
+        raw = await fetch_payload(context.request, reference, session)
         conversation = conversation_from(raw)
         fetched = [
-            await fetch_attachment(context.request, attachment)
+            await fetch_attachment(context.request, attachment, session)
             for attachment in conversation.attachments()
         ]
     return write_delivery(root, reference, raw, conversation, fetched, output)
