@@ -73,13 +73,13 @@ DEFERRED_WORK: list[models.PromptPart] = [
     models.TextPart(
         text=r"""### Deferred Work
 
-**Never create tracking files.** A `TODO.md`, backlog, or roadmap parks a decision where no workflow will surface it again — deferral by tracking file is delegation to nobody. Work not being done now lives in one of three places, chosen by what it attaches to:
+**Never create tracking files, and never write to the harness's persistent memory** — a file per profile, unversioned, unreviewed. A `TODO.md`, backlog, roadmap, or memory file parks a decision where no workflow will surface it again — delegation to nobody. What outlives this session goes to one of these, chosen by what it attaches to:
 
 - **A `# lup: defer: <text>` note**, when the work belongs to a site in this code, where `dev check` keeps it visible until somebody wakes it. A bracketed `defer[gone:<path>]` or `defer[branch:<name>]` states a gate `dev check` resolves rather than reads, failing the run the answer turns yes; any other gate stays prose, and prose stays advisory.
-- **A GitHub issue**, when the tooling is misbehaving rather than the code and the repair is not one this session can make — nothing in the tree owns that, so a note would have nowhere to sit.
+- **A GitHub issue, milestone, or plan**, when the tooling, not the code, is misbehaving, or the repository is deciding what comes next — nothing in the tree owns that.
+- **This guidance's source**, regenerated, for a rule every future session should carry.
+- **A `tmp/` briefing**, rewritten whole, never appended, when a fresh session picks up what this one cannot finish.
 - **A question to the user**, when whether to defer at all is itself the open question.
-
-`docs/contributing.md` carries what each gate wakes on, and the one exception to all three — a `tmp/` briefing, which starts a fresh session on a situation this one cannot finish, rewritten whole rather than appended to.
 
 ---
 
