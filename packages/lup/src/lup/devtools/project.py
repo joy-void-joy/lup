@@ -34,9 +34,9 @@ class DevProject(BaseModel, frozen=True):
     path_roles: list[PathRoleRow] = []
     """Roots whose contents are judged by a purpose other than production.
 
-    A test root is judged by whether it exercises production rather than by
-    production's own conventions, so a scan that read them all the same way
-    would report a fixture as a defect.
+    Test and data roots are judged by behaviour and retained evidence rather
+    than by production's conventions, so a scan that read them all the same
+    way would report fixtures and generated research payloads as defects.
     """
 
     rules: RuleSelection = RuleSelection()

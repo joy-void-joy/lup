@@ -55,7 +55,7 @@ class PathRuleRow(TypedDict):
     allow_autonomous: bool
 
 
-type PathRoleName = Literal["production", "test", "scratch"]
+type PathRoleName = Literal["production", "test", "data", "scratch"]
 
 type PathRoleKind = Literal["subtree", "contains_part"]
 """The two directory shapes :func:`root_matches` tells apart.
@@ -71,10 +71,10 @@ class PathRoleRow(TypedDict):
     """One erased declaration of what a repository root is for.
 
     A role names the purpose a tree serves, which is what decides how much of
-    the lattice applies to it. ``test`` code is judged by whether it exercises
-    production, not by production's own conventions; ``scratch`` is disposable
-    by construction, so the verbs that ask before destroying something have
-    nothing to protect there.
+    the lattice applies to it. Tests are judged by whether they exercise
+    production, and data by the evidence it retains, rather than by production's
+    source conventions. ``scratch`` is disposable by construction, so the verbs
+    that ask before destroying something have nothing to protect there.
 
     ``root`` is a pattern, which is what says how far the declaration reaches:
     a bare root is anchored at the repository top, and a leading ``**/`` names

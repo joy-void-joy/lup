@@ -2,9 +2,10 @@
 
 The lattice judges an action by what it does. A role adds the missing half:
 what the thing acted upon is *for*. Production code carries the conventions
-because other code reads it; a test carries none of them because its subject
-is production's behaviour rather than its own shape; scratch carries nothing
-at all because every file there is disposable by construction.
+because other code reads it; tests and retained data carry none of them because
+their subjects are behaviour and evidence rather than their own source shape;
+scratch carries nothing at all because every file there is disposable by
+construction.
 
 Roles inside the repository are declared by the application, never the kernel
 — that path vocabulary belongs to whoever laid out the tree. The session
@@ -168,7 +169,8 @@ def path_role(path: str, rows: list[PathRoleRow]) -> PathRoleName:
     than gathered under one prefix — every ``__pycache__``, every ``.bak`` —
     is declarable as what it is. Disposability stays something a project
     states: nothing is scratch for merely being untracked, which is what
-    keeps an ignored ``.env.local`` or trace directory production.
+    keeps an ignored ``.env.local`` protected unless its project deliberately
+    declares it as data.
 
     Resolution is lexical, so it needs no filesystem call and ``..`` cannot
     climb out of a declared root into a role it was never given. A symlink

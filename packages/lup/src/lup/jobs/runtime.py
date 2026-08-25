@@ -16,13 +16,13 @@ cannot forge its own completion.
 
 import logging
 from datetime import datetime
-from pathlib import Path
-from typing import Literal
+from pathlib import Path, PurePosixPath
+from typing import Literal, Self
 from uuid import uuid4
 
 import docker
 from docker.errors import APIError, DockerException, NotFound
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from lup.sandbox.container import Sandbox
 from lup.sandbox.models import NetworkMode
@@ -96,11 +96,32 @@ raise SystemExit(exit_code)
 type JobState = Literal["queued", "running", "succeeded", "failed", "cancelled"]
 
 
+class JobInputFile(BaseModel, frozen=True):
+    """One opaque file mounted beside the generated job program."""
+
+    path: PurePosixPath
+    content: bytes
+
+    @field_validator("path")
+    @classmethod
+    def validate_relative_path(cls, path: PurePosixPath) -> PurePosixPath:
+        """Keep a supplied payload inside the job's controlled input tree."""
+        if (
+            path.is_absolute()
+            or not path.parts
+            or ".." in path.parts
+            or path.parts[0] in ("job.py", "runner.py", "spec.json")
+        ):
+            raise ValueError(f"invalid job input path {path!s}")
+        return path
+
+
 class JobSpec(BaseModel, frozen=True):
     """One isolated request to run code out of process."""
 
     code: str = Field(min_length=1)
     packages: list[str] = []
+    input_files: list[JobInputFile] = []
     correlation_id: str | None = Field(
         default=None,
         description=(
@@ -108,6 +129,14 @@ class JobSpec(BaseModel, frozen=True):
             "carried through onto the record so a result can be matched back"
         ),
     )
+
+    @model_validator(mode="after")
+    def validate_unique_inputs(self) -> Self:
+        """Refuse two payloads whose write order would decide their bytes."""
+        paths = [item.path for item in self.input_files]
+        if len(paths) != len(dict.fromkeys(paths)):
+            raise ValueError("job input paths must be unique")
+        return self
 
 
 class JobRecord(BaseModel, frozen=True):
@@ -148,6 +177,13 @@ class JobOutput(BaseModel, frozen=True):
     install_output: str | None = None
 
 
+class JobDirectories(BaseModel, frozen=True):
+    """The two host trees prepared for one container launch."""
+
+    input_dir: Path
+    output_dir: Path
+
+
 class DockerJobConfig(BaseModel, frozen=True):
     """Docker and storage configuration for one job backend.
 
@@ -162,6 +198,12 @@ class DockerJobConfig(BaseModel, frozen=True):
     network_mode: NetworkMode = "filtered"
     egress_proxy_image: str = Sandbox.DEFAULT_EGRESS_PROXY_IMAGE
     require_rootless: bool = True
+
+    @field_validator("root", mode="before")
+    @classmethod
+    def resolve_root(cls, root: Path | str) -> Path:
+        """Give Docker a host bind path rather than a named-volume spelling."""
+        return Path(root).expanduser().resolve()
 
 
 class DockerContainerState(BaseModel):
@@ -198,6 +240,24 @@ class JobStore:
 
     def result_path(self, job_id: str) -> Path:
         return self.directory(job_id) / "output" / "result.json"
+
+    def write_inputs(self, job_id: str, spec: JobSpec) -> JobDirectories:
+        """Persist one complete, closed input tree before its container starts."""
+        directory = self.directory(job_id)
+        input_dir = directory / "input"
+        output_dir = directory / "output"
+        input_dir.mkdir(parents=True)
+        output_dir.mkdir()
+        (input_dir / "job.py").write_text(spec.code, encoding="utf-8")
+        (input_dir / "spec.json").write_text(
+            spec.model_dump_json(exclude={"code", "input_files"}), encoding="utf-8"
+        )
+        (input_dir / "runner.py").write_text(JOB_RUNNER_SCRIPT, encoding="utf-8")
+        for supplied in spec.input_files:
+            destination = input_dir.joinpath(*supplied.path.parts)
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_bytes(supplied.content)
+        return JobDirectories(input_dir=input_dir, output_dir=output_dir)
 
     def write_record(self, record: JobRecord) -> None:
         """Atomically replace the scheduler's own view of one job."""
@@ -264,16 +324,9 @@ class DockerJobBackend:
     def submit(self, spec: JobSpec) -> JobRecord:
         """Persist the inputs, launch the container, and return immediately."""
         job_id = uuid4().hex
-        directory = self.store.directory(job_id)
-        input_dir = directory / "input"
-        output_dir = directory / "output"
-        input_dir.mkdir(parents=True)
-        output_dir.mkdir()
-        (input_dir / "job.py").write_text(spec.code, encoding="utf-8")
-        (input_dir / "spec.json").write_text(
-            spec.model_dump_json(exclude={"code"}), encoding="utf-8"
-        )
-        (input_dir / "runner.py").write_text(JOB_RUNNER_SCRIPT, encoding="utf-8")
+        directories = self.store.write_inputs(job_id, spec)
+        input_dir = directories.input_dir
+        output_dir = directories.output_dir
         now = datetime.now().astimezone()
         sandbox = self.sandbox(job_id)
         # Recorded before the container exists, so a crash between the two

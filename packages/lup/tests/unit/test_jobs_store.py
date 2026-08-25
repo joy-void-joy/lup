@@ -1,11 +1,19 @@
 """The job store: durability across processes, and refusing an unsafe id."""
 
 from datetime import UTC, datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import pytest
+from pydantic import ValidationError
 
-from lup.jobs.runtime import JobExecutionResult, JobRecord, JobStore
+from lup.jobs.runtime import (
+    DockerJobConfig,
+    JobExecutionResult,
+    JobInputFile,
+    JobRecord,
+    JobSpec,
+    JobStore,
+)
 
 SUBMITTED = datetime(2026, 1, 1, tzinfo=UTC)
 
@@ -94,6 +102,56 @@ def test_records_list_newest_first(tmp_path: Path) -> None:
 
 def test_an_empty_store_lists_nothing(tmp_path: Path) -> None:
     assert JobStore(tmp_path / "absent").list_records() == []
+
+
+def test_job_inputs_are_mounted_as_files_instead_of_python_literals(
+    tmp_path: Path,
+) -> None:
+    store = JobStore(tmp_path / "jobs")
+    directories = store.write_inputs(
+        "payload",
+        JobSpec(
+            code="print('done')",
+            input_files=[
+                JobInputFile(
+                    path=PurePosixPath("problems/000.cnf.gz"), content=b"compressed"
+                )
+            ],
+        ),
+    )
+
+    assert (directories.input_dir / "job.py").read_text(encoding="utf-8") == (
+        "print('done')"
+    )
+    assert (directories.input_dir / "problems/000.cnf.gz").read_bytes() == (
+        b"compressed"
+    )
+    assert "compressed" not in (directories.input_dir / "spec.json").read_text(
+        encoding="utf-8"
+    )
+
+
+@pytest.mark.parametrize(
+    "path", ["../escape", "/absolute", "job.py", "runner.py/child"]
+)
+def test_job_inputs_cannot_replace_control_files_or_escape(path: str) -> None:
+    with pytest.raises(ValidationError):
+        JobInputFile(path=PurePosixPath(path), content=b"payload")
+
+
+def test_job_input_paths_are_unique() -> None:
+    duplicate = JobInputFile(path=PurePosixPath("problem.cnf"), content=b"payload")
+
+    with pytest.raises(ValidationError, match="must be unique"):
+        JobSpec(code="pass", input_files=[duplicate, duplicate])
+
+
+def test_docker_job_roots_are_absolute_bind_mounts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    assert DockerJobConfig(root=Path("jobs")).root == tmp_path / "jobs"
 
 
 def test_a_settled_job_reports_itself_as_settled() -> None:
