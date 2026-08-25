@@ -465,11 +465,7 @@ def scan_reports(
                 counted=False,
                 lines=[
                     f"unlanded siblings: {len(unlanded)} (advisory)",
-                    *(
-                        f"  {branch.name}  {branch.unique_commits} commits, "
-                        f"{branch.source_diff_lines} ln"
-                        for branch in unlanded
-                    ),
+                    *(f"  {branch.name}  {branch.standing()}" for branch in unlanded),
                 ],
             )
 
