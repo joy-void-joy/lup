@@ -52,7 +52,7 @@ from lup.telemetry.journal import (
 )
 from lup.telemetry.native import NativeTranscripts, NativeTranscriptWatcher
 from lup.types import EnvVars, JsonObject, JsonValue
-from lup.workspace.paths import notes_path, project_root
+from lup.workspace.paths import harness_runs_path, project_root
 from lup.adapters.codex.home import (
     CodexWorktreeHomeStore,
     login_state,
@@ -349,7 +349,7 @@ def start_harness_transcript(
     run_id = (
         f"{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}_{provider}_{uuid4().hex[:8]}"
     )
-    root = record_root or notes_path() / "harness"
+    root = record_root or harness_runs_path()
     trace_path = root / provider / run_id / "observable.jsonl"
     journal = TraceJournal(
         trace_path,

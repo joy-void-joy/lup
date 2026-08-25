@@ -22,7 +22,9 @@ from lup.telemetry.journal import read_observable_events
 def project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """A project root the launcher would write its harness transcript under."""
     monkeypatch.setattr(launch, "project_root", lambda: tmp_path)
-    monkeypatch.setattr(launch, "notes_path", lambda: tmp_path / "notes")
+    monkeypatch.setattr(
+        launch, "harness_runs_path", lambda: tmp_path / "notes" / "harness"
+    )
     return tmp_path
 
 
