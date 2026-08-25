@@ -67,3 +67,31 @@ def test_a_caller_may_narrow_the_reachable_ports() -> None:
 
 def test_nothing_is_cached_between_runs() -> None:
     assert "cache deny all" in EgressPolicy().render()
+
+
+def test_no_dstdomain_list_holds_a_name_another_entry_already_covers() -> None:
+    # Squid refuses such a list *fatally*, so this is the boundary being there
+    # at all rather than tidiness: the proxy exits, its container removes
+    # itself, and the session downstream sees a proxy name that will not
+    # resolve. Asserted over both lists, since both render as `dstdomain`.
+    rendered = EgressPolicy(allowed_domains=[".example.com", "example.com"]).render()
+
+    declared = [line for line in rendered.splitlines() if line.startswith("acl ")]
+    assert "acl allowed_domains dstdomain .example.com" in declared
+    assert "localhost" not in rendered.replace(".localhost", "")
+
+
+def test_the_covered_entry_is_dropped_and_the_covering_one_kept() -> None:
+    # The direction matters: a leading dot matches the apex too, so dropping
+    # the dotted form would keep the narrower half and lose every subdomain.
+    policy = EgressPolicy()
+
+    assert policy.distinct([".local", "local", "foo.local"]) == [".local"]
+    assert policy.distinct(["local"]) == ["local"]
+
+
+def test_the_icmp_helper_is_off_because_the_proxy_has_no_net_raw() -> None:
+    # It needs NET_RAW, which the proxy deliberately does not have. Left on it
+    # dies at startup on `Unable to open any ICMP sockets`, which reads as
+    # squid failing rather than a helper it does not need.
+    assert "pinger_enable off" in EgressPolicy().render()
