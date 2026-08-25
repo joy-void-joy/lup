@@ -130,3 +130,54 @@ class TestSlugifyLabel:
     )
     def test_the_identifying_tail_survives(self, label: str, expected: str) -> None:
         assert slugify_label(label) == expected
+
+
+class NestedResult(BaseModel):
+    """A result whose weight is records rather than prose."""
+
+    query: str = ""
+    hits: list[dict[str, str]] = []
+
+
+class TestNothingSpillableIsReported:
+    """A payload a pointer cannot shrink is named, not passed on quietly.
+
+    Only a top-level string can hold a pointer, so a model carrying its
+    weight in nested collections is invisible to the spill. Left silent,
+    the tool that owns it learns nothing, and the runtime on the far side
+    writes the payload somewhere the adopter's policy never granted.
+    """
+
+    def oversized(self) -> NestedResult:
+        return NestedResult(query="q", hits=[{"text": "x" * 200} for _ in range(20)])
+
+    def test_it_is_returned_unchanged(self) -> None:
+        configure(spill_threshold=100)
+        result = self.oversized()
+
+        assert spill_oversized_result("wide", "q", result) is result
+
+    def test_it_warns(self, caplog: pytest.LogCaptureFixture) -> None:
+        configure(spill_threshold=100)
+
+        with caplog.at_level("WARNING"):
+            spill_oversized_result("wide", "q", self.oversized())
+
+        assert "no spillable field" in caplog.text
+        assert "wide" in caplog.text
+
+    def test_a_payload_under_the_threshold_is_quiet(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        configure(spill_threshold=100_000)
+
+        with caplog.at_level("WARNING"):
+            spill_oversized_result("wide", "q", self.oversized())
+
+        assert "no spillable field" not in caplog.text
+
+
+class TestThresholdIsBelowTheRuntimeCeiling:
+    def test_default_leaves_room_under_the_mcp_cap(self) -> None:
+        """25,000 tokens estimated at four characters each, halved."""
+        assert ContentSafetyConfig(directory=Path(".")).spill_threshold <= 50_000
