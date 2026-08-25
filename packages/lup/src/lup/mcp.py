@@ -171,6 +171,7 @@ def create_mcp_server(
     name: str,
     version: str = "1.0.0",
     tools: Sequence["LupMcpTool"] | None = None,
+    instructions: str | None = None,
 ) -> LupMcpServerConfig:
     """Create an in-process MCP server with proper is_error handling.
 
@@ -178,6 +179,7 @@ def create_mcp_server(
         name: Unique identifier for the server.
         version: Server version string.
         tools: List of LupMcpTool instances created with the @lup_tool decorator.
+        instructions: Server-wide guidance returned during MCP initialization.
 
     Returns:
         LupMcpServerConfig for adapter conversion.
@@ -186,7 +188,7 @@ def create_mcp_server(
     advertises an empty tool list — selecting an unpopulated group is a
     valid (if useless) session, not a protocol error.
     """
-    server = Server(name, version=version)
+    server = Server(name, version=version, instructions=instructions)
     registered = list(tools or [])
     tool_map = {tool_def.name: tool_def for tool_def in registered}
 

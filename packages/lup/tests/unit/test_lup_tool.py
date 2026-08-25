@@ -16,7 +16,7 @@ from typing import cast
 
 from pydantic import BaseModel, Field
 
-from lup.mcp import ToolError, ToolResponse, lup_tool
+from lup.mcp import ToolError, ToolResponse, create_mcp_server, lup_tool
 
 
 class EchoInput(BaseModel):
@@ -95,3 +95,11 @@ def test_models_inferred_from_annotations() -> None:
     assert echo.output_model is EchoOutput
     assert echo.name == "echo"
     assert echo.input_schema == EchoInput.model_json_schema()
+
+
+def test_server_initialization_carries_instructions() -> None:
+    server = create_mcp_server("mathematics", instructions="Use exact arithmetic.")
+
+    initialization = server.server.create_initialization_options()
+
+    assert initialization.instructions == "Use exact arithmetic."
