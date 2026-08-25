@@ -1,10 +1,11 @@
-"""Development scans stop at roots whose purpose is retained data."""
+"""Development checks stop at roots that do not carry live code."""
 
+import json
 from pathlib import Path
 
 import pytest
 
-from lup.devtools.dev import antipatterns, boundaries
+from lup.devtools.dev import antipatterns, boundaries, check
 from lup.devtools.project import DevProject
 from lup.policy.kernel.rows import PathRoleRow
 
@@ -33,7 +34,11 @@ def data_project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> DevProject:
     monkeypatch.setattr(boundaries, "git", listing)
     return DevProject(
         package="app",
-        path_roles=[PathRoleRow(root="notes", role="data")],
+        path_roles=[
+            PathRoleRow(root="tests", role="test"),
+            PathRoleRow(root="notes", role="data"),
+            PathRoleRow(root="**/tmp", role="scratch"),
+        ],
     )
 
 
@@ -47,3 +52,44 @@ def test_boundaries_skip_data_roots(data_project: DevProject) -> None:
     assert [item.rel for item in boundaries.tracked_python_sources(data_project)] == [
         "src/app.py"
     ]
+
+
+def test_every_external_check_skips_data_and_scratch(
+    data_project: DevProject, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[tuple[str, ...]] = []
+    pyright_configuration: dict[str, object] = {}
+
+    def capture(*arguments: str, **_options: str) -> None:
+        calls.append(arguments)
+        if arguments[1:3] == ("pyright", "--project"):
+            pyright_configuration.update(
+                json.loads(Path(arguments[3]).read_text(encoding="utf-8"))
+            )
+
+    monkeypatch.setattr(check, "uv", capture)
+    monkeypatch.setattr(check, "project_root", lambda: tmp_path)
+    excluded = check.non_code_roots(data_project)
+
+    check.ruff_format_check(False, excluded)
+    check.ruff_lint_check(False, excluded)
+    check.pyright_check(excluded)
+    check.TestRoot(name="pytest", directory=tmp_path).checked(2, excluded)
+
+    assert excluded == ["notes", "**/tmp"]
+    assert all("tests" not in call for call in calls)
+    assert all("notes" in call and "**/tmp" in call for call in (calls[0], calls[1]))
+    assert pyright_configuration == {
+        "include": ["."],
+        "exclude": ["notes", "**/tmp"],
+    }
+    assert calls[3][-8:] == (
+        "--ignore-glob",
+        "notes",
+        "--ignore-glob",
+        "notes/**",
+        "--ignore-glob",
+        "**/tmp",
+        "--ignore-glob",
+        "**/tmp/**",
+    )

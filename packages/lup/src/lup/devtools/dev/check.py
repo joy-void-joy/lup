@@ -1,10 +1,13 @@
 """Unified pre-flight checks: ruff, pyright, pytest."""
 
+import json
 import os
+import tomllib
 from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 
 import sh
 import typer
@@ -78,26 +81,93 @@ def ran(name: str, command: Callable[[], object], ok: str = "ok") -> CheckReport
     return CheckReport(name=name, lines=[f"{name}: {ok}"])
 
 
-def ruff_format_check(fix: bool) -> CheckReport:
+def non_code_roots(project: DevProject) -> list[str]:
+    """Retained data and disposable scratch that no code check should read."""
+    return [
+        row["root"] for row in project.path_roles if row["role"] in ("data", "scratch")
+    ]
+
+
+def option_arguments(option: str, values: list[str]) -> list[str]:
+    """Repeat one CLI option once for every value it carries."""
+    return [argument for value in values for argument in (option, value)]
+
+
+def ruff_format_check(fix: bool, excluded_roots: list[str]) -> CheckReport:
     """Whether every file is formatted — or, with *fix*, formatting them."""
     return ran(
         "ruff format",
-        lambda: uv("run", "ruff", "format", *([] if fix else ["--check"]), "."),
+        lambda: uv(
+            "run",
+            "ruff",
+            "format",
+            *([] if fix else ["--check"]),
+            *option_arguments("--exclude", excluded_roots),
+            ".",
+        ),
         "applied" if fix else "ok",
     )
 
 
-def ruff_lint_check(fix: bool) -> CheckReport:
+def ruff_lint_check(fix: bool, excluded_roots: list[str]) -> CheckReport:
     """Whether the lint rules hold — or, with *fix*, applying what they can."""
     return ran(
         "ruff check",
-        lambda: uv("run", "ruff", "check", ".", *(["--fix"] if fix else [])),
+        lambda: uv(
+            "run",
+            "ruff",
+            "check",
+            *option_arguments("--exclude", excluded_roots),
+            ".",
+            *(["--fix"] if fix else []),
+        ),
     )
 
 
-def pyright_check() -> CheckReport:
-    """Whether the workspace type-checks."""
-    return ran("pyright", lambda: uv("run", "pyright"))
+def pyright_base_configuration(root: Path) -> Path | None:
+    """The configuration Pyright would discover from the repository root."""
+    json_config = root / "pyrightconfig.json"
+    if json_config.is_file():
+        return json_config
+    pyproject = root / "pyproject.toml"
+    if not pyproject.is_file():
+        return None
+    with pyproject.open("rb") as stream:
+        settings = tomllib.load(stream)
+    match settings:
+        case {"tool": {"pyright": _}}:
+            return pyproject
+        case _:
+            return None
+
+
+def pyright_check(excluded_roots: list[str]) -> CheckReport:
+    """Whether the code-bearing workspace type-checks."""
+    root = project_root()
+    base = pyright_base_configuration(root)
+    with NamedTemporaryFile(
+        mode="w",
+        encoding="utf-8",
+        prefix=".lup-pyright-",
+        suffix=".json",
+        dir=root,
+        delete=False,
+    ) as stream:
+        configuration = Path(stream.name)
+        json.dump(
+            {
+                **({"extends": str(base)} if base is not None else {"include": ["."]}),
+                "exclude": excluded_roots,
+            },
+            stream,
+        )
+    try:
+        return ran(
+            "pyright",
+            lambda: uv("run", "pyright", "--project", str(configuration)),
+        )
+    finally:
+        configuration.unlink(missing_ok=True)
 
 
 class TestRoot(BaseModel):
@@ -106,7 +176,7 @@ class TestRoot(BaseModel):
     name: str
     directory: Path
 
-    def checked(self, workers: int) -> CheckReport:
+    def checked(self, workers: int, excluded_roots: list[str]) -> CheckReport:
         """Whether this suite passes, run from its own root.
 
         The library ships to an index without the application beside it, so
@@ -116,7 +186,21 @@ class TestRoot(BaseModel):
         """
         return ran(
             self.name,
-            lambda: uv("run", "pytest", "-n", str(workers), _cwd=str(self.directory)),
+            lambda: uv(
+                "run",
+                "pytest",
+                "-n",
+                str(workers),
+                *option_arguments(
+                    "--ignore-glob",
+                    [
+                        pattern
+                        for root in excluded_roots
+                        for pattern in (root, f"{root}/**")
+                    ],
+                ),
+                _cwd=str(self.directory),
+            ),
         )
 
 
@@ -489,14 +573,18 @@ def run_checks(
     Pass *fix* to auto-fix formatting and lint issues. ``scope`` narrows the
     note and anti-pattern gates to paths this tree is answerable for.
     """
+    excluded_roots = non_code_roots(project)
     tools: list[Callable[[], CheckReport]] = [
-        partial(ruff_format_check, fix),
-        partial(ruff_lint_check, fix),
-        pyright_check,
+        partial(ruff_format_check, fix, excluded_roots),
+        partial(ruff_lint_check, fix, excluded_roots),
+        partial(pyright_check, excluded_roots),
         *(
             []
             if no_test
-            else [partial(root.checked, test_workers) for root in test_roots]
+            else [
+                partial(root.checked, test_workers, excluded_roots)
+                for root in test_roots
+            ]
         ),
     ]
     sweeps = partial(
