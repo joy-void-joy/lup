@@ -25,6 +25,7 @@ from pydantic import (
 from lup.codescan.common import AntiPattern, RuleSelection
 from lup.devtools.launcher import DEFAULT_ENVIRONMENT
 from lup.harness.banner import ArtifactBanner, GeneratedBanner
+from lup.harness.image import Image
 from lup.harness.requirements import Manifest
 from lup.markdown import CodeCell, PlainCell, TableCell, escaped
 from lup.mcp import ToolDeclaration
@@ -1216,6 +1217,15 @@ class Harness(BaseModel, frozen=True):
     declare here is checked by the launch, printed by the standalone command,
     and installed into any image built from this harness -- one roster, so
     the three cannot describe different toolchains.
+    """
+    image: Image = Image()
+    """The container an agent session runs in, built from the roster above.
+
+    Separate from ``requirements`` because it answers a different question:
+    that says *what* the toolchain is, this says how a container carrying it
+    is assembled and started. The package list is not repeated here -- it is
+    read off the manifest, so an image cannot be built from a roster the
+    preflight never exercised.
     """
 
     @property

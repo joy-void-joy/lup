@@ -19,10 +19,13 @@ import sh
 import typer
 from pydantic import BaseModel, Field
 
+from lup.runtime.login import ProviderLogin
 from lup.runtime.profiles import ProfileDirectory
+from lup.devtools.harness.contained import contained_argv
 from lup.adapters.claude.harness import ClaudeSpellings
 from lup.adapters.claude.transcripts import ClaudeTranscripts
 from lup.adapters.codex.harness import CodexSpellings
+from lup.adapters.codex.login import CODEX_LOGIN
 from lup.adapters.codex.harness_runtime import (
     CodexPluginInstaller,
     PluginCacheConfig,
@@ -33,13 +36,17 @@ from lup.harness.models import NativeName, Plugin, Resumption
 from lup.harness.notice import Notice
 from lup.harness.requirements import (
     Finding,
-    LostCapability,
     Manifest,
     Requirement,
-    Run,
     refused,
 )
 from lup.harness.process import LocalProcessLauncher
+from lup.harness.toolchain import (
+    bubblewrap_requirement,
+    container_client,
+    for_host,
+    socat_requirement,
+)
 from lup.telemetry.journal import (
     ArgvRedaction,
     KeyRedaction,
@@ -441,16 +448,99 @@ def report_requirements(manifest: Manifest, setting_up: bool = False) -> list[Fi
     that was equally true yesterday.
     """
     environ: EnvVars = dict(os.environ)  # lup: ignore[os-environ]
-    findings = manifest.check(environ, setting_up=setting_up)
+    # Pointed at this host's client here rather than declared as one, because
+    # the declaration is hashed into the ownership digest and a container
+    # client is a fact about the machine. This is the only place the
+    # exercises actually run, so it is the only place that has to know.
+    findings = for_host(manifest, container_client(), project_root()).check(
+        environ, setting_up=setting_up
+    )
+    return reported(findings)
+
+
+def reported(findings: list[Finding]) -> list[Finding]:
+    """Say what each finding found, and stop where absence refuses.
+
+    One place for both halves so the two rosters cannot come to differ about
+    what a refusal means. They already had somewhere to differ: the inside
+    roster was written after the host one and, printed separately, would have
+    been free to treat a refused finding as a line rather than a stop.
+
+    The refusal names the capabilities and stops there. Joining their whole
+    consequences into the exception was tried and is unreadable at the size
+    this roster reached: four refusals became one nine-line paragraph inside
+    an error box, restating word for word what had just been printed above it
+    with the causes, the recoveries and the blank lines all flattened out. The
+    lines above are the report; this is the exit code and what it was about.
+    """
     for finding in findings:
         for notice in finding.notices():
             notice.say()
     stopping = refused(findings)
     if stopping:
         raise typer.BadParameter(
-            "; ".join(item.requirement.absence.consequence() for item in stopping)
+            f"{len(stopping)} of these refuse a session: "
+            + ", ".join(item.requirement.capability for item in stopping)
+            + ". Each is reported above with its cause and what answers it."
         )
     return findings
+
+
+def verify_inside(
+    manifest: Manifest, opening: list[str], setting_up: bool = True
+) -> list[Finding]:
+    """Exercise the image half behind an argv somebody already assembled.
+
+    Split from :func:`report_inside_requirements` so the launch can use it
+    without building the argv a second time. Assembling it starts the egress
+    proxy and may build the image, so a second call would not merely be slow
+    -- it would print the whole boundary notice again, which reads as the
+    launch having done it twice.
+    """
+    environ: EnvVars = dict(os.environ)  # lup: ignore[os-environ]
+    return reported(manifest.check_inside(environ, opening, setting_up))
+
+
+def report_inside_requirements(
+    composition: NativeHarnessComposition,
+    plugin: Plugin,
+    config_home: Path,
+    login: ProviderLogin,
+) -> list[Finding]:
+    """Exercise the image-side requirements inside the container a session opens.
+
+    The half of the manifest that had nowhere to run. An image requirement is
+    excluded from the host roster for a good reason -- a laptop without
+    ``bun`` is not a laptop with a problem -- and excluded was as far as it
+    went: declared, rendered into a package list, never exercised. What that
+    bought was a preflight that reported a healthy machine and a session that
+    could not resolve its own proxy, because everything the boundary is made
+    of sat on the unexercised side.
+
+    Behind the *same* argv a launch opens with, assembled by the same call.
+    That is the whole design, and the alternative has already been measured
+    wrong twice: an exercise spelled as its own ``run`` verified a container
+    with no network, no mounts and no config home, and an exercise spelled
+    with its own client verified an engine no session opens through. A probe
+    that assembles its own container answers about that container.
+
+    Non-interactive, which is the one deliberate difference. A probe's output
+    is captured rather than shown, and ``-it`` against a pipe fails on the
+    terminal it was promised.
+    """
+    harness = composition.recipe.source
+    credential = login.credentials_path(config_home)
+    opening = contained_argv(
+        harness.image,
+        harness.requirements,
+        project_root(),
+        plugin.hooks.human_owned_files if plugin.hooks is not None else [],
+        config_home,
+        credential if credential.exists() else None,
+        login,
+        interactive=False,
+    )
+    return verify_inside(harness.requirements, opening)
 
 
 def codex_login_preflight(home: Path, environment: EnvVars) -> None:
@@ -485,7 +575,8 @@ def apply_sandbox_environment(
     plugin: Plugin,
     environment: EnvVars,
     label: str,
-    required_tools: list[str],
+    required_tools: list[Requirement],
+    contained: bool = False,
 ) -> None:
     """Export LUP_SANDBOX_ACTIVE when the declared sandbox can actually run.
 
@@ -500,29 +591,46 @@ def apply_sandbox_environment(
     to relax into a boundary that will not be there. Absence and breakage
     both leave the lattice standing, which is the safe direction, and the
     message says which of the two was found rather than only that one was.
+
+    Asked only of an uncontained launch. A contained one has a boundary
+    already, and the kernel reads it from the image's own ``LUP_CONTAINED``
+    rather than from anything a launcher passes -- ``boundary = sandboxed or
+    contained``, so the flag would change no verdict. Probing anyway printed
+    a sandbox verdict about a session that was not going to rely on it, and
+    on a failed probe printed ``deny lattice stays active`` for a session
+    whose lattice was about to stand down behind the container. Saying
+    nothing is the honest report, and the container's own line says what the
+    boundary is.
+
+    Each tool carries its own exercise rather than being named here and
+    probed with a flag chosen by this function. That is not tidiness: the
+    one flag this spelled for every tool was ``--version``, socat has no
+    such option and exits 1 on it, and the OS boundary was therefore
+    reported unavailable on every host in the world.
     """
     hooks = plugin.hooks
-    if hooks is None or hooks.sandbox is None:
+    if contained or hooks is None or hooks.sandbox is None:
         return
-    findings = [
-        Requirement(
-            capability=tool,
-            purpose="the OS boundary this launch claims",
-            exercise=Run(command=[tool, "--version"]),
-            absence=LostCapability(capability="OS confinement"),
-        ).check(environment)
-        for tool in required_tools
-    ]
+    findings = [tool.check(environment) for tool in required_tools]
     unusable = [finding for finding in findings if not finding.working]
     if unusable:
         for finding in unusable:
-            typer.echo(
-                f"{label} sandbox: {finding.requirement.capability} — {finding.detail}"
-            )
-        typer.echo(f"{label} sandbox: deny lattice stays active")
+            Notice(
+                text=(
+                    f"{label} sandbox: {finding.requirement.capability} — "
+                    f"{finding.detail}"
+                ),
+                urgency="warning",
+            ).say()
+        Notice(
+            text=f"{label} sandbox: deny lattice stays active", urgency="warning"
+        ).say()
         return
     environment["LUP_SANDBOX_ACTIVE"] = "1"
-    typer.echo(f"{label} sandbox: active — unjudged shell defers to the OS boundary")
+    Notice(
+        text=f"{label} sandbox: active — unjudged shell defers to the OS boundary",
+        urgency="boundary",
+    ).say()
 
 
 # lup: ignore[library-default] — each entry is literally a Codex CLI flag
@@ -536,21 +644,41 @@ CODEX_SANDBOX_OVERRIDES = (
 
 
 def codex_sandbox_arguments(
-    plugin: Plugin, environment: EnvVars, extra_args: list[str]
+    plugin: Plugin,
+    environment: EnvVars,
+    extra_args: list[str],
+    contained: bool = False,
 ) -> list[str]:
     """Compose the interactive Codex envelope that LUP_SANDBOX_ACTIVE vouches for.
 
-    The launcher establishes the boundary it announces: an explicit
-    workspace-write sandbox on the Codex command line, mirroring how the
-    Claude settings artifact compiles the same declaration into an OS wall.
-    Path-level write and credential denials have no Codex equivalent, and
-    neither does taking one command out of the envelope, so the envelope is
-    the declaration's strict subset (network stays off). The dispatcher still
-    reads the exclusions, judging those commands as though nothing confined
-    them — which is the strict direction here too, since an envelope with no
-    network is not a boundary they would have survived either. When the
-    caller supplies its own sandbox flag the launcher vouches for nothing:
-    the flag stays unset and the deny lattice keeps the escalation recipe.
+    Uncontained, the launcher establishes the boundary it announces: an
+    explicit workspace-write sandbox on the Codex command line, mirroring how
+    the Claude settings artifact compiles the same declaration into an OS
+    wall. Path-level write and credential denials have no Codex equivalent,
+    and neither does taking one command out of the envelope, so the envelope
+    is the declaration's strict subset (network stays off). The dispatcher
+    still reads the exclusions, judging those commands as though nothing
+    confined them — which is the strict direction here too, since an envelope
+    with no network is not a boundary they would have survived either. When
+    the caller supplies its own sandbox flag the launcher vouches for
+    nothing: the flag stays unset and the deny lattice keeps the escalation
+    recipe.
+
+    Contained, that same envelope is wrong in a way that has nothing to do
+    with strictness: ``workspace-write`` turns network access off, and a
+    contained session's only route out is an HTTP proxy on an internal
+    network. The strict subset would therefore cut the session off from the
+    egress boundary built for it, and the Codex documentation says so
+    directly for this case -- configure the container to provide the
+    isolation, then run with ``danger-full-access`` inside it. This is the
+    counterpart of Claude's ``enabled: false``, and it is what "every
+    runtime, in the same change" means for a posture: one concept, each
+    runtime's own word for it.
+
+    LUP_SANDBOX_ACTIVE stays unset either way here, because a contained
+    session does not need it -- the kernel reads the container from the
+    image's own ``LUP_CONTAINED``, and a boundary is a boundary whether the
+    launcher vouched for it or not.
     """
     hooks = plugin.hooks
     if hooks is None or hooks.sandbox is None:
@@ -561,16 +689,31 @@ def codex_sandbox_arguments(
         if word in CODEX_SANDBOX_OVERRIDES or word.startswith("--sandbox=")
     ]
     if overrides:
-        typer.echo(
-            f"codex sandbox: caller envelope ({' '.join(overrides)}) — "
-            "deny lattice stays active"
-        )
+        Notice(
+            text=(
+                f"codex sandbox: caller envelope ({' '.join(overrides)}) — "
+                "deny lattice stays active"
+            ),
+            urgency="warning",
+        ).say()
         return []
+    if contained:
+        Notice(
+            text=(
+                "codex sandbox: off inside the container — "
+                "the container is the boundary, and its proxy is the way out"
+            ),
+            urgency="boundary",
+        ).say()
+        return ["--sandbox", "danger-full-access"]
     environment["LUP_SANDBOX_ACTIVE"] = "1"
-    typer.echo(
-        "codex sandbox: workspace-write envelope — "
-        "unjudged shell defers to the OS boundary"
-    )
+    Notice(
+        text=(
+            "codex sandbox: workspace-write envelope — "
+            "unjudged shell defers to the OS boundary"
+        ),
+        urgency="boundary",
+    ).say()
     return ["--sandbox", "workspace-write", *writable_root_arguments()]
 
 
@@ -648,14 +791,14 @@ def codex_resume_arguments(resume: Resumption) -> list[str]:
     return ["resume", "--last"] if resume.latest else []
 
 
-def claude_sandbox_arguments(plugin: Plugin) -> list[str]:
-    """Widen the Claude sandbox's writable set over the same sibling tree/.
+def claude_sandbox_arguments(plugin: Plugin, contained: bool = False) -> list[str]:
+    """Say what this launch means the Claude sandbox to be, in one settings merge.
 
-    Claude roots writes at the working directory just as Codex does, so a
-    second checkout is read-only to every command a session runs — and
-    running the toolchain over one is ordinary work here, which is why the
-    symptom arrives as pytest failing to write a cache and `ruff format`
-    refusing to save. Neither error names a sandbox.
+    Uncontained, that is a widening: Claude roots writes at the working
+    directory just as Codex does, so a second checkout is read-only to every
+    command a session runs — and running the toolchain over one is ordinary
+    work here, which is why the symptom arrives as pytest failing to write a
+    cache and `ruff format` refusing to save. Neither error names a sandbox.
 
     The path is this machine's, so it is resolved at launch and passed as
     settings rather than declared: an artifact carrying an absolute path
@@ -664,10 +807,34 @@ def claude_sandbox_arguments(plugin: Plugin) -> list[str]:
     surfaces document this key differently — arrays that merge across
     scopes, values that override per session — and a list carrying both is
     the same list under either reading.
+
+    Contained, it is an *off* switch, and the artifact still says ``enabled:
+    true`` because that is the right answer for the uncontained launch the
+    same file serves. Two reasons to turn it off, one measured and one
+    documented. Measured: in an unprivileged container bubblewrap cannot
+    mount a fresh ``/proc`` -- ``Can't mount proc on /newroot/proc:
+    Operation not permitted`` -- so the inner sandbox does not start, and
+    the packages installed to keep it quiet bought silence rather than a
+    boundary. Documented: Anthropic's remedy for that is
+    ``enableWeakerNestedSandbox``, which they describe as considerably
+    weaker and appropriate only where an outer container is already the
+    boundary -- and where that is true, the honest posture is the container
+    alone rather than a second wall that has to be weakened to stand up.
+
+    What is lost is narrower than it looks. The credential read denials name
+    paths this container never mounts; the human-owned write denials are
+    still surfaced as approvals by the semantic policy; ``excludedCommands``
+    was already inert here, because the container never agreed to leave any
+    command alone. The domain allowlist is not a wall either -- it
+    pre-approves rather than refuses, and ``strictAllowlist`` has no effect
+    from a repository's own settings — and what does refuse is the egress
+    proxy, which is untouched by this.
     """
     hooks = plugin.hooks
     if hooks is None or hooks.sandbox is None:
         return []
+    if contained:
+        return ["--settings", json.dumps({"sandbox": {"enabled": False}})]
     try:
         tree = get_tree_dir()
     except (typer.Exit, SystemExit):
@@ -705,6 +872,77 @@ def companion_plugin_directories(root: Path, generated: str) -> list[Path]:
 # vector, and a mode is one optional argument among them; moving it onto
 # LaunchMode would make the model answerable for starting a runtime it knows
 # nothing about, and leave a project declaring no mode with no launcher at all.
+def ambient_config_home(login: ProviderLogin, fallback: Path) -> Path:
+    """The configuration home a launch would inherit, made concrete for a mount.
+
+    ``launch_home`` answers ``None`` for "inherit whatever the environment
+    selected", which is the right answer everywhere it is read -- except at a
+    mount, which names a file rather than a policy. Resolving it here lets
+    that ``None`` keep meaning what it means everywhere else instead of every
+    caller inventing a default.
+    """
+    # lup: ignore[os-environ,dict-get] — the process environment is the open
+    # mapping this reads by definition, and absence is the answer it wants
+    named = os.environ.get(login.config_home_env)
+    return Path(named) if named else fallback
+
+
+def session_argv(
+    cli: str,
+    arguments: list[str],
+    composition: NativeHarnessComposition,
+    plugin: Plugin,
+    config_home: Path,
+    login: ProviderLogin,
+    unsandboxed: bool,
+) -> list[str]:
+    """The argv that opens a session, inside the declared container or on the host.
+
+    One place decides this for both runtimes, because "contained unless the
+    operator said otherwise" is a property of the launch rather than of the
+    CLI being launched -- and a second runtime that decided it separately is
+    how one of them ends up quietly uncontained.
+    """
+    if unsandboxed:
+        return [cli, *arguments]
+    harness = composition.recipe.source
+    credential = login.credentials_path(config_home)
+    opening = contained_argv(
+        harness.image,
+        harness.requirements,
+        project_root(),
+        plugin.hooks.human_owned_files if plugin.hooks is not None else [],
+        config_home,
+        credential if credential.exists() else None,
+        login,
+    )
+    # Verified on the way in, rather than asserted. This is §6's whole point
+    # and the launch is where it has to happen: the boundary was built two
+    # lines ago and nothing had ever asked whether it carries traffic. What
+    # that cost, measured on the first contained session anybody opened, was
+    # a session that started cleanly, looked entirely healthy, and reported
+    # every request as the operator's own internet or DNS being down.
+    #
+    # Not the whole image roster -- only the entries marked `always`, which
+    # is the handful whose absence means the session can do nothing. A model
+    # call and a toolchain version belong to `harness requirements --inside`.
+    verify_inside(harness.requirements, probing(opening), setting_up=False)
+    return [*opening, cli, *arguments]
+
+
+def probing(opening: list[str]) -> list[str]:
+    """The session's own argv, with the interactive terminal taken back off.
+
+    The same argv rather than a fresh one, because a probe assembled
+    separately verifies a container no session opens -- which is how the
+    exercise this replaces could pass on a host whose sessions could not
+    start. The one difference is deliberate: a probe's output is captured,
+    and ``-it`` against a pipe fails on the terminal it was promised.
+    """
+    return [word for word in opening if word != "-it"]
+
+
+# lup: ignore[model-free-function] — a launcher is not an operation on a mode.
 def launch_claude(
     composition: NativeHarnessComposition,
     extra_args: list[str],
@@ -715,6 +953,7 @@ def launch_claude(
     mode: LaunchMode | None = None,
     resume: Resumption = Resumption(),
     relaxed: bool = False,
+    unsandboxed: bool = False,
     checkpoint: LaunchCheckpoint | None = None,
 ) -> None:
     """Generate/reconcile Claude artifacts and launch the verified local plugin."""
@@ -744,13 +983,19 @@ def launch_claude(
     arguments.extend(
         [
             *[flag for directory in named for flag in ("--plugin-dir", str(directory))],
-            *claude_sandbox_arguments(plugin),
+            *claude_sandbox_arguments(plugin, contained=not unsandboxed),
             *(mode.command_words("claude") if mode is not None else []),
             *extra_args,
         ]
     )
     environment = non_interactive_environment(os.environ)  # lup: ignore[os-environ]
-    apply_sandbox_environment(plugin, environment, "claude", ["bwrap", "socat"])
+    apply_sandbox_environment(
+        plugin,
+        environment,
+        "claude",
+        [bubblewrap_requirement(), socat_requirement()],
+        contained=not unsandboxed,
+    )
     # A name no origin answers to reaches here from an explicit --profile, and
     # from an active selection whose profile has since gone; both are the
     # caller's to fix, so neither should arrive as a traceback.
@@ -778,7 +1023,18 @@ def launch_claude(
         )
         with opening as session:
             environment.update(session)
-            sh.Command("claude")(*arguments, _fg=True, _env=environment)
+            argv = session_argv(
+                "claude",
+                arguments,
+                composition,
+                plugin,
+                home
+                if home is not None
+                else ambient_config_home(profiles.login, Path.home() / ".claude"),
+                profiles.login,
+                unsandboxed,
+            )
+            sh.Command(argv[0])(*argv[1:], _fg=True, _env=environment)
         succeeded = True
     except sh.CommandNotFound as error:
         raise typer.BadParameter("Claude Code CLI is not installed") from error
@@ -803,6 +1059,7 @@ def launch_codex(
     mode: LaunchMode | None = None,
     resume: Resumption = Resumption(),
     relaxed: bool = False,
+    unsandboxed: bool = False,
     checkpoint: LaunchCheckpoint | None = None,
 ) -> None:
     """Generate/reconcile Codex artifacts and launch without updating the CLI."""
@@ -816,7 +1073,9 @@ def launch_codex(
     if not ready_to_open(composition, generate_only):
         return
     environment = non_interactive_environment(os.environ)  # lup: ignore[os-environ]
-    envelope = codex_sandbox_arguments(plugin, environment, extra_args)
+    envelope = codex_sandbox_arguments(
+        plugin, environment, extra_args, contained=not unsandboxed
+    )
     store = CodexWorktreeHomeStore()
     home = select_codex_home(codex_home, environment, project_root(), profile, store)
     selected_home = home.path
@@ -860,7 +1119,16 @@ def launch_codex(
         with opening as session:
             typer.echo(f"Verified installed Codex plugin: {cache.installed_root}")
             environment.update(session)
-            sh.Command("codex")(*arguments, _fg=True, _env=environment)
+            argv = session_argv(
+                "codex",
+                arguments,
+                composition,
+                plugin,
+                selected_home,
+                CODEX_LOGIN,
+                unsandboxed,
+            )
+            sh.Command(argv[0])(*argv[1:], _fg=True, _env=environment)
         succeeded = True
     except sh.CommandNotFound as error:
         raise typer.BadParameter("Codex CLI is not installed") from error

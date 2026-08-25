@@ -117,6 +117,8 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 | `harness propose-reconciliation` | Persist a source patch for separate review and stale-base-checked apply. |
 | `harness doctor` | Report installed native runtime evidence without updating either CLI. |
 | `harness requirements` | Exercise the external programs this project expects on this machine. |
+| `harness image` | Render the container image this project&#x27;s sessions run in. |
+| `harness egress` | Report or remove the network boundary this project&#x27;s sessions run behind. |
 | `harness serve-resolver-tools` | Serve one worker&#x27;s question tools over stdio, for out-of-process runtimes. |
 | `harness claude` | Generate/reconcile Claude artifacts and launch the verified plugin. |
 | `harness codex` | Generate/reconcile Codex artifacts and launch without updating the CLI. |
