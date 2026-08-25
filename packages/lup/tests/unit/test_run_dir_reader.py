@@ -47,14 +47,27 @@ class TestRunDirReader:
 
         assert list(iter_run_dirs(RUN_ID, roots=[declared])) == [expected]
 
-    def test_a_declared_root_does_not_hide_the_default(
+    def test_declared_roots_replace_the_default_rather_than_extend_it(
         self, isolated_root: Path
     ) -> None:
+        """Which roots hold runs is the adopter's to state, including by omission.
+
+        Prepending the default would read as a courtesy and behave as a rule:
+        a caller could add a root but never decline one.
+        """
+        declared = isolated_root / "notes" / "research" / "sessions"
+        record(harness_runs_path(), "claude", RUN_ID)
+        declared_run = record(declared, "codex", RUN_ID)
+
+        assert list(iter_run_dirs(RUN_ID, roots=[declared])) == [declared_run]
+
+    def test_the_default_is_taken_by_naming_it(self, isolated_root: Path) -> None:
+        """Composing with the default stays available — it is just not implied."""
         declared = isolated_root / "notes" / "research" / "sessions"
         default_run = record(harness_runs_path(), "claude", RUN_ID)
         declared_run = record(declared, "codex", RUN_ID)
 
-        found = list(iter_run_dirs(RUN_ID, roots=[declared]))
+        found = list(iter_run_dirs(RUN_ID, roots=[harness_runs_path(), declared]))
 
         assert found == [default_run, declared_run]
 
