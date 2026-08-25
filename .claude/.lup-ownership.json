@@ -366,14 +366,14 @@
     {
       "path": ".claude/plugins/lup/hooks/runtime/kernel/roles.py",
       "category": "generated",
-      "sha256": "c64f8b7735fa13c8b6035ca87f35eb9b7ee2511b7340c67eab40d039967649cd",
+      "sha256": "fe7c9f8a8031816620713ea4640daf875930e7d3ca61b5e723803dc62a6917bb",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
     {
       "path": ".claude/plugins/lup/hooks/runtime/kernel/rows.py",
       "category": "generated",
-      "sha256": "9741d01d0f7aac0028ab0410fa53127f57d0a6b599dae79471bb343265d16b1e",
+      "sha256": "164201db5670e70bcd86442d0a1150af2117b0f3d885c38f63c6410129df3a87",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },

@@ -28,6 +28,7 @@ from lup.codescan.boundaries import (
 )
 from lup.devtools.project import DevProject
 from lup.devtools.utils import git, output_json
+from lup.policy.kernel.roles import path_role
 
 
 class FoundBreach(BoundaryBreach):
@@ -44,15 +45,17 @@ class TrackedSource(BaseModel):
     text: str
 
 
-def tracked_python_sources() -> list[TrackedSource]:
-    """Every tracked Python file that exists on disk, with its text."""
+def tracked_python_sources(project: DevProject | None = None) -> list[TrackedSource]:
+    """Every production Python file that exists on disk, with its text."""
     tracked = str(
         git("ls-files", "--cached", "--others", "--exclude-standard")
     ).splitlines()
     return [
         TrackedSource(rel=rel, path=path, text=path.read_text(encoding="utf-8"))
         for rel in tracked
-        if (path := Path(rel)).suffix == ".py" and path.exists()
+        if (path := Path(rel)).suffix == ".py"
+        and path.exists()
+        and (project is None or path_role(rel, project.path_roles) == "production")
     ]
 
 
@@ -135,7 +138,7 @@ def scan_application_placement(project: DevProject) -> list[PortableModule]:
     )
     return [
         PortableModule(file=source.rel, imports=0)
-        for source in tracked_python_sources()
+        for source in tracked_python_sources(project)
         if source.rel.startswith(root)
         and not source.rel.startswith(exempt)
         and source.path.name != "__init__.py"
@@ -147,7 +150,7 @@ def scan_boundaries(project: DevProject) -> list[FoundBreach]:
     """Every native import, spelling, and kernel-import breach in the tree."""
     found: list[FoundBreach] = []  # lup: ignore[empty-collection]
     roots = project.roots
-    for source in tracked_python_sources():
+    for source in tracked_python_sources(project):
         found.extend(
             FoundBreach(
                 file=source.rel,

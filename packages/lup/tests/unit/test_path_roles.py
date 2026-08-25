@@ -7,6 +7,7 @@ from lup.policy.kernel.rows import AcceptanceGuardRow, PathRoleRow
 
 ROLES = [
     PathRoleRow(root="tests", role="test"),
+    PathRoleRow(root="notes", role="data"),
     PathRoleRow(root="tmp", role="scratch"),
 ]
 
@@ -19,7 +20,34 @@ NESTED = [
 def test_a_declared_root_and_everything_beneath_it_carries_its_role() -> None:
     assert path_role("tests", ROLES) == "test"
     assert path_role("tests/unit/test_thing.py", ROLES) == "test"
+    assert path_role("notes/results/sweep.py", ROLES) == "data"
     assert path_role("tmp/briefing.md", ROLES) == "scratch"
+
+
+def test_data_is_non_production_without_becoming_disposable_scratch() -> None:
+    created = decide_edit(
+        "notes/results/sweep.py",
+        None,
+        "def result():\n    return None\n",
+        path_exists=False,
+        path_rules=[],
+        antipattern_rows=[],
+        path_roles=ROLES,
+        python_source=True,
+    )
+    marker_removed = decide_edit(
+        "notes/results/sweep.py",
+        "# lup: verify this result\nvalue = 1\n",
+        "value = 1\n",
+        path_exists=True,
+        path_rules=[],
+        antipattern_rows=[],
+        path_roles=ROLES,
+        python_source=True,
+    )
+
+    assert created.effect == "allow"
+    assert marker_removed.effect == "deny"
 
 
 def test_an_undeclared_path_is_production() -> None:
