@@ -1098,6 +1098,11 @@ def bash_decision(
         # instead.
         relayed=relayed,
         escapable=escapable,
+        # Read here rather than passed by each dispatcher, unlike `escapable`
+        # above: whether this process sits inside the container is a fact
+        # about the host with no runtime variation to it, so neither
+        # dispatcher is given the chance to forget it.
+        contained=contained(),
         recovered=bool(reference),
     )
     if verdict.effect == "deny":

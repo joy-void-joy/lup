@@ -6,6 +6,14 @@ installed-but-not-working, one capability spelled several ways, and a
 diagnosis that stays quiet about a failure it does not explain.
 """
 
+from pathlib import Path
+
+import lup.devtools.harness.launch as launch
+from lup.harness.image import Podman
+from lup.harness.ownership import source_digest
+from lup.harness.toolchain import for_host
+from lup_template.devtools.harness.catalog import portable_harness
+from lup_template.devtools.harness.content.requirements import manifest
 from lup.harness.requirements import (
     Advisory,
     AnyOf,
@@ -14,6 +22,7 @@ from lup.harness.requirements import (
     Finding,
     LostCapability,
     Manifest,
+    Package,
     RefusedLaunch,
     Requirement,
     Run,
@@ -151,7 +160,7 @@ def test_a_manifest_collects_the_packages_an_image_installs_without_repeating_on
             requirement("second", WORKING, where="both", install=["shared", "two"]),
         ]
     )
-    assert manifest.packages() == ["shared", "one", "two"]
+    assert [item.name for item in manifest.packages()] == ["shared", "one", "two"]
 
 
 def test_a_host_requirement_never_reaches_the_image() -> None:
@@ -256,31 +265,230 @@ def test_the_offered_container_requirement_defaults_out_of_the_image() -> None:
     offered = container_requirement()
     assert offered.where == "host"
     assert offered.install == []
-    assert not any("docker" in package for package in default_manifest().packages())
+    assert not any(
+        "docker" in package.name for package in default_manifest().packages()
+    )
 
 
 def test_every_offered_requirement_lets_a_project_place_and_install_it() -> None:
     """The seams are parameters, so an adopter overrules without forking lup."""
     from lup.harness.toolchain import bun_requirement, container_requirement
 
-    moved = bun_requirement(where="both", install=["bun-bin"])
-    assert moved.where == "both" and moved.install == ["bun-bin"]
-    inside = container_requirement(where="image", install=["docker.io"])
-    assert inside.where == "image" and inside.install == ["docker.io"]
+    moved = bun_requirement(where="both", install=[Package(name="bun-bin")])
+    assert moved.where == "both" and [item.name for item in moved.install] == [
+        "bun-bin"
+    ]
+    inside = container_requirement(where="image", install=[Package(name="docker.io")])
+    assert inside.where == "image" and [item.name for item in inside.install] == [
+        "docker.io"
+    ]
 
 
-def test_the_declared_manifest_contains_only_host_capabilities() -> None:
-    """Sandbox and image concerns do not belong to this host-only composition."""
+def test_the_declared_manifest_asks_the_host_for_nothing_image_side() -> None:
+    """bun and typescript live in the image, so a bare host is never faulted."""
     from lup_template.devtools.harness.content.requirements import manifest
 
     MANIFEST = manifest()
 
-    declared = [item.capability for item in MANIFEST.requirements]
-    assert declared == ["uv", "gh", "clipboard"]
-    assert MANIFEST.packages() == ["gh"]
+    on_host = [item.capability for item in MANIFEST.on_the_host(setting_up=True)]
+    assert "bun" not in on_host and "typescript" not in on_host
+    assert {"bun", "typescript"} <= {item.name for item in MANIFEST.packages()}
+
+
+def test_every_declared_package_is_obtained_by_something_that_verifies_it() -> None:
+    """The property the base image was chosen for, pinned so a change is visible.
+
+    A `script` package runs a shell line the build never checks. None is
+    declared, and the `package-install-script` rule is what keeps it that way
+    -- but a rule catches the source shape, and this catches the roster the
+    image is actually built from, including anything a constructor default
+    reintroduces.
+    """
+    from lup.harness.toolchain import default_manifest
+    from lup_template.devtools.harness.content.requirements import manifest
+
+    for roster in (default_manifest(), manifest()):
+        assert not [item for item in roster.packages() if item.manager == "script"]
 
 
 def test_a_finding_carries_the_requirement_that_produced_it() -> None:
     """So a caller reporting one can say what it was for without a lookup."""
     declared = requirement("echo", WORKING)
     assert Finding(requirement=declared, working=True).requirement is declared
+
+
+def test_the_declared_client_is_the_portable_one_whatever_this_host_runs() -> None:
+    """A container client is a fact about the machine, not about the project.
+
+    The ownership digest hashes the whole declaration, so a probe of this
+    host inside it reports generated artifacts as stale on any machine whose
+    client differs. Measured before this split existed: the digest moved
+    between two runs on *one* machine, minutes apart, because a stale podman
+    pid file was cleaned up between them and the resolution flipped.
+    """
+    declared = manifest()
+    carried = [item for item in declared.requirements if item.by_client]
+
+    assert carried, "this project declares no client-carried exercise"
+    assert all(item.exercise.programs() == ["docker"] for item in carried)
+    # Two *different* checkouts, which is the comparison that catches this.
+    # Asking the same root twice was the earlier assertion and could not fail:
+    # a host fact resolved from the root gives the same answer both times, so
+    # the digest was measured stable against the one input that never varied
+    # while it moved for every worktree that was not this one.
+    assert source_digest(
+        portable_harness(root=Path("/tmp/one-checkout"))
+    ) == source_digest(portable_harness(root=Path("/tmp/another-checkout")))
+
+
+def test_the_preflight_points_every_client_exercise_at_what_answered() -> None:
+    """The other half: it does matter which client, where they actually run.
+
+    A Docker CLI pointed at a podman socket answers first and is refused as
+    undrivable, so exercising it verifies a boundary no session opens.
+    `for_host` is the one place that knows, because it is the one place the
+    exercises run.
+    """
+    pointed = for_host(manifest(), Podman(binary="podman"))
+    carried = [item for item in pointed.requirements if item.by_client]
+
+    assert carried
+    assert all(item.exercise.programs() == ["podman"] for item in carried)
+
+
+def test_pointing_a_manifest_at_a_host_moves_only_what_a_machine_supplies() -> None:
+    """The client and the checkout are filled in; nothing else is touched.
+
+    Two things a machine supplies, and the test has to allow for both. A
+    ``Run`` keeps every argument the declaration wrote and moves only its
+    program. A ``MountProbe`` has no arguments to keep — it is a shape, and
+    resolving it is what turns it into a command — so the assertion for it is
+    that the command it became names this checkout rather than any other.
+    """
+    declared = manifest()
+    here = Path("/tmp/some-checkout")
+    pointed = for_host(declared, Podman(binary="podman"), here)
+
+    assert [item.capability for item in pointed.requirements] == [
+        item.capability for item in declared.requirements
+    ]
+    # Through `programs`, because the roster holds more than one shape of
+    # exercise and only `Run` has a command to index -- the clipboard entry
+    # is an `AnyOf` over several spellings.
+    assert [item.exercise.programs() for item in pointed.requirements] != [
+        item.exercise.programs() for item in declared.requirements
+    ]
+    spelled = {
+        item.capability: item.exercise
+        for item in declared.requirements
+        if isinstance(item.exercise, Run)
+    }
+    assert all(
+        item.exercise.model_dump(exclude={"command"})
+        == spelled[item.capability].model_dump(exclude={"command"})
+        for item in pointed.requirements
+        if item.capability in spelled
+    )
+
+
+def test_a_mount_probe_is_aimed_at_the_checkout_a_machine_names() -> None:
+    """The shape carries no path; the resolution carries this one.
+
+    The declaration cannot name a checkout, because it is hashed into the
+    ownership digest and a worktree is where somebody put it. Measured before
+    this split: two checkouts of one commit hashing differently, so every one
+    but the last to generate read its own committed tree as stale.
+    """
+    here = Path("/tmp/some-checkout")
+    aimed = for_host(manifest(), Podman(binary="podman"), here).requirements
+    probe = next(
+        item for item in aimed if item.capability == "same-path bind mounts"
+    ).exercise
+
+    assert isinstance(probe, Run)
+    assert probe.command[0] == "podman"
+    assert f"{here}:{here}:ro" in probe.command
+    assert str(here / "pyproject.toml") in probe.command
+
+
+def test_nothing_in_a_declared_manifest_names_a_path_or_a_client() -> None:
+    """The whole roster, checked for the fact that must not be in it.
+
+    A per-entry assertion would pass for every entry written before the one
+    that reintroduces the trap. This asks the question of the manifest itself,
+    so a new requirement that bakes a host path fails here rather than at
+    whichever adopter cloned to a different directory.
+    """
+    written = manifest().model_dump_json()
+
+    assert str(Path.cwd()) not in written
+    assert str(Path.home()) not in written
+
+
+def test_the_image_half_is_exercised_behind_the_argv_a_session_opens() -> None:
+    """An image requirement runs inside the container, not beside it.
+
+    The defect this closes: image-side entries were excluded from the host
+    roster and exercised nowhere, so the whole boundary — proxy, mounts,
+    config home — was declared and unverified. What made that invisible is
+    that the one entry which did run spelled its own `docker run`, which
+    verified a container with no network and no mounts.
+    """
+    opening = ["podman", "run", "--rm", "--network", "lup-net", "lup-agent:abc"]
+    inside = manifest().check_inside({}, opening)
+    session = next(
+        item
+        for item in inside
+        if item.requirement.capability == "contained agent session"
+    )
+
+    assert [item.requirement.capability for item in inside]
+    carried = session.requirement.exercise
+    assert isinstance(carried, Run)
+    assert carried.command[: len(opening)] == opening
+    assert carried.command[len(opening) :] == [
+        "claude",
+        "-p",
+        "Reply with exactly: SESSION_OK",
+    ]
+
+
+def test_a_launch_asks_only_the_image_entries_marked_always() -> None:
+    """The whole image roster at every launch would cost a container each.
+
+    The axis is doing real work here rather than expressing importance: what
+    a launch pays for is the handful whose absence means the session can do
+    nothing at all, and a model call and a toolchain version are what
+    somebody setting a machine up hears once.
+    """
+    declared = manifest()
+    opening = ["podman", "run", "--rm", "lup-agent:abc"]
+    at_launch = {
+        item.requirement.capability
+        for item in declared.check_inside({}, opening, setting_up=False)
+    }
+    at_setup = {
+        item.requirement.capability for item in declared.check_inside({}, opening)
+    }
+
+    assert at_launch == {"session reaches its proxy", "egress proxy tunnels out"}
+    assert "contained agent session" in at_setup - at_launch
+
+
+def test_the_launch_probe_drops_the_terminal_it_cannot_have() -> None:
+    """The session's own argv, minus the one flag a captured probe cannot take.
+
+    The same argv rather than a fresh one is the whole point — an exercise
+    assembled separately verifies a container no session opens — so the
+    difference has to be exactly this and nothing else.
+    """
+    opening = ["podman", "run", "--rm", "-it", "-v", "vol:/cfg", "lup-agent:abc"]
+
+    assert launch.probing(opening) == [
+        "podman",
+        "run",
+        "--rm",
+        "-v",
+        "vol:/cfg",
+        "lup-agent:abc",
+    ]

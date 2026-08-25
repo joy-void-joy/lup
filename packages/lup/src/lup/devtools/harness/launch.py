@@ -942,7 +942,6 @@ def probing(opening: list[str]) -> list[str]:
     return [word for word in opening if word != "-it"]
 
 
-# lup: ignore[model-free-function] — a launcher is not an operation on a mode.
 def launch_claude(
     composition: NativeHarnessComposition,
     extra_args: list[str],

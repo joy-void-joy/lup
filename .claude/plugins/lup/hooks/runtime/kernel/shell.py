@@ -951,6 +951,7 @@ def decide_shell(
     runner_targets: list[RunnerTargetRow] | None = None,
     target_tables: list[ShellRuleRow] | None = None,
     escapable: bool = False,
+    contained: bool = False,
     recovered: bool = False,
     relayed: bool = False,
 ) -> KernelDecision:
@@ -1022,6 +1023,7 @@ def decide_shell(
             ),
             escalation=why,
             sandboxed=sandboxed,
+            contained=contained,
             confined=confined,
             escapable=escapable,
             recovered=recovered,

@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "41703a6ba8474f81e97552ef61ffa74748f3ca8f7eb56b0076b9d4bb00df1318",
+  "source_digest": "e16d69cc39d4f69f2b4af8e57b4971266592d18a2fd4df195214780b5238c126",
   "target_requirements": [
     "claude-code"
   ],
@@ -380,14 +380,14 @@
     {
       "path": ".claude/plugins/lup/hooks/runtime/kernel/settlement.py",
       "category": "generated",
-      "sha256": "5e18487485b011d4a9e70cdb67cd868efa5743b5054eed64363012115052a5d0",
+      "sha256": "f4e749a96a4de535e675077fea60af70e105e59ba6c3fb681d98434f6796ff6a",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
     {
       "path": ".claude/plugins/lup/hooks/runtime/kernel/shell.py",
       "category": "generated",
-      "sha256": "d75519570cb8fec0d3d25c64a40fc8baa7fd68bc6da76a341389847a8c51b489",
+      "sha256": "76082dd6000d695b897f1c5968a01fe0a5476b688ba9e76a6c130255a5a91b91",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -415,7 +415,7 @@
     {
       "path": ".claude/plugins/lup/hooks/scripts/policy.py",
       "category": "generated",
-      "sha256": "36e5ad86bbb568aae08e075ab381e20c1eb9d62e6051aa3fa1e6b082040b9e10",
+      "sha256": "fa87cc0ae32dc2c11b59a9d247478d119da238b06383e5d5cb837bc9ee09145d",
       "semantic_id": "hooks.lup-policy",
       "executable": true
     },
@@ -450,7 +450,7 @@
     {
       "path": "docs/contributing.md",
       "category": "generated",
-      "sha256": "41af4eb06c3af9d512e5f7fc51be857770e060912750da75665e64352d631e14",
+      "sha256": "954ba69a693538f80f04577ba73a75e7dd5cf8655f2a385e97d2cd3876996ab0",
       "semantic_id": "docs.contributing",
       "executable": false
     },
@@ -548,7 +548,7 @@
     {
       "path": "docs/template.md",
       "category": "generated",
-      "sha256": "be2654403d0db14aed33ed153100c1dd6f20140995f3909ef84855db23edfc4a",
+      "sha256": "94cf807bd8ce43a2ded7be2fa9dd2fb40e08b56665430493ede2b8f019201a95",
       "semantic_id": "docs.template",
       "executable": false
     },
