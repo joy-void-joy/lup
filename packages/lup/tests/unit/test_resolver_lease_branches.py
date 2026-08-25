@@ -16,6 +16,7 @@ from lup.devtools.dev.branches import (
     disposition_for,
     never_diverged_from,
 )
+from lup.devtools.report.build import lease_items
 from lup.harness.models import ResolveSpec, SkillInvocation
 from lup.harness.process import LaunchRequest, LocalProcessLauncher
 from lup.resolver.models import (
@@ -311,3 +312,42 @@ def test_an_undiverged_pointer_with_no_worktree_is_still_spent() -> None:
     )
 
     assert verdict.status == "DELETE"
+
+
+def test_a_leftover_whose_branch_the_run_deleted_is_not_reported(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The record names every branch a run ever leased; the tree names fewer.
+
+    Cleanup deletes what it can and deactivates every lease regardless, so a
+    completed run's record still carries branches that are gone. The survey
+    meets a lease through ``refs/heads`` and so never saw them; a report that
+    read the record alone listed fifty leases for two runs whose batches had
+    already landed, and called them outstanding.
+    """
+    work = tmp_path / "work"
+    who = ("-c", "user.email=leases@example.test", "-c", "user.name=Lease Test")
+    git_in = ("git", "-C", str(work))
+    launcher = LocalProcessLauncher()
+    for arguments in (
+        ["git", "init", "-b", "dev", str(work)],
+        [*git_in, *who, "commit", "--allow-empty", "-m", "base"],
+        [*git_in, "branch", "resolve/run-1/alpha"],
+    ):
+        status = launcher.launch(LaunchRequest(arguments=arguments, cwd=tmp_path))
+        if status.code != 0:
+            raise AssertionError(status.stderr)
+    monkeypatch.chdir(work)
+    state_root = tmp_path / ".lup" / "resolve"
+    ResolverStateRepository(state_root, "run-1").save(
+        run_state(
+            "run-1",
+            ResolvePhase.COMPLETE,
+            [
+                lease("alpha", tmp_path / "leases", active=False),
+                lease("beta", tmp_path / "leases", active=False),
+            ],
+        )
+    )
+
+    assert [item.where for item in lease_items(state_root)] == ["resolve/run-1/alpha"]

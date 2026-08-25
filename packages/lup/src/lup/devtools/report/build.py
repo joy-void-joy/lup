@@ -12,7 +12,11 @@ replaces.
 from pathlib import Path
 
 from lup.codescan.markers import NoteKind, find_feedback
-from lup.devtools.dev.branches import unlanded_siblings
+from lup.devtools.dev.branches import (
+    leased_on_disk,
+    parse_branches,
+    unlanded_siblings,
+)
 from lup.devtools.dev.comments import FoundComment, scan_tracked
 from lup.devtools.harness.drift import RepositoryWriter, inspect_drift
 from lup.devtools.harness.generate import NativeHarnessComposition
@@ -84,22 +88,23 @@ def unlanded_items() -> list[ReportItem]:
     """Every sibling branch holding work the integration branch lacks."""
     return [
         ReportItem(
-            where=branch.name,
-            what=(
-                f"{branch.unique_commits} commit(s), "
-                f"{branch.source_diff_lines} ln unlanded"
-            ),
-            gate=branch.worktree or "",
+            where=branch.name, what=branch.standing(), gate=branch.worktree or ""
         )
         for branch in unlanded_siblings()
     ]
 
 
 def lease_items(state_root: Path) -> list[ReportItem]:
-    """Every concern a resolver run is holding a branch for."""
+    """Every concern a resolver run is holding a branch for.
+
+    Read as the branch survey reads it: only a leased branch still in
+    ``refs/heads`` is outstanding. The rest went with the run's own cleanup,
+    and listing them would count finished work as held.
+    """
+    names = [branch["name"] for branch in parse_branches()]
     return [
         ReportItem(where=held.branch, what=held.standing, gate=f"run {held.run_id}")
-        for held in live_lease_branches(state_root).values()
+        for held in leased_on_disk(live_lease_branches(state_root), names).values()
     ]
 
 

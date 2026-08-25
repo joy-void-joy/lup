@@ -5,7 +5,7 @@ import logging
 import sys
 from abc import ABC, abstractmethod
 from collections import defaultdict
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator, Mapping
 from collections.abc import Set as AbstractSet
 from itertools import groupby
 from operator import attrgetter
@@ -217,6 +217,20 @@ def runs_holding(leased: dict[str, HeldLease]) -> list[RunHold]:
         for run_id, group in groupby(ordered, key=attrgetter("run_id"))
         if (held := list(group))
     ]
+
+
+def leased_on_disk(
+    lease_of: Mapping[str, HeldLease], branch_names: Iterable[str]
+) -> dict[str, HeldLease]:
+    """The held leases a branch survey can say anything about.
+
+    A run records every branch it ever leased, and a completed run keeps
+    reporting the ones its cleanup did not delete. Only a branch still in
+    ``refs/heads`` can be landed, kept, or dropped, so every reader of the
+    lease record meets it through this intersection — one that read the
+    record alone would count a run's deleted branches as work still held.
+    """
+    return {name: lease_of[name] for name in branch_names if name in lease_of}
 
 
 class BranchClassification(TypedDict, total=False):
@@ -699,12 +713,24 @@ def classify_branch(
 
 
 class UnlandedBranch(BaseModel):
-    """A branch holding commits the integration branch does not have."""
+    """A branch holding commits the integration branch does not have.
+
+    ``contained_by`` names the unlanded sibling that already carries every
+    commit of this one, when there is such a sibling: the same work under
+    two names is one decision, not two lines of backlog.
+    """
 
     name: str
     unique_commits: int
     source_diff_lines: int
     worktree: str | None
+    contained_by: str | None = None
+
+    def standing(self) -> str:
+        """What this branch holds, as one line reads it."""
+        if self.contained_by is not None:
+            return f"every commit already inside {self.contained_by}"
+        return f"{self.unique_commits} commit(s), {self.source_diff_lines} ln unlanded"
 
 
 def unlanded_siblings(
@@ -726,6 +752,11 @@ def unlanded_siblings(
     same line repeated until the reader skips it, and reads as a backlog
     nobody is carrying when a run either is carrying it or has finished.
     Reading the run directory keeps this offline, which the rest of it is.
+
+    A branch every commit of which another unlanded sibling already carries
+    is reported inside that sibling rather than beside it. Two lines showing
+    one line's figures read as twice the backlog, and a reader adding them
+    up lands on a number nothing holds.
     """
     integration = get_integration_branch()
     worktrees = parse_worktrees()
@@ -747,10 +778,37 @@ def unlanded_siblings(
             worktree=worktrees.get(name),  # lup: ignore[dict-get] — open map
         )
 
-    return [
+    measured = [
         found
         for name in git.lines("branch", "--format=%(refname:short)")
         if (found := measure(name)) is not None
+    ]
+
+    def container_of(branch: UnlandedBranch) -> str | None:
+        """The sibling that carries all of this branch, if one does.
+
+        The widest strict container wins, so a chain names its top rather
+        than its next link. Two names on one commit contain each other, and
+        the first by name stands for the group.
+        """
+        carriers = [
+            other
+            for other in measured
+            if other.name != branch.name and is_ancestor(branch.name, other.name)
+        ]
+        strict = [
+            other for other in carriers if not is_ancestor(other.name, branch.name)
+        ]
+        if strict:
+            return max(strict, key=attrgetter("unique_commits")).name
+        same_tip = sorted(other.name for other in carriers)
+        if same_tip and same_tip[0] < branch.name:
+            return same_tip[0]
+        return None
+
+    return [
+        branch.model_copy(update={"contained_by": container_of(branch)})
+        for branch in measured
     ]
 
 
@@ -1439,11 +1497,9 @@ def survey(as_json: bool) -> None:
         typer.echo("Querying PR status...", err=True)
     pr_named = branch_names + [row["name"] for row in remote_only]
     pr_map: dict[str, PRStatus] = fetch_pr_status(pr_named) if has_remote else {}
-    # A run records every branch it ever leased, and a completed run keeps
-    # reporting the ones its cleanup did not delete. Only what is still on
-    # disk is a branch this sweep can say anything about.
-    lease_of = live_lease_branches(project_root() / ".lup" / "resolve")
-    leased = {name: lease_of[name] for name in branch_names if name in lease_of}
+    leased = leased_on_disk(
+        live_lease_branches(project_root() / ".lup" / "resolve"), branch_names
+    )
 
     def info(b: ParsedBranch) -> BranchInfo:
         name = b["name"]
