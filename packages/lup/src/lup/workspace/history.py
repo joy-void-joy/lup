@@ -366,24 +366,30 @@ def iter_session_dirs(
 
 def iter_run_dirs(
     run_id: str | None = None,
-    roots: Sequence[Path] = (),
+    roots: Sequence[Path] | None = None,
 ) -> Iterator[Path]:
-    """Iterate over harness run directories, in the default root and any given.
+    """Iterate over harness run directories, in the roots given or the default.
 
     Yields paths like: notes/harness/claude/20260825_023457_898418_claude_15f67aad/
 
     A launch writes ``<root>/<provider>/<run_id>/`` and a mode may name the
-    root, so a run id alone does not say which root holds it — pass the roots
-    a mode declared and this searches them alongside the default. The provider
+    root, so a run id alone does not say which root holds it. The provider
     level is searched rather than assumed, because the same run id reaches a
     reader from whichever runtime opened it.
+
+    Which roots hold runs is the adopter's, not this package's: ``roots``
+    replaces the set rather than extending it, and omitting it takes the
+    default. Prepending the default to whatever was passed would have read as
+    a courtesy and behaved as a rule — an adopter could add a root but never
+    decline one, which is a choice made for every adopter out of a value only
+    this package can see.
 
     This exists because the tree above is written here and was readable
     nowhere: every caller wanting a run back from its id re-derived the
     ``<provider>/<run_id>`` shape, which made a layout this package owns into
     something it could not change without breaking readers it cannot see.
     """
-    for root in (harness_runs_path(), *roots):
+    for root in (harness_runs_path(),) if roots is None else roots:
         if not root.is_dir():
             continue
         for provider in sorted(root.iterdir()):
