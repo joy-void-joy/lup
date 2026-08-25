@@ -52,7 +52,7 @@ Examples:
 import json
 import logging
 import re
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Sequence
 from datetime import datetime
 from pathlib import Path
 
@@ -63,6 +63,7 @@ from lup.telemetry.metrics import MetricsSummary
 from lup.workspace.paths import (
     TIMESTAMP_FMT,
     agent_version,
+    harness_runs_path,
     parse_timestamp,
     sessions_dir,
     traces_path,
@@ -361,6 +362,39 @@ def iter_session_dirs(
             for d in sessions_base.iterdir():
                 if d.is_dir():
                     yield d
+
+
+def iter_run_dirs(
+    run_id: str | None = None,
+    roots: Sequence[Path] = (),
+) -> Iterator[Path]:
+    """Iterate over harness run directories, in the default root and any given.
+
+    Yields paths like: notes/harness/claude/20260825_023457_898418_claude_15f67aad/
+
+    A launch writes ``<root>/<provider>/<run_id>/`` and a mode may name the
+    root, so a run id alone does not say which root holds it — pass the roots
+    a mode declared and this searches them alongside the default. The provider
+    level is searched rather than assumed, because the same run id reaches a
+    reader from whichever runtime opened it.
+
+    This exists because the tree above is written here and was readable
+    nowhere: every caller wanting a run back from its id re-derived the
+    ``<provider>/<run_id>`` shape, which made a layout this package owns into
+    something it could not change without breaking readers it cannot see.
+    """
+    for root in (harness_runs_path(), *roots):
+        if not root.is_dir():
+            continue
+        for provider in sorted(root.iterdir()):
+            if not provider.is_dir():
+                continue
+            if run_id is None:
+                yield from (run for run in sorted(provider.iterdir()) if run.is_dir())
+                continue
+            candidate = provider / run_id
+            if candidate.is_dir():
+                yield candidate
 
 
 def iter_output_dirs(

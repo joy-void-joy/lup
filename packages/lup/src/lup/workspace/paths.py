@@ -323,6 +323,16 @@ def traces_path() -> Path:
     return notes_path() / "traces"
 
 
+def harness_runs_path() -> Path:
+    """Return ``notes/harness/``, where a launch keeps a run it was not told to move.
+
+    A launch mode may name its own root, so this is the default rather than
+    the location: what every harness run shares is the shape *inside* the
+    root, not the root itself.
+    """
+    return notes_path() / "harness"
+
+
 def feedback_path() -> Path:
     """Return ``notes/feedback_loop/``."""
     return notes_path() / "feedback_loop"
