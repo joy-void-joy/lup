@@ -97,3 +97,45 @@ def test_two_stacked_directives_keep_the_one_not_retired() -> None:
 
     assert revised.text == "# lup: ignore[kept] — second\ndef run() -> None: ...\n"
     assert revised.removed == [1]
+
+
+def test_a_narrowed_sweep_leaves_a_live_directive_naming_the_same_rule() -> None:
+    """The property `dev check --antipatterns --fix` rests on.
+
+    An audit finding says one *line* carries a dead directive, not that the
+    rule is retired everywhere. A file can hold the dead one and a live one
+    naming the same id, and repairing the first unnarrowed would delete the
+    second — turning a spurious finding into a missing one, which is the one
+    outcome a repair pass must never produce.
+    """
+    text = (
+        "first = 1  # lup: ignore[gone] — dead\n"
+        "second = 2  # lup: ignore[gone] — live\n"
+    )
+    revised = retired_suppressions(source(text), "gone", at={1})
+
+    assert revised.text == "first = 1\nsecond = 2  # lup: ignore[gone] — live\n"
+    assert revised.removed == [1]
+
+
+def test_a_bare_directive_is_named_by_an_empty_rule_id() -> None:
+    """The other thing the audit reports spurious, and the other with no id.
+
+    A bare `# lup: ignore` guarding a line that matches nothing has no id to
+    strip, so a caller repairing it has nothing to name — an empty id means
+    that directive rather than meaning every directive.
+    """
+    revised = retired_suppressions(source("value = 1  # lup: ignore\n"), "", at={1})
+
+    assert revised.text == "value = 1\n"
+    assert revised.removed == [1]
+
+
+def test_a_bare_repair_leaves_a_typed_directive_alone() -> None:
+    """An empty id names the bare form only, never a directive that named one."""
+    revised = retired_suppressions(
+        source("value = 1  # lup: ignore[kept] — a reason\n"), "", at={1}
+    )
+
+    assert revised.text == "value = 1  # lup: ignore[kept] — a reason\n"
+    assert revised.removed == []

@@ -471,7 +471,11 @@ def create_dev_app(
     def check_cmd(
         fix: Annotated[
             bool,
-            typer.Option("--fix", help="Auto-fix formatting and lint issues"),
+            typer.Option(
+                "--fix",
+                help="Auto-fix formatting and lint issues; with --antipatterns, "
+                "delete the dead directives instead of reporting them",
+            ),
         ] = False,
         no_test: Annotated[
             bool,
@@ -549,7 +553,7 @@ def create_dev_app(
             elif stats:
                 antipatterns_mod.summarize(declarations.project, as_json, path)
             else:
-                antipatterns_mod.report(declarations.project, as_json, path)
+                antipatterns_mod.report(declarations.project, as_json, path, fix=fix)
             return
         if boundaries:
             boundaries_mod.report(declarations.project, as_json)
