@@ -12,7 +12,7 @@ from lup_template.agent.toolsets import (
 )
 from lup_template.agent.tools.example import EXAMPLE_TOOLS
 from lup.workspace.context import SessionContext
-from lup.mcp import LupMcpTool
+from lup.tools.mcp import LupMcpTool
 
 
 def collect_tools_by_server(
@@ -124,7 +124,7 @@ def serve_tools(
 ) -> None:
     """Serve the collected tools over MCP stdio (see the ``serve-tools`` command)."""
     from lup.workspace.context import read_session_context
-    from lup.mcp import create_mcp_server, serve_stdio
+    from lup.tools.mcp import create_mcp_server, serve_stdio
     from lup.telemetry.metrics import configure_metrics, metrics_path
 
     context = read_session_context()

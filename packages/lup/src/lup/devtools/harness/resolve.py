@@ -27,7 +27,7 @@ from lup.policy.enforcement import (
     SandboxPosture,
     create_policy_hooks,
 )
-from lup.mcp import create_mcp_server, serve_stdio, server_tool_names
+from lup.tools.mcp import create_mcp_server, serve_stdio, server_tool_names
 from lup.policy.grants import LeaseGrants, allowance_grants_environment
 from lup.policy.identity import agent_identity_environment
 from lup.harness.environment import non_interactive_environment

@@ -37,7 +37,7 @@ from lup.actors.questions import Question
 from lup.actors.refs import ActorRef
 from lup.actors.roster import SpawnedActor
 from lup.channels.models import Door, utc_now
-from lup.mcp import LupMcpTool, ToolError, lup_tool
+from lup.tools.mcp import LupMcpTool, ToolError, lup_tool
 
 TOOL_WAIT_SECONDS = 300.0
 """How long one wait call holds before it reports back unanswered.

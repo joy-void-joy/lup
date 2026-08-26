@@ -6,8 +6,8 @@ import pytest
 from pydantic import BaseModel
 
 from lup.hooks import LupHookInput, LupHooksConfig, create_tool_allowlist_hook
-from lup.mcp import create_mcp_server, lup_tool
-from lup.tool_policy import BaseToolPolicy
+from lup.tools.mcp import create_mcp_server, lup_tool
+from lup.tools.policy import BaseToolPolicy
 
 from lup_template.agent.config import settings
 from lup_template.agent.tool_policy import ToolPolicy

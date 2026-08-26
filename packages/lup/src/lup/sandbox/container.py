@@ -68,7 +68,7 @@ from docker.types import Mount as DockerMount
 from docker.utils.socket import SocketError
 from pydantic import TypeAdapter
 
-from lup.mcp import (
+from lup.tools.mcp import (
     LupMcpServerConfig,
     LupMcpTool,
     ToolError,

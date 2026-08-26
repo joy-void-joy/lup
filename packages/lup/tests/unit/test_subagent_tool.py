@@ -7,7 +7,7 @@ from contextlib import AbstractAsyncContextManager
 
 import pytest
 
-from lup.mcp import ToolResponse
+from lup.tools.mcp import ToolResponse
 from lup.runtime.models import TurnTextBlock
 from lup.client import Client
 from lup.runtime.models import SessionHandle, SessionId

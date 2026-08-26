@@ -121,7 +121,7 @@ With the pipeline and inventory in hand, assess the design:
 - Does the implementation match the interface? (Read the actual code — does the tool deliver what its docstring promises?)
 - Are tool names consistent and self-explanatory?
 - Do input/output patterns follow consistent conventions?
-- Do tools use the shared MCP plumbing (`lup_tool` for definition, `ToolError` from `lup.mcp` for recoverable failures)?
+- Do tools use the shared MCP plumbing (`lup_tool` for definition, `ToolError` from `lup.tools.mcp` for recoverable failures)?
 - Is anything in the wrong server or confusingly organized?
 
 ### What's Missing

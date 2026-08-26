@@ -50,8 +50,8 @@ from urllib.parse import unquote, urlparse
 import typer
 from pydantic import BaseModel, ValidationError
 
-from lup.codeintel.client import Call, LspSession, lsp_session
-from lup.codeintel.replies import LOCATIONS
+from lup.tools.lsp.client import Call, LspSession, lsp_session
+from lup.tools.lsp.replies import LOCATIONS
 from lup.codescan.oracle import (
     ClassDeclaration,
     Declaration,

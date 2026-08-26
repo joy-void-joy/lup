@@ -20,7 +20,7 @@ from lup.adapters.codex.selection import (
     codex_mcp_server,
 )
 from lup.hooks import LupHooksConfig
-from lup.mcp import create_mcp_server
+from lup.tools.mcp import create_mcp_server
 from lup.client import Client
 from lup.runtime.selection import Runtime, SessionAutonomy, SessionRequest
 

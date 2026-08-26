@@ -68,7 +68,7 @@ from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 
 from lup.channels.models import ChannelOverflowError, write_atomic
 from lup.channels.stream import Stream
-from lup.mcp import LupMcpTool, ToolError, lup_tool
+from lup.tools.mcp import LupMcpTool, ToolError, lup_tool
 from lup.realtime.models import (
     ContextInput,
     ContextOutput,

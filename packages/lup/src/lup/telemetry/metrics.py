@@ -1,6 +1,6 @@
 """Tool call metrics tracking.
 
-MCP tools defined with :func:`lup.mcp.lup_tool` are tracked automatically —
+MCP tools defined with :func:`lup.tools.mcp.lup_tool` are tracked automatically —
 every call's duration and error status is recorded into the module-level
 collector, no decorator needed. Metrics are saved with each session for
 feedback loop analysis.
@@ -217,7 +217,7 @@ def tracked[**P, T](
 
     **What:** Records each call's duration and error status (raised
     exceptions, or a returned dict carrying ``is_error``) into the same
-    collector that :func:`lup.mcp.lup_tool` feeds automatically for MCP
+    collector that :func:`lup.tools.mcp.lup_tool` feeds automatically for MCP
     tools.
 
     **When:** Apply to async helpers that are not MCP tools — background

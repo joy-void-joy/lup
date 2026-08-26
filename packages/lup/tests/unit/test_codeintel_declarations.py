@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from lup.codeintel.tools import (
+from lup.tools.lsp.tools import (
     CODEINTEL_TOOL_DECLARATIONS,
     create_codeintel_tools,
 )

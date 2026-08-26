@@ -19,7 +19,7 @@ the auxiliary factory with ``aux_model()``, like the reviewer in ``reflect.py``.
 
 from pydantic import BaseModel, Field
 
-from lup.mcp import lup_tool
+from lup.tools.mcp import lup_tool
 from lup_template.agent.config import aux_model
 
 

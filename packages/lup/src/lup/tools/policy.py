@@ -25,7 +25,12 @@ Express each exclusion whichever way is cheaper to maintain:
 import logging
 from collections.abc import Sequence
 
-from lup.mcp import LupMcpServerConfig, LupMcpTool, McpServerEntry, server_tool_names
+from lup.tools.mcp import (
+    LupMcpServerConfig,
+    LupMcpTool,
+    McpServerEntry,
+    server_tool_names,
+)
 from lup.types import ToolName
 
 logger = logging.getLogger(__name__)

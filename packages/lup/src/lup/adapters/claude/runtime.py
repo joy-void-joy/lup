@@ -17,7 +17,7 @@ from mcp.server import Server
 from mcp.types import CallToolResult, TextContent, Tool
 from pydantic import BaseModel, Field
 
-from lup.mcp import LupMcpServerConfig, McpServerEntry
+from lup.tools.mcp import LupMcpServerConfig, McpServerEntry
 from lup.hooks import LupHooksConfig
 from lup.policy.enforcement import SandboxPosture
 from lup.runtime.composition import AcceptedTurn, CompletedTurn, ComposedSession

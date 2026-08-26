@@ -9,8 +9,8 @@ import json
 
 from pydantic import BaseModel, Field
 
-from lup.mcp import lup_tool, response_text
-from lup.tool_routes import ToolRoutes
+from lup.tools.mcp import lup_tool, response_text
+from lup.tools.routing import ToolRoutes
 
 
 class PaperInput(BaseModel):

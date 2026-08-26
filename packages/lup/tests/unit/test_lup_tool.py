@@ -16,7 +16,7 @@ from typing import cast
 
 from pydantic import BaseModel, Field
 
-from lup.mcp import ToolError, ToolResponse, create_mcp_server, lup_tool
+from lup.tools.mcp import ToolError, ToolResponse, create_mcp_server, lup_tool
 
 
 class EchoInput(BaseModel):

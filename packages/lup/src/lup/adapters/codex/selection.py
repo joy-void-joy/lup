@@ -35,7 +35,7 @@ from lup.adapters.codex.runtime import (
     CodexSessionConfig,
     create_codex,
 )
-from lup.mcp import McpServerEntry, RawStdioServerConfig
+from lup.tools.mcp import McpServerEntry, RawStdioServerConfig
 from lup.client import Client
 from lup.runtime.selection import (
     Runtime,

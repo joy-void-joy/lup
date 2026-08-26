@@ -9,7 +9,7 @@ every turn.
 """
 
 import lup.harness.models as models
-from lup.codeintel.tools import rendered_tool_declarations
+from lup.tools.lsp.tools import rendered_tool_declarations
 
 DOCUMENT = models.PromptDocument(
     source=__name__,

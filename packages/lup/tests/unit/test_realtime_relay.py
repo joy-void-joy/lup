@@ -24,7 +24,7 @@ import pytest
 from pydantic import BaseModel
 
 
-from lup.mcp import LupMcpTool, ToolResponse
+from lup.tools.mcp import LupMcpTool, ToolResponse
 from lup.realtime.relay import (
     MISSING_SLEEP_MESSAGE,
     ContextReadEvent,

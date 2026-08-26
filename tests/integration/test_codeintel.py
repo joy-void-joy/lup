@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from lup.codeintel.tools import (
+from lup.tools.lsp.tools import (
     DocumentInput,
     PositionInput,
     RenameInput,
@@ -29,7 +29,7 @@ pytestmark = pytest.mark.skipif(
     langserver_path() is None, reason="pyright-langserver is not installed"
 )
 
-TARGET = "packages/lup/src/lup/codeintel/client.py"
+TARGET = "packages/lup/src/lup/tools/lsp/client.py"
 
 
 def tools_by_name(edition: Path | None = None):
@@ -91,7 +91,7 @@ async def test_a_definition_resolves_through_the_import_that_names_it(
     )
 
     assert result["sites"], "the server resolved no definition at all"
-    assert any(site["path"].endswith("codeintel/client.py") for site in result["sites"])
+    assert any(site["path"].endswith("lsp/client.py") for site in result["sites"])
 
 
 @pytest.mark.asyncio

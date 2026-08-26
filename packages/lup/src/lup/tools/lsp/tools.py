@@ -26,14 +26,14 @@ from urllib.parse import unquote, urlparse
 
 from pydantic import BaseModel, Field, ValidationError
 
-from lup.codeintel.client import lsp_session
-from lup.codeintel.replies import (
+from lup.tools.lsp.client import lsp_session
+from lup.tools.lsp.replies import (
     DOCUMENT_SYMBOLS,
     HOVER,
     LOCATIONS,
     WORKSPACE_EDIT,
 )
-from lup.mcp import LupMcpTool, ToolDeclaration, ToolError, lup_tool
+from lup.tools.mcp import LupMcpTool, ToolDeclaration, ToolError, lup_tool
 from lup.types import JsonValue
 from lup.workspace.edition import edition_path, read_edition
 

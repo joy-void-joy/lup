@@ -43,7 +43,7 @@ from urllib.parse import urlsplit
 
 from pydantic import BaseModel
 
-from lup.mcp import LupMcpTool, ToolResponse
+from lup.tools.mcp import LupMcpTool, ToolResponse
 from lup.types import JsonObject
 
 logger = logging.getLogger(__name__)

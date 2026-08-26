@@ -52,7 +52,7 @@ from lup.runtime.wrappers import (
     TracingConfig,
     decorated_session_factory,
 )
-from lup.mcp import McpServerEntry
+from lup.tools.mcp import McpServerEntry
 from lup.telemetry.metrics import (
     get_metrics_summary,
     log_metrics_summary,
@@ -444,7 +444,7 @@ def build_session_factory(
         create_tool_allowlist_hook,
         merge_hooks,
     )
-    from lup.mcp import create_mcp_server
+    from lup.tools.mcp import create_mcp_server
     from lup.realtime.relay import REALTIME_DIRNAME
     from lup_template.agent.tool_policy import ToolPolicy
     from lup_template.agent.subagents import get_subagent_specs

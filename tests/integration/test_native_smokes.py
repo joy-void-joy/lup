@@ -27,7 +27,7 @@ from lup.adapters.codex.harness_runtime import CodexPluginInstaller, PluginCache
 from lup.adapters.codex.runtime import CodexSessionConfig, create_codex
 from lup.harness.process import LocalProcessLauncher
 from lup.resolver.core import ResolverCore
-from lup.mcp import create_mcp_server, server_tool_names
+from lup.tools.mcp import create_mcp_server, server_tool_names
 from lup.channels.models import utc_now
 from lup.actors.mailbox import AnswerDoor, AnswerOffer
 from lup.resolver.mailbox import QuestionMailbox

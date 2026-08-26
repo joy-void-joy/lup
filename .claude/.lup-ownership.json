@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "ffc483e512f39e9b6d08955ba1d21c6c53e17d6130220ef0b64e4804c0df04bf",
+  "source_digest": "24351b85e73a1488cc1a753f2879895637b3f4da22db10e26d502c34d108228e",
   "target_requirements": [
     "claude-code"
   ],
@@ -37,7 +37,7 @@
     {
       "path": ".claude/plugins/lup/TEMPLATE_CLAUDE.md",
       "category": "generated",
-      "sha256": "2517b0637c582dc7a00884423bd77b059ed6f00db070261e5bfedbb69fdf3afe",
+      "sha256": "0eb918f0022ed66c088f8ca994160501a5735feb3309b6da7d12d898e6d82579",
       "semantic_id": "harness.template-guidance",
       "executable": false
     },
@@ -247,7 +247,7 @@
     {
       "path": ".claude/plugins/lup/commands/refactor-tools.md",
       "category": "generated",
-      "sha256": "4ca200ff9f706a68eb3ea035b42e130f6670201fd77aac5ff11fbf2ea4a82b77",
+      "sha256": "d39ff403522380ed9cc6305fefae036a2942ca7042ccd0f3016bcbb16ec4854e",
       "semantic_id": "skill.refactor-tools",
       "executable": false
     },
@@ -478,7 +478,7 @@
     {
       "path": "docs/library.md",
       "category": "generated",
-      "sha256": "586ffe65aab444b34aba5e75ca767dadd77b0197a718a4478b933e966a64b6ee",
+      "sha256": "06c91dbdbcfcca2ceadd49559b839e029839e4a05c67f37ee8357b14c29c083b",
       "semantic_id": "docs.library",
       "executable": false
     },

@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Literal, TypedDict
 
 if TYPE_CHECKING:
-    from lup.mcp import LupMcpTool
+    from lup.tools.mcp import LupMcpTool
     from lup.reflect import ReviewGate
     from lup.sandbox.container import Sandbox
 
@@ -95,7 +95,7 @@ def build_session_toolset(
     Returns:
         The groups plus the shared reflection gate.
     """
-    from lup.codeintel.tools import create_codeintel_tools
+    from lup.tools.lsp.tools import create_codeintel_tools
     from lup.workspace.paths import project_root
     from lup_template.agent.config import aux_model
     from lup_template.agent.tools.example import EXAMPLE_TOOLS

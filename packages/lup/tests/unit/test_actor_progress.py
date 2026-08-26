@@ -20,7 +20,7 @@ from lup.actors.cohort import ActorCohort
 from lup.actors.progress import ProgressWindow, read_progress
 from lup.actors.tools import SpawnReadInput, create_cohort_tools
 from lup.channels.models import Door
-from lup.mcp import LupMcpTool, ToolError
+from lup.tools.mcp import LupMcpTool, ToolError
 from lup.runtime.models import (
     MessageCompletedEvent,
     SessionId,

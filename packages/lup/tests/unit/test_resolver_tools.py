@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 from lup.harness.process import LaunchRequest, LocalProcessLauncher
-from lup.mcp import LupMcpTool, ToolError
+from lup.tools.mcp import LupMcpTool, ToolError
 from lup.policy.identity import ConcernAllowance
 from lup.actors.mailbox import AnswerDoor, RecordedAnswer
 from lup.actors.questions import QuestionAnswer

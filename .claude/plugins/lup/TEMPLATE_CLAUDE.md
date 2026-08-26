@@ -496,7 +496,7 @@ Code in `packages/lup/` must be **complete-as-is and configurable through functi
 
 **Never use `__init__.py` re-exports or `__all__` in internal packages.** Import directly from the module that defines the symbol.
 
-- `from lup.mcp import lup_tool` -- not `from lup import lup_tool`
+- `from lup.tools.mcp import lup_tool` -- not `from lup import lup_tool`
 - `__init__.py` files should contain only the module docstring (no imports, no `__all__`)
 - Barrel files drift out of sync and hide real dependencies
 

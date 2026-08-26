@@ -19,7 +19,7 @@ from typing import Literal
 from pydantic import BaseModel
 
 from lup.hooks import LupHooksConfig
-from lup.mcp import McpServerEntry
+from lup.tools.mcp import McpServerEntry
 from lup.client import Client
 from lup.runtime.login import ProviderLogin
 from lup.types import EnvVars

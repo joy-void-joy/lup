@@ -28,7 +28,7 @@ from lup.harness.banner import ArtifactBanner, GeneratedBanner
 from lup.harness.image import Image
 from lup.harness.requirements import Manifest
 from lup.markdown import CodeCell, PlainCell, TableCell, escaped
-from lup.mcp import ToolDeclaration
+from lup.tools.mcp import ToolDeclaration
 from lup.policy.kernel.rows import AcceptanceGuardRow, PathRoleName
 from lup.policy.models import PolicyId, UrlPathPrefix
 from lup.policy.refused_tools import RefusedTool

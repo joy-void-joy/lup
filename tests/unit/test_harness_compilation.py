@@ -16,7 +16,7 @@ import typer
 from claude_agent_sdk.types import SandboxNetworkConfig, SandboxSettings
 from pydantic import BaseModel, Field
 
-from lup.codeintel.tools import CODEINTEL_TOOL_DECLARATIONS
+from lup.tools.lsp.tools import CODEINTEL_TOOL_DECLARATIONS
 from lup.policy.identity import AGENT_IDENTITY_ENV
 from lup.types import JsonObject
 from lup.adapters.claude.harness import CLAUDE_DISPATCHER, ClaudeSpellings

@@ -30,7 +30,7 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 
 from lup.harness.process import LocalProcessLauncher, ProcessLauncher
-from lup.mcp import LupMcpTool, ToolError, lup_tool
+from lup.tools.mcp import LupMcpTool, ToolError, lup_tool
 from lup.resolver.join_desk import JoinDesk, JoinLanding, JoinPlan, JoinTip
 from lup.resolver.mailbox import QuestionMailbox
 from lup.resolver.models import (

@@ -5,7 +5,7 @@ from itertools import takewhile
 from pathlib import Path
 
 from lup.codescan.symbols import DefinedSymbol, defined_symbols, symbols_lost
-from lup.gitlocks import admin_dirs, diagnose_git_admin
+from lup.execution.writability import admin_dirs, diagnose_git_admin
 from lup.harness.ownership import GeneratedArtifacts, generated_artifacts
 from lup.harness.process import ExitStatus, LaunchRequest, ProcessLauncher
 from lup.resolver.contracts import WorktreePreparer

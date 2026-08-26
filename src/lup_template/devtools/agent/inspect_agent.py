@@ -21,7 +21,7 @@ from lup_template.agent.models import AgentOutput
 from lup_template.agent.prompts import get_system_prompt
 from lup_template.agent.subagents import get_subagent_specs
 from lup_template.devtools.agent.serve import collect_registry_tools
-from lup.mcp import LupMcpTool
+from lup.tools.mcp import LupMcpTool
 from lup.types import JsonObject
 
 # lup: ignore[constant-declaration] — how much of a prompt the default view

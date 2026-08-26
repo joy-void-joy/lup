@@ -34,7 +34,7 @@ from typing import TypedDict
 
 from pydantic import BaseModel, Field
 
-from lup.mcp import LupMcpTool, lup_tool
+from lup.tools.mcp import LupMcpTool, lup_tool
 from lup.reflect import ReviewGate, ReviewResult, ReviewVerdict
 
 logger = logging.getLogger(__name__)
