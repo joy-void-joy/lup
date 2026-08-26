@@ -52,7 +52,7 @@ def test_nested_sub_apps_are_reached_at_the_depth_a_reader_types() -> None:
 
     assert "dev pr create" in spelled
     assert "dev library status" in spelled
-    assert "dev init ownership" in spelled
+    assert "dev init rename-package" in spelled
 
 
 def test_every_command_carries_a_summary() -> None:
