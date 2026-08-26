@@ -302,11 +302,7 @@ def claude_granted_tools(
             for server in plugin.mcp_servers
         }
     )
-    return [
-        served.get(tool, tool)  # lup: ignore[dict-get] — bare keys pass through
-        for tool in tools
-        if tool not in CLAUDE_ABSENT_TOOLS
-    ]
+    return [served.get(tool, tool) for tool in tools if tool not in CLAUDE_ABSENT_TOOLS]
 
 
 class ClaudeSkillRenderer(ArtifactRenderer[Skill]):

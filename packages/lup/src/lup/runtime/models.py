@@ -24,6 +24,7 @@ from lup.types import (
     LupThinkingBlock,
     LupToolResultBlock,
     LupToolUseBlock,
+    PayloadText,
     Usage,
 )
 
@@ -34,6 +35,19 @@ DELEGATION_TOOLS = ("Agent", "Task")
 
 # What a delegation is called when its call named no role.
 UNNAMED_SUBAGENT = "subagent"
+
+
+class DelegatedRole(BaseModel, frozen=True):
+    """The role a delegation call names, under either spelling a runtime uses.
+
+    Claude's Agent tool spells the role `subagent_type` and the spec-driven
+    delegation tool spells it `name`, so a call carries whichever its own tool
+    declared and this reads both. A value that is not a string names no role,
+    which is what a model emitting junk arguments produces.
+    """
+
+    subagent_type: PayloadText = None
+    name: PayloadText = None
 
 
 class SessionId(BaseModel, frozen=True):
@@ -183,10 +197,8 @@ class TurnToolCallBlock(TurnBlock, frozen=True):
     ) -> str | None:
         if self.name not in tools:
             return None
-        requested = self.arguments.get("subagent_type")  # lup: ignore[dict-get]
-        if not isinstance(requested, str):
-            requested = self.arguments.get("name")  # lup: ignore[dict-get]
-        return requested if isinstance(requested, str) else unnamed
+        requested = DelegatedRole.model_validate(self.arguments)
+        return requested.subagent_type or requested.name or unnamed
 
 
 class ToolRefusal(BaseModel, frozen=True):

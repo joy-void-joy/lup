@@ -30,6 +30,7 @@ from lup.sandbox.models import (
     SandboxNotInitializedError,
 )
 from lup.sandbox.process import compute_deadline
+from lup.sandbox.repl_server import ExecuteRequest
 from lup.types import EnvVars
 
 logger = logging.getLogger(__name__)
@@ -149,7 +150,8 @@ class ReplSession:
         if self.sock is None:
             raise SandboxNotInitializedError("REPL not connected")
 
-        request = json.dumps({"code": code, "timeout": timeout_seconds}) + "\n"
+        payload = ExecuteRequest(code=code, timeout=timeout_seconds)
+        request = json.dumps(payload) + "\n"
         self.send(request.encode("utf-8"))
 
         deadline = compute_deadline(timeout_seconds)

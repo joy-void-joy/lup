@@ -145,6 +145,20 @@ class TokenUsageBreakdown(BaseModel, frozen=True):
     cached_input_tokens: int = Field(alias="cachedInputTokens")
 
 
+class CodexTurnFailure(BaseModel, frozen=True):
+    """The `error` object an app-server turn carries when it did not complete."""
+
+    message: str | None = None
+
+
+class CodexCompletedTurn(BaseModel, frozen=True):
+    """One `turn/completed` payload, read for the fields this adapter needs."""
+
+    status: str
+    duration_ms: int | None = Field(default=None, alias="durationMs")
+    error: CodexTurnFailure | None = None
+
+
 class CodexSchemaRebindingError(RuntimeError):
     """The current app-server cannot change thread-scoped dynamic tools safely."""
 
@@ -274,13 +288,12 @@ class CodexTurnChannel:
                 "tokenUsage": {"last": usage},
             } if isinstance(usage, dict):
                 self.usage = decode_usage(usage)
-            case "turn/completed", {
-                "turn": {"id": str(), "status": str(status)} as turn
-            }:
-                duration_ms = turn.get("durationMs")  # lup: ignore[dict-get]
+            case "turn/completed", {"turn": {"id": str(), "status": str()} as turn}:
+                completed_turn = CodexCompletedTurn.model_validate(turn)
+                status = completed_turn.status
                 duration = timedelta(
-                    milliseconds=duration_ms
-                    if isinstance(duration_ms, int)
+                    milliseconds=completed_turn.duration_ms
+                    if completed_turn.duration_ms is not None
                     else (perf_counter() - self.started) * 1000
                 )
                 if status == "completed":
@@ -295,16 +308,13 @@ class CodexTurnChannel:
                             )
                         )
                 elif not self.completed.done():
-                    native_error = turn.get("error")  # lup: ignore[dict-get]
                     message = (
-                        native_error.get("message")  # lup: ignore[dict-get]
-                        if isinstance(native_error, dict)
-                        else None
+                        completed_turn.error.message if completed_turn.error else None
                     )
                     failure = TurnFailure(
                         message=(
                             message
-                            if isinstance(message, str) and message
+                            if message
                             else f"Codex turn ended with status {status}"
                         ),
                         blocks=self.blocks,

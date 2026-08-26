@@ -40,6 +40,7 @@ from collections.abc import Awaitable, Callable
 from contextlib import AbstractAsyncContextManager, nullcontext
 from datetime import datetime
 from pathlib import Path
+from typing import Protocol, runtime_checkable
 from uuid import uuid4
 
 from pydantic import BaseModel, TypeAdapter
@@ -158,6 +159,13 @@ class CohortJournal(Journal[ActorRef, CohortEntry]):
         ]
 
 
+@runtime_checkable
+class CarriesSummary(Protocol):
+    """A submission that names what it found, in a field called ``summary``."""
+
+    summary: str
+
+
 def submitted_summary(output: BaseModel | None) -> str:
     """What a finished agent found, read off the result it has already given.
 
@@ -166,10 +174,11 @@ def submitted_summary(output: BaseModel | None) -> str:
     the submission carries one and reports nothing where it does not. A caller
     whose result names it differently passes its own.
     """
-    if output is None:
+    if not isinstance(output, CarriesSummary):
         return ""
-    found = output.model_dump().get("summary")  # lup: ignore[dict-get] optional field
-    return found if isinstance(found, str) else ""
+    # The protocol declares the field's type; matching one at runtime proves
+    # only that the field is there, so what it holds is still asked about.
+    return output.summary if isinstance(output.summary, str) else ""
 
 
 class ActorCohort:

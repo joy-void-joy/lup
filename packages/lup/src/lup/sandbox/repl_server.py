@@ -34,6 +34,29 @@ import traceback
 from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 from types import FrameType
+from typing import NotRequired, TypedDict
+
+DEFAULT_TIMEOUT = 30
+"""How long a cell runs when the request named no bound of its own.
+
+What :func:`serve` starts with, and what a caller wiring the loop itself
+passes instead — the host always names a timeout, so this is what a
+hand-written client that did not gets."""
+
+
+class ExecuteRequest(TypedDict):
+    """One request on the JSON-line wire: the cell, and how long it may run.
+
+    Declared in the half that runs in the container, because that half may
+    import nothing but the standard library — so the host imports the protocol
+    from the server it ships rather than respelling the fields at the socket.
+    Reading it back here is still a boundary decode: the line arrives as text
+    and there is no validator in the container to hand it to.
+    """
+
+    code: str
+    timeout: NotRequired[int]
+
 
 MAX_OUTPUT = 1_048_576
 """How much of one stream a single response may carry.
@@ -118,7 +141,7 @@ def run_cell(
     return echo_repr(value)
 
 
-def serve() -> None:
+def serve(default_timeout: int = DEFAULT_TIMEOUT) -> None:
     # Hijack standard streams: keep the originals for protocol I/O so user
     # code (print, input) cannot corrupt the JSON wire format.
     proto_in = sys.stdin
@@ -156,7 +179,9 @@ def serve() -> None:
             continue
 
         code = str(request["code"])
-        timeout = int(request.get("timeout", 30))  # lup: ignore[dict-get] — wire
+        # lup: ignore[dict-get] — the decoded JSON line, whose fields
+        # `ExecuteRequest` declares and which no validator reaches in here
+        timeout = int(request.get("timeout", default_timeout))
         out_buf = StringIO()
         err_buf = StringIO()
         exit_code = 0

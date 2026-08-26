@@ -60,6 +60,7 @@ from lup.telemetry.metrics import (
 )
 from lup.telemetry.trace import TraceLogger
 from lup.types import (
+    PayloadText,
     SubagentSpec,
     Usage,
     UsageCost,
@@ -635,6 +636,18 @@ def result_text[T: BaseModel | None](result: TurnResult[T]) -> str:
     )
 
 
+class ConsultedSource(BaseModel, frozen=True):
+    """What a retrieval tool call names as the source it consulted.
+
+    A fetch names a `url` and a search names a `query`; one model reads both
+    because which of them a call carries is decided by the tool that made it,
+    and the arguments arrive as whatever the model emitted.
+    """
+
+    url: PayloadText = None
+    query: PayloadText = None
+
+
 def result_sources[T: BaseModel | None](result: TurnResult[T]) -> list[str]:
     """Extract source URLs and search queries from semantic tool calls."""
     sources: list[str] = []  # lup: ignore[empty-collection]
@@ -642,13 +655,15 @@ def result_sources[T: BaseModel | None](result: TurnResult[T]) -> list[str]:
         arguments = block.tool_arguments
         if arguments is None:
             continue
-        if block.tool_call_name in ("FetchUrl", "WebFetch"):
-            value = arguments.get("url")  # lup: ignore[dict-get]
-        elif block.tool_call_name in ("SearchWeb", "WebSearch"):
-            value = arguments.get("query")  # lup: ignore[dict-get]
-        else:
-            continue
-        if isinstance(value, str) and value:
+        consulted = ConsultedSource.model_validate(arguments)
+        match block.tool_call_name:
+            case "FetchUrl" | "WebFetch":
+                value = consulted.url
+            case "SearchWeb" | "WebSearch":
+                value = consulted.query
+            case _:
+                continue
+        if value:
             sources.append(value)
     return sources
 

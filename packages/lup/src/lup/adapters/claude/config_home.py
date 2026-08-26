@@ -21,12 +21,12 @@ repository, and to nothing else it happens to open a session in.
 import json
 from pathlib import Path
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from lup.adapters.claude.login import CLAUDE_CONFIG_DIR, CLAUDE_LOGIN
 from lup.channels.models import write_atomic
 from lup.runtime.session_home import SessionHomeLayout, SessionHomes
-from lup.types import EnvVars, JsonObject
+from lup.types import EnvVars, JsonObject, JsonValue
 
 CLAUDE_CONFIG_FILE = ".config.json"
 """What Claude Code calls its configuration document inside a config home."""
@@ -180,12 +180,26 @@ def save_document(path: Path, document: JsonObject) -> None:
     write_atomic(path, json.dumps(document).encode("utf-8"))
 
 
+class ProjectSection(BaseModel):
+    """The per-project section of Claude's own configuration document.
+
+    Claude writes that document itself and has been seen writing it corrupt,
+    so a `projects` that is not an object reads here as no projects rather
+    than as a failure — the recovery path that reads it is the one repairing
+    exactly that, and it must be able to look.
+    """
+
+    projects: JsonObject = {}
+
+    @field_validator("projects", mode="before")
+    @classmethod
+    def an_object_or_none_at_all(cls, value: JsonValue) -> JsonValue:
+        return value if isinstance(value, dict) else {}
+
+
 def project_entries(document: JsonObject) -> JsonObject:
     """The per-project section of one document, empty when it carries none."""
-    projects = document.get(  # lup: ignore[dict-get] — Claude's own document
-        "projects"
-    )
-    return dict(projects) if isinstance(projects, dict) else {}
+    return ProjectSection.model_validate(document).projects
 
 
 def project_entry(document: JsonObject, workspace: Path) -> JsonObject:

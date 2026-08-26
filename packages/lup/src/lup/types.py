@@ -11,7 +11,13 @@ import json
 from collections.abc import Callable, Sequence
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, Discriminator, Field, StringConstraints
+from pydantic import (
+    BaseModel,
+    BeforeValidator,
+    Discriminator,
+    Field,
+    StringConstraints,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -46,6 +52,22 @@ these keys open differs, and a header map annotated as environment variables
 reads as a mistake even where the checker cannot see one. Reach for it when
 the keys are data rather than a schema; a fixed set of fields is a
 ``TypedDict`` or a model, not this."""
+
+
+def text_or_absent(value: JsonValue) -> str | None:
+    """Read one text field of an open payload, or nothing where it is not text."""
+    return value if isinstance(value, str) else None
+
+
+type PayloadText = Annotated[str | None, BeforeValidator(text_or_absent)]
+"""One optional text field of a payload whose schema is declared elsewhere.
+
+A vendor notification or a model's tool arguments can carry anything under a
+key, and a field declared ``str | None`` fails validation on that junk rather
+than reading it as absent — which is what a reader asking "did this name a
+URL?" means by it. Reach for this where a model reads an untyped payload;
+a field the schema really does guarantee stays ``str``."""
+
 
 type Namespace = dict[str, object]  # lup: ignore[dict-str-object] — live objects
 """A live Python namespace: names bound to whatever objects they name.
