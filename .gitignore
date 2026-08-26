@@ -242,3 +242,7 @@ downstream.json.local
 .cache/
 refs/
 **/*.bak
+# A native runtime's write journal, which it makes beside whichever directory
+# it was reading — including inside the library's own package root, where an
+# empty `.claude/` is the first thing a newcomer scanning that tree meets.
+**/.cc-writes/
