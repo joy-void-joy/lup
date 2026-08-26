@@ -9,13 +9,6 @@ and adds what the library lacks, keyed on the same id a directive, a denial and
 the generated reference already use, so an override replaces its namesake in
 place rather than sitting beside it.
 
-Three tables reach a project as a starting point rather than as a fixture: the
-anti-patterns it holds its code to, the shell vocabulary it runs, and the edit
-gates it judges its own file changes by. All three had the same problem in
-different shapes — the only way to disagree with one entry was to restate the
-table around it, and a restatement that fell behind the library looked exactly
-like a decision.
-
 :class:`Selection` is the one answer. A project names what it drops, adds what
 it has that the library does not, and says nothing about the rest::
 

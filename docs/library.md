@@ -238,9 +238,10 @@ is the map of every difference.
 
 ### The rest
 
-Every remaining top-level entry, and what makes it one. `types` is tier 1
-above and `__init__` is the front door; the rest each answer a question no
-sibling answers.
+Every remaining top-level entry, and what makes it one. `__init__` is the
+front door, and six more are described at length above instead —
+`types` in **Layering**; `sessions`, `harness`, `policy`, `resolver` and `providers` in **The packages** — so the rest each answer a question no sibling
+answers.
 
 Which entries this table has to cover is walked from the installed `lup`
 package when the page is generated — `packages/lup/src/lup` in this repository,
@@ -253,7 +254,7 @@ the way six of them once were.
 | --- | --- |
 | `banner` | The one generated-from banner, spelled however a target format admits. Every generated artifact whose format can hold a comment opens with the same sentence: what produced it, the command that rebuilds it, and where the provenance record lives. Only the source, the command, any target-specific notes, and the comment syntax differ, so the wording is written once here and each generator supplies its parameters. A format with no comment syntax, and the two families that deliberately carry no banner, are named by :class:`BannerExemption` so the absence is declared rather than noticed. |
 | `channels` | File-backed channels: a value that settles, and an ordered log. The widest dependency in the library: most of its top-level entries write through this one, which is what makes it a package rather than a helper inside any of them. Counted rather than listed, because the list is the thing that falls behind — the roster this paragraph came from named six consumers where the import graph held eleven, and nobody notices a sentence going stale. |
-| `client` | The concrete session surface every consumer holds. Top-level rather than under `runtime` because it is what the package root exports and what a reader meets first — a front door reached through a subpackage named for the machinery behind it is the shape that made every example open a session by importing an adapter instead. |
+| `client` | The concrete session surface every consumer holds. Top-level rather than inside `sessions` because it is what the package root exports and what a reader meets first — a front door reached through the package named for the machinery behind it is the shape that made every early example open a session by importing an adapter instead. What holds it here rather than one directory down is measured rather than assumed: `create_client` below routes a model id to whichever provider serves it and `providers` builds a `Client` back, so the two entries import each other, and moving that routing to the provider edge is what would settle the placement. |
 | `devtools` | The development CLI a project built on lup inherits rather than forks. Worktrees and branches, trace and Python introspection, the resolver supervisor, the sync registry, version bookkeeping. Ships the whole roster — `roster.py` wires every sub-app over one `DevtoolsDeclarations`, and an application declares only what it retires and what only it has, so a sub-app added here reaches it on the next lock refresh instead of waiting to be noticed. Requires the `web` extra for the supervisor. |
 | `execution` | What carrying work out runs into, and what to do about each of it. The retry and the throttle a flaky or rate-limited service is met with, the executor a blocking call is handed to so work in flight outlives any one loop&#x27;s teardown, and whether a path can be written at all — or whether a boundary owns it and something merely died holding a lock. |
 | `markdown` | The cells a generated Markdown table is laid out from. Rendering Markdown that is generated rather than authored, escaping at the leaf where data enters the document. Only `devtools` renders such tables today, but nothing in it is about development tooling. |
@@ -319,13 +320,15 @@ run: the `application placement` row names each module under the application's
 fails, because the template is copied and frozen the moment an adopter takes
 it while `packages/lup` reaches them through an ordinary dependency bump — so
 the row is a debt that shrinks, and this is where its verdicts are settled
-rather than a list kept somewhere else. Two modules answer it today.
-`devtools/setup.py` is where it belongs: this project's own integrations
-written as data, which is exactly what importing nothing looks like when a
-module is this project's judgement. `devtools/dev/library.py` is not — how a
-project obtains lup, across the published, git, local, and linked modes, is a
-question every adopter has and none of it is about this application, so its
-home is `lup/devtools/dev/`.
+rather than a list kept somewhere else. One module answers it today, and it is
+the one that should not: how a project obtains lup, across the published, git,
+local, and linked modes, is a question every adopter has and none of it is
+about this application, so `devtools/dev/library.py` belongs under
+`lup/devtools/dev/`. A single entry with a settled verdict is the shape a
+shrinking debt is supposed to have, and the row is read rather than trusted —
+a module that reaches the application, as `devtools/setup.py` does for its own
+harness composition, leaves the row by doing so rather than by being argued
+about here.
 
 ## Building on it
 

@@ -1,9 +1,13 @@
 """The concrete session surface every consumer holds.
 
-Top-level rather than under `runtime` because it is what the package root
-exports and what a reader meets first — a front door reached through a
-subpackage named for the machinery behind it is the shape that made every
-example open a session by importing an adapter instead.
+Top-level rather than inside `sessions` because it is what the package root
+exports and what a reader meets first — a front door reached through the
+package named for the machinery behind it is the shape that made every early
+example open a session by importing an adapter instead. What holds it here
+rather than one directory down is measured rather than assumed: `create_client`
+below routes a model id to whichever provider serves it and `providers` builds
+a `Client` back, so the two entries import each other, and moving that routing
+to the provider edge is what would settle the placement.
 
 Consumers never hold a capability ABC. ``Client`` is a plain class
 parametrized by one swappable ``SessionOpener`` engine: adapters, wrappers,

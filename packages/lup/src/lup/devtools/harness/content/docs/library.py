@@ -10,6 +10,7 @@ four commits after it was added.
 
 import ast
 from collections.abc import Iterator
+from itertools import groupby
 from pathlib import Path
 
 from pydantic import BaseModel
@@ -45,8 +46,10 @@ class TieredEntry(BaseModel, frozen=True):
 
     Carried rather than inferred: a package earns a section of its own by
     being load-bearing enough to need one, which is a judgement. Naming the
-    section is what lets a roster failure point *there* rather than only say
-    "not in the table".
+    section is what lets the roster send a reader *there* rather than leave a
+    package it skips unaccounted for — :meth:`Roster.described` renders that
+    sentence from this list, so an entry tiered out of the table appears in
+    the line saying where it went by being tiered at all.
     """
 
     package: str
@@ -80,14 +83,18 @@ class Roster(BaseModel, frozen=True):
     """
 
     tiered: list[TieredEntry] = [
-        TieredEntry(package="types", section="tier 1"),
-        TieredEntry(package="providers", section="the provider tier"),
-        TieredEntry(package="harness", section="the harness tier"),
-        TieredEntry(package="sessions", section="the session tier"),
-        TieredEntry(package="policy", section="the policy tier"),
-        TieredEntry(package="resolver", section="the target layout"),
+        TieredEntry(package="types", section="Layering"),
+        TieredEntry(package="sessions", section="The packages"),
+        TieredEntry(package="harness", section="The packages"),
+        TieredEntry(package="policy", section="The packages"),
+        TieredEntry(package="resolver", section="The packages"),
+        TieredEntry(package="providers", section="The packages"),
     ]
-    """Entries a section above the roster describes at length instead."""
+    """Entries a section above the roster describes at length instead.
+
+    In the order a reader meets them, because :meth:`described` renders the
+    sentence that sends them there from this list and nothing sorts it after.
+    """
 
     def owed(self) -> list[str]:
         """Every entry in the library's own package this roster has to describe."""
@@ -97,6 +104,31 @@ class Roster(BaseModel, frozen=True):
             for name in top_level_names(self.source.parent, self.source.name)
             if name not in elsewhere
         ]
+
+    def described(self) -> str:
+        """Where each entry this roster skips is described at length instead.
+
+        Rendered from :attr:`tiered` rather than restated in the prose beside
+        it, which is the whole reason the section is carried: the sentence
+        naming what the table omits and the filter that omits it are one list,
+        so neither can name a package the other has forgotten. The sentence it
+        replaced named `types` and left the other five unaccounted for.
+
+        Grouped by consecutive run rather than by sorted key, so the order is
+        the one a reader meets the sections in; two runs of one section read
+        as two clauses, which is what interleaving them would deserve.
+        """
+
+        def listed(packages: list[str]) -> str:
+            """A short run of names, read as a clause rather than as a row."""
+            if len(packages) == 1:
+                return packages[0]
+            return f"{', '.join(packages[:-1])} and {packages[-1]}"
+
+        return "; ".join(
+            f"{listed([f'`{entry.package}`' for entry in run])} in **{section}**"
+            for section, run in groupby(self.tiered, key=lambda entry: entry.section)
+        )
 
     def entry_source(self, name: str) -> Path:
         """The file whose docstring describes one top-level entry."""
@@ -421,9 +453,10 @@ is the map of every difference.
 
 ### The rest
 
-Every remaining top-level entry, and what makes it one. `types` is tier 1
-above and `__init__` is the front door; the rest each answer a question no
-sibling answers.
+Every remaining top-level entry, and what makes it one. `__init__` is the
+front door, and six more are described at length above instead —
+{LIBRARY.described()} — so the rest each answer a question no sibling
+answers.
 
 Which entries this table has to cover is walked from the installed `lup`
 package when the page is generated — `{LIBRARY.subtree}` in this repository,
@@ -491,13 +524,15 @@ run: the `application placement` row names each module under the application's
 fails, because the template is copied and frozen the moment an adopter takes
 it while `packages/lup` reaches them through an ordinary dependency bump — so
 the row is a debt that shrinks, and this is where its verdicts are settled
-rather than a list kept somewhere else. Two modules answer it today.
-`devtools/setup.py` is where it belongs: this project's own integrations
-written as data, which is exactly what importing nothing looks like when a
-module is this project's judgement. `devtools/dev/library.py` is not — how a
-project obtains lup, across the published, git, local, and linked modes, is a
-question every adopter has and none of it is about this application, so its
-home is `lup/devtools/dev/`.
+rather than a list kept somewhere else. One module answers it today, and it is
+the one that should not: how a project obtains lup, across the published, git,
+local, and linked modes, is a question every adopter has and none of it is
+about this application, so `devtools/dev/library.py` belongs under
+`lup/devtools/dev/`. A single entry with a settled verdict is the shape a
+shrinking debt is supposed to have, and the row is read rather than trusted —
+a module that reaches the application, as `devtools/setup.py` does for its own
+harness composition, leaves the row by doing so rather than by being argued
+about here.
 
 ## Building on it
 

@@ -4,7 +4,7 @@ Two kinds of name are exported here, and the distinction is why the second kind
 is reached the way it is.
 
 The vocabulary -- sessions, turns, requests, results -- is provider-neutral and
-free to import: naming it costs nothing beyond the runtime package itself. The
+free to import: naming it costs nothing beyond `lup.sessions` itself. The
 **constructors** are not, because each one reaches an adapter, and an adapter
 reaches the tool ecosystem its provider speaks. Imported eagerly here, `import
 lup` pulls 811 modules and roughly 1.3 seconds, including an ASGI server and a
