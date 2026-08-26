@@ -15,6 +15,7 @@ from urllib.parse import urlsplit
 
 from pydantic import BaseModel, Field
 
+from lup.harness.generation import plugin_served_tool
 from lup.harness.models import HookSet, HookUrlScope, Plugin
 from lup.types import JsonObject, JsonValue
 
@@ -59,9 +60,14 @@ def served_tool_grants(plugin: Plugin) -> list[str]:
     settings to extend.
 
     The scoped name is what a runtime addresses a plugin's server by; the bare
-    key it is declared under matches nothing.
+    key it is declared under matches nothing. It is spelled by
+    :func:`~lup.harness.generation.plugin_served_tool`, which the skill and
+    agent renderers read too, so a grant and the permission that admits it
+    cannot come to name different tools.
     """
-    return [f"mcp__plugin_{plugin.name}_{server.name}" for server in plugin.mcp_servers]
+    return [
+        plugin_served_tool(plugin.name, server.name) for server in plugin.mcp_servers
+    ]
 
 
 def credential_read_denials(hooks: "HookSet | None") -> list[str]:
