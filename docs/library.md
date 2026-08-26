@@ -268,17 +268,24 @@ the way six of them once were.
 
 ### What is left to place
 
-The roster above is where the tree stands and, with one exception, where the
-three questions put it. The exception is `resolver`, whose home is
-`lup/harness/resolver/`: its only driver is `lup.devtools.harness.resolve`,
-so it is part of the harness subject rather than a sibling of it, and the
-downward question stops it at the library edge — following the driver into
-`devtools/` would move provider-neutral code into the tooling layer.
+The roster above is where the tree stands, and where the three questions put
+it. Thirty-four top-level entries became these by asking, of each one, which
+of the four kinds it is: a foundation that imports nothing here, a subject,
+the one vendor boundary, or tooling.
 
-Thirty-four top-level entries became these by asking, of each one, which of
-the four kinds it is: a foundation that imports nothing here, a subject, the
-one vendor boundary, or tooling. Five two-way edges between entries survive
-that, and each is a placement question still open rather than an accident:
+`resolver` is the entry the downward question is hardest on, because
+everything that drives it is tooling: eight modules across
+`devtools/harness/`, `devtools/supervisor/`, `devtools/dev/` and
+`devtools/report/` read its journal, its state repository, its question
+mailbox and its lease table. What keeps it a sibling of the subjects rather
+than a package inside one is what it imports. Twenty-four of its import lines
+reach `orchestration.actors` and fifteen reach `harness`, so neither subject
+contains it, and what it answers — reviewed concerns driven over a DAG of
+branches, each on its own branch in a leased worktree — is a question neither
+of them answers.
+
+Five two-way edges between entries survive the sort. Four are placement
+questions still open; the fifth is the shape of a guarantee.
 
 | pair | what closes the loop |
 |---|---|
@@ -286,16 +293,27 @@ that, and each is a placement question still open rather than an accident:
 | `client` ↔ `sessions` | six session modules hold a `Client`, and the front door reads the turn vocabulary |
 | `devtools` ↔ `harness` | three utilities the library needs — `git`, the clipboard probes, a launcher's default environment — live under the tooling half |
 | `devtools` ↔ `sandbox` | the same `git`, reached from the container's mount rail |
-| `harness` ↔ `policy` | the edit gate reads the anti-pattern table, which reads this package's declaration models |
 
-The last three all have one shape: a symbol two subjects share, sitting inside
-one of them. Each closes by moving that symbol below both, which is what
+The last two have one shape: a symbol two subjects share, sitting inside one
+of them. Each closes by moving that symbol below both, which is what
 `lup.banner` already did for the do-not-edit banner the policy bundle and the
 harness both write. The first two are the front door deliberately knowing
 about what it opens; whether a lazily-imported provider counts as an edge at
 all is the question to answer before an acyclicity check is written, and
 answering it by choosing a walker that does not look inside a function would
 be hiding it rather than settling it.
+
+`harness` ↔ `policy` is the one that stays, because breaking it would break
+what `policy` is for. Nine of `codescan`'s modules read `policy.kernel.edit`
+— the tokenizer, the AST walkers, and the match-site finders that the
+compiled hook script carries — and `policy` reads `codescan`'s anti-pattern
+table back. That is not an accident of where the utilities happened to be
+written. This package exists to decide identically in two homes, the compiled
+hook and `dev check`, and one shared reading of the source is how the two are
+held to the same answer. Cutting the edge would mean two implementations of
+that reading, drifting apart on exactly the cases nobody thought to test —
+which is the failure the package was built to prevent, reintroduced for the
+sake of a tidier graph.
 
 Acting on one of these answers is a command rather than an afternoon.
 `uv run lup-devtools dev relocate old.module=new.module` repoints every import
