@@ -12,6 +12,7 @@ kernel decides.
 
 import json
 import urllib.parse
+from collections.abc import Iterator
 from pathlib import Path
 
 from pydantic import BaseModel
@@ -42,6 +43,7 @@ from lup.policy.shell_rules import (
     runner_target_tables,
 )
 from lup.policy.rules import antipattern_row, human_owned_path_rule, path_rule_row
+from lup.types import JsonValue
 
 
 class KernelModule(BaseModel, frozen=True):
@@ -200,19 +202,61 @@ def path_rule_rows_literal(rows: list[PathRuleRow]) -> str:
     )
 
 
+def python_literal(value: JsonValue) -> str:
+    """One primitive as Python source, quoted the way Ruff would quote it.
+
+    ``json.dumps`` alone was the obvious reach and is the wrong language: it
+    renders JSON, and what this writes is a Python module. The two agree on
+    every string with no quote in it, which is why it worked — until a rule
+    message contained a double quote, JSON escaped it, and Ruff wanted the
+    single-quoted form instead, failing the format check on a generated file
+    nobody had edited and nobody could have fixed.
+
+    So the quote is chosen the way Ruff chooses it: the configured double,
+    unless single strictly reduces the escaping. What sits between the quotes
+    is JSON's escaping either way, which Ruff leaves alone, so the outermost
+    decision is the whole of what this makes.
+    """
+    if not isinstance(value, str):
+        return repr(value)
+    rendered = json.dumps(value)
+    if value.count("'") >= value.count('"'):
+        return rendered
+    # Requoting an escaped literal, for which there is no parser: these two
+    # substitutions are the escaping itself rather than data being edited.
+    inner = rendered[1:-1].replace('\\"', '"')  # lup: ignore[string-replace]
+    return "'" + inner.replace("'", "\\'") + "'"  # lup: ignore[string-replace]
+
+
 def antipattern_rows_literal(rows: dict[str, list[AntiPatternRow]]) -> str:
     """Render suffix-keyed anti-pattern rows in Ruff-stable form."""
+
+    def row_fields(row: AntiPatternRow) -> Iterator[str]:
+        """Each field as Python source, refusing a value this cannot render.
+
+        Rendered from the row's own keys rather than a list of them: a field
+        added to ``AntiPatternRow`` reaches the hermetic runtime by
+        construction, instead of being dropped until someone notices. Reading
+        a ``TypedDict`` that way widens every value to ``object``, so what one
+        actually holds is narrowed here — and a field that is not a primitive
+        fails generation rather than reaching the runtime as its ``repr``.
+        """
+        for key, value in row.items():
+            match value:
+                case str() | int() | float() | None:
+                    yield f"            {python_literal(key)}: {python_literal(value)},"
+                case _:
+                    raise TypeError(
+                        f"anti-pattern row field {key!r} holds a "
+                        f"{type(value).__name__}, which the hermetic runtime "
+                        "cannot carry as a primitive"
+                    )
+
     lines = ["{"]
     for suffix, patterns in sorted(rows.items()):
-        lines.append(f"    {json.dumps(suffix)}: [")
+        lines.append(f"    {python_literal(suffix)}: [")
         for row in patterns:
-            # Rendered from the row's own keys rather than a list of them: a
-            # field added to AntiPatternRow reaches the hermetic runtime by
-            # construction, instead of being dropped until someone notices.
-            fields = "\n".join(
-                f"            {json.dumps(key)}: {json.dumps(value)},"
-                for key, value in row.items()
-            )
+            fields = "\n".join(row_fields(row))
             lines.append(f"        {{\n{fields}\n        }},")
         lines.append("    ],")
     lines.append("}")
