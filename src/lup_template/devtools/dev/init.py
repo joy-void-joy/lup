@@ -17,9 +17,7 @@ Examples::
     $ uv run lup-devtools dev init rename-package myproject --dry-run
 """
 
-import ast
 import re
-from itertools import accumulate
 from pathlib import Path
 import tomlkit
 from tomlkit.container import Container
@@ -28,9 +26,8 @@ import typer
 
 from lup.workspace.paths import find_project_root
 from lup.devtools.dev.plugin import set_marketplace_name
-import lup_template.devtools.harness.catalog as catalog
 from lup_template.devtools.harness.catalog import declared_plugin
-from lup.devtools.utils import git, uv
+from lup.devtools.utils import git
 
 PACKAGE_IMPORT_RE = re.compile(
     r"""
@@ -322,105 +319,3 @@ def rename_package(
         typer.echo("  uv run pyright")
         typer.echo("  uv run ruff check .")
         typer.echo("  uv run pytest")
-
-
-def path_literal(element: ast.expr) -> str | None:
-    """The string a ``Path("...")`` element names, if it is one."""
-    match element:
-        case ast.Call(args=[ast.Constant(value=str() as text)]):
-            return text
-    return None
-
-
-def ownership_listing(tree: ast.Module, field: str) -> ast.List:
-    """The list a hook set declares ``field`` as.
-
-    Located through the parser rather than matched textually: the same call
-    can be spelled across lines, carry a comment between its arguments, or
-    name the field again in a docstring, and only a parse knows which
-    occurrence is the value and where it ends.
-    """
-    for node in ast.walk(tree):
-        match node:
-            case ast.keyword(arg=name, value=ast.List() as listing) if name == field:
-                return listing
-    raise ValueError(f"no hook set in this catalog declares {field!r}")
-
-
-def spliced(source: str, node: ast.List, replacement: str) -> str:
-    """``source`` with the span ``node`` covers rewritten as ``replacement``.
-
-    Cut over the encoded bytes because that is the unit an AST column offset
-    counts in — a line carrying an em dash ahead of the node would put a
-    character-indexed cut in the wrong place, and this catalog has them.
-    """
-    raw = source.encode("utf-8")
-    starts = list(
-        accumulate((len(line) for line in raw.splitlines(keepends=True)), initial=0)
-    )
-    begin = starts[node.lineno - 1] + node.col_offset
-    end = starts[(node.end_lineno or node.lineno) - 1] + (node.end_col_offset or 0)
-    return (raw[:begin] + replacement.encode("utf-8") + raw[end:]).decode("utf-8")
-
-
-def rendered_listing(paths: list[str]) -> str:
-    """The ownership list as one flat literal, for the formatter to lay out.
-
-    Flat rather than pre-indented: where the list wraps and how far it indents
-    are the formatter's answers, and a splice that guessed them would land a
-    catalog that parses and that `ruff format` then rewrites, failing the gate
-    on the very file this just edited.
-    """
-    entries = ", ".join(f'Path("{path}")' for path in paths)
-    return f"[{entries}]"
-
-
-def file_ownership(lock: list[str], unlock: list[str], dry_run: bool) -> None:
-    """Report or change which files the human author owns, then regenerate.
-
-    A locked file surfaces every agent edit as an approval, which is right for
-    a file whose words are the author's and wrong for one the agent is meant
-    to keep current. The declaration is the catalog's, so changing it by hand
-    means editing a typed call and remembering that the native trees compile
-    from it; asking here does both.
-    """
-    catalog_file = Path(catalog.__file__)
-    source = catalog_file.read_text(encoding="utf-8")
-    listing = ownership_listing(ast.parse(source), "human_owned_files")
-    owned = [named for element in listing.elts if (named := path_literal(element))]
-
-    if not lock and not unlock:
-        typer.echo(f"Human-owned files declared in {catalog_file.name}:")
-        for path in owned or ["  (none)"]:
-            typer.echo(f"  {path}" if owned else path)
-        return
-
-    missing = [path for path in unlock if path not in owned]
-    if missing:
-        typer.echo(f"Error: not declared human-owned: {', '.join(missing)}", err=True)
-        raise typer.Exit(1)
-    already = [path for path in lock if path in owned]
-    if already:
-        typer.echo(f"Error: already human-owned: {', '.join(already)}", err=True)
-        raise typer.Exit(1)
-
-    kept = [path for path in owned if path not in unlock]
-    updated = kept + [path for path in lock if path not in kept]
-    rewritten = spliced(source, listing, rendered_listing(updated))
-
-    for path in unlock:
-        typer.echo(f"  unlocked {path} — agents may edit it without asking")
-    for path in lock:
-        typer.echo(f"  locked {path} — every agent edit becomes an approval")
-
-    if dry_run:
-        typer.echo(f"\nDry run: {catalog_file} left unchanged")
-        return
-    catalog_file.write_text(rewritten, encoding="utf-8")
-    uv("run", "ruff", "format", "--quiet", str(catalog_file))
-    typer.echo(f"\n{catalog_file.name} updated; regenerating the native trees")
-    # A fresh interpreter, because the catalog this just rewrote is already
-    # imported in this one: generating here would compile the declaration as
-    # it was read at startup and report writing nothing, leaving the trees
-    # stale behind a command that said it had regenerated them.
-    typer.echo(uv("run", "lup-devtools", "harness", "generate", "all"))

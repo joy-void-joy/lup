@@ -80,7 +80,6 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 | `dev model-config snapshot-at` | Record the configuration pydantic resolved at a git revision. |
 | `dev model-config compare` | Diff two snapshots; exit non-zero when any model&#x27;s config moved. |
 | `dev init rename-package` | Rename the lup Python package to a project-specific name. |
-| `dev init ownership` | Report or change which files the human author owns, then regenerate. |
 | `dev library status` | Report where the lup library is resolved from. |
 | `dev library release` | Ask the package index whether a release exists, and which mode that settles. |
 | `dev library use` | Resolve lup from the package index, or from the vendored copy. |
