@@ -59,6 +59,15 @@ COMMAND_REFERENCE = IndexEntry(
 )
 """Also declared by no module: it renders from the wired app at generation."""
 
+GENERATED_PATHS = IndexEntry(
+    link="generated-paths.md",
+    answers=(
+        "Every file the recipes compile and what each is compiled from, "
+        "walked from the trees themselves rather than listed by hand."
+    ),
+)
+"""The third page no module declares: it renders from the compiled trees."""
+
 
 def document(
     reference: list[models.Document], project: list[models.Document]
@@ -146,6 +155,7 @@ def document(
                         "parser, which resolver tool.",
                     ),
                     COMMAND_REFERENCE,
+                    GENERATED_PATHS,
                     entry(
                         page["docs.quality-pipeline"],
                         "The three check layers, and what each one uniquely catches.",

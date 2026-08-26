@@ -35,6 +35,7 @@ Subjects that span the three components, or that are large enough to own a page.
 | [contributing.md](contributing.md) | How to get set up, where a change of each kind belongs, and what has to be green before it lands. |
 | [conventions.md](conventions.md) | The lookup behind each code-convention rule: which library, which typed stand-in for a dict, which parser, which resolver tool. |
 | [commands.md](commands.md) | Every command `lup-devtools` serves, walked from the composed CLI rather than listed by hand. |
+| [generated-paths.md](generated-paths.md) | Every file the recipes compile and what each is compiled from, walked from the trees themselves rather than listed by hand. |
 | [quality-pipeline.md](quality-pipeline.md) | The three check layers, and what each one uniquely catches. |
 | [dev-tooling-decisions.md](dev-tooling-decisions.md) | The architectural decisions behind the development tooling, each stated against the current system. |
 
