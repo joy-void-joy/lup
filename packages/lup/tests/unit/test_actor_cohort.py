@@ -18,7 +18,7 @@ from lup.actors.mail import EVERYONE
 from lup.actors.refs import ActorRef
 from lup.hooks import LupHooksConfig
 from lup.runtime.contracts import Session, Turn
-from lup.runtime.factory import SessionFactory
+from lup.client import Client
 from lup.runtime.models import (
     TurnHandle,
     TurnInput,
@@ -92,7 +92,7 @@ def recipe_for(session: HeldSession) -> ActorRecipe:
     nothing anyone sends it.
     """
 
-    def recipe(_actor: ActorRef, hooks: LupHooksConfig) -> SessionFactory:
+    def recipe(_actor: ActorRef, hooks: LupHooksConfig) -> Client:
         session.hooks = hooks
         return session_factory(session)
 

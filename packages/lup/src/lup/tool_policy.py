@@ -1,5 +1,9 @@
 """Tool-availability filtering: the mechanism, not the policy.
 
+A project subclasses `BaseToolPolicy` and maps its own settings onto it, which
+is the placement rule in miniature — the machinery is the library's, every
+exclusion is the adopter's.
+
 A session's tools pass through one policy object that decides what the
 agent may call. *Which* exclusions apply is a per-project decision (API
 keys, modes, session context), so this module owns only the machinery:

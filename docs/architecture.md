@@ -19,13 +19,13 @@ the engine-versus-surface split (`docs/patterns.md`), and the criterion is
 behavior: a frozen value that only carries capabilities is a transparent
 carrier, not a caller-facing surface, so there is nothing for a composing
 class to home. `handle.session.start(...)` and `turn.turn.result()` are
-conforming. `SessionFactory` is the behavioral surface over these seams.
+conforming. `Client` is the behavioral surface over these seams.
 
 The runtime sequence is:
 
 1. an application builds a validated Claude or Codex config;
 2. immutable profile/endpoint transforms run before factory construction;
-3. `SessionFactory.open()` owns provider resources;
+3. `Client.open()` owns provider resources;
 4. `Session.start()` creates a fresh output store, finishes tool binding, and
    waits for native turn acknowledgement;
 5. `Turn.result()` returns one strict `TurnResult[T]` or raises a typed error

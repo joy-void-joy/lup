@@ -339,7 +339,7 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         # Flags a string-keyed dict/Mapping only when the VALUE is a scalar/
         # payload type (str, int, float, bool, bytes, complex, or a union that
         # opens with one). Concrete class and callable value types are left
-        # alone: `dict[str, SessionFactory]`, `dict[str, LupMcpTool]`, `dict[str,
+        # alone: `dict[str, Client]`, `dict[str, LupMcpTool]`, `dict[str,
         # Callable[...]]` are registries/routers whose open, data-driven key
         # set IS the point. The smell is a CLOSED, enumerable key set with a
         # scalar value (config-shaped) — that wants a BaseModel or
@@ -366,7 +366,7 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
             # A registry: the value is a concrete class, and the open key set
             # keyed by external data is the whole point.
             RuleExample(
-                code="def render(fields: dict[str, SessionFactory]) -> None: ...",
+                code="def render(fields: dict[str, Client]) -> None: ...",
                 verdict="cleared",
             ),
             RuleExample(
@@ -378,7 +378,7 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         "CLOSED, enumerable set — use a BaseModel or dict[Literal[...], V]. When the keys "
         "are open and data-driven (a registry/cache/counter keyed by external data) this is "
         "legitimate: add `# lup: ignore[dict-str-payload]`. Concrete class/callable value "
-        "types (dict[str, SessionFactory]) are already accepted; JsonValue covers arbitrary JSON",
+        "types (dict[str, Client]) are already accepted; JsonValue covers arbitrary JSON",
     ),
     AntiPattern(
         # Flags every `.get(` — the user's explicit broad choice over a narrow

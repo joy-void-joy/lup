@@ -9,7 +9,7 @@ from pydantic import BaseModel
 
 from lup.runtime.background import BackgroundAgent, BackgroundConfig
 from lup.runtime.composition import AcceptedTurn, CompletedTurn, ComposedSession
-from lup.runtime.factory import SessionFactory
+from lup.client import Client
 from lup.runtime.errors import TurnError
 from lup.runtime.models import (
     SessionHandle,
@@ -63,7 +63,7 @@ class RecordingOpener:
 @pytest.mark.asyncio
 async def test_background_agent_coalesces_to_latest_state() -> None:
     opener = RecordingOpener()
-    factory = SessionFactory(opener.session_context)
+    factory = Client(opener.session_context)
     completed = asyncio.Event()
     results: list[TurnResult[None]] = []
     errors: list[TurnError] = []

@@ -33,12 +33,12 @@ for them by name, and read the module when a question gets specific.
 
 ### The runtime, and what one run is
 
-A session is opened by a **`SessionFactory`**, which hands back a `Session`;
+A session is opened by a **`Client`**, which hands back a `Session`;
 a turn is a **`TurnRequest`** carrying the prompt and the Pydantic type the
 answer must arrive as, and it comes back as a strict **`TurnResult[T]`** whose
 `.output` is already validated. Each typed turn binds its own `submit_output`
 tool to that schema, so structured output is enforced rather than parsed.
-`SessionFactory.query(prompt, Model)` is the whole of it for a one-shot.
+`Client.query(prompt, Model)` is the whole of it for a one-shot.
 
 The first design question is therefore what one *run* is: a single typed turn,
 a conversation over one session, or a process that outlives any of them.

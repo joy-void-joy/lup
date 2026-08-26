@@ -65,7 +65,7 @@ def test_per_engine_imports_breach() -> None:
 
 def test_seam_surface_does_not_breach() -> None:
     text = (
-        "from lup.runtime.contracts import SessionFactory\n"
+        "from lup.runtime.contracts import Client\n"
         "from lup.runtime.query import query\n"
         "from lup.harness.contracts import ArtifactRenderer\n"
         "from lup.policy.contracts import NativeEventDecoder\n"

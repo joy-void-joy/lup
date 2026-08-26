@@ -6,7 +6,7 @@ block — but it proves it of the **CLI**, driving `codex exec` with three
 things the app-server path never sets: `--enable hooks`, an installed plugin,
 and `--dangerously-bypass-hook-trust`.
 
-`create_codex_session_factory` — the path every real Lup session takes — starts
+`create_codex` — the path every real Lup session takes — starts
 the app-server with `["--profile", name]` and nothing else. Whether hooks fire
 there is undocumented, and openai/codex#21639 is evidence that firing is
 surface-dependent, so it is asked of a live session rather than reasoned about.
@@ -27,9 +27,9 @@ from pathlib import Path
 import pytest
 from pydantic import BaseModel, Field
 
-from lup.adapters.codex.runtime import CodexSessionConfig, create_codex_session_factory
+from lup.adapters.codex.runtime import CodexSessionConfig, create_codex
 from lup.adapters.codex.selection import CODEX_RUNTIME
-from lup.runtime.factory import SessionFactory
+from lup.client import Client
 from lup.runtime.models import turn_request
 from lup.runtime.selection import SessionRequest
 from lup.workspace.paths import find_project_root
@@ -98,7 +98,7 @@ def workspace_request(cwd: Path) -> SessionRequest:
 async def attempt(command: str) -> ShellAttempt:
     """Drive one app-server session, on the process's own Codex home."""
     return await ask(
-        create_codex_session_factory(personal_home_session(find_project_root())),
+        create_codex(personal_home_session(find_project_root())),
         command,
     )
 
@@ -111,7 +111,7 @@ async def attempt_as_lup_opens_one(command: str) -> ShellAttempt:
     )
 
 
-async def ask(factory: SessionFactory, command: str) -> ShellAttempt:
+async def ask(factory: Client, command: str) -> ShellAttempt:
     """Put one command to one already-configured session."""
     async with factory.open() as handle:
         accepted = await handle.session.start(

@@ -17,7 +17,7 @@ artifact, prompt, invocation, and probe capabilities from
 :mod:`lup.runtime.config`; and native event decoding and decision rendering
 from :mod:`lup.policy.native`. Frozen Pydantic models are the adapter-owned
 configuration and evidence data those implementations consume.
-``create_claude_session_factory`` is the named runtime composition root;
+``create_claude`` is the named runtime composition root;
 module-level builders, converters, and conversation state are its typed
 internals.
 

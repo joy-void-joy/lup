@@ -51,17 +51,17 @@ from lup.resolver.models import (
 )
 from lup.resolver.run import ResolveRun, ResolverInvariantError
 from lup.resolver.tools import WAIT_CONTRACT
-from lup.runtime.factory import SessionFactory
+from lup.client import Client
 from lup.runtime.models import TurnInput, TurnRequest, TurnResult, turn_request
 from lup.runtime.wrappers import CorrectionConfig, decorated_session_factory
 
-type WorkerFactoryRecipe = Callable[[WorkerContext], SessionFactory]
-type ReviewerFactoryRecipe = Callable[[ReviewerContext], SessionFactory]
+type WorkerFactoryRecipe = Callable[[WorkerContext], Client]
+type ReviewerFactoryRecipe = Callable[[ReviewerContext], Client]
 
 
 def corrective[T](
-    recipe: Callable[[T], SessionFactory],
-) -> Callable[[T], SessionFactory]:
+    recipe: Callable[[T], Client],
+) -> Callable[[T], Client]:
     """Give each opened session corrective structured-output reprompts.
 
     Every resolver turn ends in a typed submission; a model that answers in
@@ -69,7 +69,7 @@ def corrective[T](
     whole run on its first miss.
     """
 
-    def factory(argument: T) -> SessionFactory:
+    def factory(argument: T) -> Client:
         return decorated_session_factory(
             recipe(argument), correction=CorrectionConfig(cycles=2)
         )
@@ -281,7 +281,7 @@ class TurnRunner:
         withdrawal it is indistinguishable from.
         """
 
-        def recipe(opened: ActorRef, hooks: LupHooksConfig) -> SessionFactory:
+        def recipe(opened: ActorRef, hooks: LupHooksConfig) -> Client:
             """Configure this worker's session around the mail that reaches it."""
             return self.worker_factory(
                 WorkerContext(

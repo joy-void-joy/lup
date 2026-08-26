@@ -21,10 +21,10 @@ from pydantic import BaseModel, Field
 from lup.adapters.claude.harness import ClaudeSpellings
 from lup.adapters.claude.runtime import (
     ClaudeSessionConfig,
-    create_claude_session_factory,
+    create_claude,
 )
 from lup.adapters.codex.harness_runtime import CodexPluginInstaller, PluginCacheConfig
-from lup.adapters.codex.runtime import CodexSessionConfig, create_codex_session_factory
+from lup.adapters.codex.runtime import CodexSessionConfig, create_codex
 from lup.harness.process import LocalProcessLauncher
 from lup.resolver.core import ResolverCore
 from lup.mcp import create_mcp_server, server_tool_names
@@ -41,7 +41,7 @@ from lup.resolver.models import (
     VerificationCommand,
     WorkerContext,
 )
-from lup.runtime.factory import SessionFactory
+from lup.client import Client
 from lup.runtime.models import TurnTextBlock, turn_request
 
 pytestmark = pytest.mark.integration
@@ -52,7 +52,7 @@ CODEX_SMOKE_MODEL = "gpt-5.5"
 
 async def test_fresh_claude_session_completes_one_turn(tmp_path: Path) -> None:
     """A fresh native session id survives one complete turn."""
-    factory = create_claude_session_factory(
+    factory = create_claude(
         ClaudeSessionConfig(
             model=CLAUDE_SMOKE_MODEL,
             system_prompt="Answer in one short sentence.",
@@ -81,7 +81,7 @@ class SmokeSubmission(BaseModel):
 
 async def test_codex_thread_start_carries_a_dynamic_tool(tmp_path: Path) -> None:
     """A typed binding survives the installed app-server schema."""
-    factory = create_codex_session_factory(
+    factory = create_codex(
         CodexSessionConfig(
             model=CODEX_SMOKE_MODEL,
             developer_instructions="Follow the submission instruction exactly.",
@@ -123,7 +123,7 @@ async def test_a_claude_session_carries_context_across_same_schema_turns(
     starts each one cold. Nothing here resumes anything — the same live
     connection has to carry the first turn's word into the second.
     """
-    factory = create_claude_session_factory(
+    factory = create_claude(
         ClaudeSessionConfig(
             model=CLAUDE_SMOKE_MODEL,
             system_prompt="Call the submission tool. Never ask a question.",
@@ -213,7 +213,7 @@ async def test_miniature_resolver_run_on_a_fixture_repository(tmp_path: Path) ->
     launcher = LocalProcessLauncher()
     run_id = "smoke-run"
 
-    def worker_factory(context: WorkerContext) -> SessionFactory:
+    def worker_factory(context: WorkerContext) -> Client:
         server = create_mcp_server(
             "resolver",
             tools=create_question_tools(
@@ -224,7 +224,7 @@ async def test_miniature_resolver_run_on_a_fixture_repository(tmp_path: Path) ->
                 wake=core.wake,
             ),
         )
-        return create_claude_session_factory(
+        return create_claude(
             ClaudeSessionConfig(
                 model=CLAUDE_SMOKE_MODEL,
                 system_prompt="Execute the persisted Lup resolver assignment.",
@@ -237,8 +237,8 @@ async def test_miniature_resolver_run_on_a_fixture_repository(tmp_path: Path) ->
             )
         )
 
-    def reviewer_factory(context: ReviewerContext) -> SessionFactory:
-        return create_claude_session_factory(
+    def reviewer_factory(context: ReviewerContext) -> Client:
+        return create_claude(
             ClaudeSessionConfig(
                 model=CLAUDE_SMOKE_MODEL,
                 system_prompt="Independently review the persisted resolver change.",

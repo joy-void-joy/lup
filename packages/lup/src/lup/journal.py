@@ -1,5 +1,11 @@
 """One ordered record file: sequenced, appended durably, read back by either end.
 
+Two products ride it — the resolver's typed decision log and the observable
+transcript's hash-chained provider payloads — and neither collapses into the
+other. Sharing the mechanism is what lets any reader tail either record the
+same way, and what stops the next thing needing a record from arriving with a
+third implementation.
+
 Two records ride this. The resolver's decision log carries a typed event union
 a supervisor dispatches on; the observable transcript carries whatever payload
 a provider produced, hashed into a chain so an edit is visible rather than

@@ -1,4 +1,4 @@
-"""Codex app-server SessionFactory with live optional turn capabilities."""
+"""Codex app-server Client with live optional turn capabilities."""
 
 import asyncio
 import json
@@ -28,7 +28,7 @@ from lup.runtime.contracts import (
     TurnToolBinder,
 )
 from lup.runtime.errors import ProviderTurnError, TurnFailure, TurnInterruptedError
-from lup.runtime.factory import SessionFactory
+from lup.client import Client
 from lup.runtime.models import (
     BlockCompletedEvent,
     BlockDeltaEvent,
@@ -641,9 +641,53 @@ class CodexSessionOpener:
                 await server.close()
 
 
-def create_codex_session_factory(config: CodexSessionConfig) -> SessionFactory:
-    """Create the named Codex runtime composition root."""
-    return SessionFactory(CodexSessionOpener(config).open_session)
+def create_codex(
+    options: CodexSessionConfig | None = None,
+    *,
+    model: str | None = None,
+    system_prompt: str = "",
+    cwd: Path | None = None,
+    base_url: str | None = None,
+    api_key: str | None = None,
+) -> Client:
+    """Open Codex sessions, configured by argument or by whole declaration.
+
+    The same two shapes :func:`lup.adapters.claude.runtime.create_claude` takes,
+    for the same reason: a reader meeting the library names arguments, and a
+    composition that already holds a declaration passes it positionally.
+
+    ``system_prompt`` is the shared spelling across both constructors, and this
+    provider's configuration calls the same thing ``developer_instructions``.
+    The translation happens here rather than at the call, so a reader moving
+    between providers keeps one argument list -- which is the whole reason the
+    constructors share one.
+
+    ``cwd`` is resolved at call time rather than defaulted at import, because
+    this configuration requires one and the honest default is where the caller
+    is standing when it asks -- read at import, a library loaded before a
+    process changed directory would open every session somewhere else.
+    """
+    base = options or CodexSessionConfig(cwd=Path.cwd())
+    config = base.model_copy(
+        update={
+            "model": base.model if model is None else model,
+            "developer_instructions": system_prompt or base.developer_instructions,
+            "cwd": base.cwd if cwd is None else cwd,
+        }
+    )
+    if base_url is not None:
+        # Imported inside the call for the reason the Claude constructor gives:
+        # `config` imports this module, so naming it above closes the cycle.
+        from lup.adapters.codex.config import (
+            CodexCompatibilityTransform,
+            CodexCompatibleEndpoint,
+        )
+
+        endpoint = CodexCompatibleEndpoint.model_validate(
+            {"base_url": base_url, "api_key": api_key}
+        )
+        config = CodexCompatibilityTransform(endpoint).apply(config)
+    return Client(CodexSessionOpener(config).open_session)
 
 
 def dynamic_tool(submission: TurnSubmission) -> JsonObject:

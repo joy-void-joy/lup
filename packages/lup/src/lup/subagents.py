@@ -1,5 +1,8 @@
 """Spec-driven subagent delegation tool.
 
+Spec-driven delegation for engines with no native subagents, dispatching the
+same `SubagentSpec` roster the native path uses.
+
 Engines with native subagents run them directly (from a
 ``SubagentSpec``). Engines without get this served MCP tool instead: the
 agent calls ``run_subagent(name, task)`` and the tool dispatches a
@@ -20,8 +23,7 @@ from collections.abc import Callable
 from pydantic import BaseModel, Field
 
 from lup.mcp import LupMcpTool, ToolError, lup_tool
-from lup.runtime.factory import SessionFactory
-from lup.runtime.query import query
+from lup.client import Client
 from lup.types import SubagentSpec
 
 logger = logging.getLogger(__name__)
@@ -44,7 +46,7 @@ class RunSubagentOutput(BaseModel):
 def create_run_subagent_tool(
     specs: list[SubagentSpec],
     *,
-    factory_recipe: Callable[[SubagentSpec], SessionFactory],
+    factory_recipe: Callable[[SubagentSpec], Client],
 ) -> LupMcpTool:
     """Create the run_subagent tool from the shared spec list.
 
@@ -81,7 +83,7 @@ def create_run_subagent_tool(
             ) from exc
 
         logger.info("Delegating to subagent %r", spec.name)
-        response = await query(factory, validated.task)
+        response = await factory.query(validated.task)
         text = "\n\n".join(
             text
             for block in response.blocks

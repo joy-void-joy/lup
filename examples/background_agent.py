@@ -4,13 +4,9 @@ import asyncio
 
 from pydantic import BaseModel
 
-from lup.adapters.claude.runtime import (
-    ClaudeSessionConfig,
-    create_claude_session_factory,
-)
+from lup import TurnRequest, TurnResult, create_claude, turn_request
 from lup.runtime.background import BackgroundAgent, BackgroundConfig
 from lup.runtime.errors import TurnError
-from lup.runtime.models import TurnRequest, TurnResult, turn_request
 
 from examples.common import Summary
 
@@ -25,11 +21,9 @@ class DraftState(BaseModel, frozen=True):
 
 
 async def main() -> None:
-    factory = create_claude_session_factory(
-        ClaudeSessionConfig(
-            model="claude-opus-5",
-            system_prompt="Submit a concise structured summary.",
-        )
+    client = create_claude(
+        model="claude-opus-5",
+        system_prompt="Submit a concise structured summary.",
     )
     completion = asyncio.get_running_loop().create_future()
 
@@ -40,7 +34,7 @@ async def main() -> None:
         completion.set_exception(error)
 
     agent = BackgroundAgent[DraftState, Summary](
-        factory,
+        client,
         DraftState.request,
         completed,
         failed,

@@ -14,15 +14,12 @@ import asyncio
 
 from pydantic import AnyHttpUrl
 
+from lup import create_claude
 from lup.adapters.claude.hooks import CLAUDE_SEMANTICS
-from lup.adapters.claude.runtime import (
-    ClaudeSessionConfig,
-    create_claude_session_factory,
-)
+from lup.adapters.claude.runtime import ClaudeSessionConfig
 from lup.hooks import LupHooksConfig
 from lup.policy.enforcement import SemanticToolPolicy, create_policy_hooks
 from lup.policy.rules import FetchPolicy, UrlScope
-from lup.runtime.query import query
 
 from examples.common import Summary
 
@@ -61,9 +58,8 @@ def session_config() -> ClaudeSessionConfig:
 
 
 async def main() -> None:
-    factory = create_claude_session_factory(session_config())
-    result = await query(
-        factory,
+    client = create_claude(session_config())
+    result = await client.query(
         f"Fetch {DENIED_URL} and summarize the page.",
         Summary,
     )

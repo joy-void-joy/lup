@@ -111,7 +111,7 @@ from lup.resolver.state import (
     StateTransitionError,
 )
 from lup.runtime.contracts import Session
-from lup.runtime.factory import SessionFactory
+from lup.client import Client
 from lup.runtime.composition import is_output_model
 from lup.runtime.models import (
     SessionHandle,
@@ -644,13 +644,13 @@ def missing_branch_launcher() -> ScriptedLauncher:
     return ScriptedLauncher(default=out(code=1))
 
 
-def unused_session_factory() -> SessionFactory:
+def unused_session_factory() -> Client:
     def refuse(
         resume: SessionId | None = None,
     ) -> AbstractAsyncContextManager[SessionHandle]:
         raise AssertionError(f"session factory should not be opened: {resume}")
 
-    return SessionFactory(refuse)
+    return Client(refuse)
 
 
 class UnusedInvocationRenderer(SkillInvocationRenderer):
@@ -717,7 +717,7 @@ def recording_worker_recipe(
     launcher: ProcessLauncher,
     response: ResolverResponse,
     log: list[str],
-) -> Callable[[WorkerContext], SessionFactory]:
+) -> Callable[[WorkerContext], Client]:
     """``worker_recipe``, for the tests that also read back every prompt."""
 
     def run_dir() -> Path:
@@ -726,7 +726,7 @@ def recording_worker_recipe(
             raise AssertionError(f"expected one run under {state_root}, found {runs}")
         return runs[0]
 
-    def recipe(context: WorkerContext) -> SessionFactory:
+    def recipe(context: WorkerContext) -> Client:
         return session_factory(
             PromptRecordingSession(
                 context.root,
@@ -745,7 +745,7 @@ def recording_worker_recipe(
 
 def merger_draining_after_one_parent(
     run_dir: Path, launcher: ProcessLauncher, response: ResolverResponse
-) -> Callable[[WorkerContext], SessionFactory]:
+) -> Callable[[WorkerContext], Client]:
     """A merger that lands one parent, then finds the run asked to stop.
 
     The drain arrives mid-sequence rather than before the join, because
@@ -753,7 +753,7 @@ def merger_draining_after_one_parent(
     before a session is opened, which exercises a different path.
     """
 
-    def recipe(context: WorkerContext) -> SessionFactory:
+    def recipe(context: WorkerContext) -> Client:
         if context.actor.kind != "merger":
             return resolver_test_factory(context.root, response)
         tools = {
@@ -814,7 +814,7 @@ class ResolverTestSession(Session):
 
 def resolver_test_factory(
     root: Path, response: ResolverResponse, joining: JoinDriver | None = None
-) -> SessionFactory:
+) -> Client:
     return session_factory(ResolverTestSession(root, response, joining))
 
 
@@ -822,7 +822,7 @@ def worker_recipe(
     state_root: Path,
     launcher: ProcessLauncher,
     response: ResolverResponse,
-) -> Callable[[WorkerContext], SessionFactory]:
+) -> Callable[[WorkerContext], Client]:
     """The worker factory a test core gets, with a merger that drives its join.
 
     One recipe opens both a concern's worker and the merger that joins into
@@ -840,7 +840,7 @@ def worker_recipe(
             raise AssertionError(f"expected one run under {state_root}, found {runs}")
         return runs[0]
 
-    def recipe(context: WorkerContext) -> SessionFactory:
+    def recipe(context: WorkerContext) -> Client:
         return resolver_test_factory(
             context.root,
             response,
@@ -4862,7 +4862,7 @@ async def test_a_granted_allowance_reaches_the_sessions_launched_next(
 
     granting = worker_recipe(tmp_path / "state", launcher, worker_response)
 
-    def recording_worker_factory(context: WorkerContext) -> SessionFactory:
+    def recording_worker_factory(context: WorkerContext) -> Client:
         carried.append(context.grants.granted())
         return granting(context)
 

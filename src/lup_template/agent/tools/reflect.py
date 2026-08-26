@@ -36,7 +36,6 @@ from pydantic import BaseModel, Field
 
 from lup.mcp import LupMcpTool, lup_tool
 from lup.reflect import ReviewGate, ReviewResult, ReviewVerdict
-from lup.runtime.query import query
 
 logger = logging.getLogger(__name__)
 
@@ -233,7 +232,7 @@ async def run_reviewer(
         thinking_budget=thinking_budget,
         max_turns=max_turns,
     )
-    result = await query(factory, reviewer_prompt, ReviewResult)
+    result = await factory.query(reviewer_prompt, ReviewResult)
     return result.output
 
 

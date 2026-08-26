@@ -81,7 +81,7 @@ from lup.policy.models import (
     UnknownTool,
 )
 from lup.runtime.config import ProfileSelector
-from lup.runtime.factory import SessionFactory
+from lup.client import Client
 from lup.runtime.routing import (
     ExactModelMatcher,
     ModelRoute,
@@ -234,9 +234,9 @@ class RecordingBuilder:
     def __init__(self) -> None:
         self.config: ClaudeSessionConfig | None = None
 
-    def build(self, config: ClaudeSessionConfig) -> SessionFactory:
+    def build(self, config: ClaudeSessionConfig) -> Client:
         self.config = config
-        return SessionFactory(RecordingOpener().session_context)
+        return Client(RecordingOpener().session_context)
 
 
 def test_profile_selector_resolves_applies_then_constructs(tmp_path: Path) -> None:
@@ -337,8 +337,8 @@ def test_codex_compatible_endpoint_uses_structured_provider_config(
 
 
 def test_model_router_uses_explicit_recipe_then_first_match() -> None:
-    broad = SessionFactory(RecordingOpener().session_context)
-    exact = SessionFactory(RecordingOpener().session_context)
+    broad = Client(RecordingOpener().session_context)
+    exact = Client(RecordingOpener().session_context)
     router = ModelRouter(
         [
             ModelRoute(

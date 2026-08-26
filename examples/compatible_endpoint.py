@@ -1,31 +1,23 @@
-"""Point the Claude adapter at an Anthropic-compatible local endpoint."""
+"""Point the Claude client at an Anthropic-compatible local endpoint."""
 
 import asyncio
 
-from lup.adapters.claude.config import (
-    ClaudeCompatibilityTransform,
-    ClaudeCompatibleEndpoint,
-)
-from lup.adapters.claude.runtime import (
-    ClaudeSessionConfig,
-    create_claude_session_factory,
-)
+from lup import create_claude
 
 from examples.common import Summary
 
 
 async def main() -> None:
-    base = ClaudeSessionConfig(
+    # The endpoint is a constructor argument rather than a transform to
+    # choreograph: naming a base URL is the whole of pointing a client
+    # somewhere else, and an omitted key sends the placeholder credential a
+    # local endpoint expects.
+    client = create_claude(
         model="local-model",
         system_prompt="Submit a concise structured summary.",
+        base_url="http://localhost:4000",
     )
-    endpoint = ClaudeCompatibleEndpoint.model_validate(
-        {"base_url": "http://localhost:4000"}
-    )
-    configured = ClaudeCompatibilityTransform(endpoint).apply(base)
-    result = await create_claude_session_factory(configured).query(
-        "Confirm the compatible endpoint.", Summary
-    )
+    result = await client.query("Confirm the compatible endpoint.", Summary)
     print(result.output.summary)
 
 

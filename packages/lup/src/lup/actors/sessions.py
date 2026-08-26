@@ -1,6 +1,6 @@
 """One durable session per actor, opened once and kept while the run moves.
 
-A caller reaching for :func:`lup.runtime.query.query` opens a session, takes
+A caller reaching for :meth:`lup.client.Client.query` opens a session, takes
 one turn and closes it. Nine separate symptoms sat downstream of that one
 fact in the resolver: a park discarded the whole turn, a reviewer re-read its
 concern cold each round, a merger never saw the parent it joined last, and
@@ -46,7 +46,7 @@ from lup.hooks import (
 )
 from lup.journal import JournalRecord
 from lup.runtime.errors import ProviderTurnError
-from lup.runtime.factory import SessionFactory
+from lup.client import Client
 from lup.runtime.models import (
     SessionHandle,
     SessionId,
@@ -253,7 +253,7 @@ class ActorSession:
     def __init__(
         self,
         actor: ActorRef,
-        factory: SessionFactory,
+        factory: Client,
         journal: ActorJournal,
         record: ActorRecord | None = None,
         inbox: ActorInbox | None = None,

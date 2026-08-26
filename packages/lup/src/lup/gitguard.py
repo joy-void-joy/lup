@@ -2,6 +2,14 @@
 # refs a repository happens to hold; there is no closed set to model
 """Catching a test suite that wrote into the repository it is running inside.
 
+A test that forgets to bind git to its throwaway repository inherits the
+process working directory instead, and nothing fails — git finds a repository,
+commits succeed, and the suite passes green while the developer's branch has
+moved. Found the slow way, by a `dev pr sync-base` merging a `dev` whose tip
+had become a fixture's commit deleting the application source. The suite cannot
+be trusted to notice, because noticing is exactly what it failed at, so the
+refs are read around it.
+
 A test that builds a throwaway repository binds git to it — `git -C <tmp>` —
 and one that forgets inherits the process working directory instead, which
 during a test run is a real checkout. Nothing about that fails: git finds a

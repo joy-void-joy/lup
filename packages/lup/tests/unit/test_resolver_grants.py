@@ -47,7 +47,7 @@ from lup.resolver.run import ResolveRun
 from lup.resolver.state import ResolverStateRepository
 from lup.resolver.turns import TurnRunner
 from lup.runtime.contracts import Session
-from lup.runtime.factory import SessionFactory
+from lup.client import Client
 from lup.runtime.models import TurnHandle, TurnRequest
 from tests.unit.doubles import session_factory
 
@@ -180,7 +180,7 @@ class RecordingRecipe:
     def __init__(self) -> None:
         self.opened: list[WorkerContext] = []
 
-    def __call__(self, context: WorkerContext) -> SessionFactory:
+    def __call__(self, context: WorkerContext) -> Client:
         self.opened.append(context)
         return session_factory(IdleSession())
 

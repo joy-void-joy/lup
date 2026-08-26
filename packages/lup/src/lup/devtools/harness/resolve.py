@@ -83,7 +83,7 @@ from lup.resolver.tools import (
     read_resolver_tool_context,
 )
 from lup.resolver.join_tools import create_join_tools
-from lup.runtime.factory import SessionFactory
+from lup.client import Client
 from lup.runtime.profiles import SessionAccount
 from lup.types import EnvVars
 from lup.workspace.paths import project_root
@@ -1482,7 +1482,7 @@ def run_resolve(
         from lup.adapters.claude.runtime import (
             ClaudeSandboxConfig,
             ClaudeSessionConfig,
-            create_claude_session_factory,
+            create_claude,
             environmental_fault,
             may_be_a_rotation,
             needs_a_person,
@@ -1490,7 +1490,7 @@ def run_resolve(
         from lup.adapters.codex.runtime import (
             CodexMcpServerConfig,
             CodexSessionConfig,
-            create_codex_session_factory,
+            create_codex,
         )
         from lup.adapters.claude.config_home import (
             selected_config_home,
@@ -1697,7 +1697,7 @@ def run_resolve(
         # about a confinement it could only restate.
         codex_worker_sandbox = SandboxPosture()
 
-        def worker_factory(context: WorkerContext) -> SessionFactory:
+        def worker_factory(context: WorkerContext) -> Client:
             """Open one worker session that can ask its own questions.
 
             The tools are bound to this concern here rather than taking the
@@ -1766,7 +1766,7 @@ def run_resolve(
             ]
             if adapter == "claude":
                 server = create_mcp_server("resolver", tools=actor_tools)
-                return create_claude_session_factory(
+                return create_claude(
                     ClaudeSessionConfig(
                         model=session_model,
                         system_prompt="Execute the persisted Lup resolver assignment.",
@@ -1800,7 +1800,7 @@ def run_resolve(
                         ),
                     )
                 )
-            return create_codex_session_factory(
+            return create_codex(
                 CodexSessionConfig(
                     model=session_model,
                     developer_instructions=(
@@ -1840,7 +1840,7 @@ def run_resolve(
                 )
             )
 
-        def reviewer_factory(context: ReviewerContext) -> SessionFactory:
+        def reviewer_factory(context: ReviewerContext) -> Client:
             # A reviewer takes the same mail every other actor does. It used
             # to take none, being the one kind whose recipe was handed a bare
             # path, so the actor best placed to use a late fact — a criterion
@@ -1848,7 +1848,7 @@ def run_resolve(
             # is judging — was the one nobody could tell.
             cwd = context.root
             if adapter == "claude":
-                return create_claude_session_factory(
+                return create_claude(
                     ClaudeSessionConfig(
                         model=session_model,
                         system_prompt=(
@@ -1865,7 +1865,7 @@ def run_resolve(
                         ),
                     )
                 )
-            return create_codex_session_factory(
+            return create_codex(
                 CodexSessionConfig(
                     model=session_model,
                     approval_policy="on-request",

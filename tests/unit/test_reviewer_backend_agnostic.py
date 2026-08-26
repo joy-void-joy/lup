@@ -11,6 +11,24 @@ from lup_template.agent import core
 from lup_template.agent.tools import reflect
 
 
+class StubClient:
+    """A client that records the one turn the reviewer runs on it.
+
+    Stands in for `Client` structurally rather than by subclassing it: what
+    the reviewer needs is `query`, and a stub that answered more than that
+    would be asserting the reviewer stays inside a surface it never touches.
+    """
+
+    def __init__(self, requested: dict[str, object]) -> None:
+        self.requested = requested
+
+    async def query(self, prompt: object, output_type: object = None) -> object:
+        self.requested.update(factory=self, prompt=prompt, output_type=output_type)
+        return SimpleNamespace(
+            output=ReviewResult(verdict=ReviewVerdict.approve, assessment="critique")
+        )
+
+
 def make_input() -> reflect.ReflectInput:
     return reflect.ReflectInput(
         assessment="solid work",
@@ -24,25 +42,18 @@ async def test_reviewer_uses_explicit_factory_and_typed_request(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     built: dict[str, object] = {}
-    marker = object()
+    requested: dict[str, object] = {}
+
+    # A stub client rather than a patched module function: dispatch is the
+    # method now, so what the reviewer is handed is what answers it, and the
+    # test intercepts by supplying that rather than by reaching around it.
+    marker = StubClient(requested)
 
     def build(**kwargs: object) -> object:
         built.update(kwargs)
         return marker
 
-    requested: dict[str, object] = {}
-
-    async def query(factory: object, prompt: object, output_type: object) -> object:
-        requested.update(factory=factory, prompt=prompt, output_type=output_type)
-        return SimpleNamespace(
-            output=ReviewResult(
-                verdict=ReviewVerdict.approve,
-                assessment="critique",
-            )
-        )
-
     monkeypatch.setattr(core, "build_auxiliary_factory", build)
-    monkeypatch.setattr(reflect, "query", query)
 
     result = await reflect.run_reviewer(make_input(), None, model="review-model")
 
@@ -62,18 +73,9 @@ async def test_reviewer_factory_shape_does_not_depend_on_model_family(
 
     def build(**kwargs: object) -> object:
         calls.append(kwargs)
-        return object()
-
-    async def query(_factory: object, _prompt: object, _output_type: object) -> object:
-        return SimpleNamespace(
-            output=ReviewResult(
-                verdict=ReviewVerdict.approve,
-                assessment="ok",
-            )
-        )
+        return StubClient({})
 
     monkeypatch.setattr(core, "build_auxiliary_factory", build)
-    monkeypatch.setattr(reflect, "query", query)
 
     await reflect.run_reviewer(make_input(), None, model="claude-model")
     await reflect.run_reviewer(make_input(), None, model="gpt-model")

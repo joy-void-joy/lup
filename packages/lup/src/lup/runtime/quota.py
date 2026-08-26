@@ -24,7 +24,7 @@ from pydantic import BaseModel, Field
 
 from lup.runtime.contracts import Session, Turn
 from lup.runtime.errors import QuotaExceededError
-from lup.runtime.factory import SessionFactory
+from lup.client import Client
 from lup.runtime.models import (
     SessionHandle,
     SessionId,
@@ -167,13 +167,13 @@ class QuotaWaitingSession(Session):
 # what this does is compose a config, a sink and a clock into a factory, which
 # belongs to none of the three alone.
 def quota_waiting_session_factory(
-    inner: SessionFactory,
+    inner: Client,
     config: QuotaWaitConfig,
     sink: QuotaWaitSink,
     *,
     sleeper: QuotaSleeper = asyncio.sleep,
     now: NowProvider = utc_now,
-) -> SessionFactory:
+) -> Client:
     """Give every session opened by ``inner`` wait-only allowance recovery."""
 
     @asynccontextmanager
@@ -186,4 +186,4 @@ def quota_waiting_session_factory(
                 fork=handle.fork,
             )
 
-    return SessionFactory(open_waiting)
+    return Client(open_waiting)

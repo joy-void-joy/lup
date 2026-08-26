@@ -23,7 +23,7 @@ choice that holds regardless of ``AGENT_SDK``.
 Subagents are one of several agent shapes — ``docs/orchestration.md`` is
 the full catalog. Where the siblings live:
 
-- Nested agents: a one-shot :func:`lup.runtime.query.query` inside a
+- Nested agents: a one-shot :meth:`lup.client.Client.query` inside a
   tool handler; the reviewer in ``agent/tools/reflect.py`` is the
   exemplar
 - Background agents: :class:`lup.runtime.background.BackgroundAgent`, with

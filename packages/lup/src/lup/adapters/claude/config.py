@@ -7,7 +7,7 @@ from pydantic import AnyHttpUrl, BaseModel, Field, SecretStr
 
 from lup.adapters.claude.runtime import (
     ClaudeSessionConfig,
-    create_claude_session_factory,
+    create_claude,
 )
 from lup.adapters.claude.config_home import default_config_home
 from lup.adapters.claude.login import CLAUDE_LOGIN
@@ -69,9 +69,7 @@ def claude_profile_selector(
     registry: ClaudeProfileRegistry,
 ) -> ProfileSelector[ClaudeSessionConfig]:
     """The surface a consumer holds over Claude account selection."""
-    return ProfileSelector(
-        ClaudeProfileResolver(registry), create_claude_session_factory
-    )
+    return ProfileSelector(ClaudeProfileResolver(registry), create_claude)
 
 
 class ClaudeCompatibleEndpoint(BaseModel, frozen=True):

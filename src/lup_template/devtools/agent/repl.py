@@ -11,7 +11,7 @@ if TYPE_CHECKING:
     from rich.console import Console
 
     from lup.runtime.contracts import Session
-    from lup.runtime.factory import SessionFactory
+    from lup.client import Client
     from lup.runtime.models import TurnResult
 
 import typer
@@ -119,7 +119,7 @@ def build_repl_factory(
     *,
     no_tools: bool,
     no_prompt: bool,
-) -> "SessionFactory":
+) -> "Client":
     """Build the configured provider-neutral factory for a REPL session.
 
     The overrides are assembly knobs on the neutral options

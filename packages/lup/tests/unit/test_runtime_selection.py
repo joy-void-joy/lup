@@ -21,7 +21,7 @@ from lup.adapters.codex.selection import (
 )
 from lup.hooks import LupHooksConfig
 from lup.mcp import create_mcp_server
-from lup.runtime.factory import SessionFactory
+from lup.client import Client
 from lup.runtime.selection import Runtime, SessionAutonomy, SessionRequest
 
 AUTONOMY_DEGREES = get_args(SessionAutonomy.__value__)
@@ -45,13 +45,11 @@ def test_claude_renders_the_whole_request(
 ) -> None:
     rendered: list[ClaudeSessionConfig] = []
 
-    def record(config: ClaudeSessionConfig) -> SessionFactory:
+    def record(config: ClaudeSessionConfig) -> Client:
         rendered.append(config)
-        return SessionFactory(lambda resume=None: None)  # pyright: ignore[reportArgumentType]
+        return Client(lambda resume=None: None)  # pyright: ignore[reportArgumentType]
 
-    monkeypatch.setattr(
-        "lup.adapters.claude.selection.create_claude_session_factory", record
-    )
+    monkeypatch.setattr("lup.adapters.claude.selection.create_claude", record)
     CLAUDE_RUNTIME.session_factory(
         SessionRequest(
             model="a-model",
@@ -82,13 +80,11 @@ def test_codex_renders_what_it_can_spell(
 ) -> None:
     rendered: list[CodexSessionConfig] = []
 
-    def record(config: CodexSessionConfig) -> SessionFactory:
+    def record(config: CodexSessionConfig) -> Client:
         rendered.append(config)
-        return SessionFactory(lambda resume=None: None)  # pyright: ignore[reportArgumentType]
+        return Client(lambda resume=None: None)  # pyright: ignore[reportArgumentType]
 
-    monkeypatch.setattr(
-        "lup.adapters.codex.selection.create_codex_session_factory", record
-    )
+    monkeypatch.setattr("lup.adapters.codex.selection.create_codex", record)
     CODEX_RUNTIME.session_factory(
         SessionRequest(
             model="a-model",

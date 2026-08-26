@@ -73,7 +73,7 @@ consumer would otherwise reach past a missing surface to reach.
 is the previous section seen from the consumer's side: `ModelMatcher` is the
 engine, `ExactModelMatcher` and `PrefixModelMatcher` fill it, and nobody
 outside the router calls `matches`. Callers hold the router and ask
-`resolve`. `SessionFactory` (`packages/lup/src/lup/runtime/factory.py`) is the
+`resolve`. `Client` (`packages/lup/src/lup/runtime/factory.py`) is the
 same arrangement one level up — a plain class parametrized by a single
 `SessionOpener`, which adapters, wrappers, and tests each supply differently.
 The engine there is a callable rather than an ABC, which is the point: what
@@ -113,7 +113,7 @@ handed to `ComposedSession`, which is itself the surface. `Session` is the
 case worth reading twice, because it qualifies without being handle-only: a
 driver takes one as a parameter and runs a turn inside its own concern —
 signal handling in `send_interruptible`, a mailbox in `run_relay_session` —
-and those two share only start-then-result, which `SessionFactory.query`
+and those two share only start-then-result, which `Client.query`
 already homes. Both drivers hold a handle and narrow to `.session` on
 purpose: taking the whole handle would fold them under the carrier exemption
 instead, but a driver that only starts turns should not also demand `fork`.

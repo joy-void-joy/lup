@@ -1,5 +1,11 @@
 """Whether git can still take the lock its config writes need.
 
+A confinement owning the path and a lock some git left behind when it died both
+surface as `File exists`, and the remedies are opposite, so telling them apart
+reads the mount state and the lock's age rather than the message. The same two-
+consumers shape as `codeintel`: the resolver's orchestrator and
+`devtools/utils` both diagnose it, and neither owns it.
+
 Every config write goes through `config.lock`: git creates it exclusively,
 writes the new config beside it, and renames over the old one. Two unrelated
 failures stop that create, and git reports both as `File exists`:

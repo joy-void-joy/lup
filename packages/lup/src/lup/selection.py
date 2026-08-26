@@ -1,5 +1,14 @@
 """Taking a library table as offered, and saying only what differs from it.
 
+Three tables reach a project as a starting point rather than a fixture — the
+anti-patterns it holds its code to, the shell vocabulary it runs, the edit
+gates it judges its own changes by — and in all three the only way to disagree
+with one entry was to restate the table around it, where a restatement fallen
+behind the library looks exactly like a decision. A project names what it drops
+and adds what the library lacks, keyed on the same id a directive, a denial and
+the generated reference already use, so an override replaces its namesake in
+place rather than sitting beside it.
+
 Three tables reach a project as a starting point rather than as a fixture: the
 anti-patterns it holds its code to, the shell vocabulary it runs, and the edit
 gates it judges its own file changes by. All three had the same problem in

@@ -606,7 +606,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
         {
             "id": "dict-str-payload",
             "pattern": "\\b(?:dict|Mapping|MutableMapping)\\[\\s*str\\s*,\\s*(?:str|int|float|bool|bytes|complex)\\b",
-            "message": "String-keyed dict with a scalar value hides shape when the keys are a CLOSED, enumerable set \u2014 use a BaseModel or dict[Literal[...], V]. When the keys are open and data-driven (a registry/cache/counter keyed by external data) this is legitimate: add `# lup: ignore[dict-str-payload]`. Concrete class/callable value types (dict[str, SessionFactory]) are already accepted; JsonValue covers arbitrary JSON",
+            "message": "String-keyed dict with a scalar value hides shape when the keys are a CLOSED, enumerable set \u2014 use a BaseModel or dict[Literal[...], V]. When the keys are open and data-driven (a registry/cache/counter keyed by external data) this is legitimate: add `# lup: ignore[dict-str-payload]`. Concrete class/callable value types (dict[str, Client]) are already accepted; JsonValue covers arbitrary JSON",
             "context": "code",
             "matcher": "dict_str_payload_sites",
             "strength": "soft",
@@ -1022,7 +1022,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
         {
             "id": "dict-str-payload",
             "pattern": "\\b(?:dict|Mapping|MutableMapping)\\[\\s*str\\s*,\\s*(?:str|int|float|bool|bytes|complex)\\b",
-            "message": "String-keyed dict with a scalar value hides shape when the keys are a CLOSED, enumerable set \u2014 use a BaseModel or dict[Literal[...], V]. When the keys are open and data-driven (a registry/cache/counter keyed by external data) this is legitimate: add `# lup: ignore[dict-str-payload]`. Concrete class/callable value types (dict[str, SessionFactory]) are already accepted; JsonValue covers arbitrary JSON",
+            "message": "String-keyed dict with a scalar value hides shape when the keys are a CLOSED, enumerable set \u2014 use a BaseModel or dict[Literal[...], V]. When the keys are open and data-driven (a registry/cache/counter keyed by external data) this is legitimate: add `# lup: ignore[dict-str-payload]`. Concrete class/callable value types (dict[str, Client]) are already accepted; JsonValue covers arbitrary JSON",
             "context": "code",
             "matcher": "dict_str_payload_sites",
             "strength": "soft",

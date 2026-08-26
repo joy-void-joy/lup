@@ -17,7 +17,7 @@ from lup.adapters.claude.runtime import (
     SESSION_THINKING_TOKENS,
     ClaudeSandboxConfig,
     ClaudeSessionConfig,
-    create_claude_session_factory,
+    create_claude,
 )
 from lup.adapters.codex.config import (
     CodexCompatibilityTransform,
@@ -26,9 +26,9 @@ from lup.adapters.codex.config import (
 from lup.adapters.codex.runtime import (
     CodexMcpServerConfig,
     CodexSessionConfig,
-    create_codex_session_factory,
+    create_codex,
 )
-from lup.runtime.factory import SessionFactory
+from lup.client import Client
 from lup.runtime.composition import submission_gate_resolver
 from lup.hooks import LupHooksConfig
 from lup.runtime.models import (
@@ -92,14 +92,12 @@ class PersistentSessionResult(BaseModel):
 class SessionBuild(BaseModel, frozen=True, arbitrary_types_allowed=True):
     """Configured provider-neutral factory and its application workspace."""
 
-    factory: SessionFactory
+    factory: Client
     notes: NotesConfig
     trace_logger: TraceLogger
 
 
-def cleaning_session_factory(
-    inner: SessionFactory, cleanup: Callable[[], None]
-) -> SessionFactory:
+def cleaning_session_factory(inner: Client, cleanup: Callable[[], None]) -> Client:
     """Run one application resource cleanup after every opened session."""
 
     @asynccontextmanager
@@ -112,7 +110,7 @@ def cleaning_session_factory(
         finally:
             cleanup()
 
-    return SessionFactory(open_cleaned)
+    return Client(open_cleaned)
 
 
 def reflection_submission_gate(gate: "ReviewGate") -> SubmissionGate[AgentOutput]:
@@ -170,11 +168,11 @@ def provider_factory(
     subagents: list[SubagentSpec] | None = None,
     thinking_budget: int | None = None,
     max_turns: int | None = None,
-) -> SessionFactory:
+) -> Client:
     """The one application-owned provider selection boundary.
 
     Native identifiers are intentionally confined to this concrete composition
-    root. Every caller above it receives only a configured ``SessionFactory``.
+    root. Every caller above it receives only a configured ``Client``.
     """
     engine = engine_for_settings()
     logger.info(
@@ -233,7 +231,7 @@ def provider_factory(
                     ),
                 )
             ).apply(config)
-        return create_claude_session_factory(config)
+        return create_claude(config)
 
     if engine in ("codex", "openai", "openai-compat"):
         unsupported = [
@@ -291,7 +289,7 @@ def provider_factory(
                     ),
                 )
             ).apply(config)
-        return create_codex_session_factory(config)
+        return create_codex(config)
 
     raise ValueError(f"unsupported engine {engine!r}")
 
@@ -362,11 +360,11 @@ def normalize_codex_effort(
 
 
 def decorate_factory(
-    factory: SessionFactory,
+    factory: Client,
     *,
     notes: NotesConfig | None = None,
     trace_logger: TraceLogger | None = None,
-) -> SessionFactory:
+) -> Client:
     """Apply complete-logical-turn governance in its explicit order."""
     usage_cost = build_usage_cost()
     budget = None
@@ -596,7 +594,7 @@ def build_auxiliary_factory(
     tools: list[str] | None = None,
     thinking_budget: int | None = None,
     max_turns: int | None = None,
-) -> SessionFactory:
+) -> Client:
     """Build a one-shot nested/reviewer factory through the same route.
 
     A nested agent's bounds are the caller's: it is one query with a job, so

@@ -1,5 +1,8 @@
 """MCP server factory with proper is_error propagation.
 
+The `lup_tool` decorator and `create_mcp_server`, with typed input models and
+error propagation that actually reaches the caller.
+
 Creates in-process MCP servers from ``LupMcpTool`` definitions. The
 ``create_mcp_server`` function returns an ``LupMcpServerConfig`` that
 each SDK adapter converts to its native server configuration.

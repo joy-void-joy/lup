@@ -26,7 +26,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from lup.runtime.contracts import Session, Turn
-from lup.runtime.factory import SessionFactory
+from lup.client import Client
 from lup.runtime.models import (
     SessionHandle,
     SessionId,
@@ -234,13 +234,13 @@ class FinancialBudgetSession(Session):
 # what this does is compose a config, a sink and a clock into a factory, which
 # belongs to none of the three alone.
 def financial_budget_session_factory(
-    inner: SessionFactory,
+    inner: Client,
     config: FinancialBudgetConfig,
     sink: BudgetSink,
     *,
     sleeper: BudgetSleeper = asyncio.sleep,
     now: EpochProvider = utc_epoch,
-) -> SessionFactory:
+) -> Client:
     """Apply one durable period allowance across every session opened."""
     store = FinancialBudgetStore(config)
 
@@ -256,4 +256,4 @@ def financial_budget_session_factory(
                 fork=handle.fork,
             )
 
-    return SessionFactory(open_budgeted)
+    return Client(open_budgeted)

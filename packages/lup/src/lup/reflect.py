@@ -1,5 +1,8 @@
 """Reflection gate abstraction for enforcing reflect-before-output patterns.
 
+Reflect-before-output gates: a flag-based `ReflectionGate` and a verdict-aware
+`ReviewGate`.
+
 Agents benefit from structured self-assessment before committing to output.
 This module provides the domain-neutral gate mechanism:
 

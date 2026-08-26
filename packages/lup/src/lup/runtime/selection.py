@@ -20,7 +20,7 @@ from pydantic import BaseModel
 
 from lup.hooks import LupHooksConfig
 from lup.mcp import McpServerEntry
-from lup.runtime.factory import SessionFactory
+from lup.client import Client
 from lup.runtime.login import ProviderLogin
 from lup.types import EnvVars
 
@@ -74,7 +74,7 @@ class SessionRequest(BaseModel, frozen=True, arbitrary_types_allowed=True):
     hooks: LupHooksConfig | None = None
 
 
-type SessionOpener = Callable[[SessionRequest], SessionFactory]
+type SessionOpener = Callable[[SessionRequest], Client]
 """Render one request into the configured session factory of one runtime."""
 
 type WorkspaceHome = Callable[[EnvVars, Path], EnvVars]
@@ -109,7 +109,7 @@ class Runtime(BaseModel, frozen=True, arbitrary_types_allowed=True):
     open: SessionOpener
     workspace_home: WorkspaceHome
 
-    def session_factory(self, request: SessionRequest) -> SessionFactory:
+    def session_factory(self, request: SessionRequest) -> Client:
         """Open a session factory for this runtime from a portable request."""
         return self.open(self.contained(request))
 

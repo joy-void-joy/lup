@@ -39,7 +39,7 @@ from lup.journal import ChainedWriter, Journal, JournalRecord, last_record
 from lup.runtime.composition import is_output_model
 from lup.runtime.contracts import EventStream, Session, Turn
 from lup.runtime.errors import TurnError
-from lup.runtime.factory import SessionFactory
+from lup.client import Client
 from lup.runtime.models import (
     BlockCompletedEvent,
     BlockDeltaEvent,
@@ -834,9 +834,7 @@ class JournalSession(Session):
         )
 
 
-def journal_session_factory(
-    inner: SessionFactory, journal: TraceJournal
-) -> SessionFactory:
+def journal_session_factory(inner: Client, journal: TraceJournal) -> Client:
     """Give every session opened by ``inner`` the canonical observable journal."""
 
     @asynccontextmanager
@@ -859,4 +857,4 @@ def journal_session_factory(
         finally:
             journal.emit("session_end")
 
-    return SessionFactory(open_journaled)
+    return Client(open_journaled)

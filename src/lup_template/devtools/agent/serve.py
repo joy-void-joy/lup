@@ -35,7 +35,7 @@ def collect_tools_by_server(
         return {EXAMPLE_GROUP: list(EXAMPLE_TOOLS)}
 
     from lup.reflect import ReviewGate
-    from lup.runtime.factory import SessionFactory
+    from lup.client import Client
     from lup.subagents import create_run_subagent_tool
     from lup.types import SubagentSpec
     from lup_template.agent.core import build_auxiliary_factory
@@ -52,7 +52,7 @@ def collect_tools_by_server(
         )
         atexit.register(sandbox.stop)
 
-    def subagent_factory(spec: SubagentSpec) -> SessionFactory:
+    def subagent_factory(spec: SubagentSpec) -> Client:
         return build_auxiliary_factory(
             model=spec.model or settings.model,
             system_prompt=spec.prompt,

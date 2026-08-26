@@ -40,7 +40,7 @@ from lup.adapters.codex.app_server import (
 )
 from lup.harness.process import ExitStatus, LaunchRequest, ProcessLauncher
 from lup.runtime.contracts import Session, Turn
-from lup.runtime.factory import SessionFactory
+from lup.client import Client
 from lup.runtime.models import (
     SessionHandle,
     SessionId,
@@ -141,7 +141,7 @@ class StaticTurn[T: BaseModel | None](Turn[T]):
         return self.value
 
 
-def session_factory(session: Session) -> SessionFactory:
+def session_factory(session: Session) -> Client:
     """A factory whose every opened session is the one given."""
 
     @asynccontextmanager
@@ -150,7 +150,7 @@ def session_factory(session: Session) -> SessionFactory:
     ) -> AsyncGenerator[SessionHandle]:
         yield SessionHandle(session=session)
 
-    return SessionFactory(open_session)
+    return Client(open_session)
 
 
 class FailingLauncher(ProcessLauncher):

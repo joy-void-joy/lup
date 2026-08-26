@@ -8,6 +8,8 @@ top-level entry" while silently omitting six of them, `actors` among them
 four commits after it was added.
 """
 
+import ast
+from collections.abc import Iterator
 from pathlib import Path
 
 from pydantic import BaseModel
@@ -59,111 +61,6 @@ class Roster(BaseModel, frozen=True):
     forking the check that reads them.
     """
 
-    entries: list[RosterEntry] = [
-        RosterEntry(
-            package="devtools",
-            solves="The development CLI an adopter inherits rather than forks: worktrees and branches, trace and Python introspection, the resolver supervisor, the sync registry, version bookkeeping. Ships the whole roster — `roster.py` wires every sub-app over one `DevtoolsDeclarations`, and an application declares only what it retires and what only it has, so a sub-app added here reaches it on the next lock refresh instead of waiting to be noticed. Requires the `web` extra for the supervisor.",
-        ),
-        RosterEntry(
-            package="channels",
-            solves="File-backed channels — a value that settles, an ordered log, and the atomic publish under both. The widest dependency here: `harness`, `resolver`, `runtime`, `realtime`, `telemetry`, and `adapters` all write through it, which is what makes it a package rather than a helper inside any one of them.",
-        ),
-        RosterEntry(
-            package="journal",
-            solves="One ordered record file, sequenced and durably appended, read back from a byte offset or a sequence number and paged backwards from either. Two products ride it — the resolver's typed decision log and the observable transcript's hash-chained provider payloads — and neither collapses into the other. Sharing the mechanism is what lets any reader tail either record the same way, and what stops the next thing needing a record from arriving with a third implementation.",
-        ),
-        RosterEntry(
-            package="codeintel",
-            solves="An LSP client and the tools built on it, so a name is resolved rather than grepped. Serves an agent's toolset and the pyright oracle behind `dev check` — two consumers on opposite sides of the library, neither of which owns it.",
-        ),
-        RosterEntry(
-            package="gitlocks",
-            solves="Why git cannot take the lock its config writes need. A confinement owning the path and a lock some git left behind when it died both surface as `File exists`, and the remedies are opposite, so telling them apart reads the mount state and the lock's age rather than the message. The same two-consumers shape as `codeintel`: the resolver's orchestrator and `devtools/utils` both diagnose it, and neither owns it.",
-        ),
-        RosterEntry(
-            package="gitguard",
-            solves="Catching a suite that wrote into the checkout it was running inside. A test that forgets to bind git to its throwaway repository inherits the process working directory instead, and nothing fails — git finds a repository, commits succeed, and the suite passes green while the developer's branch has moved. Found the slow way, by a `dev pr sync-base` merging a `dev` whose tip had become a fixture's commit deleting the application source. The suite cannot be trusted to notice, because noticing is exactly what it failed at, so the refs are read around it.",
-        ),
-        RosterEntry(
-            package="actors",
-            solves="Addressable agents: one held session each, reachable while they work. An agent opened for a single turn and closed cannot be talked to, because there is nothing to talk to between the call and the result. An actor holds its session across turns, takes mail mid-turn through a hook it never chooses to check, and asks questions that settle without stalling the asker. Nothing here knows what the actors are for — the resolver names its own kinds over this mechanism, and a research session names different ones.",
-        ),
-        RosterEntry(
-            package="jobs",
-            solves="Durable containerized work that outlives the process that submitted it. A sandbox cell runs inside the caller's process, so the agent waits and a crash takes the work with it; a job is submitted, left running, and asked about later — possibly by a process started after that crash. Everything durable is on the filesystem, and the scheduler's atomically-replaced view is deliberately separate from the terminal result the container writes, so a job cannot forge its own completion.",
-        ),
-        RosterEntry(
-            package="replay",
-            solves="A durable journal of executed cells and the divergence check on replaying one: state is reconstructed by re-running the record rather than by serializing objects. What differs between users is the contract attached. An environment claiming determinism says a replay must reproduce its outcomes, so a divergence there is a defect in a claim; an environment claiming nothing still gets the report, and there the divergence *is* the finding — the result depended on something outside the journal. Both are replayable; only the first is certifiable.",
-        ),
-        RosterEntry(
-            package="selection",
-            solves="Taking a library table as offered and saying only what differs from it. Three tables reach a project as a starting point rather than a fixture — the anti-patterns it holds its code to, the shell vocabulary it runs, the edit gates it judges its own changes by — and in all three the only way to disagree with one entry was to restate the table around it, where a restatement fallen behind the library looks exactly like a decision. A project names what it drops and adds what the library lacks, keyed on the same id a directive, a denial and the generated reference already use, so an override replaces its namesake in place rather than sitting beside it.",
-        ),
-        RosterEntry(
-            package="subagents",
-            solves="Spec-driven delegation for engines with no native subagents, dispatching the same `SubagentSpec` roster the native path uses.",
-        ),
-        RosterEntry(
-            package="tool_policy",
-            solves="Tool-availability filtering: the mechanism, not the policy. A project subclasses `BaseToolPolicy` and maps its own settings onto it, which is the placement rule in miniature — the machinery is the library's, every exclusion is the adopter's.",
-        ),
-        RosterEntry(
-            package="tool_routes",
-            solves="Which tool answers a URL better than fetching it would. Behind a prediction-market URL is a market tool and behind a paper URL is a paper tool, and the rendered page is a poorer answer than either API. This is the table that says so — a URL shape, the tool it stands for, and how to build that tool's arguments from what the shape matched. The same placement split as `tool_policy`: the matching and dispatch are the library's, the table's content belongs to the only thing that knows its own tools.",
-        ),
-        RosterEntry(
-            package="markdown",
-            solves="Rendering Markdown that is generated rather than authored, escaping at the leaf where data enters the document. Only `devtools` renders such tables today, but nothing in it is about development tooling.",
-        ),
-        RosterEntry(
-            package="web",
-            solves="What a page served on this machine does to stay local-only: the loopback bind refusal, the `Host` check that DNS rebinding would otherwise walk past, and the browser round-trip an installed OAuth client needs. One subject — a local HTTP surface a browser reaches — and the OAuth half is reached by a downstream project rather than by anything here, which is the outward test answering in the affirmative. The two user-facing pages, `devtools/dashboard` and `devtools/supervisor`, sit *on* this; it does not belong beside them.",
-        ),
-        RosterEntry(
-            package="workspace",
-            solves="Where a run's data lives: version-aware paths, the `SessionContext` that crosses a process boundary, session history, and the note directories a session may touch.",
-        ),
-        RosterEntry(
-            package="realtime",
-            solves="The wake/act/sleep lifecycle for persistent agents. `scheduler.py` stands alone; `relay.py` layers a subprocess mailbox transport on top and is never imported by it.",
-        ),
-        RosterEntry(
-            package="telemetry",
-            solves="What a run records about itself: markdown trace plus machine-readable sidecar, console rendering, per-tool metrics with a file-backed flush for subprocess tools.",
-        ),
-        RosterEntry(
-            package="usage",
-            solves="One account's metered usage, whichever runtime billed it: the windows a plan meters and when each clears, where the tokens went day by day, and the display that draws both. Ships no roster — each adapter declares the entry that reads its own runtime into this shape, so a runtime joins the display by being read rather than by growing a command beside it.",
-        ),
-        RosterEntry(
-            package="sandbox",
-            solves="A Docker-isolated Python REPL — mount topology, container lifecycle, and the exec-multiplexed socket protocol. Requires the `docker` extra.",
-        ),
-        RosterEntry(
-            package="resilience",
-            solves="`throttle` bounds concurrency and minimum call interval; `retry` re-runs a coroutine with exponential backoff.",
-        ),
-        RosterEntry(
-            package="hooks",
-            solves="SDK-agnostic hook models and factories: permission hooks, tool allowlists, gates, nudges, capture.",
-        ),
-        RosterEntry(
-            package="mcp",
-            solves="The `lup_tool` decorator and `create_mcp_server`, with typed input models and error propagation that actually reaches the caller.",
-        ),
-        RosterEntry(
-            package="reflect",
-            solves="Reflect-before-output gates: a flag-based `ReflectionGate` and a verdict-aware `ReviewGate`.",
-        ),
-    ]
-    """What each remaining top-level entry solves, in the order the page reads them.
-
-    Authored rather than walked, because "what makes this a package" is a
-    judgement. Which entries need one is not: :meth:`table` walks the tree and
-    refuses to render a roster that has drifted from it in either direction.
-    """
-
     subtree: str = "packages/lup/src/lup"
     """Where the package this describes lives inside lup's own repository.
 
@@ -202,31 +99,71 @@ class Roster(BaseModel, frozen=True):
             if name not in elsewhere
         ]
 
-    def table(self) -> models.MarkdownTable:
-        """The roster as a table, refusing any disagreement with the tree.
+    def entry_source(self, name: str) -> Path:
+        """The file whose docstring describes one top-level entry."""
+        entry = self.source / name
+        return entry / "__init__.py" if entry.is_dir() else entry.with_suffix(".py")
 
-        Raises rather than rendering a partial roster: a page that quietly
-        drops a package reads exactly like a complete one, which is the whole
-        difficulty. Generation fails loudly instead, naming what to write or
-        what to delete.
+    def solves(self, name: str) -> str:
+        """What one entry says it solves, read from its own docstring.
+
+        The summary line and the paragraph beneath it, joined. PEP 257 puts a
+        short summary first, which is what a reader of the module wants and is
+        too short to be a roster row on its own; the paragraph under it is
+        where an entry says why it is an entry at all. Anything further down is
+        the module explaining itself to somebody already inside it.
+
+        Read from the code rather than restated here, and that is the point.
+        This page used to key an authored string to each name — two
+        descriptions of one subject, in two files, with nothing holding them
+        together. The hand-written half had already drifted: its `channels` row
+        named six consumers where the import graph counts eleven, and a page
+        confidently wrong is worse than one that had to be looked up.
         """
-        owed = self.owed()
-        described = {entry.package: entry.solves for entry in self.entries}
-        if missing := [name for name in owed if name not in described]:
+        source = self.entry_source(name)
+        docstring = ast.get_docstring(ast.parse(source.read_text(encoding="utf-8")))
+        if not docstring:
             raise ValueError(
-                f"{self.source} carries {missing}, which this page neither "
-                "tiers nor describes: write a row saying what each solves"
+                f"{source} carries no docstring, so this page has nothing to "
+                "say about it: open the module with a summary line and a "
+                "paragraph saying what it solves"
             )
-        if vanished := [name for name in described if name not in owed]:
-            raise ValueError(
-                f"the roster describes {vanished}, which {self.source} no "
-                "longer carries: delete those rows"
-            )
+
+        def opening() -> Iterator[str]:
+            """The summary and the one paragraph under it, line by line.
+
+            Walked rather than split on the blank line, because what is being
+            read is prose: there is no parser for "the first two paragraphs",
+            and a loop takes them without pretending otherwise.
+            """
+            blanks = 0
+            for line in docstring.splitlines():
+                if not line.strip():
+                    blanks += 1
+                    if blanks == 2:
+                        return
+                    continue
+                yield line.strip()
+
+        return " ".join(" ".join(opening()).split())
+
+    def table(self) -> models.MarkdownTable:
+        """The roster as a table, derived from the tree it describes.
+
+        Nothing left to fall behind: every row is the entry's own docstring, so
+        an entry added to the library arrives here by existing and one deleted
+        leaves by the same route. What used to be a hand-kept list checked
+        against a walk is now the walk.
+
+        A missing docstring still fails generation loudly, for the reason the
+        authored roster did: a page that quietly drops a package reads exactly
+        like a complete one.
+        """
         return models.MarkdownTable(
             headers=["Package", "Solves"],
             rows=[
-                [CodeCell(text=entry.package), PlainCell(text=entry.solves)]
-                for entry in self.entries
+                [CodeCell(text=name), PlainCell(text=self.solves(name))]
+                for name in self.owed()
             ],
         )
 
@@ -269,27 +206,60 @@ declares a public API:
 
 ```python
 from lup import (
-    SessionFactory,   # open configured conversations
+    create_claude,    # open Claude sessions, configured
+    create_codex,     # open Codex sessions, configured
+    create_client,    # route a model id to whichever serves it
+    Client,   # what a constructor returns
     SessionHandle,    # an opened session, plus optional fork capability
     TurnHandle,       # an accepted turn, plus optional events/interrupt/steer
     TurnInput,        # portable user input
     TurnRequest,      # what to run, and the type to come back
     TurnResult,       # a validated, typed result
     turn_request,     # request factory
-    query,            # one-shot: factory in, typed result out
 )
 ```
 
-The shortest useful program is one call:
+The shortest useful program imports everything it uses:
 
 ```python
-factory = create_claude_session_factory(ClaudeSessionConfig(model="..."))
-result = await query(factory, turn_request(TurnInput(text="summarize"), Summary))
+from lup import create_claude
+
+client = create_claude(model="claude-opus-5", system_prompt="Be concise.")
+result = await client.query("summarize", Summary)
 summary = result.output
 ```
 
-`query` is the one-shot convenience. For anything with more than one turn, open
-a session and start turns on it — the same contracts, held longer.
+The constructors are why the root is worth importing. Everything else here is
+vocabulary — a name to annotate against — and vocabulary alone builds nothing,
+which an earlier edition of this section demonstrated by accident: it listed
+eight nouns and then reached for two names it had never imported, so the
+shortest useful program did not run.
+
+`client.query(...)` opens a session, takes one turn, and always closes it. For
+anything with more than one turn, open a session and start turns on it — the
+same contracts, held longer.
+
+`create_client(model=...)` is the third route, for a caller holding a model id
+who does not also want to know which vendor owns which prefix:
+
+```python
+from lup import create_client
+
+client = create_client("gpt-5.5")           # routed by prefix
+client = create_client("house-model", provider="claude")   # said outright
+```
+
+It is deliberately narrower than the two named constructors, and that is the
+whole reason all three exist. Dispatch cannot carry typed provider options:
+`create_claude(options=ClaudeSessionConfig(...))` type-checks, and no annotation
+means "whichever config the model turns out to select". So the common arguments
+route, the whole declaration does not, and neither pretends to be the other. A
+model no prefix claims raises rather than guessing — a guess opens a session
+against the wrong vendor and fails later, in that vendor's vocabulary.
+
+All three resolve their adapter on first access, so `import lup` costs roughly
+80 ms and pulls neither provider SDK. Naming a constructor imports its adapter;
+opening a session is what finally reaches the vendor's own package.
 
 ## Layering
 
@@ -501,7 +471,7 @@ The library is the dependency; your application is the composition root. That
 inversion is the whole design, and it has three practical consequences.
 
 **Name the provider exactly once.** Choose an adapter factory in one function,
-pass the resulting `SessionFactory` everywhere else. `seam-boundary` will tell
+pass the resulting `Client` everywhere else. `seam-boundary` will tell
 you when a second site appears.
 
 **Compose capabilities rather than configuring an object.** Timeouts, budgets,

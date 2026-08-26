@@ -33,10 +33,10 @@ from lup.adapters.codex.login import CODEX_LOGIN
 from lup.adapters.codex.runtime import (
     CodexMcpServerConfig,
     CodexSessionConfig,
-    create_codex_session_factory,
+    create_codex,
 )
 from lup.mcp import McpServerEntry, RawStdioServerConfig
-from lup.runtime.factory import SessionFactory
+from lup.client import Client
 from lup.runtime.selection import (
     Runtime,
     SessionAutonomy,
@@ -153,9 +153,9 @@ def codex_config(request: SessionRequest) -> CodexSessionConfig:
     )
 
 
-def codex_session(request: SessionRequest) -> SessionFactory:
+def codex_session(request: SessionRequest) -> Client:
     """Render a portable request into a configured Codex session factory."""
-    return create_codex_session_factory(codex_config(request))
+    return create_codex(codex_config(request))
 
 
 def codex_workspace_home(environment: EnvVars, workspace: Path) -> EnvVars:

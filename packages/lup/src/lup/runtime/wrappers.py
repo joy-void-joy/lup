@@ -28,7 +28,7 @@ from lup.runtime.errors import (
     TurnTimeoutError,
     ValidationAttempt,
 )
-from lup.runtime.factory import SessionFactory
+from lup.client import Client
 from lup.runtime.models import (
     SessionHandle,
     SessionId,
@@ -644,7 +644,7 @@ class SerializedSession(Session):
 # subject: what this does is compose them into a session, which belongs to
 # neither the configs nor the factory alone.
 def decorated_session_factory(
-    inner: SessionFactory,
+    inner: Client,
     *,
     timeout: TimeoutConfig | None = None,
     budget: BudgetConfig | None = None,
@@ -655,7 +655,7 @@ def decorated_session_factory(
     usage: UsageConfig | None = None,
     display: DisplayConfig | None = None,
     serialized: bool = False,
-) -> SessionFactory:
+) -> Client:
     """Apply configured whole-turn decorators to every opened session."""
 
     @asynccontextmanager
@@ -678,7 +678,7 @@ def decorated_session_factory(
                 session = SerializedSession(session)
             yield SessionHandle(session=session, fork=handle.fork)
 
-    return SessionFactory(open_decorated)
+    return Client(open_decorated)
 
 
 def failure_from_result[T: BaseModel | None](

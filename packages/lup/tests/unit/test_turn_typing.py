@@ -1,6 +1,6 @@
 """Inference pins for the one-turn entry points.
 
-`turn_request` and `SessionFactory.query` are overloaded so each call shape
+`turn_request` and `Client.query` are overloaded so each call shape
 resolves to one exact type rather than a union. The `assert_type` calls below
 are the regression guard: pyright — which `lup-devtools dev check` runs — fails
 the moment a later simplification collapses an overload set and widens what a
@@ -15,7 +15,7 @@ import pytest
 from pydantic import BaseModel
 
 from lup.runtime.contracts import Session, Turn
-from lup.runtime.factory import SessionFactory
+from lup.client import Client
 from lup.runtime.models import (
     SessionId,
     TurnHandle,
@@ -26,7 +26,6 @@ from lup.runtime.models import (
     TurnResult,
     turn_request,
 )
-from lup.runtime.query import query
 from lup.types import Usage
 from tests.unit.doubles import session_factory
 
@@ -76,7 +75,7 @@ class StubSession(Session):
         self.prompts.append(request.input.text)
         return TurnHandle[T](turn=StubTurn(request))
 
-    def factory(self) -> SessionFactory:
+    def factory(self) -> Client:
         """A factory whose every opened session is this one."""
         return session_factory(self)
 
@@ -139,10 +138,10 @@ async def test_the_free_spelling_infers_exactly_what_the_method_does() -> None:
     session = StubSession()
     factory = session.factory()
 
-    prepared = await query(factory, turn_request("summarize", Summary))
-    plain = await query(factory, "summarize")
-    typed = await query(factory, "summarize", Summary)
-    typed_input = await query(factory, TurnInput(text="wrapped"), Summary)
+    prepared = await factory.query(turn_request("summarize", Summary))
+    plain = await factory.query("summarize")
+    typed = await factory.query("summarize", Summary)
+    typed_input = await factory.query(TurnInput(text="wrapped"), Summary)
 
     assert_type(prepared, TurnResult[Summary])
     assert_type(plain, TurnResult[None])
