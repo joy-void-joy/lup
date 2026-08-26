@@ -14,7 +14,7 @@ from lup.orchestration.actors.sessions import ActorInbox, ActorRecord, ActorSess
 from lup.resolver.journal import Journal
 from lup.sessions.capabilities import Session
 from lup.sessions.errors import ProviderTurnError, TurnFailure
-from lup.client import Client
+from lup.sessions.client import Client
 from lup.sessions.events import (
     SessionHandle,
     SessionId,

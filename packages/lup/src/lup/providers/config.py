@@ -7,7 +7,7 @@ resolution; the ABCs here are the engines it and ``ModelRouter`` compose.
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 
-from lup.client import Client
+from lup.sessions.client import Client
 
 
 class ConfigTransform[C](ABC):

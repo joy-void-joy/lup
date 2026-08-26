@@ -11,7 +11,7 @@ if TYPE_CHECKING:
     from rich.console import Console
 
     from lup.sessions.capabilities import Session
-    from lup.client import Client
+    from lup.sessions.client import Client
     from lup.sessions.events import TurnResult
 
 import typer

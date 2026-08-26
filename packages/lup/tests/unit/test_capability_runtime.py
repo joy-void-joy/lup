@@ -35,7 +35,7 @@ from lup.sessions.composition import (
     submission_gate_resolver,
 )
 from lup.sessions.capabilities import Interrupt, TurnToolBinder
-from lup.client import Client
+from lup.sessions.client import Client
 from lup.sessions.errors import (
     ProviderTurnError,
     StructuredOutputError,

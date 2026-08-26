@@ -81,7 +81,7 @@ from lup.policy.models import (
     UnknownTool,
 )
 from lup.providers.config import ProfileSelector
-from lup.client import Client
+from lup.sessions.client import Client
 from lup.providers.routing import (
     ExactModelMatcher,
     ModelRoute,

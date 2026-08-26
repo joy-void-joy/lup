@@ -1,5 +1,5 @@
 {
-  "revision": "093939f72f2293e126aa65515e4b534312f4ff66",
+  "revision": "310fa5e5dfba831fe3f50939876325b32bdea20f",
   "roots": [
     "lup",
     "lup_template"
@@ -162,6 +162,7 @@
       "declares": [
         "CONSTRUCTORS",
         "__getattr__",
+        "create_client",
         "__all__"
       ]
     },
@@ -307,21 +308,6 @@
       "declares": [
         "POLL_SECONDS",
         "wait_until"
-      ]
-    },
-    {
-      "module": "lup.client",
-      "declares": [
-        "Client",
-        "Client.__init__",
-        "Client.open",
-        "Client.query",
-        "Client.query",
-        "Client.query",
-        "Client.query",
-        "PROVIDER_PREFIXES",
-        "provider_for",
-        "create_client"
       ]
     },
     {
@@ -2496,6 +2482,8 @@
         "Roster.source",
         "Roster.tiered",
         "Roster.owed",
+        "Roster.described",
+        "Roster.described.listed",
         "Roster.entry_source",
         "Roster.solves",
         "Roster.solves.opening",
@@ -3265,6 +3253,8 @@
     {
       "module": "lup.devtools.report.build",
       "declares": [
+        "parser",
+        "authored_headings",
         "note_items",
         "drift_items",
         "unlanded_items",
@@ -3680,58 +3670,6 @@
       "declares": [
         "logger",
         "SHORT_SHA_LENGTH",
-        "ShKwargs",
-        "ShKwargs._fg",
-        "ShKwargs._bg",
-        "ShKwargs._bg_exc",
-        "ShKwargs._with",
-        "ShKwargs._in",
-        "ShKwargs._out",
-        "ShKwargs._err",
-        "ShKwargs._err_to_out",
-        "ShKwargs._in_bufsize",
-        "ShKwargs._out_bufsize",
-        "ShKwargs._err_bufsize",
-        "ShKwargs._internal_bufsize",
-        "ShKwargs._env",
-        "ShKwargs._piped",
-        "ShKwargs._iter",
-        "ShKwargs._iter_noblock",
-        "ShKwargs._iter_poll_time",
-        "ShKwargs._ok_code",
-        "ShKwargs._cwd",
-        "ShKwargs._long_sep",
-        "ShKwargs._long_prefix",
-        "ShKwargs._tty_in",
-        "ShKwargs._tty_out",
-        "ShKwargs._unify_ttys",
-        "ShKwargs._encoding",
-        "ShKwargs._decode_errors",
-        "ShKwargs._timeout",
-        "ShKwargs._timeout_signal",
-        "ShKwargs._no_out",
-        "ShKwargs._no_err",
-        "ShKwargs._no_pipe",
-        "ShKwargs._tee",
-        "ShKwargs._done",
-        "ShKwargs._truncate_exc",
-        "ShKwargs._preexec_fn",
-        "ShKwargs._uid",
-        "ShKwargs._new_session",
-        "ShKwargs._new_group",
-        "ShKwargs._log_msg",
-        "ShKwargs._close_fds",
-        "ShKwargs._pass_fds",
-        "ShKwargs._return_cmd",
-        "ShKwargs._async",
-        "LazyCommand",
-        "LazyCommand.__init__",
-        "LazyCommand.resolve",
-        "LazyCommand.__call__",
-        "LazyCommand.__getattr__",
-        "LazyCommand.out",
-        "LazyCommand.lines",
-        "git",
         "gh",
         "uv",
         "slug_from_remote",
@@ -3808,6 +3746,63 @@
         "Throttle.__init__",
         "Throttle.get_state",
         "Throttle.slot"
+      ]
+    },
+    {
+      "module": "lup.execution.shell",
+      "declares": [
+        "ShKwargs",
+        "ShKwargs._fg",
+        "ShKwargs._bg",
+        "ShKwargs._bg_exc",
+        "ShKwargs._with",
+        "ShKwargs._in",
+        "ShKwargs._out",
+        "ShKwargs._err",
+        "ShKwargs._err_to_out",
+        "ShKwargs._in_bufsize",
+        "ShKwargs._out_bufsize",
+        "ShKwargs._err_bufsize",
+        "ShKwargs._internal_bufsize",
+        "ShKwargs._env",
+        "ShKwargs._piped",
+        "ShKwargs._iter",
+        "ShKwargs._iter_noblock",
+        "ShKwargs._iter_poll_time",
+        "ShKwargs._ok_code",
+        "ShKwargs._cwd",
+        "ShKwargs._long_sep",
+        "ShKwargs._long_prefix",
+        "ShKwargs._tty_in",
+        "ShKwargs._tty_out",
+        "ShKwargs._unify_ttys",
+        "ShKwargs._encoding",
+        "ShKwargs._decode_errors",
+        "ShKwargs._timeout",
+        "ShKwargs._timeout_signal",
+        "ShKwargs._no_out",
+        "ShKwargs._no_err",
+        "ShKwargs._no_pipe",
+        "ShKwargs._tee",
+        "ShKwargs._done",
+        "ShKwargs._truncate_exc",
+        "ShKwargs._preexec_fn",
+        "ShKwargs._uid",
+        "ShKwargs._new_session",
+        "ShKwargs._new_group",
+        "ShKwargs._log_msg",
+        "ShKwargs._close_fds",
+        "ShKwargs._pass_fds",
+        "ShKwargs._return_cmd",
+        "ShKwargs._async",
+        "LazyCommand",
+        "LazyCommand.__init__",
+        "LazyCommand.resolve",
+        "LazyCommand.__call__",
+        "LazyCommand.__getattr__",
+        "LazyCommand.out",
+        "LazyCommand.lines",
+        "git"
       ]
     },
     {
@@ -5112,6 +5107,7 @@
         "Finding.notices",
         "Manifest",
         "Manifest.requirements",
+        "Manifest.across",
         "Manifest.on_the_host",
         "Manifest.inside_the_image",
         "Manifest.check",
@@ -5166,6 +5162,7 @@
         "container_client",
         "container_requirement",
         "same_path_mount_requirement",
+        "git_requirement",
         "github_requirement",
         "bubblewrap_requirement",
         "socat_requirement",
@@ -8703,7 +8700,12 @@
         "ModelRoute.recipe",
         "ModelRouter",
         "ModelRouter.__init__",
-        "ModelRouter.resolve"
+        "ModelRouter.resolve",
+        "ProviderRoute",
+        "ProviderRoute.provider",
+        "ProviderRoute.matcher",
+        "PROVIDER_ROUTES",
+        "provider_for"
       ]
     },
     {
@@ -10132,6 +10134,18 @@
         "SubmittedOutputStore.read",
         "TurnToolBinder",
         "TurnToolBinder.bind"
+      ]
+    },
+    {
+      "module": "lup.sessions.client",
+      "declares": [
+        "Client",
+        "Client.__init__",
+        "Client.open",
+        "Client.query",
+        "Client.query",
+        "Client.query",
+        "Client.query"
       ]
     },
     {

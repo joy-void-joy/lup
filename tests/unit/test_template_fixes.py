@@ -13,7 +13,7 @@ from lup.orchestration.reflection import ReviewGate
 from lup_template.agent.config import aux_model, engine_for_settings, settings
 from lup_template.agent.core import reflection_submission_gate
 from lup.sessions.capabilities import Session, Turn
-from lup.client import Client
+from lup.sessions.client import Client
 from lup.sessions.events import (
     SessionHandle,
     SessionId,

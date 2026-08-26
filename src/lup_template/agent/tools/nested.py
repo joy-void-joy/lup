@@ -1,7 +1,7 @@
 """Nested Agent pattern (template).
 
 A nested agent is an MCP tool that, inside its handler, spins up an
-independent configured session via :meth:`lup.client.Client.query`, runs it to
+independent configured session via :meth:`lup.sessions.client.Client.query`, runs it to
 completion, and folds the scalar result back into a structured tool response.
 
 It differs from a **native subagent** (defined upfront in ``get_subagent_specs``

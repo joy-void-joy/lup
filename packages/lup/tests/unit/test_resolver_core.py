@@ -111,7 +111,7 @@ from lup.resolver.state import (
     StateTransitionError,
 )
 from lup.sessions.capabilities import Session
-from lup.client import Client
+from lup.sessions.client import Client
 from lup.sessions.composition import is_output_model
 from lup.sessions.events import (
     SessionHandle,

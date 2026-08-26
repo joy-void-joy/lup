@@ -28,7 +28,7 @@ from lup.sessions.capabilities import (
     TurnToolBinder,
 )
 from lup.sessions.errors import ProviderTurnError, TurnFailure, TurnInterruptedError
-from lup.client import Client
+from lup.sessions.client import Client
 from lup.sessions.events import (
     BlockCompletedEvent,
     BlockDeltaEvent,

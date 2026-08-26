@@ -23,7 +23,7 @@ from collections.abc import Callable
 from pydantic import BaseModel, Field
 
 from lup.tools.mcp import LupMcpTool, ToolError, lup_tool
-from lup.client import Client
+from lup.sessions.client import Client
 from lup.types import SubagentSpec
 
 logger = logging.getLogger(__name__)

@@ -26,7 +26,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from lup.sessions.capabilities import Session, Turn
-from lup.client import Client
+from lup.sessions.client import Client
 from lup.sessions.events import (
     SessionHandle,
     SessionId,

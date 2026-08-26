@@ -20,7 +20,7 @@ from pydantic import BaseModel
 
 from lup.policy.hooks import LupHooksConfig
 from lup.tools.mcp import McpServerEntry
-from lup.client import Client
+from lup.sessions.client import Client
 from lup.providers.login import ProviderLogin
 from lup.types import EnvVars
 

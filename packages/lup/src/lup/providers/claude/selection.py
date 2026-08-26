@@ -14,7 +14,7 @@ from lup.providers.claude.runtime import (
     ClaudeSessionConfig,
     create_claude,
 )
-from lup.client import Client
+from lup.sessions.client import Client
 from lup.providers.selection import (
     Runtime,
     SessionAutonomy,

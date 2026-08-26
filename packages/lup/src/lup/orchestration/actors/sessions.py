@@ -1,6 +1,6 @@
 """One durable session per actor, opened once and kept while the run moves.
 
-A caller reaching for :meth:`lup.client.Client.query` opens a session, takes
+A caller reaching for :meth:`lup.sessions.client.Client.query` opens a session, takes
 one turn and closes it. Nine separate symptoms sat downstream of that one
 fact in the resolver: a park discarded the whole turn, a reviewer re-read its
 concern cold each round, a merger never saw the parent it joined last, and
@@ -46,7 +46,7 @@ from lup.policy.hooks import (
 )
 from lup.observability.journal import JournalRecord
 from lup.sessions.errors import ProviderTurnError
-from lup.client import Client
+from lup.sessions.client import Client
 from lup.sessions.events import (
     SessionHandle,
     SessionId,

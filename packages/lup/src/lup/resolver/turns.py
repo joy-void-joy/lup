@@ -51,7 +51,7 @@ from lup.resolver.models import (
 )
 from lup.resolver.run import ResolveRun, ResolverInvariantError
 from lup.resolver.tools import WAIT_CONTRACT
-from lup.client import Client
+from lup.sessions.client import Client
 from lup.sessions.events import TurnInput, TurnRequest, TurnResult, turn_request
 from lup.sessions.middleware import CorrectionConfig, decorated_session_factory
 

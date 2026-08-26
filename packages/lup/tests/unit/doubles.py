@@ -40,7 +40,7 @@ from lup.providers.codex.app_server import (
 )
 from lup.harness.process import ExitStatus, LaunchRequest, ProcessLauncher
 from lup.sessions.capabilities import Session, Turn
-from lup.client import Client
+from lup.sessions.client import Client
 from lup.sessions.events import (
     SessionHandle,
     SessionId,

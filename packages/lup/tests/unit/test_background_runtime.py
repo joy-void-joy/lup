@@ -9,7 +9,7 @@ from pydantic import BaseModel
 
 from lup.orchestration.background import BackgroundAgent, BackgroundConfig
 from lup.sessions.composition import AcceptedTurn, CompletedTurn, ComposedSession
-from lup.client import Client
+from lup.sessions.client import Client
 from lup.sessions.errors import TurnError
 from lup.sessions.events import (
     SessionHandle,

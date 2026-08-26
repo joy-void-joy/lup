@@ -21,7 +21,7 @@ from lup.providers.codex.selection import (
 )
 from lup.policy.hooks import LupHooksConfig
 from lup.tools.mcp import create_mcp_server
-from lup.client import Client
+from lup.sessions.client import Client
 from lup.providers.selection import Runtime, SessionAutonomy, SessionRequest
 
 AUTONOMY_DEGREES = get_args(SessionAutonomy.__value__)

@@ -184,7 +184,7 @@ class QuestionDesk[Q: Question]:
 
     A plain class rather than a model because it holds a builder and a live
     mailbox — behaviour and a seam, on the same terms as
-    :class:`~lup.client.Client`.
+    :class:`~lup.sessions.client.Client`.
 
     ``asked_by`` is bound at construction rather than taken per call, so an
     agent structurally cannot post a question against a sibling, and ids are

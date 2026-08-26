@@ -9,7 +9,7 @@ import pytest
 
 from lup.tools.mcp import ToolResponse
 from lup.sessions.events import TurnTextBlock
-from lup.client import Client
+from lup.sessions.client import Client
 from lup.sessions.events import SessionHandle, SessionId
 from lup.orchestration.subagents import create_run_subagent_tool
 from lup.types import SubagentSpec

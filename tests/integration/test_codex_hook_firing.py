@@ -29,7 +29,7 @@ from pydantic import BaseModel, Field
 
 from lup.providers.codex.runtime import CodexSessionConfig, create_codex
 from lup.providers.codex.selection import CODEX_RUNTIME
-from lup.client import Client
+from lup.sessions.client import Client
 from lup.sessions.events import turn_request
 from lup.providers.selection import SessionRequest
 from lup.workspace.paths import find_project_root

@@ -28,7 +28,7 @@ from lup.providers.codex.runtime import (
     CodexSessionConfig,
     create_codex,
 )
-from lup.client import Client
+from lup.sessions.client import Client
 from lup.sessions.composition import submission_gate_resolver
 from lup.policy.hooks import LupHooksConfig
 from lup.sessions.events import (

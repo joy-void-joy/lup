@@ -65,7 +65,7 @@ from lup.orchestration.actors.sessions import (
 from lup.channels.models import Door, publish_atomic, utc_now
 from lup.policy.hooks import LupHooksConfig
 from lup.observability.journal import Journal, JournalRecord
-from lup.client import Client
+from lup.sessions.client import Client
 from lup.sessions.events import TurnRequest, TurnResult
 
 logger = logging.getLogger(__name__)

@@ -15,7 +15,7 @@ import pytest
 from pydantic import BaseModel
 
 from lup.sessions.capabilities import Session, Turn
-from lup.client import Client
+from lup.sessions.client import Client
 from lup.sessions.events import (
     SessionId,
     TurnHandle,

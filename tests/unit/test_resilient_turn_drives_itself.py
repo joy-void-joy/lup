@@ -24,7 +24,7 @@ from pydantic import BaseModel
 
 from lup.sessions.capabilities import EventStream, Session, Turn
 from lup.sessions.errors import StructuredOutputError, TurnFailure
-from lup.client import Client
+from lup.sessions.client import Client
 from lup.sessions.events import (
     MessageCompletedEvent,
     SessionHandle,

@@ -36,7 +36,7 @@ from lup.providers.codex.runtime import (
     create_codex,
 )
 from lup.tools.mcp import McpServerEntry, RawStdioServerConfig
-from lup.client import Client
+from lup.sessions.client import Client
 from lup.providers.selection import (
     Runtime,
     SessionAutonomy,

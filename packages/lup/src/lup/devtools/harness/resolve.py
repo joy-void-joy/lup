@@ -83,7 +83,7 @@ from lup.resolver.tools import (
     read_resolver_tool_context,
 )
 from lup.resolver.join_tools import create_join_tools
-from lup.client import Client
+from lup.sessions.client import Client
 from lup.providers.profiles import SessionAccount
 from lup.types import EnvVars
 from lup.workspace.paths import project_root

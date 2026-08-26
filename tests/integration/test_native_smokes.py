@@ -41,7 +41,7 @@ from lup.resolver.models import (
     VerificationCommand,
     WorkerContext,
 )
-from lup.client import Client
+from lup.sessions.client import Client
 from lup.sessions.events import TurnTextBlock, turn_request
 
 pytestmark = pytest.mark.integration

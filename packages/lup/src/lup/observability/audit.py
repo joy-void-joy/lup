@@ -39,7 +39,7 @@ from lup.observability.journal import ChainedWriter, Journal, JournalRecord, las
 from lup.sessions.composition import is_output_model
 from lup.sessions.capabilities import EventStream, Session, Turn
 from lup.sessions.errors import TurnError
-from lup.client import Client
+from lup.sessions.client import Client
 from lup.sessions.events import (
     BlockCompletedEvent,
     BlockDeltaEvent,

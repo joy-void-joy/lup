@@ -35,7 +35,7 @@ from lup.sessions.errors import (
     TurnFailure,
     TurnInterruptedError,
 )
-from lup.client import Client
+from lup.sessions.client import Client
 from lup.sessions.events import (
     BlockCompletedEvent,
     BlockDeltaEvent,

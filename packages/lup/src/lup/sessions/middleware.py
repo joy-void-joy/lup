@@ -28,7 +28,7 @@ from lup.sessions.errors import (
     TurnTimeoutError,
     ValidationAttempt,
 )
-from lup.client import Client
+from lup.sessions.client import Client
 from lup.sessions.events import (
     SessionHandle,
     SessionId,

@@ -34,12 +34,30 @@ list confidently wrong is worse than one that had to be looked up.
 | `lup.selection` | `lup.tables` | it is about narrowing a library table, not selecting a runtime |
 | `lup.gitguard` | `lup.devtools.gitguard` | catching a test suite writing outside its fixtures is development tooling |
 | `lup.harness.banner` | `lup.banner` | a foundation both the harness and the policy bundle write |
+| `lup.client` | `lup.sessions.client`, `lup.providers.routing`, `lup` | one module was the type every consumer holds *and* the router that reaches both vendors |
+| `lup.gitlocks` → `lup.execution.writability`, and `lup.devtools.utils.git` | `lup.execution.shell` | a configured `git` the mount rail and the harness both reach, moved below both |
 
-`lup.channels`, `lup.types`, `lup.markdown`, `lup.client`, `lup.workspace`,
-`lup.web`, `lup.sandbox`, `lup.policy`, `lup.harness`, `lup.resolver` and
-`lup.devtools` keep their names. `channels` in particular stays a top-level
-foundation: it imports nothing but `lup.types`, and folding it in with
-`workspace` manufactured a cycle between storage and observability.
+`lup.channels`, `lup.types`, `lup.markdown`, `lup.workspace`, `lup.web`,
+`lup.sandbox`, `lup.policy`, `lup.harness`, `lup.resolver` and `lup.devtools`
+keep their names. `channels` in particular stays a top-level foundation: it
+imports nothing but `lup.types`, and folding it in with `workspace`
+manufactured a cycle between storage and observability.
+
+`from lup import Client, create_client, Provider` is unchanged — the package
+root still exports the whole front door, and `create_client` is declared there
+now rather than one module down. What moved is where a consumer that bypassed
+the root has to look: `Client` is `lup.sessions.client`, and the model-id
+routing is `lup.providers.routing`, which is the vendor edge that was already
+keeping a matcher vocabulary of its own.
+
+**One capability is gone rather than moved.** `PROVIDER_PREFIXES`, a
+`dict[str, Provider]` matched longest-prefix-first, is replaced by
+`PROVIDER_ROUTES`, a `list[ProviderRoute]` matched in declaration order and
+carrying a `ModelMatcher` rather than a bare prefix — so an adopter can name a
+model exactly, or write a matcher of its own, where a prefix says the wrong
+thing. A caller passing `prefixes=` passes `routes=` instead, and writes the
+narrower entry above the broader one rather than relying on a sort nothing on
+the page mentioned. Every other export in the ledger resolved to its new home.
 
 - Modelled the payloads a literal dictionary key was reading by hand: a Codex
   `turn/completed` notification, the two spellings a delegation names its role

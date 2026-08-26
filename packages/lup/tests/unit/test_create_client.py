@@ -8,17 +8,17 @@ that vendor's vocabulary, which is a worse error arriving later.
 
 import subprocess
 import sys
-from collections.abc import Mapping
 
 import pytest
 
-from lup.client import (
-    PROVIDER_PREFIXES,
-    Client,
-    Provider,
-    create_client,
+from lup import create_client
+from lup.providers.routing import (
+    PROVIDER_ROUTES,
+    PrefixModelMatcher,
+    ProviderRoute,
     provider_for,
 )
+from lup.sessions.client import Client
 
 
 def test_each_vendors_prefixes_reach_its_own_provider() -> None:
@@ -27,16 +27,32 @@ def test_each_vendors_prefixes_reach_its_own_provider() -> None:
     assert provider_for("o3-mini") == "codex"
 
 
-def test_a_longer_prefix_wins_over_one_that_contains_it() -> None:
-    """First match by length, so a narrower entry can sit beside a broader one.
+def test_the_route_declared_first_wins() -> None:
+    """Declaration order, which is the rule `ModelRouter` reads its own routes by.
 
-    Iteration order over a table is not a rule anybody should have to know, and
-    an adopter adding `gpt-5.5-local` beside `gpt-` means the narrower one.
+    A narrower entry earns its answer by being written above a broader one. The
+    table this replaced was a mapping sorted by prefix length, which put the
+    rule somewhere no reader of the declaration could see it; a list puts the
+    ordering on the page, where an adopter writing `gpt-5.5-local` above `gpt-`
+    can tell what they have said.
     """
-    prefixes: Mapping[str, Provider] = {"gpt-": "codex", "gpt-5.5-local": "claude"}
+    routes = [
+        ProviderRoute(provider="claude", matcher=PrefixModelMatcher("gpt-5.5-local")),
+        ProviderRoute(provider="codex", matcher=PrefixModelMatcher("gpt-")),
+    ]
 
-    assert provider_for("gpt-5.5-local-preview", prefixes) == "claude"
-    assert provider_for("gpt-4o", prefixes) == "codex"
+    assert provider_for("gpt-5.5-local-preview", routes) == "claude"
+    assert provider_for("gpt-4o", routes) == "codex"
+
+
+def test_a_broader_route_written_first_shadows_the_narrower_one() -> None:
+    """The other half of declaration order, stated so nobody has to discover it."""
+    shadowed = [
+        ProviderRoute(provider="codex", matcher=PrefixModelMatcher("gpt-")),
+        ProviderRoute(provider="claude", matcher=PrefixModelMatcher("gpt-5.5-local")),
+    ]
+
+    assert provider_for("gpt-5.5-local-preview", shadowed) == "codex"
 
 
 def test_a_model_nothing_claims_names_what_it_knows() -> None:
@@ -46,7 +62,7 @@ def test_a_model_nothing_claims_names_what_it_knows() -> None:
 
     assert "llama-3" in str(raised.value)
     assert "provider=" in str(raised.value)
-    assert "claude-" in str(raised.value)
+    assert "claude" in str(raised.value)
 
 
 def test_naming_the_provider_skips_the_table_entirely() -> None:
@@ -94,6 +110,6 @@ def test_routing_to_one_vendor_leaves_the_other_adapter_unloaded() -> None:
     assert reported == "False False"
 
 
-def test_the_shipped_table_covers_both_constructors() -> None:
-    """A prefix table naming one vendor would route everything to it silently."""
-    assert set(PROVIDER_PREFIXES.values()) == {"claude", "codex"}
+def test_the_shipped_routes_cover_both_constructors() -> None:
+    """Routes naming one vendor would send everything to it silently."""
+    assert {route.provider for route in PROVIDER_ROUTES} == {"claude", "codex"}
