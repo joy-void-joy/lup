@@ -16,7 +16,7 @@ from lup.harness.contracts import (
     Spelled,
     Spelling,
 )
-from lup.harness.generation import argument_text
+from lup.harness.generation import argument_text, plugin_served_tool
 from lup.harness.prompts import (
     SPAWNED_SESSION_LOSES_SHELL,
     guidance_banner,
@@ -277,21 +277,49 @@ again needs one edit here rather than one per declaration.
 """
 
 
-def claude_granted_tools(tools: Sequence[str]) -> list[str]:
-    """Keep only the grants this runtime can actually honor."""
-    return [tool for tool in tools if tool not in CLAUDE_ABSENT_TOOLS]
+def claude_granted_tools(
+    tools: Sequence[str], plugin: Plugin | None = None
+) -> list[str]:
+    """Keep only the grants this runtime can honor, spelled the way it reads them.
+
+    A declaration names a tool server by the portable key it is registered
+    under — ``mcp__notes`` — which is what the server is called everywhere
+    except once it arrives inside a plugin. This runtime scopes a plugin's own
+    servers by the plugin that brought them, and the bare key then matches
+    nothing, so a grant left unscoped silently grants no tool at all: the
+    skill opens, its instruments are absent, and the declaration that listed
+    them reads as though they were there.
+
+    Only the plugin's own servers are rewritten. A grant naming a server the
+    project registered outside the plugin is addressed by its bare key and is
+    left as it is, which is also what a caller with no plugin in hand gets.
+    """
+    served = (
+        {}
+        if plugin is None
+        else {
+            f"mcp__{server.name}": plugin_served_tool(plugin.name, server.name)
+            for server in plugin.mcp_servers
+        }
+    )
+    return [
+        served.get(tool, tool)  # lup: ignore[dict-get] — bare keys pass through
+        for tool in tools
+        if tool not in CLAUDE_ABSENT_TOOLS
+    ]
 
 
 class ClaudeSkillRenderer(ArtifactRenderer[Skill]):
     """Render one portable skill as a Claude command Markdown artifact."""
 
-    def __init__(self, prompts: PromptRenderer, plugin_name: str) -> None:
+    def __init__(self, prompts: PromptRenderer, plugin: Plugin) -> None:
         self.prompts = prompts
-        self.plugin_name = plugin_name
+        self.plugin = plugin
+        self.plugin_name = plugin.name
 
     def render(self, source: Skill) -> ArtifactTree:
         frontmatter = [f"description: {json.dumps(source.description)}"]
-        granted = claude_granted_tools(source.tools)
+        granted = claude_granted_tools(source.tools, self.plugin)
         if granted:
             frontmatter.append("allowed-tools: " + ", ".join(granted))
         if source.argument_hint is not None:
@@ -327,14 +355,15 @@ class ClaudeAgentRenderer(ArtifactRenderer[Agent]):
     """Render one portable agent in Claude's Markdown format."""
 
     def __init__(
-        self, prompts: PromptRenderer, plugin_name: str, spellings: NativeSpellings
+        self, prompts: PromptRenderer, plugin: Plugin, spellings: NativeSpellings
     ) -> None:
         self.prompts = prompts
-        self.plugin_name = plugin_name
+        self.plugin = plugin
+        self.plugin_name = plugin.name
         self.spellings = spellings
 
     def render(self, source: Agent) -> ArtifactTree:
-        tools = ", ".join(claude_granted_tools(source.tools))
+        tools = ", ".join(claude_granted_tools(source.tools, self.plugin))
         alias = (
             None if source.model is None else self.spellings.model_alias(source.model)
         )

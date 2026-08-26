@@ -131,8 +131,8 @@ def compile_claude(source: Harness) -> ArtifactTree:
     guidance_renderer = ClaudeGuidanceRenderer(prompts)
     artifacts: list[Artifact] = []  # lup: ignore[empty-collection]
     for plugin in source.plugins:
-        skill_renderer = ClaudeSkillRenderer(prompts, plugin.name)
-        agent_renderer = ClaudeAgentRenderer(prompts, plugin.name, spellings)
+        skill_renderer = ClaudeSkillRenderer(prompts, plugin)
+        agent_renderer = ClaudeAgentRenderer(prompts, plugin, spellings)
         for declaration in plugin.skills:
             artifacts.extend(skill_renderer.render(declaration).artifacts)
         for declaration in plugin.agents:

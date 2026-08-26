@@ -2968,6 +2968,79 @@ def test_both_runtimes_grant_the_declared_servers_the_same_way() -> None:
     assert len(set(served_tool_grants(plugin))) == len(declared)
 
 
+def harness_granting_its_own_servers() -> Harness:
+    """The example harness, with every skill and agent granting every server.
+
+    The example declares servers and grants none of them, so a tree built
+    from it says nothing about what happens when a declaration asks for one —
+    which is exactly the case that was broken. Adopters do ask, so the grant
+    is put where an adopter puts it rather than left to whichever example
+    happens to carry one.
+    """
+    source = portable_harness()
+    plugin = source.plugins[0]
+    wanted = [f"mcp__{server.name}" for server in plugin.mcp_servers]
+    return source.model_copy(
+        update={
+            "plugins": [
+                plugin.model_copy(
+                    update={
+                        "skills": [
+                            skill.model_copy(update={"tools": [*skill.tools, *wanted]})
+                            for skill in plugin.skills
+                        ],
+                        "agents": [
+                            agent.model_copy(update={"tools": [*agent.tools, *wanted]})
+                            for agent in plugin.agents
+                        ],
+                    }
+                )
+            ]
+        }
+    )
+
+
+def test_a_grant_in_a_command_names_the_tool_its_permission_admits() -> None:
+    """The two halves of one grant, rendered into two artifacts.
+
+    A skill's `allowed-tools` and the settings permission that admits it are
+    written by different renderers and have to name the same tool. They did
+    not: the settings scoped the plugin's servers and the command frontmatter
+    carried the bare key, which this runtime answers to under neither name —
+    so a pass granted its instruments in its own declaration opened without
+    them, and nothing failed to say so.
+    """
+    source = harness_granting_its_own_servers()
+    plugin = source.plugins[0]
+    admitted = set(served_tool_grants(plugin))
+    assert admitted, "the harness declares no tool servers to grant"
+
+    rendered = {
+        artifact.path.as_posix(): artifact.content
+        for artifact in compile_claude(source).artifacts
+    }
+    declarations = {
+        path: content
+        for path, content in rendered.items()
+        if "/commands/" in path or "/agents/" in path
+    }
+    assert declarations, "no commands or agents were rendered"
+
+    for path, content in declarations.items():
+        # The grant line is what this renderer wrote: one `key: value` line of
+        # the frontmatter, its value joined with ", ". Read back the same way.
+        header = content.partition("\n---")[0]  # lup: ignore[string-split]
+        for line in header.splitlines():
+            key, _, value = line.partition(": ")  # lup: ignore[string-split]
+            if key not in ("allowed-tools", "tools"):
+                continue
+            for grant in value.split(", "):  # lup: ignore[string-split]
+                if grant.startswith("mcp__"):
+                    assert grant in admitted, (
+                        f"{path} grants {grant}, which no settings permission admits"
+                    )
+
+
 def test_a_declared_startup_deadline_reaches_the_runtime_that_waits_on_one() -> None:
     """A group resolving its package before it imports anything starts slowly.
 
