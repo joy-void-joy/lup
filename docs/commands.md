@@ -71,6 +71,9 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 | `dev git-hooks install` | Install every git hook this repository declares. |
 | `dev git-hooks status` | Report what this clone refuses, at every moment a hook sits at. |
 | `dev git-hooks uninstall` | Remove them, leaving hooks written elsewhere alone. |
+| `dev preserve capture` | Record the surface this repository offers, as a checked-in fixture. |
+| `dev preserve check` | Resolve every captured capability against the tree as it stands. |
+| `dev preserve migration` | Print the relocation that repoints an importer of the captured tree. |
 | `dev model-config census` | Enumerate every `model_config` declaration by right-hand-side shape. |
 | `dev model-config aliases` | List every shared configuration alias, and who imports each one. |
 | `dev model-config convert` | Rewrite every assigned `model_config` as class keywords, in place. |

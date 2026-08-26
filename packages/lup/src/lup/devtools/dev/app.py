@@ -30,6 +30,7 @@ import lup.devtools.dev.model_config as model_config_mod
 import lup.devtools.dev.pending as pending_mod
 import lup.devtools.dev.plugin as plugin_mod
 import lup.devtools.dev.policy_explain as policy_explain
+import lup.devtools.dev.preservation as preservation
 import lup.devtools.dev.seams as seams
 import lup.devtools.dev.pr as pr
 import lup.devtools.dev.relocate as relocate_mod
@@ -40,7 +41,7 @@ import lup.devtools.harness.content.docs.upstream_reports as upstream_reports
 from lup.codescan.markers import NoteKind
 from lup.codescan.registry import all_rules
 from lup.devtools.dev.conflict_app import create_conflict_app
-from lup.devtools.utils import repository_slug
+from lup.devtools.utils import output_json, repository_slug
 from lup.devtools.harness.composition import NativeTargets
 from lup.devtools.harness.drift import RepositoryWriter
 from lup.devtools.harness.launch import relocation_hint
@@ -85,6 +86,7 @@ def create_dev_app(
     conflict_app = create_conflict_app()
     plugin_app = typer.Typer(no_args_is_help=True)
     guard_app = typer.Typer(no_args_is_help=True)
+    preserve_app = typer.Typer(no_args_is_help=True)
     app.add_typer(worktree_app, name="worktree", help="Worktree management")
     app.add_typer(pr_app, name="pr", help="PR lifecycle (status, merge, push, checks)")
     app.add_typer(
@@ -95,6 +97,11 @@ def create_dev_app(
         guard_app,
         name="git-hooks",
         help="The git hooks refusing stale artifacts and a failing gate",
+    )
+    app.add_typer(
+        preserve_app,
+        name="preserve",
+        help="The capability ledger a reorganisation is measured against",
     )
     app.add_typer(
         model_config_mod.create_model_config_app(),
@@ -1015,6 +1022,84 @@ def create_dev_app(
             typer.echo(f"{edit.path}: {edit.imports} import(s)")
         for mention in relocate_mod.surviving_mentions(roots, declared):
             typer.echo(f"still mentions a moved module: {mention}", err=True)
+
+    # -- preservation ledger --
+
+    def walked(ctx: typer.Context) -> preservation.Ledger:
+        """The surface the tree offers right now, as this CLI can see it."""
+        return preservation.capture(preservation.operations(ctx), declared().project)
+
+    def against(ctx: typer.Context, ledger: Path) -> preservation.Divergence:
+        """What the live tree does and does not still answer for a capture."""
+        return preservation.compare(preservation.Ledger.read(ledger), walked(ctx))
+
+    @preserve_app.command("capture")
+    def preserve_capture_cmd(
+        ctx: typer.Context,
+        ledger: Annotated[
+            Path, typer.Option("--ledger", help="The capture to read or write")
+        ] = preservation.LEDGER_FILE,
+    ) -> None:
+        """Record the surface this repository offers, as a checked-in fixture.
+
+        Run before a reorganisation, and again after one whose removals were
+        deliberate: what leaves the fixture leaves it in a diff somebody
+        reads, which is the only place a dropped capability is ever noticed.
+        """
+        captured = walked(ctx)
+        captured.write(ledger)
+        exports = sum(len(surface.declares) for surface in captured.modules)
+        typer.echo(
+            f"{ledger}: {len(captured.commands)} operation(s), {exports} export(s) "
+            f"across {len(captured.modules)} module(s), at {captured.revision}"
+        )
+
+    @preserve_app.command("check")
+    def preserve_check_cmd(
+        ctx: typer.Context,
+        ledger: Annotated[
+            Path, typer.Option("--ledger", help="The capture to read or write")
+        ] = preservation.LEDGER_FILE,
+        as_json: Annotated[bool, typer.Option("--json", help="Emit JSON")] = False,
+    ) -> None:
+        """Resolve every captured capability against the tree as it stands.
+
+        A capability the tree no longer declares anywhere fails the run. One
+        declared somewhere else is reported and does not: a move is what a
+        reorganisation is, and telling the two apart is the whole point.
+        """
+        divergence = against(ctx, ledger)
+        if as_json:
+            output_json(divergence)
+        else:
+            for capability in divergence.disappeared:
+                typer.echo(f"disappeared: {capability.spelled()}", err=True)
+            for relocation in divergence.relocated:
+                typer.echo(f"relocated:   {relocation.spelled()}")
+            for capability in divergence.arrived:
+                typer.echo(f"arrived:     {capability.spelled()}")
+        if not divergence.intact():
+            raise typer.Exit(1)
+
+    @preserve_app.command("migration")
+    def preserve_migration_cmd(
+        ctx: typer.Context,
+        ledger: Annotated[
+            Path, typer.Option("--ledger", help="The capture to read or write")
+        ] = preservation.LEDGER_FILE,
+    ) -> None:
+        """Print the relocation that repoints an importer of the captured tree.
+
+        The command an adopter runs to follow this repository's move, derived
+        from the same difference that proved nothing was lost. Add `--root` to
+        aim it at the checkout being migrated.
+        """
+        moves = against(ctx, ledger).module_moves()
+        if not moves:
+            typer.echo("no module moved since the capture")
+            return
+        pairs = " ".join(f"{old}={new}" for old, new in sorted(moves.items()))
+        typer.echo(f"uv run lup-devtools dev relocate {pairs}")
 
     @app.command("policy")
     def policy_cmd(
