@@ -3119,19 +3119,6 @@ def edit_threshold(
     return stated[-1] if stated else default
 
 
-# lup: solved: Editing `.claude/` or `.codex/` should be auto-deny here, carrying the
-# redirecting guidance that the `.py` generating it is what to modify instead.
-# `GENERATED_PLUGIN_REFUSAL` in the kernel's words module already says exactly
-# that, but only the shell path reaches it — an Edit or Write to the same file
-# is judged by the ordinary lattice.
-#
-# lup: solved: It should be possible to *relocate* a note. The gate reads any edit that
-# drops the marker line as a deletion, so moving one to the declaration it
-# actually concerns is refused with "resolving a note means replacing it with
-# solved" — which is not what a move is. This bites hardest in a merge, where
-# both sides add at one spot and a note routinely lands against the wrong
-# declaration. Recognize a marker whose text reappears elsewhere in the file.
-#
 def decide_edit(
     path: str,
     before: str | None,

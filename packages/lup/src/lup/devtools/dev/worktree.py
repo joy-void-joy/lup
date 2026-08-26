@@ -455,12 +455,6 @@ def create(
         """Everything that has to hold before this worktree can be used."""
         yield MergeDriver()
         yield ArmedGitGuards(guards=guards, worktree=worktree_path)
-        # lup: solved: `lup-devtools sync base` often reports "Base guessed", because
-        # this is where the record fails to happen: the fallback reads the *cwd's*
-        # current branch, which is not the branch being worked in once EnterWorktree
-        # has moved the session, and records nothing at all when the read comes back
-        # empty. Make `worktree create` refuse without `--branch` when it cannot know
-        # what base to record, with a `--no-record` to suppress that deliberately.
         if not no_record:
             yield recorded
         yield PushedBranch(branch=name)

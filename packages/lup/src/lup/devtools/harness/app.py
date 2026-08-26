@@ -567,20 +567,6 @@ def create_harness_app(
             start_new,
         )
 
-    # lup: solved: There is no way to open a session that the anti-pattern gate
-    # leaves alone. Both launchers should offer one — `lup-devtools harness claude
-    # --ignore-antipatterns`, and the same option on `codex` — for the sessions
-    # where the rules are not the point: exploring, spiking, or working over
-    # code this repository's conventions were never written for. The flag has
-    # somewhere to go, because `ready_to_open` regenerates before it opens: the
-    # anti-pattern table is projected into each plugin's hermetic edit policy at
-    # generation time, so a launch-time switch reaches the dispatcher the
-    # session actually runs against rather than only this command line. What it
-    # sets is already declared — `RuleSelection` is subtractive, so the mode is
-    # one that retires every id rather than a second way of saying the same
-    # thing. Decide too whether the sweep follows: `dev check --antipatterns`
-    # reads the same selection, and a session that edited freely under the flag
-    # will fail it.
     def selected_target(
         mode: launch.LaunchMode | None, runtime: str, relaxed: bool = False
     ) -> NativeHarnessComposition:

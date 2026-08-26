@@ -417,12 +417,6 @@ def decide_sed_words(
             continue
         if word.startswith("--"):
             name, separator, value = word.partition("=")
-            # lup: solved: Seems counterproductive not to just accept sed here. A
-            # real denial read: "escalated (renaming one keyword argument at 38
-            # identical call sites across 9 files; the substitution is
-            # exact-string and the result is verified by pyright plus the
-            # suite): in-place sed bypasses the edit policy — use Edit". An
-            # escalation carrying that reason should get through.
             if name in ("--in-place", "--inplace"):
                 in_place = True
                 continue
@@ -785,12 +779,7 @@ def uv_package_source(
     return None
 
 
-# lup: solved: (Re)-installing lup, or clearing the cache, should be auto-allowed.
-# `uv cache clean lup && uv lock --upgrade-package lup && uv sync --all-extras`
-# needed a leading escalate marker and *still* asked, on "dependency changes
-# fetch and execute external code" — for a refresh of a dependency the project
-# already declares. The gh block below sits between this note and `decide_uv`,
-# which is its subject.
+# lup: Re-installing lup still asks. `uv cache clean` and `uv lock` moved below the install line and are allowed, but `uv sync --all-extras` is judged as an install that fetches and runs build code — so the refresh line still puts a question for a dependency the project already declares, without an escalate marker now rather than with one. `decide_uv` argues that half deliberately: the verb that reaches the network to install is a question, every time. A disagreement to settle rather than an oversight to fix.
 def decide_uv(
     words: list[str],
     runner_targets: list[RunnerTargetRow],

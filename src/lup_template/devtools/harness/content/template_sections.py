@@ -412,11 +412,6 @@ data(outputs): add session batch results
     ),
 ]
 
-# lup: solved: Yeah, see. This would be the perfect place to generate these
-# programatically. It's a bit stupid to have these kind of fixed-code
-# implementation when we could do the whole thing without. Can you see
-# everywhere where we do those kind of list in documents, and just directly
-# change their .py generator instead? Would be way better
 DIRECTORY_STRUCTURE_THROUGH_TOOLS: list[models.PromptPart] = [
     models.TextPart(
         text=r"""## Directory Structure

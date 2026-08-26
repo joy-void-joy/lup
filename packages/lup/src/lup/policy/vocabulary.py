@@ -283,15 +283,6 @@ def judged_ask_rules(
             read_verbs=["ls", "list", "view", "outdated", "why", "explain"],
             reason="package tools fetch and execute code — requires approval",
         ),
-        # lup: solved: A full verify line — ruff format, ruff check, pyright, pytest,
-        # then `cd frontend && npx tsc --noEmit` — was refused here with
-        # "package tools fetch and execute code". It should probably have been
-        # auto-allowed, and so should the `command tsc isn't recognized` probe
-        # the same line falls back to.
-        #
-        # `npx` moved to `typescript_rule`, beside the other package runner, so
-        # the compiler it most often reaches is recognized. What stays here is
-        # the package *managers*, which install rather than run.
         JudgedCommand(
             name="pnpm",
             reason="package tools fetch and execute code — requires approval",

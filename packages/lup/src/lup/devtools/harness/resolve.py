@@ -1539,18 +1539,6 @@ def run_resolve(
             typer.echo(f"Verified installed Codex plugin: {cache.installed_root}")
             return {"CODEX_HOME": str(home.path)}
 
-        # lup: solved: Selecting a profile must reach every lup invocation, not just
-        # a native launch. `profile use X` should decide the account for anything
-        # lup runs — agents, subagents, resolver planners, workers, reviewers —
-        # and today it decides only what `harness claude`/`codex` opens. This
-        # site is one instance: it inherits the launching shell's identity, and
-        # `select_codex_home(None, environment, root)` above drops the profile
-        # and store that launch.py passes. The seam already exists in
-        # `lup.runtime.profiles.ProfileDirectory`; this entry point simply never
-        # reaches it. Fix it generally rather than per call site: building a
-        # session environment should require naming the profile it runs under,
-        # so a new entry point cannot inherit an operator's account by omission
-        # the way this one does.
         session_environment = account.exported(
             non_interactive_environment(
                 os.environ  # lup: ignore[os-environ] — sessions inherit the console
@@ -1657,21 +1645,6 @@ def run_resolve(
                 Path(path).expanduser()
                 for path in (declared.writable_paths if declared is not None else [])
             ]
-
-        # lup: solved: Every session opened here loses Bash entirely. A session
-        # launched from inside sandboxed Bash cannot create its own
-        # `~/.claude/session-env/<id>`, so each shell call dies on `EROFS:
-        # read-only file system, mkdir`. The directory holds 508 entries, all
-        # made at startup *outside* the sandbox, which is why an interactive
-        # session never sees this and a spawned one always does. The planner
-        # that produced this run's inventory ran read-only on it: its own audit
-        # records losing grep and the drift checker, and an explorer reporting
-        # absence as fact after silently narrowing its scope. Workers will hit
-        # exactly the same wall, so this blocks the implementation phase, not
-        # just planning. Fix it with the session launcher outside the sandbox or
-        # that path made writable — the deny looks like the runtime's own
-        # protection of its config directory, so test that a grant can override
-        # it rather than assuming.
 
         # A worker is confined to its lease, and the toolchain it verifies
         # with is declared to run outside that confinement — so the escape has
