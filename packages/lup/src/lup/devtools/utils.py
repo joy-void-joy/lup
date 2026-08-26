@@ -10,7 +10,7 @@ import sh
 import typer
 from pydantic import BaseModel
 
-from lup.gitlocks import admin_dirs, diagnose_git_admin, inspect_git_admin
+from lup.execution.writability import admin_dirs, diagnose_git_admin, inspect_git_admin
 
 logger = logging.getLogger(__name__)
 

@@ -19,7 +19,7 @@ from pathlib import Path
 import pytest
 
 from lup.devtools.utils import clear_stale_config_locks, config_lock_diagnosis
-from lup.gitlocks import diagnosis, inspect_git_admin
+from lup.execution.writability import diagnosis, inspect_git_admin
 from lup.harness.process import LaunchRequest, LocalProcessLauncher
 
 
