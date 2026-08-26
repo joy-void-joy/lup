@@ -953,9 +953,19 @@ def create_dev_app(
             typer.Option("--check", help="Fail when docs/rules.md is stale"),
         ] = False,
     ) -> None:
-        """Generate the Lup rule and typed-suppression reference."""
+        """Generate the Lup rule and typed-suppression reference.
+
+        Rendered against the selection this repository holds itself to, which
+        is the same one the edit hook and the sweep read. Rendering the whole
+        library table instead writes a reference naming rules the gate here
+        does not enforce — and a project that retired one then has two
+        documents disagreeing about what it is held to, the generated file
+        saying it still applies.
+        """
         try:
-            destination = rules.write_rule_reference(check=check_only)
+            destination = rules.write_rule_reference(
+                check=check_only, selection=declared().hooks.rules
+            )
         except RuntimeError as error:
             typer.echo(str(error), err=True)
             raise typer.Exit(1) from error
