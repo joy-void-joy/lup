@@ -34,6 +34,7 @@ from lup.harness.image import detected_client
 from lup.devtools.harness.generate import NativeHarnessComposition
 from lup.devtools.harness.profile_app import create_profile_app
 from lup.harness.models import Resumption
+from lup.harness.requirements import Manifest
 from lup.providers.profiles import ProfileDirectory
 from lup.devtools.harness.drift import RepositoryWriter
 from lup.devtools.supervisor.app import serve_supervisor
@@ -191,11 +192,18 @@ def create_harness_app(
         working. An advisory alone never fails this: it is advice, and a
         machine that declines it is finished being set up.
         """
-        findings = [
-            finding
-            for composition in targets.resolve(target, project_root())
-            for finding in (
-                launch.report_inside_requirements(
+        compositions = targets.resolve(target, project_root())
+        # The two halves span the targets differently, because they answer
+        # differently-scoped questions. What the image must carry is the
+        # image's own, so it is asked once per target; what the host must
+        # carry is the machine's, and asking it per target exercises one
+        # roster twice -- a container probe paid for twice, printed twice,
+        # with nothing on screen saying the second was the same question.
+        findings = (
+            [
+                finding
+                for composition in compositions
+                for finding in launch.report_inside_requirements(
                     composition,
                     composition.recipe.source.plugins[0],
                     launch.ambient_config_home(
@@ -203,13 +211,18 @@ def create_harness_app(
                     ),
                     directory.login,
                 )
-                if inside
-                else launch.report_requirements(
-                    composition.recipe.source.requirements,
-                    setting_up=not launch_only,
-                )
+            ]
+            if inside
+            else launch.report_requirements(
+                Manifest.across(
+                    [
+                        composition.recipe.source.requirements
+                        for composition in compositions
+                    ]
+                ),
+                setting_up=not launch_only,
             )
-        ]
+        )
         if not findings:
             typer.echo("No host requirements declared.")
             return

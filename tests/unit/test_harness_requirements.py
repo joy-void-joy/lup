@@ -492,3 +492,46 @@ def test_the_launch_probe_drops_the_terminal_it_cannot_have() -> None:
         "vol:/cfg",
         "lup-agent:abc",
     ]
+
+
+def test_one_host_roster_spans_every_target() -> None:
+    """Two targets declare one machine, so its capabilities are asked once.
+
+    The command that spans every target holds a manifest per target, and the
+    host halves answer the same question — what this machine carries. Asked
+    one manifest at a time, a reader got the whole roster twice with nothing
+    saying the second was a repeat, and `same-path bind mounts` started its
+    probe container twice to establish what the first had.
+    """
+    declared = manifest()
+    spanned = Manifest.across([declared, declared])
+
+    assert [item.capability for item in spanned.requirements] == [
+        item.capability for item in declared.requirements
+    ]
+
+
+def test_spanning_targets_keeps_what_only_one_of_them_declares() -> None:
+    """Deduplication is per capability, not a choice between whole manifests.
+
+    A project may hold one target to something the other never needed, and a
+    span that took the first manifest whole would drop it — reporting a
+    machine ready for a target whose own requirement was never exercised.
+    """
+    shared = Requirement(
+        capability="uv",
+        purpose="the environment",
+        exercise=Run(command=["uv", "--version"]),
+        absence=LostCapability(capability="syncing"),
+    )
+    only_one = Requirement(
+        capability="bun",
+        purpose="the javascript toolchain",
+        exercise=Run(command=["bun", "--version"]),
+        absence=LostCapability(capability="bundling"),
+    )
+    spanned = Manifest.across(
+        [Manifest(requirements=[shared]), Manifest(requirements=[shared, only_one])]
+    )
+
+    assert [item.capability for item in spanned.requirements] == ["uv", "bun"]

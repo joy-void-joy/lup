@@ -748,6 +748,36 @@ class Manifest(BaseModel, frozen=True):
 
     requirements: list[Requirement] = []
 
+    @classmethod
+    def across(cls, manifests: Sequence["Manifest"]) -> "Manifest":
+        """One roster from several, keeping the first declaration of a capability.
+
+        What a *host* is expected to satisfy is a fact about the machine, not
+        about the target being launched, so a command spanning every target
+        holds several manifests answering the same question. Exercised one
+        manifest at a time, the machine is asked everything once per target:
+        the reader gets the roster twice with nothing saying why, and a probe
+        that starts a container is paid for twice to establish what the first
+        one already had.
+
+        Keyed on the capability rather than on the whole requirement, because
+        that is the name the report prints and so the one a reader would see
+        repeated. Two targets declaring one capability with different
+        exercises is a disagreement between declarations, and exercising both
+        would report a machine that has and has not got it -- so the first
+        wins here, and the disagreement stays where it was written rather
+        than becoming two lines that contradict each other.
+        """
+        declared = [item for manifest in manifests for item in manifest.requirements]
+        return cls(
+            requirements=[
+                item
+                for index, item in enumerate(declared)
+                if item.capability
+                not in [prior.capability for prior in declared[:index]]
+            ]
+        )
+
     def on_the_host(self, setting_up: bool = False) -> list[Requirement]:
         """The requirements this machine is expected to satisfy itself.
 
