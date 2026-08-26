@@ -45,19 +45,19 @@ and the first row that settles ends the pass. So a statement about precedence
 — *a stated reason never leaves a refusal standing*, *a judged deny is not
 rescued by a boundary*, *a question nobody can answer is no judgment* — is one
 row that says it, and changing the policy is moving, adding, or dropping one.
-The rows, in order:
+The rows, in order, each stating its own claim:
 
 | row | what it says |
-|---|---|
-| `ContainedPlacement` | a container is the place every placement was asking for, so none of them is left to carry |
-| `StatedReason` | a marker turns anything not already permitted into the question it asked for |
-| `TrappedPlacement` | a call declared `outside` where nothing can place it outside cannot run, and no reason moves that |
-| `RestoredBySession` | a question about a loss this session can put back is settled as a deferral rather than asked |
-| `UnanswerableQuestion` | a question on a host with nobody to ask is no judgment |
-| `ConfinedElsewhere` | no judgment, and a boundary beneath it: the boundary carries it |
-| `Unjudged` | no judgment and no boundary: refuse, naming the recipe |
-| `JudgedRefusal` | a rule refused this, and confinement is no answer to somebody's answer |
-| `Standing` | a permission, or an answerable question, stands |
+| --- | --- |
+| `ContainedPlacement` | A container is the place every placement was asking for. |
+| `StatedReason` | A marker turns anything not already permitted into a question. |
+| `TrappedPlacement` | A call declared ``outside`` on a host that cannot place it there. |
+| `RestoredBySession` | An approval question about a loss this session can already put back. |
+| `UnanswerableQuestion` | A question on a host with nobody to put it to is not a question. |
+| `ConfinedElsewhere` | No judgment, and a boundary beneath it: the boundary carries it. |
+| `Unjudged` | No judgment and no boundary: the only thing left is to refuse. |
+| `JudgedRefusal` | A rule refused this, and no sandbox rescues a judged deny. |
+| `Standing` | Whatever reached here stands: a permission, or an answerable question. |
 
 Where a command runs is a second axis beside that verdict, declared per rule
 rather than inferred: `git` states its placement once and every verb beneath

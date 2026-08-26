@@ -7,7 +7,55 @@ that change a decision are all material a reader opens once a denial has told
 them which one applies. The guidance keeps the rule and points here.
 """
 
+import inspect
+
 import lup.harness.models as models
+from lup.markdown import CodeCell, PlainCell
+from lup.policy.kernel.settlement import SETTLEMENT_ORDER, SettlementRule
+
+
+def settlement_table(
+    order: list[SettlementRule] = SETTLEMENT_ORDER,
+) -> models.MarkdownTable:
+    """The settlement order, read off the order itself.
+
+    Every row is one rule's own summary line, in the order the pass reads
+    them — so a row added, moved or dropped arrives here by being added,
+    moved or dropped, and this page cannot come to describe a precedence the
+    kernel does not have. What stood here before was the same nine names and
+    the same nine claims, written a second time in a second file with nothing
+    holding the two together.
+
+    A rule carrying no docstring fails generation loudly rather than
+    rendering an empty claim, for the reason the roster in ``library.py``
+    gives: a page that quietly drops a row reads exactly like a complete one.
+    """
+
+    def says(rule: SettlementRule) -> str:
+        """One rule's whole claim: the summary line PEP 257 puts first.
+
+        Read off the class itself rather than through ``inspect.getdoc``,
+        which walks up to the base — and the base here is the seam every row
+        implements, so a row that said nothing would render the seam's own
+        description as its claim and read exactly like a described one.
+        """
+        docstring = type(rule).__doc__
+        if not docstring:
+            raise ValueError(
+                f"{type(rule).__name__} carries no docstring, so this page has "
+                "nothing to say about it: open the class with a summary line "
+                "stating what the row settles"
+            )
+        return inspect.cleandoc(docstring).splitlines()[0]
+
+    return models.MarkdownTable(
+        headers=["row", "what it says"],
+        rows=[
+            [CodeCell(text=type(rule).__name__), PlainCell(text=says(rule))]
+            for rule in order
+        ],
+    )
+
 
 DOCUMENT = models.PromptDocument(
     source=__name__,
@@ -58,20 +106,13 @@ and the first row that settles ends the pass. So a statement about precedence
 — *a stated reason never leaves a refusal standing*, *a judged deny is not
 rescued by a boundary*, *a question nobody can answer is no judgment* — is one
 row that says it, and changing the policy is moving, adding, or dropping one.
-The rows, in order:
+The rows, in order, each stating its own claim:
 
-| row | what it says |
-|---|---|
-| `ContainedPlacement` | a container is the place every placement was asking for, so none of them is left to carry |
-| `StatedReason` | a marker turns anything not already permitted into the question it asked for |
-| `TrappedPlacement` | a call declared `outside` where nothing can place it outside cannot run, and no reason moves that |
-| `RestoredBySession` | a question about a loss this session can put back is settled as a deferral rather than asked |
-| `UnanswerableQuestion` | a question on a host with nobody to ask is no judgment |
-| `ConfinedElsewhere` | no judgment, and a boundary beneath it: the boundary carries it |
-| `Unjudged` | no judgment and no boundary: refuse, naming the recipe |
-| `JudgedRefusal` | a rule refused this, and confinement is no answer to somebody's answer |
-| `Standing` | a permission, or an answerable question, stands |
-
+"""
+        ),
+        settlement_table(),
+        models.TextPart(
+            text=r"""
 Where a command runs is a second axis beside that verdict, declared per rule
 rather than inferred: `git` states its placement once and every verb beneath
 it runs outside the sandbox, because one confined away from its transport or
