@@ -1,5 +1,9 @@
 """The cells a generated Markdown table is laid out from.
 
+Rendering Markdown that is generated rather than authored, escaping at the leaf
+where data enters the document. Only `devtools` renders such tables today, but
+nothing in it is about development tooling.
+
 Prose written by a human is Markdown all the way down and needs nothing here.
 What needs a renderer is a table *derived* from declarations: a pipe or a
 newline in a value silently breaks the row it lands in, and the layout is the

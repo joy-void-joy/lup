@@ -1,5 +1,12 @@
 """Which tool answers a URL better than fetching it would.
 
+Behind a prediction-market URL is a market tool and behind a paper URL is a
+paper tool, and the rendered page is a poorer answer than either API. This is
+the table that says so — a URL shape, the tool it stands for, and how to build
+that tool's arguments from what the shape matched. The same placement split as
+`tool_policy`: the matching and dispatch are the library's, the table's content
+belongs to the only thing that knows its own tools.
+
 A fetch tool that always fetches is worse than the tools standing next to it:
 behind a prediction-market URL is a market tool, behind a paper URL is a paper
 tool, and the rendered page is a poorer answer than either API. This is the

@@ -1,5 +1,8 @@
 """Spec-driven subagent delegation tool.
 
+Spec-driven delegation for engines with no native subagents, dispatching the
+same `SubagentSpec` roster the native path uses.
+
 Engines with native subagents run them directly (from a
 ``SubagentSpec``). Engines without get this served MCP tool instead: the
 agent calls ``run_subagent(name, task)`` and the tool dispatches a

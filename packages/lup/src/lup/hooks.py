@@ -2,6 +2,9 @@
 # Legacy low-level SDK interop remains public during the capability migration.
 """SDK-agnostic hook utilities — the normalized hook seam and its factories.
 
+SDK-agnostic hook models and factories: permission hooks, tool allowlists,
+gates, nudges, capture.
+
 This module owns the whole hook vocabulary: the normalized
 :class:`LupHookInput` / :class:`LupHookOutput` models, the
 :class:`LupHookMatcher`, the :class:`LupHooksConfig` structure, the
