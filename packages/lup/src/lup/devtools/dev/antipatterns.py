@@ -28,7 +28,7 @@ import pstats
 from collections.abc import Iterator, Sequence, Set as AbstractSet
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import typer
 from pydantic import BaseModel
@@ -123,15 +123,23 @@ def within_scope(rel: str, paths: Sequence[str] | None) -> bool:
     read entirely. A named path covers itself and everything beneath it, so a
     caller scopes by file or by directory without having to say which it meant.
 
+    Both sides are compared as paths rather than as text, so the spelling a
+    shell completes a directory to — with a trailing separator — names the same
+    scope as the one without it. Comparing the strings made those two spellings
+    different scopes, and the one a completion produces matched nothing: the
+    sweep then reported a clean tree for a directory full of findings, which
+    reads as an answer rather than as a scope that caught no files.
+
     This is what keeps a lease answerable for its own concern. A lease holds
     one concern's changes and `dev check` judges it; reading the whole
     repository made that verdict depend on state no worker in the run
     controls, so one finding nobody introduced blocked every lease at once
     with no revision able to converge on it.
     """
-    return paths is None or any(
-        rel == path or rel.startswith(f"{path}/") for path in paths
-    )
+    if paths is None:
+        return True
+    subject = PurePosixPath(rel)
+    return any(subject.is_relative_to(PurePosixPath(path)) for path in paths)
 
 
 def declared_rules(project: DevProject) -> AntiPatternSet:

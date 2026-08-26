@@ -48,3 +48,16 @@ def test_a_named_directory_covers_what_sits_under_it() -> None:
 
     assert within_scope("packages/lup/src/lup/devtools/dev/check.py", scope)
     assert not within_scope("packages/lup/src/lup/devtools_other/check.py", scope)
+
+
+def test_a_directory_names_one_scope_however_it_is_spelled() -> None:
+    # A shell completing a directory writes the trailing separator, so the
+    # spelling a caller most easily types is the one that has to work. Compared
+    # as text it matched nothing, and a directory full of findings reported
+    # clean — a false answer rather than a visibly empty scope.
+    under = "packages/lup/src/lup/devtools/dev/check.py"
+
+    assert within_scope(under, ["packages/lup/src/lup/devtools/"])
+    assert within_scope(under, ["packages/lup/src/lup/devtools"])
+    assert within_scope(under, ["./packages/lup/src/lup/devtools"])
+    assert not within_scope(under, ["packages/lup/src/lup/devtools_other/"])
