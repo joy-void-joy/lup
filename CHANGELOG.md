@@ -1,5 +1,53 @@
 # Changelog
 
+## Unreleased
+
+Breaking reorganisation of the library's top level. Thirty-four entries became
+twenty by asking of each one which of four kinds it is: a foundation that
+imports nothing else here, a subject, the one vendor boundary, or tooling.
+Every import path an adopter holds is affected, and the migration is derived
+rather than written — `dev preserve migration --ledger <a pre-refactor
+capture>` prints the exact `dev relocate` invocation that repoints a checkout.
+
+| Was | Is | Why |
+| --- | --- | --- |
+| `lup.adapters` | `lup.providers` | the boundary named for what sits behind it, not for the pattern |
+| `lup.runtime` | `lup.sessions` | one of four modules called `runtime`; the engine is about a session's turns |
+| `lup.runtime.contracts` / `.models` / `.wrappers` | `lup.sessions.capabilities` / `.events` / `.middleware` | each named for what it holds |
+| `lup.runtime.profiles`, `.profile_tree`, `.login`, `.session_home`, `.selection`, `.routing`, `.config` | `lup.providers.*` | which runtime answers is the provider's question, not the turn engine's |
+| `lup.mcp`, `lup.tool_policy`, `lup.tool_routes`, `lup.codeintel` | `lup.tools.mcp`, `.policy`, `.routing`, `.lsp` | one entry for what an agent acts with; `codeintel` shared eight characters with `codescan` on the opposite side of the system |
+| `lup.journal`, `lup.telemetry.*`, `lup.replay.journal`, `lup.usage`, `lup.runtime.usage` | `lup.observability.journal`, `.audit`, `.trace`, `.display`, `.metrics`, `.blocks`, `.native`, `.replay`, `.usage`, `.cost` | four entries answered "what happened", and `journal` named four different things |
+| `lup.actors`, `lup.jobs.runtime`, `lup.realtime`, `lup.subagents`, `lup.reflect`, `lup.runtime.background` | `lup.orchestration.*`, with `reflect` → `reflection` and `jobs.runtime` → `jobs` | five entries answered "run work concurrently" |
+| `lup.resilience`, `lup.runtime.threads`, `lup.gitlocks` | `lup.execution.resilience`, `.threads`, `.writability` | what carrying work out runs into; `gitlocks` asks a filesystem question that git's `config.lock` is only the first caller of |
+| `lup.hooks` | `lup.policy.hooks` | the hook seam is part of the permission subject |
+| `lup.codescan` | `lup.harness.codescan` | the rule engine reads the harness declaration models it judges |
+| `lup.selection` | `lup.tables` | it is about narrowing a library table, not selecting a runtime |
+| `lup.gitguard` | `lup.devtools.gitguard` | catching a test suite writing outside its fixtures is development tooling |
+| `lup.harness.banner` | `lup.banner` | a foundation both the harness and the policy bundle write |
+
+`lup.channels`, `lup.types`, `lup.markdown`, `lup.client`, `lup.workspace`,
+`lup.web`, `lup.sandbox`, `lup.policy`, `lup.harness`, `lup.resolver` and
+`lup.devtools` keep their names. `channels` in particular stays a top-level
+foundation: it imports nothing but `lup.types`, and folding it in with
+`workspace` manufactured a cycle between storage and observability.
+
+- Modelled the payloads a literal dictionary key was reading by hand: a Codex
+  `turn/completed` notification, the two spellings a delegation names its role
+  under, what a retrieval call names as its source, Claude's project section,
+  and the REPL wire protocol, now declared once in the half that runs in the
+  container. `PayloadText` in `lup.types` carries the fact three of them
+  share.
+- Named the shapes that replace an open string map in the `dict-str-payload`
+  and `dict-str-object` diagnostics, so a denial points at a frozen id model,
+  a declared route list, or `EnvVars`/`StringMap` rather than at a
+  suppression.
+- Derived the permissions page's settlement order from the kernel that reads
+  it, and the supersession gate now reads its answer from the domain it
+  publishes rather than from a constant pair declared beside it.
+- Version directory names parse with `semver`, so an experiment arm's
+  `+build` suffix orders with the release it came from, and `resolve_version`
+  takes the counter and the word for what it counts as overridable defaults.
+
 ## 0.2.0 — 2026-07-23
 
 Breaking capability-composition and semantic-policy release. A clean break:
