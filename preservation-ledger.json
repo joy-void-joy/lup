@@ -1,5 +1,5 @@
 {
-  "revision": "79f69a47cfd6777bbf123a77c5dfdd7d88696863",
+  "revision": "a427409694461148f5bc03a8217163954bd1bfb8",
   "roots": [
     "lup",
     "lup_template"
@@ -10998,11 +10998,6 @@
         "iter_trace_event_files",
         "list_all_session_ids",
         "MIN_VERSION_DATAPOINTS",
-        "SEMVER_RE",
-        "Semver",
-        "Semver.major",
-        "Semver.minor",
-        "Semver.patch",
         "parse_semver",
         "VersionScope",
         "VersionScope.versions",
