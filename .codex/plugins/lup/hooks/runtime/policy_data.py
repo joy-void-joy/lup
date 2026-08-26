@@ -597,7 +597,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
         {
             "id": "dict-str-object",
             "pattern": "\\b(?:dict|Mapping)\\[\\s*str\\s*,\\s*object\\s*\\]",
-            "message": "Never use dict[str, object] or Mapping[str, object] \u2014 use TypedDict or BaseModel",
+            "message": "dict[str, object] and Mapping[str, object] say nothing about either half \u2014 a TypedDict or BaseModel carries the fields where they are closed, JsonObject from lup.types carries data whose schema lives elsewhere, and Namespace from lup.types carries the one thing `object` is honest for: names bound to live Python objects rather than to data",
             "context": "code",
             "matcher": "dict_str_object_sites",
             "strength": "soft",
@@ -606,7 +606,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
         {
             "id": "dict-str-payload",
             "pattern": "\\b(?:dict|Mapping|MutableMapping)\\[\\s*str\\s*,\\s*(?:str|int|float|bool|bytes|complex)\\b",
-            "message": "String-keyed dict with a scalar value hides shape when the keys are a CLOSED, enumerable set \u2014 use a BaseModel or dict[Literal[...], V]. When the keys are open and data-driven (a registry/cache/counter keyed by external data) this is legitimate: add `# lup: ignore[dict-str-payload]`. Concrete class/callable value types (dict[str, Client]) are already accepted; JsonValue covers arbitrary JSON",
+            "message": "String-keyed dict with a scalar value hides what the keys are \u2014 the comment naming them is the shape the type could not carry. Four shapes carry it instead, and one of them almost always fits: a BaseModel or dict[Literal[...], V] where the field set is closed and enumerable; a frozen id model as the key (dict[SessionId, str]) where the keys are identities this code mints; a declared route list behind a router (CommentRouter in lup.harness.banner, ModelRouter in lup.runtime.routing) where they are a dispatch table; and EnvVars or StringMap from lup.types where the names are owned outside this repository. Concrete class/callable value types (dict[str, Client]) are already accepted and JsonValue covers arbitrary JSON. Where the keys are open and none of those names them, `# lup: ignore[dict-str-payload]` carries the reason they are open",
             "context": "code",
             "matcher": "dict_str_payload_sites",
             "strength": "soft",
@@ -1013,7 +1013,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
         {
             "id": "dict-str-object",
             "pattern": "\\b(?:dict|Mapping)\\[\\s*str\\s*,\\s*object\\s*\\]",
-            "message": "Never use dict[str, object] or Mapping[str, object] \u2014 use TypedDict or BaseModel",
+            "message": "dict[str, object] and Mapping[str, object] say nothing about either half \u2014 a TypedDict or BaseModel carries the fields where they are closed, JsonObject from lup.types carries data whose schema lives elsewhere, and Namespace from lup.types carries the one thing `object` is honest for: names bound to live Python objects rather than to data",
             "context": "code",
             "matcher": "dict_str_object_sites",
             "strength": "soft",
@@ -1022,7 +1022,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
         {
             "id": "dict-str-payload",
             "pattern": "\\b(?:dict|Mapping|MutableMapping)\\[\\s*str\\s*,\\s*(?:str|int|float|bool|bytes|complex)\\b",
-            "message": "String-keyed dict with a scalar value hides shape when the keys are a CLOSED, enumerable set \u2014 use a BaseModel or dict[Literal[...], V]. When the keys are open and data-driven (a registry/cache/counter keyed by external data) this is legitimate: add `# lup: ignore[dict-str-payload]`. Concrete class/callable value types (dict[str, Client]) are already accepted; JsonValue covers arbitrary JSON",
+            "message": "String-keyed dict with a scalar value hides what the keys are \u2014 the comment naming them is the shape the type could not carry. Four shapes carry it instead, and one of them almost always fits: a BaseModel or dict[Literal[...], V] where the field set is closed and enumerable; a frozen id model as the key (dict[SessionId, str]) where the keys are identities this code mints; a declared route list behind a router (CommentRouter in lup.harness.banner, ModelRouter in lup.runtime.routing) where they are a dispatch table; and EnvVars or StringMap from lup.types where the names are owned outside this repository. Concrete class/callable value types (dict[str, Client]) are already accepted and JsonValue covers arbitrary JSON. Where the keys are open and none of those names them, `# lup: ignore[dict-str-payload]` carries the reason they are open",
             "context": "code",
             "matcher": "dict_str_payload_sites",
             "strength": "soft",
