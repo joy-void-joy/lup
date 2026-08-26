@@ -111,7 +111,23 @@ resolves later — decides which files exist at the end. Ask the user directly, 
 
 ## Phase 1.5: Prune Scaffolding
 
-Before customizing, decide which optional patterns this domain actually needs. The template ships them all wired; most domains use a subset, and **deleting the rest is the goal, not a failure** (see the guidance file's § Scaffolding Is a Menu, Not a Mandate). From the interview answers, classify each as KEEP-and-customize or DELETE-the-files:
+First, the part that is not a decision. The template ships demonstrations of
+*itself* — `examples/` composing lup's own runtime against lup's own README,
+and the two test modules driving them. A domain that adopted the template is a
+consumer of that library rather than a demonstrator of it, so what it inherits
+there is a directory it will never run and a suite it has to keep green. Run:
+
+```bash
+uv run lup-devtools dev init drop-examples --dry-run
+uv run lup-devtools dev init drop-examples
+```
+
+It reports the handful of lines still naming what went — a README link, two
+docstring citations, and the `"examples/"` composition root in the catalog,
+which is dead once the directory is. Fix those; the README is human-owned, so
+propose that edit rather than making it.
+
+Now the decisions. Which optional patterns does this domain actually need? The template ships them all wired; most domains use a subset, and **deleting the rest is the goal, not a failure** (see the guidance file's § Scaffolding Is a Menu, Not a Mandate). From the interview answers, classify each as KEEP-and-customize or DELETE-the-files:
 
 - **Reflection** (`agent/tools/reflect.py` + the gate wiring in `core.py`) — keep only if the agent commits a consequential, judgment-bearing output where self-critique helps.
 - **Realtime / persistent mode** (`agent/tools/realtime.py`, `lup.realtime*`, the Stop-hook/sleep-wake wiring) — keep only for agents that live over time (chat, monitoring, games); delete for one-shot agents.

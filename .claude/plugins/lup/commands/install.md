@@ -249,6 +249,7 @@ These patterns are **opt-in, not a bundle**: reflection, realtime/persistent mod
 
 ### Skip (never port)
 
+- **`examples/`, and the two test modules driving it.** These demonstrate lup's own runtime composition against lup's own README — a front door being opened, a wrapper stack, a policy denying the call it declared. The target is a consumer of that library rather than a demonstrator of it, so porting them installs a directory it will never run and a suite it has to keep green. When the target asks how a capability is composed, point at the source checkout's copy instead of copying it in.
 - Domain-specific tool implementations (example.py contents)
 - Domain-specific prompt content
 - Domain-specific model fields (but port the pattern/structure)
