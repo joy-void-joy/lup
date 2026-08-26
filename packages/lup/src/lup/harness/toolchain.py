@@ -264,6 +264,48 @@ def same_path_mount_requirement(
     )
 
 
+def git_requirement(
+    where: Side = "host",
+    install: list[Package] = [Package(name="git")],
+) -> Requirement:
+    """Git itself, which every other capability here assumes and none declared.
+
+    The one external program nothing works without was the one with no
+    declaration: `uv`, the container runtime, `gh` and the clipboard were all
+    exercised, while the program that answers where the checkout is, which
+    worktree holds the lease, and who is committing was simply assumed. What
+    that bought is a machine missing git failing at whichever git call ran
+    first, in that call's own vocabulary, several steps from the one thing to
+    install.
+
+    Exercised inside a repository rather than by ``--version``, for the reason
+    `gh` is exercised as authenticated: a git that runs while standing outside
+    a worktree answers every version query and refuses every question a
+    session actually asks it.
+
+    Host-side, because the image declares its own -- git is in the base
+    package list :class:`~lup.harness.image.Image` renders, so a requirement
+    installing it again would rebuild every image to add a package already
+    there.
+
+    Absence costs rather than refuses, which is the grade this module reserves
+    for what would be *quietly* weaker. Nothing about a missing git is quiet:
+    the operator gets this line at the top of the scrollback naming what to
+    install, and every route below it fails loudly rather than proceeding
+    against a boundary that is not standing.
+    """
+    return Requirement(
+        capability="git",
+        purpose="the checkouts, worktree leases and commit attribution a session needs",
+        where=where,
+        exercise=Run(command=["git", "rev-parse", "--git-dir"]),
+        absence=LostCapability(
+            capability="every checkout, worktree lease and commit a session makes"
+        ),
+        install=install,
+    )
+
+
 def github_requirement(
     where: Side = "both",
     install: list[Package] = [Package(name="github-cli")],
@@ -795,6 +837,7 @@ def default_manifest() -> Manifest:
     """
     return Manifest(
         requirements=[
+            git_requirement(),
             uv_requirement(),
             container_requirement(),
             github_requirement(),

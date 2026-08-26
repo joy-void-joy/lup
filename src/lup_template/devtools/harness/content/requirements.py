@@ -21,6 +21,7 @@ from lup.harness.toolchain import (
     bun_requirement,
     clipboard_requirement,
     container_requirement,
+    git_requirement,
     github_requirement,
     metadata_refused_requirement,
     proxy_reachable_requirement,
@@ -77,6 +78,7 @@ def manifest() -> Manifest:
             # opinion it is in what it *adds*: the JavaScript toolchain, which
             # `default_manifest` deliberately omits because most projects on lup
             # have none.
+            git_requirement(),
             uv_requirement(),
             container_requirement(),
             same_path_mount_requirement(),
