@@ -27,7 +27,8 @@ from lup.harness.codescan.boundaries import (
     library_placement_path_is_audited,
 )
 from lup.devtools.project import DevProject
-from lup.devtools.utils import git, output_json
+from lup.devtools.utils import output_json
+from lup.execution.shell import git
 from lup.policy.kernel.roles import path_role
 
 

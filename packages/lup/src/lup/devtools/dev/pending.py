@@ -15,7 +15,8 @@ from pathlib import Path
 
 from pydantic import BaseModel, computed_field
 
-from lup.devtools.utils import format_table, git, output_json
+from lup.devtools.utils import format_table, output_json
+from lup.execution.shell import git
 
 logger = logging.getLogger(__name__)
 

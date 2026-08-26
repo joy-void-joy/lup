@@ -37,7 +37,8 @@ from lup.harness.codescan.markers import (
     retire_claims,
     scan_mode_for,
 )
-from lup.devtools.utils import decode_stderr, git, output_json
+from lup.devtools.utils import decode_stderr, output_json
+from lup.execution.shell import git
 
 
 class FoundComment(MarkerComment):

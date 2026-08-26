@@ -62,7 +62,8 @@ from pydantic import ConfigDict, TypeAdapter, with_config
 
 from lup.workspace.paths import project_root
 from lup.devtools.subapps import subapp
-from lup.devtools.utils import decode_stderr, format_table, git, short_sha
+from lup.devtools.utils import decode_stderr, format_table, short_sha
+from lup.execution.shell import git
 
 app = typer.Typer(no_args_is_help=True)
 SUBAPP = subapp("sync", "Track sync.json repos and review their commits", app)

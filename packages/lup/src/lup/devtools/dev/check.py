@@ -40,7 +40,8 @@ from lup.devtools.harness.drift import (
     roster_gaps,
 )
 from lup.devtools.harness.generate import NativeHarnessComposition
-from lup.devtools.utils import decode_stderr, git, uv
+from lup.devtools.utils import decode_stderr, uv
+from lup.execution.shell import git
 
 # The suite waits on git subprocesses and hook scripts far more than it
 # computes, so it parallelizes well — but each worker pays a full interpreter

@@ -29,7 +29,8 @@ from lup.workspace.paths import agent_version
 
 from lup.devtools.changelog import Changelog, ReleaseNote
 from lup.devtools.subapps import subapp
-from lup.devtools.utils import git, output_json, short_sha
+from lup.devtools.utils import output_json, short_sha
+from lup.execution.shell import git
 
 
 ChangelogCategory = Literal["behavior", "data", "infrastructure"]

@@ -18,7 +18,7 @@ from lup.devtools.harness.contained import (
     superseded_volume_name,
     superseded_volume_notice,
 )
-from lup.devtools.utils import git
+from lup.execution.shell import git
 from lup.harness.image import Docker
 
 BASE = "FROM archlinux:base\nRUN pacman -Syu --noconfirm\n"

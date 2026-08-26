@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 from lup.devtools.dev import undo
-from lup.devtools.utils import git
+from lup.execution.shell import git
 
 
 @pytest.fixture

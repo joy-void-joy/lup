@@ -22,7 +22,8 @@ import sh
 import typer
 from pydantic import BaseModel
 
-from lup.devtools.utils import decode_stderr, gh, git
+from lup.devtools.utils import decode_stderr, gh
+from lup.execution.shell import git
 
 
 class RemoteRef(BaseModel):

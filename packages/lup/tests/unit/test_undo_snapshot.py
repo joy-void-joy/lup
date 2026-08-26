@@ -10,7 +10,7 @@ somebody turns off.
 
 from pathlib import Path
 
-from lup.devtools.utils import git
+from lup.execution.shell import git
 from lup.policy.assets.host import undo_namespace, undo_snapshot
 
 import pytest

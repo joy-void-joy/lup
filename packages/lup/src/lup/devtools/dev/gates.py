@@ -59,7 +59,7 @@ from pydantic import BaseModel
 from lup.harness.codescan.markers import MarkerComment, find_feedback, scan_mode_for
 from lup.devtools.dev.branches import get_integration_branch, is_ancestor
 from lup.devtools.dev.comments import FoundComment
-from lup.devtools.utils import git
+from lup.execution.shell import git
 from lup.workspace.paths import project_root
 
 # A resolvable condition is `<keyword>:<argument>`, and the keyword is a

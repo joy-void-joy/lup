@@ -39,7 +39,7 @@ from pathlib import Path
 import sh
 from pydantic import BaseModel
 
-from lup.devtools.utils import git
+from lup.execution.shell import git
 
 SOURCE_SUFFIXES = (".py", ".pyi")
 """Which files a sweep reads, for a caller that does not say.

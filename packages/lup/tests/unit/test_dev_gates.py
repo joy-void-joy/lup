@@ -6,7 +6,7 @@ import pytest
 
 import lup.devtools.dev.gates as gates
 from lup.harness.codescan.markers import MarkerComment, NoteKind
-from lup.devtools.utils import git
+from lup.execution.shell import git
 from lup.devtools.dev.branches import get_integration_branch
 from lup.devtools.dev.comments import FoundComment
 from lup.devtools.dev.gates import (

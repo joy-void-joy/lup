@@ -59,7 +59,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field
 
-from lup.devtools.utils import git
+from lup.execution.shell import git
 from lup.policy.assets.host import undo_namespace, undo_snapshot
 
 UNDO_NAMESPACE = undo_namespace()

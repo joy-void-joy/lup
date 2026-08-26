@@ -52,7 +52,7 @@ from lup.devtools.dev.boundaries import TrackedSource, tracked_python_sources
 from lup.devtools.dev.commands import CommandEntry
 from lup.devtools.dev.relocate import name_parts
 from lup.devtools.project import DevProject
-from lup.devtools.utils import git
+from lup.execution.shell import git
 
 LEDGER_FILE = Path("preservation-ledger.json")
 """Where a capture lands by default, relative to the checkout it describes.

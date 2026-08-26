@@ -140,7 +140,7 @@ def test_an_overwide_suppression_is_placed_rather_than_left_to_the_author() -> N
     decision = decide(
         edit_payload(
             "packages/lup/src/lup/devtools/dev/antipatterns.py",
-            "from lup.devtools.utils import git, output_json",
+            "from lup.devtools.utils import output_json",
             f"from typing import Any  # lup: ignore[any-type] — {reason}",
             False,
         )
@@ -160,7 +160,7 @@ def test_a_suppression_that_fits_is_left_exactly_where_it_was_written() -> None:
     decision = decide(
         edit_payload(
             "packages/lup/src/lup/devtools/dev/antipatterns.py",
-            "from lup.devtools.utils import git, output_json",
+            "from lup.devtools.utils import output_json",
             "from typing import Any  # lup: ignore[any-type] — at a boundary",
             False,
         )

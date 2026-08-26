@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from lup.devtools.utils import git
+from lup.execution.shell import git
 from lup.harness.credential import (
     AgentKey,
     GitAccess,

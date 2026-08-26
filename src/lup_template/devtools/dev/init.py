@@ -27,7 +27,7 @@ import typer
 from lup.workspace.paths import find_project_root
 from lup.devtools.dev.plugin import set_marketplace_name
 from lup_template.devtools.harness.catalog import declared_plugin
-from lup.devtools.utils import git
+from lup.execution.shell import git
 
 PACKAGE_IMPORT_RE = re.compile(
     r"""

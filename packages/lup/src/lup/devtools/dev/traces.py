@@ -38,7 +38,8 @@ import sh
 import typer
 from pydantic import BaseModel
 
-from lup.devtools.utils import decode_stderr, git, output_json
+from lup.devtools.utils import decode_stderr, output_json
+from lup.execution.shell import git
 from lup.workspace.paths import notes_path, project_root
 
 logger = logging.getLogger(__name__)

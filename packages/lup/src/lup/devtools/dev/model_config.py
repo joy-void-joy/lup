@@ -59,7 +59,8 @@ import sh
 import typer
 from pydantic import BaseModel
 
-from lup.devtools.utils import format_table, git, output_json
+from lup.devtools.utils import format_table, output_json
+from lup.execution.shell import git
 
 type DeclarationShape = Literal[
     "config-dict", "settings-config-dict", "alias", "dict-literal", "other"

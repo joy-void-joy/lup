@@ -42,9 +42,9 @@ from lup.devtools.launcher import (
     DEFAULT_ENVIRONMENT,
     launcher_invocation,
 )
+from lup.execution.shell import git
 from lup.devtools.utils import (
     format_table,
-    git,
     decode_stderr,
     output_json,
     short_sha,

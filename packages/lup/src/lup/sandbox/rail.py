@@ -49,7 +49,7 @@ from pathlib import Path
 import sh
 from pydantic import BaseModel, Field
 
-from lup.devtools.utils import git
+from lup.execution.shell import git
 
 
 class Lease(BaseModel, frozen=True):

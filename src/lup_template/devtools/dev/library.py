@@ -49,7 +49,7 @@ from importlib.metadata import version as installed_version
 from packaging.requirements import Requirement
 
 from lup.workspace.paths import find_project_root
-from lup.devtools.utils import git
+from lup.execution.shell import git
 
 # The three below spell where the vendored copy sits, which is a fact about
 # lup's own layout and this repository's, not a choice either end makes.

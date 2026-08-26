@@ -74,7 +74,8 @@ from lup.policy.kernel.edit import (
 from lup.policy.kernel.roles import path_role
 from lup.devtools.dev.pyright_oracle import default_oracle
 from lup.devtools.project import DevProject
-from lup.devtools.utils import git, output_json
+from lup.devtools.utils import output_json
+from lup.execution.shell import git
 
 
 def scanned_roots(project: DevProject) -> AbstractSet[str]:

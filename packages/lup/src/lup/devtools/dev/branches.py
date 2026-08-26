@@ -25,9 +25,9 @@ from lup.resolver.models import HeldLease
 from lup.resolver.state import live_lease_branches
 from lup.types import StringMap
 from lup.workspace.paths import project_root
+from lup.execution.shell import git
 from lup.devtools.utils import (
     format_table,
-    git,
     gh,
     config_lock_diagnosis,
     decode_stderr,

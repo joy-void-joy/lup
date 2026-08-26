@@ -38,7 +38,7 @@ from pydantic import BaseModel
 
 from lup.devtools.gitguard import GIT_ENVIRONMENT
 from lup.banner import REGENERATE_COMMAND
-from lup.devtools.utils import git
+from lup.execution.shell import git
 
 DRIFT_COMMAND = "uv run lup-devtools harness check all"
 """The read-only drift check every path that refuses stale output runs."""

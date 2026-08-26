@@ -6,7 +6,8 @@ from pathlib import Path
 import sh
 import typer
 
-from lup.devtools.utils import decode_stderr, git
+from lup.devtools.utils import decode_stderr
+from lup.execution.shell import git
 
 logger = logging.getLogger(__name__)
 

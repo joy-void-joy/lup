@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from lup.devtools.utils import git
+from lup.execution.shell import git
 from lup.sandbox.rail import (
     Lease,
     lease_for,

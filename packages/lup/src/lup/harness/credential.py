@@ -43,7 +43,7 @@ from urllib.parse import urlsplit
 import sh
 from pydantic import BaseModel, Discriminator, Field
 
-from lup.devtools.utils import git
+from lup.execution.shell import git
 from lup.harness.notice import Notice
 from lup.types import EnvVars
 
