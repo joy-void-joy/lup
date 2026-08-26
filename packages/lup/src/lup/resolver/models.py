@@ -294,16 +294,6 @@ class MaterialQuestion(Question, frozen=True):
     )
 
 
-# lup: ignore[constant-declaration] — one of the two words the re-check question
-# is closed over, so it is the recorded answer's own spelling
-RECHECK_SUPERSEDED = "superseded"
-"""The ruling that settles a lost criterion: later work replaced it."""
-
-# lup: ignore[constant-declaration] — the other of those two words
-RECHECK_REGRESSION = "regression"
-"""The ruling that does not: the merged tree broke something that held."""
-
-
 class RecheckRuling(BaseModel, frozen=True):
     """One answered re-check, read where the decision it governs is taken.
 
@@ -317,15 +307,6 @@ class RecheckRuling(BaseModel, frozen=True):
     ruling: str
 
 
-# lup: solved: A closed gate's answer domain is one fact, and this file spells it
-# four ways: `[APPROVE, DEFER]` twice from constants, `[ALLOWANCE_GRANTED,
-# ALLOWANCE_REFUSED]` from another pair, and `["superseded", "regression"]`
-# inline at joins.py:551 with its reader comparing the same literals by hand.
-# Nothing ties the choices a question publishes to the token its reader tests,
-# which is how the allowance gate once accepted a prose answer that promoted
-# cleanly and then meant refusal. Give every closed gate the shape
-# `ResidualRuling` has — one enum, choices derived from it — so a reader cannot
-# test for a token the question never offered.
 class ClosedAnswer(StrEnum):
     """One gate's whole answer domain, published and read from one place.
 
@@ -1328,20 +1309,6 @@ class ResolveState(BaseModel, frozen=True):
             join_completions=(
                 self.join_progress.completions if self.join_progress else []
             ),
-            # lup: solved: This counts every concern holding a commit, but `integrate`
-            # joins only the verified ones, so the total over-reads by each concern
-            # that failed or retired still holding work — and the bar can never reach
-            # it. Measured on resolve-9e060ad9bb53: 22 against 20 real parents, the two
-            # extras being composition-seam-abc (failed) and git-sandbox-lock-diagnosis
-            # (retired), both of which the assembly gate lists as exclusions rather
-            # than merging. Count what that gate will actually join. If the wider
-            # number is worth showing, it is a second figure — "20 of 22 on the
-            # table" says something true, where one number pretending to be both
-            # cannot.
-            # Settled: the joiner records which parents it set out to merge, so the
-            # total is that set's size — what the assembly gate will actually join,
-            # counted by the one who knows which parents ride inside a sibling. The
-            # wider figure is not shown here rather than shown wrongly.
             join_total=len(self.join_progress.planned) if self.join_progress else 0,
         )
 

@@ -10,11 +10,10 @@ from lup.actors.questions import QuestionAnswer
 from lup.resolver.contracts import ResolverRegression
 from lup.resolver.joins import asked_rulings
 from lup.resolver.models import (
-    RECHECK_REGRESSION,
-    RECHECK_SUPERSEDED,
     ConcernOutcome,
     MaterialQuestion,
     RecheckRuling,
+    SupersessionRuling,
 )
 
 
@@ -23,7 +22,7 @@ def recheck(concern_id: str, *criteria: str) -> MaterialQuestion:
         id=f"{concern_id}-superseded-integrated",
         concern_id=concern_id,
         prompt="superseded or regression?",
-        choices=[RECHECK_SUPERSEDED, RECHECK_REGRESSION],
+        choices=SupersessionRuling.choices(),
         closed_choices=True,
         criteria=list(criteria),
     )
@@ -36,13 +35,15 @@ def answered(question: MaterialQuestion, value: str) -> QuestionAnswer:
 def test_an_answered_recheck_is_paired_with_the_criteria_it_ruled_on() -> None:
     question = recheck("provenance", "venue-derived", "one-vocabulary")
 
-    rulings = asked_rulings([question], [answered(question, RECHECK_REGRESSION)])
+    rulings = asked_rulings(
+        [question], [answered(question, SupersessionRuling.REGRESSION)]
+    )
 
     assert rulings == [
         RecheckRuling(
             concern_id="provenance",
             criteria=["venue-derived", "one-vocabulary"],
-            ruling=RECHECK_REGRESSION,
+            ruling=SupersessionRuling.REGRESSION,
         )
     ]
 
@@ -58,13 +59,32 @@ def test_superseded_and_regression_are_told_apart() -> None:
 
     rulings = asked_rulings(
         [settled, broken],
-        [answered(settled, RECHECK_SUPERSEDED), answered(broken, RECHECK_REGRESSION)],
+        [
+            answered(settled, SupersessionRuling.SUPERSEDED),
+            answered(broken, SupersessionRuling.REGRESSION),
+        ],
     )
 
     regressed = [
-        rule.concern_id for rule in rulings if rule.ruling == RECHECK_REGRESSION
+        rule.concern_id
+        for rule in rulings
+        if rule.ruling == SupersessionRuling.REGRESSION
     ]
     assert regressed == ["beta"]
+
+
+def test_every_answer_this_gate_offers_is_one_its_reader_can_test() -> None:
+    """The defect the four gates shared: a published choice nothing tests for.
+
+    The reader compared a constant pair declared beside the enum rather than
+    a member of it, so nothing held the offer and the test together — which
+    is how the allowance gate once accepted an answer that promoted cleanly
+    and then meant refusal.
+    """
+    assert SupersessionRuling.choices() == [
+        SupersessionRuling.SUPERSEDED,
+        SupersessionRuling.REGRESSION,
+    ]
 
 
 def test_a_regression_names_every_concern_and_criterion_it_stopped_for() -> None:
@@ -77,7 +97,7 @@ def test_a_regression_names_every_concern_and_criterion_it_stopped_for() -> None
                     "venue-derived-from-acquisition",
                     "one-vocabulary-downstream",
                 ],
-                ruling=RECHECK_REGRESSION,
+                ruling=SupersessionRuling.REGRESSION,
             )
         ]
     )

@@ -52,7 +52,6 @@ from lup.resolver.models import (
     IntegrationRecord,
     MaterialQuestion,
     QuestionBatch,
-    RECHECK_REGRESSION,
     RecheckRuling,
     RefreshReport,
     ResolveInventory,
@@ -64,6 +63,7 @@ from lup.resolver.models import (
     ReviewNote,
     ResolverConfig,
     ResolveState,
+    SupersessionRuling,
     WritableRootLease,
 )
 from lup.resolver.orchestrator import (
@@ -1423,7 +1423,7 @@ class ResolverCore:
             regressed = [
                 ruling
                 for ruling in await self.joiner.settle_rechecks(rechecks)
-                if ruling.ruling == RECHECK_REGRESSION
+                if ruling.ruling == SupersessionRuling.REGRESSION
             ]
             if regressed:
                 self.persist(self.record_regressions(state, regressed))

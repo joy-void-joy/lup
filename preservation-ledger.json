@@ -1,5 +1,5 @@
 {
-  "revision": "0ec7713eb5dea4c2c3b8ba54a3db63c0d15e416b",
+  "revision": "79f69a47cfd6777bbf123a77c5dfdd7d88696863",
   "roots": [
     "lup",
     "lup_template"
@@ -68,6 +68,7 @@
     "dev model-config snapshot-at",
     "dev model-config compare",
     "dev init rename-package",
+    "dev init drop-examples",
     "dev library status",
     "dev library release",
     "dev library use",
@@ -182,6 +183,8 @@
         "CohortJournal.__init__",
         "CohortJournal.append",
         "CohortJournal.conversation",
+        "CarriesSummary",
+        "CarriesSummary.summary",
         "submitted_summary",
         "ActorCohort",
         "ActorCohort.__init__",
@@ -601,6 +604,9 @@
         "selected_config_home",
         "load_document",
         "save_document",
+        "ProjectSection",
+        "ProjectSection.projects",
+        "ProjectSection.an_object_or_none_at_all",
         "project_entries",
         "project_entry",
         "restorable_backups",
@@ -1397,6 +1403,12 @@
         "TokenUsageBreakdown.input_tokens",
         "TokenUsageBreakdown.output_tokens",
         "TokenUsageBreakdown.cached_input_tokens",
+        "CodexTurnFailure",
+        "CodexTurnFailure.message",
+        "CodexCompletedTurn",
+        "CodexCompletedTurn.status",
+        "CodexCompletedTurn.duration_ms",
+        "CodexCompletedTurn.error",
         "CodexSchemaRebindingError",
         "notification_turn_id",
         "CodexTurnChannel",
@@ -4454,6 +4466,8 @@
     {
       "module": "lup.devtools.harness.content.docs.permissions",
       "declares": [
+        "settlement_table",
+        "settlement_table.says",
         "DOCUMENT"
       ]
     },
@@ -6025,6 +6039,7 @@
       "module": "lup.harness.generation",
       "declares": [
         "argument_text",
+        "plugin_served_tool",
         "ArtifactValidationError",
         "artifact_map"
       ]
@@ -7016,7 +7031,9 @@
         "dict_rows_literal",
         "url_scope_rows_literal",
         "path_rule_rows_literal",
+        "python_literal",
         "antipattern_rows_literal",
+        "antipattern_rows_literal.row_fields",
         "path_role_rows_literal",
         "acceptance_guard_literal",
         "refused_tool_rows_literal",
@@ -7445,6 +7462,7 @@
         "tuple_shape_sites.variadic",
         "default_factory_sites",
         "dict_get_sites",
+        "dict_get_sites.names_a_field",
         "dict_get_sites.keyed_lookup",
         "empty_collection_sites",
         "silent_truncation_sites",
@@ -8783,8 +8801,6 @@
         "MaterialQuestion.concern_id",
         "MaterialQuestion.allowances",
         "MaterialQuestion.criteria",
-        "RECHECK_SUPERSEDED",
-        "RECHECK_REGRESSION",
         "RecheckRuling",
         "RecheckRuling.concern_id",
         "RecheckRuling.criteria",
@@ -9565,6 +9581,9 @@
       "declares": [
         "DELEGATION_TOOLS",
         "UNNAMED_SUBAGENT",
+        "DelegatedRole",
+        "DelegatedRole.subagent_type",
+        "DelegatedRole.name",
         "SessionId",
         "SessionId.value",
         "TurnId",
@@ -10197,6 +10216,10 @@
     {
       "module": "lup.sandbox.repl_server",
       "declares": [
+        "DEFAULT_TIMEOUT",
+        "ExecuteRequest",
+        "ExecuteRequest.code",
+        "ExecuteRequest.timeout",
         "MAX_OUTPUT",
         "carried",
         "CellTimeout",
@@ -10543,6 +10566,7 @@
     {
       "module": "lup.types",
       "declares": [
+        "text_or_absent",
         "normalize_content",
         "LupContentBlock",
         "LupContentBlock.display_emoji",
@@ -11122,6 +11146,9 @@
         "build_auxiliary_factory",
         "resolve_resume_token",
         "result_text",
+        "ConsultedSource",
+        "ConsultedSource.url",
+        "ConsultedSource.query",
         "result_sources",
         "application_result",
         "run_agent",
@@ -11412,6 +11439,7 @@
         "library_app",
         "extend",
         "init_rename_package_cmd",
+        "init_drop_examples_cmd",
         "DryRun",
         "KeepVendored",
         "Force",
@@ -11431,6 +11459,8 @@
         "FRAMEWORK_MARKERS",
         "is_framework_reference",
         "is_renamer_module",
+        "INITIALIZATION_MODULES",
+        "declares_initialization",
         "rename_match",
         "rename_pattern_in_file",
         "rename_pattern_in_file.replace_match",
@@ -11439,6 +11469,11 @@
         "clear_scaffold_flag.drop_with_preamble",
         "rename_cli_app_name",
         "find_stale_references",
+        "SCAFFOLD_DEMONSTRATIONS",
+        "SKIPPED_TREES",
+        "drop_scaffold_demonstrations",
+        "mention_pattern",
+        "surviving_mentions",
         "rename_package"
       ]
     },
