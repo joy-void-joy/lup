@@ -80,7 +80,6 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 | `dev model-config snapshot-at` | Record the configuration pydantic resolved at a git revision. |
 | `dev model-config compare` | Diff two snapshots; exit non-zero when any model&#x27;s config moved. |
 | `dev init rename-package` | Rename the lup Python package to a project-specific name. |
-| `dev init ownership` | Report or change which files the human author owns, then regenerate. |
 | `dev library status` | Report where the lup library is resolved from. |
 | `dev library release` | Ask the package index whether a release exists, and which mode that settles. |
 | `dev library use` | Resolve lup from the package index, or from the vendored copy. |
@@ -117,6 +116,8 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 | `harness propose-reconciliation` | Persist a source patch for separate review and stale-base-checked apply. |
 | `harness doctor` | Report installed native runtime evidence without updating either CLI. |
 | `harness requirements` | Exercise the external programs this project expects on this machine. |
+| `harness image` | Render the container image this project&#x27;s sessions run in. |
+| `harness egress` | Report or remove the network boundary this project&#x27;s sessions run behind. |
 | `harness serve-resolver-tools` | Serve one worker&#x27;s question tools over stdio, for out-of-process runtimes. |
 | `harness claude` | Generate/reconcile Claude artifacts and launch the verified plugin. |
 | `harness codex` | Generate/reconcile Codex artifacts and launch without updating the CLI. |

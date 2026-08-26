@@ -261,6 +261,15 @@ the bare form, which names no rule and so silences every rule there is — the
 auditor still reports one that guards nothing, so a bare marker the gate
 admits can still be a marker `dev check` refuses.
 
+A spurious finding is the one kind with no decision in it, so
+`dev check --antipatterns --fix` deletes those directives instead of listing
+them, then sweeps again and reports what is left. The reason prose above a
+standalone directive goes with it, being a sentence explaining a rule that
+does not fire; prose written above *that* is not its reason and stays. The
+other two kinds are untouched, because both are asking for a judgement:
+"missing" is whether the rule is right or the line is, and "untyped" is a
+reason nobody has written yet.
+
 In a file's opening comment block the marker goes file-wide — a standalone
 `# lup: ignore` disables anti-pattern checks for the whole file, and
 `# lup: ignore[rule-id]` disables only that rule, the way `# pyright: ignore`

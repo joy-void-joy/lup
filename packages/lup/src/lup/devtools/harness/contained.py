@@ -1,0 +1,1539 @@
+"""Opening a native session inside the container the project declares.
+
+The launcher's other half. :mod:`lup.harness.image` says what a container is
+and how it starts; this says how a *launch* reaches one -- which image tag
+this checkout answers to, whether it has been built, and what the lease under
+the session mounts.
+
+Why the checkout is a mount rather than a copy, and why it is mounted at its
+own absolute path: a linked worktree's ``.git`` is a file holding an absolute
+``gitdir:`` pointer into the repository's common directory, so a tree that
+appeared anywhere else inside the container would be a checkout pointing at a
+path that does not exist. :func:`lup.sandbox.rail.same_path` is the rule, and
+this module is one of the two callers that has to honour it.
+
+What this deliberately does not do is fall back to an uncontained launch when
+the boundary cannot be built. A boundary that quietly is not there is the one
+failure mode the design forbids, so a caller that asked to be contained and
+cannot be gets a refusal naming what was missing, and the operator decides.
+"""
+
+import hashlib
+import json
+import os
+import time
+from collections import deque
+from contextlib import nullcontext
+from ipaddress import IPv4Address
+from pathlib import Path
+
+import sh
+import typer
+from pydantic import BaseModel, Field
+from rich.console import Console
+from rich.live import Live
+from rich.text import Text
+
+from lup.harness.credential import committer, remote_rewrites
+from lup.harness.egress import PROXY_LABEL, SessionEgress
+from lup.harness.image import ContainerEngine, Image, detected_client
+from lup.harness.notice import Notice
+from lup.harness.requirements import Manifest
+from lup.runtime.login import ProviderLogin
+from lup.sandbox.attribution import WRITE_REFUSAL_MARKERS
+from lup.sandbox.rail import Lease, lease_for, repository_layout
+
+
+def image_tag(dockerfile: str) -> str:
+    """The image a declaration answers to, named for the declaration itself.
+
+    Two worktrees share a layer exactly when they would build the same thing,
+    and get separate ones exactly when they would not -- derived rather than
+    assumed. The assumption is what the alternatives cost. Naming the image
+    after the *worktree* pays a full build per checkout, which is hundreds of
+    packages times however many are open. Naming it after the *repository*
+    rests on every worktree declaring the same toolchain, which is true right
+    up until a branch edits the image declaration -- and then the two rebuild
+    over each other on every switch, because :func:`image_matches` compares
+    the declaration digest and each finds the other's.
+
+    Twelve hex characters, for the reason a short object hash is enough to
+    name a commit: this is a handle for a thing already in the store, not a
+    security claim, and the full digest is on the image's own label.
+    """
+    return f"lup-agent:{declaration_digest(dockerfile)[:12]}"
+
+
+def checkout_tag(root: Path) -> str:
+    """The readable name this checkout's latest image also answers to.
+
+    A second tag on the same image, moved to whatever this checkout last
+    built or reused. It earns its place twice over. An image list showing
+    only digests is one nobody can read, and -- the load-bearing half -- the
+    preflight has to name the image it probes, while the digest is computed
+    *from* the manifest that preflight is part of. A name that does not
+    depend on the declaration is the only one that can be stated inside it.
+
+    Moved even when the build is skipped, or a checkout that reused another's
+    image would have no tag of its own and its probe would ask after nothing.
+    """
+    return f"lup-agent:{root.name}"
+
+
+def state_volume_name(root: Path) -> str:
+    """The volume carrying this project's container-side config home.
+
+    Per repository, and keyed on the shared git directory because that is the
+    only name every worktree of one repository agrees on. It used to be
+    ``root.name``, which reads as the repository right up until the checkout
+    is a linked worktree -- and the documented workflow makes one per feature.
+    What that cost was a config home created empty for every branch: the
+    theme back to default, trust re-seeded, each preference set by hand
+    again, and, now that a login can be made in here, a sign-in per feature.
+
+    Separate from the caches because it holds decisions rather than
+    artifacts: the trust a fresh config home would otherwise discard, the
+    session state a ``--continue`` reopens, and the stored login.
+
+    What it costs is that worktrees of one repository now share a config
+    home, so trust and session history are visible across them. That is the
+    arrangement a host home already has, and it is the trade the name was
+    claiming to have made all along.
+    """
+    return f"lup-cfg-{repository_layout(root).name()}"
+
+
+def superseded_volume_name(root: Path) -> str:
+    """What this checkout's config home was called while the name was per branch.
+
+    Kept so a launch can say where the settings went. A rename silently
+    hands back an empty config home, which is indistinguishable from the bug
+    it fixes -- and the operator is looking at the same default theme either
+    way.
+    """
+    return f"lup-cfg-{root.name}"
+
+
+def superseded_volume_notice(
+    root: Path, engine: ContainerEngine, existing: list[str]
+) -> list[Notice]:
+    """Say that a config home moved, in the one session that would notice.
+
+    Only when the old volume is still there and the new one is not, which is
+    exactly the launch where the settings appear to have been lost. Said
+    rather than migrated, because which of several per-branch homes should
+    become the repository's is a question only the operator can answer, and
+    a launcher that guessed would overwrite the answer.
+    """
+    superseded, current = superseded_volume_name(root), state_volume_name(root)
+    if superseded == current or superseded not in existing or current in existing:
+        return []
+    return [
+        Notice(
+            text=(
+                f"Config home: now `{current}`, one per repository rather "
+                f"than one per worktree. `{superseded}` still holds this "
+                "worktree's old settings and is not read any more — copy it "
+                f"over with `{engine.binary} run --rm -v "
+                f"{superseded}:/from -v {current}:/to alpine cp -a /from/. "
+                "/to/`, or set your preferences once and remove it."
+            ),
+            urgency="warning",
+        )
+    ]
+
+
+def existing_volumes(engine: ContainerEngine) -> list[str]:
+    """Every volume this engine holds, or nothing when it cannot be asked.
+
+    An engine that will not answer is not a reason to fail a launch that is
+    otherwise fine -- it costs one advisory notice, and the launch says the
+    rest of what it was going to say.
+    """
+    try:
+        listed = sh.Command(engine.binary)("volume", "ls", "--format", "{{.Name}}")
+    except (sh.CommandNotFound, sh.ErrorReturnCode):
+        return []
+    return str(listed).split()
+
+
+# lup: ignore[constant-declaration] — an identity this repository defines, not a
+# judgement: the writer and the reader have to name the same key or neither works
+DECLARATION_LABEL = "lup.declaration"
+"""The label carrying the digest of the Dockerfile an image was built from."""
+
+
+def declaration_digest(dockerfile: str) -> str:
+    """What this declaration hashes to, for comparing an image against it."""
+    return hashlib.sha256(dockerfile.encode("utf-8")).hexdigest()
+
+
+def image_matches(tag: str, dockerfile: str, engine: ContainerEngine) -> bool:
+    """Whether this tag exists *and* was built from this declaration.
+
+    Presence alone was the question for a while, and it is the wrong one: an
+    image is built once and the declaration goes on changing, so every later
+    edit -- a pinned CLI, a package, the entrypoint -- was a change that
+    landed in the repository and never in the thing a session actually ran
+    in. Nothing reported it, because from the outside a stale image and a
+    current one are one tag.
+
+    The digest is a label rather than a file beside the image, so it travels
+    with what it describes and cannot be left behind by a `rmi`. An image
+    carrying no label at all is one built before this existed, and is treated
+    as stale: rebuilding costs a build, and trusting it costs a session
+    running in something nobody can identify.
+    """
+    try:
+        labelled = sh.Command(engine.binary)(
+            "image",
+            "inspect",
+            "--format",
+            f'{{{{index .Config.Labels "{DECLARATION_LABEL}"}}}}',
+            tag,
+        )
+    except (sh.CommandNotFound, sh.ErrorReturnCode):
+        return False
+    return str(labelled).strip() == declaration_digest(dockerfile)
+
+
+# lup: ignore[constant-declaration] — an identity this repository defines, not a
+# judgement: the tag functions above spell it and the sweep below matches on it,
+# so a caller free to differ would be a caller whose prune found nothing
+IMAGE_PREFIX = "lup-agent:"
+"""What every image this project builds is named under.
+
+An identity rather than a judgement: the tag functions above spell it and the
+sweep below has to match them, so a caller free to differ would be a caller
+whose prune found nothing.
+"""
+
+
+def superseded_images(engine: ContainerEngine, keep: str) -> list[str]:
+    """The digest tags no checkout is pointing at any more.
+
+    Content-addressing is what lets two checkouts share a layer, and the cost
+    it comes with is that editing the declaration leaves the old image
+    standing rather than replacing it under one name. These are big -- a full
+    Arch base and a package set -- so something has to name what is finished.
+
+    A digest tag is finished when no readable checkout tag sits on the same
+    image. That is the whole test, and it is deliberately not "older than":
+    a checkout nobody has opened for a month still runs the image its tag
+    points at, and time says nothing about that.
+
+    ``keep`` is the tag this checkout would build right now, held back
+    whether or not anything is tagged onto it yet -- a sweep run between a
+    declaration edit and the next launch would otherwise delete the image
+    that launch is about to reuse.
+    """
+    try:
+        listed = sh.Command(engine.binary)(
+            "images", "--format", "{{.ID}} {{.Repository}}:{{.Tag}}"
+        )
+    except (sh.CommandNotFound, sh.ErrorReturnCode):
+        return []
+    return finished_tags(str(listed), keep)
+
+
+def finished_tags(listing: str, keep: str) -> list[str]:
+    """Read one engine's image listing down to the tags nothing points at.
+
+    Split from the call that fetches the listing because this is the half
+    that decides what gets deleted, and a sweep whose selection cannot be
+    exercised without a container runtime is one nobody should be asked to
+    trust. The listing is one ``<id> <repository>:<tag>`` per line, which is
+    the format the caller asks for.
+
+    A digest tag is recognized by its shape -- the prefix plus twelve hex
+    characters -- rather than by parsing, because that is what
+    :func:`image_tag` produces and a checkout name of that exact length
+    would have to be twelve characters of hex to collide.
+    """
+    rows = [line.split() for line in listing.splitlines()]
+    # Sliced at the prefix rather than split on "/", because the registry a
+    # listing prepends is not a path and the tag is not its last segment: the
+    # name this project builds under starts where the prefix does, and
+    # everything before it is whichever store the image happens to sit in.
+    named = [
+        (row[0], row[1][row[1].index(IMAGE_PREFIX) :])
+        for row in rows
+        if len(row) == 2 and IMAGE_PREFIX in row[1]
+    ]
+    beside = {
+        identifier: [tag for other, tag in named if other == identifier]
+        for identifier, _ in named
+    }
+    return sorted(
+        tag
+        for tags in beside.values()
+        for tag in tags
+        if tag != keep
+        and len(tag) == len(IMAGE_PREFIX) + 12
+        and not any(len(other) != len(tag) for other in tags)
+    )
+
+
+def retire_images(tags: list[str], engine: ContainerEngine) -> list[str]:
+    """Remove each named image, reporting the ones that actually went.
+
+    One call per tag rather than one call for all of them, because a single
+    failure -- an image a stopped container still references -- would take
+    the whole sweep down with it and leave the operator no better off.
+    """
+    gone: list[str] = []
+    for tag in tags:
+        try:
+            sh.Command(engine.binary)("rmi", tag)
+        except (sh.CommandNotFound, sh.ErrorReturnCode):
+            continue
+        gone.append(tag)
+    return gone
+
+
+def name_for_checkout(tag: str, readable: str, engine: ContainerEngine) -> None:
+    """Point this checkout's readable name at the image it will actually run.
+
+    Idempotent, and silent about its own failure: the tag is a convenience
+    for whoever reads an image list and the name the preflight probes, and
+    neither is worth refusing a launch over. The session runs the digest tag
+    regardless, which is the one that has to be right.
+    """
+    try:
+        sh.Command(engine.binary)("tag", tag, readable)
+    except (sh.CommandNotFound, sh.ErrorReturnCode):
+        return
+
+
+def running(name: str, engine: ContainerEngine) -> bool:
+    """Whether a container by this name is up, asked of the engine.
+
+    Asked rather than remembered, for the same reason :func:`image_matches`
+    is: the operator may have removed it between launches, another checkout
+    of the same repository may have brought it up, and a launcher that kept
+    its own record of either would be reading a file instead of the truth.
+    """
+    try:
+        state = sh.Command(engine.binary)(
+            "inspect", "--format", "{{.State.Running}}", name
+        )
+    except (sh.CommandNotFound, sh.ErrorReturnCode):
+        return False
+    return str(state).strip() == "true"
+
+
+def host_resolv_conf(path: Path = Path("/etc/resolv.conf")) -> str:
+    """What this machine names as its own nameservers, or nothing readable.
+
+    Absence answers empty rather than raising, because a launch is not the
+    place to fail over a file: what a missing one costs is that the proxy
+    keeps whatever the engine wrote, which :func:`handed_resolvers` says out
+    loud rather than leaving to be found later as a boundary carrying nothing.
+    """
+    try:
+        return path.read_text(encoding="utf-8")
+    except OSError:
+        return ""
+
+
+def handed_resolvers(resolvers: list[str]) -> list[Notice]:
+    """What a launch says about the nameservers the proxy is being given.
+
+    Silent when there are some, because a proxy that can resolve is a proxy
+    behaving as declared. Loud when there are none, because that is the state
+    the whole field exists to escape: the proxy falls back to the engine's own
+    resolv.conf, whose first entry on an internal network answers "no such
+    name" for every public destination and hides every server after it.
+    """
+    if resolvers:
+        return []
+    return [
+        Notice(
+            text=(
+                "No nameserver this host names is reachable from a container "
+                "— they are all loopback — so the proxy keeps whatever the "
+                "engine gives it."
+            ),
+            urgency="warning",
+        ),
+        Notice(
+            text=(
+                "On an internal network that is the network's own resolver, "
+                "which refuses public names authoritatively and hides every "
+                "server after it. Declare `resolvers` on the image's egress "
+                "if the proxy turns out unable to reach the world."
+            ),
+            urgency="detail",
+            indent=1,
+        ),
+    ]
+
+
+def default_route(table: str) -> str:
+    """The default route in a kernel routing table, read as the kernel writes it.
+
+    ``/proc/net/route`` rather than ``ip route``, because the proxy image
+    carries no ``iproute2`` and a probe that needed one would report a
+    missing tool as a missing route -- the same shape of false answer this
+    module keeps finding. A file every container has cannot be absent for a
+    reason unrelated to the question.
+
+    The destination and gateway are little-endian hexadecimal in the kernel's
+    own byte order, which :mod:`ipaddress` and :meth:`int.from_bytes` read
+    between them; a default route is the row whose destination is all zeroes.
+    """
+    for row in table.splitlines()[1:]:
+        columns = row.split()
+        if len(columns) < 3 or columns[1] != "00000000":
+            continue
+        gateway = IPv4Address(int.from_bytes(bytes.fromhex(columns[2]), "little"))
+        return f"via {gateway} on {columns[0]}"
+    return ""
+
+
+def proxy_log(name: str, engine: ContainerEngine, lines: int = 400) -> str:
+    """What a proxy container said, with its own errors kept above the traffic.
+
+    Both streams, because squid splits them: its access log is configured onto
+    stdout and everything about why it would not start, or why one request
+    could not be completed, onto stderr. Reading one of the two is reading the
+    half that is empty in exactly the case this is for.
+
+    They are separated again on the way out, and that is not cosmetic. A busy
+    proxy writes one access line per request and a handful of error lines
+    across its whole life, so a plain tail is twenty rows of traffic and none
+    of the diagnosis -- measured, five hundred bytes of `TCP_TUNNEL/503`
+    repeating while the line saying *why* sat above the window.
+    """
+    try:
+        spoken = sh.Command(engine.binary)(
+            "logs", "--tail", str(lines), name, _err_to_out=True
+        )
+    except (sh.CommandNotFound, sh.ErrorReturnCode):
+        return ""
+    said = str(spoken).strip().splitlines()
+    traffic = [line for line in said if "TCP_" in line or "TAG_" in line]
+    return "\n".join(
+        [*[line for line in said if line not in traffic][-12:], *traffic[-6:]]
+    )
+
+
+def departed(
+    egress: SessionEgress, project: str, engine: ContainerEngine
+) -> list[Notice]:
+    """Account for a proxy this launch is about to replace, then take it away.
+
+    Two things arrive here. One died -- and the evidence step this design was
+    missing is reading why: the proxy ran with ``--rm``, so a squid that
+    exited on its configuration removed itself on the way out and left a
+    launch reporting a boundary that was not there, which was then read for
+    three passes as a name that would not resolve. The other is running and
+    was started from a declaration that has since moved, which is the
+    counterpart to rebuilding a stale image and is a replacement rather than
+    a failure.
+
+    Removal happens here rather than being left to the operator because the
+    name is what blocks the restart, and a launch that refused on a name
+    collision would be reporting the collision rather than the cause.
+    """
+    name = egress.proxy_name(project)
+    try:
+        state = str(
+            sh.Command(engine.binary)("inspect", "--format", "{{.State.Status}}", name)
+        ).strip()
+    except (sh.CommandNotFound, sh.ErrorReturnCode):
+        return []
+    spoken = proxy_log(name, engine)
+    sh.Command(engine.binary)("rm", "--force", name, _ok_code=list(range(256)))
+    # Two ways to arrive here and they are not the same news. A proxy that
+    # died left the last session with no way out and its log says why; one
+    # that is running was started from a declaration that has since moved,
+    # which is a replacement rather than a failure and has nothing to explain.
+    if state == "running":
+        return [
+            Notice(
+                text=(
+                    f"{name} was started from an older declaration of this "
+                    "boundary, so it is being replaced. A session reaching it "
+                    "would have got the policy, the resolvers or the image "
+                    "this project no longer declares."
+                ),
+                urgency="progress",
+            )
+        ]
+    return [
+        Notice(
+            text=(
+                f"The previous {name} was {state} rather than running, so the "
+                "last session it was meant to carry had no way out. Replacing "
+                "it; what it said before it stopped:"
+            ),
+            urgency="warning",
+        ),
+        *[
+            Notice(text=line, urgency="detail", indent=1)
+            for line in (spoken.splitlines() or ["nothing at all"])
+        ],
+    ]
+
+
+def proxy_matches(name: str, declaration: str, engine: ContainerEngine) -> bool:
+    """Whether a running proxy was started from the declaration in force now.
+
+    The same question :func:`image_matches` asks of an image, and missing for
+    the proxy until a change to the declaration failed to reach one. A proxy
+    is started once and the declaration goes on moving -- the policy, the
+    resolvers, the pinned image -- so every later edit landed in the
+    repository and never in the container a session reached. Measured: a
+    ``--dns`` flag added, a launch run, and the proxy found running and left
+    exactly as it was, with the launch reporting the boundary it was supposed
+    to have.
+
+    A proxy carrying no label is one started before this existed and is
+    treated as stale, for the reason an unlabelled image is: replacing it
+    costs a second, and trusting it costs a session behind a boundary nobody
+    can identify.
+    """
+    try:
+        labelled = sh.Command(engine.binary)(
+            "inspect",
+            "--format",
+            f'{{{{index .Config.Labels "{PROXY_LABEL}"}}}}',
+            name,
+        )
+    except (sh.CommandNotFound, sh.ErrorReturnCode):
+        return False
+    return str(labelled).strip() == declaration_digest(declaration)
+
+
+def attached(name: str, network: str, engine: ContainerEngine) -> bool:
+    """Whether this container is on that network, asked of the engine.
+
+    The third piece of the egress state, and the one a launcher is most
+    likely to assume rather than ask. A proxy is *running* and a proxy is
+    *reachable from the session's network* are different facts that come
+    apart in ordinary ways: the operator removes the network while the proxy
+    stays up, or the connect half of a two-command start fails after the run
+    half succeeded. Either leaves a proxy answering ``true`` to every
+    question a launcher thought to ask, on a network the session is not on.
+
+    What that costs is worth spelling, because it is not a timeout. The
+    session resolves ``egress`` through the internal network's resolver,
+    which has no record of a container that never joined -- so every request
+    fails at DNS, and the runtime reports it as the operator's internet or
+    DNS being broken. Nothing in that sentence is true, and nothing in it
+    mentions a proxy.
+    """
+    try:
+        found = sh.Command(engine.binary)(
+            "inspect",
+            "--format",
+            "{{range $name, $_ := .NetworkSettings.Networks}}{{$name}} {{end}}",
+            name,
+        )
+    except (sh.CommandNotFound, sh.ErrorReturnCode):
+        return False
+    return network in str(found).split()
+
+
+def proxy_address(egress: SessionEgress, project: str, engine: ContainerEngine) -> str:
+    """Where the proxy sits on the session's network, asked after it joined.
+
+    The one fact the session's environment cannot be assembled without, and
+    the one nothing could hold in advance: it is assigned when the container
+    joins the network. Reaching for a name instead is what put a resolver on
+    an internal network and left the proxy unable to resolve anything, so the
+    address is asked for here rather than designed around.
+    """
+    try:
+        found = sh.Command(engine.binary)(
+            "inspect",
+            "--format",
+            f'{{{{with index .NetworkSettings.Networks "{egress.network_name(project)}"}}}}'
+            "{{.IPAddress}}{{end}}",
+            egress.proxy_name(project),
+        )
+    except (sh.CommandNotFound, sh.ErrorReturnCode):
+        return ""
+    return str(found).strip()
+
+
+def start_egress(
+    egress: SessionEgress, project: str, engine: ContainerEngine, root: Path
+) -> str:
+    """Bring up the internal network and the proxy bridged out of it.
+
+    Idempotent, and idempotent one piece at a time rather than as a whole:
+    the network can outlive a proxy the operator stopped, the proxy can
+    outlive the network it was attached to, and a run that treated any pair
+    of the three as one fact would leave a session attached to a network with
+    nothing on the far side of it -- which is the failure mode the filtered
+    posture exists to avoid, arrived at by the launcher itself.
+
+    The attachment is the piece an earlier version assumed. It returned as
+    soon as the proxy was *running*, so a proxy that had lost its place on the
+    internal network -- or never taken one, the connect half of the start
+    having failed after the run half succeeded -- was found running and left
+    exactly as it was, on every launch afterwards. :func:`attached` is what
+    turns that from a permanent state into a repair.
+
+    The rendered configuration is written into the checkout's scratch
+    directory rather than piped in, for the reason :func:`build_image` writes
+    the Dockerfile there: what the proxy is enforcing should be readable as a
+    file rather than reconstructed from a declaration and a memory of which
+    version was running.
+    """
+    if not egress.filtered():
+        return ""
+    client = sh.Command(engine.binary)
+    # Read here rather than declared, for the reason the terminal handoff and
+    # the container client are: this is a fact about the machine, and the
+    # declaration it would otherwise sit in is hashed into the ownership
+    # digest. A launch is the only place that can answer it.
+    resolvers = egress.resolvers_for(host_resolv_conf())
+    declaration = egress.declaration(resolvers)
+    network = egress.network_name(project)
+    # The network first, because rebuilding it takes the proxy with it — a
+    # network with a container attached refuses to go, and every posture the
+    # network carries is one the proxy inherited when it joined.
+    if network_present(network, engine) and not network_matches(
+        network, declaration, engine
+    ):
+        Notice(
+            text=(
+                f"{network} was created under an older declaration of this "
+                "boundary — a network keeps the posture it was created with, "
+                "so its resolver, its isolation and everything a container "
+                "inherits by joining it are that older answer. Rebuilding it "
+                "and the proxy on it."
+            ),
+            urgency="progress",
+        ).say()
+        for argv in egress.teardown_arguments(project):
+            # Every exit code is acceptable: removing a piece already gone
+            # reports an error naming exactly the absence this wanted.
+            client(*argv, _ok_code=list(range(256)))
+    if not network_present(network, engine):
+        client(*egress.network_arguments(project, declaration_digest(declaration)))
+    if running(egress.proxy_name(project), engine) and proxy_matches(
+        egress.proxy_name(project), declaration, engine
+    ):
+        if attached(egress.proxy_name(project), egress.network_name(project), engine):
+            return proxy_address(egress, project, engine)
+        # Connecting a running container is the repair rather than restarting
+        # it, because the proxy is shared: another checkout's session may be
+        # reaching the network through this same container right now, and
+        # taking it down to fix an attachment it already has would break a
+        # session that was working to mend one that was not.
+        try:
+            client(*egress.connect_arguments(project))
+        except sh.ErrorReturnCode as error:
+            raise typer.BadParameter(
+                f"{egress.proxy_name(project)} is running but is not on "
+                f"{egress.network_name(project)}, and joining it failed: "
+                f"{error.stderr.decode('utf-8', 'replace').strip()}. A session "
+                "opened now would have no address to send to — the proxy is "
+                "reached at the address it holds on that network, and it "
+                "holds none. Remove the pair with `harness egress --down` and "
+                "let the next launch rebuild them, or open the session with "
+                "--unsandboxed."
+            ) from error
+        return proxy_address(egress, project, engine)
+    # A proxy that is here and not being kept is one this has to account for
+    # before it goes: dead, in which case its log is the only record of why,
+    # or started from a declaration that has since moved. Either way the name
+    # is taken, so `run --name` would refuse and the refusal would name the
+    # collision rather than the cause.
+    for notice in departed(egress, project, engine):
+        notice.say()
+    scratch = root / "tmp"
+    scratch.mkdir(parents=True, exist_ok=True)
+    configuration = scratch / "egress.conf"
+    configuration.write_text(egress.enforced().render())
+    for notice in handed_resolvers(resolvers):
+        notice.say()
+    try:
+        client(
+            *egress.proxy_arguments(
+                project, configuration, resolvers, declaration_digest(declaration)
+            )
+        )
+        client(*egress.connect_arguments(project))
+    except sh.ErrorReturnCode as error:
+        raise typer.BadParameter(
+            f"Could not start {egress.proxy_name(project)}, so this session "
+            "would open on an internal network with no way out of it. The "
+            "policy it was given is at "
+            f"{configuration}; open the session with --unsandboxed, or "
+            "declare `mode='bridge'` on the image's egress to run without "
+            "an egress boundary."
+        ) from error
+    settled(egress, project, engine, configuration)
+    return proxy_address(egress, project, engine)
+
+
+def settled(
+    egress: SessionEgress,
+    project: str,
+    engine: ContainerEngine,
+    configuration: Path,
+    grace: float = 2.0,
+) -> None:
+    """Confirm the proxy is still up a moment after being told to start.
+
+    ``run --detach`` answers whether the container was *created*, which is a
+    different question from whether the program in it is still running --
+    measured, and the difference is the whole of this bug. Squid reads its
+    configuration at startup and exits on a line it will not accept, and by
+    then the launcher has its zero exit code and has moved on to say the
+    boundary is up.
+
+    So the start is waited out rather than believed. ``grace`` is the whole
+    window and it is slept through rather than polled, because a proxy that
+    comes up and dies a second later would satisfy a poll that stopped at the
+    first sight of it running. Paid once per proxy rather than once per
+    launch: a later session finds it up and returns before reaching here.
+    """
+    time.sleep(grace)
+    name = egress.proxy_name(project)
+    if running(name, engine):
+        return
+    spoken = proxy_log(name, engine)
+    raise typer.BadParameter(
+        f"{name} started and then stopped within {grace:g}s, so this session "
+        "would open on an internal network with nothing bridged out of it. "
+        f"The configuration it was given is at {configuration}. What it said "
+        "before it stopped:\n" + (spoken or "nothing at all")
+    )
+
+
+def record_boundary(lease: Lease, egress: SessionEgress, root: Path) -> None:
+    """Write down what this session is confined by, for the gate that explains it.
+
+    The mount table is a launch fact and the dispatcher that has to explain a
+    refusal was compiled long before it. Nothing else bridges that: the
+    dispatcher runs as a bare script with no way to ask the container runtime
+    anything, and a refusal it cannot attribute reaches the agent as
+    ``Read-only file system`` -- which is a broken disk, not a boundary, and
+    is debugged as one.
+
+    Written on every contained launch rather than once, because a lease
+    changes when a sibling worktree appears or goes, and a stale table would
+    attribute a refusal to a mount that is no longer there. An uncontained
+    launch writes nothing and the reader treats absence as "no boundary to
+    speak of", which is exactly what it is.
+    """
+    ledger = root / ".lup" / "boundary.json"
+    ledger.parent.mkdir(parents=True, exist_ok=True)
+    ledger.write_text(
+        json.dumps(
+            {
+                "read_only": sorted(lease.read_only.values()),
+                "write_refusals": list(WRITE_REFUSAL_MARKERS),
+                "allowed_hosts": sorted(item.host for item in egress.admits),
+            },
+            indent=2,
+        )
+    )
+
+
+class Spoken(BaseModel, frozen=True):
+    """What one command inside a container said, and whether it worked.
+
+    Two fields rather than one because reading the second out of the first is
+    what a first draft did and it was wrong within the hour: a lookup that
+    failed and a lookup that succeeded were told apart by sniffing the answer
+    for a phrase, and the phrase was one of three the failure could produce.
+    Whether a command worked is known exactly at the moment it runs, and
+    carrying it is cheaper than recovering it.
+    """
+
+    worked: bool = False
+    text: str = Field(default="", description="Its own words, either way")
+
+
+class NetworkLeg(BaseModel, frozen=True):
+    """One network a container is on, and whether it offers a way off it.
+
+    The gateway is the field this exists for. A proxy is the only process
+    meant to be on both sides of the boundary, and "on two networks" says
+    nothing about whether either of them routes anywhere -- an ``--internal``
+    network is precisely one that does not. A report listing membership
+    without it describes a container that looks correctly attached and can
+    reach nothing.
+    """
+
+    network: str = Field(description="What the network is called")
+    address: str = Field(default="", description="The container's address on it")
+    gateway: str = Field(
+        default="", description="What it routes through there, empty for internal"
+    )
+
+    def sentence(self) -> str:
+        """This leg as one line, saying plainly when it leads nowhere."""
+        through = f"via {self.gateway}" if self.gateway else "no gateway"
+        return f"{self.network} at {self.address or 'no address'} — {through}"
+
+
+class EgressState(BaseModel, frozen=True):
+    """What this project's egress infrastructure is actually doing, asked.
+
+    The gap this fills is the one the whole boundary fell into. A launch
+    printed what the *declaration* said -- filtered, through this proxy, these
+    denials -- and nothing anywhere asked the engine whether any of it was so.
+    Measured: a session opening behind a proxy whose name it could not
+    resolve, reporting every request as the operator's internet being down.
+
+    Held as a model rather than printed as it is gathered so the verdict can
+    be computed from the whole picture. Which of these facts is wrong decides
+    where a reader goes next, and no single one of them says on its own.
+    """
+
+    network: str = Field(description="The internal network this project declares")
+    proxy: str = Field(description="The container bridged out of it")
+
+    network_exists: bool = False
+    dns_enabled: bool = False
+    proxy_exists: bool = False
+    proxy_running: bool = False
+    proxy_status: str = Field(
+        default="", description="What the engine says about the container's state"
+    )
+    attached: bool = False
+    aliases: list[str] = Field(
+        default=[], description="Names the proxy answers to on that network"
+    )
+    address: str = Field(default="", description="Its address there, if it has one")
+    log: str = Field(
+        default="",
+        description=(
+            "What the proxy last said. For a stopped one that is why it "
+            "stopped; for a running one it is the access and error lines "
+            "behind whatever a session is seeing, which is where a refusal "
+            "and a failure to reach an origin are told apart -- squid "
+            "answers a denied request and an unreachable one with different "
+            "codes and says which in its own log"
+        ),
+    )
+    legs: list[NetworkLeg] = Field(
+        default=[],
+        description=(
+            "Every network the proxy is on, with what each routes through. "
+            "The proxy is the one process meant to be on both sides, so this "
+            "is where a proxy that joined the session's network and lost its "
+            "way out of the other one shows up -- a state in which every "
+            "question asked so far answers correctly and nothing works"
+        ),
+    )
+    route: str = Field(
+        default="",
+        description=(
+            "The default route the kernel inside the proxy would actually "
+            "use, which is the question a per-network gateway does not "
+            "answer. Only one of a container's networks provides it and "
+            "netavark installs none for an internal one, so a proxy on two "
+            "networks that each *record* a gateway can hold no default route "
+            "at all — and every packet it sends to a public address then "
+            "fails instantly rather than timing out. Read out of "
+            "``/proc/net/route``, which is a file rather than a tool: the "
+            "proxy image carries no ``ip``, and a probe needing one would "
+            "report a missing tool as a missing route"
+        ),
+    )
+    started_with: str = Field(
+        default="",
+        description=(
+            "The command the engine records this container as having been "
+            "created with, read back rather than reconstructed. What a "
+            "launcher *asked* for and what a container *has* are two things, "
+            "and three round trips went on the difference: a flag added to "
+            "the arguments and never applied because a running proxy was "
+            "reused, and then applied and apparently undone by a later "
+            "`network connect`. Printing the intent would have shown the "
+            "intent both times"
+        ),
+    )
+    resolver: str = Field(
+        default="",
+        description=(
+            "The nameservers the proxy itself is using. A proxy is the one "
+            "process that has to resolve the *destination*, and it does that "
+            "on its own network rather than the session's -- so a session "
+            "that resolves the proxy perfectly can still be answered 503 by "
+            "a proxy that cannot resolve anything"
+        ),
+    )
+    answers_locally: bool = Field(
+        default=False,
+        description=(
+            "Whether the proxy can resolve the alias its own network's "
+            "resolver holds. Beside :attr:`reached` this is the pair that "
+            "matters: a resolver chain answering internal names and refusing "
+            "public ones is being consulted and stopping early, which is a "
+            "different fault from one that cannot be reached at all and has "
+            "a different repair"
+        ),
+    )
+    reached: bool = Field(
+        default=False,
+        description=(
+            "Whether the proxy turned a public name into an address of its "
+            "own. Separate from :meth:`resolvable`, which is the *session's* "
+            "question: the two happen on different networks and were "
+            "conflated by having only one, so a session resolving `egress` "
+            "perfectly and a proxy resolving nothing both read as the same "
+            "kind of failure"
+        ),
+    )
+    upstream: str = Field(
+        default="",
+        description=(
+            "What the proxy got when it looked a public name up, or what "
+            "went wrong. The question a 503 on CONNECT poses and nothing "
+            "else here answers: squid returns it both for a name it could "
+            "not resolve and for an origin it could not reach, and the "
+            "repairs for those are not the same"
+        ),
+    )
+
+    def addressable(self) -> bool:
+        """Whether a session on this network has a proxy it can send to.
+
+        Every clause was a candidate in turn, and the one that is gone is
+        instructive: this used to ask whether an *alias* resolved, which is a
+        question that could be answered yes by a network whose resolver then
+        refused every public name the proxy needed. Addressing the proxy
+        where it is removed the question rather than answering it.
+
+        A proxy on the engine's bridge and not on this network is invisible
+        to a session on it, and one with no address there is the same thing
+        said in the engine's own terms.
+        """
+        return (
+            self.network_exists
+            and self.proxy_running
+            and self.attached
+            and bool(self.address)
+        )
+
+    def notices(self) -> list[Notice]:
+        """This state as a reader needs it: each fact, then what it adds up to.
+
+        Every fact printed rather than only the failing one, because which
+        combination holds is what decides where to go next -- a network with
+        no DNS is a different repair from a proxy that is not on it, and both
+        look identical from inside a session.
+        """
+        state = self.proxy_status or ("running" if self.proxy_running else "absent")
+        return [
+            Notice(text=f"network {self.network}", urgency="detail"),
+            Notice(
+                text=f"exists: {self.network_exists}, dns: {self.dns_enabled}",
+                urgency="ready" if self.dns_enabled else "refusal",
+                indent=1,
+            ),
+            Notice(text=f"proxy {self.proxy}", urgency="detail"),
+            *(
+                [
+                    Notice(
+                        text=f"started with: {self.started_with}",
+                        urgency="detail",
+                        indent=1,
+                    )
+                ]
+                if self.started_with
+                else []
+            ),
+            Notice(
+                text=f"state: {state}",
+                urgency="ready" if self.proxy_running else "refusal",
+                indent=1,
+            ),
+            Notice(
+                text=(
+                    f"on this network: {self.attached}"
+                    + (f" as {', '.join(self.aliases)}" if self.aliases else "")
+                    + (f" at {self.address}" if self.address else "")
+                ),
+                urgency="ready" if self.attached else "refusal",
+                indent=1,
+            ),
+            *(
+                [Notice(text="its networks:", urgency="detail", indent=1)]
+                if self.legs
+                else []
+            ),
+            *[
+                Notice(
+                    text=leg.sentence(),
+                    urgency="ready" if leg.gateway else "warning",
+                    indent=2,
+                )
+                for leg in self.legs
+            ],
+            *(
+                [
+                    Notice(
+                        text=(
+                            "default route: "
+                            + (self.route or "none — it reaches only its own networks")
+                        ),
+                        urgency="ready" if self.route else "refusal",
+                        indent=1,
+                    ),
+                    Notice(
+                        text=f"resolving through: {self.resolver or 'nothing it names'}",
+                        urgency="detail",
+                        indent=1,
+                    ),
+                    Notice(
+                        text=f"a public name resolves to: {self.upstream}",
+                        urgency="ready" if self.reached else "refusal",
+                        indent=1,
+                    ),
+                    *(
+                        [
+                            Notice(
+                                text=(
+                                    "its own network's names resolve: "
+                                    f"{self.answers_locally}"
+                                ),
+                                urgency="detail",
+                                indent=1,
+                            )
+                        ]
+                        # Only where a public name failed. This tells two
+                        # failures apart and says nothing otherwise: a proxy
+                        # given its own nameservers stops holding the internal
+                        # network's, so `False` here is what success looks
+                        # like and calling it a fault would be a lie.
+                        if not self.reached
+                        else []
+                    ),
+                ]
+                if self.proxy_running
+                else []
+            ),
+            *(
+                [Notice(text="what it last said:", urgency="detail", indent=1)]
+                if self.log
+                else []
+            ),
+            *[
+                Notice(text=line, urgency="detail", indent=2)
+                for line in self.log.splitlines()
+            ],
+            *self.verdict(),
+        ]
+
+    def routes(self) -> bool:
+        """Whether the proxy holds a default route the kernel would use.
+
+        Asked of the routing table rather than of the networks, because those
+        two answers came apart on the machine this was written for: both legs
+        recorded a gateway and the container reached nothing. Only one of a
+        container's networks provides the default route, netavark installs
+        none for an internal one, and ``podman inspect`` reports a network's
+        ``.1`` address as its gateway either way. Membership said yes,
+        metadata said yes, and every packet failed instantly.
+        """
+        return bool(self.route)
+
+    def shadowed(self) -> list[Notice]:
+        """Name the one fault the facts above single out, when they do.
+
+        A route out, a resolver list holding a working server, names of its
+        own network resolving, and a public name not: that combination has
+        one explanation. glibc takes the first authoritative answer it gets
+        and stops, so a resolver that says NXDOMAIN for everything outside
+        its own network hides every server listed after it — including the
+        one that would have answered.
+
+        Said only when every clause holds. A verdict that guessed from two of
+        them would be the sixth theory this boundary has produced by reading,
+        and the previous five were all refuted by measuring.
+        """
+        if not (self.route and self.answers_locally and self.resolver):
+            return []
+        return [
+            Notice(
+                text=(
+                    "It has a route out and a working nameserver in its list, "
+                    "and it resolves its own network's names — so the chain is "
+                    "answering and stopping early. The first resolver refuses "
+                    "public names authoritatively, which hides every server "
+                    "after it."
+                ),
+                urgency="detail",
+                indent=1,
+            )
+        ]
+
+    def verdict(self) -> list[Notice]:
+        """What the facts above add up to, in the words a session would use.
+
+        Three answers rather than two, and the third is here because writing
+        two reproduced the exact failure this whole report exists to catch: a
+        headline saying the boundary was fine, standing over a proxy that
+        could not resolve anything. Reaching the proxy and the proxy reaching
+        the world are separate legs, they fail separately, and a reader told
+        only about the first goes looking in the wrong place.
+        """
+        recovery = Notice(
+            text=(
+                "`harness egress --down` removes both pieces so the next "
+                "launch rebuilds them; `--unsandboxed` opens on the host."
+            ),
+            urgency="detail",
+            indent=1,
+        )
+        if not self.addressable():
+            return [
+                Notice(
+                    text=(
+                        "A session has no address for the proxy on this "
+                        "network, so every request in it fails before it is "
+                        "sent — which the runtime reports as the operator's "
+                        "own internet or DNS being down."
+                    ),
+                    urgency="refusal",
+                ),
+                recovery,
+            ]
+        if not self.reached:
+            return [
+                Notice(
+                    text=(
+                        f"A session can reach the proxy at {self.address}, "
+                        "and the proxy cannot reach the world — so requests "
+                        "arrive and are "
+                        "answered 503 rather than refused. The boundary is "
+                        "standing; what is behind it is not."
+                    ),
+                    urgency="refusal",
+                ),
+                *(
+                    self.shadowed()
+                    or [
+                        Notice(
+                            text=(
+                                "It holds no default route, so it reaches only "
+                                "its own networks — which is why it resolves "
+                                "nothing: every nameserver it lists is "
+                                "unreachable."
+                                if not self.routes()
+                                else "That is the proxy's own resolution or "
+                                "its route out, not the session's network. "
+                                "Its log above and its networks say which."
+                            ),
+                            urgency="detail",
+                            indent=1,
+                        )
+                    ]
+                ),
+            ]
+        return [
+            Notice(
+                text=(
+                    f"A session reaches the proxy at {self.address} and is "
+                    "carried out through it."
+                ),
+                urgency="ready",
+            )
+        ]
+
+
+def egress_state(
+    egress: SessionEgress,
+    project: str,
+    engine: ContainerEngine,
+    resolving: str = "api.anthropic.com",
+) -> EgressState:
+    """Ask the engine what this project's boundary is, rather than what it declares.
+
+    Every field comes off an inspect rather than off a record this launcher
+    kept. A launcher that remembered would be reading a file: the operator may
+    have removed either piece between launches, a sibling checkout may have
+    brought them up, and the state that mattered here -- an alias recorded on
+    a network that cannot serve it -- is one nothing would have thought to
+    write down.
+    """
+    client = sh.Command(engine.binary)
+    network = egress.network_name(project)
+    proxy = egress.proxy_name(project)
+
+    def asked(*words: str) -> str:
+        """One inspect, with absence answering empty rather than raising."""
+        try:
+            return str(client(*words)).strip()
+        except (sh.CommandNotFound, sh.ErrorReturnCode):
+            return ""
+
+    dns = asked("network", "inspect", "--format", "{{.DNSEnabled}}", network)
+    status = asked("inspect", "--format", "{{.State.Status}}", proxy)
+    joined = asked(
+        "inspect",
+        "--format",
+        "{{range $name, $_ := .NetworkSettings.Networks}}{{$name}} {{end}}",
+        proxy,
+    ).split()
+    legs = [
+        NetworkLeg(
+            network=leg,
+            address=asked(
+                "inspect",
+                "--format",
+                f'{{{{with index .NetworkSettings.Networks "{leg}"}}}}'
+                "{{.IPAddress}}{{end}}",
+                proxy,
+            ),
+            gateway=asked(
+                "inspect",
+                "--format",
+                f'{{{{with index .NetworkSettings.Networks "{leg}"}}}}'
+                "{{.Gateway}}{{end}}",
+                proxy,
+            ),
+        )
+        for leg in joined
+    ]
+    names = asked(
+        "inspect",
+        "--format",
+        f'{{{{with index .NetworkSettings.Networks "{network}"}}}}'
+        "{{range .Aliases}}{{.}} {{end}}{{end}}",
+        proxy,
+    ).split()
+    address = asked(
+        "inspect",
+        "--format",
+        f'{{{{with index .NetworkSettings.Networks "{network}"}}}}'
+        "{{.IPAddress}}{{end}}",
+        proxy,
+    )
+
+    def within(*words: str) -> Spoken:
+        """One command run inside the proxy, answering in its own words either way.
+
+        Asked of the proxy rather than of the session, because the two
+        resolve on different networks and the interesting failure is the
+        proxy's: it is the one process that has to turn the *destination*
+        into an address, and a session can reach it perfectly while it
+        reaches nothing.
+
+        A failure returns what the engine said rather than the empty string
+        this module's other probes use. Empty is the right answer for an
+        inspect, where absence is the fact being reported; here it would put
+        a name that did not resolve and a program the image does not carry
+        into one indistinguishable answer.
+        """
+        if status != "running":
+            return Spoken()
+        try:
+            return Spoken(worked=True, text=str(client("exec", proxy, *words)).strip())
+        except sh.CommandNotFound:
+            return Spoken(text=f"{engine.binary} is not on PATH")
+        except sh.ErrorReturnCode as failure:
+            said = failure.stderr.decode("utf-8", "replace").strip()
+            return Spoken(
+                text=said or f"exited {failure.exit_code} with nothing to say"
+            )
+
+    # `getent` exits 2 on a name it cannot find and says nothing, so the
+    # question is carried into the answer and the verdict comes off `worked`.
+    looked = within("getent", "hosts", resolving)
+    # Asked only where the session's network runs a resolver at all, which
+    # is off by default and for this exact reason: a resolver there answers
+    # names on that network and refuses every other one authoritatively, and
+    # glibc stops at the first authoritative answer -- so it stands in front
+    # of the one server that could resolve a public name. Where a project
+    # turns it back on, this pair is what tells that shadowing apart from a
+    # resolver chain that is simply not answering.
+    known = (
+        within("getent", "hosts", egress.proxy_name(project))
+        if egress.resolves_names
+        else Spoken()
+    )
+    routed = default_route(within("cat", "/proc/net/route").text)
+    # Podman records it; Docker does not, and an empty answer there is an
+    # absence of the field rather than of the container.
+    created = asked("inspect", "--format", '{{join .Config.CreateCommand " "}}', proxy)
+    nameservers = " ".join(
+        line.split()[1]
+        for line in within("cat", "/etc/resolv.conf").text.splitlines()
+        if line.startswith("nameserver ")
+    )
+    return EgressState(
+        network=network,
+        proxy=proxy,
+        resolver=nameservers,
+        legs=legs,
+        route=routed,
+        started_with=created,
+        reached=looked.worked,
+        answers_locally=known.worked,
+        upstream=f"{resolving} -> {looked.text or 'no answer'}",
+        network_exists=bool(dns),
+        dns_enabled=dns == "true",
+        proxy_exists=bool(status),
+        proxy_running=status == "running",
+        proxy_status=status,
+        attached=network in joined,
+        aliases=names,
+        address=address,
+        log=proxy_log(proxy, engine),
+    )
+
+
+def report_egress(egress: SessionEgress, root: Path, down: bool) -> None:
+    """Say what network boundary this project has, and remove it when asked.
+
+    Removal names each piece separately and tolerates a piece already gone:
+    the operator may have stopped the proxy by hand, and a teardown that
+    failed on the half already in the state it wanted would leave the other
+    half standing while reporting an error.
+    """
+    project = root.name
+    client = detected_client()
+    if client is None:
+        Notice(
+            text="No container client answered, so nothing of this is running.",
+            urgency="warning",
+        ).say()
+        return
+    for argv in egress.teardown_arguments(project) if down else []:
+        # Every exit code is acceptable here and nowhere else: removing a
+        # container that is already gone reports an error naming exactly the
+        # absence this call was asked to produce.
+        sh.Command(client.binary)(*argv, _ok_code=list(range(256)))
+    if down:
+        Notice(text="Removed.", urgency="ready").say()
+        return
+    for notice in egress.notice(project):
+        notice.say()
+    if not egress.filtered():
+        return
+    # What is declared, then what is running. Only the first was ever printed,
+    # and the two came apart in the way that matters: the notice above says
+    # traffic is filtered through a proxy, which was true, while the session
+    # could not resolve the name it addresses that proxy by.
+    for notice in egress_state(egress, project, client.engine()).notices():
+        notice.say()
+
+
+def network_matches(name: str, declaration: str, engine: ContainerEngine) -> bool:
+    """Whether this network was created under the declaration in force now.
+
+    The third thing in this design that was reused whatever the declaration
+    said, and the one that would have swallowed the repair for the other two.
+    A network is created once and outlives every launch, so the posture it
+    was first created under is the posture it keeps -- and the flag that
+    stops its resolver shadowing the proxy's would never have reached a
+    machine whose network already existed.
+
+    An unlabelled network is one created before this existed and counts as
+    stale, for the reason an unlabelled image and an unlabelled proxy do.
+    """
+    try:
+        labelled = sh.Command(engine.binary)(
+            "network",
+            "inspect",
+            "--format",
+            f'{{{{index .Labels "{PROXY_LABEL}"}}}}',
+            name,
+        )
+    except (sh.CommandNotFound, sh.ErrorReturnCode):
+        return False
+    return str(labelled).strip() == declaration_digest(declaration)
+
+
+def network_present(name: str, engine: ContainerEngine) -> bool:
+    """Whether this network exists, asked of the engine rather than guessed."""
+    try:
+        sh.Command(engine.binary)("network", "inspect", name)
+    except (sh.CommandNotFound, sh.ErrorReturnCode):
+        return False
+    return True
+
+
+def build_image(
+    image: Image,
+    manifest: Manifest,
+    tag: str,
+    engine: ContainerEngine,
+    root: Path,
+    shown: int = 4,
+) -> None:
+    """Build this project's image from the declaration, in the open.
+
+    The Dockerfile is written into the checkout's scratch directory rather
+    than piped in, so an operator who wants to know what was built can read
+    the file the build actually used instead of reconstructing it.
+
+    Every line the build writes is kept, and the terminal shows the last
+    ``shown`` of them in place. The distinction matters more than it looks:
+    the *file* is complete, so nothing a reader might need was thrown away,
+    and the *display* is a window onto it rather than a shortened copy. A
+    cold build here is hundreds of package lines, and putting them in the
+    scrollback buries whatever the launch said before them -- which is
+    exactly the boundary report a session most needs to have read.
+
+    Two lines are printed before anything runs, because a build with a live
+    region and no header is a session that appears to have stopped: what is
+    being built, and where its full output is being written.
+    """
+    scratch = root / "tmp"
+    scratch.mkdir(parents=True, exist_ok=True)
+    dockerfile = scratch / "agent.Dockerfile"
+    rendered = image.dockerfile(manifest)
+    dockerfile.write_text(rendered)
+    log = scratch / "agent-build.log"
+    argv = [
+        "build",
+        "-t",
+        tag,
+        "--label",
+        f"{DECLARATION_LABEL}={declaration_digest(rendered)}",
+        "-f",
+        str(dockerfile),
+        "--build-arg",
+        f"UID={root.stat().st_uid}",
+        "--build-arg",
+        f"GID={root.stat().st_gid}",
+        str(scratch),
+    ]
+    Notice(text=f"Building {tag} from {dockerfile}", urgency="progress").say()
+    Notice(text=f"Its output: {log}", urgency="artifact").say()
+    console = Console()
+    recent: deque[str] = deque(maxlen=shown)
+    with log.open("w", encoding="utf-8") as handle:
+        # Transient, so the window closes when the build does and the
+        # scrollback keeps the two header lines rather than a frozen tail of
+        # whatever the last layer happened to say. Off entirely where there
+        # is no terminal to redraw -- a CI log is a file, and a file wants
+        # every line in order, which is what the handle already gets.
+        live = Live(console=console, transient=True) if console.is_terminal else None
+
+        def record(chunk: str) -> None:
+            """Keep every line, and show the last few."""
+            handle.write(chunk)
+            spoken = chunk.rstrip()
+            if not spoken or live is None:
+                return
+            recent.append(spoken)
+            live.update(Text("\n".join(recent), style="dim"))
+
+        try:
+            with live or nullcontext():
+                sh.Command(engine.binary)(
+                    *argv, _out=record, _err_to_out=True, _out_bufsize=1
+                )
+        except sh.ErrorReturnCode as error:
+            for line in recent:
+                typer.echo(line)
+            raise typer.BadParameter(
+                f"Could not build {tag} from {dockerfile}. The declaration is "
+                f"in the project's Image; {log} holds every line of the build, "
+                "and its last ones say which layer failed."
+            ) from error
+
+
+def contained_argv(
+    image: Image,
+    manifest: Manifest,
+    root: Path,
+    human_owned: list[Path],
+    host_config_home: Path | None,
+    credential: Path | None,
+    login: ProviderLogin,
+    engine: ContainerEngine | None = None,
+    interactive: bool = True,
+) -> list[str]:
+    """The argv that opens a session in this project's container.
+
+    Refuses rather than degrades when no container client answers: a launch
+    that asked for the boundary and silently ran without one is exactly the
+    failure the boundary exists to make impossible.
+
+    A client that answers and cannot drive the engine behind it is refused
+    the same way and in different words, because the two failures send an
+    operator to opposite places: one to install a runtime, the other to stop
+    pointing the one they have at somebody else's socket.
+    """
+    if engine is not None:
+        client = engine
+    else:
+        found = detected_client()
+        if found is None:
+            raise typer.BadParameter(
+                "No container client answered, so this session cannot be "
+                "contained. Install docker or podman, or open the session with "
+                "--unsandboxed to run on the host under the semantic policy alone."
+            )
+        if not found.drives_its_server():
+            raise typer.BadParameter(found.consequence())
+        client = found.engine()
+    rendered = image.dockerfile(manifest)
+    tag = image_tag(rendered)
+    if not image_matches(tag, rendered, client):
+        build_image(image, manifest, tag, client, root)
+    name_for_checkout(tag, checkout_tag(root), client)
+    reached_at = start_egress(image.egress, root.name, client, root)
+    for notice in image.egress.notice(root.name):
+        notice.say()
+    for notice in superseded_volume_notice(root, client, existing_volumes(client)):
+        notice.say()
+    # Started before the container rather than beside it, because a pipe with
+    # no reader blocks its writer: a sign-in that raced the listener would
+    # hang on the one step the whole bridge exists to unblock.
+    handing = image.browser.serve()
+    for notice in image.browser.notice(handing is not None):
+        notice.say()
+    lease = lease_for(root, human_owned)
+    record_boundary(lease, image.egress, root)
+    # Read on the host and passed in, never resolved inside: the file that
+    # answers "where does this remote point" is `.git/config`, which the
+    # container can write, so a rewrite decided in there is a rewrite the
+    # confined thing chose for itself.
+    environ = os.environ  # lup: ignore[os-environ]
+    token = (
+        environ[image.forge.token_variable]
+        if image.forge.token_variable in environ
+        else ""
+    )
+    rewrites = remote_rewrites(root, image.forge.host)
+    # Read on the host for the same reason the rewrites are: `.git/config` is
+    # writable from inside, so an identity resolved in there would be one the
+    # confined thing chose for itself.
+    identity = committer(root)
+    for notice in image.forge.notice(token, rewrites, identity):
+        notice.say()
+    # The operator's terminal, answered here rather than in the declaration
+    # the digest hashes. Same rule as the container client and for the same
+    # measured reason: a `TERM` folded into the declaration would report the
+    # generated trees stale on any machine whose terminal differed.
+    terminal = image.terminal.for_host(environ)
+    for notice in terminal.notices():
+        notice.say()
+    return image.session_arguments(
+        tag=tag,
+        checkout=root,
+        uid=root.stat().st_uid,
+        gid=root.stat().st_gid,
+        writable=lease.writable,
+        read_only=lease.read_only,
+        state_volume=state_volume_name(root),
+        config_home_env=login.config_home_env,
+        credential_file=login.credentials_file,
+        credential_renewable=login.renewable,
+        credential=credential,
+        host_config_home=host_config_home,
+        engine=client,
+        forge_token=token,
+        rewrites=rewrites,
+        identity=identity,
+        browser_directory=handing,
+        terminal=terminal.environment,
+        interactive=interactive,
+        proxy_address=reached_at,
+    )

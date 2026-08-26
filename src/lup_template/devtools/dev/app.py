@@ -72,29 +72,6 @@ def init_rename_package_cmd(
     init.rename_package(new_name, dry_run)
 
 
-@init_app.command("ownership")
-def init_ownership_cmd(
-    unlock: Annotated[
-        list[str],
-        typer.Option(
-            "--unlock", help="Stop surfacing every agent edit to this file as an ask"
-        ),
-    ] = [],
-    lock: Annotated[
-        list[str],
-        typer.Option("--lock", help="Surface every agent edit to this file as an ask"),
-    ] = [],
-    dry_run: Annotated[
-        bool,
-        typer.Option(
-            "--dry-run", "-n", help="Show what would change without modifying files"
-        ),
-    ] = False,
-) -> None:
-    """Report or change which files the human author owns, then regenerate."""
-    init.file_ownership(lock, unlock, dry_run)
-
-
 # -- library commands --
 
 DryRun = Annotated[

@@ -233,3 +233,26 @@ def test_an_unknown_effect_in_a_row_falls_back_to_the_kernel() -> None:
         ).effect
         == "ask"
     )
+
+
+def test_a_note_moved_to_another_declaration_is_not_a_deletion() -> None:
+    """Relocation is the fourth honest way a note leaves a line.
+
+    Survival is asked of the note's words across the whole revision rather
+    than of the line it sat on, so moving one to the declaration it actually
+    concerns is not the act this gate refuses. It bites hardest in a merge,
+    where both sides add at one spot and a note routinely lands against the
+    wrong declaration -- a gate that read the move as a deletion would leave
+    it stranded there permanently.
+    """
+    before = NOTED + "first = 1\nsecond = 2\n"
+    moved = "first = 1\n" + NOTED + "second = 2\n"
+
+    assert verdict("src/a.py", before, moved) == "allow"
+
+
+def test_stripping_the_note_off_standing_code_is_still_denied() -> None:
+    """The other side of the same measurement, so relocation buys no exemption."""
+    before = NOTED + "first = 1\nsecond = 2\n"
+
+    assert verdict("src/a.py", before, "first = 1\nsecond = 2\n") == "deny"

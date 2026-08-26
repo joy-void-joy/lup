@@ -6,9 +6,12 @@ config home without declaring it would leave an application reaching for a
 literal again, which is exactly what the seam rule forbids above the adapter.
 """
 
+import json
+import time
 from pathlib import Path
 
 import pytest
+import sh
 
 from lup.adapters.claude.harness import CLAUDE_DISPATCHER
 from lup.adapters.claude.login import CLAUDE_LOGIN
@@ -67,3 +70,69 @@ def test_a_dispatcher_takes_its_managed_root_from_the_login(
     pins that it still does instead of guarding two literals against drift.
     """
     assert declaration.managed_root_env == login.config_home_env
+
+
+def renewable(filter_text: str, credential: object, tmp_path: Path) -> bool:
+    """Run one runtime's renewal test the way the entrypoint runs it."""
+    written = tmp_path / "credential.json"
+    written.write_text(json.dumps(credential), encoding="utf-8")
+    try:
+        sh.Command("jq")("-e", filter_text, str(written))
+    except sh.ErrorReturnCode:
+        return False
+    return True
+
+
+@pytest.mark.parametrize(
+    ("deadline", "expected"),
+    [(86_400_000, True), (-86_400_000, False)],
+    ids=["renewable", "past renewing"],
+)
+def test_claude_reads_the_refresh_deadline_rather_than_the_access_one(
+    deadline: int, expected: bool, tmp_path: Path
+) -> None:
+    """The distinction the whole field exists for, run through real `jq`.
+
+    An access token expires hourly and renews itself, so a test reading that
+    one would call a healthy login dead every hour and re-seed over it. The
+    fixture holds an expired access token in both cases on purpose: only the
+    refresh deadline moves the answer.
+    """
+    now = int(time.time() * 1000)
+    credential = {
+        "claudeAiOauth": {
+            "expiresAt": now - 3_600_000,
+            "refreshTokenExpiresAt": now + deadline,
+        }
+    }
+
+    assert renewable(CLAUDE_LOGIN.renewable, credential, tmp_path) is expected
+
+
+@pytest.mark.parametrize(
+    "credential",
+    [{}, {"mcpOAuth": {"some-server": {"accessToken": "x"}}}],
+    ids=["empty object", "other credentials but no login"],
+)
+def test_a_file_holding_no_claude_login_is_not_a_renewable_one(
+    credential: object, tmp_path: Path
+) -> None:
+    """A missing deadline must answer "no", not raise and not pass.
+
+    `jq` compares null below every number, so an absent login reads as past
+    renewing -- which is the answer wanted here, and worth pinning because a
+    filter written with `//` or `?` would quietly answer the other way.
+    """
+    assert renewable(CLAUDE_LOGIN.renewable, credential, tmp_path) is False
+
+
+def test_codex_declares_no_renewal_test_because_its_login_states_no_deadline() -> None:
+    """Stated rather than left blank by omission.
+
+    Codex's stored login carries `auth_mode`, its tokens, an account id and
+    `last_refresh` -- when a renewal last succeeded, never when renewing stops
+    working. Reading the `id_token`'s own `exp` in its place would be worse
+    than declaring nothing: that hour passes while the login is still fine, so
+    every launch past the first would re-seed a working credential.
+    """
+    assert CODEX_LOGIN.renewable == ""

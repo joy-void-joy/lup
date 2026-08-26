@@ -52,9 +52,15 @@ def test_claude_checkpoints_before_preflight_and_after_close(
         lambda _composition, _generate_only: events.append("ready") or True,
     )
     monkeypatch.setattr(launch, "project_root", lambda: tmp_path)
-    monkeypatch.setattr(launch, "claude_sandbox_arguments", lambda _plugin: [])
+    monkeypatch.setattr(launch, "ambient_config_home", lambda *a, **k: tmp_path)
+    monkeypatch.setattr(launch, "session_argv", lambda name, *a, **k: [name])
+    monkeypatch.setattr(
+        launch, "claude_sandbox_arguments", lambda _plugin, contained=False: []
+    )
     monkeypatch.setattr(launch, "non_interactive_environment", lambda _env: {})
-    monkeypatch.setattr(launch, "apply_sandbox_environment", lambda *args: None)
+    monkeypatch.setattr(
+        launch, "apply_sandbox_environment", lambda *args, **kwargs: None
+    )
     monkeypatch.setattr(launch, "ClaudeTranscripts", lambda _home: Mock())
     monkeypatch.setattr(
         launch,
@@ -94,9 +100,13 @@ def test_codex_checkpoints_before_preflight_and_after_close(
         lambda _composition, _generate_only: events.append("ready") or True,
     )
     monkeypatch.setattr(launch, "project_root", lambda: tmp_path)
+    monkeypatch.setattr(launch, "ambient_config_home", lambda *a, **k: tmp_path)
+    monkeypatch.setattr(launch, "session_argv", lambda name, *a, **k: [name])
     monkeypatch.setattr(launch, "non_interactive_environment", lambda _environment: {})
     monkeypatch.setattr(
-        launch, "codex_sandbox_arguments", lambda _plugin, _environment, _args: []
+        launch,
+        "codex_sandbox_arguments",
+        lambda _plugin, _environment, _args, contained=False: [],
     )
     monkeypatch.setattr(launch, "CodexWorktreeHomeStore", lambda: store)
     monkeypatch.setattr(launch, "select_codex_home", lambda *args: home)

@@ -24,6 +24,13 @@ import lup.devtools.harness.resolve as resolve
 from lup.codescan.registry import every_rule_retired
 from lup.devtools.dev.issues import EXCLUDED_LABEL
 from lup.devtools.harness.composition import NativeTargets, claude_profile_directory
+from lup.devtools.harness.contained import (
+    image_tag,
+    report_egress,
+    retire_images,
+    superseded_images,
+)
+from lup.harness.image import detected_client
 from lup.devtools.harness.generate import NativeHarnessComposition
 from lup.devtools.harness.profile_app import create_profile_app
 from lup.harness.models import Resumption
@@ -150,6 +157,17 @@ def create_harness_app(
                 help="Skip the conveniences, exactly as a launch does",
             ),
         ] = False,
+        inside: Annotated[
+            bool,
+            typer.Option(
+                "--inside",
+                help=(
+                    "Exercise the image half instead, inside the container a "
+                    "session opens — builds the image and starts the egress "
+                    "boundary if they are not up"
+                ),
+            ),
+        ] = False,
     ) -> None:
         """Exercise the external programs this project expects on this machine.
 
@@ -157,10 +175,17 @@ def create_harness_app(
         -- so somebody setting a machine up hears everything once, where they
         can act on it, and every session afterwards hears only what it lost.
 
-        Only host-side requirements are exercised. What the container image
-        is expected to carry is checked where it is needed rather than here,
-        because a machine that will never run a TypeScript toolchain outside
-        a container is not a machine with a problem.
+        Host-side by default. ``--inside`` asks the other half, behind the
+        argv a session opens with: the image's toolchain, the egress proxy
+        taken component by component, and whether the operator's terminal
+        arrived. That half was declared and unexercised for as long as it had
+        nowhere to run, which is how a preflight reported a healthy machine
+        while the first contained session could not resolve its own proxy.
+
+        The two are separate flags rather than one roster because their costs
+        are not comparable. The host half asks programs their versions; the
+        image half builds an image, starts a proxy, opens a container per
+        requirement, and spends a model call on the last of them.
 
         Exits nonzero when something whose absence costs a capability is not
         working. An advisory alone never fails this: it is advice, and a
@@ -169,8 +194,20 @@ def create_harness_app(
         findings = [
             finding
             for composition in targets.resolve(target, project_root())
-            for finding in launch.report_requirements(
-                composition.recipe.source.requirements, setting_up=not launch_only
+            for finding in (
+                launch.report_inside_requirements(
+                    composition,
+                    composition.recipe.source.plugins[0],
+                    launch.ambient_config_home(
+                        directory.login, Path.home() / ".claude"
+                    ),
+                    directory.login,
+                )
+                if inside
+                else launch.report_requirements(
+                    composition.recipe.source.requirements,
+                    setting_up=not launch_only,
+                )
             )
         ]
         if not findings:
@@ -181,6 +218,67 @@ def create_harness_app(
             for finding in findings
         ):
             raise typer.Exit(1)
+
+    @app.command("image")
+    def image_command(
+        target: Annotated[str, typer.Argument(help=selector)] = targets.every,
+        prune: Annotated[
+            bool,
+            typer.Option(
+                "--prune", help="Remove images no checkout is pointing at any more"
+            ),
+        ] = False,
+    ) -> None:
+        """Render the container image this project's sessions run in.
+
+        Printed rather than written, because a Dockerfile on disk is a second
+        place the toolchain is stated and the first thing to drift from the
+        declaration. A build reads this on stdin -- ``harness image | docker
+        build -f - .`` -- so what is built is what is declared, every time,
+        with nothing in between to edit.
+
+        ``--prune`` sweeps instead of printing. An image is named after the
+        declaration it was built from, which is what lets two checkouts share
+        one -- and means editing the declaration leaves the old image
+        standing rather than replacing it. What goes is every digest tag with
+        no checkout tag on it; what stays is anything a checkout still points
+        at, and the image this declaration would build right now.
+        """
+        for composition in targets.resolve(target, project_root()):
+            source = composition.recipe.source
+            rendered = source.image.dockerfile(source.requirements)
+            if not prune:
+                typer.echo(rendered)
+                continue
+            client = detected_client()
+            if client is None:
+                typer.echo("No container client answered, so nothing was swept.")
+                return
+            finished = superseded_images(client.engine(), image_tag(rendered))
+            if not finished:
+                typer.echo("Nothing superseded — every image has a checkout on it.")
+                return
+            for tag in retire_images(finished, client.engine()):
+                typer.echo(f"removed {tag}")
+
+    @app.command("egress")
+    def egress_command(
+        target: Annotated[str, typer.Argument(help=selector)] = targets.every,
+        down: Annotated[
+            bool,
+            typer.Option("--down", help="Remove the proxy and its network"),
+        ] = False,
+    ) -> None:
+        """Report or remove the network boundary this project's sessions run behind.
+
+        The proxy outlives a session deliberately -- starting one costs a
+        second and every launch would pay it -- which means something has to
+        be able to say what is running and take it away. Without that the
+        only answer is a raw engine command against a name the operator has
+        to know, which is the friction this whole harness exists to remove.
+        """
+        for composition in targets.resolve(target, project_root()):
+            report_egress(composition.recipe.source.image.egress, project_root(), down)
 
     @app.command("serve-resolver-tools")
     def serve_resolver_tools_command() -> None:
@@ -557,6 +655,13 @@ def create_harness_app(
                     help="Open a session the anti-pattern gate leaves alone",
                 ),
             ] = False,
+            unsandboxed: Annotated[
+                bool,
+                typer.Option(
+                    "--unsandboxed",
+                    help="Open the session on the host instead of in the container",
+                ),
+            ] = False,
         ) -> None:
             selection = launch.extract_launch_mode(modes, ctx.args)
             launch.launch_claude(
@@ -569,6 +674,7 @@ def create_harness_app(
                 selection.mode,
                 Resumption(latest=continue_latest, pick=resume, session=session),
                 ignore_antipatterns,
+                unsandboxed,
                 checkpoint,
             )
 
@@ -630,6 +736,13 @@ def create_harness_app(
                     help="Open a session the anti-pattern gate leaves alone",
                 ),
             ] = False,
+            unsandboxed: Annotated[
+                bool,
+                typer.Option(
+                    "--unsandboxed",
+                    help="Open the session on the host instead of in the container",
+                ),
+            ] = False,
         ) -> None:
             selection = launch.extract_launch_mode(modes, ctx.args)
             launch.launch_codex(
@@ -643,6 +756,7 @@ def create_harness_app(
                 selection.mode,
                 Resumption(latest=continue_latest, pick=resume, session=session),
                 ignore_antipatterns,
+                unsandboxed,
                 checkpoint,
             )
 

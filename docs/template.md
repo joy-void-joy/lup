@@ -55,6 +55,7 @@ src/lup_template/
 │   │       │   ├── index.py # The documentation index: what this repository is, and where each part is.
 │   │       │   └── template.py # Guide to ``src/lup_template``, the application built on the library.
 │   │       ├── guidance.py  # Canonical repository guidance.
+│   │       ├── image.py     # The container this repository's agent sessions run in.
 │   │       ├── provenance.py # What a project settles about where its lup came from.
 │   │       ├── requirements.py # The external programs this repository needs, and what going without costs.
 │   │       ├── settings.py  # What this repository grants, refuses, and enables for itself.

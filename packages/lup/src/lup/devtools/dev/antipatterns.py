@@ -417,6 +417,77 @@ def retire_directives(project: DevProject, rule_id: str) -> list[RetiredDirectiv
     return list(swept())
 
 
+class RepairedDirective(BaseModel, frozen=True):
+    """One dead directive the sweep took out rather than reporting."""
+
+    file: str
+    line: int
+    rule_id: str
+
+
+def repair_spurious(
+    project: DevProject, findings: Sequence[FoundAntiPattern]
+) -> list[RepairedDirective]:
+    """Delete the directives the audit calls spurious, and say which went.
+
+    A spurious finding is the one class of finding whose fix is not a
+    judgement. "Missing" says a line trips a rule and somebody has to decide
+    whether the rule is right or the line is; "untyped" says a directive needs
+    the reason nobody has written yet. "Spurious" says a directive guards
+    something that is not there -- there is one correct edit, this is it, and
+    printing it for a human to perform is asking for typing rather than for a
+    decision.
+
+    Deleted per site rather than per rule. The same id can be dead on one line
+    and live on another in the same file, and :func:`retired_suppressions`
+    narrowed to the audited line is what keeps repairing the first from
+    stranding the second.
+
+    Files are rewritten once each, with every site they hold applied in one
+    pass, because each rewrite shifts the lines under it -- applied one at a
+    time against re-read text, the second finding in a file would name a line
+    that has moved.
+    """
+    by_file: dict[str, list[FoundAntiPattern]] = defaultdict(list)
+    for finding in findings:
+        if finding.kind == "spurious":
+            by_file[finding.file].append(finding)
+    if not by_file:
+        return []
+
+    roots = scanned_roots(project)
+
+    def repaired() -> Iterator[RepairedDirective]:
+        for item in scanned_files(project):
+            if item.rel not in by_file or item.path.suffix.lower() not in {
+                ".py",
+                ".pyi",
+            }:
+                continue
+            text = item.text
+            # Descending, so a rewrite that drops a line cannot move a site
+            # this file has not reached yet.
+            for finding in sorted(by_file[item.rel], key=lambda f: -f.line):
+                source = PythonSource(
+                    path=item.path,
+                    module=module_name(item.path, roots),
+                    text=text,
+                )
+                revised = retired_suppressions(
+                    source, finding.rule_id, at={finding.line}
+                )
+                if revised.text == text:
+                    continue
+                text = revised.text
+                yield RepairedDirective(
+                    file=item.rel, line=finding.line, rule_id=finding.rule_id
+                )
+            if text != item.text:
+                item.path.write_text(text, encoding="utf-8")
+
+    return list(repaired())
+
+
 def report_directives(
     project: DevProject, as_json: bool, limit: int = SUPPRESSION_COLUMN_LIMIT
 ) -> None:
@@ -557,6 +628,7 @@ def report(
     as_json: bool,
     paths: Sequence[str] | None = None,
     advisory: AbstractSet[str] = ADVISORY_KINDS,
+    fix: bool = False,
 ) -> None:
     """List anti-pattern findings; exit non-zero when a blocking one remains.
 
@@ -564,8 +636,25 @@ def report(
     typed one) and never fail the command; "missing" and "spurious" do. Every
     finding the typed grammar refuted is listed with the declaration that
     settled it, so a dropped verdict is accountable rather than invisible.
+
+    ``fix`` takes out the dead directives instead of printing them, and the
+    sweep runs again over what it wrote so the report is about the tree as it
+    now stands rather than as it was found. The second sweep is what makes
+    this honest: deleting a directive can uncover a violation it was sitting
+    on top of, and a repair pass that printed its own pre-repair findings
+    would claim to have fixed something it had just moved.
     """
     scan = scan_antipatterns(project, paths)
+    if fix:
+        repaired = repair_spurious(project, scan.findings)
+        for item in repaired:
+            named = f"[{item.rule_id}]" if item.rule_id else ""
+            typer.echo(
+                f"{item.file}:{item.line} [repaired] removed dead `# lup: ignore{named}`"
+            )
+        if repaired:
+            typer.echo(f"{len(repaired)} dead directive(s) removed\n")
+            scan = scan_antipatterns(project, paths)
     found = scan.findings
     blocking = [finding for finding in found if finding.kind not in advisory]
     if as_json:

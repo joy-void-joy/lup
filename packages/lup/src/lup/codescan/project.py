@@ -17,6 +17,7 @@ bare, or guarding nothing at all.
 """
 
 import ast
+from collections.abc import Set as AbstractSet
 from functools import cache
 from pathlib import Path
 from typing import Literal
@@ -275,7 +276,9 @@ class RetiredDirectives(BaseModel, frozen=True):
     """Line numbers taken out, so a sweep can print what it deleted."""
 
 
-def retired_suppressions(source: PythonSource, rule_id: str) -> RetiredDirectives:
+def retired_suppressions(
+    source: PythonSource, rule_id: str, at: AbstractSet[int] | None = None
+) -> RetiredDirectives:
     """Take a retired rule out of every directive one file writes.
 
     Retiring a rule strands every directive naming it: the violation it
@@ -292,6 +295,18 @@ def retired_suppressions(source: PythonSource, rule_id: str) -> RetiredDirective
     the other side, so prose left behind would be a sentence explaining a
     rule nothing runs any more. Prose written *above* a directive is not its
     reason and stays.
+
+    ``at`` narrows the sweep to directives on the lines named, for the caller
+    that is repairing individual findings rather than retiring a rule. The
+    difference matters in one direction only: retiring a rule strands every
+    directive naming it, while an audit finding says this *one* line does not
+    trip it, and a file can hold both that dead directive and a live one
+    naming the same rule two functions down. Unnarrowed, repairing the first
+    would delete the second and turn a spurious finding into a missing one.
+
+    An empty ``rule_id`` names the bare directive that guards nothing, which
+    is the other thing the audit reports spurious and the other thing there
+    is no id to strip from.
 
     A rewrite that would stop the file parsing is returned untouched — the
     same refusal the placement rewriter makes.
@@ -330,7 +345,12 @@ def retired_suppressions(source: PythonSource, rule_id: str) -> RetiredDirective
                 continue
             spelled = match.group("ids") or ""
             named = [item.strip() for item in spelled.split(",") if item.strip()]
-            if rule_id not in named:
+            if at is not None and number not in at:
+                yield line
+                continue
+            # An empty `rule_id` is the bare directive, which names nothing to
+            # strip and goes whole; anything else has to be named to be taken.
+            if rule_id not in named if rule_id else named:
                 yield line
                 continue
             remaining = [item for item in named if item != rule_id]

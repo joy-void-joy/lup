@@ -3101,7 +3101,7 @@ def edit_threshold(
 # that, but only the shell path reaches it — an Edit or Write to the same file
 # is judged by the ordinary lattice.
 #
-# lup: It should be possible to *relocate* a note. The gate reads any edit that
+# lup: solved: It should be possible to *relocate* a note. The gate reads any edit that
 # drops the marker line as a deletion, so moving one to the declaration it
 # actually concerns is refused with "resolving a note means replacing it with
 # solved" — which is not what a move is. This bites hardest in a merge, where

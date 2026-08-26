@@ -47,10 +47,95 @@ from pathlib import Path
 from typing import Annotated, Literal
 
 import sh
-from pydantic import BaseModel, Discriminator, Field
+from pydantic import BaseModel, Discriminator, Field, model_validator
 
 from lup.harness.notice import Notice, Urgency
 from lup.types import EnvVars
+
+
+type PackageManager = Literal["pacman", "bun", "uv", "script"]
+"""Which ecosystem obtains an installable.
+
+Three that verify what they fetch, and one that does not. ``pacman`` takes
+distribution packages, signed by the distribution and checked before they
+unpack; ``bun`` and ``uv`` take a registry name at a pinned version, whose
+integrity hash the lockfile records. ``script`` runs a shell line, verifies
+nothing, and is refused by the ``package-install-script`` rule -- it stays
+expressible because an adopter may hold a dependency no registry carries, and
+refusing it by rule rather than by omission means that adopter writes down why
+instead of discovering the field is missing.
+"""
+
+
+class Package(BaseModel, frozen=True):
+    """One installable, and the ecosystem that obtains it.
+
+    A bare name cannot install anything, and a flat list of names hid that for
+    as long as nothing consumed the list. What the list was silently promising
+    was one ``apt-get install`` line, and measured against a Debian base every
+    entry in it was false: ``gh`` is not in the stable archive, ``bun`` ships
+    only as an install script, and ``typescript`` is a registry package. A
+    declaration that can only be rendered one way, into a line that does not
+    work, is worse than no declaration.
+
+    So the manager is part of the declaration rather than an assumption the
+    renderer makes -- and the base was chosen to make the honest answer the
+    short one. A bare string parses as a distribution package because, on the
+    distribution this harness builds from, that is the right answer for every
+    package in the toolchain.
+    """
+
+    name: str = Field(description="What the manager is asked for")
+    manager: PackageManager = Field(
+        default="pacman",
+        description=(
+            "``pacman`` is the base image's own distribution and the answer "
+            "wherever it has the package, which is everywhere this "
+            "repository's toolchain reaches. ``bun`` takes a JavaScript "
+            "registry package and ``uv`` a Python one, both at a pinned "
+            "version whose integrity the lockfile records. ``script`` "
+            "verifies nothing and is refused by rule"
+        ),
+    )
+    version: str = Field(
+        default="",
+        description=(
+            "Pinned version for a registry package. Empty takes the "
+            "registry's current release, which is a decision to re-make on "
+            "every build rather than a version to reproduce"
+        ),
+    )
+    command: str = Field(
+        default="",
+        description="The shell line that installs a ``script`` package",
+    )
+
+    def requested(self) -> str:
+        """How this package is named to its manager, version included."""
+        return f"{self.name}@{self.version}" if self.version else self.name
+
+    @model_validator(mode="before")
+    @classmethod
+    # lup: ignore[bare-object] — pydantic hands a before-hook whatever the
+    # caller wrote, which is the untyped boundary the rule says to narrow at
+    def a_bare_name_is_a_distribution_package(cls, value: object) -> object:
+        """Accept the common case spelled shortest, as a plain string."""
+        return {"name": value} if isinstance(value, str) else value
+
+    @model_validator(mode="after")
+    def a_script_carries_the_line_that_runs_it(self) -> "Package":
+        """A script package with no command is one that installs nothing.
+
+        Caught here rather than at render time, because a package that
+        silently installs nothing produces an image missing a tool and an
+        error naming that tool -- pointing at the toolchain rather than at
+        the declaration that forgot to say how to get it.
+        """
+        if self.manager == "script" and not self.command:
+            raise ValueError(
+                f"package {self.name!r} installs by script but names no command"
+            )
+        return self
 
 
 class Advisory(BaseModel, frozen=True):
@@ -260,6 +345,44 @@ class Run(BaseModel, frozen=True):
         """
         return [self.command[0]]
 
+    def pointed_at(self, program: str) -> "Run":
+        """This exercise with its program replaced, arguments untouched.
+
+        Asked of the exercise for the same reason :meth:`programs` is: a
+        caller that tested which member of the union it held would be a
+        caller a third shape has to be added to. What it is *for* is one
+        thing -- a container client is a fact about the machine, and the
+        declaration this sits in is hashed into the ownership digest, so the
+        program cannot be chosen until the exercise is about to run.
+        """
+        return self.model_copy(update={"command": [program, *self.command[1:]]})
+
+    def behind(self, opening: list[str]) -> "Run":
+        """This exercise carried out inside whatever *opening* starts.
+
+        How an image-side requirement stops being a claim. The command an
+        image requirement declares -- ``bun --version``, ``claude -p`` -- is
+        the right command; what was missing was anywhere to run it, so the
+        declaration sat unexercised while its docstring described what it
+        proved. Prefixing the argv a session opens with is the whole of the
+        answer, and it matters that it is *that* argv rather than a fresh
+        ``run``: a probe assembled separately verifies a container no session
+        opens, which is how a boundary passes its own preflight and then
+        fails the first session behind it.
+        """
+        return self.model_copy(update={"command": [*opening, *self.command]})
+
+    def given(self, facts: "HostFacts") -> "Run":
+        """This exercise with anything the declaration could not name filled in.
+
+        Nothing, for a plain run: its command is portable, which is what
+        being a plain run means. The method is here rather than only on the
+        members that need it so a caller never tests which member it holds --
+        the same argument :meth:`programs` makes, applied to the second thing
+        a machine has to supply.
+        """
+        return self
+
     def run(self) -> ExerciseOutcome:
         """Carry the operation out, answering whether it proved the claim."""
         try:
@@ -304,6 +427,43 @@ class AnyOf(BaseModel, frozen=True):
             name for candidate in self.alternatives for name in candidate.programs()
         ]
 
+    def pointed_at(self, program: str) -> "AnyOf":
+        """Every spelling repointed, which is what holding several means here.
+
+        Nothing declares a client-carried capability this way today. Written
+        anyway, because the alternative is the union answering for one member
+        and raising for the other, and a shape that answers only sometimes is
+        one the caller has to test for -- which is the test this method
+        exists to remove.
+        """
+        return self.model_copy(
+            update={
+                "alternatives": [
+                    candidate.pointed_at(program) for candidate in self.alternatives
+                ]
+            }
+        )
+
+    def behind(self, opening: list[str]) -> "AnyOf":
+        """Every spelling carried out inside what *opening* starts."""
+        return self.model_copy(
+            update={
+                "alternatives": [
+                    candidate.behind(opening) for candidate in self.alternatives
+                ]
+            }
+        )
+
+    def given(self, facts: "HostFacts") -> "AnyOf":
+        """Every spelling given what the declaration could not name."""
+        return self.model_copy(
+            update={
+                "alternatives": [
+                    candidate.given(facts) for candidate in self.alternatives
+                ]
+            }
+        )
+
     def run(self) -> ExerciseOutcome:
         """Take the first spelling that works, or report what each one said."""
         outcomes = [candidate.run() for candidate in self.alternatives]
@@ -319,7 +479,115 @@ class AnyOf(BaseModel, frozen=True):
         )
 
 
-type Exercise = Annotated[Run | AnyOf, Discriminator("kind")]
+class HostFacts(BaseModel, frozen=True):
+    """What a machine supplies to an exercise the declaration could not name.
+
+    The counterpart to every "no fact about a machine belongs in a hashed
+    declaration" argument in this module, gathered into one object so the
+    resolution is one call rather than one per fact. Every field here was
+    measured moving a generated tree's ownership digest between two checkouts
+    of the same commit: the container client, because ``DOCKER_HOST`` decides
+    it; and the checkout path, because a worktree is where somebody put it.
+    """
+
+    client: str = Field(
+        default="docker", description="The container client this machine answered with"
+    )
+    checkout: Path = Field(
+        default=Path(),
+        description="Where this checkout sits, for a probe aimed at the real tree",
+    )
+
+
+class MountProbe(BaseModel, frozen=True):
+    """Read a file back through a bind mount of a directory at its own path.
+
+    The prerequisite the worktree rail rests on, as a shape rather than as a
+    spelled-out command. Every part of that command that differs between two
+    machines -- which client, which directory -- is supplied by
+    :class:`HostFacts` when the probe is about to run, and what is declared
+    here is only what is the same everywhere: the throwaway image, and the
+    name of a file the checkout is known to contain.
+
+    Spelled out, this requirement put an absolute path into a declaration the
+    ownership digest hashes, and the digest then moved between two worktrees
+    of one commit -- so every checkout but the one that last generated read
+    its own committed tree as stale, for a fact about where somebody had put
+    it.
+
+    Why a *read* rather than a presence check: asking ``test -d`` about the
+    mounted directory answered false on rootless podman for every worktree
+    this rail leases, which reads exactly like an absent mount and is not
+    one. And a container creates an empty directory at any mount target it is
+    given, so the check can pass with no mount having happened at all.
+    Reading a file across the boundary can do neither.
+    """
+
+    kind: Literal["mount_probe"] = "mount_probe"
+    image: str = Field(
+        default="docker.io/library/busybox:latest",
+        description="A throwaway image with a shell, for reading one file",
+    )
+    witness: str = Field(
+        default="pyproject.toml",
+        description="A file the probed directory is known to hold",
+    )
+
+    def resolved(self, facts: HostFacts) -> Run:
+        """This probe as the command a machine runs, host facts filled in."""
+        mount = f"{facts.checkout}:{facts.checkout}:ro"
+        return Run(
+            command=[
+                facts.client,
+                "run",
+                "--rm",
+                "-v",
+                mount,
+                self.image,
+                "cat",
+                str(facts.checkout / self.witness),
+            ]
+        )
+
+    def programs(self) -> list[str]:
+        """The client, which is the one executable this runs on the host."""
+        return ["docker"]
+
+    def pointed_at(self, program: str) -> "MountProbe":
+        """Unchanged: which client runs this arrives through :class:`HostFacts`.
+
+        Answered rather than omitted so the union stays uniform -- a caller
+        that had to know this member ignores repointing is a caller testing
+        which member it holds.
+        """
+        return self
+
+    def behind(self, opening: list[str]) -> "MountProbe":
+        """Unchanged: this probe *is* a container start, so it opens its own."""
+        return self
+
+    def given(self, facts: HostFacts) -> Run:
+        """The resolved command, which is what a host fact turns this into."""
+        return self.resolved(facts)
+
+    def run(self) -> ExerciseOutcome:
+        """Refuse rather than pass, because nothing has aimed this yet.
+
+        An unresolved probe has no directory to read and no client to read it
+        with. Reporting that plainly is the only honest answer: a silent
+        success here would vouch for the mount topology the whole worktree
+        rail stands on, having tested nothing.
+        """
+        return ExerciseOutcome(
+            proved=False,
+            detail=(
+                "this mount probe was never given a checkout to aim at, so it "
+                "tested nothing — exercise it through `for_host`"
+            ),
+        )
+
+
+type Exercise = Annotated[Run | AnyOf | MountProbe, Discriminator("kind")]
 
 
 type Side = Literal["host", "image", "both"]
@@ -355,6 +623,22 @@ class Requirement(BaseModel, frozen=True):
             "of an important thing inexpressible"
         ),
     )
+    at_launch: bool = Field(
+        default=False,
+        description=(
+            "Whether a contained launch pays a container start to verify "
+            "this on the way in. A separate field from ``checked`` because "
+            "``checked`` is about an exercise's cost and the same exercise "
+            "costs differently on each side: ``uv --version`` is free on the "
+            "host and a container start inside, so one field marking it "
+            "cheap was read as cheap in both places -- measured, a launch "
+            "roster that grew to six container starts including a "
+            "``bunx tsc`` and a ``gh auth status``. False by default, so "
+            "nothing costs a launch anything unless it says so, and what "
+            "says so is the boundary: the part whose failure is invisible "
+            "from outside and leaves the session unable to do anything"
+        ),
+    )
     exercise: Exercise
     absence: Absence
     diagnoses: list[Diagnosis] = Field(
@@ -365,15 +649,29 @@ class Requirement(BaseModel, frozen=True):
             "message points somewhere else"
         ),
     )
-    install: list[str] = Field(
+    install: list[Package] = Field(
         default=[],
         description=(
-            "Distribution packages that satisfy this *inside a container "
+            "Packages that satisfy this *inside a container "
             "image built from this harness*, when a package manager is how "
             "it is obtained there. Empty is the common answer and means one "
             "of two things: the base image already ships it, or the "
             "capability is the host's and the container deliberately does "
             "not have it"
+        ),
+    )
+
+    by_client: bool = Field(
+        default=False,
+        description=(
+            "Whether the host's container client carries this exercise out. "
+            "Which client that is stays out of the declaration deliberately: "
+            "the ownership digest hashes this model, so a probe of the host "
+            "in here reports generated artifacts as stale on any machine "
+            "whose client differs -- measured moving twice on one machine, "
+            "minutes apart, when a stale pid file was cleaned up between the "
+            "runs. The exercise names the portable spelling and "
+            "`lup.harness.toolchain.for_host` points it at what answered"
         ),
     )
 
@@ -471,11 +769,54 @@ class Manifest(BaseModel, frozen=True):
             and (setting_up or item.checked == "always")
         ]
 
+    def inside_the_image(self, setting_up: bool = True) -> list[Requirement]:
+        """The requirements the container is expected to satisfy, not this machine.
+
+        The other half of :meth:`on_the_host`, and for a long time the half
+        with nowhere to run. An image-side entry was excluded from the host
+        roster -- correctly, since a laptop without ``bun`` is not a laptop
+        with a problem -- and excluded is where it stopped: declared,
+        rendered into a package list, and never once exercised. What that
+        bought was a manifest whose image half was a claim, with each entry's
+        docstring describing a proof nothing had performed.
+
+        *setting_up* is off for a launch, which narrows this to the entries
+        that asked to be verified there. Every entry in this roster costs a
+        container start -- there is no cheap one -- so what a launch pays for
+        is named rather than inferred: the boundary, whose failure is
+        invisible from outside and leaves the session unable to do anything.
+        A toolchain version and a model call are what somebody setting a
+        machine up hears once.
+        """
+        return [
+            item
+            for item in self.requirements
+            if item.where in ("image", "both") and (setting_up or item.at_launch)
+        ]
+
     def check(self, environment: EnvVars, setting_up: bool = False) -> list["Finding"]:
         """Exercise every host-side requirement, in declaration order."""
         return [item.check(environment) for item in self.on_the_host(setting_up)]
 
-    def packages(self) -> list[str]:
+    def check_inside(
+        self, environment: EnvVars, opening: list[str], setting_up: bool = True
+    ) -> list["Finding"]:
+        """Exercise every image-side requirement inside what *opening* starts.
+
+        *opening* is the argv a session opens with, minus the CLI it would
+        have run. Passed in rather than built here because assembling it
+        needs the launcher's whole world -- the lease, the credential, the
+        engine, the network -- and a manifest that reached for those would be
+        a manifest only a launcher could hold.
+        """
+        return [
+            item.model_copy(update={"exercise": item.exercise.behind(opening)}).check(
+                environment
+            )
+            for item in self.inside_the_image(setting_up)
+        ]
+
+    def packages(self) -> list[Package]:
         """Everything an image installs to satisfy this manifest, deduplicated.
 
         Ordered by first declaration rather than sorted: an image layer reads
@@ -489,6 +830,10 @@ class Manifest(BaseModel, frozen=True):
         which that workflow already solves with a setup action -- and it
         would have installed a container runtime the image must never carry.
         A requirement is one thing; where each place gets it is another.
+
+        Each entry carries the manager that obtains it, because the three
+        this repository declares need three different ones and a list of
+        bare names could only ever have been rendered as one.
         """
         return list(
             dict.fromkeys(

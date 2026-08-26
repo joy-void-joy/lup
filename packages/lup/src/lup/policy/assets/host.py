@@ -32,6 +32,20 @@ def sandbox_active() -> bool:
     return "LUP_SANDBOX_ACTIVE" in environ and environ["LUP_SANDBOX_ACTIVE"] == "1"
 
 
+def contained() -> bool:
+    """Whether this session is running inside the project's container.
+
+    A different question from :func:`sandbox_active`, and the two are not
+    interchangeable: the native sandbox confines one call at a time and can
+    be told to leave some alone, where a container confines the process and
+    was never asked. Read from the image's own baked-in variable rather than
+    from anything a launch passes, so a session cannot be told it is
+    contained by something standing outside the container.
+    """
+    environ = os.environ  # lup: ignore[os-environ]
+    return "LUP_CONTAINED" in environ and environ["LUP_CONTAINED"] == "1"
+
+
 def append_hook_evidence(path: Path, encoded: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as stream:
@@ -320,6 +334,104 @@ def shared_git_directory(path_text: str) -> str:
     if len(linked.parents) < 2:
         return ""
     return str(linked.parents[1])
+
+
+def boundary_description(
+    root: Path | None, ledger: str = ".lup/boundary.json"
+) -> dict[str, list[str]]:
+    """What the launcher recorded about the boundary this session runs behind.
+
+    The mount table and the egress allowlist are *launch* facts, not
+    generation facts: which worktrees exist and which of them this session
+    leased is decided when the container starts, long after this dispatcher
+    was compiled. So the launcher writes them down and this reads them back,
+    the same shape the run ledger already uses.
+
+    An absent file is the ordinary answer rather than a failure: an
+    uncontained session has no boundary to describe, and one whose launcher
+    predates this has none recorded. Both mean the same thing to every caller
+    -- there is nothing here to attribute a failure to -- so both come back
+    empty.
+    """
+    if root is None:
+        return {}
+    try:
+        raw = (root / ledger).read_text()
+    except OSError:
+        return {}
+    try:
+        loaded = json.loads(raw)
+    except ValueError:
+        return {}
+    if not isinstance(loaded, dict):
+        return {}
+    return {
+        name: [item for item in value if isinstance(item, str)]
+        for name, value in loaded.items()
+        if isinstance(name, str) and isinstance(value, list)
+    }
+
+
+def unquoted_path(word: str) -> str:
+    """One word of a diagnostic, with the punctuation it was quoted in removed.
+
+    An error message is prose with a path in it, and prose has no parser --
+    which is why this trims rather than parses. Kept as its own function so
+    that reasoning sits beside the one line it excuses.
+    """
+    # lup: ignore[string-strip] — the quotes a diagnostic wraps a path in are
+    # exactly what has to come off, and no parser reads free-form prose
+    return word.strip("'\"`:,;()[]<>")
+
+
+def boundary_refusal(failure: str, described: dict[str, list[str]]) -> str:
+    """Name the boundary as the cause of a failure, or say nothing at all.
+
+    A confined command that fails fails in the vocabulary of whatever it was
+    doing. A write the mount table refused arrives as ``Read-only file
+    system`` and a host the proxy refused arrives as a timeout, and neither
+    says "you are confined" -- so an agent reading them debugs the filesystem
+    or the network library, for as long as it takes somebody to notice.
+
+    The discipline that makes this worth having is the refusal to guess. A
+    marker in the text never suffices on its own, because ``Read-only file
+    system`` appears for a genuinely read-only disk too; the claim is made
+    only where a *declared* read-only mount covers the path the failure named.
+    Everything else says nothing, and silence is the right answer here far
+    more often than a claim is. A wrong boundary claim is worse than none: it
+    teaches an agent to reach for the host when the bug was in its own code,
+    and that lesson outlives the one command it was wrong about.
+
+    The same reading as :mod:`lup.sandbox.attribution`, in the pinned standard
+    library, because this one runs inside the compiled dispatcher where that
+    module cannot be imported. What it deliberately does not repeat is the
+    egress half: a refused host is read out of the proxy's own log rather than
+    out of the client's guess about why its connection died, and reaching that
+    log means reaching the container runtime, which this half must not do.
+    """
+    markers = described["write_refusals"] if "write_refusals" in described else []
+    read_only = described["read_only"] if "read_only" in described else []
+    if not markers or not read_only:
+        return ""
+    if not any(marker in failure for marker in markers):
+        return ""
+    covering = [
+        mount
+        for word in failure.split()
+        for candidate in [unquoted_path(word)]
+        if candidate.startswith("/") and len(candidate) > 1
+        for mount in read_only
+        if candidate == mount or candidate.startswith(mount + "/")
+    ]
+    if not covering:
+        return ""
+    return (
+        f"The boundary refused this, not the filesystem: {covering[0]} is "
+        "mounted read-only on purpose, so retrying, changing permissions or "
+        "creating the parent will not help. Work inside your own tree, or "
+        "propose adding the path to the image declaration if it genuinely "
+        "belongs in every session."
+    )
 
 
 def foreign_repository(path_text: str, root: Path | None) -> bool:

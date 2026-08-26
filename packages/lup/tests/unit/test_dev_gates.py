@@ -1,8 +1,12 @@
 """What a bracketed deferral's condition is resolved to, and when it wakes."""
 
+from pathlib import Path
+
 import pytest
 
+import lup.devtools.dev.gates as gates
 from lup.codescan.markers import MarkerComment, NoteKind
+from lup.devtools.utils import git
 from lup.devtools.dev.branches import get_integration_branch
 from lup.devtools.dev.comments import FoundComment
 from lup.devtools.dev.gates import (
@@ -157,16 +161,51 @@ def test_a_checkout_missing_every_feature_branch_wakes_nothing() -> None:
     assert sweep.woken == []
 
 
-def test_a_note_on_another_ref_reaches_the_branch_it_names() -> None:
-    # The half that makes any of this arrive in time, read against a ref this
-    # commit controls rather than against whatever the integration branch
-    # happens to hold today. The real case is the same shape one step out:
-    # content-overhaul has not merged dev, so a deferral naming it is found
-    # only by reading the ref it was left on.
-    inbound = inbound_notes("content-overhaul", "HEAD")
-    assert inbound, "the deferral naming content-overhaul was not found on HEAD"
-    assert all(note.condition == "branch:content-overhaul" for note in inbound)
+def planted_deferral(root: Path, names: str) -> None:
+    """A one-commit repository holding one deferral aimed at *names*."""
+    root.mkdir()
+    git.out("-C", str(root), "init", "--initial-branch=main")
+    git.out("-C", str(root), "config", "user.email", "test@example.invalid")
+    git.out("-C", str(root), "config", "user.name", "test")
+    (root / "sample.py").write_text(
+        f"# lup: defer[branch:{names}]: waits on the branch it names\nvalue = 1\n",
+        encoding="utf-8",
+    )
+    git.out("-C", str(root), "add", "sample.py")
+    git.out("-C", str(root), "commit", "-m", "plant a deferral")
+
+
+def test_a_note_on_another_ref_reaches_the_branch_it_names(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The half that makes any of this arrive in time.
+
+    Planted in a repository this test builds, rather than read off whichever
+    deferral happens to be in the tree. An earlier version named a live one
+    and went red the day somebody resolved it — a gate test failing because
+    the gate worked, which teaches the wrong lesson twice: the note had been
+    answered, and the mechanism under test was fine.
+    """
+    root = tmp_path / "planted"
+    planted_deferral(root, "elsewhere")
+    monkeypatch.setattr(gates, "project_root", lambda: root)
+
+    inbound = inbound_notes("elsewhere", "HEAD")
+
+    assert inbound, "the planted deferral naming `elsewhere` was not found"
+    assert all(note.condition == "branch:elsewhere" for note in inbound)
     assert all(note.kind == NoteKind.defer for note in inbound)
+
+
+def test_a_note_naming_a_different_branch_stays_on_its_own_ref(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Naming is what keeps this quiet, against the same plant."""
+    root = tmp_path / "planted"
+    planted_deferral(root, "elsewhere")
+    monkeypatch.setattr(gates, "project_root", lambda: root)
+
+    assert inbound_notes("some-other-branch", "HEAD") == []
 
 
 def test_a_branch_nobody_left_a_note_about_gets_nothing() -> None:
