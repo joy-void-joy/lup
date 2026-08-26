@@ -8,6 +8,13 @@ each was reached by a different call path and any one of them could be added
 back without the others noticing.
 """
 
+from pathlib import Path
+
+import pytest
+from typer.testing import CliRunner
+
+import lup.devtools.dev.rules as rules_mod
+import lup_template.devtools.harness.catalog as catalog
 from lup.adapters.claude.harness import ClaudeSpellings
 from lup.adapters.harness import claude_prompt_renderer
 from lup.codescan.antipatterns import (
@@ -17,7 +24,10 @@ from lup.codescan.antipatterns import (
 )
 from lup.codescan.common import RuleSelection
 from lup.codescan.registry import all_rules
-from lup.devtools.dev.rules import rule_reference_document
+from lup.devtools.dev.app import create_dev_app
+from lup.devtools.dev.rules import RULE_REFERENCE_PATH, rule_reference_document
+from lup_template.devtools.dev.app import declared as declared_here
+from lup_template.devtools.harness.composition import TARGETS
 
 RETIRED = RuleSelection(retired=["model-config", "default-factory"])
 
@@ -60,6 +70,38 @@ def test_the_reference_document_renders_from_the_selection() -> None:
 
     assert "`model-config`" not in rendered
     assert "`constant-declaration`" in rendered
+
+
+def test_the_documented_command_writes_the_reference_this_repository_is_held_to(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The fourth call path, and the one that was quietly not honouring it.
+
+    `dev rules` rendered the whole library table instead of the selection,
+    so a project that retired a rule got a generated page still documenting
+    it — and its own drift check, which does read the selection, then rejected
+    the file the documented command had just written. Neither said which was
+    wrong, and the page claimed a rule the gate there does not enforce.
+    """
+    monkeypatch.setattr(rules_mod, "project_root", lambda: tmp_path)
+    retiring = declared_here().model_copy(
+        update={
+            "hooks": catalog.declared_hook_set().model_copy(update={"rules": RETIRED})
+        }
+    )
+    app = create_dev_app(
+        declared=lambda: retiring,
+        native_targets=TARGETS,
+        repository_writers=[],
+        relocate_roots=[],
+    )
+
+    result = CliRunner().invoke(app, ["rules"])
+
+    assert result.exit_code == 0, result.output
+    written = (tmp_path / RULE_REFERENCE_PATH).read_text(encoding="utf-8")
+    assert "`model-config`" not in written
+    assert "`constant-declaration`" in written
 
 
 def test_a_structural_rule_can_be_retired_too() -> None:
