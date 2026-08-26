@@ -7,10 +7,10 @@ from lup.providers.harness import claude_prompt_renderer
 from lup.harness.codescan.common import RuleStrength
 from lup.harness.codescan.common import RuleSelection
 from lup.harness.codescan.registry import RULE_REFERENCE, RegisteredRule, all_rules
-from lup.banner import GeneratedBanner
+from lup.formats.banner import GeneratedBanner
 from lup.harness.materialization import write_generated_file
 from lup.harness.models import Artifact
-from lup.markdown import CodeCell, HtmlCodeCell, PlainCell, TableCell
+from lup.formats.markdown import CodeCell, HtmlCodeCell, PlainCell, TableCell
 from lup.workspace.paths import project_root
 
 # lup: ignore[constant-declaration] — the rule reference's own prose, which is

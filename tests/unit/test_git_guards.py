@@ -35,7 +35,7 @@ from lup.devtools.dev.git_guards import (
     uninstall_guards,
 )
 from lup.devtools.dev.workflow import WorkflowSpec
-from lup.banner import REGENERATE_COMMAND
+from lup.formats.banner import REGENERATE_COMMAND
 from tests.unit.repos import commit_file, initialized_repo
 
 GUARD_SCRIPT = '''"""Refuse a commit while this repository's one generated file is behind."""
@@ -44,7 +44,7 @@ import sys
 from pathlib import Path
 
 from lup.devtools.harness.drift import inspect_drift, report_stale
-from lup.banner import REGENERATE_COMMAND, VERBATIM_COPY
+from lup.formats.banner import REGENERATE_COMMAND, VERBATIM_COPY
 from lup.harness.materialization import write_generated_file
 from lup.harness.models import Artifact
 

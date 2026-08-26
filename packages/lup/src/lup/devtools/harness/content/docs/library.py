@@ -18,7 +18,7 @@ from pydantic import BaseModel
 import lup.harness.models as models
 from lup.devtools.harness.content.application import ApplicationLayout
 from lup.devtools.harness.content.tree import top_level_names
-from lup.markdown import CodeCell, PlainCell
+from lup.formats.markdown import CodeCell, PlainCell
 
 LIBRARY_PACKAGE = Path(__file__).resolve().parents[4]
 """This library's own package directory, wherever the reader installed it from.
@@ -302,9 +302,13 @@ Four tiers, and imports only ever point downward.
    (`JsonValue`/`JsonObject`, `ToolName`/`ToolGrant`, `LupContentBlock`,
    `LupMessage`, `Usage`, `SubagentSpec`); `lup.channels` is the file-backed
    primitive both durable state and inter-process rendezvous are built on;
-   `lup.banner`, `lup.markdown`, `lup.seams` and `lup.execution` are the
-   rest. Burying one of these inside a subject is what manufactures a cycle —
-   folding `channels` in with `workspace` did exactly that and was undone.
+   `lup.formats` is how a compiled artifact has to be spelled to survive being
+   one, the do-not-edit banner and the escaping of a derived table's cells;
+   `lup.seams` and `lup.execution` are the rest. Burying one of these inside a
+   subject is what manufactures a cycle — folding `channels` in with
+   `workspace` did exactly that and was undone. Gathering two of them under a
+   question they share does not, and cannot: a package holding only leaves has
+   no outgoing edge to close a loop with.
 2. **`capabilities` and `events`** — each subject carries both.
    `sessions/events.py` owns the turn vocabulary; `sessions/capabilities.py`
    owns the narrow capability seams, and each other subject carries the same
@@ -392,7 +396,7 @@ The pipeline is `validation` → `ownership` → `reconciliation` →
 canonical source and `process`/`environment` for launching a native CLI.
 `generation.py` holds the small deterministic helpers the stages share. The
 do-not-edit banner every commentable generated artifact opens with is
-`lup.banner`, a foundation rather than part of this subject, because the
+`lup.formats.banner`, a foundation rather than part of this subject, because the
 policy bundle writes one too and a banner reached through the harness made
 the two entries import each other.
 
@@ -500,7 +504,7 @@ questions still open; the fifth is the shape of a guarantee.
 
 The last two have one shape: a symbol two subjects share, sitting inside one
 of them. Each closes by moving that symbol below both, which is what
-`lup.banner` already did for the do-not-edit banner the policy bundle and the
+`lup.formats.banner` already did for the do-not-edit banner the policy bundle and
 harness both write. The first two are the front door deliberately knowing
 about what it opens; whether a lazily-imported provider counts as an edge at
 all is the question to answer before an acyclicity check is written, and

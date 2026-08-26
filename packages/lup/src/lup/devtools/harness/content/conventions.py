@@ -33,7 +33,7 @@ from pydantic import BaseModel
 
 import lup.harness.models as models
 from lup.harness.codescan.common import RuleSelection
-from lup.markdown import CodeCell, PlainCell
+from lup.formats.markdown import CodeCell, PlainCell
 
 PLAN_AT_AGENT_SPEED: list[models.PromptPart] = [
     models.TextPart(

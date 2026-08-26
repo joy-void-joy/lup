@@ -16,9 +16,9 @@ from pathlib import Path
 from pydantic import BaseModel
 
 from lup.devtools.dev.git_guards import CHECK_COMMAND, DRIFT_COMMAND
-from lup.banner import GeneratedBanner
+from lup.formats.banner import GeneratedBanner
 from lup.harness.materialization import write_generated_file
-from lup.banner import REGENERATE_COMMAND
+from lup.formats.banner import REGENERATE_COMMAND
 from lup.harness.models import Artifact
 from lup.workspace.paths import project_root
 

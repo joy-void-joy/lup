@@ -15,7 +15,7 @@ from pydantic import ValidationError
 
 from lup.providers.harness import claude_prompt_renderer, codex_prompt_renderer
 from lup.harness.models import MarkdownTable, PromptDocument, TextPart
-from lup.markdown import CodeCell, HtmlCodeCell, LinkCell, PlainCell
+from lup.formats.markdown import CodeCell, HtmlCodeCell, LinkCell, PlainCell
 
 
 def test_a_pipe_or_a_newline_cannot_break_out_of_the_cell_holding_it() -> None:

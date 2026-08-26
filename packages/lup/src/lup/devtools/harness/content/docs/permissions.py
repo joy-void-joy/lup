@@ -10,7 +10,7 @@ them which one applies. The guidance keeps the rule and points here.
 import inspect
 
 import lup.harness.models as models
-from lup.markdown import CodeCell, PlainCell
+from lup.formats.markdown import CodeCell, PlainCell
 from lup.policy.kernel.settlement import SETTLEMENT_ORDER, SettlementRule
 
 

@@ -10,7 +10,7 @@ composed here for the same reason: what it has to say about the other trees is
 a spelling question.
 """
 
-from lup.banner import REGENERATE_COMMAND, GeneratedBanner
+from lup.formats.banner import REGENERATE_COMMAND, GeneratedBanner
 from lup.harness.contracts import NativeSpellings, PromptRenderer
 from lup.harness.models import LocatedPart, NativePath, PromptDocument
 

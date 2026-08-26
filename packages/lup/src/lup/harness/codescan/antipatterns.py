@@ -384,7 +384,7 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         "dict[Literal[...], V] where the field set is closed and enumerable; a frozen "
         "id model as the key (dict[SessionId, str]) where the keys are identities this "
         "code mints; a declared route list behind a router (CommentRouter in "
-        "lup.banner, ModelRouter in lup.providers.routing) where they are a "
+        "lup.formats.banner, ModelRouter in lup.providers.routing) where they are a "
         "dispatch table; and EnvVars or StringMap from lup.types where the names are "
         "owned outside this repository. Concrete class/callable value types "
         "(dict[str, Client]) are already accepted and JsonValue covers arbitrary JSON. "

@@ -44,7 +44,7 @@ from lup.devtools.dev.commands import COMMAND_REFERENCE
 from lup.devtools.harness.generated_paths import GENERATED_PATHS
 from lup.devtools.harness.drift import roster_gaps
 from lup.devtools.harness.settings import served_tool_grants
-from lup.banner import (
+from lup.formats.banner import (
     ARTIFACT_COMMENT_ROUTER,
     COMMENT_FREE,
     REGENERATE_COMMAND,
@@ -92,7 +92,7 @@ from lup.harness.models import (
     document_byte_size,
 )
 from lup.harness.contracts import PromptRenderer
-from lup.markdown import CodeCell, PlainCell
+from lup.formats.markdown import CodeCell, PlainCell
 from lup.harness.ownership import (
     OwnershipManifest,
     OwnershipManifestError,

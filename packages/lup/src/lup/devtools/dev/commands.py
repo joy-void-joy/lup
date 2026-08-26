@@ -32,10 +32,10 @@ from typer.core import TyperGroup
 
 import lup.harness.models as models
 from lup.providers.harness import claude_prompt_renderer
-from lup.banner import GeneratedBanner
+from lup.formats.banner import GeneratedBanner
 from lup.harness.materialization import write_generated_file
 from lup.harness.models import Artifact
-from lup.markdown import CodeCell, PlainCell
+from lup.formats.markdown import CodeCell, PlainCell
 from lup.workspace.paths import project_root
 
 # lup: ignore[constant-declaration] — one generated artifact's identity: the

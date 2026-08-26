@@ -9,7 +9,7 @@ from pathlib import Path
 import tomlkit
 from lup.providers.codex.login import CODEX_LOGIN
 from lup.harness.codescan.antipatterns import DOCUMENT_IN_HAND, antipattern_set_for
-from lup.banner import (
+from lup.formats.banner import (
     COMMENT_FREE,
     PROMPT_TEXT,
     REGENERATE_COMMAND,

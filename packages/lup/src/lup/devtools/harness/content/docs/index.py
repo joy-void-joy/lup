@@ -14,7 +14,7 @@ own words about its own repository, and pass through untouched.
 from pydantic import BaseModel
 
 import lup.harness.models as models
-from lup.markdown import LinkCell, PlainCell
+from lup.formats.markdown import LinkCell, PlainCell
 
 
 class IndexEntry(BaseModel, frozen=True):

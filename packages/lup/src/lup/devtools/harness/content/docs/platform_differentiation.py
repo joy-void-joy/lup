@@ -5,7 +5,7 @@
 import lup.harness.models as models
 
 from lup.devtools.harness.content.application import ApplicationLayout
-from lup.markdown import contained
+from lup.formats.markdown import contained
 
 
 def document(

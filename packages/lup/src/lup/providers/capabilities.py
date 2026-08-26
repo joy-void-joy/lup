@@ -18,7 +18,7 @@ what a contract can do; that records what is currently sitting on disk.
 from pydantic import BaseModel
 
 from lup.harness.models import MarkdownTable
-from lup.markdown import PlainCell, TableCell
+from lup.formats.markdown import PlainCell, TableCell
 
 
 class CapabilityCell(BaseModel, frozen=True):

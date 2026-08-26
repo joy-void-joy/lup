@@ -37,7 +37,7 @@ import sh
 from pydantic import BaseModel
 
 from lup.devtools.gitguard import GIT_ENVIRONMENT
-from lup.banner import REGENERATE_COMMAND
+from lup.formats.banner import REGENERATE_COMMAND
 from lup.execution.shell import git
 
 DRIFT_COMMAND = "uv run lup-devtools harness check all"

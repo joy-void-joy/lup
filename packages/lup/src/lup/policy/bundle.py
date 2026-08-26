@@ -18,7 +18,7 @@ from pathlib import Path
 from pydantic import BaseModel
 
 from lup.harness.codescan.antipatterns import AntiPatternSet
-from lup.banner import REGENERATE_COMMAND, GeneratedBanner
+from lup.formats.banner import REGENERATE_COMMAND, GeneratedBanner
 from lup.policy.grants import ALLOWANCE_GRANTS_ENV, known_allowances
 from lup.policy.identity import AGENT_IDENTITY_ENV
 import lup.policy.kernel as kernel

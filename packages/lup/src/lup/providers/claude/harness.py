@@ -6,7 +6,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from lup.providers.claude.login import CLAUDE_LOGIN
 from lup.harness.codescan.antipatterns import DOCUMENT_IN_HAND, antipattern_set_for
-from lup.banner import COMMENT_FREE, PROMPT_TEXT, VERBATIM_COPY
+from lup.formats.banner import COMMENT_FREE, PROMPT_TEXT, VERBATIM_COPY
 from lup.harness.contracts import (
     ArtifactRenderer,
     Atom,

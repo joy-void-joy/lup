@@ -18,7 +18,7 @@ from lup.devtools.harness.evidence import (
     accepted_version,
     cited_fixture,
 )
-from lup.markdown import CodeCell
+from lup.formats.markdown import CodeCell
 
 
 def cited_library_fixture(library: Path | None, path: str) -> str:

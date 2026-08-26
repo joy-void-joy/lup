@@ -20,7 +20,7 @@ from lup.providers.harness import (
     compile_claude,
     compile_codex,
 )
-from lup.banner import (
+from lup.formats.banner import (
     COMMENT_FREE,
     REGENERATE_COMMAND,
     VERBATIM_COPY,

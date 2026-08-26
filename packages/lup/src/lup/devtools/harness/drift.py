@@ -18,7 +18,7 @@ from pathlib import Path
 import typer
 from pydantic import BaseModel
 
-from lup.banner import REGENERATE_COMMAND
+from lup.formats.banner import REGENERATE_COMMAND
 from lup.devtools.harness.generate import (
     DriftReport,
     HarnessGenerationConflict,

@@ -42,7 +42,7 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-from lup.banner import REGENERATE_COMMAND, GeneratedBanner
+from lup.formats.banner import REGENERATE_COMMAND, GeneratedBanner
 from lup.policy.kernel.edit import file_level_line, suppression_reaches
 
 SHARED_PACKAGE = "lup.policy"

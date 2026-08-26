@@ -24,10 +24,10 @@ from pydantic import (
 
 from lup.harness.codescan.common import AntiPattern, RuleSelection
 from lup.devtools.launcher import DEFAULT_ENVIRONMENT
-from lup.banner import ArtifactBanner, GeneratedBanner
+from lup.formats.banner import ArtifactBanner, GeneratedBanner
 from lup.harness.image import Image
 from lup.harness.requirements import Manifest
-from lup.markdown import CodeCell, PlainCell, TableCell, escaped
+from lup.formats.markdown import CodeCell, PlainCell, TableCell, escaped
 from lup.tools.mcp import ToolDeclaration
 from lup.policy.kernel.rows import AcceptanceGuardRow, PathRoleName
 from lup.policy.models import PolicyId, UrlPathPrefix

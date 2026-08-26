@@ -87,9 +87,13 @@ Four tiers, and imports only ever point downward.
    (`JsonValue`/`JsonObject`, `ToolName`/`ToolGrant`, `LupContentBlock`,
    `LupMessage`, `Usage`, `SubagentSpec`); `lup.channels` is the file-backed
    primitive both durable state and inter-process rendezvous are built on;
-   `lup.banner`, `lup.markdown`, `lup.seams` and `lup.execution` are the
-   rest. Burying one of these inside a subject is what manufactures a cycle —
-   folding `channels` in with `workspace` did exactly that and was undone.
+   `lup.formats` is how a compiled artifact has to be spelled to survive being
+   one, the do-not-edit banner and the escaping of a derived table's cells;
+   `lup.seams` and `lup.execution` are the rest. Burying one of these inside a
+   subject is what manufactures a cycle — folding `channels` in with
+   `workspace` did exactly that and was undone. Gathering two of them under a
+   question they share does not, and cannot: a package holding only leaves has
+   no outgoing edge to close a loop with.
 2. **`capabilities` and `events`** — each subject carries both.
    `sessions/events.py` owns the turn vocabulary; `sessions/capabilities.py`
    owns the narrow capability seams, and each other subject carries the same
@@ -177,7 +181,7 @@ The pipeline is `validation` → `ownership` → `reconciliation` →
 canonical source and `process`/`environment` for launching a native CLI.
 `generation.py` holds the small deterministic helpers the stages share. The
 do-not-edit banner every commentable generated artifact opens with is
-`lup.banner`, a foundation rather than part of this subject, because the
+`lup.formats.banner`, a foundation rather than part of this subject, because the
 policy bundle writes one too and a banner reached through the harness made
 the two entries import each other.
 
@@ -252,11 +256,10 @@ the way six of them once were.
 
 | Package | Solves |
 | --- | --- |
-| `banner` | The one generated-from banner, spelled however a target format admits. Every generated artifact whose format can hold a comment opens with the same sentence: what produced it, the command that rebuilds it, and where the provenance record lives. Only the source, the command, any target-specific notes, and the comment syntax differ, so the wording is written once here and each generator supplies its parameters. A format with no comment syntax, and the two families that deliberately carry no banner, are named by :class:`BannerExemption` so the absence is declared rather than noticed. |
 | `channels` | File-backed channels: a value that settles, and an ordered log. The widest dependency in the library: most of its top-level entries write through this one, which is what makes it a package rather than a helper inside any of them. Counted rather than listed, because the list is the thing that falls behind — the roster this paragraph came from named six consumers where the import graph held eleven, and nobody notices a sentence going stale. |
 | `devtools` | The development CLI a project built on lup inherits rather than forks. Worktrees and branches, trace and Python introspection, the resolver supervisor, the sync registry, version bookkeeping. Ships the whole roster — `roster.py` wires every sub-app over one `DevtoolsDeclarations`, and an application declares only what it retires and what only it has, so a sub-app added here reaches it on the next lock refresh instead of waiting to be noticed. Requires the `web` extra for the supervisor. |
 | `execution` | What carrying work out runs into, and what to do about each of it. The retry and the throttle a flaky or rate-limited service is met with, the executor a blocking call is handed to so work in flight outlives any one loop&#x27;s teardown, and whether a path can be written at all — or whether a boundary owns it and something merely died holding a lock. |
-| `markdown` | The cells a generated Markdown table is laid out from. Rendering Markdown that is generated rather than authored, escaping at the leaf where data enters the document. Only `devtools` renders such tables today, but nothing in it is about development tooling. |
+| `formats` | What a generated artifact is written as, at the leaf where data enters it. Not what a document says, but what it has to be spelled like to survive being one. A file compiled from a declaration has to say so, in whatever comment syntax its own format admits; a value spliced into a compiled table has to survive the characters that would end a cell or a row early. Both are one question — the target format&#x27;s rules, applied where data crosses into it — and it is nobody else&#x27;s: prose a human wrote is Markdown all the way down and needs nothing here, which is why this sits below every package that compiles something rather than inside the one that compiles most. |
 | `observability` | What happened, recorded so that a later reader can answer for it. One subject that used to be four top-level entries answering the same reader question. The ordered record file every durable log appends to; the lossless hash-chained audit stream a session writes as it runs; the compact markdown trace and its sidecar a later reader skims to find a session worth opening; the console display; the per-tool metrics; the replay divergence check; the per-turn cost arithmetic; and the account-level metered usage. What separates them is what each is kept *for* — evidence, navigation, or a bill — and never the mechanism, which they share. |
 | `orchestration` | Running more than one piece of work, and staying able to speak to it. A cohort of addressable held sessions with mail that lands in front of each one&#x27;s next tool call; a background agent that coalesces wakes into turns; a scheduler and relay for work that sleeps; durable out-of-process jobs; the review gates a turn passes through; and spec-driven delegation for runtimes whose own subagents will not do. |
 | `sandbox` | Docker-based Python sandbox, split by concern. A Docker-isolated Python REPL — mount topology, container lifecycle, and the exec-multiplexed socket protocol. Requires the `docker` extra. |
@@ -295,7 +298,7 @@ questions still open; the fifth is the shape of a guarantee.
 
 The last two have one shape: a symbol two subjects share, sitting inside one
 of them. Each closes by moving that symbol below both, which is what
-`lup.banner` already did for the do-not-edit banner the policy bundle and the
+`lup.formats.banner` already did for the do-not-edit banner the policy bundle and
 harness both write. The first two are the front door deliberately knowing
 about what it opens; whether a lazily-imported provider counts as an edge at
 all is the question to answer before an acyclicity check is written, and

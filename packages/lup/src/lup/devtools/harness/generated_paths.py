@@ -26,10 +26,10 @@ from pathlib import Path
 import lup.harness.models as models
 from lup.providers.harness import claude_prompt_renderer
 from lup.devtools.harness.composition import NativeTargets
-from lup.banner import GeneratedBanner
+from lup.formats.banner import GeneratedBanner
 from lup.harness.materialization import write_generated_file
 from lup.harness.models import Artifact, PromptDocument, TextPart
-from lup.markdown import CodeCell, PlainCell, TableCell
+from lup.formats.markdown import CodeCell, PlainCell, TableCell
 from lup.workspace.paths import project_root
 
 # lup: ignore[constant-declaration] — one generated artifact's identity: the
