@@ -266,7 +266,7 @@ class DeterministicReconciler(Reconciler):
         writes: list[ProposedWrite] = []  # lup: ignore[empty-collection]
         conflicts: list[ReconciliationConflict] = []  # lup: ignore[empty-collection]
         for key, artifact in wanted.items():
-            existing = present.get(key)  # lup: ignore[dict-get]
+            existing = present.get(key)
             if existing is None:
                 writes.append(ProposedWrite(artifact=artifact))
                 continue

@@ -209,7 +209,7 @@ class NativeTargets(BaseModel, frozen=True, arbitrary_types_allowed=True):
 
     def builder(self, name: str) -> "TargetBuilder | None":
         """How to build one named target, or nothing when it is not declared."""
-        return self.builders.get(name)  # lup: ignore[dict-get]
+        return self.builders.get(name)
 
     def resolve(self, value: str, root: Path) -> list[NativeHarnessComposition]:
         """Parse a generic CLI selector into already concrete compositions."""

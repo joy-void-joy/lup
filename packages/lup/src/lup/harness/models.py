@@ -1369,9 +1369,7 @@ class Harness(BaseModel, frozen=True):
             ]
         )
         for invocation in invocations:
-            skill = skills.get(  # lup: ignore[dict-get] — open declaration registry
-                (invocation.plugin, invocation.skill)
-            )
+            skill = skills.get((invocation.plugin, invocation.skill))
             if skill is None:
                 raise ValueError(
                     "skill invocation refers to an unknown declaration: "

@@ -251,33 +251,37 @@ class Client:
         return url
 
 
-def mapping(payload: dict[str, str], key: str) -> str | None:
-    return payload.get(key)
+def mapping(payload: dict[str, str]) -> str | None:
+    return payload.get("name")
 
 
 def typed_dict(row: Row) -> str | None:
     return row.get("name")
 
 
-def descended(holder: Middle, key: str) -> int | None:
-    return holder.get(key)
+def descended(holder: Middle) -> int | None:
+    return holder.get("count")
 
 
-def client(session: Client, url: str) -> str:
-    return session.get(url)
+def client(session: Client) -> str:
+    return session.get("url")
 
 
-def keywords(key: str, **kwargs: str) -> str | None:
-    return kwargs.get(key)
+def keywords(**kwargs: str) -> str | None:
+    return kwargs.get("name")
 
 
-def untyped(anything, key):
-    return anything.get(key)
+def untyped(anything):
+    return anything.get("name")
 '''
 """One file holding every shape resolution has a different answer for.
 
 Every receiver is named once, so a test names the code it is about rather
 than a line number that moves whenever this grows.
+
+Every key is a literal, because the receiver is what each of these is about.
+A key computed at runtime is settled by the tree and never becomes a site, so
+a fixture spelling one would ask the checker nothing at all.
 """
 
 
@@ -309,12 +313,12 @@ def test_a_mapping_receiver_keeps_its_finding_against_the_real_server(
     tmp_path: Path,
 ) -> None:
     """The access the rule exists for survives a checker that can see it."""
-    assert "return payload.get(key)" not in resolved(tmp_path, RESOLVED_SUBJECTS)
+    assert 'return payload.get("name")' not in resolved(tmp_path, RESOLVED_SUBJECTS)
 
 
 def test_a_client_receiver_is_refuted_on_its_own_class(tmp_path: Path) -> None:
     """The same spelling on something that is not a mapping, named as such."""
-    evidence = resolved(tmp_path, RESOLVED_SUBJECTS)["return session.get(url)"]
+    evidence = resolved(tmp_path, RESOLVED_SUBJECTS)['return session.get("url")']
     assert "`Client`" in evidence
     assert "outside the mapping family" in evidence
 
@@ -335,7 +339,7 @@ def test_a_subject_descending_from_the_family_keeps_its_finding(
     tmp_path: Path,
 ) -> None:
     """`Middle(Base(dict))` is a mapping, however many links down it says so."""
-    assert "return holder.get(key)" not in resolved(tmp_path, RESOLVED_SUBJECTS)
+    assert 'return holder.get("count")' not in resolved(tmp_path, RESOLVED_SUBJECTS)
 
 
 def test_keyword_arguments_are_a_mapping_and_keep_their_finding(
@@ -348,12 +352,12 @@ def test_keyword_arguments_are_a_mapping_and_keep_their_finding(
     contributor reading that a directive there would be reported spurious
     was reading the opposite of what the gate does.
     """
-    assert "return kwargs.get(key)" not in resolved(tmp_path, RESOLVED_SUBJECTS)
+    assert 'return kwargs.get("name")' not in resolved(tmp_path, RESOLVED_SUBJECTS)
 
 
 def test_an_untyped_subject_is_refuted_for_being_untyped(tmp_path: Path) -> None:
     """Nothing shown is not membership, and the evidence says which happened."""
-    evidence = resolved(tmp_path, RESOLVED_SUBJECTS)["return anything.get(key)"]
+    evidence = resolved(tmp_path, RESOLVED_SUBJECTS)['return anything.get("name")']
     assert "inferred no type" in evidence
 
 

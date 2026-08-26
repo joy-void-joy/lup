@@ -186,7 +186,7 @@ class Roster:
         held: dict[str, SpawnedActor] = {}  # lup: ignore[empty-collection]
         for entry in self.stream.read_all():
             conversation = entry.actor.conversation()
-            found = held.get(conversation)  # lup: ignore[dict-get] presence
+            found = held.get(conversation)
             applied = entry.applied(found)
             if applied is not None:
                 held[conversation] = applied

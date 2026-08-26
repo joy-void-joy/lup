@@ -87,7 +87,7 @@ def capability_names(
     effective_cache: dict[str, set[str]] = {}
 
     def effective_abstracts(name: str, visiting: set[str] | None = None) -> set[str]:
-        cached = effective_cache.get(name)  # lup: ignore[dict-get]
+        cached = effective_cache.get(name)
         if cached is not None:
             return cached
         if name not in symbols:

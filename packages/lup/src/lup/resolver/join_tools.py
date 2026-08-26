@@ -424,7 +424,7 @@ def create_join_tools(
             )
             if not record.passed
         ]
-        found = prepared.get(tip.commit, PreparedJoin())  # lup: ignore[dict-get]
+        found = prepared.get(tip.commit, PreparedJoin())
         desk.record(
             JoinLanding(
                 commit=tip.commit,

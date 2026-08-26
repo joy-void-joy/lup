@@ -142,9 +142,7 @@ def serve_tools(
             t for key, tools in by_server.items() if key != EXAMPLE_GROUP for t in tools
         ]
     else:
-        lup_tools = list(
-            by_server.get(server_group, [])  # lup: ignore[dict-get] — group map
-        )
+        lup_tools = list(by_server.get(server_group, []))
 
     if list_only:
         for t in lup_tools:

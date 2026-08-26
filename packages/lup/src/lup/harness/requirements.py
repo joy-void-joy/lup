@@ -236,7 +236,7 @@ class EnvironmentRedirect(BaseModel, frozen=True):
         genuinely aiming a client at something absent. That is a cause
         whatever words the client chose to fail in.
         """
-        value = environment.get(self.variable, "")  # lup: ignore[dict-get]
+        value = environment.get(self.variable, "")
         if not value:
             return ""
         target = Path(value.removeprefix(self.scheme))

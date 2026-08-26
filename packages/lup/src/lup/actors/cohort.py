@@ -252,7 +252,7 @@ class ActorCohort:
         one are two views of one stream. Handing each its own left them with
         two positions over it, and a message could sit behind both.
         """
-        held = self.inboxes.get(actor.conversation())  # lup: ignore[dict-get] presence
+        held = self.inboxes.get(actor.conversation())
         if held is None:
             held = ActorInbox(self.mail, self.journal, actor)
             self.inboxes[actor.conversation()] = held
@@ -276,7 +276,7 @@ class ActorCohort:
         The recipe is handed this actor's inbox hooks, so what it opens is
         reachable mid-turn without the caller having arranged anything.
         """
-        held = self.sessions.get(actor.conversation())  # lup: ignore[dict-get] presence
+        held = self.sessions.get(actor.conversation())
         if held is not None:
             held.actor = actor
             return held
@@ -317,9 +317,7 @@ class ActorCohort:
 
     def save(self, actor: ActorRef, held: ActorSession | None = None) -> None:
         """Persist one actor's identity so a resumed run reattaches to it."""
-        found = held or self.sessions.get(  # lup: ignore[dict-get] presence
-            actor.conversation()
-        )
+        found = held or self.sessions.get(actor.conversation())
         if found is not None:
             publish_atomic(self.path(actor), found.record)
 

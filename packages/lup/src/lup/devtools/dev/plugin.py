@@ -1,6 +1,3 @@
-# lup: ignore[dict-get]
-# Every read here probes Claude-settings JSON whose keys are all optional,
-# so dict-get is opted out file-wide.
 """Marketplace naming for the local lup plugin.
 
 Marketplace names live in one global namespace

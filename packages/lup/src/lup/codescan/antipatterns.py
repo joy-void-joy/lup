@@ -381,10 +381,9 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         "types (dict[str, Client]) are already accepted; JsonValue covers arbitrary JSON",
     ),
     AntiPattern(
-        # Flags every `.get(` — the user's explicit broad choice over a narrow
-        # rule. On payload/TypedDict-shaped data use typed attribute access; on
-        # a genuinely open dict (a registry or cache) it is one comment; a
-        # typed non-mapping receiver takes none, since the audit refutes it.
+        # Flags `.get("literal")` — a field name the author knew and the type
+        # does not carry. A key computed at runtime is a lookup into a map
+        # whose keys are data, never a hidden schema, and takes no directive.
         id="dict-get",
         pattern=re.compile(r"\.get\s*\("),
         matcher=Matcher(select=dict_get_sites),
@@ -400,10 +399,11 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
             "substantiate leaves a directive as the only way past it. A "
             "`TypedDict` resolves to its own class and is refuted there: it "
             "is already the modelling this rule asks for. What the tree "
-            "settles it settles alone, so route decorators and calls on an "
-            "imported module never become sites and never reach a checker. "
-            "Where no checker answers at all every finding keeps its "
-            "unresolved verdict and the gate asks instead of refusing."
+            "settles it settles alone, so a key computed at runtime, a route "
+            "decorator, and a call on an imported module never become sites "
+            "and never reach a checker. Where no checker answers at all every "
+            "finding keeps its unresolved verdict and the gate asks instead "
+            "of refusing."
         ),
         examples=[
             RuleExample(code='name = payload.get("name")', verdict="flagged"),
@@ -411,6 +411,9 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
             # lookup — which is why the tree rules out the bare name only.
             RuleExample(code='token = os.environ.get("LUP_TOKEN")', verdict="flagged"),
             RuleExample(code="name = payload.name", verdict="cleared"),
+            # A key computed at runtime: the map's keys are data, so there is
+            # no schema to model and nothing being hidden by not modelling it.
+            RuleExample(code="held = sessions.get(actor)", verdict="cleared"),
             RuleExample(code="import httpx; reply = httpx.get(url)", verdict="cleared"),
             RuleExample(
                 code='@app.get("/runs")\ndef runs() -> list[Run]: ...',
@@ -418,15 +421,17 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
             ),
             # No tree says what an imported class is, so the hook flags this
             # and the sweep takes it back once the receiver resolves.
-            RuleExample(code="reply = client.get(url)", verdict="refuted"),
+            RuleExample(code='reply = client.get("url")', verdict="refuted"),
         ],
-        message="`.get(` on a dict-shaped payload hides the schema — model it and "
-        "read the fields (BaseModel/TypedDict). On a genuinely open dict (registry, "
-        "cache) add `# lup: ignore[dict-get]`. On a receiver the checker resolves "
-        "outside the mapping family, or cannot resolve at all, add nothing — the "
-        "audit refutes it and a marker there is reported spurious. A `TypedDict` is "
-        "already the modelling this asks for, and `.get` is how an optional key is "
-        "read out of one, so it is not this rule's subject",
+        message='`.get("literal")` on a dict-shaped payload hides the schema — the '
+        "field name is in the call and nowhere in the type, so model it and read the "
+        "fields (BaseModel/TypedDict). Nothing else is this rule's subject and none "
+        "of it takes a directive: a key computed at runtime is a lookup into a map "
+        "whose keys are data, a receiver the checker resolves outside the mapping "
+        "family or cannot resolve at all is refuted by the audit, and a `TypedDict` "
+        "is already the modelling this asks for — `.get` is how an optional key is "
+        "read out of one. A marker at any of those is reported spurious. Where the "
+        "literal is genuinely one key of an open dict, add `# lup: ignore[dict-get]`",
     ),
     AntiPattern(
         id="bare-object",

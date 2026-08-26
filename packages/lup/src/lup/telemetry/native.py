@@ -105,7 +105,7 @@ def first_string(record: JsonValue, key: str) -> str | None:
     """
     match record:
         case dict() as mapping:
-            candidate = mapping.get(key)  # lup: ignore[dict-get]
+            candidate = mapping.get(key)
             if isinstance(candidate, str):
                 return candidate
             for child in mapping.values():
@@ -231,7 +231,7 @@ class NativeTranscriptWatcher:
         still writing it — except on the final scan, where nothing more is
         coming and a truncated record is better evidence than none.
         """
-        cursor = self.cursors.get(path, 0)  # lup: ignore[dict-get]
+        cursor = self.cursors.get(path, 0)
         size = path.stat().st_size
         if size < cursor:
             cursor = 0
@@ -271,7 +271,7 @@ class NativeTranscriptWatcher:
         """
         if self.scope is None:
             return True
-        origin = self.origins.get(path)  # lup: ignore[dict-get]
+        origin = self.origins.get(path)
         return origin is not None and self.directory_in_scope(origin)
 
     def admit(self, path: Path, origin: NativeRecordOrigin) -> bool:

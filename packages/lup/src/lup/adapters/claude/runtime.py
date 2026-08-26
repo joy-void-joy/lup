@@ -1106,7 +1106,7 @@ def claude_usage(
         return Usage(cost_usd=total_cost_usd)
 
     def count(name: str) -> int:
-        value = raw.get(name)  # lup: ignore[dict-get] -- vendor payload
+        value = raw.get(name)
         return value if isinstance(value, int) else 0
 
     return Usage(

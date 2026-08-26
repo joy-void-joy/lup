@@ -881,7 +881,7 @@ def ambient_config_home(login: ProviderLogin, fallback: Path) -> Path:
     that ``None`` keep meaning what it means everywhere else instead of every
     caller inventing a default.
     """
-    # lup: ignore[os-environ,dict-get] — the process environment is the open
+    # lup: ignore[os-environ] — the process environment is the open
     # mapping this reads by definition, and absence is the answer it wants
     named = os.environ.get(login.config_home_env)
     return Path(named) if named else fallback

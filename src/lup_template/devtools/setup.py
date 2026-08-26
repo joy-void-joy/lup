@@ -144,7 +144,7 @@ def codex_backend_status(env: EnvVars) -> IntegrationStatus:
     rates = [
         key
         for key in ("CODEX_USD_PER_MTOK_INPUT", "CODEX_USD_PER_MTOK_OUTPUT")
-        if env.get(key)  # lup: ignore[dict-get] — open env map
+        if env.get(key)
     ]
     if len(rates) == 2:
         return IntegrationStatus(ok=True, detail="rates set (budget caps enforceable)")

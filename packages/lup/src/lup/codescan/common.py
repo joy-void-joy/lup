@@ -1,4 +1,4 @@
-# lup: ignore[import-re, set-shape, empty-collection, dict-get, string-split] — the scanner that enforces these rules is written in the vocabulary they govern
+# lup: ignore[import-re, set-shape, empty-collection, string-split] — the scanner that enforces these rules is written in the vocabulary they govern
 """Shared scanning core for the review-marker and anti-pattern scanners.
 
 Both `lup.codescan.markers` and `lup.codescan.antipatterns` walk a file line by

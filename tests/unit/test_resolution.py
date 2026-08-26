@@ -260,7 +260,7 @@ def test_one_mapping_among_clients_keeps_the_line() -> None:
 
 def test_refuted_line_reports_its_directive_as_spurious() -> None:
     """The reflex suppressions become dead directives on evidence."""
-    text = "response = client.get(url)  # lup: ignore[dict-get]\n"
+    text = 'response = client.get("url")  # lup: ignore[dict-get]\n'
     refuted = refute([source(text)], TableOracle({1: CLIENT}), PYTHON_ANTI_PATTERNS)[
         "sample.py"
     ]
@@ -381,14 +381,15 @@ def test_an_unresolved_rule_declares_no_resolution() -> None:
 def test_the_gate_asks_where_nothing_resolved_the_receiver() -> None:
     """Told nothing, the gate says so instead of stating the audit's opposite.
 
-    This is the deadlock's own shape: the kernel denied `client.get(url)` and
-    demanded a directive, the audit resolved `Client`, refuted the finding,
-    and reported that directive spurious. No version of the file passed both.
+    This is the deadlock's own shape: the kernel denied `client.get("url")`
+    and demanded a directive, the audit resolved `Client`, refuted the
+    finding, and reported that directive spurious. No version of the file
+    passed both.
     """
     rows = bundled_antipattern_rows()[".py"]
 
     decision = antipattern_decision(
-        None, "response = client.get(url)\n", rows, python_source=True
+        None, 'response = client.get("url")\n', rows, python_source=True
     )
 
     assert decision is not None and decision.effect == "ask"
@@ -406,7 +407,7 @@ def test_a_resolved_receiver_is_admitted_without_a_directive() -> None:
 
     decision = antipattern_decision(
         None,
-        "response = client.get(url)\n",
+        'response = client.get("url")\n',
         rows,
         python_source=True,
         refuted={"dict-get": [1]},

@@ -615,7 +615,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
         {
             "id": "dict-get",
             "pattern": "\\.get\\s*\\(",
-            "message": "`.get(` on a dict-shaped payload hides the schema \u2014 model it and read the fields (BaseModel/TypedDict). On a genuinely open dict (registry, cache) add `# lup: ignore[dict-get]`. On a receiver the checker resolves outside the mapping family, or cannot resolve at all, add nothing \u2014 the audit refutes it and a marker there is reported spurious. A `TypedDict` is already the modelling this asks for, and `.get` is how an optional key is read out of one, so it is not this rule's subject",
+            "message": '`.get("literal")` on a dict-shaped payload hides the schema \u2014 the field name is in the call and nowhere in the type, so model it and read the fields (BaseModel/TypedDict). Nothing else is this rule\'s subject and none of it takes a directive: a key computed at runtime is a lookup into a map whose keys are data, a receiver the checker resolves outside the mapping family or cannot resolve at all is refuted by the audit, and a `TypedDict` is already the modelling this asks for \u2014 `.get` is how an optional key is read out of one. A marker at any of those is reported spurious. Where the literal is genuinely one key of an open dict, add `# lup: ignore[dict-get]`',
             "context": "code",
             "matcher": "dict_get_sites",
             "strength": "soft",
@@ -1031,7 +1031,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
         {
             "id": "dict-get",
             "pattern": "\\.get\\s*\\(",
-            "message": "`.get(` on a dict-shaped payload hides the schema \u2014 model it and read the fields (BaseModel/TypedDict). On a genuinely open dict (registry, cache) add `# lup: ignore[dict-get]`. On a receiver the checker resolves outside the mapping family, or cannot resolve at all, add nothing \u2014 the audit refutes it and a marker there is reported spurious. A `TypedDict` is already the modelling this asks for, and `.get` is how an optional key is read out of one, so it is not this rule's subject",
+            "message": '`.get("literal")` on a dict-shaped payload hides the schema \u2014 the field name is in the call and nowhere in the type, so model it and read the fields (BaseModel/TypedDict). Nothing else is this rule\'s subject and none of it takes a directive: a key computed at runtime is a lookup into a map whose keys are data, a receiver the checker resolves outside the mapping family or cannot resolve at all is refuted by the audit, and a `TypedDict` is already the modelling this asks for \u2014 `.get` is how an optional key is read out of one. A marker at any of those is reported spurious. Where the literal is genuinely one key of an open dict, add `# lup: ignore[dict-get]`',
             "context": "code",
             "matcher": "dict_get_sites",
             "strength": "soft",

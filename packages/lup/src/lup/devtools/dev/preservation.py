@@ -281,8 +281,6 @@ def compare(captured: Ledger, live: Ledger) -> Divergence:
             case CapabilityKind.COMMAND:
                 return [capability.identity] if capability.identity in commands else []
             case CapabilityKind.EXPORT:
-                # lup: ignore[dict-get] — an open index keyed by whatever the
-                # live tree happens to declare; absent is the answer, not a gap
                 return homes.get(capability.identity, [])
 
     return Divergence(

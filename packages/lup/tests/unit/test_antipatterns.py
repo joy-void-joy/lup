@@ -322,7 +322,9 @@ def test_audit_reports_dead_file_level_rule_as_spurious() -> None:
 def test_audit_reports_inline_covered_file_level_rule_as_spurious() -> None:
     # Every .get hit carries its own inline directive, so the file-wide
     # dict-get opt-out silences nothing an inline marker does not — dead.
-    source = "# lup: ignore[dict-get]\nname = data.get(k)  # lup: ignore[dict-get]\n"
+    source = (
+        '# lup: ignore[dict-get]\nname = data.get("name")  # lup: ignore[dict-get]\n'
+    )
     findings = audit_text(source, PYTHON_ANTI_PATTERNS)
     assert [(f.kind, f.rule_id, f.line) for f in findings] == [
         ("spurious", "dict-get", 1)
@@ -1024,14 +1026,40 @@ def test_audit_flags_os_file_ops_and_environ() -> None:
         assert findings and findings[0].rule_id == "os-environ", line
 
 
-def test_audit_flags_every_dict_get() -> None:
+def test_audit_flags_a_field_name_the_type_does_not_carry() -> None:
     findings = audit_text("name = payload.get('name')\n", PYTHON_ANTI_PATTERNS)
     assert [f.kind for f in findings] == ["missing"]
     assert findings[0].rule_id == "dict-get"
 
 
+def test_audit_leaves_a_key_computed_at_runtime_alone() -> None:
+    """The defect is a hidden schema, and a runtime key hides none.
+
+    A field name is always a literal, because the author knew it while
+    writing. A key the program computes reads a map whose keys are data —
+    there is nothing to model, so a directive there would be paying for a
+    rule that was never about the site.
+    """
+    for line in (
+        "held = sessions.get(actor)\n",
+        "state = self.loop_states.get(loop)\n",
+        "spec = by_name.get(validated.name)\n",
+        "found = registry.get(key, fallback)\n",
+    ):
+        assert audit_text(line, PYTHON_ANTI_PATTERNS) == [], line
+
+
+def test_a_directive_on_a_runtime_key_is_reported_spurious() -> None:
+    """The forty-nine the narrowing retired, each one now a dead directive."""
+    findings = audit_text(
+        "held = sessions.get(actor)  # lup: ignore[dict-get]\n", PYTHON_ANTI_PATTERNS
+    )
+
+    assert [(f.kind, f.rule_id) for f in findings] == [("spurious", "dict-get")]
+
+
 def test_audit_dict_get_silenced_by_typed_ignore() -> None:
-    source = "name = registry.get(key)  # lup: ignore[dict-get]\n"
+    source = 'name = registry.get("name")  # lup: ignore[dict-get]\n'
     assert audit_text(source, PYTHON_ANTI_PATTERNS) == []
 
 
@@ -1090,7 +1118,7 @@ def test_a_soft_rule_still_honours_its_suppression() -> None:
 def test_audit_file_level_typed_ignore_disables_only_that_rule() -> None:
     # `# lup: ignore[dict-get]` at the top silences dict-get file-wide, but
     # every other rule stays live.
-    source = "# lup: ignore[dict-get]\nname = data.get(k)\nx: Any = 1\n"
+    source = '# lup: ignore[dict-get]\nname = data.get("name")\nx: Any = 1\n'
     findings = audit_text(source, PYTHON_ANTI_PATTERNS)
     assert [f.kind for f in findings] == ["missing"]
     assert findings[0].rule_id == "any-type"

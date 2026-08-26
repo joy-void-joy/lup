@@ -2110,11 +2110,18 @@ def default_factory_sites(source: str) -> list[MatchSite]:
 
 
 def dict_get_sites(source: str) -> list[MatchSite]:
-    """Return the sites where ``.get(`` reads a key out of a mapping.
+    """Return the sites where ``.get(`` reads a named field out of a mapping.
 
-    Two shapes the tree alone rules out, both decidable without types — which
-    is what lets a suppression at either be retired rather than demanded by
-    the kernel and reported spurious by the audit that resolves the receiver.
+    Three shapes the tree alone rules out, all decidable without types — which
+    is what lets a suppression at any of them be retired rather than demanded
+    by the kernel and reported spurious by the audit resolving the receiver.
+
+    A key computed at runtime is not a hidden schema. The defect this rule is
+    about is a *field name* the author knew and the type does not carry, and
+    such a name is always a literal; ``registry.get(session)`` reads a map
+    whose keys are data, where modelling the keys is not a thing anyone could
+    do. Narrowing to the literal is what stopped every open registry in the
+    tree from paying a directive for a rule that was never about it.
 
     A decorator is not payload access: ``@app.get("/path")`` names a route on
     a framework object, and no schema is read out of a dict.
@@ -2158,10 +2165,27 @@ def dict_get_sites(source: str) -> list[MatchSite]:
                     )
                 )
 
+    def names_a_field(call: ast.Call) -> bool:
+        """Whether this call reads a *named field* rather than looks a key up.
+
+        The discriminator between the defect and the shape that resembles it.
+        A hidden field name is always spelled as a literal, because the author
+        knew it while writing: ``payload.get("name")`` is a schema held in
+        somebody's head and nowhere in the type. A key computed at runtime is
+        the opposite case — ``registry.get(session)`` reads a map whose keys
+        are data, and there is no schema being hidden because there is none.
+        """
+        match call.args:
+            case [ast.Constant(value=str()), *_]:
+                return True
+            case _:
+                return False
+
     def keyed_lookup(call: ast.Call, read: ast.Attribute) -> bool:
-        """Whether one ``.get(`` is a keyed lookup rather than the two near-misses."""
+        """Whether one ``.get(`` is a field read rather than a near-miss."""
         return (
-            not (isinstance(read.value, ast.Name) and read.value.id in modules)
+            names_a_field(call)
+            and not (isinstance(read.value, ast.Name) and read.value.id in modules)
             and (read.end_lineno or read.value.lineno) not in decorated
         )
 

@@ -650,22 +650,16 @@ class Sandbox:
         Only when the owner-pid label is missing (older containers, or
         ones created elsewhere) do we fall back to the age heuristic.
         """
-        owner_pid_raw = labels.get(  # lup: ignore[dict-get] — label map
-            self.OWNER_PID_LABEL
-        )
+        owner_pid_raw = labels.get(self.OWNER_PID_LABEL)
         if owner_pid_raw is not None:
             try:
                 owner_pid = int(owner_pid_raw)
             except ValueError:
                 return True
-            started = labels.get(  # lup: ignore[dict-get] — label map
-                self.OWNER_START_LABEL
-            )
+            started = labels.get(self.OWNER_START_LABEL)
             return not process_is_alive(owner_pid, started)
         try:
-            created_raw = labels.get(  # lup: ignore[dict-get] — label map
-                self.CREATED_AT_LABEL
-            )
+            created_raw = labels.get(self.CREATED_AT_LABEL)
             created_at = float(created_raw or "0")
         except ValueError:
             created_at = 0.0
@@ -699,9 +693,7 @@ class Sandbox:
             logger.warning("Removing orphaned sandbox container: %s", container.name)
             try:
                 container.remove(force=True)
-                volume_name = labels.get(  # lup: ignore[dict-get] — label map
-                    self.VOLUME_LABEL
-                )
+                volume_name = labels.get(self.VOLUME_LABEL)
                 if volume_name:
                     volume = self.docker_client.volumes.get(volume_name)
                     volume.remove()
