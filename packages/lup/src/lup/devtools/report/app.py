@@ -24,7 +24,7 @@ import typer
 
 from lup.devtools.harness.composition import NativeTargets
 from lup.devtools.harness.drift import RepositoryWriter
-from lup.devtools.report.build import build_report
+from lup.devtools.report.build import authored_headings, build_report
 from lup.devtools.report.models import DEFAULT_REPORT_PATH
 from lup.devtools.supervisor.doors import resolve_state_root
 from lup.devtools.utils import output_json
@@ -53,6 +53,12 @@ def create_report_app(
             bool,
             typer.Option("--write", help=f"Rewrite {report_path} with this report"),
         ] = False,
+        force: Annotated[
+            bool,
+            typer.Option(
+                "--force", help="Replace a report carrying a session's own prose"
+            ),
+        ] = False,
     ) -> None:
         """Report everything left to implement, across every surface."""
         root = project_root()
@@ -64,6 +70,21 @@ def create_report_app(
         )
         if write:
             written = root / report_path
+            standing = written.read_text(encoding="utf-8") if written.is_file() else ""
+            authored = authored_headings(standing)
+            if authored and not force:
+                typer.echo(
+                    f"{written} carries {len(authored)} section(s) this command "
+                    f"did not write: {', '.join(authored)}. The walked half "
+                    "rebuilds from the tree in a second; that half is what one "
+                    "session knew and has no other copy, in a directory nothing "
+                    "versions. Replace the whole file with --force, which is "
+                    "what the report skill passes because rewriting whole is "
+                    "the point there — or read this off stdout without --write "
+                    "and compose the two halves yourself.",
+                    err=True,
+                )
+                raise typer.Exit(1)
             written.parent.mkdir(parents=True, exist_ok=True)
             written.write_text(report.markdown(), encoding="utf-8")
             typer.echo(f"{written}: {report.outstanding()} outstanding item(s)")

@@ -23,8 +23,16 @@ which is the second tracking file the guidelines below refuse.
 ## 1. Ask the surfaces
 
 ```bash
-uv run lup-devtools report --write
+uv run lup-devtools report --write --force
 ```
+
+`--force` because the report standing there already carries the *last*
+session's prose, and rewriting whole is the whole point of this step. Without
+it the command refuses, naming the sections it did not write: the walked half
+rebuilds from the tree in a second, and the other half is what one session
+knew, in a directory nothing versions. That refusal is for whoever reaches for
+`--write` outside this skill; here you are about to write section 2 back on
+top, so say so.
 
 Writing to a file the invocation named instead? Drop `--write` and read the
 report off stdout, so the default path is never written:

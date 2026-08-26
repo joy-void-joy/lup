@@ -7,9 +7,17 @@ state behind `harness resolve supervise` — and this composes their answers
 into one shape. A second scanner beside those would be a second answer to
 compare against theirs, which is the reason the surface composes rather than
 replaces.
+
+It also reads one back. A written report is two halves — these topics, and
+what a session knew — and telling them apart is the same question as building
+one, asked in the other direction, so it is answered against the same roster
+rather than by a second description of what a report looks like.
 """
 
+from collections.abc import Sequence
 from pathlib import Path
+
+from markdown_it import MarkdownIt
 
 from lup.harness.codescan.markers import NoteKind, find_feedback
 from lup.devtools.dev.branches import (
@@ -27,12 +35,47 @@ from lup.devtools.report.models import (
     DRIFT,
     LEASES,
     NOTES,
+    REPORT_TOPICS,
     UNLANDED,
     Report,
     ReportItem,
     ReportPart,
+    ReportTopic,
 )
 from lup.resolver.state import live_lease_branches
+
+parser = MarkdownIt()
+
+
+def authored_headings(
+    written: str, topics: Sequence[ReportTopic] = REPORT_TOPICS
+) -> list[str]:
+    """Every section of a written report that no walk put there.
+
+    The half this command writes is exactly the declared topics, one ``##``
+    each, so a second-level heading outside that set was written by a session
+    out of what it knew. That half is the one worth protecting: the walked
+    sections rebuild from the tree in a second, while a session's own reading
+    of what it left half-done has no other copy anywhere and cannot be
+    recovered by anybody once that session is over.
+
+    Read against the same roster the report renders from, so a topic added
+    there is accounted for here by existing rather than by being remembered.
+
+    Parsed rather than scanned for lines opening with ``##``, for the reason
+    :func:`~lup.devtools.dev.guidance.guidance_sections` gives: a fenced code
+    block spells the same shape, and a report quoting one would read as
+    carrying prose it does not.
+    """
+    declared = tuple(topic.title for topic in topics)
+    tokens = parser.parse(written)
+    return [
+        tokens[index + 1].content
+        for index, token in enumerate(tokens)
+        if token.type == "heading_open"
+        and token.tag == "h2"
+        and not tokens[index + 1].content.startswith(declared)
+    ]
 
 
 def note_items(

@@ -13,7 +13,7 @@ from lup.providers.harness import claude_prompt_renderer
 from lup.harness.codescan.markers import NoteKind
 from lup.devtools.dev.comments import FoundComment
 from lup.devtools.harness.content.skills.report import SKILL
-from lup.devtools.report.build import note_items
+from lup.devtools.report.build import authored_headings, note_items
 from lup.devtools.report.models import (
     DEFAULT_REPORT_PATH,
     NOTES,
@@ -21,6 +21,7 @@ from lup.devtools.report.models import (
     Report,
     ReportItem,
     ReportPart,
+    ReportTopic,
     topic_bullets,
 )
 from lup.harness.ownership import GeneratedArtifacts, OwnedArtifact
@@ -161,3 +162,57 @@ def test_a_written_report_lands_in_scratch() -> None:
     """Scratch is the whole reason writing one is not a tracking file."""
     assert DEFAULT_REPORT_PATH.parts[0] == "tmp"
     assert not DEFAULT_REPORT_PATH.is_absolute()
+
+
+def written_report() -> str:
+    """A report as `--write` leaves one: the walked half and nothing else."""
+    return Report(
+        parts=[ReportPart(topic=topic, items=[]) for topic in REPORT_TOPICS]
+    ).markdown()
+
+
+def test_a_report_the_command_wrote_carries_nothing_it_did_not_write() -> None:
+    """The baseline: its own output must not read as somebody else's prose."""
+    assert authored_headings(written_report()) == []
+
+
+def test_a_report_with_no_file_yet_carries_nothing() -> None:
+    assert authored_headings("") == []
+
+
+def test_a_session_s_own_sections_are_named_as_its_own() -> None:
+    """What the refusal is for: the half no walk can rebuild.
+
+    A session writes what it knows under headings of its own, and those are
+    the only copy there is — the walked half above them regenerates from the
+    tree, while this does not and sits in a directory nothing versions.
+    """
+    composed = written_report() + (
+        "\n---\n\n## From this session\n\nWhat the session found.\n"
+        "\n### The item to pick up first\n\nSomething specific.\n"
+    )
+
+    assert authored_headings(composed) == ["From this session"]
+
+
+def test_a_topic_added_to_the_roster_is_accounted_for_by_existing() -> None:
+    """Read against the roster the report renders from, not a second copy."""
+    extra = ReportTopic(title="Whatever comes next", guidance="Something else.")
+    composed = written_report() + "\n## Whatever comes next (0)\n\nNothing.\n"
+
+    assert authored_headings(composed) == ["Whatever comes next (0)"]
+    assert authored_headings(composed, [*REPORT_TOPICS, extra]) == []
+
+
+def test_a_fenced_block_spelling_a_heading_is_not_authored_prose() -> None:
+    """Parsed rather than scanned: a report quoting Markdown still reads clean."""
+    quoted = written_report() + "\n```markdown\n## From this session\n```\n"
+
+    assert authored_headings(quoted) == []
+
+
+def test_the_skill_says_it_is_replacing_the_whole_file() -> None:
+    """The one caller that means it, saying so rather than being exempt."""
+    prose = claude_prompt_renderer().render(SKILL.prompt)
+
+    assert "report --write --force" in prose
