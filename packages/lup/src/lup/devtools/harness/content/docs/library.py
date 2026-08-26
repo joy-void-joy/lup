@@ -302,7 +302,7 @@ Four tiers, and imports only ever point downward.
    (`JsonValue`/`JsonObject`, `ToolName`/`ToolGrant`, `LupContentBlock`,
    `LupMessage`, `Usage`, `SubagentSpec`); `lup.channels` is the file-backed
    primitive both durable state and inter-process rendezvous are built on;
-   `lup.banner`, `lup.markdown`, `lup.tables` and `lup.execution` are the
+   `lup.banner`, `lup.markdown`, `lup.seams` and `lup.execution` are the
    rest. Burying one of these inside a subject is what manufactures a cycle —
    folding `channels` in with `workspace` did exactly that and was undone.
 2. **`capabilities` and `events`** — each subject carries both.

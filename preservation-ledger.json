@@ -1,5 +1,5 @@
 {
-  "revision": "310fa5e5dfba831fe3f50939876325b32bdea20f",
+  "revision": "53d649f308cece8bbf12fb7dea2ffc3a09197f67",
   "roots": [
     "lup",
     "lup_template"
@@ -10075,6 +10075,18 @@
       ]
     },
     {
+      "module": "lup.seams",
+      "declares": [
+        "SelectableRule",
+        "SelectableRule.selection_id",
+        "Selection",
+        "Selection.retired",
+        "Selection.overrides",
+        "Selection.keeps",
+        "Selection.over"
+      ]
+    },
+    {
       "module": "lup.sessions",
       "declares": []
     },
@@ -10473,18 +10485,6 @@
       "declares": [
         "fold_transcript",
         "fold_blocks"
-      ]
-    },
-    {
-      "module": "lup.tables",
-      "declares": [
-        "SelectableRule",
-        "SelectableRule.selection_id",
-        "Selection",
-        "Selection.retired",
-        "Selection.overrides",
-        "Selection.keeps",
-        "Selection.over"
       ]
     },
     {

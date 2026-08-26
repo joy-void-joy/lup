@@ -55,7 +55,7 @@ from lup.policy.kernel.decision import (
     SandboxPlacement,
 )
 from lup.policy.kernel.rows import RunnerTargetRow, RuleLevel, ShellRuleRow
-from lup.tables import SelectableRule
+from lup.seams import SelectableRule
 
 type CommandEffect = Literal["allow", "ask", "deny"]
 

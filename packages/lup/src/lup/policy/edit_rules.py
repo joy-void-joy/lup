@@ -50,7 +50,7 @@ from typing import Literal
 
 from lup.policy.kernel.decision import DecisionEffect
 from lup.policy.kernel.rows import EditOperation, EditRuleRow, PathRoleName
-from lup.tables import SelectableRule
+from lup.seams import SelectableRule
 
 type EditGate = Literal[
     "acceptance-guard",

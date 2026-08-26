@@ -35,7 +35,7 @@ from lup.policy.refused_tools import RefusedTool
 from lup.policy.edit_rules import EditRule
 from lup.policy.shell_rules import RunnerTargetRule, ShellCommandRule
 from lup.policy.vocabulary import default_vocabulary
-from lup.tables import Selection
+from lup.seams import Selection
 from lup.types import JsonValue, ToolGrant, ToolName
 
 if TYPE_CHECKING:

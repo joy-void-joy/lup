@@ -1,6 +1,10 @@
-"""Taking a library table as offered, and saying only what differs from it.
+"""A seam over a library table: taking it as offered, saying what differs.
 
-Three tables reach a project as a starting point rather than a fixture — the
+A seam is *a place this library holds an opinion a project is meant to
+overrule*, which is the definition `dev seams` reads and writes by. Most of
+them are declarations in the adopting project's own catalog and need no
+mechanism here at all. The ones shaped like a table do, and this is theirs:
+three reach a project as a starting point rather than a fixture — the
 anti-patterns it holds its code to, the shell vocabulary it runs, the edit
 gates it judges its own changes by — and in all three the only way to disagree
 with one entry was to restate the table around it, where a restatement fallen
@@ -8,6 +12,15 @@ behind the library looks exactly like a decision. A project names what it drops
 and adds what the library lacks, keyed on the same id a directive, a denial and
 the generated reference already use, so an override replaces its namesake in
 place rather than sitting beside it.
+
+The word carries a second load, and it is deliberate rather than a collision.
+:mod:`lup.sessions.capabilities` and each subject's equivalent hold *capability*
+seams — the narrow ABCs an implementation is swapped in at — and `seam-boundary`
+polices where those may be imported from. One idea in two materials: a place
+the library's answer is replaceable, by an implementation there and by a
+declaration here. Nothing gathers both, because a capability seam belongs to
+the subject that declares it and this belongs below every subject that has a
+table.
 
 :class:`Selection` is the one answer. A project names what it drops, adds what
 it has that the library does not, and says nothing about the rest::
