@@ -1,6 +1,3 @@
-# lup: ignore[import-re, re-call]
-# The semver parser is a three-integer pattern over version directory names —
-# regex is the tool, so those rules are opted out file-wide.
 """Session history storage, retrieval, and cross-version data discovery.
 
 This module handles:
@@ -51,12 +48,12 @@ Examples:
 
 import json
 import logging
-import re
 from collections.abc import Callable, Iterator, Sequence
 from datetime import datetime
 from pathlib import Path
 
 from pydantic import BaseModel, Field, SerializeAsAny, ValidationError
+from semver import Version as Semver
 
 from lup.types import JsonObject, JsonValue, Usage
 from lup.telemetry.metrics import MetricsSummary
@@ -480,23 +477,19 @@ def list_all_session_ids(version: str | None = None) -> list[str]:
 
 MIN_VERSION_DATAPOINTS = 10
 
-SEMVER_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
-
-
-class Semver(BaseModel):
-    """A parsed X.Y.Z version."""
-
-    major: int
-    minor: int
-    patch: int
-
 
 def parse_semver(version: str) -> Semver | None:
-    """Parse 'X.Y.Z' into a :class:`Semver`, or None if invalid."""
-    m = SEMVER_RE.match(version)
-    if not m:
+    """Parse an X.Y.Z version, or None where the label is not one.
+
+    Version directory names are semver, so semver's own parser reads them:
+    it orders two versions the way the specification says to, and it reads
+    the ``+build`` suffix an experiment arm appends to its trace directory
+    while still ordering that arm with the release it came from.
+    """
+    try:
+        return Semver.parse(version)
+    except ValueError:
         return None
-    return Semver(major=int(m.group(1)), minor=int(m.group(2)), patch=int(m.group(3)))
 
 
 class VersionScope(BaseModel):
@@ -516,11 +509,16 @@ def resolve_version(
     version: str | None,
     all_versions: bool = False,
     min_datapoints: int = MIN_VERSION_DATAPOINTS,
+    count: Callable[[list[str]], int] = count_sessions_for_versions,
+    datapoint: str = "sessions",
 ) -> VersionScope:
     """Resolve effective version scope with progressive semver fallback.
 
     Fallback chain: exact version → X.Y.* → X.* → all versions.
-    Widens when the narrower scope has fewer than ``min_datapoints`` sessions.
+    Widens when the narrower scope has fewer than ``min_datapoints`` of
+    whatever ``count`` counts — sessions here, but a project that keeps a
+    denser record than its sessions passes its own counter and the word for
+    it, rather than restating the whole fallback around a different tally.
 
     Returns ``(version_list, warning_message)``.
     ``version_list`` is ``None`` when all versions should be included.
@@ -534,17 +532,17 @@ def resolve_version(
 
     # Level 1: exact version
     exact = [effective] if effective in available else []
-    exact_count = count_sessions_for_versions(exact)
+    exact_count = count(exact)
     if exact_count >= min_datapoints:
         return VersionScope(versions=exact, warning=None)
 
     if semver is None:
-        all_count = count_sessions_for_versions(available)
+        all_count = count(available)
         if all_count == 0:
             return VersionScope(versions=None, warning=None)
         return VersionScope(
             versions=None,
-            warning=f"v{effective} has only {exact_count} sessions "
+            warning=f"v{effective} has only {exact_count} {datapoint} "
             f"(need {min_datapoints}) — including all versions",
         )
 
@@ -558,12 +556,12 @@ def resolve_version(
         and sv.major == major
         and sv.minor == minor
     ]
-    minor_count = count_sessions_for_versions(minor_matches)
+    minor_count = count(minor_matches)
     if minor_count >= min_datapoints:
         return VersionScope(
             versions=minor_matches,
-            warning=f"v{effective} has only {exact_count} sessions "
-            f"— widening to v{major}.{minor}.* ({minor_count} sessions)",
+            warning=f"v{effective} has only {exact_count} {datapoint} "
+            f"— widening to v{major}.{minor}.* ({minor_count} {datapoint})",
         )
 
     # Level 3: same major (X.*)
@@ -572,20 +570,20 @@ def resolve_version(
         for v in available
         if (sv := parse_semver(v)) is not None and sv.major == major
     ]
-    major_count = count_sessions_for_versions(major_matches)
+    major_count = count(major_matches)
     if major_count >= min_datapoints:
         return VersionScope(
             versions=major_matches,
-            warning=f"v{major}.{minor}.* has only {minor_count} sessions "
-            f"— widening to v{major}.* ({major_count} sessions)",
+            warning=f"v{major}.{minor}.* has only {minor_count} {datapoint} "
+            f"— widening to v{major}.* ({major_count} {datapoint})",
         )
 
     # Level 4: all versions
-    all_count = count_sessions_for_versions(available)
+    all_count = count(available)
     if all_count == 0:
         return VersionScope(versions=None, warning=None)
     return VersionScope(
         versions=None,
-        warning=f"v{major}.* has only {major_count} sessions "
+        warning=f"v{major}.* has only {major_count} {datapoint} "
         f"(need {min_datapoints}) — including all versions",
     )
