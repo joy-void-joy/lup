@@ -5,7 +5,7 @@ from datetime import timedelta
 import pytest
 
 from lup.runtime.models import SessionId, TurnId, TurnIdentifiers
-from lup.runtime.usage import CostAccumulator, Spend, per_mtok_usage_cost
+from lup.observability.cost import CostAccumulator, Spend, per_mtok_usage_cost
 from lup.runtime.wrappers import UsageRecord
 from lup.types import Usage
 

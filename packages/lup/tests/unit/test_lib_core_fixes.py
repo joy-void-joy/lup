@@ -32,7 +32,11 @@ from pathlib import Path
 import pytest
 
 from lup.workspace import paths
-from lup.telemetry.metrics import MetricsCollector, metrics_path, read_metrics_summary
+from lup.observability.metrics import (
+    MetricsCollector,
+    metrics_path,
+    read_metrics_summary,
+)
 from lup.workspace.notes import setup_notes
 from lup.workspace.paths import path_is_under, sessions_dir, trace_logs_dir
 from lup.realtime.models import SleepInput

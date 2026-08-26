@@ -26,7 +26,7 @@ from lup.runtime.models import (
     TurnTextBlock,
     turn_request,
 )
-from lup.telemetry.trace import TraceLogger
+from lup.observability.trace import TraceLogger
 from lup.types import Usage
 from lup.workspace.notes import NotesConfig
 from lup_template.agent.core import (

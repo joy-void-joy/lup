@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from lup.telemetry.metrics import (
+from lup.observability.metrics import (
     collector,
     configure_metrics,
     get_metrics_summary,

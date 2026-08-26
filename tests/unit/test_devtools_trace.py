@@ -12,7 +12,7 @@ import pytest
 from typer.testing import CliRunner
 
 from lup.workspace.history import iter_trace_log_files
-from lup.telemetry.trace import TraceLogger
+from lup.observability.trace import TraceLogger
 from lup.types import (
     LupContentBlock,
     LupTextBlock,

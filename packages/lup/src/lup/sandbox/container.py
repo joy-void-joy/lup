@@ -75,7 +75,7 @@ from lup.tools.mcp import (
     create_mcp_server,
     lup_tool,
 )
-from lup.replay.journal import (
+from lup.observability.replay import (
     CellOutcome,
     JournalCell,
     JournalStore,

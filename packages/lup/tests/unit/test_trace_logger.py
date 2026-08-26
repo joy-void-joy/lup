@@ -14,8 +14,8 @@ from unittest.mock import Mock
 
 import pytest
 
-from lup.telemetry.blocks import JsonValue, format_tool_result, truncate_str_fields
-from lup.telemetry.display import (
+from lup.observability.blocks import JsonValue, format_tool_result, truncate_str_fields
+from lup.observability.display import (
     TOOL_COLORS,
     ColorAssigner,
     format_duration,
@@ -23,7 +23,7 @@ from lup.telemetry.display import (
     print_message,
     resolve_color_tag,
 )
-from lup.telemetry.trace import (
+from lup.observability.trace import (
     TraceLogger,
     format_block_markdown,
     read_trace_events,
@@ -155,7 +155,7 @@ def test_print_block_passes_the_resolved_color_to_the_console(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The color resolved for a tag reaches the console rendering boundary."""
-    from lup.telemetry import display
+    from lup.observability import display
 
     rendered = Mock()
     monkeypatch.setattr(display, "console", rendered)

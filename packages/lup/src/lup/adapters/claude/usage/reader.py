@@ -26,8 +26,8 @@ from lup.adapters.claude.usage.api import (
     fetch_usage,
     load_stats,
 )
-from lup.usage.app import UsageEntry
-from lup.usage.models import (
+from lup.observability.usage.app import UsageEntry
+from lup.observability.usage.models import (
     DayUsage,
     ModelShare,
     ModelTokens,
@@ -37,7 +37,7 @@ from lup.usage.models import (
     UsageReport,
     UsageUnavailable,
 )
-from lup.usage.render import breakdown_window
+from lup.observability.usage.render import breakdown_window
 
 type BucketKey = Literal[
     "seven_day",

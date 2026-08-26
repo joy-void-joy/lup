@@ -15,7 +15,7 @@ import pytest
 
 from lup.adapters.claude.transcripts import ClaudeTranscripts
 from lup.devtools.harness import launch
-from lup.telemetry.journal import read_observable_events
+from lup.observability.audit import read_observable_events
 
 
 @pytest.fixture
@@ -145,7 +145,7 @@ def test_a_second_launch_reuses_no_stale_handler(project: Path) -> None:
 
 def test_the_watcher_reports_its_failures_on_the_captured_logger() -> None:
     """The handler is attached by module name, so the two must agree."""
-    from lup.telemetry.native import NativeTranscriptWatcher
+    from lup.observability.native import NativeTranscriptWatcher
 
     assert launch.watcher_logger().name == NativeTranscriptWatcher.__module__
-    assert logging.getLogger("lup.telemetry.native") is launch.watcher_logger()
+    assert logging.getLogger("lup.observability.native") is launch.watcher_logger()

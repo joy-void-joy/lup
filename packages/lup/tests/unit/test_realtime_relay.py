@@ -49,7 +49,7 @@ from lup.runtime.models import (
     TurnRequest,
     TurnResult,
 )
-from lup.telemetry.trace import TraceLogger
+from lup.observability.trace import TraceLogger
 from lup.types import JsonObject, Usage
 
 

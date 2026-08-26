@@ -13,8 +13,8 @@ from typing import Annotated
 import typer
 from pydantic import BaseModel
 
-from lup.usage.display import WATCH_INTERVAL_SECONDS, UsageDisplay
-from lup.usage.models import UsageReader
+from lup.observability.usage.display import WATCH_INTERVAL_SECONDS, UsageDisplay
+from lup.observability.usage.models import UsageReader
 
 
 class UsageEntry(BaseModel, frozen=True):
@@ -22,7 +22,7 @@ class UsageEntry(BaseModel, frozen=True):
 
     ``open`` takes the profile the invocation named, or nothing for whichever
     profile the runtime considers active, and raises
-    :class:`~lup.usage.models.UsageUnavailable` when there is no account there
+    :class:`~lup.observability.usage.models.UsageUnavailable` when there is no account there
     to read — which is the same failure as a request that does not arrive, and
     reaches the caller by the same route.
     """

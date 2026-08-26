@@ -113,7 +113,7 @@ the app answering to it.
 
 That is also where `usage` is decided, twice over: whether to serve it, and
 which backends' accounts it reads. The display, the pacing bars, and the
-snapshot live in `lup.usage`; each adapter contributes a reader that turns
+snapshot live in `lup.observability.usage`; each adapter contributes a reader that turns
 its own account call into the one report shape, and the roster composes the
 display around the readers it names.
 

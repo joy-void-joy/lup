@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 import typer
 
 from lup.devtools.clipboard import ClipboardImage, clipboard_image, clipboard_text
-from lup.telemetry.display import format_duration
+from lup.observability.display import format_duration
 from lup.runtime.models import turn_request
 from lup_template.agent.config import settings
 from lup_template.devtools.agent.serve import collect_registry_tools

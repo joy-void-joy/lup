@@ -70,7 +70,7 @@ from lup.runtime.models import (
     TurnToolResultBlock,
 )
 from lup.runtime.output import InMemorySubmittedOutputStore, TurnSubmission
-from lup.runtime.usage import per_mtok_usage_cost
+from lup.observability.cost import per_mtok_usage_cost
 from lup.types import Usage
 from tests.unit.test_adapter_transforms import arm_labels, decoder_arms
 

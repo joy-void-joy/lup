@@ -13,7 +13,7 @@ from lup.runtime.models import (
     TurnTextBlock,
     TurnToolCallBlock,
 )
-from lup.telemetry.journal import (
+from lup.observability.audit import (
     ArgvRedaction,
     KeyRedaction,
     Redactions,

@@ -9,7 +9,7 @@ Provides reusable scanner functions (``scan_for_errors``, ``scan_for_capability_
 consumed by both trace CLI commands and ``feedback/analyze.py``.
 
 Analysis reads the machine-readable ``.events.jsonl`` sidecar that
-:class:`lup.telemetry.trace.TraceLogger` writes beside each ``.md`` trace: typed tool,
+:class:`lup.observability.trace.TraceLogger` writes beside each ``.md`` trace: typed tool,
 error, and capability events, no regex. The line-scan over markdown remains
 only as the documented fallback for legacy ``.md`` traces that predate the
 sidecar.
@@ -34,8 +34,8 @@ from pydantic import BaseModel
 
 import typer
 
-from lup.telemetry.blocks import truncate_str
-from lup.telemetry.trace import (
+from lup.observability.blocks import truncate_str
+from lup.observability.trace import (
     TraceEvent,
     capability_request_from_text,
     read_trace_events,

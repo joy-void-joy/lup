@@ -1,12 +1,12 @@
 # lup: ignore[own-model-dispatch]
 # Which journal event a turn event becomes is this layer's reading of it, not
-# something the event knows about itself: `ObservableEventKind` is telemetry's
-# vocabulary, and declaring the projection on the runtime event union would
-# have `lup.runtime` depend on `lup.telemetry`, inverting the one direction
-# these two layers are allowed to point in.
+# something the event knows about itself: `ObservableEventKind` is this
+# layer's vocabulary, and declaring the projection on the runtime event union
+# would have `lup.runtime` depend on `lup.observability`, inverting the one
+# direction these two layers are allowed to point in.
 """Complete observable, hierarchical runtime transcripts.
 
-The ordinary :mod:`lup.telemetry.trace` sidecar is a compact feedback index —
+The ordinary :mod:`lup.observability.trace` sidecar is a compact feedback index —
 what a later reader skims to find a session worth opening. This is the other
 half: the lossless audit stream, where every event the provider or runtime
 exposes is appended immediately, correlated to the actor and span that
@@ -35,7 +35,7 @@ from uuid import uuid4
 from pydantic import BaseModel, Field, TypeAdapter
 
 from lup.channels.stream import Stream
-from lup.journal import ChainedWriter, Journal, JournalRecord, last_record
+from lup.observability.journal import ChainedWriter, Journal, JournalRecord, last_record
 from lup.runtime.composition import is_output_model
 from lup.runtime.contracts import EventStream, Session, Turn
 from lup.runtime.errors import TurnError

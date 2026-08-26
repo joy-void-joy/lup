@@ -3,8 +3,8 @@
 from pathlib import Path
 
 from lup.adapters.claude.config_home import default_config_home
-from lup.telemetry.journal import ObservableEventKind
-from lup.telemetry.native import (
+from lup.observability.audit import ObservableEventKind
+from lup.observability.native import (
     NativeRecordOrigin,
     NativeSemanticBlock,
     NativeTranscripts,

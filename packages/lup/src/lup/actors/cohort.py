@@ -59,7 +59,7 @@ from lup.actors.sessions import (
 )
 from lup.channels.models import Door, publish_atomic, utc_now
 from lup.hooks import LupHooksConfig
-from lup.journal import Journal, JournalRecord
+from lup.observability.journal import Journal, JournalRecord
 from lup.client import Client
 from lup.runtime.models import TurnRequest, TurnResult
 
@@ -143,7 +143,8 @@ class CohortJournal(Journal[ActorRef, CohortEntry]):
         """One conversation's own slice of the record, from a cursor forward.
 
         By conversation rather than by ref, which is what
-        :meth:`~lup.journal.Journal.for_actor` matches. A round is an attempt
+        :meth:`~lup.observability.journal.Journal.for_actor` matches. A round
+        is an attempt
         and not a new agent, so a reader following a worker into its second
         round would otherwise watch that agent's record stop at the moment it
         got another go.

@@ -18,7 +18,7 @@ import typer
 from lup.devtools.dev.antipatterns import scan_antipatterns
 from lup.devtools.dev.check import changed_paths
 from lup.devtools.project import DevProject
-from lup.telemetry.trace import TraceLogger
+from lup.observability.trace import TraceLogger
 from lup.workspace.paths import configure, project_root
 from lup.types import LupTextBlock, LupToolResultBlock, LupToolUseBlock
 from tests.unit.repos import commit_file, git_in, initialized_repo

@@ -56,7 +56,7 @@ transforms in each ``config.py`` are for, and what the Codex side had no
 entry point to until the split was made on both.
 
 ``usage/`` — both read an account's metered windows and its daily tokens into
-the report in :mod:`lup.usage`, which owns the display, the pacing bars, and
+the report in :mod:`lup.observability.usage`, which owns the display, the pacing bars, and
 the ``--json`` snapshot. This was Claude-only, on the belief that the other
 runtime published nothing to read; it publishes both readings over its own
 app-server, so the display was made neutral and each adapter left holding

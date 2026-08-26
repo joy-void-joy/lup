@@ -449,5 +449,5 @@ type UsageCost = Callable[[Usage], float]
 """Estimates the USD cost of accumulated token usage.
 
 Adapters that report token counts but no cost take one of these to enforce a
-budget; build it with :func:`lup.runtime.usage.per_mtok_usage_cost`.
+budget; build it with :func:`lup.observability.cost.per_mtok_usage_cost`.
 """

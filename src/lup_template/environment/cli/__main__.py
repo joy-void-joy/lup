@@ -31,7 +31,7 @@ import sh
 import typer
 
 import lup.workspace.paths
-from lup.telemetry.display import format_duration
+from lup.observability.display import format_duration
 from lup.runtime.models import SessionId
 
 from lup_template.agent.config import settings

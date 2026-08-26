@@ -27,7 +27,7 @@ from typing import Literal
 
 from pydantic import BaseModel, TypeAdapter, ValidationError
 
-from lup.telemetry.journal import ObservableEventKind, TraceJournal
+from lup.observability.audit import ObservableEventKind, TraceJournal
 from lup.types import JsonObject, JsonValue
 
 logger = logging.getLogger(__name__)

@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 from lup.tools.mcp import LupMcpTool, ToolError
-from lup.replay.journal import JournalCell
+from lup.observability.replay import JournalCell
 from lup.sandbox.container import Sandbox
 from lup.sandbox.models import (
     ExecuteCodeInput,

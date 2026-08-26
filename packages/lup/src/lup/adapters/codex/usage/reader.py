@@ -23,8 +23,8 @@ from lup.adapters.codex.usage.api import (
     RateLimitWindow,
 )
 from lup.types import EnvVars
-from lup.usage.app import UsageEntry
-from lup.usage.models import (
+from lup.observability.usage.app import UsageEntry
+from lup.observability.usage.models import (
     DayUsage,
     PacingWindow,
     UsageReader,

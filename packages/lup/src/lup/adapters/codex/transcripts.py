@@ -3,8 +3,8 @@
 from pathlib import Path
 
 from lup.adapters.codex.home import DEFAULT_ACCOUNT_HOME
-from lup.telemetry.journal import ObservableEventKind
-from lup.telemetry.native import (
+from lup.observability.audit import ObservableEventKind
+from lup.observability.native import (
     NativeRecordOrigin,
     NativeSemanticBlock,
     NativeTranscripts,

@@ -44,7 +44,7 @@ from lup.hooks import (
     LupHookOutput,
     LupHooksConfig,
 )
-from lup.journal import JournalRecord
+from lup.observability.journal import JournalRecord
 from lup.runtime.errors import ProviderTurnError
 from lup.client import Client
 from lup.runtime.models import (

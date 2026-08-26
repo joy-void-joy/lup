@@ -125,7 +125,7 @@ def serve_tools(
     """Serve the collected tools over MCP stdio (see the ``serve-tools`` command)."""
     from lup.workspace.context import read_session_context
     from lup.tools.mcp import create_mcp_server, serve_stdio
-    from lup.telemetry.metrics import configure_metrics, metrics_path
+    from lup.observability.metrics import configure_metrics, metrics_path
 
     context = read_session_context()
     if context is None and session is not None:

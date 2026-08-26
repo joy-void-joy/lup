@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from lup.replay.journal import (
+from lup.observability.replay import (
     CellOutcome,
     JournalCell,
     JournalStore,

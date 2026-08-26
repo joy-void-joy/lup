@@ -56,7 +56,7 @@ from pydantic import BaseModel, Field, SerializeAsAny, ValidationError
 from semver import Version as Semver
 
 from lup.types import JsonObject, JsonValue, Usage
-from lup.telemetry.metrics import MetricsSummary
+from lup.observability.metrics import MetricsSummary
 from lup.workspace.paths import (
     TIMESTAMP_FMT,
     agent_version,

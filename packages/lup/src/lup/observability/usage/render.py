@@ -14,7 +14,7 @@ from pydantic import BaseModel
 from rich.panel import Panel
 from rich.text import Text
 
-from lup.usage.models import (
+from lup.observability.usage.models import (
     DayUsage,
     ModelTokens,
     PacingWindow,

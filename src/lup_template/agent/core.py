@@ -40,7 +40,7 @@ from lup.runtime.models import (
     TurnResult,
     turn_request,
 )
-from lup.runtime.usage import per_mtok_usage_cost
+from lup.observability.cost import per_mtok_usage_cost
 from lup.runtime.wrappers import (
     BudgetConfig,
     CorrectionConfig,
@@ -53,12 +53,12 @@ from lup.runtime.wrappers import (
     decorated_session_factory,
 )
 from lup.tools.mcp import McpServerEntry
-from lup.telemetry.metrics import (
+from lup.observability.metrics import (
     get_metrics_summary,
     log_metrics_summary,
     reset_metrics,
 )
-from lup.telemetry.trace import TraceLogger
+from lup.observability.trace import TraceLogger
 from lup.types import (
     PayloadText,
     SubagentSpec,
@@ -388,8 +388,8 @@ def decorate_factory(
     tracing = None
     display = None
     if notes is not None and trace_logger is not None:
-        from lup.telemetry.display import ColorAssigner, print_block
-        from lup.telemetry.trace import TraceEvent
+        from lup.observability.display import ColorAssigner, print_block
+        from lup.observability.trace import TraceEvent
 
         colors = ColorAssigner()
 

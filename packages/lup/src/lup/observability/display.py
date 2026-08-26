@@ -23,11 +23,11 @@ from typing import TYPE_CHECKING
 from pydantic import BaseModel
 from rich.console import Console
 
-from lup.telemetry.blocks import extract_block_info, format_tool_result
+from lup.observability.blocks import extract_block_info, format_tool_result
 from lup.types import LupContentBlock, LupMessage
 
 if TYPE_CHECKING:
-    from lup.telemetry.trace import TraceLogger
+    from lup.observability.trace import TraceLogger
 
 TOOL_COLORS = [
     # The rotation a console gets when its caller expresses no preference:

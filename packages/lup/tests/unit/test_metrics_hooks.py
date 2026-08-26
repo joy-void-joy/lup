@@ -12,7 +12,7 @@ from lup.hooks import (
     create_capture_hook,
     create_nudge_hook,
 )
-from lup.telemetry.metrics import get_metrics_summary, reset_metrics, tracked
+from lup.observability.metrics import get_metrics_summary, reset_metrics, tracked
 
 
 @pytest.fixture(autouse=True)

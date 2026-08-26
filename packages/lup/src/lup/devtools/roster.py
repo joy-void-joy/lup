@@ -43,7 +43,7 @@ from lup.devtools.report.app import create_report_app
 from lup.devtools.setup import Integration, create_setup_app
 from lup.devtools.subapps import SubApp, SubAppSpec
 from lup.runtime.profiles import ProfileDirectory
-from lup.usage.app import UsageEntry, create_usage_app
+from lup.observability.usage.app import UsageEntry, create_usage_app
 
 import lup.devtools.py.app as py
 import lup.devtools.sync as sync

@@ -16,8 +16,12 @@ from rich.live import Live
 from rich.panel import Panel
 from rich.text import Text
 
-from lup.usage.models import UsageReader, UsageUnavailable
-from lup.usage.render import build_display, build_error_panel, build_snapshot
+from lup.observability.usage.models import UsageReader, UsageUnavailable
+from lup.observability.usage.render import (
+    build_display,
+    build_error_panel,
+    build_snapshot,
+)
 
 WATCH_INTERVAL_SECONDS = 600
 """How often a live panel re-reads, absent a caller saying otherwise."""

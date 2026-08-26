@@ -18,7 +18,7 @@ from lup.devtools.trace.traces import (
     CapabilityRequest,
     scan_for_capability_gaps,
 )
-from lup.telemetry.metrics import MetricsSummary
+from lup.observability.metrics import MetricsSummary
 from lup.workspace.history import resolve_version
 
 

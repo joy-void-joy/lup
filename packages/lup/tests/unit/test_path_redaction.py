@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from lup.telemetry.journal import (
+from lup.observability.audit import (
     KeyRedaction,
     PathRedaction,
     PortableRoot,

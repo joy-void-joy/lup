@@ -25,10 +25,10 @@ from lup.actors.mail import MessageOutstandingEvent, MessagePostedEvent
 from lup.actors.questions import QuestionAnswer
 from lup.actors.refs import ActorRef
 from lup.channels.models import utc_now
-from lup.journal import Journal as SharedJournal
-from lup.journal import JournalRecord
-from lup.journal import JournalTail as SharedTail
-from lup.journal import last_record
+from lup.observability.journal import Journal as SharedJournal
+from lup.observability.journal import JournalRecord
+from lup.observability.journal import JournalTail as SharedTail
+from lup.observability.journal import last_record
 from lup.resolver.models import (
     CarriedParent,
     ConcernProgress,

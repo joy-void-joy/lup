@@ -11,7 +11,7 @@ from typing import TypedDict
 
 from pydantic import BaseModel
 
-from lup.telemetry.metrics import MetricsSummary, ToolMetricsDict
+from lup.observability.metrics import MetricsSummary, ToolMetricsDict
 from lup.types import JsonValue
 from lup.workspace.history import SessionRecord
 

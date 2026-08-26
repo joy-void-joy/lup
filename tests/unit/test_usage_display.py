@@ -37,8 +37,12 @@ from lup.adapters.claude.usage.reader import (
 from lup.adapters.codex.usage.api import AccountUsage
 from lup.adapters.codex.usage.reader import days_from as codex_days_from
 from lup.adapters.codex.usage.reader import windows_from as codex_windows_from
-from lup.usage.models import UsageReport
-from lup.usage.render import breakdown_window, build_display, build_snapshot
+from lup.observability.usage.models import UsageReport
+from lup.observability.usage.render import (
+    breakdown_window,
+    build_display,
+    build_snapshot,
+)
 
 
 def recent_stats() -> StatsCache:

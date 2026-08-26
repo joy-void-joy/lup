@@ -1,8 +1,9 @@
 """Content-block extraction and truncation helpers.
 
 The pure functions that turn a content block or raw tool-result content into
-display-ready strings, shared by the console display (:mod:`lup.telemetry.display`)
-and the markdown trace (:mod:`lup.telemetry.trace`). No console or file I/O.
+display-ready strings, shared by the console display
+(:mod:`lup.observability.display`) and the markdown trace
+(:mod:`lup.observability.trace`). No console or file I/O.
 """
 
 import json

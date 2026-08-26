@@ -10,7 +10,7 @@ artifacts side by side: a human-readable markdown trace and a machine-readable
 errors, and capability requests) that analysis loads as validated objects
 instead of regex-scanning the markdown.
 
-Typically driven through :func:`lup.telemetry.display.print_message` with a
+Typically driven through :func:`lup.observability.display.print_message` with a
 *trace* argument for combined display and tracing; the ``log_*`` methods here
 support trace-only logging without console output.
 
@@ -33,7 +33,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from lup.telemetry.blocks import extract_block_info, truncate_str
+from lup.observability.blocks import extract_block_info, truncate_str
 from lup.types import LupContentBlock, LupMessage, normalize_content
 
 logger = logging.getLogger(__name__)

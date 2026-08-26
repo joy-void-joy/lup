@@ -51,7 +51,7 @@ from lup.realtime.scheduler import Scheduler
 from lup.runtime.background import BackgroundAgent
 from lup.runtime.errors import TurnError
 from lup.runtime.models import TurnResult, turn_request
-from lup.telemetry.trace import TraceLogger
+from lup.observability.trace import TraceLogger
 
 logger = logging.getLogger(__name__)
 

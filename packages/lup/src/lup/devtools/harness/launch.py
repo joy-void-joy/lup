@@ -47,7 +47,7 @@ from lup.harness.toolchain import (
     for_host,
     socat_requirement,
 )
-from lup.telemetry.journal import (
+from lup.observability.audit import (
     ArgvRedaction,
     KeyRedaction,
     PathRedaction,
@@ -57,7 +57,7 @@ from lup.telemetry.journal import (
     TraceContext,
     TraceJournal,
 )
-from lup.telemetry.native import NativeTranscripts, NativeTranscriptWatcher
+from lup.observability.native import NativeTranscripts, NativeTranscriptWatcher
 from lup.types import EnvVars, JsonObject, JsonValue
 from lup.workspace.paths import harness_runs_path, project_root
 from lup.adapters.codex.home import (

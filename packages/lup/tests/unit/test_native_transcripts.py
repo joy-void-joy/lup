@@ -4,13 +4,13 @@ from pathlib import Path
 
 from lup.adapters.claude.transcripts import ClaudeTranscripts
 from lup.adapters.codex.transcripts import CodexTranscripts
-from lup.telemetry.journal import (
+from lup.observability.audit import (
     TraceActor,
     TraceContext,
     TraceJournal,
     read_observable_events,
 )
-from lup.telemetry.native import NativeTranscriptWatcher
+from lup.observability.native import NativeTranscriptWatcher
 from lup.types import JsonObject
 
 
