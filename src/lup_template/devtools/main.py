@@ -91,7 +91,13 @@ DECLARATIONS = DevtoolsDeclarations(
     prompt=assembled_prompt,
     relocate_roots=[
         Path("src"),
+        # The library's own package root as well as the tree that holds it: a
+        # sweep needs the wide one to find every importer, and carrying the
+        # module's file needs the one its dotted name resolves against, or a
+        # relocation inside the library repoints every import and moves
+        # nothing. Overlapping roots are read once each.
         Path("packages"),
+        Path("packages/lup/src"),
         Path("tests"),
         Path("examples"),
     ],

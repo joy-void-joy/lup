@@ -230,12 +230,21 @@ def relocate_in_file(path: Path, moves: list[Relocation]) -> RelocationEdit | No
 def source_files(
     roots: list[Path], suffixes: Collection[str] = SOURCE_SUFFIXES
 ) -> list[Path]:
-    """Every source file beneath the given roots, in a stable order."""
+    """Every source file beneath the given roots, once each, in a stable order.
+
+    Once each because the roots may nest: a package root a module path
+    resolves against sits inside the sweep root that covers the whole
+    workspace, and a file reached through both would be read, rewritten and
+    reported twice — the second pass finding nothing, and the count telling a
+    reader the file had two imports where it had one.
+    """
     return sorted(
-        path
-        for root in roots
-        for path in root.rglob("*")
-        if path.suffix in suffixes and "__pycache__" not in path.parts
+        {
+            path
+            for root in roots
+            for path in root.rglob("*")
+            if path.suffix in suffixes and "__pycache__" not in path.parts
+        }
     )
 
 
@@ -288,7 +297,14 @@ def carry_module(roots: list[Path], move: Relocation) -> MovedModule | None:
             continue
         target.parent.mkdir(parents=True, exist_ok=True)
         if tracked(source):
-            git.out("-C", str(root), "mv", str(source), str(target))
+            # Asked of the repository holding the file, with both operands
+            # resolved: a root is wherever a module path happens to resolve
+            # against and need be no repository at all, so `-C <root>` with
+            # operands spelled from the caller's directory reads each of them
+            # twice — `packages/lup/src/packages/lup/src/...`, which git
+            # reports as a bad source rather than as a path it built.
+            top = git.out("-C", str(source.parent), "rev-parse", "--show-toplevel")
+            git.out("-C", top, "mv", str(source.resolve()), str(target.resolve()))
         else:
             source.rename(target)
         return MovedModule(old=source, new=target)
