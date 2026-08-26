@@ -21,9 +21,9 @@ from lup.resolver.contracts import (
     WorktreePreparer,
     settles_the_actor,
 )
-from lup.actors.mailbox import ANSWER_POLL_SECONDS
-from lup.actors.refs import ActorRef
-from lup.actors.cohort import ActorCohort
+from lup.orchestration.actors.mailbox import ANSWER_POLL_SECONDS
+from lup.orchestration.actors.refs import ActorRef
+from lup.orchestration.actors.cohort import ActorCohort
 from lup.resolver.dag import ConcernGraph
 from lup.resolver.execution import ConcernExecutor
 from lup.resolver.grants import GrantLedger

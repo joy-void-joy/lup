@@ -10,7 +10,7 @@ under an id no recorded answer matched.
 An actor here is addressed rather than constructed per turn. It holds its
 session across every turn it takes, drains what it does into a journal as it
 happens, and is reattached after a park from its persisted identity. The
-multi-turn shape is not unusual — :class:`lup.runtime.background.BackgroundAgent`
+multi-turn shape is not unusual — :class:`lup.orchestration.background.BackgroundAgent`
 already holds one session open across many turns — the one-shot convenience
 was simply the easier reach.
 
@@ -29,7 +29,7 @@ from typing import Protocol
 
 from pydantic import BaseModel, TypeAdapter
 
-from lup.actors.mail import (
+from lup.orchestration.actors.mail import (
     ActorDelivery,
     ActorMail,
     ActorMessage,
@@ -37,7 +37,7 @@ from lup.actors.mail import (
     MessageOutstandingEvent,
     MessagePostedEvent,
 )
-from lup.actors.refs import ActorRef
+from lup.orchestration.actors.refs import ActorRef
 from lup.hooks import (
     LupHookInput,
     LupHookMatcher,

@@ -1,7 +1,7 @@
 """Real-time MCP tools for persistent agents.
 
 This is a TEMPLATE. These tools show how to wire the Scheduler from
-``lup.realtime.scheduler`` into an agent session. Customize for your domain.
+``lup.orchestration.realtime.scheduler`` into an agent session. Customize for your domain.
 
 The pattern:
 1. Create a Scheduler with your environment's action callback
@@ -15,7 +15,7 @@ Core tools:
 - ``reply`` delivers actions to the environment
 - Timing tools (debounce, remind, schedule) are non-blocking
 
-Background agents (:class:`lup.runtime.background.BackgroundAgent`):
+Background agents (:class:`lup.orchestration.background.BackgroundAgent`):
 - Run companion agents alongside the main session
 - Observer example at the bottom shows conversation summarization
 - Any use case: research, execution, monitoring — not just observation
@@ -31,7 +31,7 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 
 from lup.tools.mcp import LupMcpTool, ToolError, lup_tool
-from lup.realtime.models import (
+from lup.orchestration.realtime.models import (
     ContextInput,
     ContextOutput,
     DebounceInput,
@@ -47,8 +47,8 @@ from lup.realtime.models import (
     SleepInput,
     SleepOutput,
 )
-from lup.realtime.scheduler import Scheduler
-from lup.runtime.background import BackgroundAgent
+from lup.orchestration.realtime.scheduler import Scheduler
+from lup.orchestration.background import BackgroundAgent
 from lup.runtime.errors import TurnError
 from lup.runtime.models import TurnResult, turn_request
 from lup.observability.trace import TraceLogger

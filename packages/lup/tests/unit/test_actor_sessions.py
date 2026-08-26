@@ -7,10 +7,10 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
-from lup.actors.mail import ActorMail, new_message
-from lup.actors.mailbox import AnswerDoor
-from lup.actors.refs import ActorRef
-from lup.actors.sessions import ActorInbox, ActorRecord, ActorSession
+from lup.orchestration.actors.mail import ActorMail, new_message
+from lup.orchestration.actors.mailbox import AnswerDoor
+from lup.orchestration.actors.refs import ActorRef
+from lup.orchestration.actors.sessions import ActorInbox, ActorRecord, ActorSession
 from lup.resolver.journal import Journal
 from lup.runtime.contracts import Session
 from lup.runtime.errors import ProviderTurnError, TurnFailure

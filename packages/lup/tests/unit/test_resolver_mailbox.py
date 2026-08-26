@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from lup.actors.mailbox import (
+from lup.orchestration.actors.mailbox import (
     AnswerDoor,
     AnswerOffer,
     MailboxConflictError,
@@ -15,7 +15,7 @@ from lup.actors.mailbox import (
     RecordedAnswer,
     wait_for_answers,
 )
-from lup.actors.questions import QuestionAnswer
+from lup.orchestration.actors.questions import QuestionAnswer
 from lup.resolver.mailbox import PendingQuestion, QuestionMailbox
 from lup.resolver.models import MaterialQuestion
 

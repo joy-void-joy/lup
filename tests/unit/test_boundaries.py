@@ -140,7 +140,9 @@ def test_sanctioned_paths() -> None:
     assert path_is_sanctioned(Path("packages/lup/src/lup/adapters/claude/runtime.py"))
     assert path_is_sanctioned(Path("tests/unit/test_adapter_transforms.py"), roots)
     assert path_is_sanctioned(Path("src/lup_template/agent/core.py"), roots)
-    assert not path_is_sanctioned(Path("packages/lup/src/lup/subagents.py"), roots)
+    assert not path_is_sanctioned(
+        Path("packages/lup/src/lup/orchestration/subagents.py"), roots
+    )
 
 
 def test_an_application_that_says_nothing_sanctions_nothing_of_its_own() -> None:

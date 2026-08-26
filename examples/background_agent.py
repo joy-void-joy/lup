@@ -5,7 +5,7 @@ import asyncio
 from pydantic import BaseModel
 
 from lup import TurnRequest, TurnResult, create_claude, turn_request
-from lup.runtime.background import BackgroundAgent, BackgroundConfig
+from lup.orchestration.background import BackgroundAgent, BackgroundConfig
 from lup.runtime.errors import TurnError
 
 from examples.common import Summary

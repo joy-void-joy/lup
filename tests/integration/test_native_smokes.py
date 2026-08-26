@@ -29,7 +29,7 @@ from lup.harness.process import LocalProcessLauncher
 from lup.resolver.core import ResolverCore
 from lup.tools.mcp import create_mcp_server, server_tool_names
 from lup.channels.models import utc_now
-from lup.actors.mailbox import AnswerDoor, AnswerOffer
+from lup.orchestration.actors.mailbox import AnswerDoor, AnswerOffer
 from lup.resolver.mailbox import QuestionMailbox
 from lup.resolver.tools import create_question_tools
 from lup.resolver.models import (

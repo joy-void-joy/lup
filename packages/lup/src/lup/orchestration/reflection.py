@@ -27,7 +27,7 @@ Persistent agents: gate ``sleep`` on reflection (via ``Scheduler.meta_gate``).
 Examples:
     Gate ``StructuredOutput`` until the agent has reflected::
 
-        >>> from lup.reflect import ReflectionGate
+        >>> from lup.orchestration.reflection import ReflectionGate
         >>> from lup.hooks import create_reflection_gate, merge_hooks
         >>> gate = ReflectionGate()
         >>> gate_hooks = create_reflection_gate(

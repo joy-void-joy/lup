@@ -1,6 +1,6 @@
 """The resolver's mailbox: the shared one, bound to its own question type.
 
-Everything this module used to hold is in :mod:`lup.actors.mailbox`. What it
+Everything this module used to hold is in :mod:`lup.orchestration.actors.mailbox`. What it
 did — declare a question once, let any door correct an offer, promote exactly
 one answer, and carry messages on a stream nothing parks on — was never about
 concerns or leases.
@@ -13,8 +13,8 @@ and there is one place each name comes from.
 
 from pathlib import Path
 
-from lup.actors.mailbox import PendingQuestion as SharedPendingQuestion
-from lup.actors.mailbox import QuestionMailbox as SharedMailbox
+from lup.orchestration.actors.mailbox import PendingQuestion as SharedPendingQuestion
+from lup.orchestration.actors.mailbox import QuestionMailbox as SharedMailbox
 from lup.resolver.models import MaterialQuestion
 
 

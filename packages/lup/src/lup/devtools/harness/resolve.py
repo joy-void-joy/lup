@@ -69,7 +69,7 @@ from lup.resolver.models import (
     WorkerContext,
 )
 from lup.channels.models import local_stamp, utc_now
-from lup.actors.mailbox import (
+from lup.orchestration.actors.mailbox import (
     AnswerDoor,
     AnswerOffer,
     MailboxConflictError,

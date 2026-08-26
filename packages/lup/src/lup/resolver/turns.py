@@ -25,10 +25,10 @@ from lup.harness.contracts import SkillInvocationRenderer
 from lup.harness.models import ResolveSpec
 from lup.hooks import LupHooksConfig
 from lup.policy.identity import ConcernAllowance
-from lup.actors.mailbox import ParkRequest
-from lup.actors.questions import QuestionAnswer
-from lup.actors.refs import ActorRef
-from lup.actors.cohort import ActorCohort, ActorRecipe
+from lup.orchestration.actors.mailbox import ParkRequest
+from lup.orchestration.actors.questions import QuestionAnswer
+from lup.orchestration.actors.refs import ActorRef
+from lup.orchestration.actors.cohort import ActorCohort, ActorRecipe
 from lup.resolver.grants import GrantLedger, concern_grants, lease_grants
 from lup.resolver.join_desk import (
     JoinPlan,

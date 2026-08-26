@@ -79,7 +79,7 @@ registry is the single place a group is added.
 - **Background agent** — `BackgroundAgent` coalesces state changes into turns
   on a persistent session, debounced. Good for work that reacts to events
   rather than to a prompt.
-- **Persistent / realtime** — `lup.realtime` provides the scheduler and the
+- **Persistent / realtime** — `lup.orchestration.realtime` provides the scheduler and the
   relay for agents that live over time and wake on events. Good for chat,
   monitoring, and games.
 

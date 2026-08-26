@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "24351b85e73a1488cc1a753f2879895637b3f4da22db10e26d502c34d108228e",
+  "source_digest": "f470eaa19b056352fd864a0c3eeeec84e9251aeb85e068d89e97daf9546ebf81",
   "target_requirements": [
     "claude-code"
   ],
@@ -37,7 +37,7 @@
     {
       "path": ".claude/plugins/lup/TEMPLATE_CLAUDE.md",
       "category": "generated",
-      "sha256": "0eb918f0022ed66c088f8ca994160501a5735feb3309b6da7d12d898e6d82579",
+      "sha256": "713dd1fa36d7030727f99eeb752a072b420a8f79490454ac7bb50e59822c78e6",
       "semantic_id": "harness.template-guidance",
       "executable": false
     },
@@ -86,7 +86,7 @@
     {
       "path": ".claude/plugins/lup/commands/brainstorm.md",
       "category": "generated",
-      "sha256": "99bd05e13bf1fd1c755b16e1975c526ff55718b9eb0da33f412b8c9aed6361ec",
+      "sha256": "c41791b155c6b012c8399fdd3f801266051ac4437023636f1ac77130aa7ce643",
       "semantic_id": "skill.brainstorm",
       "executable": false
     },
@@ -191,7 +191,7 @@
     {
       "path": ".claude/plugins/lup/commands/init.md",
       "category": "generated",
-      "sha256": "4026cc9ff1a844971e44ee87838301b08ad2db0f795134292ee07ea0c3fe5eb3",
+      "sha256": "94636b1c07a1d30a383a188bb36da7db15623962c482e97e8db066e45d261970",
       "semantic_id": "skill.init",
       "executable": false
     },
@@ -478,7 +478,7 @@
     {
       "path": "docs/library.md",
       "category": "generated",
-      "sha256": "b7c97fcfde73bb6e0058076736b9d9e2590184580dbb002a98001a1ba07f6dfd",
+      "sha256": "f378f0f40143e39575d7d25e568784b7eb7a0e877a1d756ecd5e417c1e9b5ced",
       "semantic_id": "docs.library",
       "executable": false
     },
@@ -492,7 +492,7 @@
     {
       "path": "docs/orchestration.md",
       "category": "generated",
-      "sha256": "5e9955650bec50aac9b09d765f679f9444ceca8282137503af36dbb4378863b9",
+      "sha256": "e4cab20e888c9e2988a31dca216c466e551e858a193746bce0bd4a9b0ec957a6",
       "semantic_id": "docs.orchestration",
       "executable": false
     },

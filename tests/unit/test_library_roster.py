@@ -63,7 +63,7 @@ def test_the_roster_walks_the_package_it_was_imported_from() -> None:
     describing the library that project actually runs.
     """
     assert LIBRARY.source == LIBRARY_PACKAGE
-    assert (LIBRARY.source / "actors").is_dir()
+    assert (LIBRARY.source / "orchestration").is_dir()
 
 
 def test_an_entry_added_to_the_tree_appears_without_being_declared(

@@ -13,7 +13,7 @@ Each subagent has:
 - Its own model (cheaper models for simpler tasks)
 
 Definitions use ``SubagentSpec`` as portable data. The application injects a
-typed factory recipe into :func:`lup.subagents.create_run_subagent_tool`; the
+typed factory recipe into :func:`lup.orchestration.subagents.create_run_subagent_tool`; the
 tool then performs a one-shot query without selecting a provider itself.
 
 A spec without a ``model`` inherits the session's main model on every
@@ -26,9 +26,9 @@ the full catalog. Where the siblings live:
 - Nested agents: a one-shot :meth:`lup.client.Client.query` inside a
   tool handler; the reviewer in ``agent/tools/reflect.py`` is the
   exemplar
-- Background agents: :class:`lup.runtime.background.BackgroundAgent`, with
+- Background agents: :class:`lup.orchestration.background.BackgroundAgent`, with
   the observer example in ``agent/tools/realtime.py``
-- Persistent agents: ``lup.realtime.scheduler`` and ``lup.realtime.relay``,
+- Persistent agents: ``lup.orchestration.realtime.scheduler`` and ``lup.orchestration.realtime.relay``,
   with example tools in ``agent/tools/realtime.py``
 - Data augmentation: ``agent/tools/example.py`` (domain dispatch,
   null-filling, extraction)

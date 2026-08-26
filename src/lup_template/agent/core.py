@@ -80,7 +80,7 @@ from lup_template.agent.prompts import get_system_prompt
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from lup.reflect import ReviewGate
+    from lup.orchestration.reflection import ReviewGate
     from lup.sandbox.container import Sandbox
 
 
@@ -445,7 +445,7 @@ def build_session_factory(
         merge_hooks,
     )
     from lup.tools.mcp import create_mcp_server
-    from lup.realtime.relay import REALTIME_DIRNAME
+    from lup.orchestration.realtime.relay import REALTIME_DIRNAME
     from lup_template.agent.tool_policy import ToolPolicy
     from lup_template.agent.subagents import get_subagent_specs
     from lup_template.agent.toolsets import EXAMPLE_GROUP, build_session_toolset
@@ -495,7 +495,7 @@ def build_session_factory(
         hooks = merge_hooks(hooks, create_tool_allowlist_hook(allowed_tools))
         submission_gate = reflection_submission_gate(toolset["gate"])
     elif not toolless:
-        from lup.reflect import ReviewGate
+        from lup.orchestration.reflection import ReviewGate
         from lup.workspace.context import SessionContext
         from lup_template.agent.toolsets import tool_group_names
 
@@ -724,8 +724,12 @@ async def run_persistent_agent(
     on_reply: Callable[[str], Awaitable[None]] | None = None,
 ) -> PersistentSessionResult:
     """Run the relay over the same ``Session`` contract as ordinary turns."""
-    from lup.realtime.relay import REALTIME_DIRNAME, RealtimeMailbox, run_relay_session
-    from lup.realtime.scheduler import Scheduler
+    from lup.orchestration.realtime.relay import (
+        REALTIME_DIRNAME,
+        RealtimeMailbox,
+        run_relay_session,
+    )
+    from lup.orchestration.realtime.scheduler import Scheduler
     from lup_template.agent.tools.realtime import MISSING_SLEEP_MESSAGE
 
     identifier = session_id or datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -736,7 +740,7 @@ async def run_persistent_agent(
 
     scheduler = Scheduler(on_action=on_reply or echo_reply)
     mailbox = RealtimeMailbox(build.notes.session / REALTIME_DIRNAME)
-    from lup.reflect import ReflectionGate
+    from lup.orchestration.reflection import ReflectionGate
 
     relay_gate = ReflectionGate(
         flag_path=build.notes.trace_log.with_suffix(".reflection")

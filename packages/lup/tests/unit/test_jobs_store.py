@@ -6,7 +6,7 @@ from pathlib import Path, PurePosixPath
 import pytest
 from pydantic import ValidationError
 
-from lup.jobs.runtime import (
+from lup.orchestration.jobs import (
     DockerJobConfig,
     JobExecutionResult,
     JobInputFile,

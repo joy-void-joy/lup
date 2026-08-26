@@ -4,7 +4,7 @@ This is a TEMPLATE. Customize the input model and reviewer prompt
 for your domain.
 
 Pattern: A tool the agent calls to record its self-assessment before
-producing final output. A :class:`~lup.reflect.ReviewGate` enforces
+producing final output. A :class:`~lup.orchestration.reflection.ReviewGate` enforces
 this — submit_output (or sleep, in persistent mode) is rejected until
 the reviewer passes: approve and warn open the gate, fail keeps it
 closed so the agent revises and reviews again, and after 3 consecutive
@@ -13,7 +13,7 @@ fails the gate opens anyway (escape hatch).
 Runs a nested reviewer agent (an independent one-shot query) that
 critiques the main agent's reasoning with sandboxed file access to
 past outputs (Read/Glob/Grep) and WebFetch for known URLs, returning a
-structured :class:`~lup.reflect.ReviewResult` verdict. Skipping the
+structured :class:`~lup.orchestration.reflection.ReviewResult` verdict. Skipping the
 reviewer, or a reviewer failure, records an approval — availability
 must not deadlock the session.
 
@@ -35,7 +35,7 @@ from typing import TypedDict
 from pydantic import BaseModel, Field
 
 from lup.tools.mcp import LupMcpTool, lup_tool
-from lup.reflect import ReviewGate, ReviewResult, ReviewVerdict
+from lup.orchestration.reflection import ReviewGate, ReviewResult, ReviewVerdict
 
 logger = logging.getLogger(__name__)
 
@@ -258,7 +258,7 @@ def create_reflect_tools(
     """Create the reflection tool(s) and their gate state.
 
     Returns both the tools (for MCP server registration) and the
-    gate (for wiring into :func:`~lup.reflect.create_reflection_gate`).
+    gate (for wiring into :func:`~lup.orchestration.reflection.create_reflection_gate`).
 
     Args:
         session_dir: Where to save the review output (JSON).

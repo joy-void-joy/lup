@@ -45,8 +45,8 @@ from lup.resolver.join_desk import (
     JoinProgressRecord,
     JoinTip,
 )
-from lup.actors.questions import QuestionAnswer
-from lup.actors.refs import ActorRef
+from lup.orchestration.actors.questions import QuestionAnswer
+from lup.orchestration.actors.refs import ActorRef
 from lup.resolver.join_tools import merge_problems
 from lup.resolver.models import (
     CarriedParent,

@@ -35,8 +35,8 @@ from tests.unit.doubles import (
     session_factory,
     turn_result,
 )
-from lup.actors.mailbox import AnswerDoor, AnswerOffer, ParkRequest
-from lup.actors.questions import QuestionAnswer
+from lup.orchestration.actors.mailbox import AnswerDoor, AnswerOffer, ParkRequest
+from lup.orchestration.actors.questions import QuestionAnswer
 from lup.resolver.mailbox import PendingQuestion, QuestionMailbox
 from lup.policy.identity import ConcernAllowance
 from lup.resolver.contracts import (

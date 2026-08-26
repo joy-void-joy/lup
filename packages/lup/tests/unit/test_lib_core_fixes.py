@@ -39,9 +39,9 @@ from lup.observability.metrics import (
 )
 from lup.workspace.notes import setup_notes
 from lup.workspace.paths import path_is_under, sessions_dir, trace_logs_dir
-from lup.realtime.models import SleepInput
-from lup.realtime.relay import RealtimeMailbox, ReplyEvent, RemindEvent
-from lup.reflect import ReflectionGate
+from lup.orchestration.realtime.models import SleepInput
+from lup.orchestration.realtime.relay import RealtimeMailbox, ReplyEvent, RemindEvent
+from lup.orchestration.reflection import ReflectionGate
 from lup.sandbox.container import Sandbox
 from lup.sandbox.process import process_is_alive, process_start_token
 from lup.resilience.throttle import Throttle

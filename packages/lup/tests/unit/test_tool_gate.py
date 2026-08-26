@@ -17,13 +17,13 @@ from lup.hooks import (
     create_completion_guard,
     create_tool_gate,
 )
-from lup.realtime.scheduler import (
+from lup.orchestration.realtime.scheduler import (
     Scheduler,
     create_meta_before_sleep_guard,
     create_pending_event_guard,
     create_stop_guard,
 )
-from lup.reflect import (
+from lup.orchestration.reflection import (
     ReflectionGate,
     ReviewGate,
     ReviewResult,

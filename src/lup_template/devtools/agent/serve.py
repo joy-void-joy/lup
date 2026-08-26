@@ -34,9 +34,9 @@ def collect_tools_by_server(
     if context is None:
         return {EXAMPLE_GROUP: list(EXAMPLE_TOOLS)}
 
-    from lup.reflect import ReviewGate
+    from lup.orchestration.reflection import ReviewGate
     from lup.client import Client
-    from lup.subagents import create_run_subagent_tool
+    from lup.orchestration.subagents import create_run_subagent_tool
     from lup.types import SubagentSpec
     from lup_template.agent.core import build_auxiliary_factory
     from lup_template.agent.config import settings

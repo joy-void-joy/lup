@@ -32,9 +32,9 @@ For agents that exist over time — maintaining conversations, monitoring system
 
 **Why not an event queue?** The sleep/wake pattern lets the agent stay centered — it can debounce event bursts, schedule actions, set reminders, and park thoughts for later, all on its own terms.
 
-**Two wirings, one pattern:** On Claude, tools run in-process — `sleep` blocks on the Scheduler directly and a Stop hook keeps the single turn open forever. On backends whose tools run in a subprocess (Codex, OpenAI-compatible), the loop inverts: **each wake is one SDK turn**. The served tools (`lup.realtime.relay`) relay through files in `session_dir/realtime/`: `reply` and the timing tools append events a parent-side watcher applies mid-turn, `sleep` records a request and the agent ends its turn, and the parent loop (`run_relay_session`) consumes the request, sleeps on the Scheduler, and opens the next turn with a wake message. An agent that ends a turn without sleeping gets bounded corrective turns — the relay counterpart of the Stop hook. Enforcement is in-handler on both wirings (meta-before-sleep, unread-events guard), so no hooks are required.
+**Two wirings, one pattern:** On Claude, tools run in-process — `sleep` blocks on the Scheduler directly and a Stop hook keeps the single turn open forever. On backends whose tools run in a subprocess (Codex, OpenAI-compatible), the loop inverts: **each wake is one SDK turn**. The served tools (`lup.orchestration.realtime.relay`) relay through files in `session_dir/realtime/`: `reply` and the timing tools append events a parent-side watcher applies mid-turn, `sleep` records a request and the agent ends its turn, and the parent loop (`run_relay_session`) consumes the request, sleeps on the Scheduler, and opens the next turn with a wake message. An agent that ends a turn without sleeping gets bounded corrective turns — the relay counterpart of the Stop hook. Enforcement is in-handler on both wirings (meta-before-sleep, unread-events guard), so no hooks are required.
 
-**Library support:** `lup.realtime.scheduler` provides the `Scheduler` class and hook factories (`create_stop_guard`, `create_pending_event_guard`); `lup.realtime.relay` provides the subprocess wiring (`RealtimeMailbox`, `create_realtime_relay_tools`, `run_relay_session`), sharing the tool I/O models in `lup.realtime.models`. Construction goes through the engine seam: `run_persistent_agent` in `agent/core.py` serves the `session` tool group into the subprocess engine, builds the parent-side session mailbox itself, and drives it via `run_relay_session` — the engine never touches the relay. See example tools in `src/lup_template/agent/tools/realtime.py`.
+**Library support:** `lup.orchestration.realtime.scheduler` provides the `Scheduler` class and hook factories (`create_stop_guard`, `create_pending_event_guard`); `lup.orchestration.realtime.relay` provides the subprocess wiring (`RealtimeMailbox`, `create_realtime_relay_tools`, `run_relay_session`), sharing the tool I/O models in `lup.orchestration.realtime.models`. Construction goes through the engine seam: `run_persistent_agent` in `agent/core.py` serves the `session` tool group into the subprocess engine, builds the parent-side session mailbox itself, and drives it via `run_relay_session` — the engine never touches the relay. See example tools in `src/lup_template/agent/tools/realtime.py`.
 
 ---
 
@@ -43,10 +43,10 @@ For agents that exist over time — maintaining conversations, monitoring system
 Agents produce better output when forced to self-assess before committing. Three components:
 
 1. **Reflection tool** (`agent/tools/reflect.py`): Domain-customizable self-assessment — confidence, uncertainties, tool audit, process reflection. Runs a nested reviewer agent that returns a structured `ReviewResult` verdict (skippable per call; a skip or reviewer failure records an approval so availability never deadlocks).
-2. **Review gate** (`lup.reflect`): `ReviewGate`, a verdict-aware `ReflectionGate` — in-memory, or file-backed (fail counter included) when tools run in a subprocess. Approve and warn open the gate; fail keeps it closed so the agent revises and re-reviews; after 3 consecutive fails it opens anyway (escape hatch). Enforced primarily *inside* the `submit_output` handler (`lup.runtime.output`), which rejects submission with a retriable error until the gate opens; `create_reflection_gate()` adds a PreToolUse hook as hardening where the backend supports it. The plain `ReflectionGate` base remains for act-of-reflecting gates (the realtime `sleep` meta-gate).
+2. **Review gate** (`lup.orchestration.reflection`): `ReviewGate`, a verdict-aware `ReflectionGate` — in-memory, or file-backed (fail counter included) when tools run in a subprocess. Approve and warn open the gate; fail keeps it closed so the agent revises and re-reviews; after 3 consecutive fails it opens anyway (escape hatch). Enforced primarily *inside* the `submit_output` handler (`lup.runtime.output`), which rejects submission with a retriable error until the gate opens; `create_reflection_gate()` adds a PreToolUse hook as hardening where the backend supports it. The plain `ReflectionGate` base remains for act-of-reflecting gates (the realtime `sleep` meta-gate).
 3. **Wiring**: The gate rides inside submission — `reflection_submission_gate` (`agent/core.py`) adapts the `ReviewGate` to the `SubmissionGate` carried by the turn's `TurnToolBinding`, so a gated submission is rejected with a retriable message until the reviewer passes (persistent agents gate `sleep` instead). Final output always flows through the turn-bound submission tool — registered by the adapter on every SDK backend — whose `submit_output` handler validates against the turn's output model and persists through the bound `SubmittedOutputStore` (in-memory, or file-backed when tools run in a subprocess). Completion is enforced by the logical turn itself: `ResilientTurn` sends bounded corrective cycles (`CorrectionConfig`, `lup.runtime.wrappers`) when a turn ends without a submission, and a turn that still produces none raises `StructuredOutputError` for the orchestration layer — the one-shot counterpart of the relay's missing-sleep message. Those cycles advance on the turn's own task rather than on whichever caller awaits it, so a resilient turn's event stream — one logical stream over every cycle, closing when the result settles — may be consumed before, during, or after `result()`, and a caller that watches a turn as it happens is not thereby waiting on itself. `create_completion_guard` (`lup.hooks`) remains as optional Stop-hook hardening on backends that expose stop hooks.
 
-**Customizing:** The gate in `lup.reflect` is domain-neutral and parametric. The reflection tool and `ReflectInput` in `agent/tools/reflect.py` are domain-specific — add fields for your domain. The reviewer prompt should target your domain's common failure modes.
+**Customizing:** The gate in `lup.orchestration.reflection` is domain-neutral and parametric. The reflection tool and `ReflectInput` in `agent/tools/reflect.py` are domain-specific — add fields for your domain. The reviewer prompt should target your domain's common failure modes.
 
 **Skip reviewer:** Set `skip_reviewer=True` for speed-sensitive or trivial tasks. The reviewer adds latency but catches calibration errors and reasoning gaps.
 
@@ -129,7 +129,7 @@ typed state. A `state_to_request` callback builds the turn after debounce;
 typed result/error handlers receive the outcome. `stop()` cancels the task and
 session context cleanup aborts an unfinished native turn.
 
-**Library support:** `lup.runtime.background.BackgroundAgent` composes only a
+**Library support:** `lup.orchestration.background.BackgroundAgent` composes only a
 `Client`, `state_to_request`, typed result/error callbacks, and
 `BackgroundConfig`. See the observer example in
 `src/lup_template/agent/tools/realtime.py`.
@@ -150,7 +150,7 @@ several agents work at once and the facts move under them, that is the whole
 problem — an agent verifying a statement you have since disproved, or working
 a branch you closed, keeps going because nothing can tell it.
 
-An **actor cohort** (`lup.actors.cohort.ActorCohort`) is a population of
+An **actor cohort** (`lup.orchestration.actors.cohort.ActorCohort`) is a population of
 agents that stay in contact while they work. Each holds one session across
 every turn it takes; anything addressed to one lands in front of its next tool
 call through a hook it never chooses to check; and the spawner is itself an
@@ -211,14 +211,14 @@ difference between the two cases.
 `reaching()` fold `roster.jsonl`, so a console in another process resolves the
 same address the cohort's own tools do, and a restart rebuilds the roster.
 
-**Library support:** `lup.actors.tools.create_cohort_tools` serves the verbs an
+**Library support:** `lup.orchestration.actors.tools.create_cohort_tools` serves the verbs an
 agent needs — list what I spawned, read what one of them has found so far, say
 something to one of them, say something back to whoever spawned me. Reading is
 what makes steering more than a guess: a spawn's turn events reach the journal
 as they happen, so `spawn_read` folds its own words, its calls and its
 refusals out of that record while it is still working, and a redirect can be
 aimed at what the agent is doing rather than at what it was asked.
-`lup.actors.mailbox.QuestionMailbox`
+`lup.orchestration.actors.mailbox.QuestionMailbox`
 adds decisions that park a run, on the same storage; messages ride a stream
 and never park anything, which is why "a message stalled the run" is not
 expressible rather than merely avoided.

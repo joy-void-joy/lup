@@ -7,7 +7,7 @@ real (short) timers.
 
 import asyncio
 
-from lup.realtime.scheduler import Scheduler
+from lup.orchestration.realtime.scheduler import Scheduler
 
 
 def make_scheduler() -> Scheduler:

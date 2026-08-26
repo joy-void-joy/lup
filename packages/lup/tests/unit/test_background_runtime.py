@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 import pytest
 from pydantic import BaseModel
 
-from lup.runtime.background import BackgroundAgent, BackgroundConfig
+from lup.orchestration.background import BackgroundAgent, BackgroundConfig
 from lup.runtime.composition import AcceptedTurn, CompletedTurn, ComposedSession
 from lup.client import Client
 from lup.runtime.errors import TurnError

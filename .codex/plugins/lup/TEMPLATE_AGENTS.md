@@ -252,7 +252,7 @@ agent_version = "0.1.0"
 
 For agents that exist over time (conversations, monitoring, games), use the persistent agent pattern:
 
-- Wire `Scheduler` from `lup.realtime.scheduler` into your session
+- Wire `Scheduler` from `lup.orchestration.realtime.scheduler` into your session
 - Add Stop hook to prevent turn ending (`create_stop_guard`)
 - Implement sleep/context/reply tools from `agent/tools/realtime.py`
 - Replace the request-response `run_agent()` in `core.py` with a sleep/wake loop
@@ -273,7 +273,7 @@ The template ships with **every** pattern wired so each is *available* — but a
 | Pattern | Keep it when… | Delete it when… |
 | --- | --- | --- |
 | **Reflection** (`agent/tools/reflect.py` + gate) | the agent commits a consequential, judgment-bearing output where self-critique improves calibration (a forecast, a diagnosis, a scored decision) | the task is mechanical/trivial/high-volume, or there is no discrete final output to reflect on — then the gated `review` tool is dead code |
-| **Realtime / persistent** (`lup.realtime*`, sleep/wake) | the agent is a presence over time — a conversation, a monitor, a long game — that controls its own attention | the agent is one-shot request→output (most domains); the relay/Scheduler are pure dead weight |
+| **Realtime / persistent** (`lup.orchestration.realtime*`, sleep/wake) | the agent is a presence over time — a conversation, a monitor, a long game — that controls its own attention | the agent is one-shot request→output (most domains); the relay/Scheduler are pure dead weight |
 | **Feedback loop** (`devtools/feedback/`) | ground truth or a feedback signal resolves over time to drive iteration | there is no ground truth and the agent is not iterated against outcomes — `load_outcomes` stays an empty stub |
 | **Commit loop** (`environment/cli` auto-commit) | each run yields a data artifact worth versioning per session | the agent is interactive or produces no per-session artifact worth a checkpoint |
 

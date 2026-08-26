@@ -25,7 +25,7 @@ from pydantic import BaseModel
 
 
 from lup.tools.mcp import LupMcpTool, ToolResponse
-from lup.realtime.relay import (
+from lup.orchestration.realtime.relay import (
     MISSING_SLEEP_MESSAGE,
     ContextReadEvent,
     DebounceEvent,
@@ -38,8 +38,8 @@ from lup.realtime.relay import (
     create_realtime_relay_tools,
     run_relay_session,
 )
-from lup.realtime.scheduler import Scheduler
-from lup.reflect import ReflectionGate
+from lup.orchestration.realtime.scheduler import Scheduler
+from lup.orchestration.reflection import ReflectionGate
 from lup.runtime.contracts import Session, Turn
 from lup.runtime.models import (
     SessionId,
@@ -137,7 +137,7 @@ class TestMailbox:
     def test_reset_for_new_run_clears_protocol_files(self, tmp_path: Path) -> None:
         """Re-running a session id must not replay the previous run: events,
         the sleep request, and the meta flag all clear."""
-        from lup.realtime.models import SleepInput
+        from lup.orchestration.realtime.models import SleepInput
 
         old = RealtimeMailbox(tmp_path)
         old.append_event(ReplyEvent(message="stale"))
@@ -163,7 +163,7 @@ class TestMailbox:
         assert isinstance(events[0], ReplyEvent)
 
     def test_sleep_request_consumed_once(self, tmp_path: Path) -> None:
-        from lup.realtime.models import SleepInput
+        from lup.orchestration.realtime.models import SleepInput
 
         mailbox = RealtimeMailbox(tmp_path)
         assert mailbox.consume_sleep_request() is None
@@ -190,7 +190,7 @@ class TestMailbox:
         """Once the actions file reaches the cap, writes raise instead of
         growing without bound — a looping agent gets an is_error response
         (RelayOverflowError is a ToolError) rather than a wedged parent."""
-        from lup.realtime.relay import RelayOverflowError
+        from lup.orchestration.realtime.relay import RelayOverflowError
 
         mailbox = RealtimeMailbox(tmp_path, max_actions_bytes=16)
         mailbox.append_event(ReplyEvent(message="x" * 64))

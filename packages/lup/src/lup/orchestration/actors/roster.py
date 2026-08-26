@@ -34,7 +34,7 @@ from typing import Literal
 
 from pydantic import BaseModel, TypeAdapter, computed_field
 
-from lup.actors.refs import ActorRef
+from lup.orchestration.actors.refs import ActorRef
 from lup.channels.models import utc_now
 from lup.channels.stream import Stream
 

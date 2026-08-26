@@ -1,6 +1,6 @@
 """Provider-neutral session/turn engine: how any one agent turn runs.
 
-Not :mod:`lup.realtime` — that package is the sleep/wake lifecycle machinery
+Not :mod:`lup.orchestration.realtime` — that package is the sleep/wake lifecycle machinery
 for persistent agents; ``runtime`` is the layer underneath it, opening
 provider sessions and driving typed turns through them. Modules map to
 concerns:
@@ -20,7 +20,7 @@ concerns:
   selection of a configured factory recipe.
 - :mod:`lup.runtime.output` — validated submitted-output stores and the
   portable submission tool binding.
-- :mod:`lup.runtime.background` — a debounced consumer of the session
+- :mod:`lup.orchestration.background` — a debounced consumer of the session
   capabilities that coalesces state wakes into turns on one persistent
   session.
 - :mod:`lup.runtime.threads` — blocking calls on a process-lifetime executor,

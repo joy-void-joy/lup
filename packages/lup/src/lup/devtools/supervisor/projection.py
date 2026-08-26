@@ -16,10 +16,10 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field
 
-from lup.actors.mail import EVERYONE, MESSAGE_FILE
-from lup.actors.mailbox import QUESTION_DIR
-from lup.actors.questions import QuestionAnswer
-from lup.actors.refs import ActorRef
+from lup.orchestration.actors.mail import EVERYONE, MESSAGE_FILE
+from lup.orchestration.actors.mailbox import QUESTION_DIR
+from lup.orchestration.actors.questions import QuestionAnswer
+from lup.orchestration.actors.refs import ActorRef
 from lup.resolver.mailbox import QuestionMailbox
 from lup.resolver.models import (
     ConcernStatus,

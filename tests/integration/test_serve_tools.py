@@ -27,10 +27,10 @@ from lup.workspace.context import (
     SESSION_DIR_ENV,
     SESSION_ID_ENV,
 )
-from lup.realtime.relay import MetaEvent, RealtimeMailbox, ReplyEvent
+from lup.orchestration.realtime.relay import MetaEvent, RealtimeMailbox, ReplyEvent
 from lup.client import Client
 from lup.sandbox.container import Sandbox
-from lup.subagents import create_run_subagent_tool
+from lup.orchestration.subagents import create_run_subagent_tool
 from lup.types import SubagentSpec
 
 from lup.workspace.paths import project_root

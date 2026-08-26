@@ -2,7 +2,7 @@
 
 The vocabulary the agent-facing realtime tools (sleep, reply, debounce,
 remind, schedule_action, context, meta) speak — one place both wirings share.
-The in-process template tools and the subprocess :mod:`lup.realtime.relay`
+The in-process template tools and the subprocess :mod:`lup.orchestration.realtime.relay`
 both validate against these models, so a schema change reaches every backend
 at once. This module depends on neither the scheduler core nor the relay.
 """

@@ -7,10 +7,10 @@ actions, reminders, and delayed actions. The environment layer (Discord
 bot, game server, CLI) wires callbacks; the agent interacts through
 MCP tools that delegate to this scheduler.
 
-This is the core the whole ``lup.realtime`` package is built on: it runs
+This is the core the whole ``lup.orchestration.realtime`` package is built on: it runs
 entirely in-process and imports neither the shared tool models nor the
 subprocess relay. On backends whose tools run in a separate process,
-:mod:`lup.realtime.relay` drives an instance of this ``Scheduler`` from the
+:mod:`lup.orchestration.realtime.relay` drives an instance of this ``Scheduler`` from the
 parent side — the relay depends on the core, never the reverse.
 
 See also: ``src/lup_template/agent/tools/realtime.py`` for the MCP tool
@@ -39,7 +39,7 @@ Examples:
 
     Create a Stop hook to keep the agent in a persistent loop::
 
-        >>> from lup.realtime.scheduler import create_stop_guard
+        >>> from lup.orchestration.realtime.scheduler import create_stop_guard
         >>> from lup.hooks import merge_hooks
         >>> hooks = merge_hooks(permission_hooks, create_stop_guard())
 """
@@ -53,7 +53,7 @@ from typing import TypedDict
 from pydantic import BaseModel, Field
 
 from lup.hooks import LupHookInput, LupHooksConfig, create_tool_gate
-from lup.reflect import ReflectionGate
+from lup.orchestration.reflection import ReflectionGate
 
 logger = logging.getLogger(__name__)
 
@@ -160,7 +160,7 @@ class Scheduler:
         self.pending_actions: list[DelayedAction] = []
 
         # Meta-before-sleep gate. Pass a file-backed gate when the meta
-        # tool runs in a subprocess (see lup.realtime.relay).
+        # tool runs in a subprocess (see lup.orchestration.realtime.relay).
         self.meta_gate = meta_gate if meta_gate is not None else ReflectionGate()
 
     async def send_action(self, content: str) -> None:
@@ -451,7 +451,7 @@ def create_stop_guard() -> LupHooksConfig:
         LupHooksConfig with a Stop hook.
 
     Usage:
-        from lup.realtime.scheduler import create_stop_guard
+        from lup.orchestration.realtime.scheduler import create_stop_guard
         from lup.hooks import merge_hooks
 
         hooks = merge_hooks(permission_hooks, create_stop_guard())
@@ -527,7 +527,7 @@ def create_meta_before_sleep_guard(
     """Create a PreToolUse hook that requires meta before sleep.
 
     Preset over :func:`lup.hooks.create_tool_gate`, via
-    :func:`~lup.reflect.create_reflection_gate`, for the persistent
+    :func:`~lup.orchestration.reflection.create_reflection_gate`, for the persistent
     agent pattern. Forces the agent to call the ``meta`` tool (process
     self-assessment) before every sleep. The gate resets automatically
     via ``scheduler.on_agent_action()``.
@@ -539,7 +539,7 @@ def create_meta_before_sleep_guard(
     Returns:
         LupHooksConfig with PreToolUse hooks.
     """
-    from lup.reflect import create_reflection_gate
+    from lup.orchestration.reflection import create_reflection_gate
 
     return create_reflection_gate(
         gate=scheduler.meta_gate,

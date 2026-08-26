@@ -60,7 +60,7 @@ class ActorRef(BaseModel, frozen=True):
         telling *the humans* something told its siblings, who consumed it,
         while no surface a person reads ever showed it. Reaching everyone is
         still one message
-        (:data:`~lup.actors.mail.EVERYONE`), addressed on purpose; what it is
+        (:data:`~lup.orchestration.actors.mail.EVERYONE`), addressed on purpose; what it is
         no longer is the value a caller arrives at by filling nothing in.
         """
         return [

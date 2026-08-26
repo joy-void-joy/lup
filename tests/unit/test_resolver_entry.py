@@ -8,13 +8,13 @@ import typer
 
 from lup.codescan.markers import NoteKind
 from lup.channels.models import utc_now
-from lup.actors.mailbox import (
+from lup.orchestration.actors.mailbox import (
     AnswerDoor,
     AnswerOffer,
     MailboxConflictError,
     RecordedAnswer,
 )
-from lup.actors.questions import QuestionAnswer
+from lup.orchestration.actors.questions import QuestionAnswer
 from lup.resolver.mailbox import QuestionMailbox
 from lup.resolver.core import planned_evidence
 from lup.resolver.models import (

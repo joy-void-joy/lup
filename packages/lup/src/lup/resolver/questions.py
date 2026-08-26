@@ -22,13 +22,13 @@ from lup.resolver.journal import (
     Journal,
     QuestionAskedEvent,
 )
-from lup.actors.mailbox import (
+from lup.orchestration.actors.mailbox import (
     ANSWER_POLL_SECONDS,
     ParkRequest,
     RecordedAnswer,
     wait_for_answers,
 )
-from lup.actors.questions import QuestionAnswer
+from lup.orchestration.actors.questions import QuestionAnswer
 from lup.resolver.mailbox import PendingQuestion, QuestionMailbox
 from lup.resolver.models import (
     AllowanceRuling,

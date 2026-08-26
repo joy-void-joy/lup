@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING, Literal, TypedDict
 
 if TYPE_CHECKING:
     from lup.tools.mcp import LupMcpTool
-    from lup.reflect import ReviewGate
+    from lup.orchestration.reflection import ReviewGate
     from lup.sandbox.container import Sandbox
 
 ServerGroup = Literal["notes", "sandbox", "codeintel", "session", "example"]
@@ -122,8 +122,11 @@ def build_session_toolset(
         groups[CODEINTEL_GROUP] = create_codeintel_tools(server, project_root())
 
     if realtime_dir is not None:
-        from lup.realtime.relay import RealtimeMailbox, create_realtime_relay_tools
-        from lup.reflect import ReflectionGate
+        from lup.orchestration.realtime.relay import (
+            RealtimeMailbox,
+            create_realtime_relay_tools,
+        )
+        from lup.orchestration.reflection import ReflectionGate
 
         meta_flag = RealtimeMailbox(realtime_dir).meta_flag_path
         groups[SESSION_GROUP] = create_realtime_relay_tools(

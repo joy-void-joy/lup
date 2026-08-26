@@ -9,7 +9,7 @@ import pytest
 from pydantic import BaseModel
 
 from lup_template.agent import prompts
-from lup.reflect import ReviewGate
+from lup.orchestration.reflection import ReviewGate
 from lup_template.agent.config import aux_model, engine_for_settings, settings
 from lup_template.agent.core import reflection_submission_gate
 from lup.runtime.contracts import Session, Turn

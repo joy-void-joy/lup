@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from lup.reflect import ReviewResult, ReviewVerdict
+from lup.orchestration.reflection import ReviewResult, ReviewVerdict
 from lup_template.agent import core
 from lup_template.agent.tools import reflect
 

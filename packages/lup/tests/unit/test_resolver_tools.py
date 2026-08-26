@@ -13,10 +13,10 @@ import pytest
 from lup.harness.process import LaunchRequest, LocalProcessLauncher
 from lup.tools.mcp import LupMcpTool, ToolError
 from lup.policy.identity import ConcernAllowance
-from lup.actors.mailbox import AnswerDoor, RecordedAnswer
-from lup.actors.questions import QuestionAnswer
+from lup.orchestration.actors.mailbox import AnswerDoor, RecordedAnswer
+from lup.orchestration.actors.questions import QuestionAnswer
 from lup.resolver.mailbox import QuestionMailbox
-from lup.actors.tools import (
+from lup.orchestration.actors.tools import (
     AskedQuestion,
     AwaitAnswersInput,
     AwaitAnswersOutput,

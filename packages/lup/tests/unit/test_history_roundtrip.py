@@ -9,7 +9,11 @@ import pytest
 from pydantic import BaseModel
 
 from lup.types import Usage
-from lup.workspace.history import iter_session_dirs, load_session_records, save_session
+from lup.workspace.history import (
+    iter_session_dirs,
+    load_session_records,
+    save_session,
+)
 from lup.workspace.paths import configure, project_root
 
 ORIGINAL_ROOT = project_root()

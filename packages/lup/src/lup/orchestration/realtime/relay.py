@@ -1,14 +1,14 @@
 """Subprocess relay for backends whose tools run in a separate process.
 
-Layered on the in-process :mod:`lup.realtime.scheduler`: that module is the
+Layered on the in-process :mod:`lup.orchestration.realtime.scheduler`: that module is the
 ``Scheduler`` (and Stop-hook guards) an in-process persistent agent drives
 directly; this one is the subprocess transport that gives subprocess-tool
 backends the same sleep/wake behavior when tools cannot share process state.
 Same pattern, two wirings — and the dependency runs one way: the relay imports
-the scheduler core and the shared :mod:`lup.realtime.models`, never the reverse.
+the scheduler core and the shared :mod:`lup.orchestration.realtime.models`, never the reverse.
 
 With in-process tools, a persistent agent holds one never-ending SDK turn: its
-tools share process state with the :class:`~lup.realtime.scheduler.Scheduler`,
+tools share process state with the :class:`~lup.orchestration.realtime.scheduler.Scheduler`,
 ``sleep`` blocks in-process, and a Stop hook forbids ending the turn. Backends
 whose tools run in a subprocess cannot share that state, so they invert the
 loop: **each wake is one SDK turn**, and the parent process owns the Scheduler
@@ -30,7 +30,7 @@ via ``LUP_REALTIME_DIR`` — see
 - ``state.json`` — parent → agent snapshot (unread event count plus any
   domain fields). The served ``context`` tool returns it; the ``sleep``
   tool refuses to record a sleep while unread events exist.
-- ``meta_flag`` — file-backed :class:`~lup.reflect.ReflectionGate`, used
+- ``meta_flag`` — file-backed :class:`~lup.orchestration.reflection.ReflectionGate`, used
   only when the caller supplies a gate (reflection is opt-in). When one
   is supplied, the ``meta`` tool marks it, ``reply`` resets it, and
   ``sleep`` requires it. Gate transitions triggered by the agent's own
@@ -69,7 +69,7 @@ from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 from lup.channels.models import ChannelOverflowError, write_atomic
 from lup.channels.stream import Stream
 from lup.tools.mcp import LupMcpTool, ToolError, lup_tool
-from lup.realtime.models import (
+from lup.orchestration.realtime.models import (
     ContextInput,
     ContextOutput,
     DebounceInput,
@@ -84,8 +84,8 @@ from lup.realtime.models import (
     ScheduleActionOutput,
     SleepInput,
 )
-from lup.realtime.scheduler import Scheduler, SleepResult
-from lup.reflect import ReflectionGate
+from lup.orchestration.realtime.scheduler import Scheduler, SleepResult
+from lup.orchestration.reflection import ReflectionGate
 from lup.runtime.contracts import Session
 from lup.runtime.models import turn_request
 from lup.observability.trace import TraceLogger
@@ -440,7 +440,7 @@ def create_realtime_relay_tools(
     Enforcement is in-handler (no hooks required on any backend): ``sleep``
     refuses while the state snapshot shows unread events the agent hasn't
     looked at via ``context``. Reflection is opt-in: pass ``gate`` (a
-    file-backed :class:`~lup.reflect.ReflectionGate` rooted at
+    file-backed :class:`~lup.orchestration.reflection.ReflectionGate` rooted at
     ``mailbox.meta_flag_path`` and shared with the parent's
     :func:`run_relay_session`) to also require a fresh ``meta`` before
     sleep, reset by ``reply``. With no gate the library imposes no

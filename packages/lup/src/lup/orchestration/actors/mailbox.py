@@ -6,7 +6,7 @@
 
 A question is a :class:`~lup.channels.slot.Slot`: declared once by whoever
 asks, offered to by any door, and settled exactly once. Messages ride an
-:class:`~lup.actors.mail.ActorMail` instead, held here and delegated to, so a
+:class:`~lup.orchestration.actors.mail.ActorMail` instead, held here and delegated to, so a
 caller reads one vocabulary while the two halves keep their own storage — and
 the run parks on a slot, never on a stream.
 
@@ -20,7 +20,7 @@ rather than a race between whoever reached the filesystem first.
 Generic over the question because what rides in the slot is the asker's:
 a resolver gate carries the edit allowances a choice would need, and a
 research session's carries none of that. The mailbox reads only what
-:class:`~lup.actors.questions.Question` guarantees, so each caller
+:class:`~lup.orchestration.actors.questions.Question` guarantees, so each caller
 round-trips its own type without the layer knowing any of them.
 """
 
@@ -30,9 +30,9 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
-from lup.actors.mail import ActorDelivery, ActorMail, ActorMessage
-from lup.actors.questions import Question, QuestionAnswer
-from lup.actors.refs import ActorRef
+from lup.orchestration.actors.mail import ActorDelivery, ActorMail, ActorMessage
+from lup.orchestration.actors.questions import Question, QuestionAnswer
+from lup.orchestration.actors.refs import ActorRef
 from lup.channels.models import (
     ChannelConflictError,
     ChannelCorruptionError,

@@ -24,18 +24,22 @@ from collections.abc import Callable
 
 from pydantic import BaseModel, Field
 
-from lup.actors.cohort import ActorCohort
-from lup.actors.mailbox import (
+from lup.orchestration.actors.cohort import ActorCohort
+from lup.orchestration.actors.mailbox import (
     ANSWER_POLL_SECONDS,
     MailboxConflictError,
     PendingQuestion,
     QuestionMailbox,
     wait_for_answers,
 )
-from lup.actors.progress import ActorProgress, ProgressWindow, read_progress
-from lup.actors.questions import Question
-from lup.actors.refs import ActorRef
-from lup.actors.roster import SpawnedActor
+from lup.orchestration.actors.progress import (
+    ActorProgress,
+    ProgressWindow,
+    read_progress,
+)
+from lup.orchestration.actors.questions import Question
+from lup.orchestration.actors.refs import ActorRef
+from lup.orchestration.actors.roster import SpawnedActor
 from lup.channels.models import Door, utc_now
 from lup.tools.mcp import LupMcpTool, ToolError, lup_tool
 

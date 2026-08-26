@@ -3,7 +3,7 @@
 A runtime-level consumer of the session capabilities: callers push
 replaceable typed state, wakes inside the debounce window coalesce, and each
 surviving wake becomes one turn on a single long-lived session. Distinct
-from :mod:`lup.realtime`, which owns a persistent agent's full sleep/wake
+from :mod:`lup.orchestration.realtime`, which owns a persistent agent's full sleep/wake
 lifecycle (scheduler state machine, reminders, subprocess relay) and sits a
 layer above this engine.
 """

@@ -45,10 +45,15 @@ from uuid import uuid4
 
 from pydantic import BaseModel, TypeAdapter
 
-from lup.actors.mail import EVERYONE, ActorDelivery, ActorMail, new_message
-from lup.actors.refs import ActorRef
-from lup.actors.roster import ROSTER_FILE, Roster, SpawnedActor
-from lup.actors.sessions import (
+from lup.orchestration.actors.mail import (
+    EVERYONE,
+    ActorDelivery,
+    ActorMail,
+    new_message,
+)
+from lup.orchestration.actors.refs import ActorRef
+from lup.orchestration.actors.roster import ROSTER_FILE, Roster, SpawnedActor
+from lup.orchestration.actors.sessions import (
     RECORD_ADAPTER,
     ActorEvent,
     ActorInbox,

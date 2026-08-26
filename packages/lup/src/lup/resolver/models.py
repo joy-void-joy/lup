@@ -9,8 +9,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
 
-from lup.actors.questions import Question, QuestionAnswer
-from lup.actors.refs import ActorRef
+from lup.orchestration.actors.questions import Question, QuestionAnswer
+from lup.orchestration.actors.refs import ActorRef
 from lup.codescan.symbols import DefinedSymbol
 from lup.harness.models import ResolveSpec
 from lup.hooks import LupHooksConfig
@@ -20,7 +20,7 @@ from lup.policy.identity import ConcernAllowance
 type ActorKind = Literal["worker", "reviewer", "merger", "planner", "run"]
 """The roles this run addresses, which the resolver validates at its own edge.
 
-The neutral :class:`~lup.actors.refs.ActorRef` leaves ``kind`` open, because a
+The neutral :class:`~lup.orchestration.actors.refs.ActorRef` leaves ``kind`` open, because a
 closed set underneath every consumer would be every consumer's set at once.
 The closed set that matters *here* is this one, checked where a run builds a
 ref rather than carried in the type it shares with everyone else.
@@ -269,7 +269,7 @@ class MaterialQuestion(Question, frozen=True):
     """A resolver question: the mailbox's shape, plus what the run consults.
 
     The id, the prompt, the answer domain and the two validators over them
-    are what any door reads, and live on :class:`~lup.actors.questions.Question`.
+    are what any door reads, and live on :class:`~lup.orchestration.actors.questions.Question`.
     Added here is only what the resolver itself consults — which concern the
     question belongs to, which edit gates an option would need, and which
     lost criteria a re-check is about.

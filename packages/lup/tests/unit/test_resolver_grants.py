@@ -21,8 +21,8 @@ from lup.policy.models import EditBatch, EditChange
 from lup.policy.rules import EditPolicy, PathRule
 from lup.resolver.grants import GrantLedger, concern_grants
 from lup.resolver.journal import Journal
-from lup.actors.mailbox import AnswerDoor, AnswerOffer, ParkRequest
-from lup.actors.questions import QuestionAnswer
+from lup.orchestration.actors.mailbox import AnswerDoor, AnswerOffer, ParkRequest
+from lup.orchestration.actors.questions import QuestionAnswer
 from lup.resolver.mailbox import PendingQuestion, QuestionMailbox
 from lup.resolver.models import (
     INTEGRATION_CONCERN_ID,
@@ -40,8 +40,8 @@ from lup.resolver.models import (
     WritableRootLease,
     allowance_question_id,
 )
-from lup.actors.cohort import ActorCohort
-from lup.actors.refs import ActorRef
+from lup.orchestration.actors.cohort import ActorCohort
+from lup.orchestration.actors.refs import ActorRef
 from lup.resolver.questions import QuestionBroker
 from lup.resolver.run import ResolveRun
 from lup.resolver.state import ResolverStateRepository
