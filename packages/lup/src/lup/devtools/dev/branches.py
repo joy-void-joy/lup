@@ -543,7 +543,7 @@ def rewrite_suspects(branch: str, integration: str) -> list[str]:
 
 def get_branch_worktree(branch: str) -> str | None:
     """Return the worktree path for a branch, or None."""
-    return parse_worktrees().get(branch)  # lup: ignore[dict-get] — open branch map
+    return parse_worktrees().get(branch)
 
 
 def get_pr_info(branch: str) -> PRStatus | None:
@@ -775,7 +775,7 @@ def unlanded_siblings(
             name=name,
             unique_commits=unique,
             source_diff_lines=count_source_diff_lines(name, integration),
-            worktree=worktrees.get(name),  # lup: ignore[dict-get] — open map
+            worktree=worktrees.get(name),
         )
 
     measured = [
@@ -1453,7 +1453,7 @@ def pr_body(
 
     def summarize(prefix: str, messages: list[str]) -> str:
         fallback = prefix.capitalize()
-        label = labels.get(prefix, fallback)  # lup: ignore[dict-get]
+        label = labels.get(prefix, fallback)
         first = messages[0].partition(":")[2]  # lup: ignore[string-split] — log line
         desc = (first or messages[0]).lstrip()
         more = f" (+{len(messages) - 1} more)" if len(messages) > 1 else ""
@@ -1503,7 +1503,7 @@ def survey(as_json: bool) -> None:
 
     def info(b: ParsedBranch) -> BranchInfo:
         name = b["name"]
-        checkout = worktrees.get(name)  # lup: ignore[dict-get] — open map
+        checkout = worktrees.get(name)
         contained_in = containment[name]
         pr_merged = name in pr_map and pr_map[name].state == "MERGED"
 
@@ -1523,7 +1523,7 @@ def survey(as_json: bool) -> None:
             integration=integration,
             current=cur,
             contained_in=contained_in,
-            pr=pr_map.get(name),  # lup: ignore[dict-get] — open map
+            pr=pr_map.get(name),
             unique_commits=unique,
             held=leased[name].reason() if name in leased else "",
             related=related,
@@ -1538,7 +1538,7 @@ def survey(as_json: bool) -> None:
             worktree=checkout,
             is_current=b["is_current"],
             contained_in=contained_in,
-            pr=pr_map.get(name),  # lup: ignore[dict-get] — open map
+            pr=pr_map.get(name),
             unique_commits=unique,
             source_diff_lines=diff_lines,
             disposition=verdict.status,
@@ -1568,7 +1568,7 @@ def survey(as_json: bool) -> None:
             integration=integration,
             current=cur,
             contained_in=[integration] if contained else [],
-            pr=pr_map.get(name),  # lup: ignore[dict-get] — open map
+            pr=pr_map.get(name),
             unique_commits=unique,
             related=related,
         )
@@ -1577,7 +1577,7 @@ def survey(as_json: bool) -> None:
             remote=row["remote"],
             commit=row["commit"],
             contained_in_integration=contained,
-            pr=pr_map.get(name),  # lup: ignore[dict-get] — open map
+            pr=pr_map.get(name),
             unique_commits=unique,
             disposition=verdict.status,
             reason=verdict.reason,
@@ -1885,7 +1885,7 @@ def plan_deletion(name: str, force: bool, remote: bool | None = None) -> Deletio
     which is exactly what a push before deleting was for, so it stays
     unless a caller says otherwise in so many words.
     """
-    worktree = parse_worktrees().get(name)  # lup: ignore[dict-get] — open branch map
+    worktree = parse_worktrees().get(name)
     stranded = worktree is not None and not Path(worktree).exists()
     actions: list[PlannedAction] = []
 

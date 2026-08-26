@@ -159,12 +159,12 @@ class StatsCache(BaseModel, populate_by_name=True):
         activity_by_date = {entry.date: entry for entry in self.daily_activity}
 
         def day_breakdown(ds: str) -> DailyBreakdown:
-            by_model = tokens_by_date.get(ds, {})  # lup: ignore[dict-get] — date map
+            by_model = tokens_by_date.get(ds, {})
             return DailyBreakdown(
                 date=ds,
                 total_tokens=sum(by_model.values()),
                 tokens_by_model=by_model,
-                activity=activity_by_date.get(ds),  # lup: ignore[dict-get] — date map
+                activity=activity_by_date.get(ds),
             )
 
         span = (window_end.date() - window_start.date()).days

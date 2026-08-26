@@ -75,6 +75,22 @@ def is_renamer_module(path: Path) -> bool:
     return path.as_posix().endswith("devtools/dev/init.py")
 
 
+INITIALIZATION_MODULES = ["devtools/dev/init.py", "devtools/dev/app.py"]
+"""Where initialization's own vocabulary is written down, for a caller that
+does not say. A module that names what initialization removes says the name
+because that is its subject, so a scan reporting lines still naming a deleted
+path skips these for the same reason the rename skips the renamer: its
+literals are the command rather than a reference the command left dangling."""
+
+
+def declares_initialization(
+    path: Path, modules: list[str] = INITIALIZATION_MODULES
+) -> bool:
+    """Whether ``path`` is one of initialization's own declaring modules."""
+    spelled = path.as_posix()
+    return any(spelled.endswith(module) for module in modules)
+
+
 def rename_match(matched: str, new_name: str) -> str:
     """Rewrite the package name inside one matched piece of source text."""
     return matched.replace("lup_template", new_name, 1)
@@ -222,6 +238,101 @@ def find_stale_references(root: Path) -> list[str]:
         for path in scan_files
         for lineno, line in enumerate(path.read_text().splitlines(), start=1)
         if "lup_template" in line
+    ]
+
+
+SCAFFOLD_DEMONSTRATIONS = [
+    Path("examples"),
+    Path("tests/unit/test_policy_examples.py"),
+    Path("tests/unit/test_examples_use_the_front_door.py"),
+]
+"""What the scaffold ships to demonstrate *itself*, for a caller that does not
+say. Each of these composes lup's own runtime against lup's own README — a
+front door being opened, a wrapper stack, a policy denying the call it declared
+— so a domain that adopted the template inherits a directory of demos for a
+library it is merely a consumer of, and two test modules driving them. Its own
+examples, if it wants any, are about its own subject and share nothing with
+these but a directory name. A fork shipping different demonstrations passes
+its own list rather than editing this one."""
+
+SKIPPED_TREES = ["fixtures"]
+"""Directory names a mention scan never descends into, beside the obvious, for
+a caller that does not say. The version-controlled, virtual-environment, and
+bytecode trees are skipped because nothing in them is prose anyone repairs. A
+fixture tree is skipped for the opposite reason: it says `examples/` on
+purpose, as the data a test drives."""
+
+
+def drop_scaffold_demonstrations(
+    root: Path,
+    dry_run: bool,
+    demonstrations: list[Path] = SCAFFOLD_DEMONSTRATIONS,
+) -> list[str]:
+    """Remove the scaffold's demonstrations of itself.
+
+    Deleted through git rather than the filesystem, so the removal is staged
+    the way the package rename beside it is and a tracked file that is somehow
+    absent fails loudly instead of being passed over.
+
+    The README is not edited. It is human-owned here, and an adopting domain
+    rewrites it about its own subject anyway — so a link into a directory that
+    is going belongs to that rewrite rather than to a surgery performed behind
+    the owner's back. :func:`surviving_mentions` reports it instead.
+    """
+    present = [path for path in demonstrations if (root / path).exists()]
+    if not dry_run:
+        for path in present:
+            git("rm", "-r", "--quiet", str(path), _cwd=str(root))
+    return [f"  {path.as_posix()}: removed" for path in present]
+
+
+def mention_pattern(path: Path) -> re.Pattern[str]:
+    """How a line names this path, in each spelling one can take.
+
+    A file is named by its path and nothing else. A directory is named two
+    ways — as a path, with the separator that makes it one, and as the import
+    root a ``-m`` invocation spells with a dot. Both carry that separator on
+    purpose: the bare name is an ordinary English word, and matching it alone
+    reported every sentence that happened to use it. The dot form additionally
+    requires a name after it, because a sentence ending in "examples." is
+    prose about examples rather than a reference to the package.
+    """
+    name = re.escape(path.as_posix())
+    if path.suffix:
+        return re.compile(name)
+    return re.compile(rf"{name}/|{name}\.(?=[A-Za-z_])")
+
+
+def surviving_mentions(
+    root: Path, removed: list[Path], skipped_trees: list[str] = SKIPPED_TREES
+) -> list[str]:
+    """Every line still naming something that was just removed.
+
+    Reported rather than rewritten, for the reason the rename's own stale-
+    reference pass reports: what names a deleted directory is prose, a link,
+    or a configuration key, and each wants a different repair that only
+    whoever owns the file can choose.
+
+    A file inside what was removed is not scanned. It names its own siblings
+    constantly and is going with them, so reporting it would bury the handful
+    of lines somebody actually has to repair.
+    """
+    skipped = {".git", ".venv", "__pycache__", *skipped_trees}
+    patterns = [mention_pattern(path) for path in removed]
+    scanned = [
+        path
+        for path in sorted(root.rglob("*"))
+        if path.is_file()
+        and path.suffix in [".py", ".md", ".toml"]
+        and not skipped.intersection(path.parts)
+        and not declares_initialization(path)
+        and not any(path.is_relative_to(root / going) for going in removed)
+    ]
+    return [
+        f"  {path.relative_to(root)}:{number}: {line.strip()}"
+        for path in scanned
+        for number, line in enumerate(path.read_text().splitlines(), start=1)
+        if any(pattern.search(line) for pattern in patterns)
     ]
 
 

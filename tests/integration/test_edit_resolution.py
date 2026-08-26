@@ -41,19 +41,20 @@ PROPOSED = (
     "import httpx\n"
     "\n"
     "\n"
-    "def read(client: httpx.Client, url: str) -> httpx.Response:\n"
-    "    return client.get(url)\n"
+    "def read(client: httpx.Client) -> httpx.Response:\n"
+    '    return client.get("url")\n'
 )
 """A receiver only a checker can settle: an HTTP client, outside the family.
 
-A module-qualified `httpx.get` would not do. The tree rules that one out on
-its own, so it never becomes a site and no checker is asked about it — which
-is the point of stating the shape once, and also why it cannot stand in for
-the case this test is about.
+Two shapes would not do, both because the tree rules them out on its own and
+no checker is ever asked. A module-qualified `httpx.get` is one. A key
+computed at runtime is the other: `client.get(url)` reads a map whose keys
+are data, which is not what this rule is about. Stating each shape once is
+the point, and is also why neither can stand in for the case tested here.
 """
 
 REFUTED_LINE = 5
-"""Where `client.get(url)` sits in the proposed content above."""
+"""Where `client.get("url")` sits in the proposed content above."""
 
 
 def unwritten(root: Path) -> str:

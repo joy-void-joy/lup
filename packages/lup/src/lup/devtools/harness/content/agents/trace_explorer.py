@@ -11,6 +11,7 @@ def agent(layout: ApplicationLayout) -> models.Agent:
         name="trace-explorer",
         description="Investigate trace evidence without changing production files",
         prompt=models.PromptDocument(
+            source=__name__,
             parts=[
                 models.TextPart(
                     text=rf"""You are the **Trace Explorer Agent**, specialized in reading session traces in bulk and identifying cross-cutting patterns.
@@ -127,7 +128,7 @@ Traces worth the main agent reading in full (limit to 2-3):
 - **Be comprehensive, not bloated**: Cover every trace you read. Include the per-session summary table so nothing is missed. But don't pad -- every line should carry information.
 """
                 ),
-            ]
+            ],
         ),
         tools=["Read", "Grep", "Glob", "Bash"],
         model="strongest",

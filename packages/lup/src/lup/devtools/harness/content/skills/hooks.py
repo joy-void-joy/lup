@@ -19,6 +19,7 @@ def skill(layout: ApplicationLayout) -> models.Skill:
         ],
         tools=["Read", "Edit", "Grep", "Glob", "AskUserQuestion", "Bash"],
         prompt=models.PromptDocument(
+            source=__name__,
             parts=[
                 models.TextPart(
                     text=r"""# Hooks: Semantic Permission Policy
@@ -109,6 +110,6 @@ protected edit rules, threshold, resolver-editor exceptions, and each native
 boundary's approval behavior, then ask what should change.
 """
                 ),
-            ]
+            ],
         ),
     )

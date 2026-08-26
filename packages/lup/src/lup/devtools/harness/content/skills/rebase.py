@@ -23,6 +23,7 @@ SKILL = models.Skill(
     ],
     argument_hint="[target-branch]",
     prompt=models.PromptDocument(
+        source=__name__,
         parts=[
             models.TextPart(
                 text=r"""# Rebase and PR
@@ -197,6 +198,6 @@ Return the PR URL to the user.
 - **Write good messages**: Future you will thank present you
 """
             ),
-        ]
+        ],
     ),
 )

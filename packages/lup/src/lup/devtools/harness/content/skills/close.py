@@ -8,6 +8,7 @@ SKILL = models.Skill(
     description="Check PR review status, merge if approved, and clean up branches",
     tools=["Bash(uv run lup-devtools:*)", "AskUserQuestion", "Skill(lup:commit)"],
     prompt=models.PromptDocument(
+        source=__name__,
         parts=[
             models.TextPart(
                 text=r"""# Close PR
@@ -80,6 +81,6 @@ Summarize what was done: PR merged (with link), cleanup results.
 - The user approves the merge before it happens -- never merge unprompted
 """
             ),
-        ]
+        ],
     ),
 )

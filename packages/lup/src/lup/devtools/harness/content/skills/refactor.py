@@ -24,6 +24,7 @@ SKILL = models.Skill(
     ],
     argument_hint="<path>",
     prompt=models.PromptDocument(
+        source=__name__,
         parts=[
             models.TextPart(
                 text=r"""# Refactor from Scratch
@@ -147,6 +148,6 @@ Show the user:
 - **Preserve tests.** If tests reference the refactored code, ensure they still pass.
 """
             ),
-        ]
+        ],
     ),
 )

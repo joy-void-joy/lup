@@ -216,7 +216,7 @@ class CodexAppServer:
         try:
             return await future
         finally:
-            if self.pending.get(request_id) is future:  # lup: ignore[dict-get]
+            if self.pending.get(request_id) is future:
                 self.pending.pop(request_id)
 
     def notify(self, method: str, params: JsonObject) -> None:

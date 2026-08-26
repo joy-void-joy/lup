@@ -15,6 +15,7 @@ SKILL = models.Skill(
         "AskUserQuestion",
     ],
     prompt=models.PromptDocument(
+        source=__name__,
         parts=[
             models.TextPart(
                 text=r"""# Analyze: Tool Health & Capability Gaps
@@ -83,6 +84,6 @@ From tool-health and capability-gap data:
 - Are there reasoning quality patterns across sessions?
 """
             ),
-        ]
+        ],
     ),
 )

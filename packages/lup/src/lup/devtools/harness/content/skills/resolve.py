@@ -15,6 +15,7 @@ SKILL = models.Skill(
     ],
     argument_hint="[what needs resolving, in your own words]",
     prompt=models.PromptDocument(
+        source=__name__,
         parts=[
             models.TextPart(text="""**What this run is about:** """),
             models.ArgumentsRef(),
@@ -84,6 +85,6 @@ File it *and then* decide whether to admit it. The two do different work: an adm
 Intake takes every open issue except those labelled `resolver-skip`, so a filed issue needs no further wiring to reach the next run. `uv run lup-devtools dev issues` prints exactly what a run would take, without starting one. When a concern derived from an issue lands, the run comments on the issue naming the review branch — and never closes it, because a reviewer passing is not a human having read the code.
 """
             ),
-        ]
+        ],
     ),
 )

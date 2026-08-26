@@ -140,9 +140,7 @@ class ClaudeConfigHome(BaseModel, frozen=True):
 
 def selected_config_home(environment: EnvVars) -> ClaudeConfigHome:
     """The home and document a session opened under this environment reads."""
-    named = environment.get(  # lup: ignore[dict-get] — open env-var map
-        CLAUDE_CONFIG_DIR
-    )
+    named = environment.get(CLAUDE_CONFIG_DIR)
     if named is None:
         return ClaudeConfigHome(
             directory=default_config_home(),
@@ -192,9 +190,7 @@ def project_entries(document: JsonObject) -> JsonObject:
 
 def project_entry(document: JsonObject, workspace: Path) -> JsonObject:
     """One workspace's entry in a document, empty when it has none yet."""
-    found = project_entries(document).get(  # lup: ignore[dict-get] — path-keyed
-        str(workspace.resolve())
-    )
+    found = project_entries(document).get(str(workspace.resolve()))
     return dict(found) if isinstance(found, dict) else {}
 
 
@@ -248,7 +244,7 @@ def restoration_advice(directory: Path) -> str:
 def trusts(document: JsonObject, workspace: Path) -> bool:
     """Whether one document already records that workspace as trusted."""
     entry = project_entry(document, workspace)
-    return entry.get(TRUST_FIELD) is True  # lup: ignore[dict-get] — vendor field
+    return entry.get(TRUST_FIELD) is True
 
 
 def record_trust(path: Path, workspace: Path) -> None:

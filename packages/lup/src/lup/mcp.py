@@ -385,9 +385,7 @@ def lup_tool[I: BaseModel, O: BaseModel](
                 if not params:
                     msg = f"lup_tool '{tool_name}': handler has no parameters to infer input_model from"
                     raise TypeError(msg)
-                param_type = hints.get(  # lup: ignore[dict-get] — reflection hints
-                    params[0].name
-                )
+                param_type = hints.get(params[0].name)
                 if isinstance(param_type, type) and issubclass(param_type, BaseModel):
                     resolved_input = param_type
             if resolved_output is None:

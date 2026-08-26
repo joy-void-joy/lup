@@ -41,6 +41,11 @@ if TYPE_CHECKING:
 
 # Where each deferred name actually lives, so the resolution below is a lookup
 # rather than a branch per provider -- a third adapter is one row.
+# lup: ignore[library-default] — the constructors this library authors and the
+# modules it defines them in, so the table is what lup ships rather than a
+# choice made for an adopter: a provider arrives here as an adapter, and a row
+# an adopter replaced would point `from lup import create_claude` at something
+# lup never wrote.
 CONSTRUCTORS = {
     "create_claude": "lup.adapters.claude.runtime",
     "create_codex": "lup.adapters.codex.runtime",

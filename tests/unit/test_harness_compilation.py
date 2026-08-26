@@ -41,10 +41,12 @@ from lup.devtools.dev.check import budget_reports, scaffold_budget_report
 from lup.workspace.paths import is_template_scaffold
 from lup.codescan.registry import RULE_REFERENCE
 from lup.devtools.dev.commands import COMMAND_REFERENCE
+from lup.devtools.harness.generated_paths import GENERATED_PATHS
 from lup.devtools.harness.drift import roster_gaps
 from lup.devtools.harness.settings import served_tool_grants
 from lup.harness.banner import (
     ARTIFACT_COMMENT_ROUTER,
+    COMMENT_FREE,
     REGENERATE_COMMAND,
     GeneratedBanner,
 )
@@ -316,10 +318,13 @@ def test_every_published_document_is_generated_and_banners_itself() -> None:
         path for path in Path("docs").glob("*.md") if path not in published
     )
 
-    # The two pages a repository writer produces rather than the docs roster:
-    # both render from something walked at generation time — the rule registry
-    # and the composed CLI — so neither has a declaring content module.
-    assert unmanaged == [Path(COMMAND_REFERENCE), Path(RULE_REFERENCE)]
+    # The three pages a repository writer produces rather than the docs
+    # roster: each renders from something walked at generation time — the rule
+    # registry, the composed CLI, the compiled trees — so none of them has a
+    # declaring content module to be rostered against.
+    assert unmanaged == sorted(
+        [Path(COMMAND_REFERENCE), Path(RULE_REFERENCE), GENERATED_PATHS]
+    )
     for document in roster:
         banner = GeneratedBanner(
             source=document.document.declared_source(), command=REGENERATE_COMMAND
@@ -1126,10 +1131,19 @@ def test_every_commentable_generated_file_carries_the_one_banner_form() -> None:
         assert banner.opens(artifact.path, artifact.content)
         assert f"Generated from {banner.source} by " in artifact.content
         assert f"`{banner.command}`" in artifact.content
+    # Every artifact says where it came from; only whether it can *print* that
+    # varies. A format with no comment declares the exemption saying so rather
+    # than declaring nothing, which is what keeps the provenance readable to a
+    # walk even where it is unreadable in the file.
     for tree in trees:
         for artifact in tree.artifacts:
             spelled = ARTIFACT_COMMENT_ROUTER.route_for(artifact.path)
-            assert (artifact.banner is not None) == (spelled is not None)
+            assert artifact.banner is not None
+            assert artifact.banner.attribution()
+            comment_free = artifact.banner == COMMENT_FREE.compiled_from(
+                artifact.banner.attribution()
+            )
+            assert comment_free == (spelled is None)
     assert harness == portable_harness()
 
 

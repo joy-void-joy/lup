@@ -71,6 +71,9 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 | `dev git-hooks install` | Install every git hook this repository declares. |
 | `dev git-hooks status` | Report what this clone refuses, at every moment a hook sits at. |
 | `dev git-hooks uninstall` | Remove them, leaving hooks written elsewhere alone. |
+| `dev preserve capture` | Record the surface this repository offers, as a checked-in fixture. |
+| `dev preserve check` | Resolve every captured capability against the tree as it stands. |
+| `dev preserve migration` | Print the relocation that repoints an importer of the captured tree. |
 | `dev model-config census` | Enumerate every `model_config` declaration by right-hand-side shape. |
 | `dev model-config aliases` | List every shared configuration alias, and who imports each one. |
 | `dev model-config convert` | Rewrite every assigned `model_config` as class keywords, in place. |
@@ -80,6 +83,7 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 | `dev model-config snapshot-at` | Record the configuration pydantic resolved at a git revision. |
 | `dev model-config compare` | Diff two snapshots; exit non-zero when any model&#x27;s config moved. |
 | `dev init rename-package` | Rename the lup Python package to a project-specific name. |
+| `dev init drop-examples` | Remove the scaffold&#x27;s demonstrations of itself, which no adopter wants. |
 | `dev library status` | Report where the lup library is resolved from. |
 | `dev library release` | Ask the package index whether a release exists, and which mode that settles. |
 | `dev library use` | Resolve lup from the package index, or from the vendored copy. |

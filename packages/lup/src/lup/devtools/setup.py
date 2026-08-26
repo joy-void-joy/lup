@@ -193,10 +193,7 @@ class Integration(BaseModel):
         # Gate re-entry only for secrets, which can't be shown as defaults;
         # non-secret fields echo their current value, so re-walking is cheap.
         guards_secret = any(f.secret for f in self.fields)
-        configured = all(
-            env.get(k)  # lup: ignore[dict-get] — env map
-            for k in self.env_keys
-        )
+        configured = all(env.get(k) for k in self.env_keys)
         if guards_secret and configured:
             console.print("[green]Already configured.[/]")
             if not typer.confirm("Reconfigure?", default=False):
@@ -210,7 +207,7 @@ class Integration(BaseModel):
 
         values: EnvVars = {}
         for field in self.fields:
-            current = env.get(field.key, "")  # lup: ignore[dict-get] — open env map
+            current = env.get(field.key, "")
             raw = typer.prompt(
                 field.prompt,
                 default=current,
@@ -231,10 +228,7 @@ class Integration(BaseModel):
         """Return (is_configured, detail_string)."""
         if self.status_func:
             return self.status_func(env)
-        values = [
-            env.get(k, "")  # lup: ignore[dict-get] — env map
-            for k in self.env_keys
-        ]
+        values = [env.get(k, "") for k in self.env_keys]
         if all(values):
             return IntegrationStatus(ok=True, detail=mask(values[0]))
         return IntegrationStatus(ok=False, detail="not configured")

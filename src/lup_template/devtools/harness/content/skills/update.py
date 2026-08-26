@@ -26,6 +26,7 @@ SKILL = models.Skill(
     ],
     argument_hint="[focus area]",
     prompt=models.PromptDocument(
+        source=__name__,
         parts=[
             models.TextPart(
                 text=r"""# Update from Upstream
@@ -260,6 +261,6 @@ reader bisecting a regression needs to know which one carried it.
 - **Mark synced even if nothing applied** — this advances the sync pointer so you don't re-review the same commits next time
 """
             ),
-        ]
+        ],
     ),
 )

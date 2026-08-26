@@ -595,7 +595,7 @@ class TurnRecorder:
     def child_for(self, call_id: str, model: str | None) -> TraceJournal:
         """The child span for one delegation, opened on first sight."""
         if call_id not in self.children:
-            role = self.roles.get(call_id, UNNAMED_SUBAGENT)  # lup: ignore[dict-get]
+            role = self.roles.get(call_id, UNNAMED_SUBAGENT)
             child = self.journal.child(
                 TraceActor(
                     kind="native_subagent",

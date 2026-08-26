@@ -10,6 +10,7 @@ import tomlkit
 from lup.adapters.codex.login import CODEX_LOGIN
 from lup.codescan.antipatterns import DOCUMENT_IN_HAND, antipattern_set_for
 from lup.harness.banner import (
+    COMMENT_FREE,
     PROMPT_TEXT,
     REGENERATE_COMMAND,
     VERBATIM_COPY,
@@ -315,7 +316,7 @@ class CodexSkillRenderer(ArtifactRenderer[Skill]):
                     ),
                     content=content,
                     semantic_id=source.id,
-                    banner=PROMPT_TEXT,
+                    banner=PROMPT_TEXT.compiled_from(source.prompt.declared_source()),
                 )
             ]
         )
@@ -400,11 +401,13 @@ class CodexPluginManifestRenderer(ArtifactRenderer[Plugin]):
                     ),
                     content=json.dumps(manifest, indent=2, sort_keys=True),
                     semantic_id=source.id,
+                    banner=COMMENT_FREE.compiled_from(source.id),
                 ),
                 Artifact(
                     path=Path(".agents/plugins/marketplace.json"),
                     content=json.dumps(marketplace, indent=2, sort_keys=True),
                     semantic_id=source.id,
+                    banner=COMMENT_FREE.compiled_from(source.id),
                 ),
             ]
         )
@@ -679,6 +682,7 @@ class CodexHookRenderer(ArtifactRenderer[HookSet]):
                     path=Path(f".codex/plugins/{self.plugin_name}/hooks/hooks.json"),
                     content=json.dumps(hooks, indent=2, sort_keys=True),
                     semantic_id=source.id,
+                    banner=COMMENT_FREE.compiled_from(source.id),
                 ),
                 Artifact.generated(
                     path=Path(f".codex/rules/{self.plugin_name}.rules"),
@@ -706,7 +710,7 @@ class CodexHookRenderer(ArtifactRenderer[HookSet]):
                         ),
                         content=module.source,
                         semantic_id=source.id,
-                        banner=VERBATIM_COPY,
+                        banner=VERBATIM_COPY.compiled_from(module.origin()),
                     )
                     for module in policy_kernel_modules()
                 ],
@@ -717,7 +721,7 @@ class CodexHookRenderer(ArtifactRenderer[HookSet]):
                     ),
                     content=CODEX_PATCH_RUNTIME,
                     semantic_id=source.id,
-                    banner=VERBATIM_COPY,
+                    banner=VERBATIM_COPY.compiled_from("lup.adapters.codex.patch"),
                 ),
                 Artifact.generated(
                     path=Path(
@@ -785,6 +789,7 @@ class CodexHookRenderer(ArtifactRenderer[HookSet]):
                     ),
                     content=json.dumps(evidence, indent=2, sort_keys=True),
                     semantic_id=source.id,
+                    banner=COMMENT_FREE.compiled_from(source.id),
                 ),
             ]
         )

@@ -284,8 +284,6 @@ class ForeignCheckouts(BaseModel, frozen=True):
 
     def holder(self, key: str) -> str | None:
         """The other worktree that owns this key, when another one does."""
-        # lup: ignore[dict-get] — an open registry keyed by whatever refs the
-        # repository happens to hold, which is the shape the rule exempts
         return self.holders.get(key)
 
     def ours(self, state: dict[str, str]) -> dict[str, str]:

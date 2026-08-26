@@ -28,6 +28,7 @@ def skill(layout: ApplicationLayout) -> models.Skill:
             "AskUserQuestion",
         ],
         prompt=models.PromptDocument(
+            source=__name__,
             parts=[
                 models.TextPart(
                     text=r"""# Meta: Harness Structure Review & Improvement
@@ -164,6 +165,6 @@ When considering changes, ask:
 6. Continue brainstorming or summarize changes made
 """
                 ),
-            ]
+            ],
         ),
     )

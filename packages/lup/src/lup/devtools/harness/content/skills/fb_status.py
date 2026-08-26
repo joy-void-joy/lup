@@ -17,6 +17,7 @@ SKILL = models.Skill(
     description="Feedback loop entry point \u2014 status, targets, and previous session context",
     tools=["Bash(uv run lup-devtools:*)", "Read", "Grep", "Glob", "AskUserQuestion"],
     prompt=models.PromptDocument(
+        source=__name__,
         parts=[
             models.TextPart(
                 text=rf"""# Status: Feedback Loop Entry Point
@@ -71,6 +72,6 @@ Then """
                 text=r"""
 """
             ),
-        ]
+        ],
     ),
 )

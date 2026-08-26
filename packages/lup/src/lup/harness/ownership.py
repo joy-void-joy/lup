@@ -118,7 +118,7 @@ class GeneratedArtifacts(BaseModel, frozen=True):
 
     def owning(self, path: str) -> OwnedArtifact | None:
         """The artifact generated at ``path``, where the generator owns one."""
-        return self.by_path.get(path)  # lup: ignore[dict-get] — open registry
+        return self.by_path.get(path)
 
 
 def proof_artifact(root: Path, proof: Path) -> OwnedArtifact:

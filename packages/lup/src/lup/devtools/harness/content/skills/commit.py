@@ -9,6 +9,7 @@ SKILL = models.Skill(
     description="Review all diffs and create atomic commits",
     tools=["Bash(uv run lup-devtools:*, git:*)", "Read", "Glob", "Grep"],
     prompt=models.PromptDocument(
+        source=__name__,
         parts=[
             models.TextPart(
                 text=r"""# Create Commits
@@ -104,6 +105,6 @@ After creating commits:
 3. Create a **new** commit (don't amend - the previous commit didn't happen)
 """
             ),
-        ]
+        ],
     ),
 )

@@ -6,7 +6,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from lup.adapters.claude.login import CLAUDE_LOGIN
 from lup.codescan.antipatterns import DOCUMENT_IN_HAND, antipattern_set_for
-from lup.harness.banner import PROMPT_TEXT, VERBATIM_COPY
+from lup.harness.banner import COMMENT_FREE, PROMPT_TEXT, VERBATIM_COPY
 from lup.harness.contracts import (
     ArtifactRenderer,
     Atom,
@@ -345,7 +345,7 @@ class ClaudeSkillRenderer(ArtifactRenderer[Skill]):
                     ),
                     content=content,
                     semantic_id=source.id,
-                    banner=PROMPT_TEXT,
+                    banner=PROMPT_TEXT.compiled_from(source.prompt.declared_source()),
                 )
             ]
         )
@@ -387,7 +387,7 @@ class ClaudeAgentRenderer(ArtifactRenderer[Agent]):
                     ),
                     content=content,
                     semantic_id=source.id,
-                    banner=PROMPT_TEXT,
+                    banner=PROMPT_TEXT.compiled_from(source.prompt.declared_source()),
                 )
             ]
         )
@@ -421,11 +421,13 @@ class ClaudePluginManifestRenderer(ArtifactRenderer[Plugin]):
                     ),
                     content=json.dumps(payload, indent=2, sort_keys=True),
                     semantic_id=source.id,
+                    banner=COMMENT_FREE.compiled_from(source.id),
                 ),
                 Artifact(
                     path=Path(".claude/plugins/.claude-plugin/marketplace.json"),
                     content=json.dumps(marketplace, indent=2, sort_keys=True),
                     semantic_id=source.id,
+                    banner=COMMENT_FREE.compiled_from(source.id),
                 ),
             ]
         )
@@ -458,6 +460,7 @@ class ClaudeMcpRenderer(ArtifactRenderer[Plugin]):
                         {"mcpServers": servers}, indent=2, sort_keys=True
                     ),
                     semantic_id=source.id,
+                    banner=COMMENT_FREE.compiled_from(source.id),
                 )
             ]
         )
@@ -551,6 +554,7 @@ class ClaudeHookRenderer(ArtifactRenderer[HookSet]):
                     path=Path(f".claude/plugins/{self.plugin_name}/hooks/hooks.json"),
                     content=json.dumps(hooks, indent=2, sort_keys=True),
                     semantic_id=source.id,
+                    banner=COMMENT_FREE.compiled_from(source.id),
                 ),
                 Artifact(
                     path=Path(
@@ -569,7 +573,7 @@ class ClaudeHookRenderer(ArtifactRenderer[HookSet]):
                         ),
                         content=module.source,
                         semantic_id=source.id,
-                        banner=VERBATIM_COPY,
+                        banner=VERBATIM_COPY.compiled_from(module.origin()),
                     )
                     for module in policy_kernel_modules()
                 ],
@@ -638,6 +642,7 @@ class ClaudeHookRenderer(ArtifactRenderer[HookSet]):
                     ),
                     content=json.dumps(evidence, indent=2, sort_keys=True),
                     semantic_id=source.id,
+                    banner=COMMENT_FREE.compiled_from(source.id),
                 ),
             ]
         )

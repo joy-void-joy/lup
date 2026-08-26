@@ -25,6 +25,7 @@ def skill(layout: ApplicationLayout) -> models.Skill:
         ],
         argument_hint="[error message or fragment]",
         prompt=models.PromptDocument(
+            source=__name__,
             parts=[
                 models.TextPart(
                     text=r"""# Debug: Trace an Error
@@ -135,6 +136,6 @@ Structure your report as:
 - **Be specific about fixes.** Point to exact files and lines, show before/after code.
 """
                 ),
-            ]
+            ],
         ),
     )

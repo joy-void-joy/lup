@@ -69,7 +69,7 @@ def create_run_subagent_tool(
         name="run_subagent",
     )
     async def run_subagent(validated: RunSubagentInput) -> RunSubagentOutput:
-        spec = by_name.get(validated.name)  # lup: ignore[dict-get] — role registry
+        spec = by_name.get(validated.name)
         if spec is None:
             raise ToolError(
                 f"Unknown subagent {validated.name!r}. Available: {sorted(by_name)}"

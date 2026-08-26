@@ -67,7 +67,7 @@ class Throttle:
 
     def get_state(self) -> LoopState:
         loop = asyncio.get_running_loop()
-        state = self.loop_states.get(loop)  # lup: ignore[dict-get] — loop registry
+        state = self.loop_states.get(loop)
         if state is None:
             state = LoopState(asyncio.Semaphore(self.max_concurrent))
             self.loop_states[loop] = state

@@ -41,7 +41,7 @@ def save_images(
     images_dir.mkdir(parents=True, exist_ok=True)
 
     def save_one(image: ClipboardImage) -> Path:
-        ext = MIME_TO_EXT.get(image.media_type, ".bin")  # lup: ignore[dict-get]
+        ext = MIME_TO_EXT.get(image.media_type, ".bin")
         path = images_dir / (hashlib.sha256(image.data).hexdigest()[:12] + ext)
         if not path.exists():
             path.write_bytes(image.data)

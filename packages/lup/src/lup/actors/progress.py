@@ -210,8 +210,6 @@ def progress_lines(entries: Sequence[CohortEntry], chars: int) -> list[ProgressL
                     entry,
                     "refused",
                     brief(refused.detail, chars),
-                    # lup: ignore[dict-get] — a result whose call fell before
-                    # this page names no instrument, which is what "" says
                     tool=invoked.get(refused.call_id, ""),
                 )
             elif (said := block.text_payload) is not None:

@@ -20,6 +20,7 @@ def skill(layout: ApplicationLayout) -> models.Skill:
         tools=["Write", "Read", "Glob", "Grep", "AskUserQuestion"],
         argument_hint="[command-name] [brief description of what it investigates]",
         prompt=models.PromptDocument(
+            source=__name__,
             parts=[
                 models.TextPart(
                     text=r"""# Create Investigator Command
@@ -131,6 +132,6 @@ Show the user what was created — the first draft is rarely perfect. """
 - **Keep it conversational** — ask when you need input. Don't assume.
 """
                 ),
-            ]
+            ],
         ),
     )

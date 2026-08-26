@@ -32,6 +32,7 @@ SKILL = models.Skill(
     ],
     argument_hint="[optional: paste a trace, reflection, or output for single-trace analysis]",
     prompt=models.PromptDocument(
+        source=__name__,
         parts=[
             models.TextPart(
                 text=r"""# Feedback Loop Orchestrator
@@ -167,6 +168,6 @@ uv run lup loop "task1" "task2" "task3"
 5. **Is the prompt accumulating patches?** Use `uv run lup-devtools feedback prompt-health` to check.
 """
             ),
-        ]
+        ],
     ),
 )

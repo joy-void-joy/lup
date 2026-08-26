@@ -103,30 +103,31 @@ prove which bytes it owns, so it would refuse to replace anything.
 
 ### Every generated path and its source
 
+[generated-paths.md](generated-paths.md) is that map, one row per artifact,
+walked from the trees the recipes compile. It was a table here and a table
+here drifts one way only: an artifact added to a recipe stayed invisible until
+somebody remembered this page, so the rows that went missing were always the
+newest — and a map with a family missing reads exactly like a complete one.
+Each row is now the artifact's own attribution, the same one its banner prints
+for a reader who opens the file, so nothing there can name a source the
+artifact does not.
+
 Canonical sources live in `lup.devtools.harness.content`
 (the declarations lup ships), `{layout.directory("devtools", "harness", "content")}`
 (the ones only this repository has), `{layout.path("devtools", "harness", "catalog.py")}`
 (plugin, hook, and resolver composition), and the `lup` package itself
-(adapter renderers and the policy bundle). Below, `content/` names whichever
-of the two halves owns the declaration's subject.
+(adapter renderers and the policy bundle).
 
-| Generated path | Canonical source |
-| --- | --- |
-| `.claude/CLAUDE.md`, `AGENTS.md` | `content/guidance.py` |
-| `.claude/plugins/lup/TEMPLATE_CLAUDE.md` | `content/template_claude.py` |
-| `.codex/plugins/lup/TEMPLATE_AGENTS.md` | `content/template_codex.py` |
-| `.claude/settings.json` | `content/settings.py` |
-| `.claude/plugins/lup/scripts/file_suggest.sh` | `content/assets/file_suggest.sh` (verbatim copy) |
-| `docs/*.md` | `content/docs/catalog.py` and the modules it lists |
-| `docs/rules.md` | `lup.codescan.registry`, via `uv run lup-devtools dev rules` |
-| `.claude/plugins/lup/commands/<skill>.md`, `.codex/plugins/lup/skills/<skill>/SKILL.md` | `content/skills/<skill>.py` |
-| `.claude/plugins/lup/agents/<agent>.md`, `.codex/agents/<agent>.toml` | `content/agents/<agent>.py` |
-| `.claude/plugins/lup/.claude-plugin/plugin.json`, `.claude/plugins/.claude-plugin/marketplace.json` | `catalog.py` via `lup.adapters.claude.harness` |
-| `.codex/plugins/lup/.codex-plugin/plugin.json`, `.agents/plugins/marketplace.json` | `catalog.py` via `lup.adapters.codex.harness` |
-| `.claude/plugins/lup/hooks/`, `.codex/plugins/lup/hooks/` (`hooks.json`, `scripts/policy.py`, `runtime/policy_data.py`, `runtime/evidence.json`) | `catalog.py` `HookSet` (with `lup.policy.shell_rules` and `lup.codescan.antipatterns`) via the adapter hook renderers and `lup.policy.bundle` |
-| `.claude/plugins/lup/hooks/runtime/kernel/`, `.codex/plugins/lup/hooks/runtime/kernel/` ({kernel_module_count()} modules) | verbatim copy of `lup/policy/kernel/`, read by `policy_kernel_modules()` and kept byte-identical so it can be diffed against the canonical package |
-| `.codex/config.toml` | `lup.adapters.codex.harness` |
-| `.claude/.lup-ownership.json`, `.codex/.lup-ownership.json` | written by `lup.harness.ownership` from the generation result |
+Three things that map states and the reason for each. The
+{kernel_module_count()} modules under `hooks/runtime/kernel/` are a verbatim
+copy of `lup/policy/kernel/`, kept byte-identical so it can be diffed against
+the canonical package. The ownership manifests are written by
+`lup.harness.ownership` from the generation result rather than compiled from a
+declaration. And `docs/rules.md`, `docs/commands.md`, `generated-paths.md`
+itself, and the CI workflow belong to no runtime tree at all: each is written
+by a `RepositoryWriter` the project declares beside its targets, reconciled
+against nothing but the declaration that renders it, and so absent from a map
+walked out of the recipes.
 
 `.claude/CLAUDE.md` and root `AGENTS.md` are the *same* document rendered
 twice, because each runtime reads guidance from its own location. The

@@ -25,6 +25,7 @@ SKILL = models.Skill(
     ],
     argument_hint="[target]",
     prompt=models.PromptDocument(
+        source=__name__,
         parts=[
             models.TextPart(
                 text=r"""# Merge
@@ -320,6 +321,6 @@ Classify each conflict hunk against the branch scopes:
 - **Check adjacent code**: Nearby non-conflicting code may also need updating
 """
             ),
-        ]
+        ],
     ),
 )

@@ -20,6 +20,7 @@ import lup_template.devtools.dev.init as init
 import lup_template.devtools.dev.library as library
 import lup_template.devtools.harness.catalog as catalog
 from lup.devtools.dev.app import DevDeclarations
+from lup.workspace.paths import find_project_root
 
 
 def declared() -> DevDeclarations:
@@ -70,6 +71,40 @@ def init_rename_package_cmd(
 ) -> None:
     """Rename the lup Python package to a project-specific name."""
     init.rename_package(new_name, dry_run)
+
+
+@init_app.command("drop-examples")
+def init_drop_examples_cmd(
+    dry_run: Annotated[
+        bool,
+        typer.Option(
+            "--dry-run", "-n", help="Show what would change without modifying files"
+        ),
+    ] = False,
+) -> None:
+    """Remove the scaffold's demonstrations of itself, which no adopter wants.
+
+    `examples/` composes lup's own runtime against lup's own README, and two
+    test modules drive it. A domain that adopted the template is a consumer of
+    that library rather than a demonstrator of it, so what it inherits here is
+    a directory it will never run and a suite it has to keep green.
+
+    Lines still naming what went are reported rather than rewritten: a link in
+    a README its human owner is already rewriting is theirs to remove.
+    """
+    root = find_project_root()
+    removed = init.drop_scaffold_demonstrations(root, dry_run)
+    if not removed:
+        typer.echo("no scaffold demonstrations left to remove")
+        return
+    typer.echo("Would remove:" if dry_run else "Removed:")
+    for line in removed:
+        typer.echo(line)
+    mentions = init.surviving_mentions(root, init.SCAFFOLD_DEMONSTRATIONS)
+    if mentions:
+        typer.echo(f"\nStill named in {len(mentions)} line(s) — review manually:")
+        for line in mentions:
+            typer.echo(line)
 
 
 # -- library commands --
