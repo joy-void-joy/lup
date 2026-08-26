@@ -1,5 +1,5 @@
 {
-  "revision": "c564bc01af4469812f95d295db8e1387a40e3f1b",
+  "revision": "0ec7713eb5dea4c2c3b8ba54a3db63c0d15e416b",
   "roots": [
     "lup",
     "lup_template"
@@ -4755,6 +4755,7 @@
         "ProjectContent.documents",
         "ProjectContent.assets",
         "ProjectContent.settings",
+        "ProjectContent.settings_source",
         "GenerationRecipe",
         "GenerationRecipe.label",
         "GenerationRecipe.root",
@@ -4788,10 +4789,24 @@
         "managed_paths",
         "current_reader",
         "claude_generation_recipe",
+        "claude_generation_recipe.copied_from",
         "codex_generation_recipe",
         "manifest_of",
         "inspect_generation",
         "generate"
+      ]
+    },
+    {
+      "module": "lup.devtools.harness.generated_paths",
+      "declares": [
+        "GENERATED_PATHS",
+        "GENERATED_PATHS_COMMAND",
+        "INTRODUCTION",
+        "compiled_rows",
+        "target_section",
+        "generated_paths_document",
+        "generated_paths_artifact",
+        "write_generated_paths"
       ]
     },
     {
@@ -5804,19 +5819,24 @@
         "BannerExemption",
         "BannerExemption.type",
         "BannerExemption.reason",
+        "BannerExemption.source",
         "BannerExemption.opens",
+        "BannerExemption.attribution",
+        "BannerExemption.compiled_from",
         "GeneratedBanner",
         "GeneratedBanner.type",
         "GeneratedBanner.source",
         "GeneratedBanner.command",
         "GeneratedBanner.notes",
         "GeneratedBanner.record",
+        "GeneratedBanner.attribution",
         "GeneratedBanner.lines",
         "GeneratedBanner.render",
         "GeneratedBanner.applied_to",
         "GeneratedBanner.opens",
         "PROMPT_TEXT",
-        "VERBATIM_COPY"
+        "VERBATIM_COPY",
+        "COMMENT_FREE"
       ]
     },
     {
@@ -6987,6 +7007,7 @@
         "KernelModule",
         "KernelModule.name",
         "KernelModule.source",
+        "KernelModule.origin",
         "policy_kernel_modules",
         "bundled_antipattern_rows",
         "runtime_url_scope",
@@ -11567,6 +11588,7 @@
         "EPILOGUE",
         "RULES_REFERENCE",
         "COMMAND_REFERENCE",
+        "GENERATED_PATHS",
         "document"
       ]
     },
