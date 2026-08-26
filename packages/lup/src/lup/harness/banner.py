@@ -152,8 +152,17 @@ class BannerPlacement(BaseModel, frozen=True):
         return cls(interpreter=interpreter, body="".join(rest))
 
 
-type BannerExemptionReason = Literal["prompt_text", "verbatim_copy"]
-"""Why an artifact whose format admits comments still carries no banner."""
+type BannerExemptionReason = Literal[
+    "prompt_text", "verbatim_copy", "comment_free_format"
+]
+"""Why one artifact carries no rendered generated-from banner.
+
+The first two are formats that *could* hold a comment and must not: model-
+facing prompt text, where the banner would enter every prompt, and a verbatim
+copy, where it would break the diff proving the copy faithful. The third is a
+format with no comment at all — JSON — which was previously said by declaring
+no banner and is said here instead, so that an artifact's provenance is
+carried in every case and only its rendering varies."""
 
 
 class BannerExemption(BaseModel, frozen=True):
@@ -163,14 +172,36 @@ class BannerExemption(BaseModel, frozen=True):
     a banner would be injected into every prompt. ``verbatim_copy`` is a
     byte-identical copy of a canonical source, where a banner would break the
     diff that proves the copy faithful.
+
+    An exemption says the provenance cannot be *printed*, never that there is
+    none: the artifact came from somewhere either way, and a reader asking
+    what compiles a skill file asks the same question the banner answers for
+    the file beside it. So the source is carried and simply not rendered.
     """
 
     type: Literal["exempt"] = "exempt"
     reason: BannerExemptionReason
 
+    source: str = ""
+    """What this artifact is compiled from, carried but never rendered.
+
+    Empty on the shared declaration a compile site starts from, and filled by
+    :meth:`compiled_from` at the site that knows which declaration it is
+    rendering. Left unset it states nothing, which is the whole of what an
+    exemption stated before it could carry one.
+    """
+
     def opens(self, path: PurePath, content: str) -> bool:
         """An exemption states nothing the content could fail to carry."""
         return True
+
+    def attribution(self) -> str:
+        """Where this artifact came from, whether or not it can say so."""
+        return self.source
+
+    def compiled_from(self, source: str) -> "BannerExemption":
+        """This exemption, carrying the source the compiling site knows."""
+        return self.model_copy(update={"source": source})
 
 
 class GeneratedBanner(BaseModel, frozen=True):
@@ -192,6 +223,10 @@ class GeneratedBanner(BaseModel, frozen=True):
     record: str = PROVENANCE_RECORD
     """Where this repository records what every generated tree is built from,
     for the artifacts whose format can hold no banner at all."""
+
+    def attribution(self) -> str:
+        """Where this artifact came from, the same question an exemption answers."""
+        return self.source
 
     def lines(self) -> list[str]:
         """The banner sentences, before any format spells them as a comment."""
@@ -222,12 +257,16 @@ PROMPT_TEXT = BannerExemption(reason="prompt_text")
 VERBATIM_COPY = BannerExemption(reason="verbatim_copy")
 """Declared by every artifact copied byte-identically from its source."""
 
+COMMENT_FREE = BannerExemption(reason="comment_free_format")
+"""Declared by every artifact whose format holds no comment to put one in."""
+
 
 type ArtifactBanner = Annotated[
     GeneratedBanner | BannerExemption, Discriminator("type")
 ]
 """Every generated artifact either states its provenance or why it cannot.
 
-Both members answer ``opens``, so a caller holding the union asks it directly
-rather than narrowing to a variant; a variant that stopped answering would
-fail at every call site instead of falling through a match arm."""
+Both members answer ``opens`` and ``attribution``, so a caller holding the
+union asks it directly rather than narrowing to a variant; a variant that
+stopped answering would fail at every call site instead of falling through a
+match arm."""

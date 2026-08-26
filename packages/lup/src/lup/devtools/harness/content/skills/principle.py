@@ -29,6 +29,7 @@ def skill(layout: ApplicationLayout) -> models.Skill:
         ],
         argument_hint="<principle description>",
         prompt=models.PromptDocument(
+            source=__name__,
             parts=[
                 models.TextPart(
                     text=r"""# Propagate Principle
@@ -231,6 +232,6 @@ After all changes:
 - **Enforcement > documentation** — a hook that prevents violations is worth more than a paragraph that describes the principle
 """
                 ),
-            ]
+            ],
         ),
     )

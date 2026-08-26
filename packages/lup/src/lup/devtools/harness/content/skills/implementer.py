@@ -7,6 +7,7 @@ SKILL = models.Skill(
     name="implementer",
     description="Implement one resolver concern inside its leased worktree",
     prompt=models.PromptDocument(
+        source=__name__,
         parts=[
             models.TextPart(
                 text=r"""Implement exactly the supplied resolver assignment inside its leased worktree. Your work is independently verified and reviewed before it ever merges, so move decisively. Do not create branches or commits — the orchestrator owns that authority. Report every changed path, any work beyond the declared starting points, and verification performed through the resolver's typed report.
@@ -33,6 +34,6 @@ Your edits apply without prompting, but the edit policy's own ask and deny decis
 Run the project checks (`uv run ruff format . && uv run ruff check . && uv run pyright`, plus `uv run pytest` if behavior could change) and fix what you break.
 """
             ),
-        ]
+        ],
     ),
 )

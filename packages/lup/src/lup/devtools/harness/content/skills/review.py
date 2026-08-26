@@ -26,6 +26,7 @@ def skill(layout: ApplicationLayout) -> models.Skill:
         ],
         argument_hint="[session ID, file path, or pasted trace]",
         prompt=models.PromptDocument(
+            source=__name__,
             parts=[
                 models.TextPart(
                     text=r"""# Review: Trace Workflow Analysis
@@ -167,6 +168,6 @@ Categorize improvements as:
 - **Quote the trace.** When citing evidence, quote the actual trace text (tool names, thinking excerpts, result fragments) — don't paraphrase.
 """
                 ),
-            ]
+            ],
         ),
     )

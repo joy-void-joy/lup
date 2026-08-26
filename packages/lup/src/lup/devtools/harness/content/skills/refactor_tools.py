@@ -20,6 +20,7 @@ def skill(layout: ApplicationLayout) -> models.Skill:
             "AskUserQuestion",
         ],
         prompt=models.PromptDocument(
+            source=__name__,
             parts=[
                 models.TextPart(
                     text=rf"""# Tool Review: Tools, Servers & Pipeline
@@ -179,6 +180,6 @@ Present findings as:
 - **Put decisions and prioritization to the user** rather than settling them yourself.
 """
                 ),
-            ]
+            ],
         ),
     )

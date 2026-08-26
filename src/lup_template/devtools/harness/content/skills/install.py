@@ -27,6 +27,7 @@ SKILL = models.Skill(
     tools=["Bash", "Read", "Write", "Edit", "Glob", "Grep", "AskUserQuestion"],
     argument_hint="[target-repo] [--interactive]",
     prompt=models.PromptDocument(
+        source=__name__,
         parts=[
             models.TextPart(
                 text=r"""# Install Lup into Target Repo
@@ -507,6 +508,6 @@ After installation:
 - **Explain decisions**: For each installed item, briefly explain what it does and why it helps.
 """
             ),
-        ]
+        ],
     ),
 )

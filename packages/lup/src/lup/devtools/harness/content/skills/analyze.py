@@ -22,6 +22,7 @@ SKILL = models.Skill(
     ],
     argument_hint="<conversation-url> [-- <question>]",
     prompt=models.PromptDocument(
+        source=__name__,
         parts=[
             models.TextPart(
                 text=r"""# Analyze a Retained Conversation
@@ -99,6 +100,6 @@ Ground consequential statements in clickable repo-relative paths to the retained
 End with the retained path and, when one was created, the checkpoint commit so the answer can be reproduced from the exact same input.
 """
             ),
-        ]
+        ],
     ),
 )

@@ -11,6 +11,7 @@ def agent(layout: ApplicationLayout) -> models.Agent:
         name="version-explorer",
         description="Inventory version-impact evidence across the repository",
         prompt=models.PromptDocument(
+            source=__name__,
             parts=[
                 models.TextPart(
                     text=rf"""You are the **Version Explorer Agent**, specialized in navigating agent version history via git tags. You retrieve files at specific versions, diff code across versions, and trace when concepts were introduced or removed.
@@ -190,7 +191,7 @@ Overview of the full version history.
 - **Flag missing tags.** If a requested version doesn't have a tag, say so and suggest the nearest available version.
 """
                 ),
-            ]
+            ],
         ),
         tools=["Read", "Grep", "Glob", "Bash"],
         model="strongest",

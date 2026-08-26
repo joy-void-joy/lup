@@ -20,6 +20,7 @@ def skill(layout: ApplicationLayout) -> models.Skill:
         tools=["Read", "Edit", "Write", "Glob", "Grep", "AskUserQuestion"],
         argument_hint="[command-name] [delta or description] [--args hint1 hint2]",
         prompt=models.PromptDocument(
+            source=__name__,
             parts=[
                 models.TextPart(
                     text=r"""# Modify Existing Slash Command
@@ -116,6 +117,6 @@ If `"""
 - **Preserve working behavior** -- don't break existing functionality unless the user explicitly asks to replace it
 """
                 ),
-            ]
+            ],
         ),
     )

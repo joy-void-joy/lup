@@ -7,6 +7,7 @@ SKILL = models.Skill(
     name="verify-solved",
     description="Check every claimed-resolved note and stale open issue against what it actually asked",
     prompt=models.PromptDocument(
+        source=__name__,
         parts=[
             models.TextPart(
                 text="""Every `# lup: solved:` marker in this repository is a claim that a note was addressed, made by whoever addressed it. You are the check on those claims, and you are the only thing that may retire one.
@@ -47,6 +48,6 @@ Correct yourself out loud when the check reverses an earlier reading, including 
 Say plainly how many you restored and why. A pass that retires everything it reads is not evidence the work was good; it is the first thing to be suspicious of in your own output.
 """
             ),
-        ]
+        ],
     ),
 )

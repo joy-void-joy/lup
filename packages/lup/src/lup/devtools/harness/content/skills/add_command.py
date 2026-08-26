@@ -28,6 +28,7 @@ def skill(layout: ApplicationLayout) -> models.Skill:
         ],
         argument_hint="[name] [description]",
         prompt=models.PromptDocument(
+            source=__name__,
             parts=[
                 models.TextPart(
                     text=r"""# Add New Command
@@ -206,6 +207,6 @@ Its `parts` open with the prose, splice `models.ArgumentsRef()` in after `**Argu
 - Regenerate after every change; a hand-edited artifact is reverted the next time generation runs
 """
                 ),
-            ]
+            ],
         ),
     )

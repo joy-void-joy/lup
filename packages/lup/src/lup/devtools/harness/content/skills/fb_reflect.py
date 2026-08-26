@@ -20,6 +20,7 @@ def skill(layout: ApplicationLayout) -> models.Skill:
             "AskUserQuestion",
         ],
         prompt=models.PromptDocument(
+            source=__name__,
             parts=[
                 models.TextPart(
                     text=rf"""# Reflect: Process Quality Assessment
@@ -63,6 +64,6 @@ Were the `/fb-*` subcommands helpful? Anything confusing, missing, or redundant?
 Any repetitive analysis that should be automated as a devtools command? Add it to `{layout.directory("devtools")}` when only this project would want it. When another project on lup would want it, it belongs to the library instead — `docs/library.md` carries the criterion and how to reach lup's own source in whichever mode this project obtains it.
 """
                 ),
-            ]
+            ],
         ),
     )

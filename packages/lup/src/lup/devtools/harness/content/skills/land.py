@@ -23,6 +23,7 @@ SKILL = models.Skill(
     ],
     argument_hint="[branch-name ...]",
     prompt=models.PromptDocument(
+        source=__name__,
         parts=[
             models.TextPart(
                 text=r"""# Land Every Branch
@@ -207,6 +208,6 @@ What landed, what merged, what was deleted locally, what was cleared from a remo
 - For rebased branches, content may have reached the integration branch via a rebase PR even though `--is-ancestor` is false — the `DELETE` disposition already accounts for merged PRs
 """
             ),
-        ]
+        ],
     ),
 )

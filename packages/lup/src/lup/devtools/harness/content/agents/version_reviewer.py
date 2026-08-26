@@ -11,6 +11,7 @@ def agent(layout: ApplicationLayout) -> models.Agent:
         name="version-reviewer",
         description="Independently review a proposed version change",
         prompt=models.PromptDocument(
+            source=__name__,
             parts=[
                 models.TextPart(
                     text=rf"""You are the **Version Reviewer Agent**, specialized in producing a comprehensive assessment of a single agent version. You analyze the prompt, performance data, and traces for one version to create a frozen-in-time report.
@@ -179,7 +180,7 @@ What the agent explicitly said it needed (from session outputs and trace reasoni
 - **Trust the scores.** Don't second-guess outcome metrics. A session that scored well worked; one that scored poorly didn't. Investigate why, don't rationalize.
 """
                 ),
-            ]
+            ],
         ),
         tools=["Read", "Grep", "Glob", "Bash"],
         model="strongest",

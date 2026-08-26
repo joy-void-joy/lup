@@ -50,6 +50,16 @@ class KernelModule(BaseModel, frozen=True):
     name: str
     source: str
 
+    def origin(self) -> str:
+        """The canonical module this copy is byte-identical to.
+
+        Carried so a generated tree can say where each kernel file came from
+        even though the copy prints nothing: a banner inside it would break
+        the diff that proves the copy faithful, which is a reason not to
+        render the provenance rather than not to have it.
+        """
+        return f"{kernel.__name__}.{Path(self.name).stem}"
+
 
 def policy_kernel_modules() -> list[KernelModule]:
     """Read the canonical kernel package verbatim for runtime assembly.

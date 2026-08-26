@@ -30,6 +30,7 @@ def skill(layout: ApplicationLayout) -> models.Skill:
             "AskUserQuestion",
         ],
         prompt=models.PromptDocument(
+            source=__name__,
             parts=[
                 models.TextPart(
                     text=r"""# Brainstorm: Agent Design Exploration
@@ -262,6 +263,6 @@ Things still to figure out during init or implementation.
 - **Scope at agent speed.** Implementation runs at agent pace, not human pace — a complete working version is hours away, not weeks. Don't steer the design toward a cut-down POC to "save time"; design the real thing.
 """
                 ),
-            ]
+            ],
         ),
     )

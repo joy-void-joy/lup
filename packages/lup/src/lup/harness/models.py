@@ -493,9 +493,13 @@ type PromptPart = Annotated[
 class PromptDocument(BaseModel, frozen=True):
     parts: list[PromptPart]
     source: str | None = None
-    """The module declaring this document, for the banner of an artifact
-    rendered from it alone. A document folded into a skill or agent prompt
-    reaches no artifact of its own and names no source."""
+    """The module declaring this document, and where a reader edits it.
+
+    Every document reaching a file of its own carries one — a skill's or an
+    agent's prompt included, whose artifact renders the frontmatter and the
+    prose out of the single module declaring both. What names no source is a
+    document composed into another rather than compiled: a shared section
+    several skills fold in has no file of its own to point anybody at."""
 
     def declared_source(self) -> str:
         """The declaring module, required because this document becomes a file."""

@@ -18,6 +18,7 @@ SKILL = models.Skill(
         "WebFetch",
     ],
     prompt=models.PromptDocument(
+        source=__name__,
         parts=[
             models.TextPart(
                 text=r"""# Implement: Make Changes
@@ -124,6 +125,6 @@ uv run lup loop "task1" "task2" "task3"
 Choose sessions that are diverse in task type, exercise recently fixed or new tools, and include edge cases where the agent previously struggled.
 """
             ),
-        ]
+        ],
     ),
 )

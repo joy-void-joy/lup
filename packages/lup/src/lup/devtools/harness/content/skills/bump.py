@@ -23,6 +23,7 @@ SKILL = models.Skill(
     ],
     argument_hint="[patch|minor|major]",
     prompt=models.PromptDocument(
+        source=__name__,
         parts=[
             models.TextPart(
                 text=r"""# Version Bump
@@ -108,6 +109,6 @@ Show the user what was bumped and the behavioral changes that warranted it.
 - **When in doubt, ask** -- put an ambiguous level to the user rather than guessing
 """
             ),
-        ]
+        ],
     ),
 )

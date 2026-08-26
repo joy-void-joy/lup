@@ -21,6 +21,7 @@ from lup.adapters.harness import (
     compile_codex,
 )
 from lup.harness.banner import (
+    COMMENT_FREE,
     REGENERATE_COMMAND,
     VERBATIM_COPY,
     GeneratedBanner,
@@ -85,6 +86,14 @@ class ProjectContent(BaseModel, frozen=True):
 
     settings: JsonObject = {}
     """Native settings for the runtime that reads a settings file."""
+
+    settings_source: str = ""
+    """The module declaring those settings, and where a reader edits them.
+
+    Carried beside them because the settings themselves are a ``JsonObject``
+    and carry nothing: the artifact they become is JSON too, so its provenance
+    has no comment to sit in and would otherwise be nowhere at all.
+    """
 
 
 class GenerationRecipe(BaseModel, frozen=True, arbitrary_types_allowed=True):
@@ -254,13 +263,19 @@ def claude_generation_recipe(
     compiled = compile_claude(source)
     prompts = claude_prompt_renderer()
     plugin = Path(".claude/plugins") / source.plugins[0].name
+
+    def copied_from(asset: Path) -> str:
+        """Where the asset sits, as a reader of this checkout would name it."""
+        inside = asset.relative_to(root) if asset.is_relative_to(root) else asset
+        return inside.as_posix()
+
     verbatim = [
         Artifact(
             path=plugin / "scripts" / asset.name,
             content=asset.read_text(encoding="utf-8"),
             semantic_id="harness.file-suggestion",
             executable=True,
-            banner=VERBATIM_COPY,
+            banner=VERBATIM_COPY.compiled_from(copied_from(asset)),
         )
         for asset in content.assets
     ]
@@ -274,6 +289,7 @@ def claude_generation_recipe(
             path=Path(".claude/settings.json"),
             content=json.dumps(content.settings, indent=2, sort_keys=True),
             semantic_id="harness.project-settings",
+            banner=COMMENT_FREE.compiled_from(content.settings_source),
         ),
     ]
     desired = validated_tree([*compiled.artifacts, *support_artifacts])

@@ -24,6 +24,7 @@ from lup.devtools.harness.generate import (
     NativeHarnessComposition,
     ProjectContent,
 )
+from lup.devtools.harness.generated_paths import write_generated_paths
 from lup.runtime.profiles import ProfileDirectory
 from lup.workspace.paths import project_root
 from lup_template.devtools.harness.catalog import (
@@ -32,6 +33,7 @@ from lup_template.devtools.harness.catalog import (
     portable_harness,
 )
 from lup_template.devtools.harness.content.docs.catalog import documents
+import lup_template.devtools.harness.content.settings as settings_module
 from lup_template.devtools.harness.content.settings import project_settings
 from lup_template.devtools.harness.content.template_claude import (
     DOCUMENT as TEMPLATE_CLAUDE,
@@ -59,6 +61,7 @@ def project_content(root: Path, rules: RuleSelection | None = None) -> ProjectCo
         documents=documents(root),
         assets=[CONTENT_ROOT / "assets" / "file_suggest.sh"],
         settings=project_settings(harness.plugins[0]),
+        settings_source=settings_module.__name__,
     )
 
 
@@ -96,5 +99,6 @@ TARGETS = NativeTargets(builders={"claude": claude_target, "codex": codex_target
 REPOSITORY_WIDE: list[RepositoryWriter] = [
     partial(write_rule_reference, selection=declared_hook_set().rules),
     partial(write_workflow, WORKFLOW),
+    partial(write_generated_paths, TARGETS),
 ]
 """Every project-owned generated file outside a native runtime tree."""

@@ -15,6 +15,7 @@ AGENT = models.Agent(
     name="tdd-implementer",
     description="Write production code against failing tests, without editing the tests",
     prompt=models.PromptDocument(
+        source=__name__,
         parts=[
             models.TextPart(
                 text=r"""You are the **Implementer Agent**, a specialist in writing production code to satisfy test requirements during Test-Driven Development workflows.
@@ -132,7 +133,7 @@ When successful: Confirm implementation is complete and tests pass.
 When tests need changes: Return the detailed analysis report above. Do NOT attempt workarounds that violate the tests' intent.
 """
             ),
-        ]
+        ],
     ),
     tools=["Read", "Grep", "Glob", "Bash", "Write", "Edit"],
     model="strongest",

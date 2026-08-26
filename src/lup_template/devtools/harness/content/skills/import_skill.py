@@ -25,6 +25,7 @@ SKILL = models.Skill(
     ],
     argument_hint="<project|path|ref> [BASE..SOURCE] <scope description>",
     prompt=models.PromptDocument(
+        source=__name__,
         parts=[
             models.TextPart(
                 text=r"""# Import from Another Git Line
@@ -283,6 +284,6 @@ Offer to commit the imported pattern, through `"""
 - **Test after porting** — `dev check` in step 6 is that bar; it runs ruff, pyright and the suite together, so reaching for them one at a time only makes it easier to stop after the first.
 """
             ),
-        ]
+        ],
     ),
 )

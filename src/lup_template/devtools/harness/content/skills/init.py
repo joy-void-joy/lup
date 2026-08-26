@@ -53,6 +53,7 @@ SKILL = models.Skill(
         "AskUserQuestion",
     ],
     prompt=models.PromptDocument(
+        source=__name__,
         parts=[
             models.TextPart(
                 text=r"""# Initialize Self-Improvement Loop
@@ -549,6 +550,6 @@ domain produces, `agent/prompts.py` for what the agent is told, then
 `agent/toolsets.py` and `agent/tools/` for what it can do.
 """
             ),
-        ]
+        ],
     ),
 )

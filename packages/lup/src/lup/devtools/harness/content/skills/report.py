@@ -18,6 +18,7 @@ SKILL = models.Skill(
     ),
     tools=["Bash(uv run lup-devtools:*)", "Read", "Write"],
     prompt=models.PromptDocument(
+        source=__name__,
         parts=[
             models.TextPart(
                 text=f"""# Report what is left
@@ -101,6 +102,6 @@ an edit to one line of a stale report leaves the rest of it stale.
   in the reply; this file is read by whoever picks the work up next.
 """
             ),
-        ]
+        ],
     ),
 )

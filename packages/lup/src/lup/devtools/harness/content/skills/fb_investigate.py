@@ -20,6 +20,7 @@ def skill(layout: ApplicationLayout) -> models.Skill:
         ],
         argument_hint="<session_id1> [session_id2 ...]",
         prompt=models.PromptDocument(
+            source=__name__,
             parts=[
                 models.TextPart(
                     text=r"""# Investigate: Trace Deep-Dive
@@ -129,6 +130,6 @@ Then """
                     text=r"""
 """
                 ),
-            ]
+            ],
         ),
     )
