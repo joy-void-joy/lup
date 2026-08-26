@@ -51,7 +51,7 @@ where a named capability will do.
 
 `ModelRoute` pairs a `ModelMatcher` with a factory recipe, and
 `ModelRouter.resolve` takes the first route that matches
-(`packages/lup/src/lup/runtime/routing.py`). `ExactModelMatcher` and
+(`packages/lup/src/lup/providers/routing.py`). `ExactModelMatcher` and
 `PrefixModelMatcher` are each a few lines, and each *says what it means* —
 where a regex would have encoded the same intent in punctuation that no
 reader, and no type checker, can check. A new matching strategy is a new
@@ -69,11 +69,11 @@ calls `text_payload` on it — is Closed By Construction above, and holding the
 variant directly is the whole point there. This section is about the seam a
 consumer would otherwise reach past a missing surface to reach.
 
-`ModelRouter` (`packages/lup/src/lup/runtime/routing.py`) is the shape, and it
+`ModelRouter` (`packages/lup/src/lup/providers/routing.py`) is the shape, and it
 is the previous section seen from the consumer's side: `ModelMatcher` is the
 engine, `ExactModelMatcher` and `PrefixModelMatcher` fill it, and nobody
 outside the router calls `matches`. Callers hold the router and ask
-`resolve`. `Client` (`packages/lup/src/lup/runtime/factory.py`) is the
+`resolve`. `Client` (`packages/lup/src/lup/client.py`) is the
 same arrangement one level up — a plain class parametrized by a single
 `SessionOpener`, which adapters, wrappers, and tests each supply differently.
 The engine there is a callable rather than an ABC, which is the point: what
@@ -88,7 +88,7 @@ to fix a bug in it, because there is no one place at all. The concrete class
 is where that behaviour goes, and parametrizing it is what keeps the
 implementation swappable anyway.
 
-`ProfileResolver` (`packages/lup/src/lup/runtime/config.py`) is what that
+`ProfileResolver` (`packages/lup/src/lup/providers/config.py`) is what that
 looks like caught in the act. The seam resolves a profile name to a
 `ConfigTransform`, but every consumer wants the configured session, so both
 `ClaudeProfileResolver` and `CodexProfileResolver` grew the same
@@ -102,13 +102,13 @@ question: is there shared behaviour with no home? A frozen value that only
 carries capabilities is a transparent carrier rather than a caller-facing
 surface, so reaching through one is conforming — `handle.session.start(...)`
 and `turn.turn.result()` go through `SessionHandle` and `TurnHandle`
-(`packages/lup/src/lup/runtime/models.py`), which hold seams and no behaviour
+(`packages/lup/src/lup/sessions/events.py`), which hold seams and no behaviour
 of their own. `ConfigTransform` is the same answer for a pure function over
 config: nothing to home, so applications stack transforms directly.
 
 The second is a seam that is genuinely engine-only: implemented and injected,
 never held. `TurnToolBinder` and `SubmittedOutputStore`
-(`packages/lup/src/lup/runtime/contracts.py`) are filled by adapters and
+(`packages/lup/src/lup/sessions/capabilities.py`) are filled by adapters and
 handed to `ComposedSession`, which is itself the surface. `Session` is the
 case worth reading twice, because it qualifies without being handle-only: a
 driver takes one as a parameter and runs a turn inside its own concern —

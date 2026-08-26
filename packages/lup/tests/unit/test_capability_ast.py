@@ -10,8 +10,11 @@ from pathlib import Path
 
 import pytest
 
-from lup.codescan.capabilities import audit_abstract_declarations, audit_capabilities
-from lup.codescan.common import PythonSource
+from lup.harness.codescan.capabilities import (
+    audit_abstract_declarations,
+    audit_capabilities,
+)
+from lup.harness.codescan.common import PythonSource
 
 
 def source(text: str, name: str = "sample") -> PythonSource:

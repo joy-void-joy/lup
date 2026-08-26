@@ -21,7 +21,7 @@ from lup.orchestration.actors.progress import ProgressWindow, read_progress
 from lup.orchestration.actors.tools import SpawnReadInput, create_cohort_tools
 from lup.channels.models import Door
 from lup.tools.mcp import LupMcpTool, ToolError
-from lup.runtime.models import (
+from lup.sessions.events import (
     MessageCompletedEvent,
     SessionId,
     TurnCompletedEvent,

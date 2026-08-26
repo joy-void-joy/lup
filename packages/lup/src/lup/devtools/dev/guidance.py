@@ -16,7 +16,7 @@ import typer
 from markdown_it import MarkdownIt
 from pydantic import BaseModel
 
-from lup.adapters.harness import guidance_artifacts
+from lup.providers.harness import guidance_artifacts
 from lup.harness.models import (
     GUIDANCE_BYTE_BUDGET,
     TEMPLATE_GUIDANCE_HEADROOM,

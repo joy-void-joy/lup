@@ -13,8 +13,8 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
-from lup.codescan.boundaries import ApplicationRoots
-from lup.codescan.common import AntiPattern, RuleSelection
+from lup.harness.codescan.boundaries import ApplicationRoots
+from lup.harness.codescan.common import AntiPattern, RuleSelection
 from lup.devtools.subapps import SubAppSelection
 from lup.harness.models import ContentSelection
 from lup.policy.kernel.rows import PathRoleRow

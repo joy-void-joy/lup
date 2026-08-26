@@ -21,7 +21,7 @@ import lup.devtools.harness.drift as drift
 import lup.devtools.harness.launch as launch
 import lup.devtools.harness.reconcile as reconcile
 import lup.devtools.harness.resolve as resolve
-from lup.codescan.registry import every_rule_retired
+from lup.harness.codescan.registry import every_rule_retired
 from lup.devtools.dev.issues import EXCLUDED_LABEL
 from lup.devtools.harness.composition import NativeTargets, claude_profile_directory
 from lup.devtools.harness.contained import (
@@ -34,7 +34,7 @@ from lup.harness.image import detected_client
 from lup.devtools.harness.generate import NativeHarnessComposition
 from lup.devtools.harness.profile_app import create_profile_app
 from lup.harness.models import Resumption
-from lup.runtime.profiles import ProfileDirectory
+from lup.providers.profiles import ProfileDirectory
 from lup.devtools.harness.drift import RepositoryWriter
 from lup.devtools.supervisor.app import serve_supervisor
 from lup.devtools.supervisor.page import SUPERVISOR_PORT

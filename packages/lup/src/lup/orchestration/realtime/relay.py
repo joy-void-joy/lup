@@ -86,8 +86,8 @@ from lup.orchestration.realtime.models import (
 )
 from lup.orchestration.realtime.scheduler import Scheduler, SleepResult
 from lup.orchestration.reflection import ReflectionGate
-from lup.runtime.contracts import Session
-from lup.runtime.models import turn_request
+from lup.sessions.capabilities import Session
+from lup.sessions.events import turn_request
 from lup.observability.trace import TraceLogger
 
 logger = logging.getLogger(__name__)

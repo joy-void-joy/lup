@@ -11,7 +11,7 @@ from collections import deque
 
 from claude_agent_sdk import ProcessError
 
-from lup.adapters.claude.runtime import attach_cli_stderr
+from lup.providers.claude.runtime import attach_cli_stderr
 
 
 def make_process_error(exit_code: int) -> ProcessError:

@@ -6,12 +6,12 @@ tests check the derivation itself as much as the declarations it judges.
 
 import pytest
 
-from lup.adapters.claude.harness import ClaudeSpellings, claude_granted_tools
-from lup.adapters.claude.hooks import CLAUDE_SEMANTICS
-from lup.adapters.codex.harness import CodexSpellings
-from lup.adapters.codex.hooks import CODEX_SEMANTICS
-from lup.adapters.harness import compile_codex
-from lup.codescan.portable import native_vocabulary, prose_breaches
+from lup.providers.claude.harness import ClaudeSpellings, claude_granted_tools
+from lup.providers.claude.hooks import CLAUDE_SEMANTICS
+from lup.providers.codex.harness import CodexSpellings
+from lup.providers.codex.hooks import CODEX_SEMANTICS
+from lup.providers.harness import compile_codex
+from lup.harness.codescan.portable import native_vocabulary, prose_breaches
 from lup.harness.contracts import NativeSpellings
 from lup.harness.models import PromptDocument, TextPart
 from lup.harness.prompts import SPAWNED_SESSION_LOSES_SHELL

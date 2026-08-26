@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from lup.gitguard import TEST_IDENTITY, ForeignCheckouts, repository_state
+from lup.devtools.gitguard import TEST_IDENTITY, ForeignCheckouts, repository_state
 from lup.harness.environment import launcher_decided_names
 
 
@@ -39,7 +39,7 @@ def committer_identity_armed() -> Iterator[None]:
 
     Session-scoped and autouse because the git commands that need it are not
     all the suite's own: a resolver under test runs its own `git commit`, and
-    reaches whatever the environment holds. See :mod:`lup.gitguard`.
+    reaches whatever the environment holds. See :mod:`lup.devtools.gitguard`.
     """
     with pytest.MonkeyPatch.context() as environment:
         for name, value in TEST_IDENTITY.environment().items():
@@ -53,7 +53,7 @@ def enclosing_repository_untouched() -> Iterator[None]:
 
     The same guard the template suite arms, for the same reason: this suite
     builds throwaway repositories too, and a fixture that forgets to bind git
-    to one reaches the developer's checkout instead. See :mod:`lup.gitguard`.
+    to one reaches the developer's checkout instead. See :mod:`lup.devtools.gitguard`.
     """
     root = Path(__file__).resolve().parents[3]
     foreign = ForeignCheckouts.beside(root)

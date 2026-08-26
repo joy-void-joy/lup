@@ -19,10 +19,10 @@ from pathlib import Path
 
 import pytest
 
-from lup.adapters.claude.runtime import build_claude_options
-from lup.adapters.claude.selection import claude_config
-from lup.adapters.codex.selection import codex_config
-from lup.runtime.selection import SessionRequest
+from lup.providers.claude.runtime import build_claude_options
+from lup.providers.claude.selection import claude_config
+from lup.providers.codex.selection import codex_config
+from lup.providers.selection import SessionRequest
 
 
 def test_a_request_naming_no_refusal_leaves_claude_blocking_nothing() -> None:

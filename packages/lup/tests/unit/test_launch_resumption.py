@@ -120,7 +120,7 @@ def test_a_relaxed_launch_says_what_it_retired_and_what_it_did_not(
     both bite later and neither announces itself — the sweep still holds the
     repository to every rule, and the committed tree has just been rewritten.
     """
-    from lup.codescan.common import RuleSelection
+    from lup.harness.codescan.common import RuleSelection
     from lup.devtools.harness.launch import announce_relaxed_rules
     from lup.harness.models import HookSet, Plugin
 
@@ -156,7 +156,7 @@ def test_every_rule_retired_names_them_rather_than_standing_for_them() -> None:
     A rule the library adds later is then one this selection has visibly not
     answered for, rather than one a flag silently swallowed.
     """
-    from lup.codescan.registry import all_rules, every_rule_retired
+    from lup.harness.codescan.registry import all_rules, every_rule_retired
 
     retired = every_rule_retired()
 

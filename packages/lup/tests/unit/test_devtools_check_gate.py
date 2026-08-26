@@ -17,14 +17,14 @@ from lup.devtools.dev.antipatterns import within_scope
 def test_an_unscoped_gate_reads_every_file() -> None:
     # CI asks whether the tree is clean, so nothing is out of its scope.
     assert within_scope("a.py", None)
-    assert within_scope("packages/lup/src/lup/runtime/profiles.py", None)
+    assert within_scope("packages/lup/src/lup/providers/profiles.py", None)
 
 
 def test_a_file_outside_the_changed_paths_is_not_read() -> None:
     changed = ["packages/lup/src/lup/touched.py"]
 
     assert within_scope("packages/lup/src/lup/touched.py", changed)
-    assert not within_scope("packages/lup/src/lup/runtime/profiles.py", changed)
+    assert not within_scope("packages/lup/src/lup/providers/profiles.py", changed)
 
 
 def test_a_lease_that_changed_nothing_the_rules_hit_is_green() -> None:
@@ -32,7 +32,7 @@ def test_a_lease_that_changed_nothing_the_rules_hit_is_green() -> None:
     # same pre-split ProfileStore, and the gate failed identically in all of
     # them however much the worker changed elsewhere.
     assert not within_scope(
-        "packages/lup/src/lup/runtime/profiles.py",
+        "packages/lup/src/lup/providers/profiles.py",
         ["packages/lup/src/lup/devtools/dev/worktree.py"],
     )
 

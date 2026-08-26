@@ -13,12 +13,12 @@ from pathlib import Path
 import pytest
 import sh
 
-from lup.adapters.claude.harness import CLAUDE_DISPATCHER
-from lup.adapters.claude.login import CLAUDE_LOGIN
-from lup.adapters.codex.harness import CODEX_DISPATCHER
-from lup.adapters.codex.login import CODEX_LOGIN
+from lup.providers.claude.harness import CLAUDE_DISPATCHER
+from lup.providers.claude.login import CLAUDE_LOGIN
+from lup.providers.codex.harness import CODEX_DISPATCHER
+from lup.providers.codex.login import CODEX_LOGIN
 from lup.policy.dispatcher import DispatcherDeclaration
-from lup.runtime.login import ProviderLogin
+from lup.providers.login import ProviderLogin
 
 RUNTIME_LOGINS = [
     (CLAUDE_LOGIN, "CLAUDE_CONFIG_DIR", ".credentials.json"),

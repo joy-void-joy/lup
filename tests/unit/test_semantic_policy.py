@@ -18,7 +18,7 @@ import pytest
 import sh
 from pydantic import AnyHttpUrl, BaseModel, Field, ValidationError
 
-from lup.adapters.claude.native import (
+from lup.providers.claude.native import (
     ClaudeBeforeToolEvent,
     ClaudeEditBatchOperation,
     ClaudeEventDecoder,
@@ -27,7 +27,7 @@ from lup.adapters.claude.native import (
     ClaudeDecisionRenderer,
     parse_claude_before_tool,
 )
-from lup.adapters.codex.native import (
+from lup.providers.codex.native import (
     CodexBeforeToolEvent,
     CodexEventDecoder,
     CodexFileChange,
@@ -1560,8 +1560,8 @@ def test_a_tool_refusal_names_what_to_reach_for_instead() -> None:
 
 
 def test_malformed_native_fetch_urls_become_conservative_unknown_tools() -> None:
-    from lup.adapters.claude.native import ClaudeFetchOperation
-    from lup.adapters.codex.native import CodexFetchOperation
+    from lup.providers.claude.native import ClaudeFetchOperation
+    from lup.providers.codex.native import CodexFetchOperation
 
     claude = ClaudeEventDecoder().decode(
         ClaudeBeforeToolEvent(operation=ClaudeFetchOperation(url="not a url"))

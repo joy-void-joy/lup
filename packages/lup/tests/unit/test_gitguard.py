@@ -12,7 +12,7 @@ from lup.devtools.dev.git_guards import (
     install_guards,
     read_hooks,
 )
-from lup.gitguard import (
+from lup.devtools.gitguard import (
     GIT_ENVIRONMENT,
     guard_report,
     moved_refs,

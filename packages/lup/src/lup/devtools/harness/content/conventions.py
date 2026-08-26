@@ -32,7 +32,7 @@ judgements no gate fires on.
 from pydantic import BaseModel
 
 import lup.harness.models as models
-from lup.codescan.common import RuleSelection
+from lup.harness.codescan.common import RuleSelection
 from lup.markdown import CodeCell, PlainCell
 
 PLAN_AT_AGENT_SPEED: list[models.PromptPart] = [

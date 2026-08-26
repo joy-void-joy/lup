@@ -17,7 +17,7 @@ renderer spells, because the axis is a project rather than a runtime: a
 :class:`~lup.harness.models.NativePath` differs between Claude and Codex and
 belongs to whichever adapter is rendering, while this differs between
 repositories and is identical in every tree one of them generates. That is the
-shape :class:`~lup.codescan.common.RuleSelection` already has — declared once
+shape :class:`~lup.harness.codescan.common.RuleSelection` already has — declared once
 by the project and handed down to the content that renders it.
 """
 

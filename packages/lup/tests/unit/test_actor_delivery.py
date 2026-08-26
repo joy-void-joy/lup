@@ -16,7 +16,7 @@ from lup.orchestration.actors.refs import ActorRef
 from lup.orchestration.actors.sessions import ActorInbox, create_inbox_hooks
 from lup.resolver.journal import Journal
 
-from lup.hooks import LupHookInput
+from lup.policy.hooks import LupHookInput
 
 
 def worker(round_number: int = 1) -> ActorRef:

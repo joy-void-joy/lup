@@ -247,7 +247,7 @@ def run_capabilities(markdown: bool) -> None:
     ``tests/unit/test_capability_matrix_docs.py`` keeps the README copy
     identical to this output.
     """
-    from lup.adapters.capabilities import (
+    from lup.providers.capabilities import (
         canonical_capability_matrix,
         capability_matrix,
     )

@@ -4,7 +4,7 @@ from datetime import timedelta
 
 from pydantic import BaseModel, Field
 
-from lup.runtime.wrappers import UsageRecord, UsageSink
+from lup.sessions.middleware import UsageRecord, UsageSink
 from lup.types import Usage, UsageCost
 
 

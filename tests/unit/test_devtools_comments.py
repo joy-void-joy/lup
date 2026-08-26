@@ -15,7 +15,7 @@ import pytest
 import sh
 import typer
 
-from lup.codescan.markers import NoteKind, find_feedback
+from lup.harness.codescan.markers import NoteKind, find_feedback
 from lup.devtools.dev import comments
 from lup.devtools.dev.check import inline_notes_lines
 from tests.unit.repos import commit_file, initialized_repo

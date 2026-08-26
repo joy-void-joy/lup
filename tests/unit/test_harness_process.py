@@ -17,7 +17,7 @@ def test_git_output_stays_plain_under_pager_environments(tmp_path: Path) -> None
     launcher = LocalProcessLauncher()
 
     def git(*arguments: str) -> None:
-        # Identity per invocation, never `git config` — see `lup.gitguard`.
+        # Identity per invocation, never `git config` — see `lup.devtools.gitguard`.
         status = launcher.launch(
             LaunchRequest(
                 arguments=[
@@ -56,7 +56,7 @@ def test_resolver_snapshot_includes_notes_without_mutating_the_checkout(
     launcher = LocalProcessLauncher()
 
     def git(*arguments: str) -> str:
-        # Identity per invocation, never `git config` — see `lup.gitguard`.
+        # Identity per invocation, never `git config` — see `lup.devtools.gitguard`.
         status = launcher.launch(
             LaunchRequest(
                 arguments=[

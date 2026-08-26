@@ -2,7 +2,7 @@
 # Which journal event a turn event becomes is this layer's reading of it, not
 # something the event knows about itself: `ObservableEventKind` is this
 # layer's vocabulary, and declaring the projection on the runtime event union
-# would have `lup.runtime` depend on `lup.observability`, inverting the one
+# would have `lup.sessions` depend on `lup.observability`, inverting the one
 # direction these two layers are allowed to point in.
 """Complete observable, hierarchical runtime transcripts.
 
@@ -36,11 +36,11 @@ from pydantic import BaseModel, Field, TypeAdapter
 
 from lup.channels.stream import Stream
 from lup.observability.journal import ChainedWriter, Journal, JournalRecord, last_record
-from lup.runtime.composition import is_output_model
-from lup.runtime.contracts import EventStream, Session, Turn
-from lup.runtime.errors import TurnError
+from lup.sessions.composition import is_output_model
+from lup.sessions.capabilities import EventStream, Session, Turn
+from lup.sessions.errors import TurnError
 from lup.client import Client
-from lup.runtime.models import (
+from lup.sessions.events import (
     BlockCompletedEvent,
     BlockDeltaEvent,
     BlockStartedEvent,

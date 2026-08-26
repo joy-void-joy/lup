@@ -2,8 +2,8 @@
 
 from pathlib import Path
 
-from lup.adapters.claude.transcripts import ClaudeTranscripts
-from lup.adapters.codex.transcripts import CodexTranscripts
+from lup.providers.claude.transcripts import ClaudeTranscripts
+from lup.providers.codex.transcripts import CodexTranscripts
 from lup.observability.audit import (
     TraceActor,
     TraceContext,

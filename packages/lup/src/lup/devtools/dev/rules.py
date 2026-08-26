@@ -3,11 +3,11 @@
 from pathlib import Path
 
 import lup.harness.models as models
-from lup.adapters.harness import claude_prompt_renderer
-from lup.codescan.common import RuleStrength
-from lup.codescan.common import RuleSelection
-from lup.codescan.registry import RULE_REFERENCE, RegisteredRule, all_rules
-from lup.harness.banner import GeneratedBanner
+from lup.providers.harness import claude_prompt_renderer
+from lup.harness.codescan.common import RuleStrength
+from lup.harness.codescan.common import RuleSelection
+from lup.harness.codescan.registry import RULE_REFERENCE, RegisteredRule, all_rules
+from lup.banner import GeneratedBanner
 from lup.harness.materialization import write_generated_file
 from lup.harness.models import Artifact
 from lup.markdown import CodeCell, HtmlCodeCell, PlainCell, TableCell
@@ -18,7 +18,7 @@ from lup.workspace.paths import project_root
 INTRODUCTION = (
     "# Lup rule reference\n\n"
     "Every executable Lup rule family — anti-pattern, boundary, spelling, and "
-    "architecture rules — is indexed here from `lup.codescan.registry`, with the "
+    "architecture rules — is indexed here from `lup.harness.codescan.registry`, with the "
     "module that defines and enforces each rule. An edit-hook denial cites its "
     "rule id and this reference. Lup rules enforce repository-specific "
     "architecture and editing conventions; Ruff remains the source of standard "
@@ -63,7 +63,7 @@ REFINEMENT_INTRODUCTION = (
     "Both gates read the same finished source, both parse it, and both reach "
     "a type checker for the rules below — so a rule the grammar has a word "
     "for decides identically at edit time and in `lup-devtools dev check`. "
-    "The audit holds the oracle in `lup.codescan.oracle` directly; the hook "
+    "The audit holds the oracle in `lup.harness.codescan.oracle` directly; the hook "
     "shells out to `lup-devtools dev refutations` with the text it is about "
     "to write, and only for a rule whose row says its verdict turns on a "
     "resolved declaration, so an edit tripping no such rule pays nothing. "

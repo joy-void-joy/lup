@@ -46,8 +46,8 @@ from pathlib import Path
 import typer
 from pydantic import BaseModel
 
-from lup.codescan.common import PACKAGE_ROOTS, module_name
-from lup.codescan.symbols import defined_symbols
+from lup.harness.codescan.common import PACKAGE_ROOTS, module_name
+from lup.harness.codescan.symbols import defined_symbols
 from lup.devtools.dev.boundaries import TrackedSource, tracked_python_sources
 from lup.devtools.dev.commands import CommandEntry
 from lup.devtools.dev.relocate import name_parts

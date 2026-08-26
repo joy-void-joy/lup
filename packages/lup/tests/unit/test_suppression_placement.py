@@ -24,10 +24,10 @@ from pathlib import Path
 
 import pytest
 
-from lup.codescan.antipatterns import audit_text, patterns_for_suffix
-from lup.codescan.capabilities import audit_capabilities
-from lup.codescan.common import PythonSource
-from lup.codescan.dispatch import audit_own_model_dispatch
+from lup.harness.codescan.antipatterns import audit_text, patterns_for_suffix
+from lup.harness.codescan.capabilities import audit_capabilities
+from lup.harness.codescan.common import PythonSource
+from lup.harness.codescan.dispatch import audit_own_model_dispatch
 from lup.policy.kernel.edit import relocated_suppressions, suppression_reaches
 
 DIRECTIVE = "# lup: ignore[{rule}] — pinned by the placement test"

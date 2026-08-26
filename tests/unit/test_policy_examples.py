@@ -13,7 +13,7 @@ from typing import Literal
 from claude_agent_sdk import types as claude_types
 
 from examples import semantic_policy, semantic_policy_shell
-from lup.adapters.claude.runtime import ClaudeSessionConfig, build_claude_options
+from lup.providers.claude.runtime import ClaudeSessionConfig, build_claude_options
 from lup.policy.kernel.decision import ESCALATE_HINT
 from lup.types import JsonObject
 

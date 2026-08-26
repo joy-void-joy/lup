@@ -29,7 +29,7 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings
 
-from lup.adapters.codex.app_server import (
+from lup.providers.codex.app_server import (
     CodexAppServer,
     OutgoingRpcMessage,
     RpcError,
@@ -39,9 +39,9 @@ from lup.adapters.codex.app_server import (
     RpcSuccess,
 )
 from lup.harness.process import ExitStatus, LaunchRequest, ProcessLauncher
-from lup.runtime.contracts import Session, Turn
+from lup.sessions.capabilities import Session, Turn
 from lup.client import Client
-from lup.runtime.models import (
+from lup.sessions.events import (
     SessionHandle,
     SessionId,
     TurnId,

@@ -1,4 +1,4 @@
-"""Behavior tests for the marker scanner (`lup.codescan.markers`).
+"""Behavior tests for the marker scanner (`lup.harness.codescan.markers`).
 
 Pins the load-bearing rule that distinguishes a real note from code: in
 Python a `# lup:` counts only inside a comment or docstring, never inside
@@ -13,9 +13,9 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from lup.codescan.common import file_level_ignore, ignore_rule_ids
+from lup.harness.codescan.common import file_level_ignore, ignore_rule_ids
 from lup.policy.kernel.edit import IGNORE_RE
-from lup.codescan.markers import (
+from lup.harness.codescan.markers import (
     MarkerComment,
     NoteTarget,
     ScanMode,
@@ -191,7 +191,7 @@ def test_file_level_ignore_is_not_itself_a_note() -> None:
 
 def test_feedback_note_surfaces_despite_file_level_ignore() -> None:
     # The file-level opt-out silences anti-pattern checks, never feedback:
-    # a real note in an opted-out file (e.g. lup.codescan.markers itself) must reach
+    # a real note in an opted-out file (e.g. lup.harness.codescan.markers itself) must reach
     # `dev comments`, or review feedback silently disappears.
     source = "# lup: ignore\nx = 1  # lup: real note\n"
     assert texts(source, ScanMode.PYTHON) == ["real note"]

@@ -12,9 +12,9 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
-from lup.codescan.antipatterns import PYTHON_ANTI_PATTERNS
-from lup.codescan.common import PythonSource, Refutation
-from lup.codescan.oracle import (
+from lup.harness.codescan.antipatterns import PYTHON_ANTI_PATTERNS
+from lup.harness.codescan.common import PythonSource, Refutation
+from lup.harness.codescan.oracle import (
     Declaration,
     SourceBuffer,
     SymbolQuery,

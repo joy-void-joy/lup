@@ -1,8 +1,8 @@
 """Boundary scan behavior: what breaches, what is sanctioned, what escapes.
 
-The scan (:mod:`lup.codescan.boundaries`) guards two directions. Inward, it is
+The scan (:mod:`lup.harness.codescan.boundaries`) guards two directions. Inward, it is
 the regression guard that keeps per-engine adapter imports from creeping
-outside ``lup.adapters``, and the live tree is pinned at zero breaches.
+outside ``lup.providers``, and the live tree is pinned at zero breaches.
 Outward, the placement rule judges whether a library data table reaches its
 adopters as an overridable default; the live tree still carries known
 violations, so those tests work from fixtures rather than pinning a count.
@@ -12,7 +12,7 @@ two tests hold it there against the live tree.
 
 from pathlib import Path
 
-from lup.codescan.boundaries import (
+from lup.harness.codescan.boundaries import (
     CONSTANT_DECLARATION_RULE_ID,
     LIBRARY_DEFAULT_RULE_ID,
     ApplicationRoots,
@@ -37,8 +37,8 @@ from lup_template.devtools.harness.catalog import (
     application_roots,
     dev_project,
 )
-from lup.codescan.common import PythonSource
-from lup.codescan.project import RuleFinding
+from lup.harness.codescan.common import PythonSource
+from lup.harness.codescan.project import RuleFinding
 from lup.policy.kernel.roles import path_role
 from lup.devtools.dev.boundaries import (
     library_sources,
@@ -48,28 +48,28 @@ from lup.devtools.dev.boundaries import (
     tracked_python_sources,
 )
 
-BREACHING = "from lup.adapters.claude.runtime import ClaudeSessionFactory\n"
+BREACHING = "from lup.providers.claude.runtime import ClaudeSessionFactory\n"
 
 
 def test_per_engine_imports_breach() -> None:
     text = (
-        "import lup.adapters.codex.runtime\n"
-        "from lup.adapters.codex.native import CodexEventDecoder\n"
-        "from lup.adapters.claude.profile_store import ClaudeProfileNames\n"
-        "from lup.adapters.claude.harness import ClaudeSkillRenderer\n"
+        "import lup.providers.codex.runtime\n"
+        "from lup.providers.codex.native import CodexEventDecoder\n"
+        "from lup.providers.claude.profile_store import ClaudeProfileNames\n"
+        "from lup.providers.claude.harness import ClaudeSkillRenderer\n"
     )
     breaches = find_boundary_breaches(text)
     assert [breach.line for breach in breaches] == [1, 2, 3, 4]
-    assert breaches[0].module == "lup.adapters.codex.runtime"
+    assert breaches[0].module == "lup.providers.codex.runtime"
 
 
 def test_seam_surface_does_not_breach() -> None:
     text = (
-        "from lup.runtime.contracts import Client\n"
-        "from lup.runtime.query import query\n"
+        "from lup.sessions.capabilities import Client\n"
+        "from lup.sessions.query import query\n"
         "from lup.harness.contracts import ArtifactRenderer\n"
         "from lup.policy.contracts import NativeEventDecoder\n"
-        "from lup.adapters.harness import compile_codex\n"
+        "from lup.providers.harness import compile_codex\n"
     )
     assert not find_boundary_breaches(text)
 
@@ -137,7 +137,7 @@ def test_native_spelling_suppression_is_audited() -> None:
 
 def test_sanctioned_paths() -> None:
     roots = application_roots()
-    assert path_is_sanctioned(Path("packages/lup/src/lup/adapters/claude/runtime.py"))
+    assert path_is_sanctioned(Path("packages/lup/src/lup/providers/claude/runtime.py"))
     assert path_is_sanctioned(Path("tests/unit/test_adapter_transforms.py"), roots)
     assert path_is_sanctioned(Path("src/lup_template/agent/core.py"), roots)
     assert not path_is_sanctioned(
@@ -148,7 +148,7 @@ def test_sanctioned_paths() -> None:
 def test_an_application_that_says_nothing_sanctions_nothing_of_its_own() -> None:
     """The library guards its own package and can name no adopter's."""
     assert not path_is_sanctioned(Path("src/lup_template/agent/core.py"))
-    assert path_is_sanctioned(Path("packages/lup/src/lup/adapters/codex/harness.py"))
+    assert path_is_sanctioned(Path("packages/lup/src/lup/providers/codex/harness.py"))
 
 
 def test_a_generated_tree_is_sanctioned_by_the_runtime_that_spells_it() -> None:
@@ -163,7 +163,7 @@ def test_a_generated_tree_is_sanctioned_by_the_runtime_that_spells_it() -> None:
 def test_portable_content_is_scanned_for_native_spellings() -> None:
     path = Path("src/lup_template/devtools/harness/content/skills/example.py")
     text = (
-        "from lup.adapters.claude.runtime import ClaudeSessionFactory\n"
+        "from lup.providers.claude.runtime import ClaudeSessionFactory\n"
         'method = "turn/start"\n'
     )
     roots = application_roots()
@@ -469,7 +469,7 @@ def test_adapter_packages_are_exempt_from_the_placement_rule() -> None:
         Path("packages/lup/src/lup/policy/shell_rules.py")
     )
     assert not library_placement_path_is_audited(
-        Path("packages/lup/src/lup/adapters/codex/harness.py")
+        Path("packages/lup/src/lup/providers/codex/harness.py")
     )
     assert not library_placement_path_is_audited(
         Path("src/lup_template/devtools/harness/catalog.py")

@@ -11,9 +11,9 @@ from pydantic import BaseModel, Field, model_validator
 
 from lup.orchestration.actors.questions import Question, QuestionAnswer
 from lup.orchestration.actors.refs import ActorRef
-from lup.codescan.symbols import DefinedSymbol
+from lup.harness.codescan.symbols import DefinedSymbol
 from lup.harness.models import ResolveSpec
-from lup.hooks import LupHooksConfig
+from lup.policy.hooks import LupHooksConfig
 from lup.policy.grants import LeaseGrants
 from lup.policy.identity import ConcernAllowance
 

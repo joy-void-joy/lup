@@ -2,7 +2,7 @@
 
 The failure this guards against is silent: both adapters already carried an
 ``effort`` field and both already passed it to their provider, but a
-:class:`~lup.runtime.selection.SessionRequest` had no word for it, so an
+:class:`~lup.providers.selection.SessionRequest` had no word for it, so an
 application that set one watched it reach nothing and got whatever the
 runtime's own configuration file happened to say. Nothing raised, and the
 value a session actually ran at was only discoverable by reading the provider
@@ -15,9 +15,9 @@ from pathlib import Path
 
 import pytest
 
-from lup.adapters.claude.selection import CLAUDE_EFFORT, claude_config
-from lup.adapters.codex.selection import CODEX_EFFORT, codex_config
-from lup.runtime.selection import SessionEffort, SessionRequest
+from lup.providers.claude.selection import CLAUDE_EFFORT, claude_config
+from lup.providers.codex.selection import CODEX_EFFORT, codex_config
+from lup.providers.selection import SessionEffort, SessionRequest
 
 EVERY_DEGREE: list[SessionEffort] = [
     "minimal",

@@ -25,7 +25,7 @@ from typing import TypeAliasType, get_args
 import pytest
 from pydantic import AnyHttpUrl, BaseModel, SecretStr
 
-from lup.adapters.claude.config import (
+from lup.providers.claude.config import (
     ClaudeCompatibilityTransform,
     ClaudeCompatibleEndpoint,
     ClaudeProfileRegistry,
@@ -33,7 +33,7 @@ from lup.adapters.claude.config import (
     ClaudeProfileSelection,
     claude_profile_selector,
 )
-from lup.adapters.claude.native import (
+from lup.providers.claude.native import (
     ClaudeBeforeToolEvent,
     ClaudeEditBatchOperation,
     ClaudeEditOperation,
@@ -47,8 +47,8 @@ from lup.adapters.claude.native import (
     ClaudeWriteOperation,
     parse_claude_before_tool,
 )
-from lup.adapters.claude.runtime import ClaudeSessionConfig
-from lup.adapters.codex.config import (
+from lup.providers.claude.runtime import ClaudeSessionConfig
+from lup.providers.codex.config import (
     CodexCompatibilityTransform,
     CodexCompatibleEndpoint,
     CodexProfileRegistry,
@@ -56,7 +56,7 @@ from lup.adapters.codex.config import (
     CodexProfileSelection,
     codex_profile_selector,
 )
-from lup.adapters.codex.native import (
+from lup.providers.codex.native import (
     CodexBeforeToolEvent,
     CodexEventDecoder,
     CodexFetchOperation,
@@ -69,7 +69,7 @@ from lup.adapters.codex.native import (
     CodexUnknownOperation,
     parse_codex_before_tool,
 )
-from lup.adapters.codex.runtime import CodexSessionConfig
+from lup.providers.codex.runtime import CodexSessionConfig
 from lup.policy.models import (
     BeforeTool,
     EditBatch,
@@ -80,9 +80,9 @@ from lup.policy.models import (
     ToolIdentity,
     UnknownTool,
 )
-from lup.runtime.config import ProfileSelector
+from lup.providers.config import ProfileSelector
 from lup.client import Client
-from lup.runtime.routing import (
+from lup.providers.routing import (
     ExactModelMatcher,
     ModelRoute,
     ModelRouter,

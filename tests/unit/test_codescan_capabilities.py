@@ -6,7 +6,7 @@ reports fewer findings, which reads exactly like a clean repository.
 
 from pathlib import Path
 
-from lup.codescan.common import module_name
+from lup.harness.codescan.common import module_name
 from lup.devtools.dev.antipatterns import scanned_roots
 from lup.devtools.project import DevProject
 

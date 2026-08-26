@@ -17,26 +17,26 @@ from pathlib import Path
 import pytest
 from rich.console import Console
 
-from lup.adapters.codex.app_server import AppServerError, CodexAppServer, RpcError
-from lup.adapters.codex.usage.api import (
+from lup.providers.codex.app_server import AppServerError, CodexAppServer, RpcError
+from lup.providers.codex.usage.api import (
     METHOD_NOT_FOUND,
     RATE_LIMITS_METHOD,
     TOKEN_USAGE_METHOD,
     AccountTokenUsage,
     CodexAccountClient,
 )
-from lup.codescan.boundaries import NATIVE_SPELLINGS
+from lup.harness.codescan.boundaries import NATIVE_SPELLINGS
 from lup.types import JsonObject, JsonValue
-from lup.adapters.claude.usage.api import StatsCache, UsageResponse
-from lup.adapters.claude.usage.reader import (
+from lup.providers.claude.usage.api import StatsCache, UsageResponse
+from lup.providers.claude.usage.reader import (
     days_from,
     legend_from,
     spend_from,
     windows_from,
 )
-from lup.adapters.codex.usage.api import AccountUsage
-from lup.adapters.codex.usage.reader import days_from as codex_days_from
-from lup.adapters.codex.usage.reader import windows_from as codex_windows_from
+from lup.providers.codex.usage.api import AccountUsage
+from lup.providers.codex.usage.reader import days_from as codex_days_from
+from lup.providers.codex.usage.reader import windows_from as codex_windows_from
 from lup.observability.usage.models import UsageReport
 from lup.observability.usage.render import (
     breakdown_window,

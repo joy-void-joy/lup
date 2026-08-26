@@ -23,7 +23,7 @@ from pydantic import BaseModel
 
 from lup.harness.contracts import SkillInvocationRenderer
 from lup.harness.models import ResolveSpec
-from lup.hooks import LupHooksConfig
+from lup.policy.hooks import LupHooksConfig
 from lup.policy.identity import ConcernAllowance
 from lup.orchestration.actors.mailbox import ParkRequest
 from lup.orchestration.actors.questions import QuestionAnswer
@@ -52,8 +52,8 @@ from lup.resolver.models import (
 from lup.resolver.run import ResolveRun, ResolverInvariantError
 from lup.resolver.tools import WAIT_CONTRACT
 from lup.client import Client
-from lup.runtime.models import TurnInput, TurnRequest, TurnResult, turn_request
-from lup.runtime.wrappers import CorrectionConfig, decorated_session_factory
+from lup.sessions.events import TurnInput, TurnRequest, TurnResult, turn_request
+from lup.sessions.middleware import CorrectionConfig, decorated_session_factory
 
 type WorkerFactoryRecipe = Callable[[WorkerContext], Client]
 type ReviewerFactoryRecipe = Callable[[ReviewerContext], Client]

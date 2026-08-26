@@ -1,6 +1,6 @@
 """The Claude adapter's hook seam: portable hooks rendered as native SDK hooks.
 
-`lup.adapters.claude.hooks` is the boundary every permission and gate hook
+`lup.providers.claude.hooks` is the boundary every permission and gate hook
 crosses on the Claude backend. These pin the translation contract: each
 path-bearing tool normalizes to one ``tool_path``, a call decodes to the
 semantic tool a policy judges, structured tool responses arrive as JSON
@@ -14,14 +14,14 @@ from pathlib import Path
 from claude_agent_sdk import types as claude_types
 from pydantic import AnyHttpUrl
 
-from lup.adapters.claude.hooks import (
+from lup.providers.claude.hooks import (
     build_claude_hook_handler,
     claude_hook_semantic_tool,
     claude_hook_tool_path,
     lup_hook_output_to_claude,
     lup_hooks_to_claude,
 )
-from lup.hooks import LupHookInput, LupHookMatcher, LupHookOutput, LupHooksConfig
+from lup.policy.hooks import LupHookInput, LupHookMatcher, LupHookOutput, LupHooksConfig
 from lup.policy.models import FetchUrl, ShellCommand, ToolIdentity, UnknownTool
 from lup.types import JsonObject
 

@@ -13,7 +13,7 @@ from pathlib import Path
 
 import sh
 
-from lup.gitguard import (
+from lup.devtools.gitguard import (
     TEST_IDENTITY,
     ForeignCheckouts,
     repository_state,

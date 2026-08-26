@@ -12,13 +12,13 @@ from pathlib import Path
 import pytest
 from pydantic import AnyHttpUrl, ValidationError
 
-from lup.adapters.claude.harness import CLAUDE_DISPATCHER
-from lup.adapters.claude.hooks import CLAUDE_SEMANTICS
-from lup.adapters.claude.native import ClaudeDecisionRenderer
-from lup.adapters.claude.runtime import ClaudeSandboxConfig
-from lup.adapters.codex.native import CodexDecisionRenderer
+from lup.providers.claude.harness import CLAUDE_DISPATCHER
+from lup.providers.claude.hooks import CLAUDE_SEMANTICS
+from lup.providers.claude.native import ClaudeDecisionRenderer
+from lup.providers.claude.runtime import ClaudeSandboxConfig
+from lup.providers.codex.native import CodexDecisionRenderer
 from lup.devtools.harness.resolve import worker_policy_hooks
-from lup.hooks import LupHookInput, LupHookOutput
+from lup.policy.hooks import LupHookInput, LupHookOutput
 from lup.policy.enforcement import (
     NativeSemantics,
     SandboxPosture,

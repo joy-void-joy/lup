@@ -31,10 +31,10 @@ from lup.harness.models import (
     ResolveSpec,
     SkillInvocation,
 )
-from lup.adapters.claude.harness import ClaudeSpellings
-from lup.adapters.codex.harness import CodexSpellings
-from lup.codescan.boundaries import ApplicationRoots, generated_tree_paths
-from lup.codescan.common import RuleSelection
+from lup.providers.claude.harness import ClaudeSpellings
+from lup.providers.codex.harness import CodexSpellings
+from lup.harness.codescan.boundaries import ApplicationRoots, generated_tree_paths
+from lup.harness.codescan.common import RuleSelection
 from lup.devtools.dev.workflow import WorkflowSpec
 from lup.devtools.project import DevProject
 from lup.harness.contracts import NativeSpellings

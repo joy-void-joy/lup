@@ -9,29 +9,29 @@ from typing import TYPE_CHECKING, Literal
 
 from pydantic import AnyHttpUrl, BaseModel, SecretStr
 
-from lup.adapters.claude.config import (
+from lup.providers.claude.config import (
     ClaudeCompatibilityTransform,
     ClaudeCompatibleEndpoint,
 )
-from lup.adapters.claude.runtime import (
+from lup.providers.claude.runtime import (
     SESSION_THINKING_TOKENS,
     ClaudeSandboxConfig,
     ClaudeSessionConfig,
     create_claude,
 )
-from lup.adapters.codex.config import (
+from lup.providers.codex.config import (
     CodexCompatibilityTransform,
     CodexCompatibleEndpoint,
 )
-from lup.adapters.codex.runtime import (
+from lup.providers.codex.runtime import (
     CodexMcpServerConfig,
     CodexSessionConfig,
     create_codex,
 )
 from lup.client import Client
-from lup.runtime.composition import submission_gate_resolver
-from lup.hooks import LupHooksConfig
-from lup.runtime.models import (
+from lup.sessions.composition import submission_gate_resolver
+from lup.policy.hooks import LupHooksConfig
+from lup.sessions.events import (
     SessionHandle,
     SessionId,
     SubmissionDecision,
@@ -41,7 +41,7 @@ from lup.runtime.models import (
     turn_request,
 )
 from lup.observability.cost import per_mtok_usage_cost
-from lup.runtime.wrappers import (
+from lup.sessions.middleware import (
     BudgetConfig,
     CorrectionConfig,
     DisplayConfig,
@@ -439,7 +439,7 @@ def build_session_factory(
     bare_prompt: bool = False,
 ) -> SessionBuild:
     """Assemble tools and return a fully configured neutral factory."""
-    from lup.hooks import (
+    from lup.policy.hooks import (
         create_permission_hooks,
         create_tool_allowlist_hook,
         merge_hooks,
@@ -479,7 +479,7 @@ def build_session_factory(
             if name != EXAMPLE_GROUP
         ]
         tool_servers = dict(policy.get_mcp_servers(*servers))
-        from lup.adapters.claude.runtime import SUBMISSION_TOOL
+        from lup.providers.claude.runtime import SUBMISSION_TOOL
 
         allowed_tools = policy.get_allowed_tools(
             tool_servers,

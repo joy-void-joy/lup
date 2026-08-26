@@ -20,7 +20,7 @@ def init_repo(path: Path) -> sh.Command:
     """Initialize a one-commit repo with color forced on; return a baked git."""
     # Identity per invocation, never `git config` — a misbound command then
     # writes nothing, where a persisted setting lands in the shared config every
-    # worktree of a real repository inherits (see `lup.gitguard`).
+    # worktree of a real repository inherits (see `lup.devtools.gitguard`).
     git = sh.Command("git").bake(
         "-C",
         str(path),

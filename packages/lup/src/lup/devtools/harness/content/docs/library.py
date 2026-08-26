@@ -81,11 +81,10 @@ class Roster(BaseModel, frozen=True):
 
     tiered: list[TieredEntry] = [
         TieredEntry(package="types", section="tier 1"),
-        TieredEntry(package="adapters", section="the adapter tier"),
+        TieredEntry(package="providers", section="the provider tier"),
         TieredEntry(package="harness", section="the harness tier"),
-        TieredEntry(package="runtime", section="the runtime tier"),
+        TieredEntry(package="sessions", section="the session tier"),
         TieredEntry(package="policy", section="the policy tier"),
-        TieredEntry(package="codescan", section="the policy tier"),
         TieredEntry(package="resolver", section="the target layout"),
     ]
     """Entries a section above the roster describes at length instead."""
@@ -194,7 +193,7 @@ downstream project depends on.
 
 The rule that shapes every module: **shared code never names a provider.**
 Native config, hook payloads, command spellings, manifests, and wire schemas
-live inside `lup/adapters/`. Everything above the adapters speaks contracts.
+live inside `lup/providers/`. Everything above the providers speaks contracts.
 A third backend implements those contracts without editing a shared registry,
 because there is no registry to edit.
 
@@ -265,21 +264,29 @@ opening a session is what finally reaches the vendor's own package.
 
 Four tiers, and imports only ever point downward.
 
-1. **`lup.types`** — the portable content and tool vocabulary every other
-   package speaks: `JsonValue`/`JsonObject`, `ToolName`/`ToolGrant`,
-   `LupContentBlock`, `LupMessage`, `Usage`, `SubagentSpec`.
-2. **`contracts` and `models`** — each subpackage carries both. `models` owns
-   the vocabulary; `contracts` owns the narrow capability seams. Contracts
-   import types only, so a fake implementation needs nothing else.
-3. **Implementations** — composition, wrappers, validation, reconciliation,
-   rule evaluation. These import their own package's contracts and models, and
-   nothing from `adapters`.
-4. **`lup.adapters.claude` / `lup.adapters.codex`** — the only packages that
+1. **Foundations** — entries that import nothing else in the library, so
+   they sit at the top level rather than inside a subject. `lup.types` is the
+   portable content and tool vocabulary every other package speaks
+   (`JsonValue`/`JsonObject`, `ToolName`/`ToolGrant`, `LupContentBlock`,
+   `LupMessage`, `Usage`, `SubagentSpec`); `lup.channels` is the file-backed
+   primitive both durable state and inter-process rendezvous are built on;
+   `lup.banner`, `lup.markdown`, `lup.tables` and `lup.execution` are the
+   rest. Burying one of these inside a subject is what manufactures a cycle —
+   folding `channels` in with `workspace` did exactly that and was undone.
+2. **`capabilities` and `events`** — each subject carries both.
+   `sessions/events.py` owns the turn vocabulary; `sessions/capabilities.py`
+   owns the narrow capability seams, and each other subject carries the same
+   pair under its own names. Seams import the foundations only, so a fake
+   implementation needs nothing else.
+3. **Implementations** — composition, middleware, validation, reconciliation,
+   rule evaluation. These import their own subject's seams and vocabulary, and
+   nothing from `providers`.
+4. **`lup.providers.claude` / `lup.providers.codex`** — the only packages that
    name a vendor. They implement the contracts above and are imported only by
    named composition roots.
 
-`lup.codescan.boundaries` enforces tier 4 mechanically with the
-`seam-boundary` rule: a concrete adapter import outside `lup/adapters/`,
+`lup.harness.codescan.boundaries` enforces tier 4 mechanically with the
+`seam-boundary` rule: a concrete adapter import outside `lup/providers/`,
 the tests, the examples, or a named application composition root is a
 build failure, not a review comment.
 
@@ -295,7 +302,7 @@ values. The library may declare one only when it could not have chosen
 otherwise — a language's file suffixes, a provider's wire spelling, a closed
 enum the library itself defines. Everything else is a judgement, and reaches
 an adopter as an overridable default they replace rather than a constant they
-fork. `library-default` in `lup.codescan.boundaries` is the mechanical half of
+fork. `library-default` in `lup.harness.codescan.boundaries` is the mechanical half of
 that; canonicity it cannot judge, so a canonical table says so with
 `# lup: ignore[library-default]` and a reason.
 
@@ -316,21 +323,25 @@ pull provider-neutral code into the tooling layer.
 
 ## The packages
 
-### `runtime` — how one turn runs
+### `sessions` — how one turn runs
 
-The engine. `contracts.py` declares the lifecycle seams — open a session,
+The engine. `capabilities.py` declares the lifecycle seams — open a session,
 start a turn, await a result — as one-to-three-method capabilities.
-`models.py` holds the shared turn vocabulary: opaque `SessionId`/`TurnId`,
+`events.py` holds the shared turn vocabulary: opaque `SessionId`/`TurnId`,
 the `TurnBlock` union (`TurnTextBlock`, `TurnThinkingBlock`,
 `TurnToolCallBlock`, `TurnToolResultBlock`), and the generic
 `TurnRequest[T]`/`TurnResult[T]`.
 
 Everything optional is a decorator or an absent capability, never a flag:
-`wrappers.py` layers timeouts, budgets, retries, correction, tracing, usage,
-and display around a factory; `routing.py` selects a configured recipe from an
-immutable `ModelRoute` list and fails closed on an unknown model;
-`background.py` coalesces state wakes into turns on a persistent session;
-`output.py` binds a fresh `submit_output` tool and store to each typed turn.
+`middleware.py` layers timeouts, budgets, retries, correction, tracing, usage,
+and display around a factory; `output.py` binds a fresh `submit_output` tool
+and store to each typed turn; `budget.py` and `quota.py` are the two opposite
+kinds of "no more work" it applies.
+
+Everything about *which* runtime answers moved out to `providers`, and
+everything about running work *over* a session moved out to
+`orchestration` — a turn engine that also held routing, profile trees and a
+background agent was three subjects sharing one name.
 
 Unsupported behavior is *absent* from the handle rather than present and
 raising. If `TurnHandle.steer` is `None`, that backend cannot steer.
@@ -347,9 +358,19 @@ siblings for anything a runtime spells its own way.
 The pipeline is `validation` → `ownership` → `reconciliation` →
 `materialization`, plus `proposals` for the reviewed patch transport back to
 canonical source and `process`/`environment` for launching a native CLI.
-`generation.py` holds the small deterministic helpers the stages share,
-including the do-not-edit banner every commentable generated artifact opens
-with. [harness.md](harness.md) walks the whole pipeline.
+`generation.py` holds the small deterministic helpers the stages share. The
+do-not-edit banner every commentable generated artifact opens with is
+`lup.banner`, a foundation rather than part of this subject, because the
+policy bundle writes one too and a banner reached through the harness made
+the two entries import each other.
+
+`codescan/` nests here: the rule engine behind `lup-devtools dev check` and
+both generated edit hooks, and it reads this package's declaration models to
+judge a portable artifact. `common.py` provides comment-column tokenization,
+docstring detection, and ignore-directive parsing; `markers.py` finds
+`# lup:` review notes; `antipatterns.py`, `boundaries.py`, `capabilities.py`
+and `portable.py` are the rule families; `registry.py` indexes them all into
+[rules.md](rules.md). [harness.md](harness.md) walks the whole pipeline.
 
 ### `policy` — one decision, two homes
 
@@ -382,26 +403,17 @@ to them, `joins.py` brings branches together and settles what that breaks,
 `execution.py` drives one concern's revision loop. `core.py` composes them
 and owns only the sequence. [resolver.md](resolver.md) covers the lifecycle.
 
-### `codescan` — the executable conventions
+### `providers` — the vendor edge
 
-The rule engine behind `lup-devtools dev check` and both generated edit hooks.
-`common.py` provides comment-column tokenization, docstring detection, and
-ignore-directive parsing; `markers.py` finds `# lup:` review notes;
-`antipatterns.py`, `boundaries.py`, `capabilities.py`, and `portable.py` are
-the rule families; `registry.py` indexes them all into
-[rules.md](rules.md).
-
-### `adapters` — the vendor edge
-
-`adapters/claude/` and `adapters/codex/` each implement the same four seams:
+`providers/claude/` and `providers/codex/` each implement the same four seams:
 `runtime.py` (open sessions behind the runtime contracts), `harness.py`
 (render the declaration into that runtime's tree), `harness_runtime.py`
 (probe the installed CLI for evidence), and `native.py` (decode hook payloads
-into policy events, render decisions back). `adapters/harness.py` composes the
+into policy events, render decisions back). `providers/harness.py` composes the
 renderers into whole-tree compilers.
 
 Each also carries what only it needs: Claude a personal account registry that
-`runtime/profile_tree.py` answers with the directories a project keeps instead,
+`providers/profile_tree.py` answers with the directories a project keeps instead,
 Codex a
 typed JSON-RPC transport to `codex app-server`. Neither is mirrored for
 symmetry's sake. [platform-differentiation.md](platform-differentiation.md)
@@ -425,7 +437,7 @@ the way six of them once were.
             LIBRARY.table(),
             models.TextPart(
                 text=rf"""
-### The target layout
+### What is left to place
 
 The roster above is where the tree stands and, with one exception, where the
 three questions put it. The exception is `resolver`, whose home is
@@ -433,6 +445,28 @@ three questions put it. The exception is `resolver`, whose home is
 so it is part of the harness subject rather than a sibling of it, and the
 downward question stops it at the library edge — following the driver into
 `devtools/` would move provider-neutral code into the tooling layer.
+
+Thirty-four top-level entries became these by asking, of each one, which of
+the four kinds it is: a foundation that imports nothing here, a subject, the
+one vendor boundary, or tooling. Five two-way edges between entries survive
+that, and each is a placement question still open rather than an accident:
+
+| pair | what closes the loop |
+|---|---|
+| `client` ↔ `providers` | the front door's routing constructor reaches both providers, lazily, inside `create_client` |
+| `client` ↔ `sessions` | six session modules hold a `Client`, and the front door reads the turn vocabulary |
+| `devtools` ↔ `harness` | three utilities the library needs — `git`, the clipboard probes, a launcher's default environment — live under the tooling half |
+| `devtools` ↔ `sandbox` | the same `git`, reached from the container's mount rail |
+| `harness` ↔ `policy` | the edit gate reads the anti-pattern table, which reads this package's declaration models |
+
+The last three all have one shape: a symbol two subjects share, sitting inside
+one of them. Each closes by moving that symbol below both, which is what
+`lup.banner` already did for the do-not-edit banner the policy bundle and the
+harness both write. The first two are the front door deliberately knowing
+about what it opens; whether a lazily-imported provider counts as an edge at
+all is the question to answer before an acyclicity check is written, and
+answering it by choosing a walker that does not look inside a function would
+be hiding it rather than settling it.
 
 Acting on one of these answers is a command rather than an afternoon.
 `uv run lup-devtools dev relocate old.module=new.module` repoints every import
@@ -449,7 +483,7 @@ whether it splits a day's tokens by model — so that is what stays at the
 vendor edge, and the report shape, the pacing bars and the rendering are
 decided once above it. Neither reader carries a command of its own: each
 declares an entry, and an application composes the ones it wants, so no Typer
-app sits under `adapters/` and nothing above `devtools/` imports one.
+app sits under `providers/` and nothing above `devtools/` imports one.
 
 The outward question also runs the other way, and `dev check` asks it on every
 run: the `application placement` row names each module under the application's

@@ -45,7 +45,7 @@ type replaces one depends on where the dict came from:
 | JSON whose schema lives elsewhere — tool arguments, JSON Schemas, structured outputs, vendor payloads | `JsonValue` / `JsonObject` from `lup.types` |
 | An MCP tool's input | The `BaseModel` on the handler's first parameter — `@lup_tool` validates against it before the handler runs |
 | An MCP tool's output | The `BaseModel` the handler returns; the decorator serializes it |
-| A hook's input | `LupHookInput` from `lup.hooks` |
+| A hook's input | `LupHookInput` from `lup.policy.hooks` |
 | A hook's return value | `LupHookOutput`, built by `allow_hook` / `ask_hook` / `deny_hook` / `block_hook` |
 | A structured turn result | `TurnResult[Model].output`, already validated against the turn's `output_type` |
 

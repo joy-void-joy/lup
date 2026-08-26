@@ -99,10 +99,10 @@ def test_an_imported_alias_resolves_to_the_module_that_declared_it() -> None:
     unrecognized and leave a rewrite unable to tell which configuration it
     stood for — the site most likely to lose a key.
     """
-    declaring = parse_source("packages/lup/src/lup/runtime/models.py", ALIASES)
+    declaring = parse_source("packages/lup/src/lup/sessions/events.py", ALIASES)
     using = parse_source(
         "packages/lup/src/lup/harness/models.py",
-        "from lup.runtime.models import FROZEN_STRICT\n\nclass A(BaseModel):\n    model_config = FROZEN_STRICT\n",
+        "from lup.sessions.events import FROZEN_STRICT\n\nclass A(BaseModel):\n    model_config = FROZEN_STRICT\n",
     )
     snapshot = declared_configuration([declaring, using])
     assert snapshot.models["packages/lup/src/lup/harness/models.py::A"] == {

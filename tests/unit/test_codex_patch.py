@@ -16,7 +16,7 @@ from types import ModuleType
 
 import pytest
 
-from lup.adapters.codex.patch import patched_files
+from lup.providers.codex.patch import patched_files
 from lup.types import JsonObject
 
 GREETING = 'def greet():\n    return "hi"\n'

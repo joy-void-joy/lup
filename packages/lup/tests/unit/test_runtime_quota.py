@@ -4,15 +4,15 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from lup.runtime.composition import AcceptedTurn, CompletedTurn, ComposedSession
-from lup.runtime.errors import QuotaExceededError, TurnFailure
-from lup.runtime.models import (
+from lup.sessions.composition import AcceptedTurn, CompletedTurn, ComposedSession
+from lup.sessions.errors import QuotaExceededError, TurnFailure
+from lup.sessions.events import (
     SessionId,
     TurnId,
     TurnIdentifiers,
     turn_request,
 )
-from lup.runtime.quota import (
+from lup.sessions.quota import (
     QuotaWaitConfig,
     QuotaWaitEvent,
     QuotaWaitingSession,

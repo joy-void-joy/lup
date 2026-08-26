@@ -1,6 +1,6 @@
 """Resolution decides a rule's own sites by what its subjects are declared as.
 
-`lup.codescan.resolution` measures the sites a rule's matcher already chose
+`lup.harness.codescan.resolution` measures the sites a rule's matcher already chose
 against the family that rule declares, so these exercise the three answers an
 oracle can give — in the family, outside it, and nothing shown — plus the
 hook's unchanged line rule and the dead directives the refinement exposes.
@@ -17,14 +17,14 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from lup.codescan.antipatterns import (
+from lup.harness.codescan.antipatterns import (
     MAPPING_FAMILY,
     PYTHON_ANTI_PATTERNS,
     TEXT_FAMILY,
     audit_text,
 )
-from lup.codescan.common import AntiPattern, PythonSource, RuleExample
-from lup.codescan.oracle import (
+from lup.harness.codescan.common import AntiPattern, PythonSource, RuleExample
+from lup.harness.codescan.oracle import (
     ClassDeclaration,
     Declaration,
     FunctionDeclaration,
@@ -33,7 +33,7 @@ from lup.codescan.oracle import (
     TypeOracle,
     UnknownDeclaration,
 )
-from lup.codescan.resolution import refute, resolved_sites
+from lup.harness.codescan.resolution import refute, resolved_sites
 from lup.policy.bundle import bundled_antipattern_rows
 from lup.policy.kernel.edit import antipattern_decision
 from lup.policy.kernel.rows import AntiPatternRow

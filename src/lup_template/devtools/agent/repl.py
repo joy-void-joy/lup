@@ -10,15 +10,15 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from rich.console import Console
 
-    from lup.runtime.contracts import Session
+    from lup.sessions.capabilities import Session
     from lup.client import Client
-    from lup.runtime.models import TurnResult
+    from lup.sessions.events import TurnResult
 
 import typer
 
 from lup.devtools.clipboard import ClipboardImage, clipboard_image, clipboard_text
 from lup.observability.display import format_duration
-from lup.runtime.models import turn_request
+from lup.sessions.events import turn_request
 from lup_template.agent.config import settings
 from lup_template.devtools.agent.serve import collect_registry_tools
 

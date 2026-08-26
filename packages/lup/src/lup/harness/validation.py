@@ -12,7 +12,7 @@ from collections import Counter
 
 from pydantic import BaseModel
 
-from lup.harness.banner import ARTIFACT_COMMENT_ROUTER
+from lup.banner import ARTIFACT_COMMENT_ROUTER
 from lup.harness.generation import ArtifactValidationError
 from lup.harness.models import Artifact, ArtifactTree
 

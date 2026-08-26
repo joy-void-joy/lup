@@ -17,7 +17,7 @@ import typer
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 
-from lup.adapters.harness import AdapterName
+from lup.providers.harness import AdapterName
 from lup.channels.models import utc_now
 from lup.resolver.journal import Journal, JournalEntry
 from lup.orchestration.actors.mail import ActorMessage

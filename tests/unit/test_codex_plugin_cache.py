@@ -6,8 +6,8 @@ from pathlib import Path
 import pytest
 import sh
 
-from lup.adapters.codex import harness_runtime
-from lup.adapters.codex.harness_runtime import (
+from lup.providers.codex import harness_runtime
+from lup.providers.codex.harness_runtime import (
     CodexPluginInstaller,
     PluginCacheConfig,
     PluginCacheEvidence,

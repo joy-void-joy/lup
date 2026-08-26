@@ -19,18 +19,18 @@ import sh
 import typer
 from pydantic import BaseModel, Field
 
-from lup.runtime.login import ProviderLogin
-from lup.runtime.profiles import ProfileDirectory
+from lup.providers.login import ProviderLogin
+from lup.providers.profiles import ProfileDirectory
 from lup.devtools.harness.contained import contained_argv
-from lup.adapters.claude.harness import ClaudeSpellings
-from lup.adapters.claude.transcripts import ClaudeTranscripts
-from lup.adapters.codex.harness import CodexSpellings
-from lup.adapters.codex.login import CODEX_LOGIN
-from lup.adapters.codex.harness_runtime import (
+from lup.providers.claude.harness import ClaudeSpellings
+from lup.providers.claude.transcripts import ClaudeTranscripts
+from lup.providers.codex.harness import CodexSpellings
+from lup.providers.codex.login import CODEX_LOGIN
+from lup.providers.codex.harness_runtime import (
     CodexPluginInstaller,
     PluginCacheConfig,
 )
-from lup.adapters.codex.transcripts import CodexTranscripts
+from lup.providers.codex.transcripts import CodexTranscripts
 from lup.harness.environment import non_interactive_environment
 from lup.harness.models import NativeName, Plugin, Resumption
 from lup.harness.notice import Notice
@@ -60,7 +60,7 @@ from lup.observability.audit import (
 from lup.observability.native import NativeTranscripts, NativeTranscriptWatcher
 from lup.types import EnvVars, JsonObject, JsonValue
 from lup.workspace.paths import harness_runs_path, project_root
-from lup.adapters.codex.home import (
+from lup.providers.codex.home import (
     CodexWorktreeHomeStore,
     login_state,
     select_codex_home,

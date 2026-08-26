@@ -18,13 +18,13 @@ import pytest
 import sh
 from pydantic import BaseModel, Field
 
-from lup.adapters.claude.harness import ClaudeSpellings
-from lup.adapters.claude.runtime import (
+from lup.providers.claude.harness import ClaudeSpellings
+from lup.providers.claude.runtime import (
     ClaudeSessionConfig,
     create_claude,
 )
-from lup.adapters.codex.harness_runtime import CodexPluginInstaller, PluginCacheConfig
-from lup.adapters.codex.runtime import CodexSessionConfig, create_codex
+from lup.providers.codex.harness_runtime import CodexPluginInstaller, PluginCacheConfig
+from lup.providers.codex.runtime import CodexSessionConfig, create_codex
 from lup.harness.process import LocalProcessLauncher
 from lup.resolver.core import ResolverCore
 from lup.tools.mcp import create_mcp_server, server_tool_names
@@ -42,7 +42,7 @@ from lup.resolver.models import (
     WorkerContext,
 )
 from lup.client import Client
-from lup.runtime.models import TurnTextBlock, turn_request
+from lup.sessions.events import TurnTextBlock, turn_request
 
 pytestmark = pytest.mark.integration
 
@@ -193,7 +193,7 @@ def fixture_repository(root: Path) -> Path:
     git("init", "--initial-branch=main", _cwd=str(repo))
     # Identity per invocation, never `git config` — a misbound command then
     # writes nothing, where a persisted setting lands in the shared config every
-    # worktree of a real repository inherits (see `lup.gitguard`).
+    # worktree of a real repository inherits (see `lup.devtools.gitguard`).
     git = git.bake(
         "-c", "user.email=smoke@example.invalid", "-c", "user.name=Native Smoke"
     )

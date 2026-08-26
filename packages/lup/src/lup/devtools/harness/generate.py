@@ -14,13 +14,13 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
-from lup.adapters.harness import (
+from lup.providers.harness import (
     claude_prompt_renderer,
     codex_prompt_renderer,
     compile_claude,
     compile_codex,
 )
-from lup.harness.banner import (
+from lup.banner import (
     COMMENT_FREE,
     REGENERATE_COMMAND,
     VERBATIM_COPY,

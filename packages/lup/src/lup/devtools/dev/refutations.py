@@ -1,7 +1,7 @@
 # lup: ignore[string-split]
 # A dotted module name is the language's own structure and has no parser but
 # this one: splitting it is how a relative import's package prefix and a
-# module's parent are named, exactly as `lup.codescan.project` names them.
+# module's parent are named, exactly as `lup.harness.codescan.project` names them.
 """Remembering what a language server already resolved about a file.
 
 Refuting a rule costs a language-server session, and the gate pays it every
@@ -26,9 +26,9 @@ from pathlib import Path
 
 from pydantic import BaseModel, ValidationError
 
-from lup.codescan.common import AntiPattern, PythonSource, Refutation
-from lup.codescan.oracle import TypeOracle
-from lup.codescan.resolution import refute
+from lup.harness.codescan.common import AntiPattern, PythonSource, Refutation
+from lup.harness.codescan.oracle import TypeOracle
+from lup.harness.codescan.resolution import refute
 from lup.policy.kernel.edit import python_nodes, python_tree
 from lup.types import StringMap
 

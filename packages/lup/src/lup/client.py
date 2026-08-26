@@ -18,7 +18,7 @@ from typing import Literal, overload
 
 from pydantic import BaseModel
 
-from lup.runtime.models import (
+from lup.sessions.events import (
     SessionHandle,
     SessionId,
     TurnInput,
@@ -158,7 +158,7 @@ def create_client(
     # routing to one should not pay for the other.
     match selected:
         case "claude":
-            from lup.adapters.claude.runtime import create_claude
+            from lup.providers.claude.runtime import create_claude
 
             return create_claude(
                 model=model,
@@ -168,7 +168,7 @@ def create_client(
                 api_key=api_key,
             )
         case "codex":
-            from lup.adapters.codex.runtime import create_codex
+            from lup.providers.codex.runtime import create_codex
 
             return create_codex(
                 model=model,

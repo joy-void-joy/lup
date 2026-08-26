@@ -13,8 +13,8 @@ from urllib.parse import urlsplit
 
 from pydantic import AnyHttpUrl, BaseModel, Field
 
-from lup.codescan.antipatterns import patterns_for_suffix
-from lup.codescan.common import AntiPattern
+from lup.harness.codescan.antipatterns import patterns_for_suffix
+from lup.harness.codescan.common import AntiPattern
 from lup.policy.contracts import DecisionPolicy
 from lup.policy.grants import LeaseGrants
 from lup.policy.kernel.decision import KernelDecision

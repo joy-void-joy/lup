@@ -6,7 +6,7 @@ untouched code read as lost, and a deletion whose body text survives
 elsewhere and reads as kept.
 """
 
-from lup.codescan.symbols import defined_symbols, symbols_lost
+from lup.harness.codescan.symbols import defined_symbols, symbols_lost
 
 MODULE = '''\
 CONSTANT = 1

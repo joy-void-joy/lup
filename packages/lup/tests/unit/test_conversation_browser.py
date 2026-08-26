@@ -9,7 +9,7 @@ import pytest
 from playwright import async_api as playwright_api
 from typer.testing import CliRunner
 
-from lup.adapters.codex.login import CODEX_LOGIN
+from lup.providers.codex.login import CODEX_LOGIN
 from lup.devtools.conversation import app as conversation_app
 from lup.devtools.conversation import browser
 from lup.devtools.conversation import chatgpt

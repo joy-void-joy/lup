@@ -18,9 +18,9 @@ from lup.tools.lsp.tools import (
     RenameInput,
     create_codeintel_tools,
 )
-from lup.codescan.common import PythonSource
-from lup.codescan.antipatterns import PYTHON_ANTI_PATTERNS
-from lup.codescan.resolution import refute
+from lup.harness.codescan.common import PythonSource
+from lup.harness.codescan.antipatterns import PYTHON_ANTI_PATTERNS
+from lup.harness.codescan.resolution import refute
 from lup.workspace.edition import publish_edition
 from lup.workspace.paths import project_root
 from lup.devtools.dev.pyright_oracle import PyrightOracle, langserver_path

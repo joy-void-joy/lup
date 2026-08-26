@@ -2,8 +2,8 @@
 
 from pathlib import Path
 
-from lup.codescan.common import PythonSource
-from lup.codescan.project import retired_suppressions
+from lup.harness.codescan.common import PythonSource
+from lup.harness.codescan.project import retired_suppressions
 
 
 def source(text: str, name: str = "sample") -> PythonSource:

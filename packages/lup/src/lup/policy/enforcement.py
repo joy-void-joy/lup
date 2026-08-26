@@ -2,7 +2,7 @@
 
 The policies in :mod:`lup.policy.rules` answer with a
 :class:`~lup.policy.models.Decision`; a session refuses through the portable
-hooks of :mod:`lup.hooks`. The mapping between them is not a choice a caller
+hooks of :mod:`lup.policy.hooks`. The mapping between them is not a choice a caller
 should make twice — ``ask`` must reach a human and ``defer`` must reach
 nobody, and a composition that guesses either one wrong turns a gate into a
 silent grant. So it is decided here, once, and pinned by tests.
@@ -17,7 +17,7 @@ from collections.abc import Callable
 
 from pydantic import BaseModel, Field
 
-from lup.hooks import (
+from lup.policy.hooks import (
     LupHookInput,
     LupHookMatcher,
     LupHookOutput,
@@ -134,7 +134,7 @@ type SemanticDecoder = Callable[[LupHookInput], SemanticTool]
 """Decode one native tool call into the semantic tool a policy judges.
 
 Native tool names and payload fields are adapter knowledge, so the
-composition root supplies this — ``lup.adapters.claude.hooks`` has the
+composition root supplies this — ``lup.providers.claude.hooks`` has the
 decoder for Claude sessions."""
 
 

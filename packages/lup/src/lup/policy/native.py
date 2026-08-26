@@ -3,7 +3,7 @@
 :class:`NativeEventDecoder` turns one provider's raw hook payload into the
 semantic events of :mod:`lup.policy.models`; :class:`NativeDecisionRenderer`
 turns a :class:`~lup.policy.models.Decision` back into that provider's wire
-response. Implementations live in ``lup.adapters.<provider>.native``; nothing
+response. Implementations live in ``lup.providers.<provider>.native``; nothing
 here decides — the kernel does.
 """
 

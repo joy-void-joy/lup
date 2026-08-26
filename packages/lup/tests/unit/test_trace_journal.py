@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from lup.runtime.models import (
+from lup.sessions.events import (
     BlockCompletedEvent,
     MessageCompletedEvent,
     SessionId,

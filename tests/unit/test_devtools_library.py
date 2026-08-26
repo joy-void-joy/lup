@@ -37,7 +37,7 @@ pythonpath = ["src", "packages/lup/src"]
 include = ["src", "packages/lup/src", "tests", "packages/lup/tests"]
 
 [[tool.pyright.executionEnvironments]]
-root = "packages/lup/src/lup/adapters/claude/assets"
+root = "packages/lup/src/lup/providers/claude/assets"
 extraPaths = [".claude/plugins/lup/hooks/runtime", "packages/lup/src/lup/policy/assets"]
 
 [[tool.pyright.executionEnvironments]]
@@ -45,7 +45,7 @@ root = ".claude/plugins/lup/hooks/scripts"
 extraPaths = [".claude/plugins/lup/hooks/runtime"]
 
 [[tool.pyright.executionEnvironments]]
-root = "packages/lup/src/lup/adapters/codex/assets"
+root = "packages/lup/src/lup/providers/codex/assets"
 extraPaths = [".codex/plugins/lup/hooks/runtime", "packages/lup/src/lup/policy/assets"]
 
 [[tool.pyright.executionEnvironments]]

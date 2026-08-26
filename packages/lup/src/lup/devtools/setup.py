@@ -25,7 +25,7 @@ from rich.panel import Panel
 from rich.table import Table
 from lup.devtools.conversation.app import create_conversation_setup_app
 from lup.devtools.harness.profile_app import create_profile_app
-from lup.runtime.profiles import ProfileDirectory
+from lup.providers.profiles import ProfileDirectory
 from lup.types import EnvVars
 from lup.workspace.paths import project_root
 

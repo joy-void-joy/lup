@@ -40,8 +40,8 @@ from lup.orchestration.realtime.relay import (
 )
 from lup.orchestration.realtime.scheduler import Scheduler
 from lup.orchestration.reflection import ReflectionGate
-from lup.runtime.contracts import Session, Turn
-from lup.runtime.models import (
+from lup.sessions.capabilities import Session, Turn
+from lup.sessions.events import (
     SessionId,
     TurnHandle,
     TurnId,

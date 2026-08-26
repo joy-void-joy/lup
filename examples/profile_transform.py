@@ -3,12 +3,12 @@
 import asyncio
 from pathlib import Path
 
-from lup.adapters.claude.config import (
+from lup.providers.claude.config import (
     ClaudeProfileRegistry,
     ClaudeProfileSelection,
     claude_profile_selector,
 )
-from lup.adapters.claude.runtime import ClaudeSessionConfig
+from lup.providers.claude.runtime import ClaudeSessionConfig
 
 from examples.common import Summary
 

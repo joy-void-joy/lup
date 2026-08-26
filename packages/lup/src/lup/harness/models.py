@@ -22,9 +22,9 @@ from pydantic import (
     model_validator,
 )
 
-from lup.codescan.common import AntiPattern, RuleSelection
+from lup.harness.codescan.common import AntiPattern, RuleSelection
 from lup.devtools.launcher import DEFAULT_ENVIRONMENT
-from lup.harness.banner import ArtifactBanner, GeneratedBanner
+from lup.banner import ArtifactBanner, GeneratedBanner
 from lup.harness.image import Image
 from lup.harness.requirements import Manifest
 from lup.markdown import CodeCell, PlainCell, TableCell, escaped
@@ -35,7 +35,7 @@ from lup.policy.refused_tools import RefusedTool
 from lup.policy.edit_rules import EditRule
 from lup.policy.shell_rules import RunnerTargetRule, ShellCommandRule
 from lup.policy.vocabulary import default_vocabulary
-from lup.selection import Selection
+from lup.tables import Selection
 from lup.types import JsonValue, ToolGrant, ToolName
 
 if TYPE_CHECKING:

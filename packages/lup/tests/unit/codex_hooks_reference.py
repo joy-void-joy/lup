@@ -6,7 +6,7 @@ The wire-format reference, quarantined out of the shipped package: a
 live probe showed config.toml command hooks never fire on the Codex
 builds this project targets, so no live adapter wires this —
 enforcement is the native workspace-write sandbox
-(:class:`~lup.adapters.codex.runtime.CodexSessionConfig`).
+(:class:`~lup.providers.codex.runtime.CodexSessionConfig`).
 Kept beside its tests so the format survives for the day the runtime
 honors hooks again; do not wire it into a live adapter without
 re-probing.
@@ -23,7 +23,7 @@ import sys
 from pathlib import Path
 from typing import Literal, TypedDict
 
-from lup.hooks import LupHooksConfig
+from lup.policy.hooks import LupHooksConfig
 
 logger = logging.getLogger(__name__)
 
@@ -281,7 +281,7 @@ def build_tool_allowlist_hook(
 ) -> list[CodexHookConfig]:
     """Generate a Codex hook config that restricts the agent to allowed tools.
 
-    Equivalent to Claude's :func:`~lup.hooks.create_tool_allowlist_hook`.
+    Equivalent to Claude's :func:`~lup.policy.hooks.create_tool_allowlist_hook`.
 
     Args:
         allowed_tools: Tool names the agent is allowed to use.
@@ -336,7 +336,7 @@ def build_nudge_hook(
 ) -> list[CodexHookConfig]:
     """Generate a Codex PostToolUse hook that nudges the agent toward alternatives.
 
-    Equivalent to Claude's :func:`~lup.hooks.create_nudge_hook`, but
+    Equivalent to Claude's :func:`~lup.policy.hooks.create_nudge_hook`, but
     simplified: each nudge is a static message string rather than a callable,
     since Codex hooks are external scripts without access to in-process state.
 

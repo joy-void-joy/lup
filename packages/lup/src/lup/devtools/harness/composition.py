@@ -15,20 +15,20 @@ from typing import Protocol, runtime_checkable
 import typer
 from pydantic import BaseModel
 
-from lup.adapters.claude.harness import ClaudeSpellings
-from lup.adapters.claude.harness_runtime import (
+from lup.providers.claude.harness import ClaudeSpellings
+from lup.providers.claude.harness_runtime import (
     ClaudeCliEvidence,
     claude_capability_probes,
 )
-from lup.adapters.claude.login import CLAUDE_LOGIN
-from lup.adapters.claude.profile_store import (
+from lup.providers.claude.login import CLAUDE_LOGIN
+from lup.providers.claude.profile_store import (
     AccountFile,
     ClaudeProfileNames,
     ClaudeProfileRegistrar,
 )
-from lup.codescan.common import RuleSelection
-from lup.adapters.codex.harness import CodexSpellings
-from lup.adapters.codex.harness_runtime import (
+from lup.harness.codescan.common import RuleSelection
+from lup.providers.codex.harness import CodexSpellings
+from lup.providers.codex.harness_runtime import (
     CodexCliEvidence,
     codex_capability_probes,
 )
@@ -39,14 +39,14 @@ from lup.devtools.harness.generate import (
     codex_generation_recipe,
 )
 from lup.harness.models import CapabilityEvidence, PromptDocument
-from lup.runtime.login import ProviderLogin
-from lup.runtime.profile_tree import (
+from lup.providers.login import ProviderLogin
+from lup.providers.profile_tree import (
     ProfileFolders,
     TreeProfileNames,
     TreeProfileRegistrar,
     TreeProfileStateLocations,
 )
-from lup.runtime.profiles import ProfileDirectory
+from lup.providers.profiles import ProfileDirectory
 
 PROFILE_ROOT = Path(".lup") / "profiles"
 """Default place a project keeps its own profiles, relative to its root.

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Generated from lup.policy.assets.host and lup.adapters.codex.assets.policy_dispatcher by `uv run lup-devtools harness generate all` — edit the source, not this file.
+# Generated from lup.policy.assets.host and lup.providers.codex.assets.policy_dispatcher by `uv run lup-devtools harness generate all` — edit the source, not this file.
 # See docs/harness.md.
 
 """Codex hook dispatcher over the canonical semantic kernel.

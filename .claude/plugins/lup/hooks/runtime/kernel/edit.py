@@ -33,7 +33,7 @@ from .rows import (
 MARKER_RE = re.compile(r"(#|//)\s*lup\s*:", re.IGNORECASE)
 # A review note is any marker whose keyword is not `ignore`, which is the
 # anti-pattern escape hatch rather than feedback — the same split
-# `lup.codescan.markers` makes when it gathers notes.
+# `lup.harness.codescan.markers` makes when it gathers notes.
 # The whitespace sits inside the lookahead: leaving it outside lets the regex
 # backtrack to zero width and match `# lup: ignore` after all.
 NOTE_RE = re.compile(r"(#|//)\s*lup\s*:(?!\s*ignore\b)", re.IGNORECASE)
@@ -1912,7 +1912,7 @@ def string_replace_sites(source: str) -> list[MatchSite]:
     What arity cannot reach at all is a two-argument ``replace`` on a value
     that is not text: a dataframe filling missing values, a vendor object
     with a ``replace`` of its own. Only the receiver's own type says so, and
-    the sites carry the positions `lup.codescan.resolution` asks about.
+    the sites carry the positions `lup.harness.codescan.resolution` asks about.
     """
     tree = python_tree(source)
     if tree is None:
@@ -2138,7 +2138,7 @@ def dict_get_sites(source: str) -> list[MatchSite]:
     session deciding what the tree has already settled.
 
     What no tree can settle is what an imported class *is*, and that is what
-    the sites carry positions for: `lup.codescan.resolution` resolves them
+    the sites carry positions for: `lup.harness.codescan.resolution` resolves them
     and refutes a receiver outside the mapping family.
     """
     tree = python_tree(source)
@@ -2259,7 +2259,7 @@ def matcher_named(name: str) -> Callable[[str], list[MatchSite]] | None:
 
     A rule earns a matcher when the shape it refuses is one the grammar has a
     word for, which is most of them. Which rule has which lives at the
-    declaration in `lup.codescan.antipatterns` and travels in the row, because
+    declaration in `lup.harness.codescan.antipatterns` and travels in the row, because
     a row projected into the hermetic runtime is primitive and cannot carry a
     callable: this side holds only the functions a row may name, so a rule
     that gains one reaches the gate by construction rather than by someone

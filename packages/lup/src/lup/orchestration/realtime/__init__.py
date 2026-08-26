@@ -4,7 +4,7 @@ The wake/act/sleep lifecycle for persistent agents. `scheduler.py` stands
 alone; `relay.py` layers a subprocess mailbox transport on top and is never
 imported by it.
 
-Not :mod:`lup.runtime` — that package is the session/turn engine underneath;
+Not :mod:`lup.sessions` — that package is the session/turn engine underneath;
 ``realtime`` owns the wake -> act -> sleep lifecycle layered on top of it.
 
 Three modules, one concern each, with a one-way dependency arrow:

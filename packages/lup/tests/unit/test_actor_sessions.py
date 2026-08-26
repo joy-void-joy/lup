@@ -12,10 +12,10 @@ from lup.orchestration.actors.mailbox import AnswerDoor
 from lup.orchestration.actors.refs import ActorRef
 from lup.orchestration.actors.sessions import ActorInbox, ActorRecord, ActorSession
 from lup.resolver.journal import Journal
-from lup.runtime.contracts import Session
-from lup.runtime.errors import ProviderTurnError, TurnFailure
+from lup.sessions.capabilities import Session
+from lup.sessions.errors import ProviderTurnError, TurnFailure
 from lup.client import Client
-from lup.runtime.models import (
+from lup.sessions.events import (
     SessionHandle,
     SessionId,
     TurnHandle,

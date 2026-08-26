@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 import typer
 
-from lup.codescan.markers import NoteKind
+from lup.harness.codescan.markers import NoteKind
 from lup.channels.models import utc_now
 from lup.orchestration.actors.mailbox import (
     AnswerDoor,

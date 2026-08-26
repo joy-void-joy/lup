@@ -47,7 +47,7 @@ from lup.resolver.contracts import (
     WorktreePreparer,
     settles_the_actor,
 )
-from lup.runtime.errors import ProviderTurnError, TurnFailure
+from lup.sessions.errors import ProviderTurnError, TurnFailure
 from lup.resolver.core import (
     ASSEMBLY_QUESTION_ID,
     ResolverCore,
@@ -110,10 +110,10 @@ from lup.resolver.state import (
     StateCorruptionError,
     StateTransitionError,
 )
-from lup.runtime.contracts import Session
+from lup.sessions.capabilities import Session
 from lup.client import Client
-from lup.runtime.composition import is_output_model
-from lup.runtime.models import (
+from lup.sessions.composition import is_output_model
+from lup.sessions.events import (
     SessionHandle,
     SessionId,
     TurnHandle,
@@ -1278,7 +1278,7 @@ def test_a_parent_inside_another_is_carried_rather_than_merged(
     def git(*arguments: str) -> str:
         # Identity per invocation, never `git config`: a misbound command then
         # writes nothing, where a persisted setting lands in the shared config
-        # every worktree of a real repository inherits (see `lup.gitguard`).
+        # every worktree of a real repository inherits (see `lup.devtools.gitguard`).
         status = launcher.launch(
             LaunchRequest(
                 arguments=[
@@ -1336,7 +1336,7 @@ def test_a_parent_is_credited_only_with_the_paths_it_wrote(tmp_path: Path) -> No
     def git(*arguments: str) -> str:
         # Identity per invocation, never `git config`: a misbound command then
         # writes nothing, where a persisted setting lands in the shared config
-        # every worktree of a real repository inherits (see `lup.gitguard`).
+        # every worktree of a real repository inherits (see `lup.devtools.gitguard`).
         status = launcher.launch(
             LaunchRequest(
                 arguments=[
@@ -2042,7 +2042,7 @@ async def test_complete_resolver_lifecycle_uses_real_isolated_git_worktrees(
     launcher = LocalProcessLauncher()
 
     def git(*arguments: str, cwd: Path = workspace) -> str:
-        # Identity per invocation, never `git config` — see `lup.gitguard`.
+        # Identity per invocation, never `git config` — see `lup.devtools.gitguard`.
         status = launcher.launch(
             LaunchRequest(
                 arguments=[
@@ -2259,7 +2259,7 @@ async def test_resume_after_a_kill_past_workers_completes_without_backward_phase
     def git(*arguments: str) -> str:
         # Identity per invocation, never `git config`: a misbound command then
         # writes nothing, where a persisted setting lands in the shared config
-        # every worktree of a real repository inherits (see `lup.gitguard`).
+        # every worktree of a real repository inherits (see `lup.devtools.gitguard`).
         status = launcher.launch(
             LaunchRequest(
                 arguments=[
@@ -2369,7 +2369,7 @@ async def test_a_resume_with_nothing_left_to_lease_still_takes_the_landed_fix(
     def git(*arguments: str) -> str:
         # Identity per invocation, never `git config`: a misbound command then
         # writes nothing, where a persisted setting lands in the shared config
-        # every worktree of a real repository inherits (see `lup.gitguard`).
+        # every worktree of a real repository inherits (see `lup.devtools.gitguard`).
         status = launcher.launch(
             LaunchRequest(
                 arguments=[
@@ -2504,7 +2504,7 @@ def snapshot(workspace: Path, launcher: LocalProcessLauncher) -> SourceSnapshot:
     def git(*arguments: str) -> str:
         # Identity per invocation, never `git config`: a misbound command then
         # writes nothing, where a persisted setting lands in the shared config
-        # every worktree of a real repository inherits (see `lup.gitguard`).
+        # every worktree of a real repository inherits (see `lup.devtools.gitguard`).
         status = launcher.launch(
             LaunchRequest(
                 arguments=[
@@ -3562,7 +3562,7 @@ async def test_a_standing_recheck_costs_a_turn_only_when_it_is_asked_for(
     def git(*arguments: str) -> str:
         # Identity per invocation, never `git config`: a misbound command then
         # writes nothing, where a persisted setting lands in the shared config
-        # every worktree of a real repository inherits (see `lup.gitguard`).
+        # every worktree of a real repository inherits (see `lup.devtools.gitguard`).
         status = launcher.launch(
             LaunchRequest(
                 arguments=[
@@ -3676,7 +3676,7 @@ async def test_a_drain_stops_integration_between_two_parents(tmp_path: Path) -> 
     def git(*arguments: str) -> str:
         # Identity per invocation, never `git config`: a misbound command then
         # writes nothing, where a persisted setting lands in the shared config
-        # every worktree of a real repository inherits (see `lup.gitguard`).
+        # every worktree of a real repository inherits (see `lup.devtools.gitguard`).
         status = launcher.launch(
             LaunchRequest(
                 arguments=[
@@ -6290,7 +6290,7 @@ async def test_the_final_recheck_reads_the_tree_from_a_checkout_of_its_own(
     def git(*arguments: str) -> str:
         # Identity per invocation, never `git config`: a misbound command then
         # writes nothing, where a persisted setting lands in the shared config
-        # every worktree of a real repository inherits (see `lup.gitguard`).
+        # every worktree of a real repository inherits (see `lup.devtools.gitguard`).
         status = launcher.launch(
             LaunchRequest(
                 arguments=[
@@ -6427,7 +6427,7 @@ async def test_a_capped_wave_holds_the_cap_and_resumes_what_it_never_started(
     def git(*arguments: str) -> str:
         # Identity per invocation, never `git config`: a misbound command then
         # writes nothing, where a persisted setting lands in the shared config
-        # every worktree of a real repository inherits (see `lup.gitguard`).
+        # every worktree of a real repository inherits (see `lup.devtools.gitguard`).
         status = launcher.launch(
             LaunchRequest(
                 arguments=[

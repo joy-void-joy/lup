@@ -31,8 +31,8 @@ from typer._click.core import Command as ClickCommand
 from typer.core import TyperGroup
 
 import lup.harness.models as models
-from lup.adapters.harness import claude_prompt_renderer
-from lup.harness.banner import GeneratedBanner
+from lup.providers.harness import claude_prompt_renderer
+from lup.banner import GeneratedBanner
 from lup.harness.materialization import write_generated_file
 from lup.harness.models import Artifact
 from lup.markdown import CodeCell, PlainCell

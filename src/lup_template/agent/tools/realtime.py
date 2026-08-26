@@ -49,8 +49,8 @@ from lup.orchestration.realtime.models import (
 )
 from lup.orchestration.realtime.scheduler import Scheduler
 from lup.orchestration.background import BackgroundAgent
-from lup.runtime.errors import TurnError
-from lup.runtime.models import TurnResult, turn_request
+from lup.sessions.errors import TurnError
+from lup.sessions.events import TurnResult, turn_request
 from lup.observability.trace import TraceLogger
 
 logger = logging.getLogger(__name__)

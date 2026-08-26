@@ -4,7 +4,7 @@ import asyncio
 from pathlib import Path
 
 from lup import create_claude
-from lup.runtime.wrappers import (
+from lup.sessions.middleware import (
     BudgetConfig,
     CorrectionConfig,
     PersistenceConfig,

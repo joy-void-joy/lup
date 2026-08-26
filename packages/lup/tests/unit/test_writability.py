@@ -58,7 +58,7 @@ def linked_worktree(tmp_path: Path) -> Path:
         ["git", "init", "-b", "source", str(work)],
         # Identity per invocation, never `git config` — a misbound command then
         # writes nothing, where a persisted setting lands in the shared config
-        # every worktree of a real repository inherits (see `lup.gitguard`).
+        # every worktree of a real repository inherits (see `lup.devtools.gitguard`).
         [
             "git",
             "-C",

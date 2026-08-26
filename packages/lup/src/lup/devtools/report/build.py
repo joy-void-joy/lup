@@ -11,7 +11,7 @@ replaces.
 
 from pathlib import Path
 
-from lup.codescan.markers import NoteKind, find_feedback
+from lup.harness.codescan.markers import NoteKind, find_feedback
 from lup.devtools.dev.branches import (
     leased_on_disk,
     parse_branches,

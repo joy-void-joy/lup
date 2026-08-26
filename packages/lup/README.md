@@ -6,8 +6,8 @@ app-server agents. Importing `lup` loads no optional provider SDK.
 The package-root API is intentionally small: two constructors —
 `create_claude()` and `create_codex()` — plus `Client`, the typed turn
 request/result and capability-handle models, and `turn_request()`. Narrow
-capabilities live in `lup.runtime.contracts`; concrete provider config lives in
-`lup.adapters.claude` and `lup.adapters.codex`, which nothing above them needs
+capabilities live in `lup.sessions.capabilities`; concrete provider config lives in
+`lup.providers.claude` and `lup.providers.codex`, which nothing above them needs
 to import.
 
 ```python

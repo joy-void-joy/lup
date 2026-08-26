@@ -14,9 +14,9 @@ from typing import assert_type
 import pytest
 from pydantic import BaseModel
 
-from lup.runtime.contracts import Session, Turn
+from lup.sessions.capabilities import Session, Turn
 from lup.client import Client
-from lup.runtime.models import (
+from lup.sessions.events import (
     SessionId,
     TurnHandle,
     TurnId,

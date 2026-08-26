@@ -13,7 +13,7 @@ kind of cell escapes, not that some helper was called correctly.
 import pytest
 from pydantic import ValidationError
 
-from lup.adapters.harness import claude_prompt_renderer, codex_prompt_renderer
+from lup.providers.harness import claude_prompt_renderer, codex_prompt_renderer
 from lup.harness.models import MarkdownTable, PromptDocument, TextPart
 from lup.markdown import CodeCell, HtmlCodeCell, LinkCell, PlainCell
 

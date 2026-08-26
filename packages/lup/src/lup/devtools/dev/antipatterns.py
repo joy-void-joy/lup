@@ -2,7 +2,7 @@
 
 Backs `lup-devtools dev check --antipatterns` (and the standalone
 `dev check`-row). Walks every tracked or untracked `.py`/TS-family file and
-runs the single `lup.codescan.antipatterns` set over it — the same set the
+runs the single `lup.harness.codescan.antipatterns` set over it — the same set the
 edit hook enforces — reporting three classes the hook cannot catch after the
 fact:
 
@@ -15,7 +15,7 @@ fact:
   typed `# lup: ignore[id]` directives is gradual.
 
 The set is shared with the hook; the verdicts need not be. This sweep reads
-whole parseable files, so it hands `lup.codescan.resolution` a type oracle and
+whole parseable files, so it hands `lup.harness.codescan.resolution` a type oracle and
 decides some rules more narrowly than a hook judging an untyped edit fragment
 ever could. Every finding that narrowing drops is reported as a **refuted**
 row carrying the declaration that settled it, and the directive that used to
@@ -33,16 +33,22 @@ from pathlib import Path
 import typer
 from pydantic import BaseModel
 
-from lup.codescan.antipatterns import (
+from lup.harness.codescan.antipatterns import (
     PYTHON_ANTI_PATTERNS,
     AntiPatternFinding,
     AntiPatternSet,
     audit_text,
     patterns_for_suffix,
 )
-from lup.codescan.boundaries import audit_constant_declarations, audit_path_boundaries
-from lup.codescan.capabilities import audit_abstract_declarations, audit_capabilities
-from lup.codescan.common import (
+from lup.harness.codescan.boundaries import (
+    audit_constant_declarations,
+    audit_path_boundaries,
+)
+from lup.harness.codescan.capabilities import (
+    audit_abstract_declarations,
+    audit_capabilities,
+)
+from lup.harness.codescan.common import (
     PACKAGE_ROOTS,
     AntiPattern,
     PythonContext,
@@ -51,13 +57,13 @@ from lup.codescan.common import (
     file_level_ignore,
     module_name,
 )
-from lup.codescan.dispatch import audit_own_model_dispatch
-from lup.codescan.resolution import refute
+from lup.harness.codescan.dispatch import audit_own_model_dispatch
+from lup.harness.codescan.resolution import refute
 from lup.devtools.dev.refutations import remembered_refutations
 from lup.workspace.paths import project_root, refutation_cache_path
-from lup.codescan.narrowing import audit_isinstance_chains
-from lup.codescan.project import retired_suppressions
-from lup.codescan.registry import RULE_REFERENCE
+from lup.harness.codescan.narrowing import audit_isinstance_chains
+from lup.harness.codescan.project import retired_suppressions
+from lup.harness.codescan.registry import RULE_REFERENCE
 from lup.policy.kernel.edit import (
     IGNORE_RE,
     SUPPRESSION_COLUMN_LIMIT,
@@ -82,13 +88,13 @@ def scanned_roots(project: DevProject) -> AbstractSet[str]:
 
 
 class FoundAntiPattern(AntiPatternFinding):
-    """An :class:`~lup.codescan.antipatterns.AntiPatternFinding` tagged with its file."""
+    """An :class:`~lup.harness.codescan.antipatterns.AntiPatternFinding` tagged with its file."""
 
     file: str
 
 
 class FoundRefutation(Refutation, frozen=True):
-    """A :class:`~lup.codescan.common.Refutation` tagged with its file."""
+    """A :class:`~lup.harness.codescan.common.Refutation` tagged with its file."""
 
     file: str
 

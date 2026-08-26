@@ -109,9 +109,9 @@ Python to a launched native plugin.
    `devtools/harness/catalog.py` composes them with the application-owned
    `HookSet` into one canonical `lup.harness.models.Harness`. Prompt prose is
    stored as ordered typed parts, never as a native string.
-2. **Renderers** — `lup.adapters.claude.harness` and
-   `lup.adapters.codex.harness` implement the `ArtifactRenderer` seams from
-   `lup.harness.contracts`; the compilation roots in `lup.adapters.harness`
+2. **Renderers** — `lup.providers.claude.harness` and
+   `lup.providers.codex.harness` implement the `ArtifactRenderer` seams from
+   `lup.harness.contracts`; the compilation roots in `lup.providers.harness`
    compose them into a complete `ArtifactTree`. A `SkillInvocationRenderer`
    owns the entire native invocation spelling; shared code never rewrites one
    prefix into another.
@@ -126,7 +126,7 @@ Python to a launched native plugin.
 5. **Materialization** — `lup.harness.materialization` re-verifies every
    preimage and applies a conflict-free proposal atomically, then saves the
    manifest. Stale proposals are rejected.
-6. **Launch** — `lup.adapters.*.harness_runtime` probes native CLI
+6. **Launch** — `lup.providers.*.harness_runtime` probes native CLI
    capabilities, and `lup.harness.process` launches the native CLI with the
    non-interactive defaults from `lup.harness.environment`.
 

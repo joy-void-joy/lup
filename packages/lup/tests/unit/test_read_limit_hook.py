@@ -6,7 +6,7 @@ would have needed to know is what the call returns. These pin the hook that
 corrects the arguments instead of refusing the call.
 """
 
-from lup.hooks import LupHookInput, LupHooksConfig, create_large_read_hook
+from lup.policy.hooks import LupHookInput, LupHooksConfig, create_large_read_hook
 from lup.types import JsonObject
 
 

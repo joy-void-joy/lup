@@ -2,9 +2,9 @@
 
 from pathlib import Path
 
-from lup.adapters.harness import claude_prompt_renderer, codex_prompt_renderer
-from lup.codescan.antipatterns import PYTHON_ANTI_PATTERNS, TS_ANTI_PATTERNS
-from lup.codescan.registry import STRUCTURAL_RULES, all_rules
+from lup.providers.harness import claude_prompt_renderer, codex_prompt_renderer
+from lup.harness.codescan.antipatterns import PYTHON_ANTI_PATTERNS, TS_ANTI_PATTERNS
+from lup.harness.codescan.registry import STRUCTURAL_RULES, all_rules
 from lup.devtools.dev.rules import rule_reference_artifact, rule_reference_document
 
 
@@ -71,4 +71,4 @@ def test_registry_covers_every_family_with_unique_ids_and_homes() -> None:
         "spelling",
         "architecture",
     }
-    assert all(rule.defined_in.startswith("lup.codescan.") for rule in rules)
+    assert all(rule.defined_in.startswith("lup.harness.codescan.") for rule in rules)

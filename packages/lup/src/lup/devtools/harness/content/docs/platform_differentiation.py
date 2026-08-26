@@ -37,9 +37,9 @@ One portable declaration, two native renderings. `portable_harness()` in
 settled architecture is **portable-declaration-plus-adapter-rendering**, not
 per-platform declarations with a shared default. Everything a platform does
 differently lives in exactly two places — the adapter renderers
-(`packages/lup/src/lup/adapters/claude/harness.py`,
-`packages/lup/src/lup/adapters/codex/harness.py`, composed by
-`packages/lup/src/lup/adapters/harness.py`) and the per-platform generation
+(`packages/lup/src/lup/providers/claude/harness.py`,
+`packages/lup/src/lup/providers/codex/harness.py`, composed by
+`packages/lup/src/lup/providers/harness.py`) and the per-platform generation
 recipes (`claude_generation_recipe` / `codex_generation_recipe` in
 `packages/lup/src/lup/devtools/harness/generate.py`). A per-platform declaration
 layer was considered and rejected: it would let semantic content fork silently,
@@ -51,7 +51,7 @@ text, and `reject_native_prose` refuses any word an adapter would have spelled
 
 That second check writes down no vocabulary of its own. It asks each
 `NativeSpellings` what it spells and forbids exactly that
-(`packages/lup/src/lup/codescan/portable.py`, rule `portable-content`), which
+(`packages/lup/src/lup/harness/codescan/portable.py`, rule `portable-content`), which
 is why adding a location to `TreeLocation` or `PluginLocation` forbids it in
 prose the same moment a runtime learns to spell it.
 
@@ -107,7 +107,7 @@ each platform's native format — never byte parity.
 | Downstream template guidance | `.claude/plugins/lup/TEMPLATE_CLAUDE.md` from `content/template_claude.py` | `.codex/plugins/lup/TEMPLATE_AGENTS.md` from `content/template_codex.py` | Both flavors compose the portable sections in `content/template_sections.py`; only platform slices (guidance-file names, meta-agent naming, edit-hook vs opaque-patch guidance, LSP vs CLI diagnostics, settings, communication idiom) differ. |
 | Launch and trust | Launches the verified local plugin directory with `--plugin-dir`; `CLAUDE_CONFIG_DIR` selects the profile | Seeds a persistent per-worktree home from personal authentication and settings, materializes the Claude daltonized theme without selecting it, and installs and verifies an immutable content-addressed plugin revision there; explicit `--codex-home`/`CODEX_HOME` overrides bypass isolation | Native trust models: Claude trusts the workspace plugin, while Codex requires an installed cache and keeps plugin identity in home-level config. Retaining revisions keeps every live `PLUGIN_ROOT` valid across concurrent starts and exits. |
 | Runtime preflight | `claude` CLI version, plugin support, `plugin validate` | `codex` CLI version and cache digest evidence | Each side probes only its own native capabilities (`harness_runtime.py` in each adapter). |
-| Reasoning effort | `CLAUDE_EFFORT` in `adapters/claude/selection.py` | `CODEX_EFFORT` in `adapters/codex/selection.py` | `SessionRequest.effort` is asked for in portable words and mapped by each adapter, the way autonomy already is. `low`, `medium`, `high`, and `xhigh` are the four rungs both ladders carry outright. The two ends belong to one runtime each and the other renders the nearest it has: `minimal` is Codex's own floor, which Claude meets with `low` because its ladder has no rung beneath that; `max` is Claude's own ceiling, which Codex meets with `xhigh` for the same reason at the top. Codex's `none` is deliberately absent from the portable vocabulary — Claude would render it as `low`, turning "do not reason" into "reason a little" on one runtime without saying so. |
+| Reasoning effort | `CLAUDE_EFFORT` in `providers/claude/selection.py` | `CODEX_EFFORT` in `providers/codex/selection.py` | `SessionRequest.effort` is asked for in portable words and mapped by each adapter, the way autonomy already is. `low`, `medium`, `high`, and `xhigh` are the four rungs both ladders carry outright. The two ends belong to one runtime each and the other renders the nearest it has: `minimal` is Codex's own floor, which Claude meets with `low` because its ladder has no rung beneath that; `max` is Claude's own ceiling, which Codex meets with `xhigh` for the same reason at the top. Codex's `none` is deliberately absent from the portable vocabulary — Claude would render it as `low`, turning "do not reason" into "reason a little" on one runtime without saying so. |
 | Usage display | the OAuth usage endpoint for live windows, plus the local stats cache for per-day and per-model detail | the app-server's own account calls for both the metered windows and the daily token buckets | One display over two readers (`lup.observability.usage`, `usage/reader.py` in each adapter). Each side reports a plan's windows and its days into the same report, so the pacing bars, the daily budget, and the `--json` snapshot are decided once. What differs is what each account publishes: fixed named windows and a per-model split on one side, two self-describing windows and no model breakdown on the other — which is why one draws a model legend and the other has none to draw. |
 | Sensitive local-only files | `.claude/settings.local.json` | `.codex/config.local.toml` | Native personal-config locations, excluded from generation. |
 

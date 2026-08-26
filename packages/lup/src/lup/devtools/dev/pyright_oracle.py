@@ -1,6 +1,6 @@
 """Pyright's language server, implementing the codescan type oracle.
 
-`lup.codescan.resolution` judges a site by what its subject is declared as,
+`lup.harness.codescan.resolution` judges a site by what its subject is declared as,
 and this is the only thing in the repository that can answer that. Pyright is
 already the project's single type checker, but its CLI only reports
 diagnostics — a declaration query needs the language-server protocol, so this
@@ -52,7 +52,7 @@ from pydantic import BaseModel, ValidationError
 
 from lup.tools.lsp.client import Call, LspSession, lsp_session
 from lup.tools.lsp.replies import LOCATIONS
-from lup.codescan.oracle import (
+from lup.harness.codescan.oracle import (
     ClassDeclaration,
     Declaration,
     FunctionDeclaration,

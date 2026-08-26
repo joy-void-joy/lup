@@ -1,7 +1,7 @@
 # lup: ignore[import-re, re-call, set-shape, string-replace]
 """The anti-pattern set is single-sourced for the auditor and policy bundle.
 
-`lup.codescan.antipatterns` is the importable source of truth. Harness generation
+`lup.harness.codescan.antipatterns` is the importable source of truth. Harness generation
 embeds its rows into the dependency-free policy runtime; these tests pin that
 projection and audit missing, untyped, and spurious suppressions.
 """
@@ -11,13 +11,13 @@ import re
 import pytest
 from pydantic import ValidationError
 
-from lup.codescan.antipatterns import (
+from lup.harness.codescan.antipatterns import (
     PYTHON_ANTI_PATTERNS,
     TS_ANTI_PATTERNS,
     audit_text,
     python_anti_patterns,
 )
-from lup.codescan.common import AntiPattern, RuleExample
+from lup.harness.codescan.common import AntiPattern, RuleExample
 from lup.harness.contracts import Spelled, Unsupported
 from lup.policy.bundle import bundled_antipattern_rows
 from lup.policy.kernel.edit import (
@@ -585,7 +585,7 @@ def test_the_matcher_keeps_a_lookup_reached_through_a_module() -> None:
 def test_the_matcher_selects_nothing_from_a_fragment_it_cannot_parse() -> None:
     """No tree, no shapes. `dict-get` is soft, so the pattern still answers.
 
-    Which is what :func:`~lup.codescan.antipatterns.selected_lines` reads an
+    Which is what :func:`~lup.harness.codescan.antipatterns.selected_lines` reads an
     empty answer as: an absent entry rather than a rule that found nothing.
     """
     assert dict_get_sites("@app.get(\n") == []

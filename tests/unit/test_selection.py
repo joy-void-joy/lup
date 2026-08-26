@@ -9,7 +9,7 @@ project which says nothing gets the library's table unchanged.
 
 from lup.policy.edit_rules import EditRule
 from lup.policy.kernel.decision import DecisionEffect
-from lup.selection import Selection
+from lup.tables import Selection
 
 
 def rule(name: str, effect: DecisionEffect = "allow") -> EditRule:

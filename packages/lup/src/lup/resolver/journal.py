@@ -35,7 +35,7 @@ from lup.resolver.models import (
     MaterialQuestion,
     ResolvePhase,
 )
-from lup.runtime.models import TurnEvent
+from lup.sessions.events import TurnEvent
 
 # lup: ignore[constant-declaration] — the journal's own file name, which the
 # writing run and every reader of it must spell alike to meet at all

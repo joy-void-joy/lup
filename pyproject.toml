@@ -136,7 +136,7 @@ extraPaths = [
 ]
 
 [[tool.pyright.executionEnvironments]]
-root = "packages/lup/src/lup/adapters/claude/assets"
+root = "packages/lup/src/lup/providers/claude/assets"
 extraPaths = [
     ".claude/plugins/lup/hooks/runtime",
     "packages/lup/src/lup/policy/assets",
@@ -147,7 +147,7 @@ root = ".claude/plugins/lup/hooks/scripts"
 extraPaths = [".claude/plugins/lup/hooks/runtime"]
 
 [[tool.pyright.executionEnvironments]]
-root = "packages/lup/src/lup/adapters/codex/assets"
+root = "packages/lup/src/lup/providers/codex/assets"
 extraPaths = [
     ".codex/plugins/lup/hooks/runtime",
     "packages/lup/src/lup/policy/assets",
@@ -169,4 +169,4 @@ target-version = "py313"
 # host half stands on. `lup.policy.dispatcher` proves that carry and fails
 # generation when one is missing — an import unused in this file alone is the
 # requirement being met, not a leftover.
-"packages/lup/src/lup/adapters/*/assets/policy_dispatcher.py" = ["F401"]
+"packages/lup/src/lup/providers/*/assets/policy_dispatcher.py" = ["F401"]

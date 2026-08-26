@@ -40,7 +40,7 @@ def origin(tmp_path: Path) -> Path:
 def repo_git(work: Path) -> sh.Command:
     # Identity per invocation, never `git config` — a misbound command then
     # writes nothing, where a persisted setting lands in the shared config every
-    # worktree of a real repository inherits (see `lup.gitguard`).
+    # worktree of a real repository inherits (see `lup.devtools.gitguard`).
     return sh.Command("git").bake(
         "-C",
         str(work),

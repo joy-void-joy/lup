@@ -9,8 +9,8 @@ tree at all.
 from functools import partial
 from pathlib import Path
 
-from lup.adapters.claude.login import CLAUDE_LOGIN
-from lup.codescan.common import RuleSelection
+from lup.providers.claude.login import CLAUDE_LOGIN
+from lup.harness.codescan.common import RuleSelection
 from lup.devtools.dev.rules import write_rule_reference
 from lup.devtools.dev.workflow import write_workflow
 from lup.devtools.harness.composition import (
@@ -25,7 +25,7 @@ from lup.devtools.harness.generate import (
     ProjectContent,
 )
 from lup.devtools.harness.generated_paths import write_generated_paths
-from lup.runtime.profiles import ProfileDirectory
+from lup.providers.profiles import ProfileDirectory
 from lup.workspace.paths import project_root
 from lup_template.devtools.harness.catalog import (
     WORKFLOW,

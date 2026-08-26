@@ -12,19 +12,19 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from lup.adapters.claude.login import CLAUDE_LOGIN
-from lup.adapters.claude.profile_store import (
+from lup.providers.claude.login import CLAUDE_LOGIN
+from lup.providers.claude.profile_store import (
     AccountFile,
     ClaudeProfileNames,
     ClaudeProfileRegistrar,
 )
 from lup.devtools.harness.profile_app import create_profile_app
-from lup.runtime.profile_tree import (
+from lup.providers.profile_tree import (
     ProfileFolders,
     TreeProfileNames,
     TreeProfileRegistrar,
 )
-from lup.runtime.profiles import ProfileDirectory, UnknownProfile
+from lup.providers.profiles import ProfileDirectory, UnknownProfile
 
 PLAIN_CONSOLE = {"FORCE_COLOR": None, "NO_COLOR": "1", "TERM": "dumb"}
 

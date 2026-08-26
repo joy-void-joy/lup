@@ -6,7 +6,7 @@ from collections.abc import Iterator
 
 import pytest
 
-from lup.hooks import (
+from lup.policy.hooks import (
     LupHookInput,
     LupHookOutput,
     create_capture_hook,

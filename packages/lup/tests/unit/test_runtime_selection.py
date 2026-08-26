@@ -1,7 +1,7 @@
 """Selecting a runtime is one assignment, and both runtimes answer it.
 
 The autonomy roster is read out of the type rather than restated, so a degree
-added to :data:`~lup.runtime.selection.SessionAutonomy` fails here until every
+added to :data:`~lup.providers.selection.SessionAutonomy` fails here until every
 runtime has spelled it — which is the whole point of the request being a
 declaration each runtime renders.
 """
@@ -11,18 +11,18 @@ from typing import get_args
 
 import pytest
 
-from lup.adapters.claude.runtime import ClaudeSessionConfig
-from lup.adapters.claude.selection import CLAUDE_AUTONOMY, CLAUDE_RUNTIME
-from lup.adapters.codex.runtime import CodexSessionConfig
-from lup.adapters.codex.selection import (
+from lup.providers.claude.runtime import ClaudeSessionConfig
+from lup.providers.claude.selection import CLAUDE_AUTONOMY, CLAUDE_RUNTIME
+from lup.providers.codex.runtime import CodexSessionConfig
+from lup.providers.codex.selection import (
     CODEX_AUTONOMY,
     CODEX_RUNTIME,
     codex_mcp_server,
 )
-from lup.hooks import LupHooksConfig
+from lup.policy.hooks import LupHooksConfig
 from lup.tools.mcp import create_mcp_server
 from lup.client import Client
-from lup.runtime.selection import Runtime, SessionAutonomy, SessionRequest
+from lup.providers.selection import Runtime, SessionAutonomy, SessionRequest
 
 AUTONOMY_DEGREES = get_args(SessionAutonomy.__value__)
 
@@ -49,7 +49,7 @@ def test_claude_renders_the_whole_request(
         rendered.append(config)
         return Client(lambda resume=None: None)  # pyright: ignore[reportArgumentType]
 
-    monkeypatch.setattr("lup.adapters.claude.selection.create_claude", record)
+    monkeypatch.setattr("lup.providers.claude.selection.create_claude", record)
     CLAUDE_RUNTIME.session_factory(
         SessionRequest(
             model="a-model",
@@ -84,7 +84,7 @@ def test_codex_renders_what_it_can_spell(
         rendered.append(config)
         return Client(lambda resume=None: None)  # pyright: ignore[reportArgumentType]
 
-    monkeypatch.setattr("lup.adapters.codex.selection.create_codex", record)
+    monkeypatch.setattr("lup.providers.codex.selection.create_codex", record)
     CODEX_RUNTIME.session_factory(
         SessionRequest(
             model="a-model",

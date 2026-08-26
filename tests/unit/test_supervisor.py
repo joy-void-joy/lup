@@ -23,11 +23,11 @@ import pytest
 import typer
 from httpx import ASGITransport, AsyncClient
 
-from lup.adapters.harness import AdapterName
+from lup.providers.harness import AdapterName
 from lup.harness.models import ResolveSpec, SkillInvocation
 from lup.channels.models import utc_now
 from lup.resolver.journal import Journal, JournalEntry, PhaseChangedEvent, RunEvent
-from lup.runtime.models import TurnEvent
+from lup.sessions.events import TurnEvent
 from lup.orchestration.actors.mailbox import AnswerDoor, RecordedAnswer
 from lup.orchestration.actors.questions import QuestionAnswer
 from lup.orchestration.actors.refs import ActorRef

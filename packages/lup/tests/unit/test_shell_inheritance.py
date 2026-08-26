@@ -13,7 +13,7 @@ matters — the only forms escaping the sandbox are the git forms that reach a
 verdict, because `git` declares its placement at the command its verbs share.
 """
 
-from lup.adapters.codex.harness import codex_allow_prefixes
+from lup.providers.codex.harness import codex_allow_prefixes
 from lup.policy.kernel.decision import KernelDecision
 from lup.policy.kernel.shell import auto_escape_matches, decide_shell
 from lup.policy.shell_rules import (

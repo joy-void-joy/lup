@@ -27,7 +27,7 @@ from pathlib import Path
 import sh
 import typer
 
-from lup.codescan.markers import (
+from lup.harness.codescan.markers import (
     MarkerComment,
     NoteKind,
     NoteTarget,
@@ -60,8 +60,8 @@ def scan_tracked(
     """Run one marker scan across every tracked text file.
 
     `find` maps a file's text and its scan mode to the markers it holds —
-    :func:`lup.codescan.markers.find_feedback` for review notes, or
-    :func:`lup.codescan.markers.find_markers` bound to another convention.
+    :func:`lup.harness.codescan.markers.find_feedback` for review notes, or
+    :func:`lup.harness.codescan.markers.find_markers` bound to another convention.
     """
     results: list[FoundComment] = []  # lup: ignore[empty-collection] — scan fold
     for rel in git.lines("ls-files"):

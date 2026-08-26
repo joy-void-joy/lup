@@ -17,10 +17,10 @@ import sh
 import typer
 from pydantic import BaseModel
 
-from lup.codescan.markers import find_feedback
+from lup.harness.codescan.markers import find_feedback
 from lup.harness.enforcement import semantic_policy_for
 from lup.harness.models import HookSet
-from lup.hooks import LupHooksConfig
+from lup.policy.hooks import LupHooksConfig
 from lup.policy.enforcement import (
     EscalationRelay,
     NativeSemantics,
@@ -84,7 +84,7 @@ from lup.resolver.tools import (
 )
 from lup.resolver.join_tools import create_join_tools
 from lup.client import Client
-from lup.runtime.profiles import SessionAccount
+from lup.providers.profiles import SessionAccount
 from lup.types import EnvVars
 from lup.workspace.paths import project_root
 from lup.devtools.dev.branches import probe_base_freshness, require_fresh_base
@@ -1479,7 +1479,7 @@ def run_resolve(
         refuse_blocked_config_writes(root)
 
     async def execute() -> None:
-        from lup.adapters.claude.runtime import (
+        from lup.providers.claude.runtime import (
             ClaudeSandboxConfig,
             ClaudeSessionConfig,
             create_claude,
@@ -1487,30 +1487,30 @@ def run_resolve(
             may_be_a_rotation,
             needs_a_person,
         )
-        from lup.adapters.codex.runtime import (
+        from lup.providers.codex.runtime import (
             CodexMcpServerConfig,
             CodexSessionConfig,
             create_codex,
         )
-        from lup.adapters.claude.config_home import (
+        from lup.providers.claude.config_home import (
             selected_config_home,
             untrusted_degradation,
             workspace_config_environment,
         )
-        from lup.adapters.claude.hooks import CLAUDE_SEMANTICS
-        from lup.adapters.codex.hooks import CODEX_SEMANTICS
-        from lup.hooks import (
+        from lup.providers.claude.hooks import CLAUDE_SEMANTICS
+        from lup.providers.codex.hooks import CODEX_SEMANTICS
+        from lup.policy.hooks import (
             create_git_inspection_hook,
             create_permission_hooks,
             merge_hooks,
         )
 
-        from lup.adapters.codex.harness_runtime import (
+        from lup.providers.codex.harness_runtime import (
             CodexPluginInstaller,
             PluginCacheConfig,
         )
 
-        from lup.adapters.codex.home import CodexWorktreeHomeStore, select_codex_home
+        from lup.providers.codex.home import CodexWorktreeHomeStore, select_codex_home
 
         def codex_policy_environment(target: str, environment: EnvVars) -> EnvVars:
             """Point a Codex session at a home carrying this project's policy.

@@ -7,7 +7,7 @@ invisible to the agent.
 
 from pathlib import Path
 
-from lup.hooks import (
+from lup.policy.hooks import (
     LupHookInput,
     LupHooksConfig,
     create_git_inspection_hook,

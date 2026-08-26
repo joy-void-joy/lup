@@ -14,7 +14,7 @@ from types import ModuleType
 import pytest
 import sh
 
-from lup.adapters.claude.hooks import claude_placed_input
+from lup.providers.claude.hooks import claude_placed_input
 from lup.policy.grants import allowance_grants_environment, write_allowance_grants
 from lup.policy.identity import AGENT_IDENTITY_ENV, ConcernAllowance
 from lup.policy.kernel.decision import SandboxPlacement

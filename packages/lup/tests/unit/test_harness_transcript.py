@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from lup.adapters.claude.transcripts import ClaudeTranscripts
+from lup.providers.claude.transcripts import ClaudeTranscripts
 from lup.devtools.harness import launch
 from lup.observability.audit import read_observable_events
 

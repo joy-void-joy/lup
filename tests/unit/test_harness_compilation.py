@@ -19,18 +19,18 @@ from pydantic import BaseModel, Field
 from lup.tools.lsp.tools import CODEINTEL_TOOL_DECLARATIONS
 from lup.policy.identity import AGENT_IDENTITY_ENV
 from lup.types import JsonObject
-from lup.adapters.claude.harness import CLAUDE_DISPATCHER, ClaudeSpellings
-from lup.adapters.codex.harness import (
+from lup.providers.claude.harness import CLAUDE_DISPATCHER, ClaudeSpellings
+from lup.providers.codex.harness import (
     CODEX_DISPATCHER,
     CodexSpellings,
     codex_project_config,
 )
-from lup.adapters.codex.harness_runtime import (
+from lup.providers.codex.harness_runtime import (
     PluginCacheConfig,
     directory_digest,
     plugin_cache_evidence,
 )
-from lup.adapters.harness import (
+from lup.providers.harness import (
     claude_prompt_renderer,
     codex_prompt_renderer,
     compile_claude,
@@ -39,12 +39,12 @@ from lup.adapters.harness import (
 )
 from lup.devtools.dev.check import budget_reports, scaffold_budget_report
 from lup.workspace.paths import is_template_scaffold
-from lup.codescan.registry import RULE_REFERENCE
+from lup.harness.codescan.registry import RULE_REFERENCE
 from lup.devtools.dev.commands import COMMAND_REFERENCE
 from lup.devtools.harness.generated_paths import GENERATED_PATHS
 from lup.devtools.harness.drift import roster_gaps
 from lup.devtools.harness.settings import served_tool_grants
-from lup.harness.banner import (
+from lup.banner import (
     ARTIFACT_COMMENT_ROUTER,
     COMMENT_FREE,
     REGENERATE_COMMAND,
@@ -215,13 +215,13 @@ class ShippedDispatcher(BaseModel, frozen=True):
 SHIPPED_DISPATCHERS: dict[str, ShippedDispatcher] = {
     "claude": ShippedDispatcher(
         declaration=CLAUDE_DISPATCHER,
-        asset=Path("packages/lup/src/lup/adapters/claude/assets/policy_dispatcher.py"),
+        asset=Path("packages/lup/src/lup/providers/claude/assets/policy_dispatcher.py"),
         script=Path(".claude/plugins/lup/hooks/scripts/policy.py"),
         runtime=Path(".claude/plugins/lup/hooks/runtime"),
     ),
     "codex": ShippedDispatcher(
         declaration=CODEX_DISPATCHER,
-        asset=Path("packages/lup/src/lup/adapters/codex/assets/policy_dispatcher.py"),
+        asset=Path("packages/lup/src/lup/providers/codex/assets/policy_dispatcher.py"),
         script=Path(".codex/plugins/lup/hooks/scripts/policy.py"),
         runtime=Path(".codex/plugins/lup/hooks/runtime"),
     ),
@@ -2744,7 +2744,9 @@ def test_declared_exclusions_cover_the_commands_the_boundary_cannot_carry() -> N
     ):
         assert sandbox_excluded(command, excluded), command
     assert not sandbox_excluded("uv run pytest -q", excluded)
-    assert not sandbox_excluded("uv run lup-devtools py info lup.hooks", excluded)
+    assert not sandbox_excluded(
+        "uv run lup-devtools py info lup.policy.hooks", excluded
+    )
 
 
 def test_claude_sandbox_widens_the_writable_set_to_sibling_worktrees(

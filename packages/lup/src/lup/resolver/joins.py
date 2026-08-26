@@ -66,7 +66,7 @@ from lup.resolver.questions import QuestionBroker
 from lup.resolver.run import ResolveRun, ResolverInvariantError
 from lup.resolver.turns import TurnRunner
 from lup.resolver.verification import Verifier
-from lup.runtime.models import TurnInput, turn_request
+from lup.sessions.events import TurnInput, turn_request
 
 
 def asked_rulings(

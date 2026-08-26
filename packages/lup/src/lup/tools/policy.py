@@ -145,7 +145,7 @@ class BaseToolPolicy:
         Combines the engine's *builtin_tools*, framework tools, and the
         ``mcp__{server}__{tool}`` name of every tool on the registered
         *servers*, minus policy-excluded names. Feed the result to
-        :func:`lup.hooks.create_tool_allowlist_hook` — under
+        :func:`lup.policy.hooks.create_tool_allowlist_hook` — under
         ``permission_mode="bypassPermissions"`` the SDK's ``allowed_tools``
         option is ignored, so that hook is the enforcement point.
 

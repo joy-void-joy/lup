@@ -35,7 +35,7 @@ from lup.orchestration.actors.cohort import ActorCohort, CohortEntry
 from lup.orchestration.actors.mail import MailEventBase
 from lup.orchestration.actors.refs import ActorRef
 from lup.orchestration.actors.roster import SpawnedActor
-from lup.runtime.models import TurnMessage
+from lup.sessions.events import TurnMessage
 from lup.types import JsonObject
 
 type ProgressKind = Literal[

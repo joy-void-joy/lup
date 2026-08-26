@@ -13,8 +13,8 @@ import sh
 import typer
 from pydantic import BaseModel
 
-from lup.adapters.harness import guidance_artifacts
-from lup.codescan.markers import find_feedback
+from lup.providers.harness import guidance_artifacts
+from lup.harness.codescan.markers import find_feedback
 from lup.harness.models import (
     GUIDANCE_BYTE_BUDGET,
     TEMPLATE_GUIDANCE_HEADROOM,

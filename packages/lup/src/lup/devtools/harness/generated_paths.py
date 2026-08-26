@@ -24,9 +24,9 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import lup.harness.models as models
-from lup.adapters.harness import claude_prompt_renderer
+from lup.providers.harness import claude_prompt_renderer
 from lup.devtools.harness.composition import NativeTargets
-from lup.harness.banner import GeneratedBanner
+from lup.banner import GeneratedBanner
 from lup.harness.materialization import write_generated_file
 from lup.harness.models import Artifact, PromptDocument, TextPart
 from lup.markdown import CodeCell, PlainCell, TableCell

@@ -4,7 +4,7 @@ import contextvars
 import threading
 from functools import partial
 
-from lup.runtime.threads import run_sync
+from lup.execution.threads import run_sync
 
 CURRENT_SPAN: contextvars.ContextVar[str] = contextvars.ContextVar("current_span")
 

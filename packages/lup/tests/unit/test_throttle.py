@@ -5,7 +5,7 @@ import time
 
 import pytest
 
-from lup.resilience.throttle import Throttle
+from lup.execution.resilience.throttle import Throttle
 
 
 @pytest.mark.asyncio

@@ -17,7 +17,7 @@ the arguments supplied with this skill invocation
   and native-boundary contracts; `policy/shell_rules.py` owns the shape a shell
   vocabulary takes and its erasure to kernel rows, like the fetch scopes and
   anti-pattern set.
-- `packages/lup/src/lup/codescan/` owns the rule families — anti-patterns
+- `packages/lup/src/lup/harness/codescan/` owns the rule families — anti-patterns
   (`antipatterns.py`), boundary/spelling seams (`boundaries.py`), capability
   architecture (`capabilities.py`) — indexed by `registry.py` and rendered
   into `docs/rules.md` by `uv run lup-devtools dev rules`.

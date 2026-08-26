@@ -27,11 +27,11 @@ from pathlib import Path
 import pytest
 from pydantic import BaseModel, Field
 
-from lup.adapters.codex.runtime import CodexSessionConfig, create_codex
-from lup.adapters.codex.selection import CODEX_RUNTIME
+from lup.providers.codex.runtime import CodexSessionConfig, create_codex
+from lup.providers.codex.selection import CODEX_RUNTIME
 from lup.client import Client
-from lup.runtime.models import turn_request
-from lup.runtime.selection import SessionRequest
+from lup.sessions.events import turn_request
+from lup.providers.selection import SessionRequest
 from lup.workspace.paths import find_project_root
 
 pytestmark = pytest.mark.integration

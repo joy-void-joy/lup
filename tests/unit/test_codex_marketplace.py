@@ -14,7 +14,7 @@ project at all, and for an agent it usually is not.
 import json
 from pathlib import Path
 
-from lup.adapters.codex.marketplace import MARKETPLACE_MANIFEST, CodexMarketplace
+from lup.providers.codex.marketplace import MARKETPLACE_MANIFEST, CodexMarketplace
 
 DECLARATION = {
     "name": "example-repository",

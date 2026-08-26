@@ -24,7 +24,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from lup.client import Client, Provider, create_client
-from lup.runtime.models import (
+from lup.sessions.events import (
     SessionHandle,
     SessionId,
     TurnHandle,
@@ -36,8 +36,8 @@ from lup.runtime.models import (
 )
 
 if TYPE_CHECKING:
-    from lup.adapters.claude.runtime import create_claude
-    from lup.adapters.codex.runtime import create_codex
+    from lup.providers.claude.runtime import create_claude
+    from lup.providers.codex.runtime import create_codex
 
 # Where each deferred name actually lives, so the resolution below is a lookup
 # rather than a branch per provider -- a third adapter is one row.
@@ -47,8 +47,8 @@ if TYPE_CHECKING:
 # an adopter replaced would point `from lup import create_claude` at something
 # lup never wrote.
 CONSTRUCTORS = {
-    "create_claude": "lup.adapters.claude.runtime",
-    "create_codex": "lup.adapters.codex.runtime",
+    "create_claude": "lup.providers.claude.runtime",
+    "create_codex": "lup.providers.codex.runtime",
 }
 
 

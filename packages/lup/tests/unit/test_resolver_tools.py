@@ -275,7 +275,7 @@ def lease_with(tmp_path: Path, *, tracked: str, edits: dict[str, str]) -> Path:
     ):
         # Identity per invocation, never `git config` — a misbound command then
         # writes nothing, where a persisted setting lands in the shared config
-        # every worktree of a real repository inherits (see `lup.gitguard`).
+        # every worktree of a real repository inherits (see `lup.devtools.gitguard`).
         status = launcher.launch(
             LaunchRequest(
                 arguments=[

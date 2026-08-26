@@ -15,8 +15,8 @@ from collections.abc import Awaitable, Callable
 from pydantic import BaseModel, Field
 
 from lup.client import Client
-from lup.runtime.errors import TurnError
-from lup.runtime.models import TurnRequest, TurnResult
+from lup.sessions.errors import TurnError
+from lup.sessions.events import TurnRequest, TurnResult
 
 logger = logging.getLogger(__name__)
 

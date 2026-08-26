@@ -6,7 +6,7 @@ Lup uses one independently constructible capability per ABC. A capability has
 one to three cohesive abstract behavior methods, no concrete behavior or
 properties, inherits only `ABC` plus typing generics, and is never combined
 with another capability through multiple inheritance. Small callbacks remain
-typed callables. `lup.codescan.capabilities` enforces the mechanical shape
+typed callables. `lup.harness.codescan.capabilities` enforces the mechanical shape
 across resolved project imports with the audited `abc-capability` rule.
 
 Rich behavior is explicit data flow. `SessionHandle` contains a `Session` and

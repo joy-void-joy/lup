@@ -16,11 +16,11 @@ from pathlib import Path
 
 import pytest
 
-from lup.adapters.claude.harness import ClaudePluginManifestRenderer
-from lup.adapters.codex.harness import CodexPluginManifestRenderer
+from lup.providers.claude.harness import ClaudePluginManifestRenderer
+from lup.providers.codex.harness import CodexPluginManifestRenderer
 from lup.harness.models import Plugin
-from lup.adapters.claude.harness_runtime import ClaudeCapabilityProbe
-from lup.adapters.codex.harness_runtime import (
+from lup.providers.claude.harness_runtime import ClaudeCapabilityProbe
+from lup.providers.codex.harness_runtime import (
     CodexCapabilityProbe,
     CodexPluginInstaller,
     PluginCacheConfig,

@@ -40,7 +40,7 @@ Examples:
     Create a Stop hook to keep the agent in a persistent loop::
 
         >>> from lup.orchestration.realtime.scheduler import create_stop_guard
-        >>> from lup.hooks import merge_hooks
+        >>> from lup.policy.hooks import merge_hooks
         >>> hooks = merge_hooks(permission_hooks, create_stop_guard())
 """
 
@@ -52,7 +52,7 @@ from typing import TypedDict
 
 from pydantic import BaseModel, Field
 
-from lup.hooks import LupHookInput, LupHooksConfig, create_tool_gate
+from lup.policy.hooks import LupHookInput, LupHooksConfig, create_tool_gate
 from lup.orchestration.reflection import ReflectionGate
 
 logger = logging.getLogger(__name__)
@@ -435,7 +435,7 @@ class Scheduler:
 def create_stop_guard() -> LupHooksConfig:
     """Create a Stop hook that prevents the agent from ending its turn.
 
-    **What:** Preset over :func:`lup.hooks.create_tool_gate` — blocks the
+    **What:** Preset over :func:`lup.policy.hooks.create_tool_gate` — blocks the
     Stop event with a redirect to the ``sleep`` tool, unless the SDK
     reports ``stop_hook_active`` (the guard already fired during this
     stop sequence; passing through avoids an infinite block loop).
@@ -452,7 +452,7 @@ def create_stop_guard() -> LupHooksConfig:
 
     Usage:
         from lup.orchestration.realtime.scheduler import create_stop_guard
-        from lup.hooks import merge_hooks
+        from lup.policy.hooks import merge_hooks
 
         hooks = merge_hooks(permission_hooks, create_stop_guard())
     """
@@ -476,7 +476,7 @@ def create_pending_event_guard(
 ) -> LupHooksConfig:
     """Create a PreToolUse hook that blocks timing tools when unread events exist.
 
-    **What:** Preset over :func:`lup.hooks.create_tool_gate` — blocks the
+    **What:** Preset over :func:`lup.policy.hooks.create_tool_gate` — blocks the
     guarded timing tools while unread events exist, with the live count
     in the denial message. Unlocked when the call forces through
     (``force=true``), starts its own debounce window, a debounce window
@@ -526,7 +526,7 @@ def create_meta_before_sleep_guard(
 ) -> LupHooksConfig:
     """Create a PreToolUse hook that requires meta before sleep.
 
-    Preset over :func:`lup.hooks.create_tool_gate`, via
+    Preset over :func:`lup.policy.hooks.create_tool_gate`, via
     :func:`~lup.orchestration.reflection.create_reflection_gate`, for the persistent
     agent pattern. Forces the agent to call the ``meta`` tool (process
     self-assessment) before every sleep. The gate resets automatically

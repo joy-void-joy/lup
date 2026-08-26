@@ -12,21 +12,21 @@ from pathlib import Path
 import pytest
 from pydantic import BaseModel
 
-from lup.runtime.composition import (
+from lup.sessions.composition import (
     AcceptedTurn,
     CompletedTurn,
     CompleteTurn,
     ComposedSession,
 )
-from lup.runtime.errors import (
+from lup.sessions.errors import (
     BudgetExceededError,
     ProviderTurnError,
     StructuredOutputError,
     TurnFailure,
     TurnTimeoutError,
 )
-from lup.runtime.contracts import EventStream, Steer
-from lup.runtime.models import (
+from lup.sessions.capabilities import EventStream, Steer
+from lup.sessions.events import (
     BlockCompletedEvent,
     LiveTurnEvent,
     SessionId,
@@ -39,7 +39,7 @@ from lup.runtime.models import (
     TurnToolResultBlock,
     turn_request,
 )
-from lup.runtime.wrappers import (
+from lup.sessions.middleware import (
     BudgetConfig,
     CorrectionConfig,
     DecoratingSession,
@@ -445,7 +445,7 @@ async def test_trace_usage_and_display_observe_one_complete_logical_turn() -> No
 
     async def start(_text: str) -> AcceptedTurn:
         async def complete() -> CompletedTurn:
-            from lup.runtime.models import TurnMessage, TurnTextBlock
+            from lup.sessions.events import TurnMessage, TurnTextBlock
 
             block = TurnTextBlock(text="done")
             return CompletedTurn(

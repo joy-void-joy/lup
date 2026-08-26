@@ -63,10 +63,10 @@ from lup.orchestration.actors.sessions import (
     create_inbox_hooks,
 )
 from lup.channels.models import Door, publish_atomic, utc_now
-from lup.hooks import LupHooksConfig
+from lup.policy.hooks import LupHooksConfig
 from lup.observability.journal import Journal, JournalRecord
 from lup.client import Client
-from lup.runtime.models import TurnRequest, TurnResult
+from lup.sessions.events import TurnRequest, TurnResult
 
 logger = logging.getLogger(__name__)
 

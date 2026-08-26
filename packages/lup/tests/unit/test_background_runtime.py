@@ -8,10 +8,10 @@ import pytest
 from pydantic import BaseModel
 
 from lup.orchestration.background import BackgroundAgent, BackgroundConfig
-from lup.runtime.composition import AcceptedTurn, CompletedTurn, ComposedSession
+from lup.sessions.composition import AcceptedTurn, CompletedTurn, ComposedSession
 from lup.client import Client
-from lup.runtime.errors import TurnError
-from lup.runtime.models import (
+from lup.sessions.errors import TurnError
+from lup.sessions.events import (
     SessionHandle,
     SessionId,
     TurnIdentifiers,

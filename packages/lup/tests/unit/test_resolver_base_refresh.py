@@ -48,7 +48,7 @@ class Repository:
         # Identity per invocation rather than written once with `git config`:
         # a misbound command then writes nothing, where a persisted setting
         # lands in the shared config every worktree of a real repository
-        # inherits. See `lup.gitguard` for the run that found this out.
+        # inherits. See `lup.devtools.gitguard` for the run that found this out.
         status = self.launcher.launch(
             LaunchRequest(
                 arguments=[

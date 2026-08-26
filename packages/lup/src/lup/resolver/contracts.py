@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable
 from pathlib import Path
 
-from lup.runtime.errors import TurnError
+from lup.sessions.errors import TurnError
 from lup.resolver.models import (
     ConcernProgress,
     MaterialQuestion,

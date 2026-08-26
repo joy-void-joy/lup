@@ -16,8 +16,8 @@ from here is deleted as unowned. Nothing beneath ``docs/`` is hand-written.
 from pathlib import Path
 
 import lup.harness.models as models
-from lup.adapters.claude.harness import CLAUDE_DISPATCHER
-from lup.adapters.codex.harness import CODEX_DISPATCHER
+from lup.providers.claude.harness import CLAUDE_DISPATCHER
+from lup.providers.codex.harness import CODEX_DISPATCHER
 from lup.devtools.harness.content.docs.catalog import library_documents, published
 from lup_template.devtools.harness.content.catalog import (
     AGENTS,

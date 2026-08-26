@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from lup.adapters.claude.config_home import (
+from lup.providers.claude.config_home import (
     CLAUDE_BACKUP_DIR,
     CLAUDE_CONFIG_FILE,
     CLAUDE_HOME_LAYOUT,
@@ -24,8 +24,8 @@ from lup.adapters.claude.config_home import (
     untrusted_degradation,
     workspace_config_environment,
 )
-from lup.adapters.claude.login import CLAUDE_CONFIG_DIR
-from lup.runtime.session_home import SessionHomes
+from lup.providers.claude.login import CLAUDE_CONFIG_DIR
+from lup.providers.session_home import SessionHomes
 
 SEEDED_PROJECT = "/already/trusted"
 

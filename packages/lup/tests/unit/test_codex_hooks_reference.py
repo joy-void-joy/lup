@@ -14,7 +14,7 @@ from pathlib import Path
 
 import sh
 
-from lup.hooks import (
+from lup.policy.hooks import (
     LupHookInput,
     LupHookMatcher,
     LupHookOutput,

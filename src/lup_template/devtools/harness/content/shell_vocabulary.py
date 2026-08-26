@@ -35,7 +35,7 @@ from lup.policy.vocabulary import (
     runner_target_rules,
     typescript_rule,
 )
-from lup.selection import Selection
+from lup.tables import Selection
 
 
 def lup_devtools_rule() -> ShellCommandRule:

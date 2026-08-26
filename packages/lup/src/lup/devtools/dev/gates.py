@@ -1,5 +1,5 @@
 # lup: ignore[import-re, re-call]
-# The marker head this reads is `lup.codescan.markers` syntax, matched the way
+# The marker head this reads is `lup.harness.codescan.markers` syntax, matched the way
 # that module matches the rest of it; no format with a parser of its own is
 # involved on either side.
 """The wake conditions a deferral states, in spellings the checker resolves.
@@ -56,7 +56,7 @@ from typing import ClassVar
 import sh
 from pydantic import BaseModel
 
-from lup.codescan.markers import MarkerComment, find_feedback, scan_mode_for
+from lup.harness.codescan.markers import MarkerComment, find_feedback, scan_mode_for
 from lup.devtools.dev.branches import get_integration_branch, is_ancestor
 from lup.devtools.dev.comments import FoundComment
 from lup.devtools.utils import git

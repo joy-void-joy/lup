@@ -59,7 +59,7 @@ from lup.resolver.run import ResolveRun
 from lup.resolver.state import ResolverStateRepository
 from lup.resolver.turns import TurnRunner
 from lup.resolver.verification import Verifier, rejection_reason
-from lup.runtime.errors import TurnError
+from lup.sessions.errors import TurnError
 
 
 class ConcernExecutor:

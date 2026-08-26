@@ -38,8 +38,8 @@ from pathlib import Path
 import typer
 
 import lup_template.agent.prompts as prompts
-from lup.adapters.claude.usage.reader import claude_usage_entry
-from lup.adapters.codex.usage.reader import codex_usage_entry
+from lup.providers.claude.usage.reader import claude_usage_entry
+from lup.providers.codex.usage.reader import codex_usage_entry
 from lup.devtools.dev import conflicts
 from lup.devtools.dev.commands import write_command_reference
 from lup.devtools.feedback.models import AgentPrompt

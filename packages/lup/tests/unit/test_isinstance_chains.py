@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from lup.codescan.common import PythonSource
-from lup.codescan.narrowing import RULE_ID, audit_isinstance_chains
+from lup.harness.codescan.common import PythonSource
+from lup.harness.codescan.narrowing import RULE_ID, audit_isinstance_chains
 
 
 def source(text: str, name: str = "sample") -> PythonSource:

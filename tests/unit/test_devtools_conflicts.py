@@ -19,7 +19,7 @@ from pathlib import Path
 import pytest
 import sh
 
-from lup.adapters.harness import claude_prompt_renderer
+from lup.providers.harness import claude_prompt_renderer
 from lup.types import JsonObject
 from lup.workspace import paths
 from lup.devtools.dev import conflicts

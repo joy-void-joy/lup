@@ -11,7 +11,7 @@ from uuid import UUID
 import pytest
 from pydantic import BaseModel, Field, ValidationError
 
-from lup.adapters.claude.runtime import (
+from lup.providers.claude.runtime import (
     SESSION_THINKING_TOKENS,
     ClaudeConversationState,
     ClaudeFork,
@@ -29,8 +29,8 @@ from lup.adapters.claude.runtime import (
     may_be_a_rotation,
     needs_a_person,
 )
-from lup.adapters.codex.app_server import CodexAppServer, RpcMessage, RpcNotification
-from lup.adapters.codex.runtime import (
+from lup.providers.codex.app_server import CodexAppServer, RpcMessage, RpcNotification
+from lup.providers.codex.runtime import (
     CodexConversationState,
     CodexMcpServerConfig,
     CodexSchemaRebindingError,
@@ -45,10 +45,10 @@ from lup.adapters.codex.runtime import (
     message_role,
     notification_turn_id,
 )
-from lup.hooks import create_permission_hooks
-from lup.runtime.errors import ProviderTurnError, TurnInterruptedError
+from lup.policy.hooks import create_permission_hooks
+from lup.sessions.errors import ProviderTurnError, TurnInterruptedError
 from lup.types import JsonObject, JsonValue, SubagentSpec
-from lup.runtime.models import (
+from lup.sessions.events import (
     AnyTurnBlock,
     BlockCompletedEvent,
     BlockDeltaEvent,
@@ -69,7 +69,7 @@ from lup.runtime.models import (
     TurnToolCallBlock,
     TurnToolResultBlock,
 )
-from lup.runtime.output import InMemorySubmittedOutputStore, TurnSubmission
+from lup.sessions.output import InMemorySubmittedOutputStore, TurnSubmission
 from lup.observability.cost import per_mtok_usage_cost
 from lup.types import Usage
 from tests.unit.test_adapter_transforms import arm_labels, decoder_arms

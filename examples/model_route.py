@@ -3,7 +3,7 @@
 import asyncio
 
 from lup import Client, create_claude, create_codex
-from lup.runtime.routing import ModelRoute, ModelRouter, PrefixModelMatcher
+from lup.providers.routing import ModelRoute, ModelRouter, PrefixModelMatcher
 
 from examples.common import Summary
 

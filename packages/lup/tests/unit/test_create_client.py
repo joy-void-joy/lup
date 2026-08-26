@@ -83,7 +83,7 @@ def test_routing_to_one_vendor_leaves_the_other_adapter_unloaded() -> None:
             "-c",
             "import sys; from lup import create_client; "
             "create_client('claude-opus-5'); "
-            "print('lup.adapters.codex.runtime' in sys.modules, "
+            "print('lup.providers.codex.runtime' in sys.modules, "
             "'claude_agent_sdk' in sys.modules)",
         ],
         capture_output=True,

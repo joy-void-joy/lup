@@ -12,7 +12,7 @@ rather than at the day somebody tries the example, and it is deliberately about
 *construction* rather than about adapter imports in general: an example whose
 whole subject is provider-specific policy legitimately names
 `ClaudeSessionConfig`. What none of them may do is reach past the root to build
-a client, because a reader who has to know `lup.adapters.claude.runtime` exists
+a client, because a reader who has to know `lup.providers.claude.runtime` exists
 has already been failed.
 """
 

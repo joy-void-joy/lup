@@ -15,7 +15,7 @@ clearing.
 from collections import defaultdict
 from pathlib import Path
 
-from lup.codescan.markers import NoteTarget, remove_notes, scan_mode_for
+from lup.harness.codescan.markers import NoteTarget, remove_notes, scan_mode_for
 from lup.resolver.models import Concern, NoteClearance, ReviewNote
 
 

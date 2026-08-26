@@ -46,9 +46,9 @@ from lup.resolver.questions import QuestionBroker
 from lup.resolver.run import ResolveRun
 from lup.resolver.state import ResolverStateRepository
 from lup.resolver.turns import TurnRunner
-from lup.runtime.contracts import Session
+from lup.sessions.capabilities import Session
 from lup.client import Client
-from lup.runtime.models import TurnHandle, TurnRequest
+from lup.sessions.events import TurnHandle, TurnRequest
 from tests.unit.doubles import session_factory
 
 NEW_DEVTOOLS = PathRule(

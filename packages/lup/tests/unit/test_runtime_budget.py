@@ -4,14 +4,14 @@ from pathlib import Path
 
 import pytest
 
-from lup.runtime.budget import (
+from lup.sessions.budget import (
     FinancialBudgetConfig,
     FinancialBudgetEvent,
     FinancialBudgetSession,
     FinancialBudgetStore,
 )
-from lup.runtime.composition import AcceptedTurn, CompletedTurn, ComposedSession
-from lup.runtime.models import (
+from lup.sessions.composition import AcceptedTurn, CompletedTurn, ComposedSession
+from lup.sessions.events import (
     SessionId,
     TurnId,
     TurnIdentifiers,

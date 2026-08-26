@@ -11,7 +11,7 @@ import tomlkit
 from tomlkit.items import Table
 
 from lup.types import EnvVars
-from lup.adapters.codex.home import (
+from lup.providers.codex.home import (
     HOOKS_MANIFEST,
     CodexWorktreeHomeStore,
     declared_hook_records,
@@ -20,8 +20,8 @@ from lup.adapters.codex.home import (
     trust_project,
     untrusted_hooks,
 )
-from lup.adapters.codex.marketplace import CodexMarketplace
-from lup.adapters.codex.theme import (
+from lup.providers.codex.marketplace import CodexMarketplace
+from lup.providers.codex.theme import (
     TextMateStyle,
     TextMateThemeDocument,
     claude_daltonized_theme,

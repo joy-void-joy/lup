@@ -12,7 +12,7 @@ from typing import Annotated
 
 import typer
 
-from lup.runtime.profiles import Profile, ProfileDirectory
+from lup.providers.profiles import Profile, ProfileDirectory
 
 
 def create_profile_app(directory: ProfileDirectory) -> typer.Typer:

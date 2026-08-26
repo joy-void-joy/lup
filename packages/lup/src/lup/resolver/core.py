@@ -81,7 +81,7 @@ from lup.resolver.turns import (
     WorkerFactoryRecipe,
 )
 from lup.resolver.verification import Verifier
-from lup.runtime.models import TurnInput, turn_request
+from lup.sessions.events import TurnInput, turn_request
 
 
 logger = logging.getLogger(__name__)

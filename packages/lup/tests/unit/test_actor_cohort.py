@@ -16,10 +16,10 @@ from pydantic import BaseModel
 from lup.orchestration.actors.cohort import ActorCohort, ActorRecipe, CohortJournal
 from lup.orchestration.actors.mail import EVERYONE
 from lup.orchestration.actors.refs import ActorRef
-from lup.hooks import LupHooksConfig
-from lup.runtime.contracts import Session, Turn
+from lup.policy.hooks import LupHooksConfig
+from lup.sessions.capabilities import Session, Turn
 from lup.client import Client
-from lup.runtime.models import (
+from lup.sessions.events import (
     TurnHandle,
     TurnInput,
     TurnRequest,

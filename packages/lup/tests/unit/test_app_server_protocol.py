@@ -27,7 +27,7 @@ import sh
 
 from pydantic import ValidationError
 
-from lup.adapters.codex.app_server import (
+from lup.providers.codex.app_server import (
     AppServerError,
     CodexAppServer,
     RpcError,

@@ -5,7 +5,7 @@ what an adapter refuses or supports and this test fails until the README
 table is regenerated, so documentation cannot drift from code.
 """
 
-from lup.adapters.capabilities import (
+from lup.providers.capabilities import (
     canonical_capability_matrix,
     capability_matrix,
 )

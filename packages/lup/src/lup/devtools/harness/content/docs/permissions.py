@@ -391,7 +391,7 @@ identically to the library.
 
 1. **Canonical sources** — the `HookSet` in `devtools/harness/catalog.py`
    (protected edit roots, allowed fetch scopes, policy ids, and the shell and
-   edit selections), the anti-pattern rule set in `lup.codescan.antipatterns`,
+   edit selections), the anti-pattern rule set in `lup.harness.codescan.antipatterns`,
    and the offered shell vocabulary in `lup.policy.vocabulary`. Each selection
    is resolved by `HookSet.resolved_shell_rules` and
    `HookSet.resolved_edit_rules` and nowhere else: a second place that knew

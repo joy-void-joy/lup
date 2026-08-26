@@ -15,15 +15,15 @@ from typer.testing import CliRunner
 
 import lup.devtools.dev.rules as rules_mod
 import lup_template.devtools.harness.catalog as catalog
-from lup.adapters.claude.harness import ClaudeSpellings
-from lup.adapters.harness import claude_prompt_renderer
-from lup.codescan.antipatterns import (
+from lup.providers.claude.harness import ClaudeSpellings
+from lup.providers.harness import claude_prompt_renderer
+from lup.harness.codescan.antipatterns import (
     DOCUMENT_IN_HAND,
     AntiPatternSet,
     antipattern_set_for,
 )
-from lup.codescan.common import RuleSelection
-from lup.codescan.registry import all_rules
+from lup.harness.codescan.common import RuleSelection
+from lup.harness.codescan.registry import all_rules
 from lup.devtools.dev.app import create_dev_app
 from lup.devtools.dev.rules import RULE_REFERENCE_PATH, rule_reference_document
 from lup_template.devtools.dev.app import declared as declared_here

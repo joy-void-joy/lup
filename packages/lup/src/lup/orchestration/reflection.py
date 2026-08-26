@@ -18,7 +18,7 @@ This module provides the domain-neutral gate mechanism:
 The reflection *tool* and its input model are domain-specific and belong
 in ``agent/tools/``. This module only provides the enforcement mechanism.
 
-Hook factories that enforce the gate live in :mod:`lup.hooks` (SDK-agnostic).
+Hook factories that enforce the gate live in :mod:`lup.policy.hooks` (SDK-agnostic).
 Each adapter converts these to its native hook format.
 
 One-shot agents: gate ``StructuredOutput`` on reflection.
@@ -28,7 +28,7 @@ Examples:
     Gate ``StructuredOutput`` until the agent has reflected::
 
         >>> from lup.orchestration.reflection import ReflectionGate
-        >>> from lup.hooks import create_reflection_gate, merge_hooks
+        >>> from lup.policy.hooks import create_reflection_gate, merge_hooks
         >>> gate = ReflectionGate()
         >>> gate_hooks = create_reflection_gate(
         ...     gate=gate,
@@ -55,13 +55,13 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field
 
-from lup.hooks import LupHooksConfig, create_tool_gate
+from lup.policy.hooks import LupHooksConfig, create_tool_gate
 
 
 class ReflectionGate:
     """Tracks whether the agent has reflected in the current cycle.
 
-    Used by :func:`~lup.hooks.create_reflection_gate` to enforce
+    Used by :func:`~lup.policy.hooks.create_reflection_gate` to enforce
     "reflect before X" patterns. The reflection tool handler calls :meth:`mark_reflected`
     after saving reflection data. The orchestration layer calls
     :meth:`reset` when a new cycle begins (e.g., after each agent action
@@ -203,7 +203,7 @@ def create_reflection_gate(
 ) -> LupHooksConfig:
     """Create a PreToolUse hook that denies *gated_tool* until reflection.
 
-    **What:** Preset over :func:`lup.hooks.create_tool_gate` — denies
+    **What:** Preset over :func:`lup.policy.hooks.create_tool_gate` — denies
     *gated_tool* with a message naming *reflection_tool_name* while
     ``gate.reflected`` is False, and explicitly allows it afterwards.
 

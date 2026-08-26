@@ -22,10 +22,10 @@ from datetime import timedelta
 import pytest
 from pydantic import BaseModel
 
-from lup.runtime.contracts import EventStream, Session, Turn
-from lup.runtime.errors import StructuredOutputError, TurnFailure
+from lup.sessions.capabilities import EventStream, Session, Turn
+from lup.sessions.errors import StructuredOutputError, TurnFailure
 from lup.client import Client
-from lup.runtime.models import (
+from lup.sessions.events import (
     MessageCompletedEvent,
     SessionHandle,
     SessionId,
@@ -38,7 +38,7 @@ from lup.runtime.models import (
     TurnTextBlock,
     turn_request,
 )
-from lup.runtime.wrappers import CorrectionConfig, decorated_session_factory
+from lup.sessions.middleware import CorrectionConfig, decorated_session_factory
 from lup.types import Usage
 
 IDENTIFIERS = TurnIdentifiers(

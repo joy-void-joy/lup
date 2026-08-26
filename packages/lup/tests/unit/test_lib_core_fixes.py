@@ -44,7 +44,7 @@ from lup.orchestration.realtime.relay import RealtimeMailbox, ReplyEvent, Remind
 from lup.orchestration.reflection import ReflectionGate
 from lup.sandbox.container import Sandbox
 from lup.sandbox.process import process_is_alive, process_start_token
-from lup.resilience.throttle import Throttle
+from lup.execution.resilience.throttle import Throttle
 
 HAVE_PROC = Path("/proc/self/stat").exists()
 

@@ -9,8 +9,8 @@ findings rather than failing, so it needs a test that names the answer.
 
 from pathlib import Path
 
-from lup.codescan.dispatch import audit_own_model_dispatch
-from lup.codescan.common import PythonSource, module_name
+from lup.harness.codescan.dispatch import audit_own_model_dispatch
+from lup.harness.codescan.common import PythonSource, module_name
 from lup.devtools.dev.antipatterns import scanned_roots
 from lup.devtools.project import DevProject
 

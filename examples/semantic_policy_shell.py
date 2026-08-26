@@ -15,9 +15,9 @@ import asyncio
 from pydantic import AnyHttpUrl
 
 from lup import create_claude
-from lup.adapters.claude.hooks import CLAUDE_SEMANTICS
-from lup.adapters.claude.runtime import ClaudeSandboxConfig, ClaudeSessionConfig
-from lup.hooks import LupHooksConfig
+from lup.providers.claude.hooks import CLAUDE_SEMANTICS
+from lup.providers.claude.runtime import ClaudeSandboxConfig, ClaudeSessionConfig
+from lup.policy.hooks import LupHooksConfig
 from lup.policy.enforcement import SemanticToolPolicy, create_policy_hooks
 from lup.policy.rules import ShellPolicy, UrlScope
 from lup_template.devtools.harness.catalog import declared_hook_set

@@ -70,7 +70,7 @@ The repository-wide artifacts written outside every runtime tree — the rule an
 | `.claude/plugins/lup/hooks/runtime/kernel/tools.py` | lup.policy.kernel.tools |
 | `.claude/plugins/lup/hooks/runtime/kernel/words.py` | lup.policy.kernel.words |
 | `.claude/plugins/lup/hooks/runtime/policy_data.py` | lup.policy.bundle |
-| `.claude/plugins/lup/hooks/scripts/policy.py` | lup.policy.assets.host and lup.adapters.claude.assets.policy_dispatcher |
+| `.claude/plugins/lup/hooks/scripts/policy.py` | lup.policy.assets.host and lup.providers.claude.assets.policy_dispatcher |
 | `.claude/plugins/lup/scripts/file_suggest.sh` | src/lup_template/devtools/harness/content/assets/file_suggest.sh |
 | `.claude/settings.json` | lup_template.devtools.harness.content.settings |
 | `docs/README.md` | lup.devtools.harness.content.docs.index |
@@ -101,11 +101,11 @@ The repository-wide artifacts written outside every runtime tree — the rule an
 | `.codex/agents/trace-explorer.toml` | the portable agent declaration agent.trace-explorer |
 | `.codex/agents/version-explorer.toml` | the portable agent declaration agent.version-explorer |
 | `.codex/agents/version-reviewer.toml` | the portable agent declaration agent.version-reviewer |
-| `.codex/config.toml` | lup.adapters.codex.harness |
+| `.codex/config.toml` | lup.providers.codex.harness |
 | `.codex/plugins/lup/.codex-plugin/plugin.json` | plugin.lup |
 | `.codex/plugins/lup/TEMPLATE_AGENTS.md` | lup_template.devtools.harness.content.template_codex |
 | `.codex/plugins/lup/hooks/hooks.json` | hooks.lup-policy |
-| `.codex/plugins/lup/hooks/runtime/codex_patch.py` | lup.adapters.codex.patch |
+| `.codex/plugins/lup/hooks/runtime/codex_patch.py` | lup.providers.codex.patch |
 | `.codex/plugins/lup/hooks/runtime/evidence.json` | hooks.lup-policy |
 | `.codex/plugins/lup/hooks/runtime/kernel/__init__.py` | lup.policy.kernel.__init__ |
 | `.codex/plugins/lup/hooks/runtime/kernel/archives.py` | lup.policy.kernel.archives |
@@ -121,7 +121,7 @@ The repository-wide artifacts written outside every runtime tree — the rule an
 | `.codex/plugins/lup/hooks/runtime/kernel/tools.py` | lup.policy.kernel.tools |
 | `.codex/plugins/lup/hooks/runtime/kernel/words.py` | lup.policy.kernel.words |
 | `.codex/plugins/lup/hooks/runtime/policy_data.py` | lup.policy.bundle |
-| `.codex/plugins/lup/hooks/scripts/policy.py` | lup.policy.assets.host and lup.adapters.codex.assets.policy_dispatcher |
+| `.codex/plugins/lup/hooks/scripts/policy.py` | lup.policy.assets.host and lup.providers.codex.assets.policy_dispatcher |
 | `.codex/plugins/lup/skills/add-command/SKILL.md` | lup.devtools.harness.content.skills.add_command |
 | `.codex/plugins/lup/skills/analyze/SKILL.md` | lup.devtools.harness.content.skills.analyze |
 | `.codex/plugins/lup/skills/brainstorm/SKILL.md` | lup_template.devtools.harness.content.skills.brainstorm |

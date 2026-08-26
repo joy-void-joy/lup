@@ -3,7 +3,7 @@
 Backs ``lup-devtools dev check --boundaries`` and ``--placement`` plus their
 standalone check rows. Inward, every git-tracked ``.py`` file outside the
 sanctioned homes (the adapters package, tests) runs through
-:mod:`lup.codescan.boundaries`; the tree is expected to hold zero breaches, and
+:mod:`lup.harness.codescan.boundaries`; the tree is expected to hold zero breaches, and
 this is the regression guard that keeps backend dispatch from creeping back
 outside the seam. Outward, every library module is checked for data tables an
 adopter cannot replace — those are open placement debt, so that row names the
@@ -16,7 +16,7 @@ import typer
 
 from pydantic import BaseModel
 
-from lup.codescan.boundaries import (
+from lup.harness.codescan.boundaries import (
     KERNEL_ROOT,
     LIBRARY_ROOT,
     BoundaryBreach,
@@ -32,7 +32,7 @@ from lup.policy.kernel.roles import path_role
 
 
 class FoundBreach(BoundaryBreach):
-    """A :class:`~lup.codescan.boundaries.BoundaryBreach` tagged with its file."""
+    """A :class:`~lup.harness.codescan.boundaries.BoundaryBreach` tagged with its file."""
 
     file: str
 

@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from lup.devtools.conversation.browser import login, require_playwright
 from lup.devtools.conversation.checkpoint import checkpoint_delivery
 from lup.devtools.conversation.errors import ConversationDownloadError
-from lup.runtime.profiles import ProfileDirectory
+from lup.providers.profiles import ProfileDirectory
 from lup.workspace.paths import project_root
 
 logger = logging.getLogger(__name__)

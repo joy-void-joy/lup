@@ -10,23 +10,23 @@ from pathlib import Path
 import pytest
 from pydantic import BaseModel
 
-from lup.adapters.codex.app_server import CodexAppServer, RpcNotification
-from lup.adapters.codex.runtime import (
+from lup.providers.codex.app_server import CodexAppServer, RpcNotification
+from lup.providers.codex.runtime import (
     CodexConversationState,
     CodexSessionConfig,
     CodexTurnChannel,
 )
-from lup.adapters.codex.hooks import (
+from lup.providers.codex.hooks import (
     CODEX_SEMANTICS,
     COMMAND_APPROVAL,
     FILE_CHANGE_APPROVAL,
     CodexApprovalResponder,
 )
-from lup.hooks import create_permission_hooks
+from lup.policy.hooks import create_permission_hooks
 from lup.policy.enforcement import SemanticToolPolicy, create_policy_hooks
 from lup.policy.rules import ShellPolicy
 from lup.policy.shell_rules import ShellCommandRule
-from lup.runtime.composition import (
+from lup.sessions.composition import (
     AcceptedTurn,
     CompletedTurn,
     ComposedSession,
@@ -34,16 +34,16 @@ from lup.runtime.composition import (
     TurnLifecycle,
     submission_gate_resolver,
 )
-from lup.runtime.contracts import Interrupt, TurnToolBinder
+from lup.sessions.capabilities import Interrupt, TurnToolBinder
 from lup.client import Client
-from lup.runtime.errors import (
+from lup.sessions.errors import (
     ProviderTurnError,
     StructuredOutputError,
     TurnAbortedError,
     TurnAlreadyActiveError,
     TurnInterruptedError,
 )
-from lup.runtime.models import (
+from lup.sessions.events import (
     SessionHandle,
     SessionId,
     TurnIdentifiers,
@@ -52,8 +52,8 @@ from lup.runtime.models import (
     TurnToolBinding,
     turn_request,
 )
-from lup.runtime.output import FileSubmittedOutputStore, submit_output
-from lup.runtime.output import InMemorySubmittedOutputStore
+from lup.sessions.output import FileSubmittedOutputStore, submit_output
+from lup.sessions.output import InMemorySubmittedOutputStore
 
 
 class OutputA(BaseModel, frozen=True):
@@ -78,7 +78,7 @@ class RecordingBinder(TurnToolBinder):
         async def erased_gate(
             value: BaseModel,  # lup: ignore[bare-basemodel] — test binder erasure
         ):
-            from lup.runtime.models import SubmissionDecision
+            from lup.sessions.events import SubmissionDecision
 
             if gate is None:
                 return SubmissionDecision(accepted=True)
@@ -155,7 +155,7 @@ async def test_schema_transitions_get_fresh_turn_local_stores() -> None:
         return accepted_turn(sequence)
 
     async def gate(value: OutputA):
-        from lup.runtime.models import SubmissionDecision
+        from lup.sessions.events import SubmissionDecision
 
         return SubmissionDecision(accepted=value.value > 0)
 
@@ -404,7 +404,7 @@ async def test_app_server_eof_fails_current_turn_with_partial_evidence(
     )
     channel = CodexTurnChannel("session")
     channel.turn_id = "turn"
-    from lup.runtime.models import TurnTextBlock
+    from lup.sessions.events import TurnTextBlock
 
     channel.blocks.append(TurnTextBlock(text="partial"))
     state.channel = channel
@@ -514,7 +514,7 @@ async def test_file_store_and_gate_share_validation(tmp_path: Path) -> None:
     store = FileSubmittedOutputStore(tmp_path / "turn" / "output.json")
 
     async def gate(value: OutputA):
-        from lup.runtime.models import SubmissionDecision
+        from lup.sessions.events import SubmissionDecision
 
         return SubmissionDecision(
             accepted=value.value > 0,
@@ -540,7 +540,7 @@ async def test_request_gate_is_bound_before_native_acceptance() -> None:
     binder = RecordingBinder()
 
     async def gate(value: OutputA):
-        from lup.runtime.models import SubmissionDecision
+        from lup.sessions.events import SubmissionDecision
 
         return SubmissionDecision(accepted=value.value > 0, message="reflect first")
 

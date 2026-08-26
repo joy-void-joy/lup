@@ -9,8 +9,8 @@ generated from the same declaration, so the roster is pinned here too.
 
 from pathlib import Path
 
-from lup.adapters.harness import claude_prompt_renderer
-from lup.codescan.markers import NoteKind
+from lup.providers.harness import claude_prompt_renderer
+from lup.harness.codescan.markers import NoteKind
 from lup.devtools.dev.comments import FoundComment
 from lup.devtools.harness.content.skills.report import SKILL
 from lup.devtools.report.build import note_items

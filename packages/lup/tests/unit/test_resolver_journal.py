@@ -4,7 +4,7 @@ from pathlib import Path
 
 from lup.orchestration.actors.refs import ActorRef
 from lup.resolver.journal import Journal
-from lup.runtime.models import (
+from lup.sessions.events import (
     BlockCompletedEvent,
     MessageCompletedEvent,
     SessionId,

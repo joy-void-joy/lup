@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from lup.hooks import (
+from lup.policy.hooks import (
     LupHookEvent,
     LupHookInput,
     LupHookOutput,

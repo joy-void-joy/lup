@@ -13,7 +13,7 @@ this subclass only maps the application's settings onto exclusions. See
 the base class for the tag-vs-name rule of thumb.
 
 Usage:
-    from lup.hooks import create_tool_allowlist_hook
+    from lup.policy.hooks import create_tool_allowlist_hook
     from lup_template.agent.config import settings
     from lup_template.agent.tool_policy import ToolPolicy
 

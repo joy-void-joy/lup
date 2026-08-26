@@ -25,7 +25,7 @@ returned list gave nobody a place to see which section was spending it —
 
 import lup.devtools.harness.content.conventions as conventions
 import lup.harness.models as models
-from lup.codescan.common import RuleSelection
+from lup.harness.codescan.common import RuleSelection
 
 HEADER: list[models.PromptPart] = [
     models.TextPart(

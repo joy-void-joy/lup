@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from lup.adapters.claude.profile_store import (
+from lup.providers.claude.profile_store import (
     AccountFile,
     ClaudeProfileNames,
     ClaudeProfileRegistrar,

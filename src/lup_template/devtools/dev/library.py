@@ -85,11 +85,11 @@ class ExecutionEnvironment(TypedDict):
 # runtime beside it on the search path. Both halves live under the package, so
 # the pair exists exactly when the library is vendored.
 # lup: ignore[constant-declaration] — the adapter packages lup actually ships,
-# so the value follows lup.adapters rather than any taste
+# so the value follows lup.providers rather than any taste
 RUNTIMES = ("claude", "codex")
 VENDORED_EXECUTION_ENVIRONMENTS = [
     ExecutionEnvironment(
-        root=f"{VENDORED_SRC}/lup/adapters/{runtime}/assets",
+        root=f"{VENDORED_SRC}/lup/providers/{runtime}/assets",
         extraPaths=[
             f".{runtime}/plugins/lup/hooks/runtime",
             f"{VENDORED_SRC}/lup/policy/assets",

@@ -39,7 +39,7 @@ from lup.harness.egress import PROXY_LABEL, SessionEgress
 from lup.harness.image import ContainerEngine, Image, detected_client
 from lup.harness.notice import Notice
 from lup.harness.requirements import Manifest
-from lup.runtime.login import ProviderLogin
+from lup.providers.login import ProviderLogin
 from lup.sandbox.attribution import WRITE_REFUSAL_MARKERS
 from lup.sandbox.rail import Lease, lease_for, repository_layout
 

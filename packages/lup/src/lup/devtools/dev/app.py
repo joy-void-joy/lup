@@ -38,8 +38,8 @@ import lup.devtools.dev.resolve_review as resolve_review
 import lup.devtools.dev.rules as rules
 import lup.devtools.dev.worktree as worktree
 import lup.devtools.harness.content.docs.upstream_reports as upstream_reports
-from lup.codescan.markers import NoteKind
-from lup.codescan.registry import all_rules
+from lup.harness.codescan.markers import NoteKind
+from lup.harness.codescan.registry import all_rules
 from lup.devtools.dev.conflict_app import create_conflict_app
 from lup.devtools.utils import output_json, repository_slug
 from lup.devtools.harness.composition import NativeTargets
@@ -493,7 +493,7 @@ def create_dev_app(
             typer.Option(
                 "--antipatterns",
                 help="Audit repository files for missing/spurious `# lup: ignore` "
-                "markers only — the same lup.codescan.antipatterns rules the edit "
+                "markers only — the same lup.harness.codescan.antipatterns rules the edit "
                 "hook enforces",
             ),
         ] = False,
@@ -502,7 +502,7 @@ def create_dev_app(
             typer.Option(
                 "--boundaries",
                 help="Scan for native adapter imports outside composition roots "
-                "only — the lup.codescan.boundaries guard the full check also runs",
+                "only — the lup.harness.codescan.boundaries guard the full check also runs",
             ),
         ] = False,
         placement: Annotated[
@@ -510,7 +510,7 @@ def create_dev_app(
             typer.Option(
                 "--placement",
                 help="List library data tables no adopter can replace only — the "
-                "lup.codescan.boundaries placement guard the full check also runs",
+                "lup.harness.codescan.boundaries placement guard the full check also runs",
             ),
         ] = False,
         stats: Annotated[
