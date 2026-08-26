@@ -445,7 +445,7 @@ class SessionHandle(BaseModel, frozen=True, arbitrary_types_allowed=True):
 
     Reaching a capability through this handle is not a consumer holding an
     ABC: the handle carries capabilities and no behaviour of its own, so
-    there is nothing for a composing surface to home. ``SessionFactory`` is
+    there is nothing for a composing surface to home. ``Client`` is
     the behavioural surface over these seams.
     """
 

@@ -1,9 +1,14 @@
-"""Repoint every import of a module that moved between the two halves.
+"""Move a module between the two halves, and repoint every import of it.
 
 Deciding a utility belongs in the library rather than the application is a
 one-line judgement and a hundred-line consequence: the module moves, and
 every site that named it has to say the new name. Doing that by hand is
 where the judgement gets abandoned, so the mechanical half is a command.
+
+Both halves, and that is the correction. Repointing importers while leaving
+the file where it was is a tree in which nothing resolves, reported as a
+success — the type check names it a step later, as an unresolved import,
+detached from the command that produced it.
 
 Tokens decide, text applies. ``tokenize`` reports every token with its exact
 position, so a dotted module path in an import statement is located by
@@ -31,7 +36,10 @@ import tokenize
 from collections.abc import Collection, Iterator
 from pathlib import Path
 
+import sh
 from pydantic import BaseModel
+
+from lup.devtools.utils import git
 
 SOURCE_SUFFIXES = (".py", ".pyi")
 """Which files a sweep reads, for a caller that does not say.
@@ -229,6 +237,62 @@ def source_files(
         for path in root.rglob("*")
         if path.suffix in suffixes and "__pycache__" not in path.parts
     )
+
+
+class MovedModule(BaseModel, frozen=True):
+    """One module file the relocation carried, and where it landed."""
+
+    old: Path
+    new: Path
+
+
+def carry_module(roots: list[Path], move: Relocation) -> MovedModule | None:
+    """Move the module's own file to the path its new name spells.
+
+    The half a caller should never have been left holding. Repointing every
+    importer and leaving the file where it was produces a tree where nothing
+    resolves -- which the type check does catch, but only after this command
+    reported success, so the failure arrives detached from what caused it.
+
+    Moved through ``git`` where the file is tracked, so the history follows
+    the module instead of reading as a delete beside an unrelated add. An
+    untracked file is renamed plainly.
+
+    Two cases are deliberately quiet. A source that is not there is a caller
+    doing the same relocation in the other order -- file first, imports after
+    -- and refusing that would punish the tidier sequence. A destination that
+    already exists is left alone, because overwriting one module with another
+    is not a relocation, and the type check will name whatever that tree got
+    wrong.
+    """
+
+    def tracked(path: Path) -> bool:
+        """Whether git is keeping this file's history, and can be asked to move it.
+
+        A tree that is not a repository at all answers the same way a file git
+        has never seen does — plainly rename it — so the exit code and the
+        empty listing collapse into one answer here rather than becoming two
+        branches at the call.
+        """
+        try:
+            return bool(git.lines("-C", str(path.parent), "ls-files", "--", path.name))
+        except sh.ErrorReturnCode:
+            return False
+
+    for root in roots:
+        source = root.joinpath(*move.old).with_suffix(".py")
+        if not source.is_file():
+            continue
+        target = root.joinpath(*move.new).with_suffix(".py")
+        if target.exists():
+            continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if tracked(source):
+            git.out("-C", str(root), "mv", str(source), str(target))
+        else:
+            source.rename(target)
+        return MovedModule(old=source, new=target)
+    return None
 
 
 def relocate(

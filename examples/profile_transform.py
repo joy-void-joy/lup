@@ -26,8 +26,8 @@ async def main() -> None:
         },
         active="work",
     )
-    factory = claude_profile_selector(registry).session_factory(base)
-    result = await factory.query("Describe immutable configuration.", Summary)
+    client = claude_profile_selector(registry).session_factory(base)
+    result = await client.query("Describe immutable configuration.", Summary)
     print(result.output.summary)
 
 

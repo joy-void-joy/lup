@@ -7,7 +7,7 @@ from pydantic import AnyHttpUrl, BaseModel, Field, SecretStr
 from lup.adapters.codex.login import CODEX_LOGIN
 from lup.adapters.codex.runtime import (
     CodexSessionConfig,
-    create_codex_session_factory,
+    create_codex,
 )
 from lup.runtime.config import ConfigTransform, ProfileResolver, ProfileSelector
 from lup.types import JsonObject
@@ -71,7 +71,7 @@ def codex_profile_selector(
     registry: CodexProfileRegistry,
 ) -> ProfileSelector[CodexSessionConfig]:
     """The surface a consumer holds over Codex profile selection."""
-    return ProfileSelector(CodexProfileResolver(registry), create_codex_session_factory)
+    return ProfileSelector(CodexProfileResolver(registry), create_codex)
 
 
 class CodexCompatibleEndpoint(BaseModel, frozen=True):

@@ -35,7 +35,7 @@ from lup.runtime.composition import (
     submission_gate_resolver,
 )
 from lup.runtime.contracts import Interrupt, TurnToolBinder
-from lup.runtime.factory import SessionFactory
+from lup.client import Client
 from lup.runtime.errors import (
     ProviderTurnError,
     StructuredOutputError,
@@ -54,7 +54,6 @@ from lup.runtime.models import (
 )
 from lup.runtime.output import FileSubmittedOutputStore, submit_output
 from lup.runtime.output import InMemorySubmittedOutputStore
-from lup.runtime.query import query
 
 
 class OutputA(BaseModel, frozen=True):
@@ -135,10 +134,10 @@ async def test_factory_query_runs_one_typed_turn_and_closes_the_session() -> Non
         finally:
             closed.append(True)
 
-    factory = SessionFactory(open_session)
+    factory = Client(open_session)
 
     result = await factory.query(turn_request("a", OutputA))
-    aliased = await query(factory, turn_request("a", OutputA))
+    aliased = await factory.query(turn_request("a", OutputA))
 
     assert result.output.value == 7
     assert aliased.output.value == result.output.value

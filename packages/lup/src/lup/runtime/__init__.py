@@ -20,7 +20,6 @@ concerns:
   selection of a configured factory recipe.
 - :mod:`lup.runtime.output` — validated submitted-output stores and the
   portable submission tool binding.
-- :mod:`lup.runtime.query` — the one-shot single-turn convenience.
 - :mod:`lup.runtime.usage` — portable usage arithmetic and pricing.
 - :mod:`lup.runtime.background` — a debounced consumer of the session
   capabilities that coalesces state wakes into turns on one persistent

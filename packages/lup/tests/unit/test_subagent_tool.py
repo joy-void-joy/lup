@@ -7,10 +7,9 @@ from contextlib import AbstractAsyncContextManager
 
 import pytest
 
-import lup.subagents
 from lup.mcp import ToolResponse
 from lup.runtime.models import TurnTextBlock
-from lup.runtime.factory import SessionFactory
+from lup.client import Client
 from lup.runtime.models import SessionHandle, SessionId
 from lup.subagents import create_run_subagent_tool
 from lup.types import SubagentSpec
@@ -24,13 +23,13 @@ RESEARCHER = SubagentSpec(
 )
 
 
-def marker_factory() -> SessionFactory:
+def marker_factory() -> Client:
     def refuse(
         resume: SessionId | None = None,
     ) -> AbstractAsyncContextManager[SessionHandle]:
         raise AssertionError(f"query should be replaced in this test: {resume}")
 
-    return SessionFactory(refuse)
+    return Client(refuse)
 
 
 def response_text(response: ToolResponse) -> str:
@@ -48,7 +47,7 @@ class TestRunSubagentTool:
         assert "researcher" in response_text(result)
 
     async def test_invalid_recipe_fails_loudly(self) -> None:
-        def invalid(_spec: SubagentSpec) -> SessionFactory:
+        def invalid(_spec: SubagentSpec) -> Client:
             raise ValueError("model route is unavailable")
 
         tool = create_run_subagent_tool([RESEARCHER], factory_recipe=invalid)
@@ -63,17 +62,20 @@ class TestRunSubagentTool:
         selected: list[SubagentSpec] = []
         marker = marker_factory()
 
-        def recipe(spec: SubagentSpec) -> SessionFactory:
+        def recipe(spec: SubagentSpec) -> Client:
             selected.append(spec)
             return marker
 
         captured: dict[str, object] = {}
 
-        async def query(factory: object, prompt: object) -> object:
-            captured.update(factory=factory, prompt=prompt)
+        # Patched on the class rather than on the module: the free `query` was
+        # an alias of exactly this method, and collapsing the two spellings
+        # left one place to intercept.
+        async def query(self: Client, prompt: object) -> object:
+            captured.update(factory=self, prompt=prompt)
             return SimpleNamespace(blocks=[TurnTextBlock(text="findings")])
 
-        monkeypatch.setattr(lup.subagents, "query", query)
+        monkeypatch.setattr(Client, "query", query)
         tool = create_run_subagent_tool([RESEARCHER], factory_recipe=recipe)
 
         result = await tool.handler({"name": "researcher", "task": "look this up"})

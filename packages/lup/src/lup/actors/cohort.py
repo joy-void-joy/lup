@@ -59,7 +59,7 @@ from lup.actors.sessions import (
 from lup.channels.models import Door, publish_atomic, utc_now
 from lup.hooks import LupHooksConfig
 from lup.journal import Journal, JournalRecord
-from lup.runtime.factory import SessionFactory
+from lup.client import Client
 from lup.runtime.models import TurnRequest, TurnResult
 
 logger = logging.getLogger(__name__)
@@ -69,7 +69,7 @@ JOURNAL_FILE = "journal.jsonl"
 SPAWNER_KIND = "spawner"
 
 
-type ActorRecipe = Callable[[ActorRef, LupHooksConfig], SessionFactory]
+type ActorRecipe = Callable[[ActorRef, LupHooksConfig], Client]
 """How one actor's session is configured, given the hooks that reach it.
 
 The hooks are a parameter rather than something a recipe fetches, because

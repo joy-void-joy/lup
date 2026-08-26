@@ -13,7 +13,7 @@ from lup.reflect import ReviewGate
 from lup_template.agent.config import aux_model, engine_for_settings, settings
 from lup_template.agent.core import reflection_submission_gate
 from lup.runtime.contracts import Session, Turn
-from lup.runtime.factory import SessionFactory
+from lup.client import Client
 from lup.runtime.models import (
     SessionHandle,
     SessionId,
@@ -217,14 +217,14 @@ class StaticSession(Session):
         return TurnHandle[T](turn=StaticTurn(result))
 
 
-def static_session_factory(blocks: list[TurnBlock]) -> SessionFactory:
+def static_session_factory(blocks: list[TurnBlock]) -> Client:
     @asynccontextmanager
     async def open_static(
         _resume: SessionId | None = None,
     ) -> AsyncGenerator[SessionHandle]:
         yield SessionHandle(session=StaticSession(blocks))
 
-    return SessionFactory(open_static)
+    return Client(open_static)
 
 
 @pytest.mark.asyncio

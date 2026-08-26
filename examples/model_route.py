@@ -1,38 +1,27 @@
-"""Route a model name to one explicit, fully configured factory recipe."""
+"""Route a model name to one explicit, fully configured client recipe."""
 
 import asyncio
-from pathlib import Path
 
-from lup.adapters.claude.runtime import (
-    ClaudeSessionConfig,
-    create_claude_session_factory,
-)
-from lup.adapters.codex.runtime import CodexSessionConfig, create_codex_session_factory
-from lup.runtime.factory import SessionFactory
+from lup import Client, create_claude, create_codex
 from lup.runtime.routing import ModelRoute, ModelRouter, PrefixModelMatcher
 
 from examples.common import Summary
 
 MODEL = "claude-opus-5"  # lup: ignore[constant-declaration] — a vendor's model id
 
-
-def claude_factory() -> SessionFactory:
-    return create_claude_session_factory(
-        ClaudeSessionConfig(
-            model=MODEL,
-            system_prompt="Submit a concise structured summary.",
-        )
-    )
+# One prompt for both routes, which is what a shared argument buys. Codex's own
+# configuration calls this `developer_instructions`; the constructor translates,
+# so a routing table never has to know which provider spells it which way.
+# lup: ignore[constant-declaration] — shared by the two recipes below
+SYSTEM_PROMPT = "Submit a concise structured summary."
 
 
-def codex_factory() -> SessionFactory:
-    return create_codex_session_factory(
-        CodexSessionConfig(
-            model="gpt-5.5",
-            developer_instructions="Submit a concise structured summary.",
-            cwd=Path.cwd(),
-        )
-    )
+def claude_client() -> Client:
+    return create_claude(model=MODEL, system_prompt=SYSTEM_PROMPT)
+
+
+def codex_client() -> Client:
+    return create_codex(model="gpt-5.5", system_prompt=SYSTEM_PROMPT)
 
 
 async def main() -> None:
@@ -41,12 +30,12 @@ async def main() -> None:
             ModelRoute(
                 name="claude",
                 matcher=PrefixModelMatcher("claude-"),
-                recipe=claude_factory,
+                recipe=claude_client,
             ),
             ModelRoute(
                 name="codex",
                 matcher=PrefixModelMatcher("gpt-"),
-                recipe=codex_factory,
+                recipe=codex_client,
             ),
         ]
     )

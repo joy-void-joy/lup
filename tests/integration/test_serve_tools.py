@@ -28,7 +28,7 @@ from lup.workspace.context import (
     SESSION_ID_ENV,
 )
 from lup.realtime.relay import MetaEvent, RealtimeMailbox, ReplyEvent
-from lup.runtime.factory import SessionFactory
+from lup.client import Client
 from lup.sandbox.container import Sandbox
 from lup.subagents import create_run_subagent_tool
 from lup.types import SubagentSpec
@@ -48,7 +48,7 @@ pytestmark = pytest.mark.integration
 SUBPROCESS_TIMEOUT_SECONDS = 20
 
 
-def unused_subagent_factory(_spec: SubagentSpec) -> SessionFactory:
+def unused_subagent_factory(_spec: SubagentSpec) -> Client:
     """Keep delegation construction real without executing a model session."""
     raise AssertionError("the registry-name test must not invoke a subagent")
 

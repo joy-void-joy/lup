@@ -36,7 +36,7 @@ Before cataloging individual tools, map the **end-to-end flow**:
    the unit the permission policy can withhold whole.
 
 2. Read `{layout.path("agent", "core.py")}` to understand:
-   - How a session is opened: which `SessionFactory` is built, and which
+   - How a session is opened: which `Client` is built, and which
      wrapper layers `decorated_session_factory` puts around it (budget,
      timeout, correction, display, persistence, tracing)
    - How the registered groups become servers, and which run in-process

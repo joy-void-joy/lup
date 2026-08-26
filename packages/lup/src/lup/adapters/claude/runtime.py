@@ -1,4 +1,4 @@
-"""Claude SessionFactory composition with per-turn MCP tool rebinding."""
+"""Claude Client composition with per-turn MCP tool rebinding."""
 
 import asyncio
 import json
@@ -35,7 +35,7 @@ from lup.runtime.errors import (
     TurnFailure,
     TurnInterruptedError,
 )
-from lup.runtime.factory import SessionFactory
+from lup.client import Client
 from lup.runtime.models import (
     BlockCompletedEvent,
     BlockDeltaEvent,
@@ -828,11 +828,55 @@ class ClaudeSessionOpener:
                 await state.disconnect()
 
 
-def create_claude_session_factory(
-    config: ClaudeSessionConfig,
-) -> SessionFactory:
-    """Create the named Claude runtime composition root."""
-    return SessionFactory(ClaudeSessionOpener(config).open_session)
+def create_claude(
+    options: ClaudeSessionConfig | None = None,
+    *,
+    model: str | None = None,
+    system_prompt: str = "",
+    cwd: Path | None = None,
+    base_url: str | None = None,
+    api_key: str | None = None,
+) -> Client:
+    """Open Claude sessions, configured by argument or by whole declaration.
+
+    The package root's one constructor for this provider, and the reason it
+    takes both shapes is that both are the front door for somebody. A reader
+    meeting the library writes ``create_claude(model=...)`` and needs to have
+    found nothing else first; a composition that already holds a
+    :class:`ClaudeSessionConfig` -- a profile selector resolving an account, a
+    router picking a recipe -- passes the whole declaration positionally.
+
+    Keyword arguments are applied over ``options`` rather than instead of it,
+    so a caller may hold a configured base and still override the model for
+    one client without rebuilding the declaration.
+
+    ``base_url`` points the session at an Anthropic-compatible endpoint, which
+    is a constructor concern rather than a transform a caller has to choreograph
+    -- naming one without ``api_key`` sends a placeholder credential, which is
+    what a local endpoint expects.
+    """
+    base = options or ClaudeSessionConfig()
+    config = base.model_copy(
+        update={
+            "model": base.model if model is None else model,
+            "system_prompt": system_prompt or base.system_prompt,
+            "cwd": base.cwd if cwd is None else cwd,
+        }
+    )
+    if base_url is not None:
+        # Imported here rather than above, because `config` imports this module
+        # for its own transforms and naming it at module scope would close the
+        # cycle. The endpoint is the only argument that needs it.
+        from lup.adapters.claude.config import (
+            ClaudeCompatibilityTransform,
+            ClaudeCompatibleEndpoint,
+        )
+
+        endpoint = ClaudeCompatibleEndpoint.model_validate(
+            {"base_url": base_url, "api_key": api_key}
+        )
+        config = ClaudeCompatibilityTransform(endpoint).apply(config)
+    return Client(ClaudeSessionOpener(config).open_session)
 
 
 # The fully qualified name of the turn-bound submission tool as Claude Code

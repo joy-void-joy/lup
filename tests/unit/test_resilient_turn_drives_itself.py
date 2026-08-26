@@ -24,7 +24,7 @@ from pydantic import BaseModel
 
 from lup.runtime.contracts import EventStream, Session, Turn
 from lup.runtime.errors import StructuredOutputError, TurnFailure
-from lup.runtime.factory import SessionFactory
+from lup.client import Client
 from lup.runtime.models import (
     MessageCompletedEvent,
     SessionHandle,
@@ -121,7 +121,7 @@ class ScriptedSession(Session):
 
 def corrective_factory(
     script: list[tuple[list[TurnMessage], Answer | None]],
-) -> tuple[SessionFactory, ScriptedSession]:
+) -> tuple[Client, ScriptedSession]:
     """A factory whose sessions correct, over one scripted session."""
     inner = ScriptedSession(script)
 
@@ -130,7 +130,7 @@ def corrective_factory(
         yield SessionHandle(session=inner)
 
     decorated = decorated_session_factory(
-        SessionFactory(opener), correction=CorrectionConfig(cycles=2)
+        Client(opener), correction=CorrectionConfig(cycles=2)
     )
     return decorated, inner
 

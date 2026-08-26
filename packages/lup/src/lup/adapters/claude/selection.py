@@ -12,9 +12,9 @@ from lup.adapters.claude.runtime import (
     ClaudeEffort,
     ClaudePermissionMode,
     ClaudeSessionConfig,
-    create_claude_session_factory,
+    create_claude,
 )
-from lup.runtime.factory import SessionFactory
+from lup.client import Client
 from lup.runtime.selection import (
     Runtime,
     SessionAutonomy,
@@ -73,9 +73,9 @@ def claude_config(request: SessionRequest) -> ClaudeSessionConfig:
     )
 
 
-def claude_session(request: SessionRequest) -> SessionFactory:
+def claude_session(request: SessionRequest) -> Client:
     """Render a portable request into a configured Claude session factory."""
-    return create_claude_session_factory(claude_config(request))
+    return create_claude(claude_config(request))
 
 
 CLAUDE_RUNTIME = Runtime(

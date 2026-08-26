@@ -989,7 +989,7 @@ def create_dev_app(
             typer.Option("--root", help="Source root to rewrite (repeatable)"),
         ] = None,
     ) -> None:
-        """Repoint every import of a module that moved between the two halves."""
+        """Move a module and repoint every import of it."""
 
         def parsed(move: str) -> relocate_mod.Relocation:
             # This CLI's own flag grammar, not structured data with a parser.
@@ -1002,6 +1002,15 @@ def create_dev_app(
 
         declared = [parsed(move) for move in moves]
         roots = [path for path in root or relocate_roots if path.exists()]
+        # The module's own file first, so every import repointed below is
+        # pointed at something already there. Leaving this to the caller is
+        # what made the command's name a lie: it reported success over a tree
+        # where nothing resolved, and the type check named the wreckage
+        # somewhere else entirely.
+        for move in declared:
+            carried = relocate_mod.carry_module(roots, move)
+            if carried is not None:
+                typer.echo(f"moved {carried.old} -> {carried.new}")
         for edit in relocate_mod.relocate(roots, declared):
             typer.echo(f"{edit.path}: {edit.imports} import(s)")
         for mention in relocate_mod.surviving_mentions(roots, declared):

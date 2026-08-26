@@ -9,7 +9,7 @@ How work is delegated across agents in this project — what runs where, and who
 **Vocabulary:** two kinds of delegated agents look alike and must not be conflated:
 
 - A **native subagent** ("subagent" for short) is dispatched by the harness itself: Claude Code's `Agent`/`Task` tool hands a focused task to a named role defined upfront, inside the main agent's session — shared trace, shared metrics. See [Subagent Pattern](#subagent-pattern).
-- A **nested agent** (also called a *tool-subagent*) runs inside a tool call: the handler opens one independent session via `query()` with an explicit `SessionFactory` and folds the result into the tool's response. The harness never sees it — to the calling agent it is just a tool. See [Nested Agent Pattern](#nested-agent-pattern).
+- A **nested agent** (also called a *tool-subagent*) runs inside a tool call: the handler opens one independent session via `query()` with an explicit `Client` and folds the result into the tool's response. The harness never sees it — to the calling agent it is just a tool. See [Nested Agent Pattern](#nested-agent-pattern).
 
 Guidance that says "subagent" unqualified means the native kind; an agent living inside a tool handler is always a nested agent.
 
@@ -60,7 +60,7 @@ SDK-native delegation: the main agent dispatches a focused task to a named role 
 
 **Library support:** portable harness agents come from the typed harness catalog.
 Application-time delegation uses `create_run_subagent_tool()` only with an
-explicit `SubagentSpec -> SessionFactory` recipe; it never infers a provider or
+explicit `SubagentSpec -> Client` recipe; it never infers a provider or
 reconstructs a native client.
 
 ---
@@ -69,7 +69,7 @@ reconstructs a native client.
 
 Distinct from **native subagents** (defined upfront and delegated by the
 harness). A **nested agent** — a *tool-subagent* — is a tool that receives or
-builds an explicit independent `SessionFactory`, runs one typed query, and
+builds an explicit independent `Client`, runs one typed query, and
 folds the result into its response.
 
 | Aspect     | Native Subagent                   | Nested Agent                        |
@@ -85,11 +85,11 @@ folds the result into its response.
 ```python
 @lup_tool("Review code quality and return structured assessment")
 async def review(params: ReviewInput) -> ReviewOutput:
-    result = await query(review_factory, build_review_prompt(params), ReviewResult)
+    result = await review_factory.query(build_review_prompt(params), ReviewResult)
     return ReviewOutput(critique=result.output.assessment)
 ```
 
-**Library support:** `lup.runtime.query.query(factory, prompt, OutputModel)`
+**Library support:** `Client.query(prompt, OutputModel)`
 opens one configured session and returns a strict `TurnResult[T]`; it also
 accepts a `TurnInput` or a prepared `turn_request(...)` in place of the prompt. Provider selection,
 tools, limits, and compatible endpoints are validated when the application
@@ -130,7 +130,7 @@ typed result/error handlers receive the outcome. `stop()` cancels the task and
 session context cleanup aborts an unfinished native turn.
 
 **Library support:** `lup.runtime.background.BackgroundAgent` composes only a
-`SessionFactory`, `state_to_request`, typed result/error callbacks, and
+`Client`, `state_to_request`, typed result/error callbacks, and
 `BackgroundConfig`. See the observer example in
 `src/lup_template/agent/tools/realtime.py`.
 
@@ -197,7 +197,7 @@ and a consumer has one.
 
 **The cohort owns the wiring.** Delivery works only if the inbox hook is in
 the options the session opened with, so callers pass an `ActorRecipe`
-(`(ActorRef, LupHooksConfig) -> SessionFactory`) and the cohort hands it the
+(`(ActorRef, LupHooksConfig) -> Client`) and the cohort hands it the
 hooks. A recipe that had to fetch them could be written once without them,
 producing an agent that looks spawned and reads nothing anyone sends it.
 
@@ -269,4 +269,4 @@ Tools that fetch external data should **enrich it inside the tool** before retur
 
 **Example:** `src/lup_template/agent/tools/example.py` is the template for all three forms — `fetch_example` routes known hosts to a specialized handler (`fetch_wiki_article`, domain dispatch) and distills fetched pages through a nested `query()` call (`extract_answer`, extraction); `search_example` recovers missing snippet fields from a fallback source (`fill_missing_snippets`, null-filling).
 
-**Customizing:** Domain dispatch routes belong in `agent/tools/`. Build them lazily to avoid circular imports. Null-filling logic lives in API wrappers. Extraction uses `query(factory, request)` (see [Nested Agent Pattern](#nested-agent-pattern)).
+**Customizing:** Domain dispatch routes belong in `agent/tools/`. Build them lazily to avoid circular imports. Null-filling logic lives in API wrappers. Extraction uses `factory.query(request)` (see [Nested Agent Pattern](#nested-agent-pattern)).

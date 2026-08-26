@@ -31,7 +31,7 @@ class Session(ABC):
     ``SessionHandle``, and injected as a parameter into a driver that runs one
     turn inside its own concern — ``send_interruptible`` around signal
     handling, ``run_relay_session`` around a mailbox. Those two share only
-    start-then-result, which ``SessionFactory.query`` already homes for
+    start-then-result, which ``Client.query`` already homes for
     callers that want it, so there is no further shared behaviour for a
     composing surface to hold.
 

@@ -14,7 +14,7 @@ from collections.abc import Awaitable, Callable
 
 from pydantic import BaseModel, Field
 
-from lup.runtime.factory import SessionFactory
+from lup.client import Client
 from lup.runtime.errors import TurnError
 from lup.runtime.models import TurnRequest, TurnResult
 
@@ -39,7 +39,7 @@ class BackgroundAgent[S: BaseModel, T: BaseModel | None]:
 
     def __init__(
         self,
-        factory: SessionFactory,
+        factory: Client,
         state_to_request: StateToRequest[S, T],
         result_handler: BackgroundResultHandler[T],
         error_handler: BackgroundErrorHandler,

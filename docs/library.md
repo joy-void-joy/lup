@@ -22,27 +22,60 @@ declares a public API:
 
 ```python
 from lup import (
-    SessionFactory,   # open configured conversations
+    create_claude,    # open Claude sessions, configured
+    create_codex,     # open Codex sessions, configured
+    create_client,    # route a model id to whichever serves it
+    Client,   # what a constructor returns
     SessionHandle,    # an opened session, plus optional fork capability
     TurnHandle,       # an accepted turn, plus optional events/interrupt/steer
     TurnInput,        # portable user input
     TurnRequest,      # what to run, and the type to come back
     TurnResult,       # a validated, typed result
     turn_request,     # request factory
-    query,            # one-shot: factory in, typed result out
 )
 ```
 
-The shortest useful program is one call:
+The shortest useful program imports everything it uses:
 
 ```python
-factory = create_claude_session_factory(ClaudeSessionConfig(model="..."))
-result = await query(factory, turn_request(TurnInput(text="summarize"), Summary))
+from lup import create_claude
+
+client = create_claude(model="claude-opus-5", system_prompt="Be concise.")
+result = await client.query("summarize", Summary)
 summary = result.output
 ```
 
-`query` is the one-shot convenience. For anything with more than one turn, open
-a session and start turns on it — the same contracts, held longer.
+The constructors are why the root is worth importing. Everything else here is
+vocabulary — a name to annotate against — and vocabulary alone builds nothing,
+which an earlier edition of this section demonstrated by accident: it listed
+eight nouns and then reached for two names it had never imported, so the
+shortest useful program did not run.
+
+`client.query(...)` opens a session, takes one turn, and always closes it. For
+anything with more than one turn, open a session and start turns on it — the
+same contracts, held longer.
+
+`create_client(model=...)` is the third route, for a caller holding a model id
+who does not also want to know which vendor owns which prefix:
+
+```python
+from lup import create_client
+
+client = create_client("gpt-5.5")           # routed by prefix
+client = create_client("house-model", provider="claude")   # said outright
+```
+
+It is deliberately narrower than the two named constructors, and that is the
+whole reason all three exist. Dispatch cannot carry typed provider options:
+`create_claude(options=ClaudeSessionConfig(...))` type-checks, and no annotation
+means "whichever config the model turns out to select". So the common arguments
+route, the whole declaration does not, and neither pretends to be the other. A
+model no prefix claims raises rather than guessing — a guess opens a session
+against the wrong vendor and fails later, in that vendor's vocabulary.
+
+All three resolve their adapter on first access, so `import lup` costs roughly
+80 ms and pulls neither provider SDK. Naming a constructor imports its adapter;
+opening a session is what finally reaches the vendor's own package.
 
 ## Layering
 
@@ -206,6 +239,7 @@ the way six of them once were.
 | Package | Solves |
 | --- | --- |
 | `devtools` | The development CLI an adopter inherits rather than forks: worktrees and branches, trace and Python introspection, the resolver supervisor, the sync registry, version bookkeeping. Ships the whole roster — `roster.py` wires every sub-app over one `DevtoolsDeclarations`, and an application declares only what it retires and what only it has, so a sub-app added here reaches it on the next lock refresh instead of waiting to be noticed. Requires the `web` extra for the supervisor. |
+| `client` | `Client` itself: the concrete surface every consumer holds, parametrized by one swappable `SessionOpener`, plus `create_client` routing a model id to whichever provider serves it. Top-level rather than under `runtime` because it is what the package root exports and what a reader meets first — a front door reached through a subpackage named for the machinery behind it is the shape that made every example open a session by importing an adapter instead. |
 | `channels` | File-backed channels — a value that settles, an ordered log, and the atomic publish under both. The widest dependency here: `harness`, `resolver`, `runtime`, `realtime`, `telemetry`, and `adapters` all write through it, which is what makes it a package rather than a helper inside any one of them. |
 | `journal` | One ordered record file, sequenced and durably appended, read back from a byte offset or a sequence number and paged backwards from either. Two products ride it — the resolver&#x27;s typed decision log and the observable transcript&#x27;s hash-chained provider payloads — and neither collapses into the other. Sharing the mechanism is what lets any reader tail either record the same way, and what stops the next thing needing a record from arriving with a third implementation. |
 | `codeintel` | An LSP client and the tools built on it, so a name is resolved rather than grepped. Serves an agent&#x27;s toolset and the pyright oracle behind `dev check` — two consumers on opposite sides of the library, neither of which owns it. |
@@ -276,7 +310,7 @@ The library is the dependency; your application is the composition root. That
 inversion is the whole design, and it has three practical consequences.
 
 **Name the provider exactly once.** Choose an adapter factory in one function,
-pass the resulting `SessionFactory` everywhere else. `seam-boundary` will tell
+pass the resulting `Client` everywhere else. `seam-boundary` will tell
 you when a second site appears.
 
 **Compose capabilities rather than configuring an object.** Timeouts, budgets,

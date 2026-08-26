@@ -25,7 +25,7 @@ disagree, the guidance is the statement of intent and this is only its index.
 
 | Library | What it is for |
 | --- | --- |
-| `lup` | The runtime an application composes against, and it is provider-neutral: `SessionFactory` opens a `Session`, a `TurnRequest` carries the prompt and the type the answer must arrive as, and a strict `TurnResult[T]` hands back `.output` already validated. `SessionFactory.query(prompt, Model)` is the whole of a one-shot. |
+| `lup` | The runtime an application composes against, and it is provider-neutral: `Client` opens a `Session`, a `TurnRequest` carries the prompt and the type the answer must arrive as, and a strict `TurnResult[T]` hands back `.output` already validated. `Client.query(prompt, Model)` is the whole of a one-shot. |
 | [pydantic](https://docs.pydantic.dev/) | Validation, and every model we declare. |
 | [pydantic-settings](https://docs.pydantic.dev/latest/concepts/pydantic_settings/) | Configuration, in place of dotenv. |
 

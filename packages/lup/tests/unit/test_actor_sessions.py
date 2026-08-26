@@ -14,7 +14,7 @@ from lup.actors.sessions import ActorInbox, ActorRecord, ActorSession
 from lup.resolver.journal import Journal
 from lup.runtime.contracts import Session
 from lup.runtime.errors import ProviderTurnError, TurnFailure
-from lup.runtime.factory import SessionFactory
+from lup.client import Client
 from lup.runtime.models import (
     SessionHandle,
     SessionId,
@@ -56,7 +56,7 @@ class ResumeRefusingSession(Session):
         return TurnHandle[T](turn=StaticTurn(result))
 
 
-def refusing_factory() -> tuple[SessionFactory, list[SessionId | None]]:
+def refusing_factory() -> tuple[Client, list[SessionId | None]]:
     """A factory that refuses a resume, recording what each open asked for."""
     opened: list[SessionId | None] = []
 
@@ -67,7 +67,7 @@ def refusing_factory() -> tuple[SessionFactory, list[SessionId | None]]:
         opened.append(resume)
         yield SessionHandle(session=ResumeRefusingSession(resume is not None))
 
-    return SessionFactory(open_session), opened
+    return Client(open_session), opened
 
 
 def worker_session(

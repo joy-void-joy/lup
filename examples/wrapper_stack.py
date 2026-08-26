@@ -3,10 +3,7 @@
 import asyncio
 from pathlib import Path
 
-from lup.adapters.claude.runtime import (
-    ClaudeSessionConfig,
-    create_claude_session_factory,
-)
+from lup import create_claude
 from lup.runtime.wrappers import (
     BudgetConfig,
     CorrectionConfig,
@@ -26,11 +23,9 @@ def reported_cost(usage: Usage) -> float:
 
 
 async def main() -> None:
-    native = create_claude_session_factory(
-        ClaudeSessionConfig(
-            model="claude-opus-5",
-            system_prompt="Submit a concise structured result.",
-        )
+    native = create_claude(
+        model="claude-opus-5",
+        system_prompt="Submit a concise structured result.",
     )
     factory = decorated_session_factory(
         native,

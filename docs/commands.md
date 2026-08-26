@@ -51,7 +51,7 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 | `dev issues` | List the open issues a resolver run would take as evidence. |
 | `dev rules` | Generate the Lup rule and typed-suppression reference. |
 | `dev guidance` | Report what each section of the always-loaded guidance costs. |
-| `dev relocate` | Repoint every import of a module that moved between the two halves. |
+| `dev relocate` | Move a module and repoint every import of it. |
 | `dev policy` | Show what the declared permission policy decides about an input, and why. |
 | `dev vocabulary` | Show every shell form the declared vocabulary judges, and how. |
 | `dev worktree create` | Create or re-attach a git worktree. |

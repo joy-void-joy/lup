@@ -164,17 +164,28 @@ NO_APPLICATION = ApplicationRoots()
 
 # lup: ignore[library-default] — files of this library, which no adopter relocates
 LIBRARY_COMPOSITION = (
+    f"{LIBRARY_ROOT}__init__.py",
+    f"{LIBRARY_ROOT}client.py",
     f"{LIBRARY_ROOT}devtools/harness/composition.py",
     f"{LIBRARY_ROOT}devtools/harness/launch.py",
     f"{LIBRARY_ROOT}devtools/harness/resolve.py",
 )
-"""The library's own CLI composition roots.
+"""The library's own composition roots.
 
 A launcher starts a named runtime, the resolver entry drives one, and the
 composition builders assemble one, so all three compose concrete adapters the
 way an application's own root does. They are listed rather than sanctioned by
 directory: the engines beside them — generation, drift, reconciliation — read
 a declaration and must stay portable.
+
+The first two are the package's front door, and they are why this rule was
+worth having. Something has to name an adapter or nothing is constructible at
+all, and for as long as nothing here did, the naming happened in every example
+instead — the corpus that teaches the library, doing at tier 4 what this rule
+fails the build over everywhere else. Sanctioning the root is what confines
+that to one file a reviewer can read. Both defer the import into the call that
+needs it, so naming a constructor is what reaches an adapter and `import lup`
+still reaches neither.
 """
 
 

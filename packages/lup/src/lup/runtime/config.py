@@ -7,7 +7,7 @@ resolution; the ABCs here are the engines it and ``ModelRouter`` compose.
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 
-from lup.runtime.factory import SessionFactory
+from lup.client import Client
 
 
 class ConfigTransform[C](ABC):
@@ -32,7 +32,7 @@ class ProfileResolver[C](ABC):
         """Resolve explicit, active, or default profile selection."""
 
 
-type ConfiguredFactory[C] = Callable[[C], SessionFactory]
+type ConfiguredFactory[C] = Callable[[C], Client]
 
 
 class ProfileSelector[C]:
@@ -54,7 +54,7 @@ class ProfileSelector[C]:
         """
         return self.resolver.resolve(name)
 
-    def session_factory(self, base: C, name: str | None = None) -> SessionFactory:
+    def session_factory(self, base: C, name: str | None = None) -> Client:
         """Resolve the selection, apply it to the base config, and construct."""
         return self.build(self.transform(name).apply(base))
 
