@@ -212,6 +212,27 @@ class SyncBaseResult(PRResult):
     merged: bool
     conflicts: list[str]
 
+    base_synced: bool
+    """Whether the base was brought up to date from its remote before merging.
+
+    Reported rather than warned about, because a merge onto a base that could
+    not be refreshed succeeds exactly like one onto a base that could, and the
+    two are worth different things to whoever asked. A caller reading the JSON
+    -- which is what the JSON is for -- cannot tell them apart from `merged`,
+    and a rebase workflow that resets onto a stale base rewrites what it was
+    supposed to preserve.
+    """
+
+    sync_complaint: str = ""
+    """Why the base was not refreshed, empty when it was.
+
+    A contained session reaches this by the boundary working as designed: the
+    base is a sibling worktree, mounted read-only so nothing in here can write
+    another checkout's administrative state, and a fetch that would write
+    `FETCH_HEAD` under it is refused. That is not a fault to repair, so it is
+    said plainly and carried rather than escalated.
+    """
+
 
 class ExistingPR(BaseModel):
     number: int
@@ -508,6 +529,13 @@ def sync_base(
     that answer as settled — the history rebuild resets onto it, so a wrong
     guess rewrites whatever sits between the two branches. An authoritative
     base is one the caller passed or worktree creation recorded.
+
+    A base that could not be refreshed is merged anyway and said so in the
+    result, rather than refused. The merge is still the one the caller asked
+    for and is still correct against the base as it stands here; what changes
+    is only whether the base was current, which is a fact about the answer
+    rather than a reason to withhold it. It reaches the caller as a field
+    because a warning on stderr does not reach one reading the JSON.
     """
     feature = current_branch()
     base_source: Literal["explicit", "recorded", "guessed"] = "explicit"
@@ -536,6 +564,8 @@ def sync_base(
                 base_source=base_source,
                 merged=False,
                 conflicts=[],
+                base_synced=False,
+                sync_complaint="the base was never identified, so none was fetched",
             ),
             as_json,
         )
@@ -547,16 +577,18 @@ def sync_base(
         tree_dir = None
     base_path = tree_dir / base_branch if tree_dir else None
 
+    synced = False
+    complaint = f"no worktree for {base_branch}, so it was merged as it stands"
     if base_path and base_path.is_dir():
         if not as_json:
             typer.echo(f"Syncing {base_branch}...", err=True)
         try:
             git("-C", str(base_path), "pull", "--ff-only")
             git("-C", str(base_path), "push")
+            synced, complaint = True, ""
         except sh.ErrorReturnCode as e:
-            typer.echo(
-                f"Warning: sync of {base_branch} failed: {decode_stderr(e)}", err=True
-            )
+            complaint = decode_stderr(e)
+            typer.echo(f"Warning: sync of {base_branch} failed: {complaint}", err=True)
 
     if not as_json:
         typer.echo(f"Merging {base_branch} into {feature}...", err=True)
@@ -569,6 +601,8 @@ def sync_base(
             base_source=base_source,
             merged=True,
             conflicts=[],
+            base_synced=synced,
+            sync_complaint=complaint,
         )
     except sh.ErrorReturnCode:
         unmerged = git.lines("diff", "--name-only", "--diff-filter=U", _ok_code=[0, 1])
@@ -579,6 +613,8 @@ def sync_base(
             base_source=base_source,
             merged=False,
             conflicts=conflicts,
+            base_synced=synced,
+            sync_complaint=complaint,
         )
         if not as_json:
             typer.echo(f"Merge conflicts in {len(conflicts)} file(s):", err=True)
