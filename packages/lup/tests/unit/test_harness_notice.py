@@ -8,8 +8,13 @@ terminal's alone -- a redirected launch records the same words with nothing in
 them.
 """
 
+from lup.harness.browser import BrowserBridge
+from lup.harness.credential import GitAccess, GitIdentity, InheritedSigning
+from lup.harness.egress import SessionEgress
 from lup.harness.notice import Ink, Notice, Palette
 from lup.harness.requirements import LostCapability, RefusedLaunch, Requirement, Run
+
+OPERATOR = GitIdentity(name="An Operator", email="operator@example.test")
 
 
 def probe(refuses: bool) -> Requirement:
@@ -94,3 +99,40 @@ def test_indentation_survives_a_terminal_that_takes_no_colour() -> None:
     """The shape of the block is structure, not styling."""
     assert Notice(text="cause", indent=2).painted().endswith("cause\x1b[0m")
     assert Notice(text="cause", indent=2).painted().startswith("        ")
+
+
+def test_a_launch_with_nothing_wrong_says_nothing_in_the_warning_colour() -> None:
+    """Every posture here is doing exactly what it was declared to do.
+
+    A filtered proxy, a bridged browser, a session holding no forge token and
+    signing nothing: four boundaries working, and every one of them painted
+    orange. What that taught a reader is that the opening block is orange
+    whatever happened -- which is the same as having no warning colour, paid
+    for at the one launch where something is actually wrong.
+    """
+    healthy = [
+        *SessionEgress().notice("feat"),
+        *BrowserBridge().notice(serving=True),
+        *GitAccess().notice("", [], OPERATOR),
+    ]
+
+    assert healthy
+    assert [item.text for item in healthy if item.urgency == "warning"] == []
+
+
+def test_the_postures_that_really_do_fail_keep_the_colour() -> None:
+    """The other half, without which the one above passes by painting nothing.
+
+    Each of these ends in a failure somewhere that names neither the cause nor
+    the remedy: a request reaching the LAN because no proxy stands there, a
+    commit refused for an identity assembled from a hostname, and `gpg:
+    signing failed` in the middle of a commit whose key never crossed the
+    boundary.
+    """
+    loud = [
+        *SessionEgress(mode="bridge").notice("feat"),
+        *GitAccess().notice("tok", [], None),
+        *GitAccess(signing=InheritedSigning()).notice("tok", [], OPERATOR),
+    ]
+
+    assert sum(item.urgency == "warning" for item in loud) == 3

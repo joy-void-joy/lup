@@ -556,14 +556,14 @@ class SessionEgress(BaseModel, frozen=True):
                             "These ignore the proxy and cannot reach anything "
                             "through it:"
                         ),
-                        urgency="warning",
+                        urgency="boundary",
                     )
                 ]
                 if self.unproxied
                 else []
             ),
             *[
-                Notice(text=item.sentence(), urgency="warning", indent=1)
+                Notice(text=item.sentence(), urgency="boundary", indent=1)
                 for item in self.unproxied
             ],
             Notice(

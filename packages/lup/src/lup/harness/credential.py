@@ -173,7 +173,7 @@ class SigningOff(BaseModel, frozen=True):
                     "sign at the merge that lands the work, or set "
                     "`signing` on the image declaration."
                 ),
-                urgency="warning",
+                urgency="boundary",
             )
         ]
 
@@ -606,7 +606,7 @@ class GitAccess(BaseModel, frozen=True):
                         "than prompting. The ssh key is on the host by design "
                         "and nothing routes to it, so nothing falls back to it."
                     ),
-                    urgency="warning",
+                    urgency="boundary",
                 ),
                 *self.authorship(identity),
                 *self.signing.notice(),

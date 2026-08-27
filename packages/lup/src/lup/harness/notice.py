@@ -39,6 +39,18 @@ Seven rather than three, because the three that carry alarm are useless
 without the ones they have to stand out *from*. A block where only errors are
 coloured is a block where everything else is one undifferentiated wall, and
 the eye has no anchor to find the error against.
+
+Which is why each one states its test, and why the pair that decides the
+block's temperature states it twice. ``warning`` is for something wrong:
+this launch cannot do its work through it, or it is a misconfiguration that
+will fail later somewhere that names neither the cause nor the remedy.
+``boundary`` is for a capability the boundary does not grant, said with what
+grants it -- a posture working exactly as declared. The two read alike from
+inside the module that prints one, which is how a healthy launch ends up
+orange from top to bottom: every author of a notice knows their line is
+worth reading, and ``warning`` is the only urgency that says so. It is not.
+A reader who has learned that the opening block is orange whatever happened
+has been trained out of the one thing the colour is for.
 """
 
 
