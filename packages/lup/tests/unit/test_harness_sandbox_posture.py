@@ -24,7 +24,13 @@ from lup.devtools.harness.launch import (
 from lup.harness.image import ContainerClient, Image, detected_client
 from lup.harness.models import HookSandbox, HookSet, Plugin
 from lup.harness.requirements import LostCapability, Requirement, Run
-from lup.harness.toolchain import bubblewrap_requirement, socat_requirement
+from lup.harness.toolchain import (
+    agent_session_requirement,
+    bubblewrap_requirement,
+    socat_requirement,
+)
+from lup.providers.claude.confinement import CLAUDE_CONFINEMENT
+from lup.providers.codex.confinement import CODEX_CONFINEMENT
 from lup.types import EnvVars
 
 
@@ -238,3 +244,56 @@ def test_a_client_and_the_engine_behind_it_are_read_separately() -> None:
 
     assert renamed.drives_its_server()
     assert renamed.engine().identity_arguments(1, 1)[-1] == "--userns=keep-id"
+
+
+def test_each_runtime_stands_down_by_one_declaration_rather_than_two() -> None:
+    """Both launchers read the word the adapter owns, which the probe reads too.
+
+    Spelled at each caller instead, they are three copies of a vendor's flag
+    with no way to notice when one falls behind -- and the caller likeliest to
+    fall behind is the one nobody watches open a session.
+    """
+    environment: EnvVars = {}
+
+    assert (
+        claude_sandbox_arguments(confining_plugin(), contained=True)
+        == CLAUDE_CONFINEMENT.off
+    )
+    assert (
+        codex_sandbox_arguments(confining_plugin(), environment, [], contained=True)
+        == CODEX_CONFINEMENT.off
+    )
+
+
+def test_the_probe_opens_the_session_a_launch_opens() -> None:
+    """A probe answering about a session nobody runs is this file's whole subject.
+
+    The exercise carried the mounts, the config home and the network, and not
+    the flag standing the runtime's own sandbox down -- so it opened a session
+    whose settings still said the sandbox was on, found no bubblewrap, and
+    refused for a confinement that cannot start in an unprivileged container
+    and that no launch has ever asked for. Ordered as well as present: the
+    words are the runtime's own and have to reach it before the prompt does.
+    """
+    probe = agent_session_requirement(arguments=CLAUDE_CONFINEMENT.off)
+
+    assert probe.exercise == Run(
+        command=[
+            "claude",
+            *CLAUDE_CONFINEMENT.off,
+            "-p",
+            "Reply with exactly: SESSION_OK",
+        ],
+        expect="SESSION_OK",
+    )
+
+
+def test_a_relay_is_carried_without_reviving_the_sandbox_that_cannot_start() -> None:
+    """Two packages once bought silence about a boundary that was not there.
+
+    `socat` earns its place on its own account -- carrying something between
+    two things that cannot address each other -- so it lands in the baseline
+    rather than beside the confinement whose emptiness is a finding.
+    """
+    assert "socat" in Image().baseline
+    assert Image().inner_sandbox == []

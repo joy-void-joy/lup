@@ -11,6 +11,7 @@ from pathlib import Path
 import lup.devtools.harness.launch as launch
 from lup.harness.egress import SessionEgress
 from lup.harness.image import Podman
+from lup.providers.claude.confinement import CLAUDE_CONFINEMENT
 from lup.harness.ownership import source_digest
 from lup.harness.toolchain import for_host
 from lup_template.devtools.harness.catalog import portable_harness
@@ -497,6 +498,7 @@ def test_the_image_half_is_exercised_behind_the_argv_a_session_opens() -> None:
     assert carried.command[: len(opening)] == opening
     assert carried.command[len(opening) :] == [
         "claude",
+        *CLAUDE_CONFINEMENT.off,
         "-p",
         "Reply with exactly: SESSION_OK",
     ]
