@@ -17,7 +17,7 @@ from pydantic import BaseModel
 
 import lup.harness.models as models
 from lup.devtools.harness.content.application import ApplicationLayout
-from lup.devtools.harness.content.tree import top_level_names
+from lup.devtools.harness.content.tree import TopLevelEntry, top_level_entries
 from lup.formats.markdown import CodeCell, PlainCell
 
 LIBRARY_PACKAGE = Path(__file__).resolve().parents[4]
@@ -96,13 +96,13 @@ class Roster(BaseModel, frozen=True):
     sentence that sends them there from this list and nothing sorts it after.
     """
 
-    def owed(self) -> list[str]:
+    def owed(self) -> list[TopLevelEntry]:
         """Every entry in the library's own package this roster has to describe."""
         elsewhere = {entry.package: entry.section for entry in self.tiered}
         return [
-            name
-            for name in top_level_names(self.source.parent, self.source.name)
-            if name not in elsewhere
+            entry
+            for entry in top_level_entries(self.source.parent, self.source.name)
+            if entry.name not in elsewhere
         ]
 
     def described(self) -> str:
@@ -130,12 +130,7 @@ class Roster(BaseModel, frozen=True):
             for section, run in groupby(self.tiered, key=lambda entry: entry.section)
         )
 
-    def entry_source(self, name: str) -> Path:
-        """The file whose docstring describes one top-level entry."""
-        entry = self.source / name
-        return entry / "__init__.py" if entry.is_dir() else entry.with_suffix(".py")
-
-    def solves(self, name: str) -> str:
+    def solves(self, source: Path) -> str:
         """What one entry says it solves, read from its own docstring.
 
         The summary line and the paragraph beneath it, joined. PEP 257 puts a
@@ -151,7 +146,6 @@ class Roster(BaseModel, frozen=True):
         named six consumers where the import graph counts eleven, and a page
         confidently wrong is worse than one that had to be looked up.
         """
-        source = self.entry_source(name)
         docstring = ast.get_docstring(ast.parse(source.read_text(encoding="utf-8")))
         if not docstring:
             raise ValueError(
@@ -193,8 +187,8 @@ class Roster(BaseModel, frozen=True):
         return models.MarkdownTable(
             headers=["Package", "Solves"],
             rows=[
-                [CodeCell(text=name), PlainCell(text=self.solves(name))]
-                for name in self.owed()
+                [CodeCell(text=entry.name), PlainCell(text=self.solves(entry.source))]
+                for entry in self.owed()
             ],
         )
 

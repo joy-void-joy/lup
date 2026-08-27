@@ -14,7 +14,7 @@ phantom packages into the layout diagram.
 
 from pathlib import Path
 
-from lup.devtools.harness.content.tree import annotated_tree, top_level_names
+from lup.devtools.harness.content.tree import annotated_tree, top_level_entries
 
 
 def package_at(root: Path, name: str) -> Path:
@@ -72,4 +72,41 @@ def test_the_roster_walk_skips_a_dotted_directory(tmp_path: Path) -> None:
     package_at(tmp_path, "real")
     (tmp_path / ".claude").mkdir()
 
-    assert top_level_names(tmp_path.parent, tmp_path.name) == ["real"]
+    walked = top_level_entries(tmp_path.parent, tmp_path.name)
+
+    assert [entry.name for entry in walked] == ["real"]
+
+
+def test_the_roster_walk_skips_a_directory_holding_no_initializer(
+    tmp_path: Path,
+) -> None:
+    """Deleting a package leaves its directory wherever an untracked file sits.
+
+    The roster asked such a directory what it solved and opened an
+    ``__init__.py`` the deletion had taken, which is a crash rather than a
+    diagnostic. A directory Python cannot import is not an entry to describe.
+    """
+    package_at(tmp_path, "real")
+    (tmp_path / "emptied" / "__pycache__").mkdir(parents=True)
+    (tmp_path / "emptied" / "__pycache__" / "gone.pyc").write_bytes(b"")
+
+    walked = top_level_entries(tmp_path.parent, tmp_path.name)
+
+    assert [entry.name for entry in walked] == ["real"]
+
+
+def test_a_walked_entry_carries_the_source_that_made_it_importable(
+    tmp_path: Path,
+) -> None:
+    """The file comes from the walk, so it is one the walk actually found."""
+    package_at(tmp_path, "packaged")
+    (tmp_path / "module.py").write_text('"""A module."""\n', encoding="utf-8")
+
+    walked = {
+        entry.name: entry.source
+        for entry in top_level_entries(tmp_path.parent, tmp_path.name)
+    }
+
+    assert walked["packaged"] == tmp_path / "packaged" / "__init__.py"
+    assert walked["module"] == tmp_path / "module.py"
+    assert all(source.is_file() for source in walked.values())
