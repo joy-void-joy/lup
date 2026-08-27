@@ -258,6 +258,24 @@ class SessionEgress(BaseModel, frozen=True):
         """Whether this declaration puts a proxy between the session and the world."""
         return self.mode == "filtered"
 
+    def carries_ssh(self) -> bool:
+        """Whether a transport that ignores the proxy variables can leave at all.
+
+        The measurement this module's own header records, asked as a
+        question rather than repeated as a comparison: a proxy is a
+        convention and ssh does not follow it, so under ``filtered`` a
+        session has no route to port 22 and no resolver to find one with,
+        and under ``none`` it has no route to anything. An ssh credential is
+        selectable exactly where the answer is yes -- which is not a
+        preference about credentials but a fact about the network, and is
+        why the credential ladder asks the egress before it probes a key.
+
+        ``bridge`` and ``host`` both carry it, for different reasons that
+        make no difference here: one has a gateway of its own and the other
+        is the host's own stack.
+        """
+        return self.mode in {"bridge", "host"}
+
     def shares_host_loopback(self) -> bool:
         """Whether `127.0.0.1` names the same interface on both sides.
 
@@ -550,22 +568,27 @@ class SessionEgress(BaseModel, frozen=True):
         proxy's, and how to take the infrastructure back down. A boundary
         nobody was told about is one whose refusals get debugged as something
         else.
+
+        Each of them is *one* line, which is the part that had to be fought
+        for. The unfiltered posture used to spend four sentences explaining
+        why a shared loopback is what lets a sign-in redirect land -- true,
+        and rationale, and printed at every launch above the sentence that
+        decided whether the session could work. What a reader needs here is
+        which posture is in force and what it exposes; why it exposes that is
+        this module's header and ``docs/permissions.md``.
         """
         if not self.filtered():
             shared = (
-                " Your own loopback is this session's too: whatever is bound "
-                "there answers it, and a port it listens on answers on your "
-                "machine without being published — which is what lets a "
-                "sign-in redirect land."
+                ", and your own loopback is this session's"
                 if self.shares_host_loopback()
                 else ""
             )
             return [
                 Notice(
                     text=(
-                        f"Egress: {self.mode} — no proxy between this session "
-                        "and the network. The LAN, localhost and any metadata "
-                        f"endpoint are reachable from inside the container.{shared}"
+                        f"Egress: {self.mode} — no proxy; the LAN, localhost "
+                        "and cloud metadata are reachable from inside"
+                        f"{shared}."
                     ),
                     urgency="warning",
                 )

@@ -230,32 +230,32 @@ class BrowserBridge(BaseModel, frozen=True):
         as something else, and the same holds for a boundary's one opening:
         an operator whose browser opens by itself should have been told what
         can do that, before it happens rather than while it does.
+
+        One line for the posture, and the sign-in instructions subordinate to
+        it rather than beside it. The posture line used to spend three
+        clauses explaining that a channel carrying a URL and nothing else
+        carries nothing else -- printed at every launch, whether or not
+        anybody was about to sign in. What survives is the fact an operator
+        acts on: that their browser may open by itself, and for how many
+        addresses. The reasoning is this module's header.
         """
         if not serving:
             return [
                 Notice(
-                    text=(
-                        "Browser: not bridged, so a sign-in prints its URL "
-                        f"for you to open. {self.ending(lands)}"
-                    ),
-                    urgency="detail",
-                )
+                    text="Browser: not bridged — a sign-in prints its URL.",
+                    urgency="boundary",
+                ),
+                Notice(text=self.ending(lands), urgency="detail", indent=1),
             ]
         return [
             Notice(
                 text=(
-                    f"Browser: a sign-in URL for {len(self.admits)} known "
-                    "sign-in address(es) opens on your machine. That is the "
-                    "one channel out of this container — it carries a URL "
-                    "and nothing else, and anything not on that list is "
-                    "dropped rather than opened."
+                    f"Browser: sign-in URLs for {len(self.admits)} known "
+                    "address(es) open on your machine; nothing else crosses."
                 ),
                 urgency="boundary",
             ),
-            Notice(
-                text=f"Sign-in: {self.ending(lands)}",
-                urgency="detail",
-            ),
+            Notice(text=self.ending(lands), urgency="detail", indent=1),
         ]
 
     def serve(self) -> Path | None:

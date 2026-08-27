@@ -9,12 +9,19 @@ them.
 """
 
 from lup.harness.browser import BrowserBridge
-from lup.harness.credential import GitAccess, GitIdentity, InheritedSigning
+from lup.harness.credential import (
+    ForgeToken,
+    GitAccess,
+    GitIdentity,
+    InheritedSigning,
+    NoCredential,
+)
 from lup.harness.egress import SessionEgress
-from lup.harness.notice import Ink, Notice, Palette
+from lup.harness.notice import Banner, Ink, Notice, Palette
 from lup.harness.requirements import LostCapability, RefusedLaunch, Requirement, Run
 
 OPERATOR = GitIdentity(name="An Operator", email="operator@example.test")
+TOKEN = ForgeToken(variable="LUP_GIT_TOKEN")
 
 
 def probe(refuses: bool) -> Requirement:
@@ -104,16 +111,16 @@ def test_indentation_survives_a_terminal_that_takes_no_colour() -> None:
 def test_a_launch_with_nothing_wrong_says_nothing_in_the_warning_colour() -> None:
     """Every posture here is doing exactly what it was declared to do.
 
-    A filtered proxy, a bridged browser, a session holding no forge token and
-    signing nothing: four boundaries working, and every one of them painted
-    orange. What that taught a reader is that the opening block is orange
-    whatever happened -- which is the same as having no warning colour, paid
-    for at the one launch where something is actually wrong.
+    A filtered proxy, a bridged browser, a session reaching its forge on a
+    token and signing nothing: four boundaries working, and every one of them
+    painted orange. What that taught a reader is that the opening block is
+    orange whatever happened -- which is the same as having no warning
+    colour, paid for at the one launch where something is actually wrong.
     """
     healthy = [
         *SessionEgress().notice("feat"),
         *BrowserBridge().notice(serving=True),
-        *GitAccess().notice("", [], OPERATOR),
+        *GitAccess().notice(TOKEN, OPERATOR),
     ]
 
     assert healthy
@@ -125,14 +132,79 @@ def test_the_postures_that_really_do_fail_keep_the_colour() -> None:
 
     Each of these ends in a failure somewhere that names neither the cause nor
     the remedy: a request reaching the LAN because no proxy stands there, a
-    commit refused for an identity assembled from a hostname, and `gpg:
-    signing failed` in the middle of a commit whose key never crossed the
-    boundary.
+    session that can read a public repository and push to nothing, a commit
+    refused for an identity assembled from a hostname, and `gpg: signing
+    failed` in the middle of a commit whose key never crossed the boundary.
+
+    A session with no credential at all belongs in this half rather than the
+    other one. It used to sit among the healthy postures on the reasoning
+    that plenty of work never touches a remote, which is true and is not the
+    test: `Action required` is for a blocker *or a degradation*, and a
+    session that can read and cannot push is the second one.
     """
     loud = [
         *SessionEgress(mode="bridge").notice("feat"),
-        *GitAccess().notice("tok", [], None),
-        *GitAccess(signing=InheritedSigning()).notice("tok", [], OPERATOR),
+        *GitAccess().notice(
+            NoCredential(variable="LUP_GIT_TOKEN", host="github.com"), OPERATOR
+        ),
+        *GitAccess().notice(TOKEN, None),
+        *GitAccess(signing=InheritedSigning()).notice(TOKEN, OPERATOR),
     ]
 
-    assert sum(item.urgency == "warning" for item in loud) == 3
+    assert sum(item.urgency == "warning" for item in loud) == 4
+
+
+def test_a_band_keeps_a_subordinate_line_with_the_one_it_is_subordinate_to() -> None:
+    """Sorting by urgency alone would file a remedy away from its problem.
+
+    The remediation under an unavailable credential is `detail`, and `detail`
+    is not a band -- so a banner that grouped by urgency would drop it under
+    no heading, several lines below the sentence it explains.
+    """
+    banner = Banner()
+    banner.add(SessionEgress().notice("feat"))
+    banner.add(
+        GitAccess().notice(
+            NoCredential(
+                variable="LUP_GIT_TOKEN",
+                host="github.com",
+                declined=["no ssh agent holding an identity answers"],
+            ),
+            OPERATOR,
+        )
+    )
+
+    action = next(band for band in banner.bands if band.heading == "Action required")
+    carried = [item.urgency for item in banner.under(action)]
+
+    assert carried == ["warning", "detail", "detail"]
+
+
+def test_a_band_with_nothing_to_say_prints_no_heading_at_all() -> None:
+    """Which is what makes the shape itself informative.
+
+    A launch showing no `Action required` has nothing requiring action,
+    rather than a heading standing over a blank.
+    """
+    banner = Banner()
+    banner.add(GitAccess().notice(TOKEN, OPERATOR))
+
+    action = next(band for band in banner.bands if band.heading == "Action required")
+
+    assert banner.under(action) == []
+    assert [item.text for item in banner.under(banner.bands[2])] == [
+        "Forge authentication: HTTPS via LUP_GIT_TOKEN.",
+        "Signing: off for agent commits.",
+    ]
+
+
+def test_nothing_added_to_a_banner_is_ever_dropped() -> None:
+    """A band list that forgot an urgency would swallow every line carrying it.
+
+    Which is the failure this cannot have: the launch would read as healthy
+    for exactly the reason it was not.
+    """
+    banner = Banner(bands=[])
+    banner.add([Notice(text="unclaimed", urgency="boundary")])
+
+    assert [item.text for item in banner.unbanded()] == ["unclaimed"]

@@ -188,6 +188,61 @@ under a git remote, a daemon socket — is not a scope question: the sandbox's
 only lever there is `excluded_commands`, which drops the command out of
 isolation rather than widening anything.
 
+## Forge credentials
+
+A contained session reaches its forge on something the operator lent it,
+selected at launch from a ladder ordered by what each rung leaves behind: a
+forwarded ssh agent, then an ephemeral copy of the host's usable ssh keys,
+then a token over HTTPS, then nothing and public reads. `GitAccess.source`
+pins one rung; `auto` walks them and takes the first that is *verified*
+usable — an agent holding an identity, a key that opens with no passphrase,
+a `known_hosts` entry that lets a non-interactive ssh verify the forge. A
+pinned rung that turns out unusable degrades to public reads with the reason
+said, rather than refusing a launch over a preference.
+
+Both ssh rungs are gated on the egress carrying ssh at all. ssh reads none of
+the proxy variables, so under `filtered` a forwarded socket would be a
+credential the session holds and cannot use — which reads as ready and is
+not. The selected rung also decides which way remotes are rewritten: toward
+`https://host/` for a token, toward `git@host:` for a key or an agent, so one
+session speaks one transport rather than half its remotes working.
+
+**What the credential-path denials do and do not buy.** `~/.ssh` and
+`~/.aws/credentials` are declared in `HookSandbox.credential_paths`, which
+compiles into an OS-level read denial for sandboxed shell and into `Read`
+deny rules for the in-process file tools. That stops an agent *reading* key
+material and is worth keeping. It is not isolation from `ssh` and `git`
+*using* it: `ssh git@github.com` contains no credential path, and ssh reads
+the key or the agent socket itself. On Claude the denial is additionally
+enforced by the native per-path credential sandbox; Codex has no per-path
+equivalent, so there it is the semantic policy alone, and neither is a
+syscall boundary. An operator granting an ssh rung is granting the contained
+session the use of that identity, and this is the honest description of that
+grant rather than a claim of a stronger boundary.
+
+Nothing lent is written where it could outlive the session: the ephemeral
+home is made under the system temporary directory at mode `0700`, holds
+copies at `0600`, is mounted read-only, and is removed when the launcher
+exits. The host's own `~/.ssh/config` is never copied — the configuration is
+compiled from what was actually lent, so it cannot name an `IdentityFile`,
+an `Include` or a `Match exec` that does not exist inside. Host-key
+verification is left at ssh's default: `known_hosts` is carried in, and a
+forge it cannot verify is a reason to decline the rung rather than to accept
+an unknown host.
+
+Nothing lent reaches the argv that starts the container either. The token
+crosses as a bare `-e NAME`, which both engines read as "take this one from
+my own environment", and the forge client's own variable is derived inside
+the image from it — a value in argv is a value in `ps` for every process on
+the host, for as long as the session runs.
+
+Signing is a separate claim from authorship and stays off by default: an
+agent commit is not a human vouching for it, and signing it with the
+operator's key would make the signature assert something untrue. What that
+costs is a branch protection rule requiring signed commits, which fails on
+agent branches as a visible check at push time rather than as `gpg: signing
+failed` mid-commit.
+
 ## Edit decisions
 
 Edit decisions cover protected paths, marker changes, size, and the canonical

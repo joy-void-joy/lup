@@ -19,6 +19,7 @@ when its stream is not a tty and honours ``NO_COLOR``, so a redirected launch
 records the same text with no escapes in it.
 """
 
+from collections.abc import Callable, Iterator
 from typing import Literal
 
 import typer
@@ -150,3 +151,121 @@ class Notice(BaseModel, frozen=True):
     def say(self, palette: Palette = Palette()) -> None:
         """Print it, letting the stream decide whether the colour survives."""
         typer.echo(self.painted(palette))
+
+
+class Band(BaseModel, frozen=True):
+    """One heading in a launch's opening, and what belongs under it."""
+
+    heading: str = Field(description="The line that introduces this band")
+    urgency: Urgency = Field(
+        description="What the heading itself is, which is how it is painted"
+    )
+    carries: list[Urgency] = Field(
+        description="Urgencies whose unindented notices belong under this heading"
+    )
+
+
+class Banner(BaseModel):
+    """Every line a launch has to say, held until it can be said in order.
+
+    A launch's opening is assembled by half a dozen components in the order
+    the launch happens to need them -- the egress before the image, the
+    browser before the lease, the forge after both -- and printed in that
+    same order, which is an order about the launcher's internals. What the
+    reader wants is an order about *them*: whether anything is blocking, then
+    what this session can and cannot do, then where to look afterwards. Those
+    two orders have nothing to do with each other, and thirty lines printed
+    in the first one is where a warning goes to be scrolled past.
+
+    So the notices are collected rather than printed, and the bands decide
+    the order once. That is the same move :class:`Palette` makes and for the
+    same reason: the component that knows what it is saying should not also
+    have to know where in somebody's terminal it belongs.
+
+    Mutable, alone among the models here, because it is an accumulator and
+    the alternative is every caller threading a list back out. The bands it
+    renders through are not: they are a judgement about presentation, so they
+    are an overridable default like the palette beside them.
+
+    Nothing added is ever dropped. A notice no band claims is said last under
+    no heading at all, which is the difference between a hierarchy and a
+    filter -- a band list that forgot an urgency would otherwise swallow
+    every line carrying it, and the launch would read as healthy for the
+    reason that made it not.
+    """
+
+    notices: list[Notice] = Field(
+        default=[], description="What has been said to this launch so far"
+    )
+    bands: list[Band] = Field(
+        default=[
+            Band(heading="Ready", urgency="ready", carries=["ready"]),
+            Band(
+                heading="Action required",
+                urgency="warning",
+                carries=["refusal", "warning"],
+            ),
+            Band(heading="Security", urgency="boundary", carries=["boundary"]),
+            Band(heading="Artifacts", urgency="artifact", carries=["artifact"]),
+        ],
+        description=(
+            "The headings, in the order they are printed. Blockers before "
+            "facts and facts before paths, because a reader who stops after "
+            "one band should have stopped after the one that could change "
+            "what they do next"
+        ),
+    )
+
+    def add(self, notices: list[Notice]) -> None:
+        """Hold these until the banner is said."""
+        self.notices.extend(notices)
+
+    def claimed(self, urgency: Urgency) -> bool:
+        """Whether any band carries lines of this kind."""
+        return any(urgency in band.carries for band in self.bands)
+
+    def held(self, wanted: Callable[[Urgency], bool]) -> Iterator[Notice]:
+        """Every line whose parent this wants, subordinate lines kept with it.
+
+        A notice indented under another is part of what that one is saying --
+        the cause under a refusal, the remediation under a degradation -- so
+        it follows its parent's band rather than its own urgency. Sorting by
+        urgency alone is what would separate a remedy from the problem it
+        remedies and file it under a heading where it makes no sense.
+
+        Which is also why this walks rather than filters: a subordinate line
+        carries no record of what it is subordinate to, so the only thing
+        that knows is the position, and the last unindented line before it is
+        the answer.
+        """
+        carried = False
+        for notice in self.notices:
+            if notice.indent == 0:
+                carried = wanted(notice.urgency)
+            if carried:
+                yield notice
+
+    def under(self, band: Band) -> list[Notice]:
+        """Every line this band carries."""
+        return list(self.held(lambda urgency: urgency in band.carries))
+
+    def unbanded(self) -> list[Notice]:
+        """Whatever no band claimed, so that nothing added is ever lost."""
+        return list(self.held(lambda urgency: not self.claimed(urgency)))
+
+    def say(self, palette: Palette = Palette()) -> None:
+        """Print the whole opening, one heading per band that has anything to say.
+
+        An empty band prints nothing at all, heading included, which is what
+        makes the shape informative: a launch showing no `Action required`
+        has nothing requiring action, rather than a heading over a blank.
+        """
+        for band in self.bands:
+            held = self.under(band)
+            if not held:
+                continue
+            Notice(text=band.heading, urgency=band.urgency).say(palette)
+            for notice in held:
+                notice.model_copy(update={"indent": notice.indent + 1}).say(palette)
+        for notice in self.unbanded():
+            notice.say(palette)

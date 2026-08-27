@@ -35,7 +35,7 @@ from lup.providers.codex.harness_runtime import (
 from lup.providers.codex.transcripts import CodexTranscripts
 from lup.harness.environment import non_interactive_environment
 from lup.harness.models import NativeName, Plugin, Resumption
-from lup.harness.notice import Notice
+from lup.harness.notice import Banner, Notice
 from lup.harness.requirements import (
     Finding,
     Manifest,
@@ -897,6 +897,7 @@ def session_argv(
     config_home: Path,
     login: ProviderLogin,
     unsandboxed: bool,
+    transcript: Path | None = None,
 ) -> list[str]:
     """The argv that opens a session, inside the declared container or on the host.
 
@@ -904,11 +905,19 @@ def session_argv(
     operator said otherwise" is a property of the launch rather than of the
     CLI being launched -- and a second runtime that decided it separately is
     how one of them ends up quietly uncontained.
+
+    It is also the one place that knows the whole opening: what the container
+    had to say about itself, and whether the checks behind it passed. So the
+    banner is assembled here and said once, after the verification rather
+    than before it -- a launch cannot report itself ready while the thing
+    that would refute it has not run yet, and thirty lines printed ahead of
+    the answer is how the refutation ends up below the fold.
     """
     if unsandboxed:
         return [cli, *arguments]
     harness = composition.recipe.source
     credential = login.credentials_path(config_home)
+    banner = Banner()
     opening = contained_argv(
         harness.image,
         harness.requirements,
@@ -917,6 +926,7 @@ def session_argv(
         config_home,
         credential if credential.exists() else None,
         login,
+        banner=banner,
     )
     # Verified on the way in, rather than asserted. This is §6's whole point
     # and the launch is where it has to happen: the boundary was built two
@@ -929,6 +939,20 @@ def session_argv(
     # is the handful whose absence means the session can do nothing. A model
     # call and a toolchain version belong to `harness requirements --inside`.
     verify_inside(harness.requirements, probing(opening), setting_up=False)
+    banner.add(
+        [
+            Notice(
+                text="generated artifacts current; runtime checks passed.",
+                urgency="ready",
+            ),
+            *(
+                [Notice(text=f"Transcript: {transcript}", urgency="artifact")]
+                if transcript is not None
+                else []
+            ),
+        ]
+    )
+    banner.say()
     return [*opening, cli, *arguments]
 
 
@@ -1034,6 +1058,7 @@ def launch_claude(
                 else ambient_config_home(profiles.login, Path.home() / ".claude"),
                 profiles.login,
                 unsandboxed,
+                transcript.journal.path,
             )
             sh.Command(argv[0])(*argv[1:], _fg=True, _env=environment)
         succeeded = True
@@ -1128,6 +1153,7 @@ def launch_codex(
                 selected_home,
                 CODEX_LOGIN,
                 unsandboxed,
+                transcript.journal.path,
             )
             sh.Command(argv[0])(*argv[1:], _fg=True, _env=environment)
         succeeded = True

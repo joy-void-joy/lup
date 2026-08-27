@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "7efe050c9fb683e919decde1cb2782801f4e1a1319d190fdefe2e3d111ee0a2f",
+  "source_digest": "fd2348123242779de1755773385d715c80f757964f2a3fe12e65dee834ef8739",
   "target_requirements": [
     "claude-code"
   ],
@@ -506,14 +506,14 @@
     {
       "path": "docs/permissions.md",
       "category": "generated",
-      "sha256": "8559795bbca046d5080a53a95230fc902a7251b95fc70d8b8d2492631884cebf",
+      "sha256": "8ea7684aa997fe7b3bd604116b78a44b7e343bb685644b79ee9117e9486b1954",
       "semantic_id": "docs.permissions",
       "executable": false
     },
     {
       "path": "docs/platform-differentiation.md",
       "category": "generated",
-      "sha256": "894ad13cb2bbd6cc6eebdf20dc2b6c6df5b8494530ce4e0c742880a13c2adc5d",
+      "sha256": "0cf38805f42b66817fdb3ac77acc14b337a8c25cd43281a0684296544beba85f",
       "semantic_id": "docs.platform-differentiation",
       "executable": false
     },

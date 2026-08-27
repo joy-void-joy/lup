@@ -30,7 +30,13 @@ import sh
 from pydantic import BaseModel, Field
 
 from lup.harness.browser import BrowserBridge
-from lup.harness.credential import GitAccess, GitIdentity, RemoteRewrite
+from lup.harness.credential import (
+    ForgeCredential,
+    GitAccess,
+    GitIdentity,
+    NoCredential,
+    RemoteRewrite,
+)
 from lup.harness.egress import SessionEgress
 from lup.harness.environment import NON_INTERACTIVE_SHELL_ENV
 from lup.harness.requirements import Manifest, Package, PackageManager
@@ -834,6 +840,16 @@ if [ -n "$LUP_CREDENTIAL_NAME" ] && usable "$seed" && ! usable "$stored"; then
   cp "$seed" "$stored"
   chmod 600 "$stored"
 fi
+
+# One credential, two consumers. The token crosses the boundary by name --
+# `-e {self.forge.token_variable}` with no value, so it never appears in the
+# argv that starts this container and never reaches anything reading `ps` --
+# and `gh` reads a variable of its own. Derived in here rather than passed as
+# a second `-e`, because the launcher would have to hold the value to pass
+# it, which is the thing being avoided.
+if [ -n "${{{self.forge.token_variable}:-}}" ]; then
+  export GH_TOKEN="${self.forge.token_variable}"
+fi
 exec "$@"
 ENTRY
 RUN chmod +x /usr/local/bin/lup-entrypoint
@@ -979,7 +995,8 @@ USER $UID:$GID
         credential: Path | None = None,
         host_config_home: Path | None = None,
         engine: ContainerEngine = Docker(),
-        forge_token: str = "",
+        forge: ForgeCredential | None = None,
+        granted: bool = False,
         rewrites: list[RemoteRewrite] | None = None,
         identity: GitIdentity | None = None,
         browser_directory: Path | None = None,
@@ -1064,11 +1081,24 @@ USER $UID:$GID
         # The forge configuration is passed rather than baked, and passed
         # here rather than through `run_arguments`, because it is the one
         # part of the run that is neither an image fact nor a posture: it is
-        # a secret and a resolution of *this host's* remotes, and neither
-        # belongs in a layer anybody could pull.
-        reaching = self.forge.environment(forge_token, rewrites or [], identity) | (
-            terminal or {}
+        # this host's own credential and a resolution of this host's remotes,
+        # and neither belongs in a layer anybody could pull.
+        selected = forge or NoCredential(
+            variable=self.forge.token_variable, host=self.forge.host
         )
+        reaching = self.forge.environment(
+            rewrites or [], selected, granted, identity
+        ) | (terminal or {})
+        # By name, with no value beside it, which is what both engines read as
+        # "take this one from my own environment". The value would otherwise
+        # be in this argv -- readable out of `ps` by every process on the host
+        # for as long as the session runs, and recorded verbatim by anything
+        # that logs the launch.
+        inherited = [
+            argument
+            for name in self.forge.inherited(granted)
+            for argument in ("-e", name)
+        ]
         return [
             engine.binary,
             "run",
@@ -1084,6 +1114,8 @@ USER $UID:$GID
                 for name, value in reaching.items()
                 for argument in ("-e", f"{name}={value}")
             ],
+            *inherited,
+            *selected.mount_arguments(),
             *mounts,
             *seeded,
             *bridged,

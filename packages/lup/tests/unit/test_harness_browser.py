@@ -120,9 +120,19 @@ def test_a_url_written_inside_reaches_a_browser_outside(
 
 
 def test_the_launch_says_the_channel_exists_before_a_browser_opens_by_itself() -> None:
-    """An operator whose desktop acts on its own should have been told what can."""
-    said = "\n".join(item.text for item in BrowserBridge().notice(True))
-    assert "channel" in said
+    """An operator whose desktop acts on its own should have been told what can.
+
+    Held to the fact rather than to the word `channel`, which the sentence no
+    longer needs: what an operator acts on is that their browser may open by
+    itself and for how many addresses, and that nothing else gets out this
+    way. Why a one-way pipe carrying a URL carries nothing else is the
+    module's own header, not a clause in every launch.
+    """
+    said = BrowserBridge().notice(True)[0]
+
+    assert "open on your machine" in said.text
+    assert "nothing else crosses" in said.text
+    assert said.urgency == "boundary"
 
 
 def test_an_unbridged_launch_says_what_to_do_instead() -> None:

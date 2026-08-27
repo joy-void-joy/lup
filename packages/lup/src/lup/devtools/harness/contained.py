@@ -37,7 +37,7 @@ from rich.text import Text
 from lup.harness.credential import committer, remote_rewrites
 from lup.harness.egress import PROXY_LABEL, SessionEgress
 from lup.harness.image import ContainerEngine, Image, detected_client
-from lup.harness.notice import Notice
+from lup.harness.notice import Banner, Notice
 from lup.harness.requirements import Manifest
 from lup.providers.login import ProviderLogin
 from lup.sandbox.attribution import WRITE_REFUSAL_MARKERS
@@ -1448,6 +1448,7 @@ def contained_argv(
     login: ProviderLogin,
     engine: ContainerEngine | None = None,
     interactive: bool = True,
+    banner: Banner | None = None,
 ) -> list[str]:
     """The argv that opens a session in this project's container.
 
@@ -1459,7 +1460,15 @@ def contained_argv(
     the same way and in different words, because the two failures send an
     operator to opposite places: one to install a runtime, the other to stop
     pointing the one they have at somebody else's socket.
+
+    ``banner`` collects what this has to say instead of printing it, so a
+    caller that has its own lines to add -- whether the runtime checks passed,
+    where the transcript went -- says the whole opening once in one order. A
+    caller with nothing to add passes nothing and each line is printed as it
+    is produced, which is what a probe wants: its notices interleave with the
+    build they describe rather than arriving after it.
     """
+    said = banner if banner is not None else Banner()
     if engine is not None:
         client = engine
     else:
@@ -1479,18 +1488,15 @@ def contained_argv(
         build_image(image, manifest, tag, client, root)
     name_for_checkout(tag, checkout_tag(root), client)
     reached_at = start_egress(image.egress, root.name, client, root)
-    for notice in image.egress.notice(root.name):
-        notice.say()
-    for notice in superseded_volume_notice(root, client, existing_volumes(client)):
-        notice.say()
+    said.add(image.egress.notice(root.name))
+    said.add(superseded_volume_notice(root, client, existing_volumes(client)))
     # Started before the container rather than beside it, because a pipe with
     # no reader blocks its writer: a sign-in that raced the listener would
     # hang on the one step the whole bridge exists to unblock.
     handing = image.browser.serve()
-    for notice in image.browser.notice(
-        handing is not None, image.egress.shares_host_loopback()
-    ):
-        notice.say()
+    said.add(
+        image.browser.notice(handing is not None, image.egress.shares_host_loopback())
+    )
     lease = lease_for(root, human_owned)
     record_boundary(lease, image.egress, root)
     # Read on the host and passed in, never resolved inside: the file that
@@ -1498,25 +1504,31 @@ def contained_argv(
     # container can write, so a rewrite decided in there is a rewrite the
     # confined thing chose for itself.
     environ = os.environ  # lup: ignore[os-environ]
-    token = (
-        environ[image.forge.token_variable]
-        if image.forge.token_variable in environ
-        else ""
+    # The credential is selected here, on the host, for the third time in this
+    # function and for the same reason as the other two: everything it reads --
+    # the agent socket, the operator's ssh directory, the token variable -- is
+    # the host's, and a container asked to choose its own credential is the
+    # confined thing choosing what confines it. The egress is asked first
+    # because ssh reads none of the proxy variables, so a filtered session
+    # cannot use an ssh credential however good the credential is.
+    forge = image.forge.select(dict(environ), image.egress.carries_ssh(), Path.home())
+    granted = image.forge.granted(dict(environ))
+    rewrites = remote_rewrites(
+        root, image.forge.host, forge.transport(image.forge.ssh_user)
     )
-    rewrites = remote_rewrites(root, image.forge.host)
     # Read on the host for the same reason the rewrites are: `.git/config` is
     # writable from inside, so an identity resolved in there would be one the
     # confined thing chose for itself.
     identity = committer(root)
-    for notice in image.forge.notice(token, rewrites, identity):
-        notice.say()
+    said.add(image.forge.notice(forge, identity))
     # The operator's terminal, answered here rather than in the declaration
     # the digest hashes. Same rule as the container client and for the same
     # measured reason: a `TERM` folded into the declaration would report the
     # generated trees stale on any machine whose terminal differed.
     terminal = image.terminal.for_host(environ)
-    for notice in terminal.notices():
-        notice.say()
+    said.add(terminal.notices())
+    if banner is None:
+        said.say()
     # The editor's lockfile directory, guaranteed before anything mounts it.
     # Whichever side writes it first creates it, so on a profile no editor has
     # ever connected to it is simply absent -- and a bind mount whose source
@@ -1540,7 +1552,8 @@ def contained_argv(
         credential=credential,
         host_config_home=host_config_home,
         engine=client,
-        forge_token=token,
+        forge=forge,
+        granted=granted,
         rewrites=rewrites,
         identity=identity,
         browser_directory=handing,
