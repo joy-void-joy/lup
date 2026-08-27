@@ -535,6 +535,11 @@ def resolve_version(
     denser record than its sessions passes its own counter and the word for
     it, rather than restating the whole fallback around a different tally.
 
+    Widening pools releases only. A directory carrying build metadata is an
+    experiment arm of its release rather than the release, so pooling it in
+    would put a variant under test into the released version's numbers —
+    naming that arm exactly is the way to ask for it.
+
     Returns ``(version_list, warning_message)``.
     ``version_list`` is ``None`` when all versions should be included.
     """
@@ -568,6 +573,7 @@ def resolve_version(
         v
         for v in available
         if (sv := parse_semver(v)) is not None
+        and sv.build is None
         and sv.major == major
         and sv.minor == minor
     ]
@@ -583,7 +589,9 @@ def resolve_version(
     major_matches = [
         v
         for v in available
-        if (sv := parse_semver(v)) is not None and sv.major == major
+        if (sv := parse_semver(v)) is not None
+        and sv.build is None
+        and sv.major == major
     ]
     major_count = count(major_matches)
     if major_count >= min_datapoints:
