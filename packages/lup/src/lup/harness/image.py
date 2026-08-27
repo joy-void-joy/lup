@@ -681,7 +681,7 @@ class Image(BaseModel, frozen=True):
             for item in self.obtained_by(manifest, "script")
         )
         agent_clis = " ".join(item.requested() for item in self.agent_clis)
-        opening = self.browser.script()
+        opening = self.browser.script(self.egress.shares_host_loopback())
         # Quoted, because `ENV name=value` takes whitespace as separating
         # *more* pairs: an unquoted `GIT_SSH_COMMAND=ssh -o BatchMode=yes`
         # makes `-o` a name with no value and the whole file unparseable.

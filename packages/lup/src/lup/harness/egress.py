@@ -150,11 +150,18 @@ class SessionEgress(BaseModel, frozen=True):
         description=(
             "``filtered`` puts the session on an internal network whose only "
             "way out is the proxy; ``bridge`` gives it the host's ordinary "
-            "network and no egress boundary at all; ``none`` cuts it off "
-            "entirely, which no session that installs a dependency survives. "
-            "Filtered by default because a container whose network is "
-            "unscoped protects the home directory and leaves the LAN, "
-            "localhost, and the metadata endpoint open"
+            "network and no egress boundary at all; ``host`` gives it the "
+            "host's network namespace itself; ``none`` cuts it off entirely, "
+            "which no session that installs a dependency survives. Filtered "
+            "by default because a container whose network is unscoped "
+            "protects the home directory and leaves the LAN, localhost, and "
+            "the metadata endpoint open. ``host`` is the widest and the only "
+            "one a loopback flow completes under: a callback the session "
+            "listens for at `127.0.0.1` is the *host's* `127.0.0.1`, so a "
+            "browser on the operator's machine reaches it, which under every "
+            "other mode it cannot -- the same sharing that lets a dev server "
+            "started inside answer on the host without a published port, and "
+            "lets the session reach whatever else is bound there"
         ),
     )
     policy: EgressPolicy = Field(
@@ -250,6 +257,26 @@ class SessionEgress(BaseModel, frozen=True):
     def filtered(self) -> bool:
         """Whether this declaration puts a proxy between the session and the world."""
         return self.mode == "filtered"
+
+    def shares_host_loopback(self) -> bool:
+        """Whether `127.0.0.1` names the same interface on both sides.
+
+        Asked because a loopback flow either completes or cannot, and the two
+        want opposite sentences from anything that narrates one. A sign-in
+        redirects the operator's browser to a port the session is listening
+        on; under every other mode the container holds its own network
+        namespace and that browser reaches its own machine's loopback, where
+        nothing is listening, so the flow needs a second half done by hand.
+        Sharing the namespace makes the two the same port and the redirect
+        lands, which is not a nicety -- it is the difference between an
+        instruction the operator must follow and one that would be a lie.
+
+        A question about the posture rather than a member of it, so callers
+        ask rather than comparing against a mode name. The comparison spelled
+        at each of them is how a fourth mode arrives and two of the three
+        keep saying what was true before it.
+        """
+        return self.mode == "host"
 
     def enforced(self) -> EgressPolicy:
         """The policy the proxy is actually given, allowlist and all.
@@ -525,12 +552,20 @@ class SessionEgress(BaseModel, frozen=True):
         else.
         """
         if not self.filtered():
+            shared = (
+                " Your own loopback is this session's too: whatever is bound "
+                "there answers it, and a port it listens on answers on your "
+                "machine without being published — which is what lets a "
+                "sign-in redirect land."
+                if self.shares_host_loopback()
+                else ""
+            )
             return [
                 Notice(
                     text=(
                         f"Egress: {self.mode} — no proxy between this session "
                         "and the network. The LAN, localhost and any metadata "
-                        "endpoint are reachable from inside the container."
+                        f"endpoint are reachable from inside the container.{shared}"
                     ),
                     urgency="warning",
                 )

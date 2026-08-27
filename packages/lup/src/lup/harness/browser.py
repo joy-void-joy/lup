@@ -24,13 +24,21 @@ for nothing else.
 
 One-way is a decision with a visible cost, and it is better stated here than
 rediscovered. The CLI asks to be redirected to a loopback port it is listening
-on; that port is the container's, and the browser resolving it is the
-operator's, so the sign-in ends on a browser error every time. The flow has a
-second half for exactly this -- the page's code, pasted back at the prompt --
-and the launch says so, because an operator who is not told reads the dead tab
-as the bridge being broken and goes looking in the wrong place. Carrying the
-reply back would mean opening a path inward, which is the one thing this
-module is shaped to refuse.
+on, and whether the operator's browser reaches that port is the network
+posture's answer rather than this module's. A session holding its own network
+namespace listens on a loopback that browser cannot reach, so the sign-in ends
+on a browser error and finishes by hand -- the page's code, pasted back at the
+prompt. A session sharing the host's namespace is listening on the very port
+the browser opens, and the redirect lands with nothing left to do.
+
+Both are said at launch, and saying the wrong one is the failure worth naming:
+an operator not told about the dead tab reads it as the bridge being broken and
+goes looking in the wrong place, and one told to expect a dead tab that never
+arrives waits to be rescued from a flow that already finished. What stays
+refused in either posture is carrying the reply back *through this pipe*. The
+sharing that completes the flow is the network's to grant and is declared where
+the posture is declared; nothing here opens a path inward to make up for its
+absence.
 
 The comparison is the part worth being careful about, because every cheap
 version of it is wrong in the same direction. ``startswith`` admits
@@ -139,6 +147,25 @@ class BrowserBridge(BaseModel, frozen=True):
             "that drifts is the one nobody reads until a sign-in is stuck"
         ),
     )
+    completes: str = Field(
+        default=(
+            "The tab finishes the sign-in on its own: this session shares "
+            "your machine's loopback, so the address it redirects to is a "
+            "port something in here is really listening on. Nothing to paste."
+        ),
+        description=(
+            "The same instruction for the posture that has no second half. "
+            "Held beside its opposite rather than derived from it, because "
+            "both are read in the same two places, and a launch saying the "
+            "wrong one sends an operator to copy a code out of a page that "
+            "already worked -- or, the other way, leaves them waiting to be "
+            "told how to rescue a tab that never failed"
+        ),
+    )
+
+    def ending(self, lands: bool) -> str:
+        """How the flow finishes, in the posture it actually finishes under."""
+        return self.completes if lands else self.paste_back
 
     def path(self) -> str:
         """The pipe, spelled as the container sees it."""
@@ -148,7 +175,7 @@ class BrowserBridge(BaseModel, frozen=True):
         """What tells a CLI inside how to open a browser."""
         return {"BROWSER": self.opener}
 
-    def script(self) -> str:
+    def script(self, lands: bool = False) -> str:
         """The opener the image bakes, which is handed one URL as its argument.
 
         Prints before it writes, and writes only to a pipe that is really
@@ -172,7 +199,7 @@ class BrowserBridge(BaseModel, frozen=True):
             [
                 "#!/bin/sh",
                 "printf '\\nlup: opening on the host:\\n  %s\\n\\n' \"$1\" >&2",
-                f"printf '  %s\\n\\n' {shlex.quote(self.paste_back)} >&2",
+                f"printf '  %s\\n\\n' {shlex.quote(self.ending(lands))} >&2",
                 f'[ -p "{self.path()}" ] || exit 0',
                 f'timeout 5 sh -c \'printf "%s\\n" "$1" > "$2"\' _ "$1" '
                 f'"{self.path()}" 2>/dev/null || true',
@@ -196,7 +223,7 @@ class BrowserBridge(BaseModel, frozen=True):
             else ""
         )
 
-    def notice(self, serving: bool) -> list[Notice]:
+    def notice(self, serving: bool, lands: bool = False) -> list[Notice]:
         """Say that this channel exists, because it is one and it is new.
 
         A boundary nobody was told about is one whose refusals get debugged
@@ -209,9 +236,7 @@ class BrowserBridge(BaseModel, frozen=True):
                 Notice(
                     text=(
                         "Browser: not bridged, so a sign-in prints its URL "
-                        "for you to open. The page then shows a code to "
-                        "paste back at the `Paste code here if prompted` "
-                        "prompt."
+                        f"for you to open. {self.ending(lands)}"
                     ),
                     urgency="detail",
                 )
@@ -228,7 +253,7 @@ class BrowserBridge(BaseModel, frozen=True):
                 urgency="boundary",
             ),
             Notice(
-                text=f"Sign-in: {self.paste_back}",
+                text=f"Sign-in: {self.ending(lands)}",
                 urgency="detail",
             ),
         ]

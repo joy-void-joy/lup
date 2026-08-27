@@ -9,6 +9,7 @@ does not.
 """
 
 import json
+import shlex
 import time
 import webbrowser
 from pathlib import Path
@@ -17,6 +18,7 @@ import pytest
 import sh
 
 from lup.harness.browser import BrowserBridge
+from lup.harness.egress import SessionEgress
 from lup.harness.image import Image
 from lup.harness.requirements import Manifest
 
@@ -187,3 +189,36 @@ def test_an_apostrophe_in_the_instruction_does_not_become_shell(
     written.write_text(bridge.script(), encoding="utf-8")
 
     sh.Command("sh")("-n", str(written))
+
+
+def test_the_instruction_matches_the_posture_the_sign_in_finishes_under() -> None:
+    """One flow, two endings, and the wrong one wastes whoever reads it.
+
+    A session holding its own network namespace redirects the browser at a
+    port only the container has, so the tab dies and the code is carried back
+    by hand. A session sharing the host's namespace redirects it at a port
+    that browser can really open, so there is nothing to carry. The launch and
+    the opener both read this, and both have to read the same one.
+    """
+    bridge = BrowserBridge()
+    landing = "\n".join(item.text for item in bridge.notice(True, lands=True))
+
+    assert bridge.completes in landing
+    assert bridge.paste_back not in landing
+    assert shlex.quote(bridge.completes) in bridge.script(lands=True)
+    assert shlex.quote(bridge.paste_back) not in bridge.script(lands=True)
+
+
+def test_the_image_bakes_the_ending_its_own_network_posture_produces() -> None:
+    """The opener is baked once and read at every sign-in, so it cannot ask.
+
+    Which is why the two declarations are members of one image: the script is
+    rendered while the posture is in hand, so the sentence is settled there
+    rather than by a shell script working out at run time something it has no
+    way to see.
+    """
+    shared = Image(egress=SessionEgress(mode="host")).dockerfile(Manifest())
+    scoped = Image(egress=SessionEgress(mode="filtered")).dockerfile(Manifest())
+
+    assert shlex.quote(BrowserBridge().completes) in shared
+    assert shlex.quote(BrowserBridge().paste_back) in scoped
