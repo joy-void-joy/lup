@@ -42,6 +42,16 @@ def symbols_of(node: ast.AST, prefix: str, local: bool) -> list[DefinedSymbol]:
     a working variable rather than a definition. Recording those would put
     every renamed local on the lost list — the exact noise that makes a
     line-presence pass unreadable, arriving by a different route.
+
+    ``type X = ...`` sits with the assignments rather than with the classes,
+    because that is what it is: one name bound at module scope, with nothing
+    beneath it to walk into. It parses to its own node rather than to an
+    ``Assign``, which is the whole of why it was missing — and missing
+    silently, in the one direction this module exists to make loud. Every
+    ``type`` alias in this repository was invisible to the loss check, so a
+    merge that dropped one reported having lost nothing, while the older
+    ``Name = Literal[...]`` spelling of the same idea was tracked. Two ways
+    to write one declaration, one of them checked.
     """
     match node:
         case (
@@ -62,6 +72,7 @@ def symbols_of(node: ast.AST, prefix: str, local: bool) -> list[DefinedSymbol]:
         case (
             ast.Assign(targets=[ast.Name(id=name)], lineno=line)
             | ast.AnnAssign(target=ast.Name(id=name), lineno=line)
+            | ast.TypeAlias(name=ast.Name(id=name), lineno=line)
         ) if not local:
             return [DefinedSymbol(name=f"{prefix}{name}", line=line)]
     return symbols_under(node, prefix, local)

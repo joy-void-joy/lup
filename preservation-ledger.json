@@ -1,5 +1,5 @@
 {
-  "revision": "093939f72f2293e126aa65515e4b534312f4ff66",
+  "revision": "50cfbd28449bad3cfc4e0f707b463dd6c96874cb",
   "roots": [
     "lup",
     "lup_template"
@@ -196,6 +196,7 @@
         "BannerPlacement.interpreter",
         "BannerPlacement.body",
         "BannerPlacement.of",
+        "BannerExemptionReason",
         "BannerExemption",
         "BannerExemption.type",
         "BannerExemption.reason",
@@ -216,7 +217,8 @@
         "GeneratedBanner.opens",
         "PROMPT_TEXT",
         "VERBATIM_COPY",
-        "COMMENT_FREE"
+        "COMMENT_FREE",
+        "ArtifactBanner"
       ]
     },
     {
@@ -312,6 +314,7 @@
     {
       "module": "lup.client",
       "declares": [
+        "SessionOpener",
         "Client",
         "Client.__init__",
         "Client.open",
@@ -319,6 +322,7 @@
         "Client.query",
         "Client.query",
         "Client.query",
+        "Provider",
         "PROVIDER_PREFIXES",
         "provider_for",
         "create_client"
@@ -853,6 +857,7 @@
         "PRStatus.head_ref",
         "PRStatus.url",
         "PRStatus.reusable",
+        "BranchStatus",
         "Disposition",
         "Disposition.status",
         "Disposition.reason",
@@ -1002,6 +1007,7 @@
         "survey.remote_info",
         "survey.display_row",
         "survey.remote_row",
+        "ActionVerdict",
         "PlannedAction",
         "PlannedAction.description",
         "PlannedAction.verdict",
@@ -1253,6 +1259,7 @@
         "HookScript.framed",
         "HookScript.body",
         "hook_scripts",
+        "GuardStatus",
         "GuardState",
         "GuardState.path",
         "GuardState.status",
@@ -1327,6 +1334,7 @@
     {
       "module": "lup.devtools.dev.model_config",
       "declares": [
+        "DeclarationShape",
         "CONFIG_CALLS",
         "RenderedConfig",
         "RenderedConfig.keywords",
@@ -1944,6 +1952,7 @@
         "RelocationHint",
         "RelocationHint.agent",
         "RelocationHint.shell",
+        "WorktreeLauncher",
         "GITIGNORED_EXTRAS",
         "copy_gitignored_extras",
         "sync_dependencies",
@@ -2028,6 +2037,7 @@
         "ToolBucket",
         "ToolBucket.calls",
         "ToolBucket.errors",
+        "ToolBuckets",
         "ToolHealth",
         "ToolHealth.name",
         "ToolHealth.calls",
@@ -2099,6 +2109,7 @@
         "LoadedSession",
         "LoadedSession.source_session_id",
         "LoadedSession.source_file",
+        "SessionLoader",
         "SessionResult",
         "SessionResult.session_id",
         "SessionResult.timestamp",
@@ -2155,6 +2166,7 @@
         "ToolBucket.calls",
         "ToolBucket.errors",
         "ToolBucket.total_ms",
+        "ToolBuckets",
         "print_version_info",
         "print_data_availability",
         "print_aggregate_stats",
@@ -2267,6 +2279,7 @@
         "PROFILE_ROOT",
         "claude_profile_directory",
         "local_profile_directory",
+        "NativeCapabilityEvidence",
         "NativeComposer",
         "NativeComposer.compose",
         "ClaudeComposer",
@@ -2496,6 +2509,8 @@
         "Roster.source",
         "Roster.tiered",
         "Roster.owed",
+        "Roster.described",
+        "Roster.described.listed",
         "Roster.entry_source",
         "Roster.solves",
         "Roster.solves.opening",
@@ -2842,6 +2857,7 @@
         "GenerationRecipe.reader",
         "GenerationRecipe.reconciler",
         "GenerationRecipe.target_requirements",
+        "RuntimeReadiness",
         "NativeHarnessComposition",
         "NativeHarnessComposition.recipe",
         "NativeHarnessComposition.readiness",
@@ -3265,6 +3281,8 @@
     {
       "module": "lup.devtools.report.build",
       "declares": [
+        "parser",
+        "authored_headings",
         "note_items",
         "drift_items",
         "unlanded_items",
@@ -3679,6 +3697,11 @@
       "module": "lup.devtools.utils",
       "declares": [
         "logger",
+        "ShIn",
+        "ShOut",
+        "ShTarget",
+        "ShOkCode",
+        "ShDone",
         "SHORT_SHA_LENGTH",
         "ShKwargs",
         "ShKwargs._fg",
@@ -3871,6 +3894,8 @@
         "BrowserBridge.opener",
         "BrowserBridge.admits",
         "BrowserBridge.paste_back",
+        "BrowserBridge.completes",
+        "BrowserBridge.ending",
         "BrowserBridge.path",
         "BrowserBridge.environment",
         "BrowserBridge.script",
@@ -4029,12 +4054,15 @@
     {
       "module": "lup.harness.codescan.common",
       "declares": [
+        "RuleStrength",
+        "RuleContext",
         "RULE_CONTEXTS",
         "Matcher",
         "Matcher.select",
         "TypeFamily",
         "TypeFamily.name",
         "TypeFamily.classes",
+        "ExampleVerdict",
         "RuleExample",
         "RuleExample.code",
         "RuleExample.verdict",
@@ -4237,6 +4265,7 @@
         "UnknownDeclaration.settled",
         "UnknownDeclaration.supertypes",
         "UnknownDeclaration.refutation",
+        "Declaration",
         "TypeOracle",
         "TypeOracle.declarations"
       ]
@@ -4256,6 +4285,7 @@
     {
       "module": "lup.harness.codescan.project",
       "declares": [
+        "FindingKind",
         "ClassSymbol",
         "ClassSymbol.qualified_name",
         "ClassSymbol.module",
@@ -4304,6 +4334,7 @@
     {
       "module": "lup.harness.codescan.registry",
       "declares": [
+        "RuleFamily",
         "RULE_REFERENCE",
         "CLEARED_SEPARATOR",
         "RegisteredRule",
@@ -4438,6 +4469,7 @@
         "InheritedSigning.kind",
         "InheritedSigning.configuration",
         "InheritedSigning.notice",
+        "CommitSigning",
         "parse_remote",
         "resolved_host",
         "remote_url",
@@ -4481,6 +4513,7 @@
         "SessionEgress.resolves_names",
         "SessionEgress.unproxied",
         "SessionEgress.filtered",
+        "SessionEgress.shares_host_loopback",
         "SessionEgress.enforced",
         "SessionEgress.declaration",
         "SessionEgress.network_name",
@@ -4547,6 +4580,7 @@
         "Podman.identity_arguments",
         "reported_version",
         "reported_server",
+        "EngineFlavor",
         "flavor_of",
         "ContainerClient",
         "ContainerClient.binary",
@@ -4608,9 +4642,12 @@
     {
       "module": "lup.harness.models",
       "declares": [
+        "NativeName",
+        "QualifiedAgentName",
         "INVOCATION_SIGILS",
         "RENDERED_INVOCATION",
         "portable_prose",
+        "PortableText",
         "SemanticPart",
         "SemanticPart.spell",
         "SemanticPart.text_payload",
@@ -4652,6 +4689,10 @@
         "SkillInvocation.spell",
         "SkillInvocation.invocation",
         "SkillInvocation.named_plugin",
+        "TreeLocation",
+        "PluginLocation",
+        "PathScope",
+        "PathMember",
         "LocatedPart",
         "LocatedPart.scope",
         "LocatedPart.spell_in",
@@ -4707,6 +4748,7 @@
         "ArgumentsRef.type",
         "ArgumentsRef.spell",
         "ArgumentsRef.references_arguments",
+        "PromptPart",
         "PromptDocument",
         "PromptDocument.parts",
         "PromptDocument.source",
@@ -4739,6 +4781,8 @@
         "Skill.prompt",
         "Skill.coherent_arguments",
         "Skill.commands_it_names_are_commands_it_may_run",
+        "AgentColor",
+        "ModelTier",
         "Agent",
         "Agent.id",
         "Agent.name",
@@ -4764,6 +4808,7 @@
         "ProjectRootWord",
         "ProjectRootWord.type",
         "ProjectRootWord.spell_in",
+        "McpCommandWord",
         "McpServer",
         "McpServer.id",
         "McpServer.name",
@@ -4846,7 +4891,9 @@
         "Harness.declared_ids",
         "Harness.unique_semantic_ids",
         "path_beneath_root",
+        "ArtifactPath",
         "lf_normalized",
+        "NormalizedText",
         "Artifact",
         "Artifact.path",
         "Artifact.content",
@@ -4875,6 +4922,7 @@
     {
       "module": "lup.harness.notice",
       "declares": [
+        "Urgency",
         "Ink",
         "Ink.colour",
         "Ink.bold",
@@ -4900,6 +4948,7 @@
     {
       "module": "lup.harness.ownership",
       "declares": [
+        "OwnershipCategory",
         "OwnedArtifact",
         "OwnedArtifact.path",
         "OwnedArtifact.category",
@@ -5022,6 +5071,7 @@
     {
       "module": "lup.harness.requirements",
       "declares": [
+        "PackageManager",
         "Package",
         "Package.name",
         "Package.manager",
@@ -5048,6 +5098,7 @@
         "RefusedLaunch.refuses",
         "RefusedLaunch.costly",
         "RefusedLaunch.consequence",
+        "Absence",
         "EnvironmentRedirect",
         "EnvironmentRedirect.kind",
         "EnvironmentRedirect.variable",
@@ -5058,13 +5109,16 @@
         "SupplementaryGroup.group",
         "SupplementaryGroup.when",
         "SupplementaryGroup.cause",
+        "Diagnosis",
         "ExerciseOutcome",
         "ExerciseOutcome.proved",
+        "ExerciseOutcome.exercised",
         "ExerciseOutcome.detail",
         "Run",
         "Run.kind",
         "Run.command",
         "Run.expect",
+        "Run.contained",
         "Run.programs",
         "Run.pointed_at",
         "Run.behind",
@@ -5091,6 +5145,8 @@
         "MountProbe.behind",
         "MountProbe.given",
         "MountProbe.run",
+        "Exercise",
+        "Side",
         "Requirement",
         "Requirement.capability",
         "Requirement.purpose",
@@ -5106,12 +5162,14 @@
         "Finding",
         "Finding.requirement",
         "Finding.working",
+        "Finding.exercised",
         "Finding.detail",
         "Finding.causes",
         "Finding.refuses",
         "Finding.notices",
         "Manifest",
         "Manifest.requirements",
+        "Manifest.across",
         "Manifest.on_the_host",
         "Manifest.inside_the_image",
         "Manifest.check",
@@ -5175,6 +5233,7 @@
         "agent_session_requirement",
         "proxy_reachable_requirement",
         "proxy_tunnels_requirement",
+        "endpoint_reachable_requirement",
         "metadata_refused_requirement",
         "terminal_handoff_requirement",
         "reaped_orphans_requirement",
@@ -5220,7 +5279,8 @@
         "LinkCell",
         "LinkCell.type",
         "LinkCell.target",
-        "LinkCell.render"
+        "LinkCell.render",
+        "TableCell"
       ]
     },
     {
@@ -5235,6 +5295,8 @@
         "BLOB_THRESHOLD_BYTES",
         "REDACTED",
         "SECRET_KEY_FRAGMENTS",
+        "ActorKind",
+        "ObservableEventKind",
         "TraceActor",
         "TraceActor.kind",
         "TraceActor.name",
@@ -5288,6 +5350,7 @@
         "Redactions.apply",
         "store_large_values",
         "EVENT_ADAPTER",
+        "ObservableJournal",
         "open_observable_journal",
         "TraceJournal",
         "TraceJournal.__init__",
@@ -5326,6 +5389,7 @@
     {
       "module": "lup.observability.blocks",
       "declares": [
+        "JsonValue",
         "truncate_str",
         "truncate_str_fields",
         "format_tool_result",
@@ -5387,6 +5451,7 @@
         "JournalTail",
         "JournalTail.entries",
         "JournalTail.offset",
+        "Finalize",
         "RecordWriter",
         "RecordWriter.append",
         "AppendWriter",
@@ -5465,6 +5530,7 @@
       "declares": [
         "logger",
         "JSON_OBJECT",
+        "SessionScope",
         "NativeSemanticBlock",
         "NativeSemanticBlock.kind",
         "NativeSemanticBlock.block",
@@ -5723,6 +5789,8 @@
         "SESSION_DIR",
         "JOURNAL_FILE",
         "SPAWNER_KIND",
+        "ActorRecipe",
+        "WorkSettles",
         "CohortEntry",
         "CohortEntry.at",
         "CohortEntry.event",
@@ -5797,6 +5865,7 @@
         "MessageOutstandingEvent",
         "MessageOutstandingEvent.type",
         "MessageOutstandingEvent.delivered",
+        "MailEvent",
         "ActorMail",
         "ActorMail.__init__",
         "ActorMail.send",
@@ -5874,6 +5943,7 @@
     {
       "module": "lup.orchestration.actors.progress",
       "declares": [
+        "ProgressKind",
         "ProgressWindow",
         "ProgressWindow.after",
         "ProgressWindow.limit",
@@ -5949,6 +6019,7 @@
         "ActorFinished.summary",
         "ActorFinished.error",
         "ActorFinished.applied",
+        "RosterEntry",
         "ENTRY_ADAPTER",
         "SpawnedActor",
         "SpawnedActor.actor",
@@ -5972,6 +6043,7 @@
       "module": "lup.orchestration.actors.sessions",
       "declares": [
         "logger",
+        "ActorEvent",
         "ActorJournal",
         "ActorJournal.append",
         "ActorSchemaChangedError",
@@ -6072,6 +6144,9 @@
         "logger",
         "BackgroundConfig",
         "BackgroundConfig.debounce_seconds",
+        "StateToRequest",
+        "BackgroundResultHandler",
+        "BackgroundErrorHandler",
         "BackgroundAgent",
         "BackgroundAgent.__init__",
         "BackgroundAgent.start",
@@ -6086,6 +6161,7 @@
       "declares": [
         "logger",
         "JOB_RUNNER_SCRIPT",
+        "JobState",
         "JobInputFile",
         "JobInputFile.path",
         "JobInputFile.content",
@@ -6257,6 +6333,7 @@
         "ContextReadEvent.last_events",
         "ContextReadEvent.apply",
         "ContextReadEvent.events_read",
+        "AnyRelayEvent",
         "RELAY_EVENT_ADAPTER",
         "EventOffset",
         "EventOffset.event",
@@ -6562,6 +6639,7 @@
     {
       "module": "lup.policy.edit_rules",
       "declares": [
+        "EditGate",
         "EditRule",
         "EditRule.name",
         "EditRule.gates",
@@ -6579,11 +6657,13 @@
     {
       "module": "lup.policy.enforcement",
       "declares": [
+        "EscalationRelay",
         "RELAYED_NOTICE",
         "policy_hook_output",
         "SemanticToolPolicy",
         "SemanticToolPolicy.__init__",
         "SemanticToolPolicy.decide",
+        "SemanticDecoder",
         "SandboxPosture",
         "SandboxPosture.active",
         "SandboxPosture.escapable",
@@ -6632,6 +6712,8 @@
     {
       "module": "lup.policy.hooks",
       "declares": [
+        "LupHookEvent",
+        "LupHookDecision",
         "LupHookInput",
         "LupHookInput.event",
         "LupHookInput.tool_name",
@@ -6647,6 +6729,7 @@
         "LupHookOutput.system_message",
         "LupHookOutput.updated_input",
         "LupHookOutput.additional_context",
+        "LupHookFn",
         "LupHookMatcher",
         "LupHookMatcher.matcher",
         "LupHookMatcher.hook",
@@ -6662,6 +6745,7 @@
         "deny_hook",
         "block_hook",
         "merge_hooks",
+        "NudgeCheck",
         "create_permission_hooks",
         "create_permission_hooks.permission_hook",
         "create_git_inspection_hook",
@@ -6756,6 +6840,9 @@
     {
       "module": "lup.policy.kernel.decision",
       "declares": [
+        "DecisionEffect",
+        "Recovery",
+        "SandboxPlacement",
         "SANDBOX_ESCAPE_NOTICE",
         "SANDBOX_ESCALATION_OFFER",
         "SANDBOX_ESCALATION_UNSUPPORTED",
@@ -7053,6 +7140,8 @@
     {
       "module": "lup.policy.kernel.rows",
       "declares": [
+        "PathRuleKind",
+        "RuleLevel",
         "UrlScopeRow",
         "UrlScopeRow.scheme",
         "UrlScopeRow.host",
@@ -7066,6 +7155,8 @@
         "PathRuleRow.value",
         "PathRuleRow.reason",
         "PathRuleRow.allow_autonomous",
+        "PathRoleName",
+        "PathRoleKind",
         "PathRoleRow",
         "PathRoleRow.root",
         "PathRoleRow.role",
@@ -7105,6 +7196,7 @@
         "ShellRuleRow.write_markers",
         "ShellRuleRow.value_flags",
         "ShellRuleRow.reason",
+        "EditOperation",
         "EditRuleRow",
         "EditRuleRow.name",
         "EditRuleRow.gates",
@@ -7271,6 +7363,8 @@
     {
       "module": "lup.policy.models",
       "declares": [
+        "PolicyId",
+        "UrlPathPrefix",
         "ToolIdentity",
         "ToolIdentity.original_name",
         "ToolIdentity.source_evidence",
@@ -7303,6 +7397,7 @@
         "UnknownTool.identity",
         "UnknownTool.input",
         "UnknownTool.decide_under",
+        "SemanticTool",
         "SessionStarted",
         "SessionStarted.session_id",
         "InputSubmitted",
@@ -7328,6 +7423,7 @@
         "BeforeCompaction.reason",
         "AfterCompaction",
         "AfterCompaction.summary",
+        "SemanticEvent",
         "Decision",
         "Decision.effect",
         "Decision.reason",
@@ -7405,6 +7501,7 @@
     {
       "module": "lup.policy.shell_rules",
       "declares": [
+        "CommandEffect",
         "ROOT_EFFECT",
         "ROOT_SANDBOX",
         "ROOT_RECOVERY",
@@ -7628,6 +7725,12 @@
       ]
     },
     {
+      "module": "lup.providers.claude.confinement",
+      "declares": [
+        "CLAUDE_CONFINEMENT"
+      ]
+    },
+    {
       "module": "lup.providers.claude.harness",
       "declares": [
         "CLAUDE_MODEL_ALIASES",
@@ -7736,6 +7839,7 @@
         "ClaudeUnknownOperation.type",
         "ClaudeUnknownOperation.name",
         "ClaudeUnknownOperation.input",
+        "ClaudeOperation",
         "ClaudeBeforeToolEvent",
         "ClaudeBeforeToolEvent.operation",
         "ClaudeHookPayload",
@@ -7789,12 +7893,15 @@
       "declares": [
         "logger",
         "SESSION_THINKING_TOKENS",
+        "ClaudeSettingSource",
         "ClaudeSandboxConfig",
         "ClaudeSandboxConfig.enabled",
         "ClaudeSandboxConfig.auto_allow_bash_if_sandboxed",
         "ClaudeSandboxConfig.allow_unsandboxed_commands",
         "ClaudeSandboxConfig.excluded_commands",
         "ClaudeSandboxConfig.posture",
+        "ClaudePermissionMode",
+        "ClaudeEffort",
         "ClaudeSessionConfig",
         "ClaudeSessionConfig.model",
         "ClaudeSessionConfig.system_prompt",
@@ -7820,6 +7927,7 @@
         "ClaudeSessionConfig.stderr_tail_lines",
         "ClaudeSessionConfig.setting_sources",
         "ClaudeSessionConfig.extra_args",
+        "SubmissionBindingSource",
         "attach_cli_stderr",
         "ENVIRONMENTAL_SIGNATURES",
         "environmental_fault",
@@ -7974,6 +8082,7 @@
     {
       "module": "lup.providers.claude.usage.reader",
       "declares": [
+        "BucketKey",
         "BucketSpec",
         "BucketSpec.key",
         "BucketSpec.label",
@@ -8040,6 +8149,10 @@
         "RpcFailure.error",
         "AppServerError",
         "AppServerError.__init__",
+        "ServerRequestHandler",
+        "NotificationHandler",
+        "DisconnectHandler",
+        "OutgoingRpcMessage",
         "CodexAppServer",
         "CodexAppServer.__init__",
         "CodexAppServer.start",
@@ -8101,6 +8214,12 @@
         "CodexCompatibilityTransform",
         "CodexCompatibilityTransform.__init__",
         "CodexCompatibilityTransform.apply"
+      ]
+    },
+    {
+      "module": "lup.providers.codex.confinement",
+      "declares": [
+        "CODEX_CONFINEMENT"
       ]
     },
     {
@@ -8196,6 +8315,7 @@
         "PROJECTS_KEY",
         "TRUSTED_PROJECT",
         "HOOKS_MANIFEST",
+        "CodexHookEvent",
         "CODEX_HOOK_EVENTS",
         "CodexHomeSelection",
         "CodexHomeSelection.path",
@@ -8251,6 +8371,7 @@
         "CodexApprovalResponder.handles",
         "CodexApprovalResponder.hook_input",
         "CodexApprovalResponder.decide",
+        "ApprovalHandler",
         "build_codex_approval_handler",
         "build_codex_approval_handler.respond"
       ]
@@ -8298,6 +8419,7 @@
         "CodexUnknownOperation.type",
         "CodexUnknownOperation.name",
         "CodexUnknownOperation.input",
+        "CodexOperation",
         "CodexBeforeToolEvent",
         "CodexBeforeToolEvent.operation",
         "CodexHookPayload",
@@ -8471,6 +8593,8 @@
     {
       "module": "lup.providers.codex.selection",
       "declares": [
+        "CodexSandbox",
+        "CodexEffort",
         "CODEX_AUTONOMY",
         "CODEX_EFFORT",
         "codex_mcp_server",
@@ -8483,6 +8607,8 @@
     {
       "module": "lup.providers.codex.theme",
       "declares": [
+        "ThemeColor",
+        "ThemeFontStyle",
         "TextMateStyle",
         "TextMateStyle.background",
         "TextMateStyle.caret",
@@ -8581,12 +8707,20 @@
         "ConfigTransform.apply",
         "ProfileResolver",
         "ProfileResolver.resolve",
+        "ConfiguredFactory",
         "ProfileSelector",
         "ProfileSelector.__init__",
         "ProfileSelector.transform",
         "ProfileSelector.session_factory",
         "ModelMatcher",
         "ModelMatcher.matches"
+      ]
+    },
+    {
+      "module": "lup.providers.confinement",
+      "declares": [
+        "ProviderConfinement",
+        "ProviderConfinement.off"
       ]
     },
     {
@@ -8697,6 +8831,7 @@
         "PrefixModelMatcher",
         "PrefixModelMatcher.__init__",
         "PrefixModelMatcher.matches",
+        "FactoryRecipe",
         "ModelRoute",
         "ModelRoute.name",
         "ModelRoute.matcher",
@@ -8709,6 +8844,8 @@
     {
       "module": "lup.providers.selection",
       "declares": [
+        "SessionAutonomy",
+        "SessionEffort",
         "SessionRequest",
         "SessionRequest.model",
         "SessionRequest.instructions",
@@ -8723,6 +8860,8 @@
         "SessionRequest.max_thinking_tokens",
         "SessionRequest.environment",
         "SessionRequest.hooks",
+        "SessionOpener",
+        "WorkspaceHome",
         "Runtime",
         "Runtime.name",
         "Runtime.login",
@@ -9111,10 +9250,12 @@
         "RunFailedEvent",
         "RunFailedEvent.type",
         "RunFailedEvent.reason",
+        "RunEvent",
         "JournalEntry",
         "JournalEntry.at",
         "JournalEntry.event",
         "ENTRY_ADAPTER",
+        "JournalTail",
         "Journal",
         "Journal.__init__",
         "Journal.append",
@@ -9133,6 +9274,7 @@
     {
       "module": "lup.resolver.models",
       "declares": [
+        "ActorKind",
         "actor",
         "ResolvePhase",
         "ResolvePhase.INVENTORY",
@@ -9339,6 +9481,7 @@
         "DropCandidate.path",
         "DropCandidate.missing",
         "DropCandidate.lost_symbols",
+        "HunkFate",
         "HunkDisposition",
         "HunkDisposition.path",
         "HunkDisposition.parent",
@@ -9412,6 +9555,7 @@
         "CleanupRecord.branch",
         "CleanupRecord.action",
         "CleanupRecord.reason",
+        "InventoryPlanner",
         "ResolverSource",
         "ResolverSource.inventory",
         "ResolveInventory",
@@ -9657,6 +9801,7 @@
         "already_settled",
         "DECLARED_TRANSITIONS",
         "CONCERN_TRANSITIONS",
+        "PersistedResolverModel",
         "StateTransitionError",
         "StateCorruptionError",
         "progress_index",
@@ -9777,6 +9922,8 @@
     {
       "module": "lup.resolver.turns",
       "declares": [
+        "WorkerFactoryRecipe",
+        "ReviewerFactoryRecipe",
         "corrective",
         "corrective.factory",
         "ASK_PREAMBLE",
@@ -9854,6 +10001,7 @@
         "Unattributed.detail",
         "Unattributed.explains",
         "Unattributed.sentence",
+        "Attribution",
         "unquoted",
         "candidate_paths",
         "read_only_mount",
@@ -10094,6 +10242,9 @@
         "FinancialBudgetEvent.maximum_usd",
         "FinancialBudgetEvent.wait_seconds",
         "FinancialBudgetEvent.charge_usd",
+        "BudgetSink",
+        "BudgetSleeper",
+        "EpochProvider",
         "utc_epoch",
         "FinancialBudgetStore",
         "FinancialBudgetStore.__init__",
@@ -10143,12 +10294,16 @@
         "CompletedTurn.usage",
         "CompletedTurn.duration",
         "CompletedTurn.identifiers",
+        "CompleteTurn",
         "AcceptedTurn",
         "AcceptedTurn.identifiers",
         "AcceptedTurn.complete",
         "AcceptedTurn.events",
         "AcceptedTurn.interrupt",
         "AcceptedTurn.steer",
+        "TurnStarter",
+        "TurnFinished",
+        "OutputStoreFactory",
         "TurnLifecycle",
         "TurnLifecycle.__init__",
         "is_output_model",
@@ -10250,6 +10405,7 @@
         "TurnToolResultBlock.is_error",
         "TurnToolResultBlock.refusal",
         "TurnToolResultBlock.telemetry_block",
+        "AnyTurnBlock",
         "TurnMessage",
         "TurnMessage.role",
         "TurnMessage.blocks",
@@ -10283,9 +10439,13 @@
         "TurnCompletedEvent",
         "TurnCompletedEvent.type",
         "TurnCompletedEvent.identifiers",
+        "TurnEvent",
+        "LiveTurnEvent",
         "SubmissionDecision",
         "SubmissionDecision.accepted",
         "SubmissionDecision.message",
+        "SubmissionGate",
+        "SubmissionGateResolver",
         "TurnRequest",
         "TurnRequest.input",
         "TurnRequest.output_type",
@@ -10341,6 +10501,9 @@
         "DisplayRecord.identifiers",
         "DisplayRecord.messages",
         "DisplayRecord.blocks",
+        "TraceSink",
+        "UsageSink",
+        "DisplaySink",
         "TracingConfig",
         "TracingConfig.sink",
         "UsageConfig",
@@ -10421,6 +10584,7 @@
         "record_attempt",
         "submission_history",
         "submit_output",
+        "SubmissionHandler",
         "TurnSubmission",
         "TurnSubmission.__init__",
         "bound_submission",
@@ -10442,6 +10606,9 @@
         "QuotaWaitEvent.quota_type",
         "QuotaWaitEvent.reset_at",
         "QuotaWaitEvent.wait_seconds",
+        "QuotaWaitSink",
+        "QuotaSleeper",
+        "NowProvider",
         "utc_now",
         "QuotaWaitingTurn",
         "QuotaWaitingTurn.__init__",
@@ -10631,6 +10798,8 @@
         "mcp_response",
         "CallToolResultWithAlias",
         "CallToolResultWithAlias.is_error",
+        "LupToolHandler",
+        "ToolHandler",
         "LupMcpServerConfig",
         "LupMcpServerConfig.name",
         "LupMcpServerConfig.server",
@@ -10648,6 +10817,8 @@
         "RawHttpServerConfig.type",
         "RawHttpServerConfig.url",
         "RawHttpServerConfig.headers",
+        "RawMcpServerConfig",
+        "McpServerEntry",
         "create_mcp_server",
         "create_mcp_server.list_tools",
         "create_mcp_server.call_tool",
@@ -10671,6 +10842,8 @@
       "module": "lup.tools.policy",
       "declares": [
         "logger",
+        "NameSet",
+        "ExclusionReasons",
         "BaseToolPolicy",
         "BaseToolPolicy.__init__",
         "BaseToolPolicy.filter_tools",
@@ -10686,6 +10859,7 @@
       "module": "lup.tools.routing",
       "declares": [
         "logger",
+        "ParamBuilder",
         "ToolRoute",
         "ToolRoute.pattern",
         "ToolRoute.tool",
@@ -10708,7 +10882,19 @@
     {
       "module": "lup.types",
       "declares": [
+        "JsonValue",
+        "JsonObject",
+        "EnvVars",
+        "StringMap",
         "text_or_absent",
+        "PayloadText",
+        "Namespace",
+        "Decorator",
+        "KnownToolName",
+        "McpToolName",
+        "ToolName",
+        "ScopedToolGrant",
+        "ToolGrant",
         "normalize_content",
         "LupContentBlock",
         "LupContentBlock.display_emoji",
@@ -10758,6 +10944,7 @@
         "LupToolResultBlock.closes_pairing",
         "LupToolResultBlock.result_payload",
         "LupToolResultBlock.log_summary",
+        "MessageContentBlock",
         "SubagentSpec",
         "SubagentSpec.name",
         "SubagentSpec.description",
@@ -10784,7 +10971,8 @@
         "Usage.cost_usd",
         "Usage.output_tokens",
         "Usage.cache_read_input_tokens",
-        "Usage.cache_creation_input_tokens"
+        "Usage.cache_creation_input_tokens",
+        "UsageCost"
       ]
     },
     {
@@ -10997,6 +11185,7 @@
         "version_dirs",
         "iter_session_dirs",
         "iter_run_dirs",
+        "iter_run_dirs.found",
         "iter_output_dirs",
         "iter_trace_log_files",
         "iter_trace_event_files",
@@ -11078,6 +11267,7 @@
       "module": "lup_template.agent.config",
       "declares": [
         "logger",
+        "Engine",
         "Settings",
         "Settings.warn_missing_optional_keys",
         "Settings.example_api_key",
@@ -11496,6 +11686,7 @@
         "LibraryMode.GIT",
         "LibraryMode.LOCAL",
         "LibraryMode.LINKED",
+        "GitRefKind",
         "GitSource",
         "GitSource.url",
         "GitSource.ref_kind",
