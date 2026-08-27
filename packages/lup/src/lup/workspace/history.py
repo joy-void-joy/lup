@@ -392,27 +392,27 @@ def iter_run_dirs(
     back to decide whether one id names one run reads that repetition as
     ambiguity, and refuses the run it did find. Identity is the resolved path,
     which is what collapses those three cases into the one they always were.
+    The spelling a caller gets back is the one the roots it passed produce,
+    so the earliest is kept: mapping the reverse and reversing the result is
+    last-wins standing in for the first-wins a dict cannot express directly.
     """
-    seen: set[Path] = set()
-    for root in (harness_runs_path(),) if roots is None else roots:
-        if not root.is_dir():
-            continue
-        for provider in sorted(root.iterdir()):
-            if not provider.is_dir():
+
+    def found() -> Iterator[Path]:
+        for root in (harness_runs_path(),) if roots is None else roots:
+            if not root.is_dir():
                 continue
-            runs = (
-                sorted(run for run in provider.iterdir() if run.is_dir())
-                if run_id is None
-                else [provider / run_id]
-            )
-            for run in runs:
-                if not run.is_dir():
+            for provider in sorted(root.iterdir()):
+                if not provider.is_dir():
                     continue
-                resolved = run.resolve()
-                if resolved in seen:
-                    continue
-                seen.add(resolved)
-                yield run
+                runs = (
+                    sorted(run for run in provider.iterdir() if run.is_dir())
+                    if run_id is None
+                    else [provider / run_id]
+                )
+                yield from (run for run in runs if run.is_dir())
+
+    unique = {run.resolve(): run for run in reversed(list(found()))}
+    yield from reversed(unique.values())
 
 
 def iter_output_dirs(
