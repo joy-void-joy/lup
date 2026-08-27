@@ -101,6 +101,7 @@ def test_claude_reads_the_refresh_deadline_rather_than_the_access_one(
     now = int(time.time() * 1000)
     credential = {
         "claudeAiOauth": {
+            "refreshToken": "sk-ant-ort01-whatever",
             "expiresAt": now - 3_600_000,
             "refreshTokenExpiresAt": now + deadline,
         }
@@ -123,6 +124,31 @@ def test_a_file_holding_no_claude_login_is_not_a_renewable_one(
     renewing -- which is the answer wanted here, and worth pinning because a
     filter written with `//` or `?` would quietly answer the other way.
     """
+    assert renewable(CLAUDE_LOGIN.renewable, credential, tmp_path) is False
+
+
+def test_a_logged_out_login_is_not_renewable_however_far_off_its_deadline(
+    tmp_path: Path,
+) -> None:
+    """The shape a logout leaves behind, which is a login by the date alone.
+
+    Both token strings are emptied and every other member is written back
+    untouched, so the refresh deadline still names a week from now with
+    nothing left to present at it. Read as renewable, a file in this shape
+    suppresses the seed of a host login that works, and the session it
+    suppresses it for opens demanding a sign-in the boundary cannot finish --
+    once, and then every launch after, because nothing rewrites it.
+    """
+    now = int(time.time() * 1000)
+    credential = {
+        "claudeAiOauth": {
+            "accessToken": "",
+            "refreshToken": "",
+            "expiresAt": 0,
+            "refreshTokenExpiresAt": now + 86_400_000,
+        }
+    }
+
     assert renewable(CLAUDE_LOGIN.renewable, credential, tmp_path) is False
 
 
