@@ -1,5 +1,5 @@
 {
-  "revision": "18ffb5d356eebbb244b5ef2807aee10cc2aaadd5",
+  "revision": "d137ecbf5ce09b5c4852bac731e0d21edaf662d4",
   "roots": [
     "lup",
     "lup_template"
@@ -2439,7 +2439,6 @@
         "Roster.owed",
         "Roster.described",
         "Roster.described.listed",
-        "Roster.entry_source",
         "Roster.solves",
         "Roster.solves.opening",
         "Roster.table",
@@ -2688,7 +2687,11 @@
         "DEFAULT_SKIPPED_NAMES",
         "DEFAULT_NOTE_COLUMN",
         "summary",
-        "top_level_names",
+        "TopLevelEntry",
+        "TopLevelEntry.name",
+        "TopLevelEntry.source",
+        "top_level_entries",
+        "top_level_entries.importable",
         "annotated_tree",
         "annotated_tree.caption",
         "annotated_tree.labelled",

@@ -4,7 +4,10 @@ from pathlib import Path
 
 from typer.testing import CliRunner
 
+import lup.devtools.py.app as py_app_module
+import pytest
 from lup.devtools.py.app import app
+from lup.devtools.py.search import scan_project_symbols
 from lup.devtools.py.text import source_text_matches
 
 
@@ -52,3 +55,41 @@ def test_text_command_refuses_a_non_python_file(tmp_path: Path) -> None:
     result = runner.invoke(app, ["text", "assignment", str(source)])
     assert result.exit_code == 1
     assert "Source file is not Python" in result.output
+
+
+def test_project_symbol_search_finds_package_members(tmp_path: Path) -> None:
+    package = tmp_path / "src" / "demo"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text("")
+    source = (
+        "class Builder:\n"
+        "    def build_client(self):\n"
+        "        local_result = None\n"
+        "        return local_result\n"
+        "\n"
+        "def query():\n"
+        "    return None\n"
+    )
+    (package / "client.py").write_text(source)
+    matches = scan_project_symbols(tmp_path, "build")
+    paths = {match["import_path"] for match in matches}
+
+    assert paths == {"demo.client.Builder", "demo.client.Builder.build_client"}
+    assert all("local_result" not in match["import_path"] for match in matches)
+
+
+def test_search_command_includes_project_source(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    package = tmp_path / "src" / "demo"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text("")
+    (package / "client.py").write_text("def repository_only_symbol():\n    pass\n")
+    monkeypatch.setattr(py_app_module, "find_nearest_pyproject", lambda: tmp_path)
+    monkeypatch.setattr(py_app_module, "get_top_level_packages", lambda: [])
+    result = runner.invoke(app, ["search", "repository_only"])
+
+    assert result.exit_code == 0
+    assert "demo.client.repository_only_symbol" in result.output
+    assert "matches in project source and 0 packages" in result.output

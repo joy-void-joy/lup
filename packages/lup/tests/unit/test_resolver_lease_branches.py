@@ -13,6 +13,7 @@ import pytest
 
 from lup.devtools.dev.branches import (
     PRStatus,
+    WorktreeChanges,
     disposition_for,
     never_diverged_from,
 )
@@ -227,6 +228,76 @@ def test_a_reserved_worktree_is_not_spent_work() -> None:
 
     assert verdict.status == "KEEP"
     assert verdict.reason == "reserved workspace cut from dev"
+
+
+def test_a_reserved_worktree_holding_work_is_not_somebody_s_next_session() -> None:
+    """Reserving a workspace claims nobody has started; a dirty tree denies it.
+
+    Work left uncommitted sits in no commit, on no branch and on no remote,
+    so the sweep is the only thing that can mention it — and a verb reading
+    "leave it for the next session" is how it goes stale on a base that keeps
+    trailing, with nothing anywhere to recover it from.
+    """
+    verdict = disposition_for(
+        "feat-worked-in",
+        integration="dev",
+        current="dev",
+        contained_in=["dev"],
+        pr=None,
+        unique_commits=0,
+        never_diverged=True,
+        worktree="/tree/feat-worked-in",
+        changes=WorktreeChanges(modified=3, untracked=0),
+    )
+
+    assert verdict.status == "COMMIT"
+    assert (
+        verdict.reason
+        == "reserved workspace cut from dev, holding 3 modified, 0 untracked"
+    )
+
+
+def test_a_reserved_worktree_with_a_clean_tree_is_still_left_alone() -> None:
+    """The guard's own case, which reading the dirt must not eat.
+
+    Creating a worktree and committing into it are two moments, and between
+    them the tree is clean and the branch has diverged by nothing. That is
+    the workspace the documented workflow just told the user to make.
+    """
+    verdict = disposition_for(
+        "feat-not-started",
+        integration="dev",
+        current="dev",
+        contained_in=["dev"],
+        pr=None,
+        unique_commits=0,
+        never_diverged=True,
+        worktree="/tree/feat-not-started",
+        changes=WorktreeChanges(modified=0, untracked=0),
+    )
+
+    assert verdict.status == "KEEP"
+
+
+def test_dirt_does_not_move_a_branch_that_already_landed() -> None:
+    """Everywhere but a reserved workspace, dirt prices the action.
+
+    A merged branch whose worktree is dirty is still spent: the delete
+    refuses until forced rather than becoming a different verb, so reading
+    the dirt must not reach past the one guard it was added for.
+    """
+    verdict = disposition_for(
+        "feat-landed",
+        integration="dev",
+        current="dev",
+        contained_in=["dev"],
+        pr=None,
+        unique_commits=0,
+        worktree="/tree/feat-landed",
+        changes=WorktreeChanges(modified=5, untracked=2),
+    )
+
+    assert verdict.status == "DELETE"
 
 
 def test_a_merged_branch_still_holding_a_worktree_is_spent() -> None:

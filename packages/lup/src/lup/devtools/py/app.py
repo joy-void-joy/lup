@@ -23,6 +23,7 @@ from lup.devtools.py.info import (
 )
 from lup.devtools.py.search import (
     get_top_level_packages,
+    scan_project_symbols,
     scan_module_symbols,
 )
 from lup.devtools.py.source import format_tree
@@ -255,29 +256,41 @@ def search_cmd(
     pattern: Annotated[str, typer.Argument(help="Symbol name to search for")],
     package: Annotated[
         list[str] | None,
-        typer.Option("--package", "-P", help="Limit to specific packages"),
+        typer.Option(
+            "--package", "-P", help="Search only these installed package exports"
+        ),
     ] = None,
 ) -> None:
-    """Search for symbols across installed packages by name (case-insensitive)."""
+    """Search project source and installed package exports by name."""
+    project_root = None if package else find_nearest_pyproject()
+    project_matches = (
+        scan_project_symbols(project_root, pattern) if project_root else []
+    )
     if package:
         packages = list(package)
     else:
         packages = get_top_level_packages()
 
     if not package:
-        typer.echo(f"Scanning {len(packages)} installed packages...", err=True)
+        project_scope = "project source and " if project_root else ""
+        typer.echo(
+            f"Scanning {project_scope}{len(packages)} package exports...", err=True
+        )
 
-    all_matches = [
+    package_matches = [
         match for pkg in packages for match in scan_module_symbols(pkg, pattern)
     ]
+    all_matches = [*project_matches, *package_matches]
     scanned = len(packages)
+    package_scope = f"{scanned} package{'s' if scanned != 1 else ''}"
+    scope = f"project source and {package_scope}" if project_root else package_scope
 
     if not all_matches:
-        typer.echo(f"No matches for '{pattern}' in {scanned} packages")
+        typer.echo(f"No matches for '{pattern}' in {scope}")
         return
 
     typer.echo(f"Matches for '{pattern}':\n")
     for match in sorted(all_matches, key=lambda m: m["import_path"]):
         typer.echo(f"  {match['kind']:10s}  {match['import_path']}")
 
-    typer.echo(f"\n({len(all_matches)} matches in {scanned} packages)")
+    typer.echo(f"\n({len(all_matches)} matches in {scope})")
