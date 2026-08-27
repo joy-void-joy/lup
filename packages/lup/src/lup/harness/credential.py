@@ -589,6 +589,13 @@ class GitAccess(BaseModel, frozen=True):
         it as a credential prompt inside a non-interactive session is the
         failure the manifest exists to prevent, so it is said at launch with
         the variable named.
+
+        Named and then answered, because a variable nobody knows how to fill
+        is the same wall as a notice nobody printed. Naming one was the whole
+        of what this said, and the reader it left had a sentence identifying
+        a variable, no document defining it, and a launch that had already
+        scrolled -- so what goes in it travels beside it, subordinate to the
+        line it explains rather than competing with it.
         """
         if not token:
             reach = (
@@ -602,11 +609,25 @@ class GitAccess(BaseModel, frozen=True):
                     text=(
                         f"Forge: no token in {self.token_variable}; {reach}. "
                         "Whatever needs a credential — a push, a private "
-                        "repository — refuses in that variable's name rather "
-                        "than prompting. The ssh key is on the host by design "
-                        "and nothing routes to it, so nothing falls back to it."
+                        "repository, every `gh` call the session makes — "
+                        "refuses in that variable's name rather than "
+                        "prompting. The ssh key is on the host by design and "
+                        "nothing routes to it, so nothing falls back to it."
                     ),
                     urgency="boundary",
+                ),
+                Notice(
+                    text=(
+                        f"Grant one by exporting {self.token_variable} in the "
+                        f"shell that launches, holding a {self.host} token "
+                        "scoped to the repositories this work touches, with "
+                        "contents and pull requests readable and writable. It "
+                        "is read on the host and passed in as that variable "
+                        "and as `GH_TOKEN`, so git and `gh` share the one "
+                        "credential and nothing is stored in the checkout."
+                    ),
+                    urgency="detail",
+                    indent=1,
                 ),
                 *self.authorship(identity),
                 *self.signing.notice(),

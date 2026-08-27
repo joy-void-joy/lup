@@ -90,6 +90,24 @@ def test_the_absence_of_a_token_is_said_at_launch() -> None:
     assert "ssh key is on the host" in spoken
 
 
+def test_the_launch_says_what_goes_in_the_variable_it_names() -> None:
+    """A variable nobody can fill is the same wall as no notice at all.
+
+    The scope and the forge are read off the declaration rather than spelled
+    in the sentence, so an adopter who moved either gets an instruction about
+    the host they actually reach instead of one about GitHub.
+    """
+    granting = next(
+        item
+        for item in GitAccess(host="gitea.example.test").notice("", [])
+        if item.indent
+    )
+
+    assert "gitea.example.test" in granting.text
+    assert "export" in granting.text.lower()
+    assert granting.urgency == "detail"
+
+
 def test_the_launch_says_the_agent_can_read_the_token() -> None:
     """Stated rather than implied, because hiding it would be theatre.
 
