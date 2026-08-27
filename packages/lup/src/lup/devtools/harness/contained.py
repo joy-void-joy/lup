@@ -1487,7 +1487,9 @@ def contained_argv(
     # no reader blocks its writer: a sign-in that raced the listener would
     # hang on the one step the whole bridge exists to unblock.
     handing = image.browser.serve()
-    for notice in image.browser.notice(handing is not None):
+    for notice in image.browser.notice(
+        handing is not None, image.egress.shares_host_loopback()
+    ):
         notice.say()
     lease = lease_for(root, human_owned)
     record_boundary(lease, image.egress, root)
