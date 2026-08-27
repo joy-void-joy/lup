@@ -1,10 +1,20 @@
-"""Remote-auth probing: can git push/PR operations reach the origin remote?
+"""Remote-auth probing: what can this session actually do at the origin remote?
 
-ssh-style remotes are probed with ``ssh -T`` (GitHub answers with exit 1,
-GitLab with 0), https remotes via ``gh auth status``; local and
-unrecognized remotes pass. Callers gate remote operations on
-:func:`check_remote_auth` so a missing key or logged-out ``gh`` surfaces
-as one actionable message instead of a failed push.
+**Two questions, and they have different answers.** Whether git can reach the
+remote is :func:`check_remote_auth`: ssh-style remotes are probed with
+``ssh -T`` (GitHub answers with exit 1, GitLab with 0), https remotes via
+``gh auth status``, and local or unrecognized remotes pass. Whether the forge
+client can authenticate is :func:`check_forge_api`, which asks ``gh`` however
+the remote happens to be spelled.
+
+Conflating them is how a pull request fails in the client's own words with
+nothing saying which credential was missing. On an ssh remote the transport
+probe answers for a key and never asks about the API -- and a forwarded agent
+answers ``ssh -T`` perfectly while holding no token at all, because a token is
+a separate credential that travels separately. So a session can push all day
+and be unable to open the request describing what it pushed. Anything reading
+or writing pull requests, issues or checks gates on :func:`check_forge_api`;
+anything that only moves commits gates on :func:`check_remote_auth`.
 
 Every probe answers with a :class:`RemoteRefusal` rather than printing one,
 because two readers ask this and want different things back. A command
@@ -24,6 +34,7 @@ from pydantic import BaseModel
 
 from lup.devtools.utils import decode_stderr, gh
 from lup.execution.shell import git
+from lup.harness.credential import GitAccess
 
 
 class RemoteRef(BaseModel):
@@ -137,13 +148,34 @@ def ssh_auth_refusal(destination: str, remote_url: str) -> RemoteRefusal:
 
 
 def gh_auth_refusal(remote_url: str) -> RemoteRefusal:
-    """Verify GitHub CLI auth, used for https remotes where ssh -T means nothing."""
+    """Whether the forge client holds a credential, whatever transport git speaks.
+
+    Named for the client rather than for a scheme, because the client is what
+    it asks about. It answers the https transport question as a side effect --
+    a remote git reaches over https is reached on this same credential -- and
+    reading it as *the https probe* is exactly what kept it off every ssh
+    remote, where it is the only probe that would have said anything.
+
+    The remediation names both places a credential comes from. A session that
+    cannot reach the API is as likely to be a contained one launched without a
+    token as a host nobody ever signed in on, and only one of those is fixed
+    by signing in.
+    """
     try:
         gh("auth", "status", _ok_code=[0])
         return RemoteRefusal()
     except (sh.ErrorReturnCode, sh.CommandNotFound):
         return RemoteRefusal(
-            complaint=f"gh auth failed for remote '{remote_url}'. Run: gh auth login",
+            complaint=(
+                f"The forge API is unauthenticated for '{remote_url}', so "
+                "pull requests, issues and checks fail at the API rather "
+                "than here.\n"
+                "  On a host:  gh auth login\n"
+                "  In a contained session the token travels from the "
+                f"launching shell: export {GitAccess().token_variable} there, "
+                "or declare `token_source='forge-login'` so the launcher "
+                "carries the host's own login in."
+            ),
             credential=True,
         )
 
@@ -178,6 +210,20 @@ def check_remote_auth() -> bool:
     reaches the host cannot either.
     """
     refusal = remote_auth_refusal(git.out("remote", "get-url", "origin"))
+    if refusal.complaint:
+        typer.echo(refusal.complaint, err=True)
+    return not refusal.complaint
+
+
+def check_forge_api() -> bool:
+    """Verify the forge client can authenticate. True if API operations may proceed.
+
+    Asked of the client rather than of the remote, so the answer does not
+    change with how the remote is spelled. That independence is the point:
+    the transport probe already covers the spelling, and what it cannot cover
+    is the credential the API needs, which no remote URL mentions.
+    """
+    refusal = gh_auth_refusal(git.out("remote", "get-url", "origin"))
     if refusal.complaint:
         typer.echo(refusal.complaint, err=True)
     return not refusal.complaint

@@ -30,6 +30,7 @@ from lup.devtools.dev.branches import (
     get_integration_branch,
     parse_branches,
 )
+from lup.devtools.dev.remote_auth import check_forge_api
 from lup.devtools.layout import get_tree_dir
 
 from lup.execution.shell import git
@@ -685,7 +686,13 @@ def create(
     repository is what stops the remote-URL inference an alias defeats, and
     once the repository is given the checkout no longer says which branch the
     request comes from — so the two go together.
+
+    Gated on the forge client's own credential rather than on the remote's,
+    because this is the step where the two part company: the push that got
+    here needed a transport, and this needs an API nothing has asked about.
     """
+    if not check_forge_api():
+        raise typer.Exit(1)
     try:
         raw = gh.out(
             "pr",
@@ -722,7 +729,9 @@ def update(
     pr_number: int,
     body: str,
 ) -> None:
-    """Update a PR body."""
+    """Update a PR body, on the same API credential creating one needs."""
+    if not check_forge_api():
+        raise typer.Exit(1)
     try:
         gh("pr", "edit", str(pr_number), *repository_arguments(), "--body", body)
         typer.echo(f"Updated PR #{pr_number}")
