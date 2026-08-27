@@ -416,6 +416,7 @@ def agent_session_requirement(
     where: Side = "image",
     install: list[Package] = [],
     runtime: str = "claude",
+    arguments: list[str] = [],
 ) -> Requirement:
     """Whether an agent session actually runs inside the image, not merely opens.
 
@@ -450,6 +451,18 @@ def agent_session_requirement(
 
     Its absence refuses rather than degrades, because an architecture whose
     sessions do not run is not a degraded architecture.
+
+    ``arguments`` is what the launch says on the command line and this must
+    say too, held by the caller because the words are one runtime's own and
+    this module stays provider-neutral. It exists because the sentence above
+    was still not true without it: an exercise carrying the mounts, the
+    config home and the network, and *not* carrying the flag that stands the
+    runtime's own sandbox down, opened a session with its settings still
+    saying the sandbox was on -- so it refused for a confinement that cannot
+    start in an unprivileged container and that no launch has ever asked
+    for. A probe answering about a session nobody opens is the one failure
+    this declaration exists to prevent, and it had found a third way to do
+    it.
     """
     return Requirement(
         capability="contained agent session",
@@ -457,7 +470,7 @@ def agent_session_requirement(
         where=where,
         checked="setup",
         exercise=Run(
-            command=[runtime, "-p", "Reply with exactly: SESSION_OK"],
+            command=[runtime, *arguments, "-p", "Reply with exactly: SESSION_OK"],
             expect="SESSION_OK",
         ),
         absence=RefusedLaunch(

@@ -321,6 +321,7 @@ class Image(BaseModel, frozen=True):
             "jq",
             "less",
             "openssh",
+            "socat",
             "procps-ng",
             "ripgrep",
             "fd",
@@ -338,7 +339,13 @@ class Image(BaseModel, frozen=True):
             "permission dispatcher, which a native CLI starts as a bare "
             "``python3`` deliberately outside any virtual environment, so the "
             "interpreter ``uv`` manages is the one interpreter it may not "
-            "use: an image carrying only that one has no policy at all"
+            "use: an image carrying only that one has no policy at all. "
+            "``socat`` is the relay a session reaches for when something has "
+            "to be carried between two things that cannot address each other "
+            "-- a port, a socket, a transport an HTTP proxy will not take. "
+            "It is *not* here for the runtime's own sandbox, whose packages "
+            "``inner_sandbox`` deliberately leaves unlisted; read that field "
+            "before adding its companion here"
         ),
     )
     inner_sandbox: list[str] = Field(

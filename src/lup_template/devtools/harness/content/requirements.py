@@ -33,6 +33,7 @@ from lup.harness.toolchain import (
     typescript_requirement,
     uv_requirement,
 )
+from lup.providers.claude.confinement import CLAUDE_CONFINEMENT
 from lup_template.devtools.harness.content.image import agent_image
 
 
@@ -124,6 +125,10 @@ def manifest(boundary: SessionEgress | None = None) -> Manifest:
             reaped_orphans_requirement(),
             bun_requirement(),
             typescript_requirement(),
-            agent_session_requirement(),
+            # Opened the way a launch opens one, which for this runtime means
+            # its own sandbox stood down: the container is the boundary, and
+            # a probe spelling anything else answers about a session nobody
+            # runs.
+            agent_session_requirement(arguments=CLAUDE_CONFINEMENT.off),
         ],
     )

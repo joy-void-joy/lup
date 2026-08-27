@@ -22,8 +22,10 @@ from pydantic import BaseModel, Field
 from lup.providers.login import ProviderLogin
 from lup.providers.profiles import ProfileDirectory
 from lup.devtools.harness.contained import contained_argv
+from lup.providers.claude.confinement import CLAUDE_CONFINEMENT
 from lup.providers.claude.harness import ClaudeSpellings
 from lup.providers.claude.transcripts import ClaudeTranscripts
+from lup.providers.codex.confinement import CODEX_CONFINEMENT
 from lup.providers.codex.harness import CodexSpellings
 from lup.providers.codex.login import CODEX_LOGIN
 from lup.providers.codex.harness_runtime import (
@@ -665,15 +667,12 @@ def codex_sandbox_arguments(
     recipe.
 
     Contained, that same envelope is wrong in a way that has nothing to do
-    with strictness: ``workspace-write`` turns network access off, and a
-    contained session's only route out is an HTTP proxy on an internal
-    network. The strict subset would therefore cut the session off from the
-    egress boundary built for it, and the Codex documentation says so
-    directly for this case -- configure the container to provide the
-    isolation, then run with ``danger-full-access`` inside it. This is the
-    counterpart of Claude's ``enabled: false``, and it is what "every
-    runtime, in the same change" means for a posture: one concept, each
-    runtime's own word for it.
+    with strictness, and what stands in its place is spelled by
+    :data:`~lup.providers.codex.confinement.CODEX_CONFINEMENT` rather than
+    here -- which carries why, and is where the image-side probe reads the
+    same words rather than inventing its own. This is the counterpart of
+    Claude's off switch, and it is what "every runtime, in the same change"
+    means for a posture: one concept, each runtime's own word for it.
 
     LUP_SANDBOX_ACTIVE stays unset either way here, because a contained
     session does not need it -- the kernel reads the container from the
@@ -705,7 +704,7 @@ def codex_sandbox_arguments(
             ),
             urgency="boundary",
         ).say()
-        return ["--sandbox", "danger-full-access"]
+        return list(CODEX_CONFINEMENT.off)
     environment["LUP_SANDBOX_ACTIVE"] = "1"
     Notice(
         text=(
@@ -810,16 +809,19 @@ def claude_sandbox_arguments(plugin: Plugin, contained: bool = False) -> list[st
 
     Contained, it is an *off* switch, and the artifact still says ``enabled:
     true`` because that is the right answer for the uncontained launch the
-    same file serves. Two reasons to turn it off, one measured and one
-    documented. Measured: in an unprivileged container bubblewrap cannot
-    mount a fresh ``/proc`` -- ``Can't mount proc on /newroot/proc:
-    Operation not permitted`` -- so the inner sandbox does not start, and
-    the packages installed to keep it quiet bought silence rather than a
-    boundary. Documented: Anthropic's remedy for that is
-    ``enableWeakerNestedSandbox``, which they describe as considerably
-    weaker and appropriate only where an outer container is already the
-    boundary -- and where that is true, the honest posture is the container
-    alone rather than a second wall that has to be weakened to stand up.
+    same file serves. The switch itself is spelled by
+    :data:`~lup.providers.claude.confinement.CLAUDE_CONFINEMENT` rather than
+    here, so the image-side probe that asks whether a session can open at all
+    opens the same one this does -- spelled twice, the probe verifies a
+    session nobody launches, which is how it came to refuse for the absence
+    of a confinement no launch has ever asked for.
+
+    What the vendor documents in place of the nested sandbox travels with
+    that spelling. The measured half belongs here, beside the launcher
+    making the choice: in an unprivileged container bubblewrap cannot mount a
+    fresh ``/proc`` -- ``Can't mount proc on /newroot/proc: Operation not
+    permitted`` -- so the inner sandbox does not start, and the packages
+    installed to keep it quiet bought silence rather than a boundary.
 
     What is lost is narrower than it looks. The credential read denials name
     paths this container never mounts; the human-owned write denials are
@@ -834,7 +836,7 @@ def claude_sandbox_arguments(plugin: Plugin, contained: bool = False) -> list[st
     if hooks is None or hooks.sandbox is None:
         return []
     if contained:
-        return ["--settings", json.dumps({"sandbox": {"enabled": False}})]
+        return list(CLAUDE_CONFINEMENT.off)
     try:
         tree = get_tree_dir()
     except (typer.Exit, SystemExit):
