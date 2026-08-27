@@ -56,9 +56,11 @@ Do not present a dead run's branches as a to-do list. One decision about the run
 
 One table covering every branch, ordered `LAND` and `COMMIT` first (that is the work at risk), then the `KEEP` rows an open PR is driving (work already asked for, waiting on nothing but an order to merge in), then `DELETE`/`STALE`, then the rest of `KEEP`/`CURRENT`:
 
-| Branch | Disposition | Unique | Rewr | Diff | Dirt | PR | Proposed action |
+| Branch | Disposition | Unique | Behind | Rewr | Diff | Dirt | PR | Proposed action |
 
 `Dirt` is the survey's `changes` — what that branch's worktree holds uncommitted. On a reserved workspace it decides the disposition, which is what `COMMIT` says: reserving a workspace claims nobody has started, and an uncommitted change contradicts it. Everywhere else it changes only what carrying a disposition out costs — a dirty worktree makes a delete refuse until forced, and forcing discards those files, so a dirty row is one to read before proposing anything.
+
+`Behind` is the survey's `behind` — how many commits the integration branch holds that this branch lacks. **It is a signal, never a verdict**, and no disposition reads it: every merge moves the integration branch under every other branch at once, so a verb deciding on distance would retire a workspace because unrelated work landed. What it is for is the question left over once the verb is settled. A `KEEP` reserved workspace sitting far behind is one nobody has opened — its base is no longer somewhere a session would want to start — so name it and ask whether to refresh or drop it. Never act on the figure alone; a branch is not stale for trailing, and the current branch trails nothing by construction.
 
 `Rewr` is the survey's `rewritten` — how many of that branch's unique commits already name a subject in the integration branch. Containment is decided by patch-id, which a rewrite changes, so a commit that landed rebased, reworded, or squashed reads as unlanded ever after and a pre-rewrite snapshot presents its whole history as work at risk. **It is a signal, never a verdict**: a shared subject is not proof, so where it is set, go and check — `git cherry -v <integration> <branch>` marks with `-` what patch-id already matches, and comparing the remaining subjects against `git log <integration>` finds the rewrites it cannot see. Report what the comparison showed; never subtract it from `Unique` and never let it retire work on its own.
 

@@ -123,6 +123,17 @@ class BranchInfo(BaseModel):
     verb is decided — the wrong direction to be wrong in is the one that
     marks real work landed.
     """
+    behind: int = 0
+    """How many commits the integration branch holds that this branch lacks.
+
+    A signal, never a verdict, on the same footing as :attr:`rewritten`. It
+    answers what a disposition cannot: whether the base under a branch is one
+    a reader would still want to start from. Every merge changes this figure
+    for every branch at once, which is exactly why no verb may read it — and
+    why a reader has to, since a clean workspace whose base has gone stale is
+    one nobody has opened, and saying nothing is how it stays reserved for a
+    session that is not coming.
+    """
     changes: WorktreeChanges | None = None
     """What this branch's worktree holds uncommitted, where it has one.
 
@@ -413,6 +424,29 @@ def count_unique_commits(branch: str, integration: str) -> int:
                 f"{branch}...{integration}",
                 _ok_code=[0],
             )
+        )
+    except (sh.ErrorReturnCode, ValueError):
+        return -1
+
+
+def count_commits_behind(branch: str, integration: str) -> int:
+    """Count commits the integration branch holds that ``branch`` lacks (-1: unknown).
+
+    Reported beside a verb and never inside one. Every merge moves the
+    integration branch under every other branch at once, so a disposition
+    reading this figure would retire a workspace as a side effect of
+    unrelated work landing — which is the trap the reserved-workspace guard
+    exists to avoid, and reading the tip rather than the distance is how it
+    avoids it.
+
+    What it answers is the question left over once the verb is settled: a
+    clean workspace reserved long enough for the base beneath it to go stale
+    is one nobody has opened, and a sweep that never says so is how it goes
+    on being reserved for a session that is not coming.
+    """
+    try:
+        return int(
+            git.out("rev-list", "--count", f"{branch}..{integration}", _ok_code=[0])
         )
     except (sh.ErrorReturnCode, ValueError):
         return -1
@@ -1565,6 +1599,7 @@ def survey(as_json: bool) -> None:
             disposition=verdict.status,
             reason=verdict.reason,
             rewritten=len(rewrite_suspects(name, integration)) if unique else 0,
+            behind=count_commits_behind(name, integration),
             changes=uncommitted,
         )
 
@@ -1627,6 +1662,7 @@ def survey(as_json: bool) -> None:
                 f"{marker}{bi.name}",
                 bi.disposition,
                 str(bi.unique_commits),
+                str(bi.behind) if bi.behind else "-",
                 f"{bi.rewritten}?" if bi.rewritten else "-",
                 str(bi.source_diff_lines),
                 bi.changes.compact() if bi.changes else "-",
@@ -1638,6 +1674,7 @@ def survey(as_json: bool) -> None:
             "Branch",
             "Disposition",
             "Unique",
+            "Behind",
             "Rewr",
             "Diff",
             "Dirt",

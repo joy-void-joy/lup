@@ -14,6 +14,7 @@ import pytest
 from lup.devtools.dev.branches import (
     PRStatus,
     RemoteBranchInfo,
+    count_commits_behind,
     disposition_for,
     fetch_remote_tracking,
     parse_remote_branches,
@@ -138,3 +139,46 @@ def test_a_delete_names_the_branch_rather_than_the_tracking_ref() -> None:
 
     assert info.qualified() == "origin/feat/slashed"
     assert info.delete_command() == "git push origin --delete feat/slashed"
+
+
+def test_a_branch_reports_how_far_the_integration_branch_has_moved(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The figure a reader needs once the verb is settled.
+
+    A clean workspace whose base has gone stale is one nobody has opened,
+    and no disposition can say so: reading distance is exactly what the
+    reserved-workspace guard must not do, since every merge moves the
+    integration branch under every branch at once. Reported, never decisive.
+    """
+    launcher = LocalProcessLauncher()
+    repo = tmp_path / "repo"
+    git_in = ("git", "-C", str(repo))
+    for arguments in (
+        ["git", "init", "-b", "dev", str(repo)],
+        [*git_in, *WHO, "commit", "--allow-empty", "-m", "base"],
+        [*git_in, "branch", "reserved"],
+        [*git_in, *WHO, "commit", "--allow-empty", "-m", "one"],
+        [*git_in, *WHO, "commit", "--allow-empty", "-m", "two"],
+    ):
+        run(launcher, tmp_path, arguments)
+    monkeypatch.chdir(repo)
+
+    assert count_commits_behind("reserved", "dev") == 2
+    assert count_commits_behind("dev", "dev") == 0
+
+
+def test_a_branch_that_cannot_be_measured_says_so_rather_than_reading_zero(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Zero would read as up to date, which is the wrong way to be wrong."""
+    launcher = LocalProcessLauncher()
+    repo = tmp_path / "repo"
+    for arguments in (
+        ["git", "init", "-b", "dev", str(repo)],
+        ["git", "-C", str(repo), *WHO, "commit", "--allow-empty", "-m", "base"],
+    ):
+        run(launcher, tmp_path, arguments)
+    monkeypatch.chdir(repo)
+
+    assert count_commits_behind("no-such-branch", "dev") == -1
