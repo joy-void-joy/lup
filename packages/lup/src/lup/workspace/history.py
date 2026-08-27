@@ -329,36 +329,70 @@ def format_history_for_context(
 # -- Cross-version data discovery ---------------------------------------------
 
 
-def version_dirs() -> list[Path]:
-    """Return all version directories under notes/traces/, sorted."""
-    tp = traces_path()
-    if not tp.exists():
-        return []
-    return sorted(d for d in tp.iterdir() if d.is_dir() and not d.name.startswith("."))
+def trace_roots(roots: Sequence[Path] | None) -> Sequence[Path]:
+    """The trace trees to walk: the ones named, or the one this process resolved."""
+    return (traces_path(),) if roots is None else roots
+
+
+def version_dirs(roots: Sequence[Path] | None = None) -> list[Path]:
+    """Return all version directories under the trace roots given, sorted.
+
+    Omitting ``roots`` takes the one this process resolved, which is the only
+    answer that was available before and stays the default. Naming them
+    replaces that set rather than extending it, for the reason
+    :func:`iter_run_dirs` spells out: a caller able to add a root but not to
+    decline one has had a choice made for it out of a value only this package
+    can see.
+    """
+    return sorted(
+        directory
+        for root in trace_roots(roots)
+        for directory in (root.iterdir() if root.is_dir() else ())
+        if directory.is_dir() and not directory.name.startswith(".")
+    )
 
 
 def iter_session_dirs(
     session_id: str | None = None,
     version: str | None = None,
+    roots: Sequence[Path] | None = None,
 ) -> Iterator[Path]:
     """Iterate over session directories across all (or filtered) versions.
 
     Yields paths like: notes/traces/0.1.0/sessions/my-session/
-    """
-    ver_dirs = [traces_path() / version] if version else version_dirs()
 
-    for ver_dir in ver_dirs:
-        sessions_base = ver_dir / "sessions"
-        if not sessions_base.exists():
-            continue
-        if session_id is not None:
-            candidate = sessions_base / session_id
-            if candidate.exists() and candidate.is_dir():
-                yield candidate
-        else:
-            for d in sessions_base.iterdir():
-                if d.is_dir():
-                    yield d
+    ``roots`` names the trace trees to walk, defaulting to the one this
+    process resolved. It exists because that one moves: an adopter may
+    relocate the notes root so part of a session writes into a directory of
+    its own, and a lookup for a session another process recorded then searches
+    inside this one and comes back empty — not because the record is gone but
+    because one tree was searched for something kept in another. A caller that
+    knows of a second tree had no way to say so.
+
+    A directory reached through two roots is yielded once, under the spelling
+    the earliest root produces. Where a caller counts what comes back to decide
+    whether one id names one session, repetition would read as ambiguity and
+    refuse the session it did find.
+    """
+
+    def found() -> Iterator[Path]:
+        for ver_dir in (
+            [root / version for root in trace_roots(roots)]
+            if version
+            else version_dirs(roots)
+        ):
+            sessions_base = ver_dir / "sessions"
+            if not sessions_base.is_dir():
+                continue
+            if session_id is not None:
+                candidate = sessions_base / session_id
+                if candidate.is_dir():
+                    yield candidate
+            else:
+                yield from (d for d in sessions_base.iterdir() if d.is_dir())
+
+    unique = {directory.resolve(): directory for directory in reversed(list(found()))}
+    yield from reversed(unique.values())
 
 
 def iter_run_dirs(

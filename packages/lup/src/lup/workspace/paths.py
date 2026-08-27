@@ -204,6 +204,14 @@ def read_project_name(root: Path) -> str:
 # Internal — read it through the accessor functions, never import it by name.
 
 
+# lup: ignore[constant-declaration] — the layout this module documents and every
+# accessor below already resolves against; an adopter replaces the directory
+# through configure(), not by respelling the name it has under a root
+NOTES_DIRNAME = "notes"
+# lup: ignore[constant-declaration] — the same layout, for the same reason
+LOGS_DIRNAME = "logs"
+
+
 class PathConfig(BaseModel):
     """Resolved path state: project root, agent version, base directories."""
 
@@ -211,6 +219,22 @@ class PathConfig(BaseModel):
     version: str
     notes_dir: Path
     logs_dir: Path
+
+    def checkout_notes_dir(self) -> Path:
+        """The notes tree this root has, whatever ``notes_dir`` was set to.
+
+        Two different questions share one field until this exists. ``notes_dir``
+        answers "where does this process write", which an override is entitled
+        to move; this answers "where does this checkout keep its notes", which
+        an override does not move and cannot, being a fact about the root
+        rather than about the process reading it.
+
+        Something has to answer the second, or a process holding an override
+        has no way back to the tree it replaced — and an override exists
+        precisely so part of a session writes elsewhere while the rest goes on
+        reading what every other session committed.
+        """
+        return self.root / NOTES_DIRNAME
 
 
 class PathState(BaseModel):
@@ -242,8 +266,8 @@ def resolve_state() -> PathConfig:
         config = PathConfig(
             root=root,
             version=read_agent_version(root),
-            notes_dir=root / "notes",
-            logs_dir=root / "logs",
+            notes_dir=root / NOTES_DIRNAME,
+            logs_dir=root / LOGS_DIRNAME,
         )
         state.config = config
     return config
@@ -278,8 +302,8 @@ def configure(
         state.config = PathConfig(
             root=root,
             version=version if version is not None else read_agent_version(root),
-            notes_dir=notes_dir if notes_dir is not None else root / "notes",
-            logs_dir=logs_dir if logs_dir is not None else root / "logs",
+            notes_dir=notes_dir if notes_dir is not None else root / NOTES_DIRNAME,
+            logs_dir=logs_dir if logs_dir is not None else root / LOGS_DIRNAME,
         )
         return
 
@@ -311,6 +335,20 @@ def agent_version() -> str:
 def notes_path() -> Path:
     """Return the notes directory (``<root>/notes`` by default)."""
     return resolve_state().notes_dir
+
+
+def checkout_notes_path() -> Path:
+    """Return ``<root>/notes``, the tree an override replaces but never moves.
+
+    :func:`notes_path` answers with the override wherever one is in force,
+    which is what a writer wants and what a reader of anything committed does
+    not: an adopter relocates the notes root so one part of a session writes
+    into a directory of its own, and everything that tree does not contain is
+    still where it always was. Without this the relocation is one-way — a
+    process holding an override can no longer name what it replaced, and a
+    lookup for a file another session wrote searches inside this one.
+    """
+    return resolve_state().checkout_notes_dir()
 
 
 def runtime_logs_path() -> Path:
