@@ -385,19 +385,34 @@ def iter_run_dirs(
     nowhere: every caller wanting a run back from its id re-derived the
     ``<provider>/<run_id>`` shape, which made a layout this package owns into
     something it could not change without breaking readers it cannot see.
+
+    A directory reached twice is still one directory. The root set is the
+    adopter's, so two of its entries can nest, name the same tree by different
+    spellings, or arrive through a symlink — and a caller counting what comes
+    back to decide whether one id names one run reads that repetition as
+    ambiguity, and refuses the run it did find. Identity is the resolved path,
+    which is what collapses those three cases into the one they always were.
+    The spelling a caller gets back is the one the roots it passed produce,
+    so the earliest is kept: mapping the reverse and reversing the result is
+    last-wins standing in for the first-wins a dict cannot express directly.
     """
-    for root in (harness_runs_path(),) if roots is None else roots:
-        if not root.is_dir():
-            continue
-        for provider in sorted(root.iterdir()):
-            if not provider.is_dir():
+
+    def found() -> Iterator[Path]:
+        for root in (harness_runs_path(),) if roots is None else roots:
+            if not root.is_dir():
                 continue
-            if run_id is None:
-                yield from (run for run in sorted(provider.iterdir()) if run.is_dir())
-                continue
-            candidate = provider / run_id
-            if candidate.is_dir():
-                yield candidate
+            for provider in sorted(root.iterdir()):
+                if not provider.is_dir():
+                    continue
+                runs = (
+                    sorted(run for run in provider.iterdir() if run.is_dir())
+                    if run_id is None
+                    else [provider / run_id]
+                )
+                yield from (run for run in runs if run.is_dir())
+
+    unique = {run.resolve(): run for run in reversed(list(found()))}
+    yield from reversed(unique.values())
 
 
 def iter_output_dirs(
@@ -520,6 +535,11 @@ def resolve_version(
     denser record than its sessions passes its own counter and the word for
     it, rather than restating the whole fallback around a different tally.
 
+    Widening pools releases only. A directory carrying build metadata is an
+    experiment arm of its release rather than the release, so pooling it in
+    would put a variant under test into the released version's numbers —
+    naming that arm exactly is the way to ask for it.
+
     Returns ``(version_list, warning_message)``.
     ``version_list`` is ``None`` when all versions should be included.
     """
@@ -553,6 +573,7 @@ def resolve_version(
         v
         for v in available
         if (sv := parse_semver(v)) is not None
+        and sv.build is None
         and sv.major == major
         and sv.minor == minor
     ]
@@ -568,7 +589,9 @@ def resolve_version(
     major_matches = [
         v
         for v in available
-        if (sv := parse_semver(v)) is not None and sv.major == major
+        if (sv := parse_semver(v)) is not None
+        and sv.build is None
+        and sv.major == major
     ]
     major_count = count(major_matches)
     if major_count >= min_datapoints:

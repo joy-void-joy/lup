@@ -19,6 +19,7 @@ from lup.harness.egress import AllowedHost, PROXY_LABEL, SessionEgress, Unproxie
 from lup.harness.image import Docker, Image
 from lup.harness.requirements import Manifest
 from lup.sandbox.egress import EgressPolicy
+from lup_template.devtools.harness.content.image import agent_image
 
 
 def test_a_session_is_attached_to_the_internal_network_by_name() -> None:
@@ -44,6 +45,35 @@ def test_a_declaration_that_turns_the_boundary_off_says_so_in_the_argv() -> None
     image = Image(egress=SessionEgress(mode="bridge"))
     arguments = image.run_arguments(Path("/repo/tree/feat"), 1000, 1000, Docker())
     assert arguments[arguments.index("--network") + 1] == "bridge"
+
+
+def test_the_widest_posture_is_the_one_a_loopback_flow_finishes_under() -> None:
+    """Sharing the namespace is what makes `127.0.0.1` mean one interface.
+
+    A sign-in redirects the operator's browser at a loopback port the session
+    is listening on, and whether that browser reaches it is this field's
+    answer and nothing else's. `bridge` is not enough and reads as though it
+    were, which is why the mode and the question asked of it are pinned
+    together rather than each on its own.
+    """
+    image = Image(egress=SessionEgress(mode="host"))
+    arguments = image.run_arguments(Path("/repo/tree/feat"), 1000, 1000, Docker())
+
+    assert arguments[arguments.index("--network") + 1] == "host"
+    assert SessionEgress(mode="host").shares_host_loopback()
+    assert not SessionEgress(mode="bridge").shares_host_loopback()
+    assert not SessionEgress().shares_host_loopback()
+
+
+def test_this_repository_runs_its_sessions_on_the_host_network() -> None:
+    """The trade this repository made, pinned where the argv it produces is.
+
+    The filter admitted every public destination already, so what it cost was
+    ssh and a sign-in that could not finish, and what it bought was a denial
+    of this machine's own network. Named in a test so that taking it back is
+    a decision somebody makes rather than a default that drifted home.
+    """
+    assert agent_image().egress.mode == "host"
 
 
 def test_the_session_is_pointed_at_the_proxy_it_is_the_only_way_out_through() -> None:

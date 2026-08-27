@@ -4,18 +4,25 @@ Mechanism from the library, composition here, exactly as `requirements.py`
 splits them: `lup.harness.image` says what an image declaration *is*, and what
 is this project's is which defaults it takes and which it overrules.
 
-It overrules none of them, and that is the finding rather than an omission. A
-template whose every field had to be answered before anything worked would be
-a template that decided nothing; the library's defaults are what this
-repository actually wants, down to the base image, which was chosen so that
-every package in this toolchain arrives signed.
+It overrules one, and the one it overrules is the network. The library defaults
+to a filtered proxy because an adopter's first session should not reach
+whatever is on their network before anybody has decided it may. This repository
+has decided. That filter admits every public destination already, so it never
+stood between a session and the internet; what it stood between was a session
+and this machine's own loopback, and the price was that HTTP was the only
+transport crossing it -- which is what rewrites every ssh remote, and what
+leaves a sign-in redirecting to a port no browser on this machine can reach.
+Sharing the namespace hands both back and gives up the denial of the LAN, which
+is a trade about who runs this repository and on what, so it is made here
+rather than in a library with no way to know either.
 """
 
+from lup.harness.egress import SessionEgress
 from lup.harness.image import Image
 
 
 def agent_image() -> Image:
-    """This repository's image, which is the library's offer taken whole.
+    """This repository's image: the library's offer, on this machine's network.
 
     A function rather than the model itself, so a project that later needs to
     resolve something against its own checkout has somewhere to do it without
@@ -28,4 +35,4 @@ def agent_image() -> Image:
     Trust belongs to the checkout a container is started against, which the
     entrypoint knows and a build cannot.
     """
-    return Image()
+    return Image(egress=SessionEgress(mode="host"))

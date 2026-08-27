@@ -458,6 +458,7 @@ def agent_session_requirement(
     where: Side = "image",
     install: list[Package] = [],
     runtime: str = "claude",
+    arguments: list[str] = [],
 ) -> Requirement:
     """Whether an agent session actually runs inside the image, not merely opens.
 
@@ -492,6 +493,18 @@ def agent_session_requirement(
 
     Its absence refuses rather than degrades, because an architecture whose
     sessions do not run is not a degraded architecture.
+
+    ``arguments`` is what the launch says on the command line and this must
+    say too, held by the caller because the words are one runtime's own and
+    this module stays provider-neutral. It exists because the sentence above
+    was still not true without it: an exercise carrying the mounts, the
+    config home and the network, and *not* carrying the flag that stands the
+    runtime's own sandbox down, opened a session with its settings still
+    saying the sandbox was on -- so it refused for a confinement that cannot
+    start in an unprivileged container and that no launch has ever asked
+    for. A probe answering about a session nobody opens is the one failure
+    this declaration exists to prevent, and it had found a third way to do
+    it.
     """
     return Requirement(
         capability="contained agent session",
@@ -499,7 +512,7 @@ def agent_session_requirement(
         where=where,
         checked="setup",
         exercise=Run(
-            command=[runtime, "-p", "Reply with exactly: SESSION_OK"],
+            command=[runtime, *arguments, "-p", "Reply with exactly: SESSION_OK"],
             expect="SESSION_OK",
         ),
         absence=RefusedLaunch(
@@ -632,6 +645,68 @@ def proxy_tunnels_requirement(
                 "`tmp/egress.conf` and the proxy's own log says which rule "
                 "refused; `harness egress --down` rebuilds the pair, and "
                 "`--unsandboxed` opens without an egress boundary at all"
+            )
+        ),
+        install=install,
+    )
+
+
+def endpoint_reachable_requirement(
+    where: Side = "image",
+    install: list[Package] = [],
+    destination: str = "https://api.anthropic.com/",
+) -> Requirement:
+    """Whether a session with nothing in front of it reaches the model at all.
+
+    The same end-to-end question :func:`proxy_tunnels_requirement` asks,
+    carried by the posture with nothing in the middle to blame. Both exist
+    because the question outlives the boundary and the *vocabulary of the
+    answer* does not: a reader sent to `tmp/egress.conf` and `harness egress
+    --down` about a session running on the host's own network is being sent
+    to a rendered policy governing nothing, which costs a refusal the only
+    thing it is for.
+
+    ``at_launch``, and that is worth stating here rather than inheriting.
+    Every other image entry marked always is about the proxy, so under a
+    posture with none this is not one check among several -- it is the only
+    one, and leaving it out does not soften the launch's verification but
+    removes it, which is the state §6 exists to make impossible. What it
+    catches is the same failure either way: a session that cannot reach the
+    model opens cleanly, looks entirely healthy, and reports the operator's
+    own internet as down.
+
+    No ``expect``, for the reason the tunnel probe has none. Any HTTP status
+    proves the request arrived, and an unauthenticated 401 from the API is a
+    complete success for this question.
+    """
+    return Requirement(
+        capability="session reaches the model endpoint",
+        at_launch=True,
+        purpose="every model call, package install and documentation fetch",
+        where=where,
+        exercise=Run(
+            command=[
+                "curl",
+                "--silent",
+                "--show-error",
+                "--max-time",
+                "30",
+                "--output",
+                "/dev/null",
+                "--write-out",
+                "%{http_code}",
+                destination,
+            ]
+        ),
+        absence=RefusedLaunch(
+            because=(
+                "this session's network does not reach the model endpoint, so "
+                "every call fails and the runtime reports it as the "
+                "operator's own internet being down. Nothing stands between "
+                "this container and the world to be misconfigured, so what is "
+                "wrong is the host's own route or its resolver — `harness "
+                "image` renders the network this session was declared to "
+                "run on"
             )
         ),
         install=install,

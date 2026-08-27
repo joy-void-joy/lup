@@ -428,6 +428,16 @@ def portable_harness(version: str = "0.2.0", root: Path | None = None) -> Harnes
                 # A read deny inside the boundary, which is where it belongs:
                 # the commands that legitimately need these keys are the ones
                 # excluded below, and they never enter it.
+                #
+                # Kept as defense in depth once a contained session may be
+                # lent an ssh identity, and honest about what that is worth.
+                # It stops an agent *reading* key material. It is not
+                # isolation from `ssh` and `git` *using* it — `ssh
+                # git@github.com` names no credential path, and ssh reads the
+                # key or the agent socket itself. On Claude it is also the
+                # native per-path credential sandbox; on Codex it is the
+                # semantic policy alone, and neither is a syscall boundary.
+                # `docs/permissions.md` states the grant in those words.
                 credential_paths=["~/.ssh", "~/.aws/credentials"],
                 # Every command in this project reaches its toolchain through
                 # `uv`, which locks its cache whenever it resolves dependencies

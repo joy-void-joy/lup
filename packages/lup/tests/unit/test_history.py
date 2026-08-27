@@ -75,6 +75,21 @@ def test_all_versions_flag_short_circuits(tmp_lup_project: Path) -> None:
     assert scope.versions is None and scope.warning is None
 
 
+def test_widening_skips_build_metadata_arms(tmp_lup_project: Path) -> None:
+    seed_sessions(tmp_lup_project, "1.2.3", 1)
+    seed_sessions(tmp_lup_project, "1.2.0", 3)
+    seed_sessions(tmp_lup_project, "1.2.9+arm", 5)
+    scope = resolve_version("1.2.3", min_datapoints=3)
+    assert set(scope.versions or []) == {"1.2.0", "1.2.3"}
+
+
+def test_naming_a_build_metadata_arm_selects_it(tmp_lup_project: Path) -> None:
+    seed_sessions(tmp_lup_project, "1.2.9+arm", 3)
+    scope = resolve_version("1.2.9+arm", min_datapoints=2)
+    assert scope.versions == ["1.2.9+arm"]
+    assert scope.warning is None
+
+
 # ---------------------------------------------------------------------------
 # Latest-session selection across versions
 # ---------------------------------------------------------------------------

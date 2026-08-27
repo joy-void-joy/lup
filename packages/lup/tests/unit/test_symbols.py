@@ -84,3 +84,48 @@ def test_a_method_is_qualified_so_a_namesake_does_not_excuse_it() -> None:
     lost = symbols_lost(before, after)
 
     assert [symbol.name for symbol in lost] == ["A.run"]
+
+
+def test_a_type_alias_is_a_definition_like_the_assignment_it_replaced() -> None:
+    """`type X = ...` parses to its own node, which is how it went missing.
+
+    The older spelling of the same declaration, `X = Literal[...]`, is an
+    ordinary assignment and was always found. Two ways to write one thing,
+    one of them tracked, and nothing saying which you had written.
+    """
+    source = "type Urgency = str\nNetworkMode = str\n"
+
+    assert {symbol.name for symbol in defined_symbols(source)} == {
+        "Urgency",
+        "NetworkMode",
+    }
+
+
+def test_a_dropped_type_alias_is_reported_lost() -> None:
+    """The failure the gap allowed, in the direction this module exists for.
+
+    A merge that took the side without the alias reported having lost
+    nothing, so the rule against silently dropping code during conflict
+    resolution had no instrument for this whole class of declaration.
+    """
+    before = "type Verdict = str\n\n\ndef judge() -> None:\n    pass\n"
+    after = "def judge() -> None:\n    pass\n"
+    lost = symbols_lost(before, after)
+
+    assert [symbol.name for symbol in lost] == ["Verdict"]
+
+
+def test_a_type_alias_carries_the_line_that_defines_it() -> None:
+    """Whoever is told one went missing has to find where it was."""
+    lines = {
+        symbol.name: symbol.line for symbol in defined_symbols("\n\ntype X = int\n")
+    }
+
+    assert lines["X"] == 3
+
+
+def test_a_generic_type_alias_is_named_by_its_own_name() -> None:
+    """`type Pair[T] = ...` binds `Pair`; `T` is a parameter, not a definition."""
+    found = {symbol.name for symbol in defined_symbols("type Pair[T] = tuple[T, T]\n")}
+
+    assert found == {"Pair"}

@@ -150,11 +150,18 @@ class SessionEgress(BaseModel, frozen=True):
         description=(
             "``filtered`` puts the session on an internal network whose only "
             "way out is the proxy; ``bridge`` gives it the host's ordinary "
-            "network and no egress boundary at all; ``none`` cuts it off "
-            "entirely, which no session that installs a dependency survives. "
-            "Filtered by default because a container whose network is "
-            "unscoped protects the home directory and leaves the LAN, "
-            "localhost, and the metadata endpoint open"
+            "network and no egress boundary at all; ``host`` gives it the "
+            "host's network namespace itself; ``none`` cuts it off entirely, "
+            "which no session that installs a dependency survives. Filtered "
+            "by default because a container whose network is unscoped "
+            "protects the home directory and leaves the LAN, localhost, and "
+            "the metadata endpoint open. ``host`` is the widest and the only "
+            "one a loopback flow completes under: a callback the session "
+            "listens for at `127.0.0.1` is the *host's* `127.0.0.1`, so a "
+            "browser on the operator's machine reaches it, which under every "
+            "other mode it cannot -- the same sharing that lets a dev server "
+            "started inside answer on the host without a published port, and "
+            "lets the session reach whatever else is bound there"
         ),
     )
     policy: EgressPolicy = Field(
@@ -250,6 +257,44 @@ class SessionEgress(BaseModel, frozen=True):
     def filtered(self) -> bool:
         """Whether this declaration puts a proxy between the session and the world."""
         return self.mode == "filtered"
+
+    def carries_ssh(self) -> bool:
+        """Whether a transport that ignores the proxy variables can leave at all.
+
+        The measurement this module's own header records, asked as a
+        question rather than repeated as a comparison: a proxy is a
+        convention and ssh does not follow it, so under ``filtered`` a
+        session has no route to port 22 and no resolver to find one with,
+        and under ``none`` it has no route to anything. An ssh credential is
+        selectable exactly where the answer is yes -- which is not a
+        preference about credentials but a fact about the network, and is
+        why the credential ladder asks the egress before it probes a key.
+
+        ``bridge`` and ``host`` both carry it, for different reasons that
+        make no difference here: one has a gateway of its own and the other
+        is the host's own stack.
+        """
+        return self.mode in {"bridge", "host"}
+
+    def shares_host_loopback(self) -> bool:
+        """Whether `127.0.0.1` names the same interface on both sides.
+
+        Asked because a loopback flow either completes or cannot, and the two
+        want opposite sentences from anything that narrates one. A sign-in
+        redirects the operator's browser to a port the session is listening
+        on; under every other mode the container holds its own network
+        namespace and that browser reaches its own machine's loopback, where
+        nothing is listening, so the flow needs a second half done by hand.
+        Sharing the namespace makes the two the same port and the redirect
+        lands, which is not a nicety -- it is the difference between an
+        instruction the operator must follow and one that would be a lie.
+
+        A question about the posture rather than a member of it, so callers
+        ask rather than comparing against a mode name. The comparison spelled
+        at each of them is how a fourth mode arrives and two of the three
+        keep saying what was true before it.
+        """
+        return self.mode == "host"
 
     def enforced(self) -> EgressPolicy:
         """The policy the proxy is actually given, allowlist and all.
@@ -523,14 +568,27 @@ class SessionEgress(BaseModel, frozen=True):
         proxy's, and how to take the infrastructure back down. A boundary
         nobody was told about is one whose refusals get debugged as something
         else.
+
+        Each of them is *one* line, which is the part that had to be fought
+        for. The unfiltered posture used to spend four sentences explaining
+        why a shared loopback is what lets a sign-in redirect land -- true,
+        and rationale, and printed at every launch above the sentence that
+        decided whether the session could work. What a reader needs here is
+        which posture is in force and what it exposes; why it exposes that is
+        this module's header and ``docs/permissions.md``.
         """
         if not self.filtered():
+            shared = (
+                ", and your own loopback is this session's"
+                if self.shares_host_loopback()
+                else ""
+            )
             return [
                 Notice(
                     text=(
-                        f"Egress: {self.mode} — no proxy between this session "
-                        "and the network. The LAN, localhost and any metadata "
-                        "endpoint are reachable from inside the container."
+                        f"Egress: {self.mode} — no proxy; the LAN, localhost "
+                        "and cloud metadata are reachable from inside"
+                        f"{shared}."
                     ),
                     urgency="warning",
                 )
@@ -556,14 +614,14 @@ class SessionEgress(BaseModel, frozen=True):
                             "These ignore the proxy and cannot reach anything "
                             "through it:"
                         ),
-                        urgency="warning",
+                        urgency="boundary",
                     )
                 ]
                 if self.unproxied
                 else []
             ),
             *[
-                Notice(text=item.sentence(), urgency="warning", indent=1)
+                Notice(text=item.sentence(), urgency="boundary", indent=1)
                 for item in self.unproxied
             ],
             Notice(

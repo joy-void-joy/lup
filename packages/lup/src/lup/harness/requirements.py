@@ -313,9 +313,17 @@ class ExerciseOutcome(BaseModel, frozen=True):
     what proves the claim, and on failure it is the message a reader would
     otherwise have gone looking for. Neither is thrown away, because the whole
     point of exercising is to have something concrete to show.
+
+    ``exercised`` separates the two ways of not proving a claim, which read
+    alike here and send a reader to opposite places. An operation that ran and
+    answered no is evidence about the capability; one that never ran is
+    evidence about whatever stopped it, and reporting the second as the first
+    is how a container that refused to start got announced as a proxy nobody
+    could reach.
     """
 
     proved: bool
+    exercised: bool = True
     detail: str = ""
 
 
@@ -333,6 +341,15 @@ class Run(BaseModel, frozen=True):
     expect: str = Field(
         default="",
         description="Text the output must contain; empty means a clean exit suffices",
+    )
+    contained: bool = Field(
+        default=False,
+        description=(
+            "Whether this command is prefixed with a container start, which "
+            "decides how to read its exit code: an engine that could not "
+            "start the container failed before the probe existed, and set by "
+            "`behind` because that is the only thing that puts one there"
+        ),
     )
 
     def programs(self) -> list[str]:
@@ -370,7 +387,9 @@ class Run(BaseModel, frozen=True):
         opens, which is how a boundary passes its own preflight and then
         fails the first session behind it.
         """
-        return self.model_copy(update={"command": [*opening, *self.command]})
+        return self.model_copy(
+            update={"command": [*opening, *self.command], "contained": True}
+        )
 
     def given(self, facts: "HostFacts") -> "Run":
         """This exercise with anything the declaration could not name filled in.
@@ -393,8 +412,15 @@ class Run(BaseModel, frozen=True):
             )
         except sh.ErrorReturnCode as failure:
             spoken = failure.stderr.decode("utf-8", "replace").strip()
+            # 125 is the engine speaking about itself: docker and podman both
+            # reserve it for a run that failed before the container's command
+            # existed, and spend 126 and 127 on one that could not be invoked
+            # or found -- those are answers about the image, and belong to the
+            # capability like any other. Read from the code and not the
+            # message, which is the engine's prose and moves with its version.
             return ExerciseOutcome(
                 proved=False,
+                exercised=not (self.contained and failure.exit_code == 125),
                 detail=spoken or f"{self.command[0]} exited {failure.exit_code}",
             )
         if self.expect and self.expect not in output:
@@ -472,6 +498,10 @@ class AnyOf(BaseModel, frozen=True):
             return proved
         return ExerciseOutcome(
             proved=False,
+            # Exercised if any spelling got as far as answering: alternatives
+            # that all failed to start share one blocker, and one that ran and
+            # said no is evidence about the capability whatever its siblings hit.
+            exercised=any(item.exercised for item in outcomes),
             detail="; ".join(
                 f"{' '.join(candidate.command)}: {outcome.detail}"
                 for candidate, outcome in zip(self.alternatives, outcomes, strict=True)
@@ -580,6 +610,10 @@ class MountProbe(BaseModel, frozen=True):
         """
         return ExerciseOutcome(
             proved=False,
+            # Unexercised by the field's plain meaning: an unaimed probe ran
+            # nothing, so it is evidence about this wiring and not about the
+            # mount topology it would have read.
+            exercised=False,
             detail=(
                 "this mount probe was never given a checkout to aim at, so it "
                 "tested nothing — exercise it through `for_host`"
@@ -680,13 +714,27 @@ class Requirement(BaseModel, frozen=True):
         outcome = self.exercise.run()
         if outcome.proved:
             return Finding(requirement=self, working=True, detail=outcome.detail)
-        causes = [
-            found
-            for found in (probe.cause(environment, outcome) for probe in self.diagnoses)
-            if found
-        ]
+        # Only when something was actually exercised. A diagnosis explains why
+        # this capability failed, and an operation that never ran did not fail
+        # for any of the reasons they look for -- so asking them here would
+        # dress the wrong failure in a confident cause.
+        causes = (
+            [
+                found
+                for found in (
+                    probe.cause(environment, outcome) for probe in self.diagnoses
+                )
+                if found
+            ]
+            if outcome.exercised
+            else []
+        )
         return Finding(
-            requirement=self, working=False, detail=outcome.detail, causes=causes
+            requirement=self,
+            working=False,
+            exercised=outcome.exercised,
+            detail=outcome.detail,
+            causes=causes,
         )
 
 
@@ -695,6 +743,7 @@ class Finding(BaseModel, frozen=True):
 
     requirement: Requirement
     working: bool
+    exercised: bool = True
     detail: str = ""
     causes: list[str] = []
 
@@ -715,12 +764,35 @@ class Finding(BaseModel, frozen=True):
         something are different sentences to a reader and were the same
         sentence on the screen, which is how a working machine's launch and
         a broken one's looked alike.
+
+        An unexercised finding says so and stops, because every sentence the
+        other branch prints would be invented: the consequence describes an
+        absence nothing established, and the purpose line asserts what was
+        lost. What that cost, measured, was a container refused for a missing
+        bind source announced as an unreachable proxy and an untunnelled
+        egress, under advice to tear down a network that was working.
         """
         if self.working:
             return [
                 Notice(text=f"{self.requirement.capability}: working", urgency="ready")
             ]
         urgency: Urgency = "refusal" if self.refuses() else "warning"
+        if not self.exercised:
+            return [
+                Notice(
+                    text=f"{self.requirement.capability}: not established",
+                    urgency=urgency,
+                ),
+                Notice(text=self.detail, urgency=urgency, indent=1),
+                Notice(
+                    text=(
+                        "the exercise never ran, so nothing here is a verdict "
+                        f"on {self.requirement.purpose}"
+                    ),
+                    urgency="detail",
+                    indent=1,
+                ),
+            ]
         consequence = self.requirement.absence.consequence()
         return [
             Notice(

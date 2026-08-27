@@ -95,3 +95,47 @@ class TestRunDirReader:
 
     def test_a_missing_root_is_not_an_error(self, isolated_root: Path) -> None:
         assert list(iter_run_dirs(RUN_ID, roots=[isolated_root / "nowhere"])) == []
+
+    def test_a_root_named_twice_yields_its_run_once(self, isolated_root: Path) -> None:
+        """A caller counting results decides whether one id names one run.
+
+        Repetition read as ambiguity refuses the run that was found, so the
+        same tree named twice has to answer the way naming it once does.
+        """
+        del isolated_root
+        expected = record(harness_runs_path(), "claude", RUN_ID)
+        twice = [harness_runs_path(), harness_runs_path()]
+
+        assert list(iter_run_dirs(RUN_ID, roots=twice)) == [expected]
+
+    def test_a_root_reached_by_another_spelling_yields_its_run_once(
+        self, isolated_root: Path
+    ) -> None:
+        """Identity is the resolved path, not the spelling that reached it."""
+        del isolated_root
+        expected = record(harness_runs_path(), "claude", RUN_ID)
+        spelled = harness_runs_path() / "claude" / ".." / ".."
+
+        assert list(iter_run_dirs(RUN_ID, roots=[harness_runs_path(), spelled])) == [
+            expected
+        ]
+
+    def test_a_run_under_a_symlinked_root_is_yielded_once(
+        self, isolated_root: Path
+    ) -> None:
+        """A symlink is a second name for one directory, not a second run."""
+        expected = record(harness_runs_path(), "claude", RUN_ID)
+        linked = isolated_root / "linked-runs"
+        linked.symlink_to(harness_runs_path(), target_is_directory=True)
+
+        assert list(iter_run_dirs(RUN_ID, roots=[harness_runs_path(), linked])) == [
+            expected
+        ]
+
+    def test_listing_every_run_yields_each_one_once(self, isolated_root: Path) -> None:
+        del isolated_root
+        first = record(harness_runs_path(), "claude", "run-a")
+        second = record(harness_runs_path(), "codex", "run-b")
+        twice = [harness_runs_path(), harness_runs_path()]
+
+        assert sorted(iter_run_dirs(roots=twice)) == sorted([first, second])

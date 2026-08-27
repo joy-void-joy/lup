@@ -9,7 +9,9 @@ diagnosis that stays quiet about a failure it does not explain.
 from pathlib import Path
 
 import lup.devtools.harness.launch as launch
+from lup.harness.egress import SessionEgress
 from lup.harness.image import Podman
+from lup.providers.claude.confinement import CLAUDE_CONFINEMENT
 from lup.harness.ownership import source_digest
 from lup.harness.toolchain import for_host
 from lup_template.devtools.harness.catalog import portable_harness
@@ -235,6 +237,54 @@ def test_a_failing_finding_says_what_was_lost_and_what_needed_it() -> None:
     assert "needed for whatever clipboard is for" in rendered
 
 
+def test_a_container_that_never_started_is_not_read_as_an_absent_capability() -> None:
+    """An engine that refused has said nothing about what was inside it.
+
+    The defect this closes: a bind mount whose source did not exist made
+    podman refuse the container, and both at-launch boundary probes announced
+    the capability neither had measured -- an unreachable proxy, an
+    untunnelled egress -- under advice to tear down a network that was fine.
+    """
+    # `sh` stands in for the container engine here. What is being pinned is a
+    # *contained* command exiting 125, the code both engines reserve for a run
+    # that failed before the container's own command existed.
+    engine_refused = Run(command=["-c", "exit 125"]).behind(["sh"])
+    found = requirement("proxy", engine_refused).check({})
+
+    assert not found.working
+    assert not found.exercised
+    rendered = "\n".join(item.text for item in found.notices())
+    assert "proxy: not established" in rendered
+    assert "the proxy capability is unavailable" not in rendered
+    assert "nothing here is a verdict on whatever proxy is for" in rendered
+
+
+def test_a_probe_that_ran_and_failed_is_still_the_capabilitys_own_answer() -> None:
+    """Inside a container that started, a failure is the capability's."""
+    probe_said_no = Run(command=["-c", "exit 1"]).behind(["sh"])
+    found = requirement("proxy", probe_said_no).check({})
+
+    assert not found.working
+    assert found.exercised
+    assert "the proxy capability is unavailable" in "\n".join(
+        item.text for item in found.notices()
+    )
+
+
+def test_an_unprefixed_exercise_reads_125_as_its_own_exit_code() -> None:
+    """Nothing started a container, so 125 is the program's own answer."""
+    found = requirement("odd", Run(command=["sh", "-c", "exit 125"])).check({})
+
+    assert not found.working
+    assert found.exercised
+
+
+def test_only_a_container_prefix_makes_an_exercise_contained() -> None:
+    """The flag is `behind`'s to set, because it is the only thing prefixing one."""
+    assert not Run(command=["echo", "hello"]).contained
+    assert Run(command=["echo", "hello"]).behind(["podman", "run"]).contained
+
+
 def test_the_declared_manifest_names_only_programs_this_project_invokes() -> None:
     """A manifest that invents a prerequisite refuses machines that were fine.
 
@@ -448,6 +498,7 @@ def test_the_image_half_is_exercised_behind_the_argv_a_session_opens() -> None:
     assert carried.command[: len(opening)] == opening
     assert carried.command[len(opening) :] == [
         "claude",
+        *CLAUDE_CONFINEMENT.off,
         "-p",
         "Reply with exactly: SESSION_OK",
     ]
@@ -471,8 +522,27 @@ def test_a_launch_asks_only_the_image_entries_marked_always() -> None:
         item.requirement.capability for item in declared.check_inside({}, opening)
     }
 
-    assert at_launch == {"session reaches its proxy", "egress proxy tunnels out"}
+    assert at_launch == {"session reaches the model endpoint"}
     assert "contained agent session" in at_setup - at_launch
+
+
+def test_a_launch_asks_something_whatever_the_network_posture_is() -> None:
+    """Emptying this set is how the verification disappears without failing.
+
+    Every entry marked always used to be about the proxy, so declaring a
+    posture with none left the launch asking nothing at all -- and nothing
+    asked is indistinguishable from everything passing. The property is that
+    the set has a member, not which member it has: a posture answers with its
+    own vocabulary, and one that answers with silence is the failure.
+    """
+    opening = ["podman", "run", "--rm", "lup-agent:abc"]
+    for boundary in (SessionEgress(), SessionEgress(mode="host")):
+        asked = {
+            item.requirement.capability
+            for item in manifest(boundary).check_inside({}, opening, setting_up=False)
+        }
+
+        assert asked, f"a {boundary.mode} launch exercises nothing on the way in"
 
 
 def test_the_launch_probe_drops_the_terminal_it_cannot_have() -> None:

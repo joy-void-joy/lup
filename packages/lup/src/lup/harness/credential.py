@@ -1,15 +1,28 @@
 """Reaching the forge from inside the boundary, on a credential worth the reach.
 
-The ssh key stays on the host and nothing routes to it. That is the decision
-the container rests on, and it is not negotiable by convenience: an agent
-holding an ssh-agent socket can sign anything and reach every host that key
-reaches, which is all-or-nothing in the one direction that matters. A forge
-token is not all-or-nothing, and that asymmetry is the entire opening.
+A contained session has no identity of its own, so every remote it touches is
+reached on something the operator lent it. Which thing is lent is the whole
+of this module, and it is a ladder rather than a policy: a forwarded ssh
+agent, then an ephemeral copy of the host's ssh material, then a forge token
+over HTTPS, then nothing and the public half of the internet.
 
-So the session reaches the forge over HTTPS with a token scoped to what the
-work needs -- contents and pull requests on the repositories in play, and
-nothing else -- and every ssh remote is rewritten to the HTTPS spelling on
-the way in.
+**The ladder is ordered by what is left behind, not by convenience.** A
+forwarded agent lends the *use* of a key for the length of one container and
+leaves no copy; an ephemeral home lends the key itself and removes it when
+the launcher exits; a token is a separate credential the operator scopes
+themselves. Each rung is taken only when it is *verified usable* -- an agent
+holding an identity, a key that opens with no passphrase, a host key already
+in ``known_hosts`` -- because the failure mode this exists to prevent is a
+launch that reports a credential and a push that fails hours later in ssh's
+vocabulary rather than the boundary's.
+
+**What the ssh rungs cost is real and is not hidden.** An agent socket in a
+container can sign anything that key can sign, for every host it reaches;
+copied key files are the key. The operator grants that deliberately, and the
+denials this repository keeps on ``~/.ssh`` remain what they always were --
+defense in depth against an agent *reading* key material, not isolation from
+``ssh`` and ``git`` using it. ``docs/permissions.md`` says so in those words
+rather than implying a stronger boundary than exists.
 
 **Where the rewrite is computed is load-bearing.** Remote spellings are
 unbounded: ``git@host:``, ``ssh://``, an ssh config alias, an ``insteadOf``
@@ -22,20 +35,28 @@ that file is writable by the thing being confined: it carries
 to have none. The resolution happens on the host, before the container
 starts, and arrives as configuration the container cannot reach behind.
 
+**Which direction it rewrites is the selected credential's to say.** A token
+reaches HTTPS and nothing else, so ssh spellings are rewritten toward HTTPS;
+an ssh credential reaches ssh, so HTTPS spellings and config aliases are
+rewritten toward ``git@host:``. One transport per session, decided once,
+outside. The alternative -- leaving each remote on whatever it was spelled as
+-- is a checkout where half the remotes work.
+
 **And the configuration arrives in the environment, not in a file.** Git
 reads ``GIT_CONFIG_COUNT`` and its numbered pairs at the highest precedence,
 above every file -- so nothing inside the checkout can override what the
 launcher decided, and nothing has to be written into a tree the agent can
 edit. A file would be both.
 
-**The agent can read the token.** That is not a leak this could close: an
-agent that can run ``git push`` with a credential can also read it, and
-hiding it would be theatre. The scope is the boundary, not the secrecy --
-which is why the scope is the part worth getting right, and why the token
-lives outside the checkout rather than in a gitignored file the undo layer
-cannot restore and ``git clean -fdx`` destroys.
+**The agent can read whatever it is lent.** That is not a leak this could
+close: a session that can run ``git push`` with a credential can also read
+it, and hiding it would be theatre. The scope is the boundary, not the
+secrecy -- which is why the scope is the part worth getting right, and why
+nothing lent lives in the checkout, in a profile, or in the argv of the
+command that starts the container.
 """
 
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Annotated, Literal
 from urllib.parse import urlsplit
@@ -44,7 +65,14 @@ import sh
 from pydantic import BaseModel, Discriminator, Field
 
 from lup.execution.shell import git
+from lup.harness.environment import NON_INTERACTIVE_SHELL_ENV
 from lup.harness.notice import Notice
+from lup.harness.ssh import (
+    SshMaterial,
+    agent_socket,
+    ephemeral_home,
+    host_ssh_material,
+)
 from lup.types import EnvVars
 
 
@@ -56,8 +84,9 @@ class RemoteAddress(BaseModel, frozen=True):
     an ``insteadOf`` rewrite has to match, character for character. ``host`` is
     what the URL *names*, which may be an ssh config alias rather than a
     hostname. ``proxied`` is whether the transport survives an HTTP proxy as
-    written -- which is the question that actually matters, because a filtered
-    container's only way out speaks HTTP and HTTPS and nothing else.
+    written -- which is the question that decides whether a filtered
+    container can reach it at all, since such a container's only way out
+    speaks HTTP and HTTPS and nothing else.
     """
 
     prefix: str = Field(description="What an insteadOf rewrite must match")
@@ -75,14 +104,70 @@ class GitSetting(BaseModel, frozen=True):
 
 
 class RemoteRewrite(BaseModel, frozen=True):
-    """One ssh spelling a remote uses, and the HTTPS prefix standing in for it."""
+    """One spelling a remote uses, and the prefix standing in for it."""
 
-    spelling: str = Field(description="The ssh prefix a remote URL begins with")
-    https: str = Field(description="What git should reach instead")
+    spelling: str = Field(description="The prefix a remote URL begins with")
+    target: str = Field(description="What git should reach instead")
 
     def setting(self) -> GitSetting:
         """This rewrite as the configuration git reads it out of."""
-        return GitSetting(key=f"url.{self.https}.insteadOf", value=self.spelling)
+        return GitSetting(key=f"url.{self.target}.insteadOf", value=self.spelling)
+
+
+class HttpsTransport(BaseModel, frozen=True):
+    """What a token reaches the forge over, and the only thing a proxy carries."""
+
+    kind: Literal["https"] = "https"
+
+    def prefix(self, host: str) -> str:
+        """The URL prefix every remote on this transport begins with."""
+        return f"https://{host}/"
+
+    def carries(self, address: RemoteAddress, host: str) -> bool:
+        """Whether this address already travels here, port and user included.
+
+        Asked as "does it cross a proxy" rather than "does it start with
+        https", because that is the property being relied on and because a
+        remote that already crosses one must be left exactly as written --
+        rewriting it to a bare prefix would drop a port or a user somebody
+        put there on purpose.
+        """
+        return address.proxied
+
+
+class SshTransport(BaseModel, frozen=True):
+    """What a key or an agent reaches the forge over, once the network carries it."""
+
+    kind: Literal["ssh"] = "ssh"
+    user: str = Field(
+        default="git",
+        description=(
+            "Who a forge expects an ssh connection as. Every forge that "
+            "serves git over ssh multiplexes all of its users onto one "
+            "account and tells them apart by key -- `git` on GitHub, GitLab "
+            "and Gitea alike -- so this is the forge's own name for that "
+            "account rather than the operator's"
+        ),
+    )
+
+    def prefix(self, host: str) -> str:
+        """The scp-like prefix every remote on this transport begins with."""
+        return f"{self.user}@{host}:"
+
+    def carries(self, address: RemoteAddress, host: str) -> bool:
+        """Whether this address is already spelled exactly the way this rewrites to.
+
+        Character equality rather than "is it ssh", because the spellings
+        this has to rewrite *are* ssh: a config alias reaches the forge over
+        ssh and names something no container can resolve, and an
+        ``ssh://`` URL reaches it over ssh under a spelling that carries a
+        user this session may not connect as.
+        """
+        return address.prefix == self.prefix(host)
+
+
+type ForgeTransport = Annotated[HttpsTransport | SshTransport, Discriminator("kind")]
+"""The one transport a session's remotes are rewritten onto."""
 
 
 class GitIdentity(BaseModel, frozen=True):
@@ -143,15 +228,19 @@ def committer(root: Path) -> GitIdentity | None:
 
 
 class SigningOff(BaseModel, frozen=True):
-    """Agent commits are not signed, and the launch says so once.
+    """Agent commits are not signed, and the launch says so in one line.
 
     The default, and the honest one. A signature claims that a particular
     human vouched for a particular commit; an agent commit is not that, and
     signing it with the operator's key would make the signature assert
-    something untrue. What it costs is real and worth stating: a branch
-    protection rule requiring signed commits fails on agent branches -- as a
-    visible check, at push time, rather than as `gpg: signing failed` in the
-    middle of a commit the agent then debugs as a GPG problem.
+    something untrue.
+
+    What it costs is real: a branch protection rule requiring signed commits
+    fails on agent branches -- as a visible check, at push time, rather than
+    as `gpg: signing failed` in the middle of a commit the agent then debugs
+    as a GPG problem. That is a fact about a repository's rules rather than
+    about this launch, so it lives in `docs/permissions.md` and the launch
+    says only which posture is in force.
     """
 
     kind: Literal["off"] = "off"
@@ -166,15 +255,7 @@ class SigningOff(BaseModel, frozen=True):
     def notice(self) -> list[Notice]:
         """A capability the session does not have, which is not a fault."""
         return [
-            Notice(
-                text=(
-                    "Signing: off for agent commits. The signing key stays "
-                    "on the host, so a commit made in here is unsigned — "
-                    "sign at the merge that lands the work, or set "
-                    "`signing` on the image declaration."
-                ),
-                urgency="warning",
-            )
+            Notice(text="Signing: off for agent commits.", urgency="boundary"),
         ]
 
 
@@ -222,12 +303,10 @@ class AgentKey(BaseModel, frozen=True):
         return [
             Notice(
                 text=(
-                    f"Signing: on, as {self.identity}, with a key held in "
-                    "this container. A forge will show these as unverified "
-                    "until the public half is registered — which is "
-                    "correct, since they were not signed by you."
+                    f"Signing: on as {self.identity}, with a key held in this "
+                    "container, which a forge shows as unverified."
                 ),
-                urgency="ready",
+                urgency="boundary",
             )
         ]
 
@@ -255,10 +334,9 @@ class InheritedSigning(BaseModel, frozen=True):
         return [
             Notice(
                 text=(
-                    "Signing: inherited from this checkout. If it is "
-                    "configured and the key is on the host, commits will "
-                    "fail mid-way with `gpg: signing failed` — which is a "
-                    "boundary, not a GPG fault."
+                    "Signing: inherited from this checkout — a key that lives "
+                    "on the host fails mid-commit as `gpg: signing failed`, "
+                    "which is a boundary, not a GPG fault."
                 ),
                 urgency="warning",
             )
@@ -359,21 +437,26 @@ def remote_url(root: Path, name: str) -> str:
         return ""
 
 
-def remote_rewrites(root: Path, host: str) -> list[RemoteRewrite]:
-    """Each ssh spelling this checkout's remotes use, and its HTTPS equivalent.
+def remote_rewrites(
+    root: Path, host: str, transport: ForgeTransport
+) -> list[RemoteRewrite]:
+    """Each spelling this checkout's remotes use that the session cannot reach.
 
     Resolved here, on the host, and never inside: the file that answers this
     question is ``.git/config``, which the container can write. A rewrite
     computed in there is a rewrite the confined thing chose.
 
     Decided on the *resolved* host rather than on the URL's spelling, which
-    is the whole of what §9.2 meant by remote spellings being unbounded. A
-    first draft matched three prefixes and produced no rewrite at all for a
-    remote spelled `forge:owner/repo.git` -- an ssh config alias, which no
-    prefix list can recognize and only ssh can resolve. The
-    container would have kept an ssh remote it has no ssh to reach, and the
-    push would have failed in the transport's vocabulary rather than in the
-    boundary's.
+    is the whole of what remote spellings being unbounded meant. A first
+    draft matched three prefixes and produced no rewrite at all for a remote
+    spelled `forge:owner/repo.git` -- an ssh config alias, which no prefix
+    list can recognize and only ssh can resolve. The container would have
+    kept a remote it has no way to reach, and the push would have failed in
+    the transport's vocabulary rather than in the boundary's.
+
+    ``transport`` is the selected credential's answer to what this session
+    can actually reach, so the same walk serves both directions: toward
+    HTTPS for a token, toward ``git@host:`` for a key or an agent.
     """
     try:
         names = git.lines("-C", str(root), "remote")
@@ -384,14 +467,288 @@ def remote_rewrites(root: Path, host: str) -> list[RemoteRewrite]:
         for name in names
         if name
         for address in [parse_remote(remote_url(root, name))]
-        if address is not None and not address.proxied
+        if address is not None and not transport.carries(address, host)
     ]
     found = {
-        address.prefix: RemoteRewrite(spelling=address.prefix, https=f"https://{host}/")
+        address.prefix: RemoteRewrite(
+            spelling=address.prefix, target=transport.prefix(host)
+        )
         for address in addresses
         if resolved_host(address.host) == host
     }
     return list(found.values())
+
+
+def contained_ssh(home_inside: str) -> str:
+    """The ssh git runs inside, reading the configuration compiled for this launch.
+
+    ``GIT_SSH_COMMAND`` rather than ``core.sshCommand``, which is what this
+    first reached for and what git would have ignored. The variable takes
+    precedence over the setting, and the image bakes one already -- so a
+    session would have started with every git setting correctly in place,
+    run ``ssh -o BatchMode=yes`` with no ``-F`` at all, never opened the
+    configuration built for it, and failed on a key it was holding.
+
+    Measured against a launch's real argv rather than reasoned about. The
+    unit tests all passed: they asked whether the setting was present, and
+    it was. What they could not see is the variable sitting beside it in the
+    same argv, three hundred lines away in a different module, winning.
+
+    Composed onto the baked value rather than replacing it, and read from the
+    one place that value is declared. ``BatchMode=yes`` is what stops ssh
+    prompting in a session with nobody at the other end, so dropping it to
+    add a config file would trade a silent failure for a hanging one.
+    """
+    return f"{NON_INTERACTIVE_SHELL_ENV['GIT_SSH_COMMAND']} -F {home_inside}/config"
+
+
+class AgentSocket(BaseModel, frozen=True):
+    """The host's ssh agent, lent for the length of one container.
+
+    The narrowest of the ssh rungs and the only one that leaves nothing
+    behind: the container holds a socket rather than a key, so what it can do
+    ends when the socket goes. What it can do *while* it holds it is not
+    narrow at all -- every signature that key can make, for every host it
+    reaches -- and the operator grants exactly that.
+    """
+
+    kind: Literal["agent"] = "agent"
+    socket: str = Field(description="The host socket this forwards")
+    inside: str = Field(description="Where that socket appears in the container")
+    home: str = Field(
+        description=(
+            "The session-owned ssh home this reads its configuration and host "
+            "keys from, holding no private key of any kind"
+        )
+    )
+    home_inside: str = Field(description="Where that home is mounted")
+
+    def mount_arguments(self) -> list[str]:
+        """The socket writable and the home read-only, which is not symmetry.
+
+        Connecting to a unix socket needs write permission on it, so a
+        read-only mount there is a forwarded agent that refuses every
+        signature -- the one failure that looks exactly like a wrong key. The
+        home beside it is read: nothing inside has business editing the
+        configuration this launch compiled for it.
+        """
+        return [
+            "-v",
+            f"{self.socket}:{self.inside}",
+            "-v",
+            f"{self.home}:{self.home_inside}:ro",
+        ]
+
+    def environment(self) -> EnvVars:
+        """Where ssh looks for the agent, and which configuration git's ssh reads."""
+        return {
+            "SSH_AUTH_SOCK": self.inside,
+            "GIT_SSH_COMMAND": contained_ssh(self.home_inside),
+        }
+
+    def configuration(self) -> list[GitSetting]:
+        """Nothing: the handover is a variable, for a reason spelled at :func:`contained_ssh`."""
+        return []
+
+    def transport(self, user: str) -> ForgeTransport:
+        """Every forge remote is spelled as ssh, because ssh is what this reaches."""
+        return SshTransport(user=user)
+
+    def notice(self) -> list[Notice]:
+        """One line. Which credential was selected is the whole of what a reader needs."""
+        return [
+            Notice(
+                text="Forge authentication: SSH via forwarded agent.",
+                urgency="boundary",
+            )
+        ]
+
+
+class EphemeralKeys(BaseModel, frozen=True):
+    """A copy of the host's usable ssh keys, made for one launch and removed after it.
+
+    The rung for a host running no agent, which is most hosts. It is a
+    stronger grant than the socket and it is bounded the only way a copy can
+    be: the copy lives outside the checkout, outside every profile and
+    outside every generated tree, and the launcher deletes it on the way out.
+    """
+
+    kind: Literal["files"] = "files"
+    home: str = Field(description="The session-owned ssh home holding the copies")
+    home_inside: str = Field(description="Where that home is mounted")
+
+    def mount_arguments(self) -> list[str]:
+        """Read-only: a key the session could rewrite is a key it could replace."""
+        return ["-v", f"{self.home}:{self.home_inside}:ro"]
+
+    def environment(self) -> EnvVars:
+        """Which configuration git's ssh reads, which names every copied key."""
+        return {"GIT_SSH_COMMAND": contained_ssh(self.home_inside)}
+
+    def configuration(self) -> list[GitSetting]:
+        """Nothing: the handover is a variable, for a reason spelled at :func:`contained_ssh`."""
+        return []
+
+    def transport(self, user: str) -> ForgeTransport:
+        """Every forge remote is spelled as ssh, because ssh is what this reaches."""
+        return SshTransport(user=user)
+
+    def notice(self) -> list[Notice]:
+        """One line, and `ephemeral` is the load-bearing word in it."""
+        return [
+            Notice(
+                text="Forge authentication: SSH via ephemeral host credentials.",
+                urgency="boundary",
+            )
+        ]
+
+
+class ForgeToken(BaseModel, frozen=True):
+    """A forge token over HTTPS: the rung that needs no ssh and no network for it.
+
+    Last of the credentialed rungs by preference and first by reach. It is
+    the only one that crosses a filtered egress, because HTTPS is the only
+    thing a proxy carries, and the only one that is scoped -- a fine-grained
+    token names the repositories it opens, where a key opens whatever the key
+    opens.
+    """
+
+    kind: Literal["token"] = "token"
+    variable: str = Field(description="Where the launching shell holds it")
+
+    def mount_arguments(self) -> list[str]:
+        """Nothing crosses as a file."""
+        return []
+
+    def environment(self) -> EnvVars:
+        """Nothing by value.
+
+        The token reaches the container by name through
+        :meth:`GitAccess.inherited`, and the credential helper expands it
+        inside. A value here would be a value in the argv that starts the
+        container, which every process on the host can read.
+        """
+        return {}
+
+    def configuration(self) -> list[GitSetting]:
+        """Nothing of its own: the helper that answers with it is the access's."""
+        return []
+
+    def transport(self, user: str) -> ForgeTransport:
+        """Every forge remote is spelled as HTTPS, because that is what a token answers."""
+        return HttpsTransport()
+
+    def notice(self) -> list[Notice]:
+        """One line, naming the variable so a reader knows which one is in play."""
+        return [
+            Notice(
+                text=f"Forge authentication: HTTPS via {self.variable}.",
+                urgency="boundary",
+            )
+        ]
+
+
+class NoCredential(BaseModel, frozen=True):
+    """Nothing was usable, so the session reads what the public internet serves.
+
+    A degradation rather than a failure -- plenty of work never touches a
+    remote -- and the one arm that earns more than a line, because the reader
+    who meets it needs to know both that it happened and what would fix it.
+    Every rung that declined says why it declined, which is the difference
+    between "configure a credential" and "the agent you are running holds no
+    identity".
+    """
+
+    kind: Literal["none"] = "none"
+    variable: str = Field(description="The token variable that would have answered")
+    host: str = Field(description="The forge these credentials would have reached")
+    declined: list[str] = Field(
+        default=[], description="Why each rung of the ladder was not taken"
+    )
+
+    def mount_arguments(self) -> list[str]:
+        """Nothing crosses."""
+        return []
+
+    def environment(self) -> EnvVars:
+        """Nothing crosses."""
+        return {}
+
+    def configuration(self) -> list[GitSetting]:
+        """Nothing of its own: the refusing helper is the access's."""
+        return []
+
+    def transport(self, user: str) -> ForgeTransport:
+        """HTTPS, which is what a public read crosses a filtered egress on.
+
+        Rewriting toward a transport this session cannot authenticate on is
+        not a contradiction: an anonymous clone and fetch work over it, and
+        an ssh remote left as written is one a filtered container cannot
+        resolve at all. Half the capability beats none of it.
+        """
+        return HttpsTransport()
+
+    def notice(self) -> list[Notice]:
+        """The line, then the remediation -- which only this arm prints."""
+        return [
+            Notice(
+                text=(
+                    "Forge authentication: unavailable — public reads only; "
+                    f"configure SSH credentials or {self.variable} for push, "
+                    "private repositories, and gh."
+                ),
+                urgency="warning",
+            ),
+            *[
+                Notice(text=reason, urgency="detail", indent=1)
+                for reason in self.declined
+            ],
+            Notice(
+                text=(
+                    f"Export {self.variable} in the launching shell holding a "
+                    f"{self.host} token with contents and pull requests "
+                    "readable and writable, or run an ssh agent, or leave a "
+                    "passphrase-free key and a `known_hosts` entry for "
+                    f"{self.host} in ~/.ssh."
+                ),
+                urgency="detail",
+                indent=1,
+            ),
+        ]
+
+
+type ForgeCredential = Annotated[
+    AgentSocket | EphemeralKeys | ForgeToken | NoCredential, Discriminator("kind")
+]
+"""What one contained session proves who it is with, chosen at its launch."""
+
+
+class Attempt(BaseModel, frozen=True):
+    """What one rung of the ladder answered when it was asked.
+
+    Both halves rather than an exception, because a decline is not a failure
+    -- it is the next rung's cue, and its sentence is what the reader who
+    ends up with no credential at all needs to see.
+    """
+
+    credential: ForgeCredential | None = Field(
+        default=None, description="What this rung produced, if it produced one"
+    )
+    because: str = Field(
+        default="", description="Why it could not be taken, when it could not"
+    )
+
+
+type CredentialSource = Literal["auto", "agent", "files", "token", "none"]
+"""Which rungs of the ladder a project will take.
+
+``auto`` walks all three credentialed rungs in order of what they leave
+behind. The four named values pin one rung, which is what an adopter reaches
+for when the automatic answer is right for their laptop and wrong for their
+build machine -- and pinning a rung that turns out to be unusable degrades to
+``none`` with the reason said, rather than refusing a launch over a
+preference.
+"""
 
 
 class GitAccess(BaseModel, frozen=True):
@@ -400,10 +757,18 @@ class GitAccess(BaseModel, frozen=True):
     host: str = Field(
         default="github.com",
         description=(
-            "The forge this rewrites toward. A fine-grained, repository-"
-            "scoped token is a GitHub feature; an adopter on GitLab, Gitea "
-            "or a corporate host names their own host here and supplies "
-            "whatever their forge's equivalent is, and gets the same rewrite"
+            "The forge this reaches. A fine-grained, repository-scoped token "
+            "is a GitHub feature; an adopter on GitLab, Gitea or a corporate "
+            "host names their own host here and supplies whatever their "
+            "forge's equivalent is, and gets the same rewrites"
+        ),
+    )
+    source: CredentialSource = Field(
+        default="auto",
+        description=(
+            "Which rung of the credential ladder this project takes. `auto` "
+            "walks them in order of what each leaves behind and takes the "
+            "first that is verified usable"
         ),
     )
     token_variable: str = Field(
@@ -419,6 +784,27 @@ class GitAccess(BaseModel, frozen=True):
     username: str = Field(
         default="x-access-token",
         description="What the forge expects as the username beside a token",
+    )
+    ssh_user: str = Field(
+        default="git",
+        description=(
+            "Who an ssh remote connects to the forge as. One account serves "
+            "every user on every forge that speaks git over ssh, which tells "
+            "them apart by key rather than by name"
+        ),
+    )
+    ssh_inside: str = Field(
+        default="/run/lup/ssh",
+        description=(
+            "Where the session-owned ssh home is mounted. Outside every home "
+            "directory on purpose: a path under one would be shadowed by "
+            "whatever the runtime keeps there, and this has to be reachable "
+            "by an absolute path the compiled configuration can name"
+        ),
+    )
+    agent_inside: str = Field(
+        default="/run/lup/ssh-agent",
+        description="Where a forwarded agent socket appears inside the container",
     )
     signing: CommitSigning = Field(
         default=SigningOff(),
@@ -437,6 +823,168 @@ class GitAccess(BaseModel, frozen=True):
         ),
     )
 
+    def rungs(self) -> list[CredentialSource]:
+        """The ladder this declaration will walk, in order.
+
+        One rung when the project pinned one, and the three credentialed
+        rungs when it did not. ``none`` is a rung that declines, so a project
+        that wants no credential at all gets the same reported degradation as
+        one whose credentials were unusable rather than a separate silence.
+        """
+        match self.source:
+            case "auto":
+                return ["agent", "files", "token"]
+            case pinned:
+                return [pinned]
+
+    def select(
+        self, environ: EnvVars, carries_ssh: bool, home: Path
+    ) -> ForgeCredential:
+        """Walk the ladder and take the first rung that is verified usable.
+
+        Verified rather than present, which is the entire difference between
+        this and reading a variable. ``SSH_AUTH_SOCK`` set is not an agent
+        holding an identity, a key file is not a key that opens without a
+        passphrase, and a checkout is not a ``known_hosts`` that can verify
+        the forge. Each of those looks like a credential at launch and fails
+        identically at the first push -- inside a session, in ssh's
+        vocabulary, with nobody there to read it.
+
+        ``carries_ssh`` is the network's answer rather than this
+        declaration's, and it gates both ssh rungs before anything is
+        probed. ssh reads none of the proxy variables, so on a filtered
+        egress a forwarded agent is a credential the session holds and cannot
+        use -- which is worse than not holding it, because it reads as ready.
+
+        ``home`` is the operator's, and a launch started from inside a
+        session finds it closed: the declaration that offers these
+        credentials also denies an agent reading them. That is the boundary
+        working, and it arrives here as an ordinary decline with its reason.
+        """
+        rungs = self.rungs()
+        wanted = "agent" in rungs or "files" in rungs
+        material = (
+            host_ssh_material(home, self.host)
+            if wanted and carries_ssh
+            else SshMaterial()
+        )
+
+        nowhere = "no writable temporary directory for a session ssh home"
+
+        def reached(rung: CredentialSource) -> Attempt:
+            """What one rung answered: a credential, or why it could not be taken."""
+            match rung:
+                case "agent" | "files" if not carries_ssh:
+                    return Attempt(
+                        because=(
+                            "this session's network carries no ssh, which "
+                            "reads none of the proxy variables it would have "
+                            "to cross"
+                        )
+                    )
+                case "agent" | "files" if not material.reachable:
+                    return Attempt(
+                        because=(
+                            f"{home / '.ssh'} could not be read, so no ssh "
+                            "credential could be selected from it"
+                        )
+                    )
+                case "agent" | "files" if not material.known:
+                    return Attempt(
+                        because=(
+                            f"no host key for {self.host} in "
+                            f"{home / '.ssh' / 'known_hosts'}, so a "
+                            "non-interactive ssh cannot verify the forge"
+                        )
+                    )
+                case "agent":
+                    socket = agent_socket(environ)
+                    if not socket:
+                        return Attempt(
+                            because=(
+                                "no ssh agent holding an identity answers at "
+                                "SSH_AUTH_SOCK"
+                            )
+                        )
+                    lent = ephemeral_home(material, self.ssh_inside, keys=False)
+                    if lent is None:
+                        return Attempt(because=nowhere)
+                    return Attempt(
+                        credential=AgentSocket(
+                            socket=socket,
+                            inside=self.agent_inside,
+                            home=str(lent),
+                            home_inside=self.ssh_inside,
+                        )
+                    )
+                case "files":
+                    if not material.keys:
+                        return Attempt(
+                            because=(
+                                f"{len(material.locked)} ssh key(s) in "
+                                f"{home / '.ssh'} need a passphrase, which a "
+                                "container has nobody to type"
+                                if material.locked
+                                else f"no ssh key in {home / '.ssh'} opens "
+                                "without a passphrase"
+                            )
+                        )
+                    lent = ephemeral_home(material, self.ssh_inside, keys=True)
+                    if lent is None:
+                        return Attempt(because=nowhere)
+                    return Attempt(
+                        credential=EphemeralKeys(
+                            home=str(lent), home_inside=self.ssh_inside
+                        )
+                    )
+                case "token" if self.granted(environ):
+                    return Attempt(credential=ForgeToken(variable=self.token_variable))
+                case "token":
+                    return Attempt(
+                        because=f"{self.token_variable} is unset in the launching shell"
+                    )
+                case _:
+                    return Attempt(
+                        because="this project's image declaration selects no credential"
+                    )
+
+        def walked() -> Iterator[Attempt]:
+            """Each rung's answer, stopping at the first that produced one.
+
+            Lazily, which is the load-bearing part: taking a rung copies key
+            material into a directory that then has to be cleaned up, so a
+            walk that evaluated every rung before choosing would build ssh
+            homes for the rungs it was about to discard.
+            """
+            for rung in rungs:
+                reply = reached(rung)
+                yield reply
+                if reply.credential is not None:
+                    return
+
+        tried = list(walked())
+        taken = tried[-1].credential if tried else None
+        if taken is not None:
+            return taken
+        return NoCredential(
+            variable=self.token_variable,
+            host=self.host,
+            declined=list(dict.fromkeys(item.because for item in tried)),
+        )
+
+    def granted(self, environ: EnvVars) -> bool:
+        """Whether the launching shell holds a token, whatever rung was taken.
+
+        Asked separately from the selection because the token is not only a
+        git transport: `gh` reads it for every API call it makes, and a
+        session on an ssh credential still wants one. So it travels whenever
+        it exists, and what the ssh rungs change is which transport git
+        speaks, not whether the forge client can authenticate.
+        """
+        return bool(
+            environ[self.token_variable] if self.token_variable in environ else ""
+        )
+
     def maintenance(self) -> list[GitSetting]:
         """Whether git may start its own housekeeping, as a setting or nothing.
 
@@ -452,26 +1000,33 @@ class GitAccess(BaseModel, frozen=True):
         """
         return [] if self.maintains else [GitSetting(key="maintenance.auto", value="0")]
 
-    def helper(self, token: str) -> GitSetting:
-        """What git answers an authentication challenge with, token or not.
+    def helper(self, granted: bool) -> GitSetting:
+        """What git answers an HTTPS challenge with, token or not.
 
         With a token, the variable is read out of the environment rather than
         out of a file, so nothing lands in the tree and nothing survives the
         container: ``store`` would write it into the config home, and a
-        prompt would hang a non-interactive session forever.
+        prompt would hang a non-interactive session forever. The setting
+        carries the variable's *name* -- the shell inside expands it -- so
+        the secret is not in the configuration either.
 
         Without one, a helper is installed anyway and refuses on stderr. That
         is the boundary's only chance to get a sentence in at the moment
         somebody needs it -- git's own account of an unanswerable challenge
         names the URL and never the variable that would have answered it, and
         the launch notice that did name it has scrolled past by then.
+
+        Installed on an ssh session too, where it answers for every remote
+        the rewrite did not touch: a submodule on another forge, a
+        `pip install` from an HTTPS repository. Those are the ones that would
+        otherwise meet a prompt.
         """
         answered = (
             f"echo username={self.username}; echo password=${self.token_variable}"
-            if token
+            if granted
             else (
                 f'echo "lup: no token in {self.token_variable}, so this '
-                "session cannot authenticate to a forge; export it on the "
+                "session cannot authenticate over HTTPS; export it on the "
                 'host before the launch" >&2; exit 1'
             )
         )
@@ -480,14 +1035,17 @@ class GitAccess(BaseModel, frozen=True):
     def configuration(
         self,
         rewrites: list[RemoteRewrite],
-        token: str,
+        credential: ForgeCredential,
+        granted: bool,
         identity: GitIdentity | None = None,
     ) -> list[GitSetting]:
         """Every git setting the container starts with, in one list.
 
-        The rewrites point each ssh spelling at HTTPS, the helper answers for
-        the token or refuses in its name, the identity says who a commit is
-        authored as, and the signing member says what it claims.
+        The rewrites point each unreachable spelling at the transport this
+        session can reach, the credential contributes whatever it needs git
+        to know, the helper answers for the token or refuses in its name, the
+        identity says who a commit is authored as, and the signing member
+        says what it claims.
 
         A rewrite used to be withheld unless a token came with it, on the
         reasoning that half this arrangement is worse than none: a remote
@@ -499,43 +1057,46 @@ class GitAccess(BaseModel, frozen=True):
         """
         return [
             *[rewrite.setting() for rewrite in rewrites],
+            *credential.configuration(),
             *(identity.configuration() if identity is not None else []),
             *self.signing.configuration(),
             *self.maintenance(),
-            self.helper(token),
+            self.helper(granted),
         ]
 
     def environment(
         self,
-        token: str,
         rewrites: list[RemoteRewrite],
+        credential: ForgeCredential,
+        granted: bool,
         identity: GitIdentity | None = None,
     ) -> EnvVars:
-        """The variables that carry the token and the configuration inside.
+        """The variables carrying the configuration and the credential's own inside.
 
         ``GIT_CONFIG_COUNT`` and its numbered pairs, because git reads them
         above every configuration file: nothing inside the checkout can
         override what was decided out here, and nothing has to be written
         into a tree the agent can edit. A file would be both.
 
-        Sent whether or not there is a token, which is the part that used to
-        be withheld. An ssh remote is unreachable from in here for a reason
-        that has nothing to do with credentials -- the session's network
-        resolves no names at all -- so the rewrite is what makes a remote
-        addressable, and a public repository is readable through it on no
-        credential whatsoever. Holding it back until a token appeared turned
-        every tokenless fetch into a hostname that would not resolve, which
-        reads as a broken container rather than as a boundary, and left the
-        signing settings unsent beside it: the launch said commits were
-        unsigned while the checkout's own ``commit.gpgsign`` still stood.
+        Sent whether or not there is a credential, which is the part that
+        used to be withheld. A remote on a transport this session cannot
+        reach fails for a reason that has nothing to do with credentials --
+        under a filtered egress the session resolves no names at all -- so
+        the rewrite is what makes a remote addressable, and a public
+        repository is readable through it on no credential whatsoever.
+        Holding it back until a token appeared turned every tokenless fetch
+        into a hostname that would not resolve, which reads as a broken
+        container rather than as a boundary, and left the signing settings
+        unsent beside it: the launch said commits were unsigned while the
+        checkout's own ``commit.gpgsign`` still stood.
+
+        No secret is in here. The token crosses by name through
+        :meth:`inherited`, and every value below is a configuration key, a
+        path, or the *name* of a variable the container expands itself.
         """
-        settings = self.configuration(rewrites, token, identity)
-        carried = (
-            # `gh` reads its own variable and shares the one credential.
-            {self.token_variable: token, "GH_TOKEN": token} if token else {}
-        )
+        settings = self.configuration(rewrites, credential, granted, identity)
         return {
-            **carried,
+            **credential.environment(),
             "GIT_CONFIG_COUNT": str(len(settings)),
             **{
                 name: value
@@ -547,25 +1108,32 @@ class GitAccess(BaseModel, frozen=True):
             },
         }
 
-    def authorship(self, identity: GitIdentity | None) -> list[Notice]:
-        """Who a commit made in here will be authored as, or that none can be.
+    def inherited(self, granted: bool) -> list[str]:
+        """Variables the container takes from the launching shell by name.
 
-        The absent case is the one worth a line. Git's own account of it
-        names a container hostname and no way to fix it from where the
-        reader is standing, and it arrives in the middle of the commit that
-        was the point of the session rather than before it.
+        By name and never by value, because a value here is a value in the
+        argv of the command that starts the container -- which every process
+        on the host can read out of `ps` for as long as the session runs, and
+        which anything logging the launch records verbatim. Both engines read
+        a bare ``-e NAME`` as "take this one from my own environment", so the
+        secret crosses without ever being written down.
         """
+        return [self.token_variable] if granted else []
+
+    def authorship(self, identity: GitIdentity | None) -> list[Notice]:
+        """Said only when there is none, which is the case worth a line.
+
+        Git's own account of an absent identity names a container hostname
+        and no way to fix it from where the reader is standing, and it
+        arrives in the middle of the commit that was the point of the session
+        rather than before it. The present case says nothing: a launch that
+        reports the author of commits nobody has made yet is a paragraph
+        between the reader and the one line that mattered.
+        """
+        if identity is not None:
+            return []
         return [
             Notice(
-                text=(
-                    f"Commits: authored as {identity.name} <{identity.email}>, "
-                    "carried from this checkout. Signing is the separate "
-                    "claim, said below."
-                ),
-                urgency="ready",
-            )
-            if identity is not None
-            else Notice(
                 text=(
                     "Commits: this checkout sets no `user.name` and "
                     "`user.email`, so a commit in here refuses with `Author "
@@ -578,53 +1146,24 @@ class GitAccess(BaseModel, frozen=True):
 
     def notice(
         self,
-        token: str,
-        rewrites: list[RemoteRewrite],
+        credential: ForgeCredential,
         identity: GitIdentity | None = None,
     ) -> list[Notice]:
-        """What the launch says about reaching the forge, before it is needed.
+        """What the launch says about the forge, which is one line when all is well.
 
-        The absent-token case is the one worth being careful about. It is not
-        an error -- plenty of work never touches a remote -- but discovering
-        it as a credential prompt inside a non-interactive session is the
-        failure the manifest exists to prevent, so it is said at launch with
-        the variable named.
+        The selected credential names itself and stops. Everything that used
+        to travel beside it -- how many spellings were rewritten, that the
+        agent can read the token, what a token should be scoped to, who
+        commits are authored as -- was true and was noise: five paragraphs in
+        which the one sentence that decides whether the session can work sat
+        indistinguishable from four that do not. The rationale is in this
+        module and in ``docs/permissions.md``; the launch carries the verdict.
+
+        Remediation appears on exactly one arm, because it is the only one
+        where the reader has something to do.
         """
-        if not token:
-            reach = (
-                f"{len(rewrites)} ssh remote spelling(s) rewritten to HTTPS, so "
-                "a public repository still reads"
-                if rewrites
-                else "no ssh remote to rewrite"
-            )
-            return [
-                Notice(
-                    text=(
-                        f"Forge: no token in {self.token_variable}; {reach}. "
-                        "Whatever needs a credential — a push, a private "
-                        "repository — refuses in that variable's name rather "
-                        "than prompting. The ssh key is on the host by design "
-                        "and nothing routes to it, so nothing falls back to it."
-                    ),
-                    urgency="warning",
-                ),
-                *self.authorship(identity),
-                *self.signing.notice(),
-            ]
-        rewritten = (
-            f"{len(rewrites)} ssh remote spelling(s) rewritten"
-            if rewrites
-            else "no ssh remote to rewrite"
-        )
         return [
-            Notice(
-                text=(
-                    f"Forge: {self.host} over HTTPS with the token in "
-                    f"{self.token_variable}; {rewritten}. The agent can read "
-                    "this token — the scope is the boundary, not the secrecy."
-                ),
-                urgency="ready",
-            ),
+            *credential.notice(),
             *self.authorship(identity),
             *self.signing.notice(),
         ]
