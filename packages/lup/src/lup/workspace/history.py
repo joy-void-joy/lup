@@ -385,19 +385,34 @@ def iter_run_dirs(
     nowhere: every caller wanting a run back from its id re-derived the
     ``<provider>/<run_id>`` shape, which made a layout this package owns into
     something it could not change without breaking readers it cannot see.
+
+    A directory reached twice is still one directory. The root set is the
+    adopter's, so two of its entries can nest, name the same tree by different
+    spellings, or arrive through a symlink — and a caller counting what comes
+    back to decide whether one id names one run reads that repetition as
+    ambiguity, and refuses the run it did find. Identity is the resolved path,
+    which is what collapses those three cases into the one they always were.
     """
+    seen: set[Path] = set()
     for root in (harness_runs_path(),) if roots is None else roots:
         if not root.is_dir():
             continue
         for provider in sorted(root.iterdir()):
             if not provider.is_dir():
                 continue
-            if run_id is None:
-                yield from (run for run in sorted(provider.iterdir()) if run.is_dir())
-                continue
-            candidate = provider / run_id
-            if candidate.is_dir():
-                yield candidate
+            runs = (
+                sorted(run for run in provider.iterdir() if run.is_dir())
+                if run_id is None
+                else [provider / run_id]
+            )
+            for run in runs:
+                if not run.is_dir():
+                    continue
+                resolved = run.resolve()
+                if resolved in seen:
+                    continue
+                seen.add(resolved)
+                yield run
 
 
 def iter_output_dirs(
