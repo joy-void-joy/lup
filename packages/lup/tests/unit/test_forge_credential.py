@@ -637,10 +637,16 @@ def test_an_absent_identity_is_said_at_launch_rather_than_at_the_commit(
     assert "user.email" in lines
 
 
-def test_an_identity_that_is_there_says_nothing_at_all() -> None:
+def test_an_identity_that_is_there_says_nothing_at_all(
+    tmp_path: Path, only_this_checkout_answers: None
+) -> None:
     """A launch reporting the author of commits nobody has made yet is noise.
 
     It is a paragraph between the reader and the one line that mattered, and
     it was true every single time, which is what made it unreadable.
     """
-    assert GitAccess().authorship(committer(Path.cwd())) == []
+    git("-C", str(tmp_path), "init", "-q")
+    git("-C", str(tmp_path), "config", "user.name", "Some One")
+    git("-C", str(tmp_path), "config", "user.email", "some@one.invalid")
+
+    assert GitAccess().authorship(committer(tmp_path)) == []
