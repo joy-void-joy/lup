@@ -40,18 +40,18 @@ def test_every_entry_the_tree_carries_gets_a_row() -> None:
     """Nothing left to keep in step: the rows are the walk."""
     rows = LIBRARY.table().rows
 
-    assert [cell.text for cell, _ in rows] == LIBRARY.owed()
+    assert [cell.text for cell, _ in rows] == [entry.name for entry in LIBRARY.owed()]
 
 
 def test_a_row_opens_with_the_entry_s_own_summary_line() -> None:
     """The row is the docstring, not a paraphrase somebody has to maintain."""
-    for name in LIBRARY.owed():
-        source = LIBRARY.entry_source(name)
-        docstring = ast.get_docstring(ast.parse(source.read_text(encoding="utf-8")))
+    for entry in LIBRARY.owed():
+        parsed = ast.parse(entry.source.read_text(encoding="utf-8"))
+        docstring = ast.get_docstring(parsed)
         assert docstring is not None
         summary = docstring.splitlines()[0]
 
-        assert LIBRARY.solves(name).startswith(summary), name
+        assert LIBRARY.solves(entry.source).startswith(summary), entry.name
 
 
 def test_the_roster_walks_the_package_it_was_imported_from() -> None:
@@ -123,5 +123,23 @@ def test_a_dotted_directory_is_owed_no_row(tmp_path: Path) -> None:
     (source / ".venv").mkdir()
     roster = Roster(source=source)
 
-    assert roster.owed() == ["ordinary"]
+    assert [entry.name for entry in roster.owed()] == ["ordinary"]
+    assert len(roster.table().rows) == 1
+
+
+def test_a_directory_whose_package_was_deleted_is_owed_no_row(tmp_path: Path) -> None:
+    """A husk left by a deletion is not a package either.
+
+    Git tracks no directories, so removing a package's files leaves the
+    directory standing wherever gitignored bytecode still sits inside it. The
+    roster asked that directory what it solved and opened an `__init__.py` the
+    deletion had taken, so generation ended on a traceback naming a path
+    instead of a diagnostic naming the husk.
+    """
+    source = library_at(tmp_path, "ordinary")
+    (source / "emptied" / "__pycache__").mkdir(parents=True)
+    (source / "emptied" / "__pycache__" / "gone.pyc").write_bytes(b"")
+    roster = Roster(source=source)
+
+    assert [entry.name for entry in roster.owed()] == ["ordinary"]
     assert len(roster.table().rows) == 1

@@ -21,7 +21,10 @@ header and still have a docstring beneath it.
 """
 
 import ast
+from collections.abc import Iterator
 from pathlib import Path
+
+from pydantic import BaseModel
 
 DEFAULT_SKIPPED_SUFFIXES = (".pyc", ".egg-info")
 """Build residue, which is present in a checkout but is not part of it."""
@@ -66,21 +69,37 @@ def summary(source: Path) -> str | None:
     return " ".join(opening.split())
 
 
-def top_level_names(
+class TopLevelEntry(BaseModel, frozen=True):
+    """One importable entry beneath a package, and the file that defines it.
+
+    Both halves come from one walk. The walk has to open the layout anyway to
+    decide an entry is importable at all, so it already holds the file, and
+    carrying it costs nothing; a caller handed the name alone has to rebuild
+    that path from the name, which is a second reading of the same layout and
+    answers about a file it never saw.
+    """
+
+    name: str
+    source: Path
+
+
+def top_level_entries(
     root: Path,
     subtree: str,
     skipped_names: tuple[str, ...] = DEFAULT_SKIPPED_NAMES,
-) -> list[str]:
-    """Every import name directly beneath ``subtree``, packages and modules alike.
+) -> list[TopLevelEntry]:
+    """Every importable entry directly beneath ``subtree``, with its source file.
 
     A page that lists what a tree contains is making a claim about the tree,
     and prose cannot check it — which is how a roster promising "every
-    remaining top-level entry" came to omit six of them. Walking the names
+    remaining top-level entry" came to omit six of them. Walking the entries
     here lets the page hold its own authored description of each one while
     the *set* it describes is the tree's to decide.
 
-    Names rather than paths, because a caller keying authored prose by import
-    name should not have to strip a suffix to match `foo.py` to `foo`.
+    What makes an entry importable is what supplies its source: a module is
+    its own file, and a package is the ``__init__.py`` whose presence is the
+    reason the directory counts. One test decides both, so there is no filter
+    for a second reader to agree with.
 
     A dotted entry is skipped whatever it holds. Python cannot import one, so
     it is never a name a roster could owe a row — and the tree is read from
@@ -88,18 +107,33 @@ def top_level_names(
     beside the source is visible here. A checkout carrying `.claude` or
     `.venv` under the library would otherwise fail generation asking what an
     editor's scratch directory solves.
+
+    A directory holding no ``__init__.py`` is skipped for that same reason: it
+    is not a package, so no import name reaches it. Deleting a package leaves
+    its directory standing wherever an untracked file still sits inside it, and
+    a roster asking what that directory solves would be asking about something
+    Python cannot import.
     """
     base = root / subtree
     if not base.is_dir():
         raise ValueError(f"no directory at {subtree!r} beneath {root} to enumerate")
-    return sorted(
-        entry.stem if entry.is_file() else entry.name
-        for entry in base.iterdir()
-        if not entry.name.startswith(".")
-        and entry.name not in skipped_names
-        and not entry.name.endswith(DEFAULT_SKIPPED_SUFFIXES)
-        and (entry.is_dir() or entry.suffix == ".py")
-    )
+
+    def importable() -> Iterator[TopLevelEntry]:
+        """Each surviving candidate, paired with the file that makes it one."""
+        for entry in base.iterdir():
+            if (
+                entry.name.startswith(".")
+                or entry.name in skipped_names
+                or entry.name.endswith(DEFAULT_SKIPPED_SUFFIXES)
+            ):
+                continue
+            initializer = entry / "__init__.py"
+            if initializer.is_file():
+                yield TopLevelEntry(name=entry.name, source=initializer)
+            elif entry.is_file() and entry.suffix == ".py":
+                yield TopLevelEntry(name=entry.stem, source=entry)
+
+    return sorted(importable(), key=lambda entry: entry.name)
 
 
 def annotated_tree(
