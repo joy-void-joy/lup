@@ -4,7 +4,7 @@ Mechanism from the library, composition here, exactly as `requirements.py`
 splits them: `lup.harness.image` says what an image declaration *is*, and what
 is this project's is which defaults it takes and which it overrules.
 
-It overrules one, and the one it overrules is the network. The library defaults
+It overrules two. The first is the network. The library defaults
 to a filtered proxy because an adopter's first session should not reach
 whatever is on their network before anybody has decided it may. This repository
 has decided. That filter admits every public destination already, so it never
@@ -15,8 +15,27 @@ leaves a sign-in redirecting to a port no browser on this machine can reach.
 Sharing the namespace hands both back and gives up the denial of the LAN, which
 is a trade about who runs this repository and on what, so it is made here
 rather than in a library with no way to know either.
+
+The second is where the forge token comes from. The library reads a variable
+and stops, because an adopter's stored login is scoped to whatever they signed
+in with and taking it uninvited is not a library's call. This repository is
+developed on machines that authenticate `gh` by signing in rather than by
+exporting a token, and the cost of leaving it was not a missing convenience:
+`dev pr create`, `dev issues` and `dev report-friction` are how this repository
+says work is finished and how it records that its own tooling misbehaved, and
+inside the boundary none of them could reach the API. The friction-reporting
+loop in particular could not report its own breakage.
+
+What that grant adds over what a session already holds is the part worth
+naming. These sessions carry a forwarded ssh agent, which can sign anything
+that key can sign for every host it reaches -- so repository access was never
+what was being withheld. What the login adds is the rest of the account's
+scopes, `admin:public_key` and `workflow` among them. Exporting a fine-grained
+token narrows it again without changing anything here, since the variable is
+still read first.
 """
 
+from lup.harness.credential import GitAccess
 from lup.harness.egress import SessionEgress
 from lup.harness.image import Image
 
@@ -35,4 +54,7 @@ def agent_image() -> Image:
     Trust belongs to the checkout a container is started against, which the
     entrypoint knows and a build cannot.
     """
-    return Image(egress=SessionEgress(mode="host"))
+    return Image(
+        egress=SessionEgress(mode="host"),
+        forge=GitAccess(token_source="forge-login"),
+    )
