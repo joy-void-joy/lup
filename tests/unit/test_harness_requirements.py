@@ -9,6 +9,7 @@ diagnosis that stays quiet about a failure it does not explain.
 from pathlib import Path
 
 import lup.devtools.harness.launch as launch
+from lup.harness.egress import SessionEgress
 from lup.harness.image import Podman
 from lup.harness.ownership import source_digest
 from lup.harness.toolchain import for_host
@@ -519,8 +520,27 @@ def test_a_launch_asks_only_the_image_entries_marked_always() -> None:
         item.requirement.capability for item in declared.check_inside({}, opening)
     }
 
-    assert at_launch == {"session reaches its proxy", "egress proxy tunnels out"}
+    assert at_launch == {"session reaches the model endpoint"}
     assert "contained agent session" in at_setup - at_launch
+
+
+def test_a_launch_asks_something_whatever_the_network_posture_is() -> None:
+    """Emptying this set is how the verification disappears without failing.
+
+    Every entry marked always used to be about the proxy, so declaring a
+    posture with none left the launch asking nothing at all -- and nothing
+    asked is indistinguishable from everything passing. The property is that
+    the set has a member, not which member it has: a posture answers with its
+    own vocabulary, and one that answers with silence is the failure.
+    """
+    opening = ["podman", "run", "--rm", "lup-agent:abc"]
+    for boundary in (SessionEgress(), SessionEgress(mode="host")):
+        asked = {
+            item.requirement.capability
+            for item in manifest(boundary).check_inside({}, opening, setting_up=False)
+        }
+
+        assert asked, f"a {boundary.mode} launch exercises nothing on the way in"
 
 
 def test_the_launch_probe_drops_the_terminal_it_cannot_have() -> None:

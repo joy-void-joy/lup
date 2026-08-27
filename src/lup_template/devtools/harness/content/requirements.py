@@ -15,12 +15,14 @@ laptop with no bun and no clipboard is told nothing at all at launch, which
 is correct -- neither is a fault of that machine.
 """
 
+from lup.harness.egress import SessionEgress
 from lup.harness.requirements import Manifest
 from lup.harness.toolchain import (
     agent_session_requirement,
     bun_requirement,
     clipboard_requirement,
     container_requirement,
+    endpoint_reachable_requirement,
     github_requirement,
     metadata_refused_requirement,
     proxy_reachable_requirement,
@@ -31,10 +33,17 @@ from lup.harness.toolchain import (
     typescript_requirement,
     uv_requirement,
 )
+from lup_template.devtools.harness.content.image import agent_image
 
 
-def manifest() -> Manifest:
+def manifest(boundary: SessionEgress | None = None) -> Manifest:
     """This repository's requirements, host side and image side.
+
+    ``boundary`` is the network posture the image half is asked about, and it
+    defaults to the one this repository declares. A parameter because the
+    entries below divide on it and a caller that cannot vary it cannot ask
+    what the other posture would produce -- which is how the whole at-launch
+    set went empty under a change to one field, with every test still green.
 
     Nothing here names a path, a container client, or an image tag, and that
     is load-bearing rather than tidy. This manifest sits inside the `Harness`
@@ -55,22 +64,26 @@ def manifest() -> Manifest:
     module's own failure pointed the other way.
 
     The image half is exercised inside the container a session opens, which
-    `harness requirements --inside` is for. Four of its entries are the
-    boundary taken component by component -- the proxy being reachable, a
+    `harness requirements --inside` is for. Three of its entries take a
+    filtered boundary component by component -- the proxy being reachable, a
     request reaching the world through it, the metadata endpoint still being
-    refused, and the operator's terminal having arrived. Each was a thing the
-    first contained session found broken and no preflight was in a position
-    to see, because the image half had been declared and never run.
+    refused -- and every one of them was a thing the first contained session
+    found broken while no preflight was in a position to see it, because the
+    image half had been declared and never run. They are asked only where that
+    boundary is declared, since each names the proxy in the exercise itself.
 
-    The fifth is about the container rather than the boundary, and is here for
-    the same reason as the four: it was found by a session collapsing rather
-    than by anything asking. A container with no reaper at PID 1 keeps every
+    The others hold whatever the network is. One is the operator's terminal
+    having arrived. The last is about the container rather than the boundary,
+    and is here for the same reason as the rest: it was found by a session
+    collapsing rather than by anything asking. A container with no reaper at
+    PID 1 keeps every
     orphan it ever made, so the process bound is reached by a session that
     leaked -- and what announces that is an unrelated suite failing to start
     threads. Declared beside them because the cure and the check belong to the
     same argv, and a flag nothing measures is one that comes off in a refactor
     and is missed hours later by somebody bisecting their own change.
     """
+    egress = agent_image().egress if boundary is None else boundary
     return Manifest(
         requirements=[
             # Every default taken as offered. Where this repository has an
@@ -86,9 +99,27 @@ def manifest() -> Manifest:
             # Ordered as a session meets them: the proxy has to be reachable
             # before it can tunnel, the tunnel has to stand before a turn can
             # run, and the terminal is what the operator sees either way.
-            proxy_reachable_requirement(),
-            proxy_tunnels_requirement(),
-            metadata_refused_requirement(),
+            #
+            # The three that are about the proxy are asked only where there is
+            # one. Each names it in the exercise itself -- one curls
+            # `$HTTPS_PROXY`, one reads the variables pointing at it, one wants
+            # the 403 its denial rules answer with -- so under a posture with
+            # no proxy all three fail, and two of them refuse the launch for
+            # the absence of a component this project declared it would not
+            # have. The end-to-end question they carry between them outlives
+            # the proxy, so it is asked either way and only the vocabulary of
+            # the refusal changes: dropping it would leave a launch with no
+            # image entry marked always at all, and a session opening with
+            # nothing exercised behind the argv it opens with.
+            *(
+                [
+                    proxy_reachable_requirement(),
+                    proxy_tunnels_requirement(),
+                    metadata_refused_requirement(),
+                ]
+                if egress.filtered()
+                else [endpoint_reachable_requirement()]
+            ),
             terminal_handoff_requirement(),
             reaped_orphans_requirement(),
             bun_requirement(),
