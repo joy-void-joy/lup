@@ -6,23 +6,32 @@ runtime has spelled it — which is the whole point of the request being a
 declaration each runtime renders.
 """
 
+from collections.abc import Callable
 from pathlib import Path
 from typing import get_args
 
 import pytest
+from pydantic import BaseModel
 
 from lup.providers.claude.runtime import ClaudeSessionConfig
-from lup.providers.claude.selection import CLAUDE_AUTONOMY, CLAUDE_RUNTIME
+from lup.providers.claude.selection import (
+    CLAUDE_AUTONOMY,
+    CLAUDE_RUNTIME,
+    claude_config,
+)
 from lup.providers.codex.runtime import CodexSessionConfig
 from lup.providers.codex.selection import (
     CODEX_AUTONOMY,
     CODEX_RUNTIME,
+    codex_config,
     codex_mcp_server,
 )
 from lup.policy.hooks import LupHooksConfig
 from lup.tools.mcp import create_mcp_server
 from lup.client import Client
 from lup.providers.selection import Runtime, SessionAutonomy, SessionRequest
+from lup.sessions.composition import submission_gate_resolver
+from lup.sessions.events import SubmissionDecision
 
 AUTONOMY_DEGREES = get_args(SessionAutonomy.__value__)
 
@@ -188,3 +197,50 @@ def test_a_request_naming_no_workspace_has_nothing_to_be_contained_against(
     request = SessionRequest()
 
     assert runtime.contained(request) == request
+
+
+class GatedOutput(BaseModel):
+    """The shape one gated turn submits."""
+
+    verdict: str
+
+
+CONFIG_RENDERERS: list[
+    Callable[[SessionRequest], ClaudeSessionConfig | CodexSessionConfig]
+] = [
+    claude_config,
+    codex_config,
+]
+
+
+@pytest.mark.parametrize("render", CONFIG_RENDERERS)
+def test_a_submission_gate_reaches_every_runtime(
+    render: Callable[[SessionRequest], ClaudeSessionConfig | CodexSessionConfig],
+    tmp_path: Path,
+) -> None:
+    """A gate stated once is rendered by both, or it gates whichever it names.
+
+    Every backend spells the submission tool its own way, so a caller that
+    reached an adapter's configuration to gate a session would name a provider
+    to say something true of both — and the arm running under the other
+    provider would submit ungated. Stating it on the request is what makes
+    the gate a property of the session rather than of the spelling.
+    """
+
+    async def gate(_output: GatedOutput) -> SubmissionDecision:
+        return SubmissionDecision(accepted=False, message="review first")
+
+    resolver = submission_gate_resolver(GatedOutput, gate)
+    config = render(SessionRequest(cwd=tmp_path, submission_gate=resolver))
+
+    assert config.submission_gate_resolver is resolver
+
+
+@pytest.mark.parametrize("render", CONFIG_RENDERERS)
+def test_an_ungated_request_renders_no_gate(
+    render: Callable[[SessionRequest], ClaudeSessionConfig | CodexSessionConfig],
+    tmp_path: Path,
+) -> None:
+    config = render(SessionRequest(cwd=tmp_path))
+
+    assert config.submission_gate_resolver is None

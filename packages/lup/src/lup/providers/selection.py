@@ -22,6 +22,7 @@ from lup.policy.hooks import LupHooksConfig
 from lup.tools.mcp import McpServerEntry
 from lup.client import Client
 from lup.providers.login import ProviderLogin
+from lup.sessions.events import SubmissionGateResolver
 from lup.types import EnvVars
 
 type SessionAutonomy = Literal["ask", "accept_edits", "plan", "unattended"]
@@ -72,6 +73,17 @@ class SessionRequest(BaseModel, frozen=True, arbitrary_types_allowed=True):
     max_thinking_tokens: int | None = None
     environment: EnvVars = {}
     hooks: LupHooksConfig | None = None
+
+    submission_gate: SubmissionGateResolver | None = None
+    """Whether this session's validated output is accepted, asked per turn.
+
+    Portable because it is stated against the turn's output type rather than
+    against the tool that carries it — which is the one fact about submission
+    the neutral vocabulary cannot hold, every backend spelling that tool its
+    own way. A caller that had to reach the adapter's configuration to gate a
+    session would name a provider to say something true of both, and would
+    gate whichever provider it happened to name.
+    """
 
 
 type SessionOpener = Callable[[SessionRequest], Client]

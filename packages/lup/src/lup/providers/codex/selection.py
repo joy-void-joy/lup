@@ -150,6 +150,7 @@ def codex_config(request: SessionRequest) -> CodexSessionConfig:
             for name, server in request.tool_servers.items()
         },
         writable_roots=[request.cwd],
+        submission_gate_resolver=request.submission_gate,
     )
 
 

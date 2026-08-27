@@ -70,6 +70,7 @@ def claude_config(request: SessionRequest) -> ClaudeSessionConfig:
         cwd=request.cwd,
         environment=request.environment,
         hooks=request.hooks,
+        submission_gate_resolver=request.submission_gate,
     )
 
 
