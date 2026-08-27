@@ -11,6 +11,7 @@ appears in the argv that starts the container.
 from pathlib import Path
 
 import pytest
+import sh
 
 from lup.execution.shell import git
 from lup.harness.credential import (
@@ -44,6 +45,27 @@ AGENT = AgentSocket(
     home_inside="/run/lup/ssh",
 )
 NOTHING = NoCredential(variable="LUP_GIT_TOKEN", host="github.com")
+
+
+class StubForgeClient:
+    """A forge client that answers with one token, or cannot be asked at all.
+
+    It records what it was asked, because half of what these tests check is
+    that it was *not* asked: a declaration that reads the variable and stops
+    has to reach no further, and an assertion on the returned token alone
+    would pass just as well for one that asked and discarded the answer.
+    """
+
+    def __init__(self, answer: str | None) -> None:
+        self.answer = answer
+        self.asked: list[tuple[str, ...]] = []
+
+    def out(self, *arguments: str) -> str:
+        """What `gh auth token` prints, trailing newline and all."""
+        self.asked.append(arguments)
+        if self.answer is None:
+            raise sh.CommandNotFound("gh")
+        return f"{self.answer}\n"
 
 
 def settled(environment: dict[str, str]) -> dict[str, str]:
@@ -320,6 +342,68 @@ def test_the_image_derives_the_forge_clients_variable_from_the_one_passed_by_nam
 
     assert 'export GH_TOKEN="$ACME_FORGE"' in rendered
     assert 'if [ -n "${ACME_FORGE:-}" ]; then' in rendered
+
+
+def test_an_exported_token_wins_over_whatever_the_client_is_signed_in_as(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The variable is this launch's own answer, so nothing else is consulted."""
+    client = StubForgeClient("from-the-login")
+    monkeypatch.setattr("lup.harness.credential.gh", client)
+
+    access = GitAccess(token_source="forge-login")
+
+    assert access.sourced({"LUP_GIT_TOKEN": "exported"}) == "exported"
+    assert client.asked == []
+
+
+def test_a_declared_forge_login_answers_where_the_variable_holds_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The rung a host with a signed-in client and no variable was falling off.
+
+    Its token reaches the container the same way an exported one does, by
+    name, so the whole arrangement downstream is unchanged -- which is the
+    point of sourcing it rather than carrying it differently.
+    """
+    client = StubForgeClient("from-the-login")
+    monkeypatch.setattr("lup.harness.credential.gh", client)
+
+    access = GitAccess(token_source="forge-login")
+
+    assert access.sourced({}) == "from-the-login"
+    assert access.granted({}) is True
+    assert access.inherited(access.granted({})) == ["LUP_GIT_TOKEN"]
+    assert client.asked[0] == ("auth", "token", "--hostname", "github.com")
+
+
+def test_the_default_declaration_never_reaches_for_a_stored_login(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Widening what a session holds is opted into, so the default does not ask.
+
+    A stored login is scoped to whatever the person signed in with. Taking it
+    whenever the variable is empty would hand every session that scope on a
+    host whose only sin was signing in once.
+    """
+    client = StubForgeClient("from-the-login")
+    monkeypatch.setattr("lup.harness.credential.gh", client)
+
+    assert GitAccess().sourced({}) == ""
+    assert GitAccess().granted({}) is False
+    assert client.asked == []
+
+
+def test_a_client_that_cannot_answer_leaves_the_launch_with_no_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No token is an ordinary posture here, reported rather than raised."""
+    monkeypatch.setattr("lup.harness.credential.gh", StubForgeClient(None))
+
+    access = GitAccess(token_source="forge-login")
+
+    assert access.sourced({}) == ""
+    assert access.inherited(access.granted({})) == []
 
 
 def test_an_ssh_credential_rewrites_toward_ssh_rather_than_away_from_it() -> None:

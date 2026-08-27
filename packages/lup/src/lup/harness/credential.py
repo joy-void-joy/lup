@@ -64,6 +64,7 @@ from urllib.parse import urlsplit
 import sh
 from pydantic import BaseModel, Discriminator, Field
 
+from lup.devtools.utils import gh
 from lup.execution.shell import git
 from lup.harness.environment import NON_INTERACTIVE_SHELL_ENV
 from lup.harness.notice import Notice
@@ -764,6 +765,24 @@ preference.
 """
 
 
+type ForgeTokenSource = Literal["variable", "forge-login"]
+"""Where a launch looks for the forge token.
+
+Two answers because two kinds of host hold a token in two places. One exports
+it, having scoped it themselves; the other signed into the forge client once
+and has no variable at all -- and on that host the variable is unset for the
+same reason it is unset on a machine with no credential whatsoever, which is
+why nothing can infer the difference and a project has to say.
+
+The distinction is worth a declaration rather than a fallback taken silently:
+a stored login is scoped to whatever the person signed in with, which on
+GitHub is every repository the account can reach and whichever of `workflow`
+and `admin:public_key` they granted. A variable holds what the operator put
+in it. Reaching for the first when the second is empty widens what a session
+holds without anybody having asked for it.
+"""
+
+
 class GitAccess(BaseModel, frozen=True):
     """How a contained session reaches the forge, and what it claims when it does."""
 
@@ -792,6 +811,19 @@ class GitAccess(BaseModel, frozen=True):
             "gitignored file is exactly what the undo layer cannot restore "
             "and what `git clean -fdx` destroys — the one command the "
             "recoverability argument has to keep refusing"
+        ),
+    )
+    token_source: ForgeTokenSource = Field(
+        default="variable",
+        description=(
+            "Where the launcher looks when it needs a token. `variable` "
+            "reads `token_variable` and stops, which is what an operator "
+            "scoping their own credential wants; `forge-login` falls back "
+            "to the forge client's stored login, which is what a host "
+            "authenticated by `gh auth login` has instead of a variable. "
+            "The default is the narrow one: a project opting into the "
+            "fallback is saying its sessions may hold whatever that login "
+            "is scoped to"
         ),
     )
     username: str = Field(
@@ -985,8 +1017,32 @@ class GitAccess(BaseModel, frozen=True):
             declined=list(dict.fromkeys(item.because for item in tried)),
         )
 
+    def sourced(self, environ: EnvVars) -> str:
+        """The token this launch carries, from wherever the declaration points.
+
+        The variable wins wherever it holds something, so an operator who
+        exported one for this launch gets the one they exported rather than
+        whatever the forge client is signed in as.
+
+        A stored login is read through the client that owns it rather than
+        out of its configuration file. Where that file lives and how it
+        encodes a token are the client's to change; ``auth token`` is the
+        part it promises, and asking it also answers for a login that has
+        expired, which reading the file cannot. A client that is absent,
+        signed out, or refuses answers the empty string -- no token is an
+        ordinary posture here, reported by the launch like any other rather
+        than raised.
+        """
+        held = environ.get(self.token_variable, "")
+        if held or self.token_source == "variable":
+            return held
+        try:
+            return gh.out("auth", "token", "--hostname", self.host).strip()
+        except (sh.ErrorReturnCode, sh.CommandNotFound):
+            return ""
+
     def granted(self, environ: EnvVars) -> bool:
-        """Whether the launching shell holds a token, whatever rung was taken.
+        """Whether this launch holds a token at all, whatever rung was taken.
 
         Asked separately from the selection because the token is not only a
         git transport: `gh` reads it for every API call it makes, and a
@@ -994,9 +1050,7 @@ class GitAccess(BaseModel, frozen=True):
         it exists, and what the ssh rungs change is which transport git
         speaks, not whether the forge client can authenticate.
         """
-        return bool(
-            environ[self.token_variable] if self.token_variable in environ else ""
-        )
+        return bool(self.sourced(environ))
 
     def maintenance(self) -> list[GitSetting]:
         """Whether git may start its own housekeeping, as a setting or nothing.

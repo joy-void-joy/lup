@@ -897,6 +897,7 @@ def session_argv(
     config_home: Path,
     login: ProviderLogin,
     unsandboxed: bool,
+    environment: EnvVars,
     transcript: Path | None = None,
 ) -> list[str]:
     """The argv that opens a session, inside the declared container or on the host.
@@ -916,6 +917,14 @@ def session_argv(
     if unsandboxed:
         return [cli, *arguments]
     harness = composition.recipe.source
+    # A token crosses by name, so its value has to be in the environment of the
+    # process that starts the container rather than anywhere in the argv. That
+    # makes this the one place it has to be resolved: the argv builder reads
+    # the same declaration for whether to pass the name, and a name passed
+    # against an environment nobody populated forwards nothing.
+    carried = harness.image.forge.sourced(environment)
+    if carried:
+        environment[harness.image.forge.token_variable] = carried
     credential = login.credentials_path(config_home)
     banner = Banner()
     opening = contained_argv(
@@ -1058,6 +1067,7 @@ def launch_claude(
                 else ambient_config_home(profiles.login, Path.home() / ".claude"),
                 profiles.login,
                 unsandboxed,
+                environment,
                 transcript.journal.path,
             )
             sh.Command(argv[0])(*argv[1:], _fg=True, _env=environment)
@@ -1153,6 +1163,7 @@ def launch_codex(
                 selected_home,
                 CODEX_LOGIN,
                 unsandboxed,
+                environment,
                 transcript.journal.path,
             )
             sh.Command(argv[0])(*argv[1:], _fg=True, _env=environment)
