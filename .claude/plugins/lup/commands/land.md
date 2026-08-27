@@ -33,7 +33,7 @@ Report which case it is and what the comparison showed, and let the user settle 
 1. Run `uv run lup-devtools dev survey --json`.
 2. Resolve every named branch against the survey. Report each name that matches nothing; stop only when none of them resolve.
 3. Show every resolved branch's `disposition` and `reason` in one table, then Request explicit user approval before carrying out the actions those dispositions imply. Reason: the branches may hold work the user has not looked at.
-4. Carry out each disposition's action from the table below, taking every `LAND` branch through step 6 and every branch an open PR is driving through step 7.
+4. Carry out each disposition's action from the table below, committing every `COMMIT` branch and taking it and every `LAND` branch through step 6, and every branch an open PR is driving through step 7.
 
 ## Full Sweep Mode (no argument)
 
@@ -55,11 +55,11 @@ Do not present a dead run's branches as a to-do list. One decision about the run
 
 ### 4. Present the sweep
 
-One table covering every branch, ordered `LAND` first (that is the work at risk), then the `KEEP` rows an open PR is driving (work already asked for, waiting on nothing but an order to merge in), then `DELETE`/`STALE`, then the rest of `KEEP`/`CURRENT`:
+One table covering every branch, ordered `LAND` and `COMMIT` first (that is the work at risk), then the `KEEP` rows an open PR is driving (work already asked for, waiting on nothing but an order to merge in), then `DELETE`/`STALE`, then the rest of `KEEP`/`CURRENT`:
 
 | Branch | Disposition | Unique | Rewr | Diff | Dirt | PR | Proposed action |
 
-`Dirt` is the survey's `changes` — what that branch's worktree holds uncommitted. It never changes a disposition, only what carrying one out costs: a dirty worktree makes a delete refuse until forced, and forcing discards those files, so a dirty row is one to read before proposing anything.
+`Dirt` is the survey's `changes` — what that branch's worktree holds uncommitted. On a reserved workspace it decides the disposition, which is what `COMMIT` says: reserving a workspace claims nobody has started, and an uncommitted change contradicts it. Everywhere else it changes only what carrying a disposition out costs — a dirty worktree makes a delete refuse until forced, and forcing discards those files, so a dirty row is one to read before proposing anything.
 
 `Rewr` is the survey's `rewritten` — how many of that branch's unique commits already name a subject in the integration branch. Containment is decided by patch-id, which a rewrite changes, so a commit that landed rebased, reworded, or squashed reads as unlanded ever after and a pre-rewrite snapshot presents its whole history as work at risk. **It is a signal, never a verdict**: a shared subject is not proof, so where it is set, go and check — `git cherry -v <integration> <branch>` marks with `-` what patch-id already matches, and comparing the remaining subjects against `git log <integration>` finds the rewrites it cannot see. Report what the comparison showed; never subtract it from `Unique` and never let it retire work on its own.
 
@@ -91,9 +91,10 @@ Each row carries the same `disposition` the local classifier gave it, so it mean
 | Disposition | Meaning | Action |
 | --- | --- | --- |
 | `LAND` | Holds commits the integration branch lacks, with no PR driving it | Land it — step 6 |
+| `COMMIT` | A reserved workspace holding uncommitted work | The work sits in no commit, on no branch and on no remote, so nothing but this row records it. Read the diff against the integration branch before proposing anything — where it reports nothing, the work is a stale duplicate to discard rather than commit. Otherwise committing it in its own worktree — the move step 1 makes — turns it into a `LAND` branch; take it through step 6 from there. Never leave it on the grounds that the workspace was reserved: that is what it stopped being |
 | `DELETE` | Reached the integration branch, or its PR merged | `uv run lup-devtools dev delete <branch>`; where `Dirt` is set it refuses, so compare that worktree against the integration branch and report what forcing would discard before asking |
 | `STALE` | Every commit already cherry-picked into the integration branch | Confirm, then delete |
-| `KEEP` | Protected, an open PR is already driving it, a resolver run holds its lease, or it is a worktree reserved at the integration tip | Read which of the four it is: protected leaves it alone; an open PR offers it — step 7; a resolver run is step 3, and one with `alive: false` holds it forever; a reserved workspace is somebody's next session, so leave it |
+| `KEEP` | Protected, an open PR is already driving it, a resolver run holds its lease, or it is a clean reserved workspace | Read which of the four it is: protected leaves it alone; an open PR offers it — step 7; a resolver run is step 3, and one with `alive: false` holds it forever; a clean reserved workspace is somebody's next session, so leave it — the same workspace holding work is `COMMIT` and is not this row |
 | `UNRELATED` | Shares no history with the integration branch | Never rebase or merge it — both would replay an unrelated tree. Report it and ask; an adopted subtree or a wrongly-pushed branch are the usual causes, and neither is this sweep's to settle |
 | `CURRENT` | The branch checked out here | Never delete; warn if it would otherwise qualify |
 
@@ -141,6 +142,7 @@ What landed, what merged, what was deleted locally, what was cleared from a remo
 
 - Never force-delete without explicit user approval for that specific branch
 - **Never delete a `LAND` branch unless the user explicitly chose to drop it** — and then retire it rather than deleting it, so the choice ends the branch and not the work
+- **Never discard a `COMMIT` branch's changes without explicit user approval**, and never delete the branch to be rid of them — uncommitted work has no copy anywhere, so `git restore` there ends it with nothing to recover it from
 - Skip the current branch — warn the user instead
 - Containment counts as landed only against the integration branch; riding inside a sibling that has not landed either is no reason to drop work
 - For rebased branches, content may have reached the integration branch via a rebase PR even though `--is-ancestor` is false — the `DELETE` disposition already accounts for merged PRs

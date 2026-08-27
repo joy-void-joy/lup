@@ -64,7 +64,7 @@ class PRStatus(BaseModel):
 
 
 type BranchStatus = Literal[
-    "LAND", "DELETE", "STALE", "KEEP", "CURRENT", "UNRELATED", "NOT_FOUND"
+    "LAND", "COMMIT", "DELETE", "STALE", "KEEP", "CURRENT", "UNRELATED", "NOT_FOUND"
 ]
 
 
@@ -126,12 +126,14 @@ class BranchInfo(BaseModel):
     changes: WorktreeChanges | None = None
     """What this branch's worktree holds uncommitted, where it has one.
 
-    Carried beside the disposition rather than folded into its reason: the
-    classifier is shared with `dev survey`, and a verb decided partly on
-    working-tree state there would drift from the same verb decided here.
-    What this changes is the cost of acting, not the action — a DELETE whose
-    worktree is dirty still deletes, but refuses until forced, and a reader
-    handed the disposition alone plans a step that will stop.
+    Carried beside the disposition as well as feeding it, because the two ask
+    different things of it. For most verbs this is the cost of acting rather
+    than the action — a ``DELETE`` whose worktree is dirty still deletes, but
+    refuses until forced, and a reader handed the disposition alone plans a
+    step that will stop. On a reserved workspace it *is* the action: one
+    nobody has started is a workspace to leave alone, and the same workspace
+    holding uncommitted work is the one shape a sweep exists to surface,
+    since nothing else in the repository records that work.
     """
 
 
@@ -597,6 +599,7 @@ def disposition_for(
     related: bool = True,
     never_diverged: bool = False,
     worktree: str | None = None,
+    changes: WorktreeChanges | None = None,
 ) -> Disposition:
     """Resolve a branch to its single disposition.
 
@@ -621,6 +624,14 @@ def disposition_for(
     from how far the integration branch has since travelled: a sweep moves
     that branch under every workspace reserved against it, so a guard reading
     distance would protect a workspace only until the sweep's first merge.
+
+    What that workspace holds then decides which verb it gets. Reserving one
+    says nobody has started, which a clean tree agrees with and an uncommitted
+    change contradicts — and work left uncommitted sits in no commit, on no
+    branch and on no remote, so leaving it for somebody's next session is how
+    it goes stale with nothing to recover it from. Dirt elsewhere prices an
+    action without changing it, a dirty ``DELETE`` being a delete that refuses
+    until forced; on a reserved workspace it decides what the action is.
     """
     if name == current:
         return Disposition(status="CURRENT", reason="current branch")
@@ -633,6 +644,14 @@ def disposition_for(
             status="UNRELATED", reason=f"shares no history with {integration}"
         )
     if never_diverged and worktree is not None:
+        if changes is not None and changes.dirty():
+            return Disposition(
+                status="COMMIT",
+                reason=(
+                    f"reserved workspace cut from {integration}, "
+                    f"holding {changes.summary()}"
+                ),
+            )
         return Disposition(
             status="KEEP", reason=f"reserved workspace cut from {integration}"
         )
@@ -1518,6 +1537,7 @@ def survey(as_json: bool) -> None:
             unique = count_unique_commits(name, integration)
             diff_lines = count_source_diff_lines(name, integration)
 
+        uncommitted = worktree_changes(checkout) if checkout else None
         verdict = disposition_for(
             name,
             integration=integration,
@@ -1529,6 +1549,7 @@ def survey(as_json: bool) -> None:
             related=related,
             never_diverged=never_diverged_from(name, integration),
             worktree=checkout,
+            changes=uncommitted,
         )
 
         return BranchInfo(
@@ -1544,7 +1565,7 @@ def survey(as_json: bool) -> None:
             disposition=verdict.status,
             reason=verdict.reason,
             rewritten=len(rewrite_suspects(name, integration)) if unique else 0,
-            changes=worktree_changes(checkout) if checkout else None,
+            changes=uncommitted,
         )
 
     def remote_info(row: ParsedRemoteBranch) -> RemoteBranchInfo:
