@@ -1515,6 +1515,15 @@ def contained_argv(
     terminal = image.terminal.for_host(environ)
     for notice in terminal.notices():
         notice.say()
+    # The editor's lockfile directory, guaranteed before anything mounts it.
+    # Whichever side writes it first creates it, so on a profile no editor has
+    # ever connected to it is simply absent -- and a bind mount whose source
+    # does not exist is one the engine refuses the entire container for, which
+    # takes the launch and every probe behind the same argv down with it.
+    # Here rather than in the image declaration, which assembles argv, touches
+    # no disk, and is hashed into the ownership digest.
+    if host_config_home is not None:
+        (host_config_home / "ide").mkdir(parents=True, exist_ok=True)
     return image.session_arguments(
         tag=tag,
         checkout=root,

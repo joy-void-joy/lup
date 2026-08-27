@@ -235,6 +235,54 @@ def test_a_failing_finding_says_what_was_lost_and_what_needed_it() -> None:
     assert "needed for whatever clipboard is for" in rendered
 
 
+def test_a_container_that_never_started_is_not_read_as_an_absent_capability() -> None:
+    """An engine that refused has said nothing about what was inside it.
+
+    The defect this closes: a bind mount whose source did not exist made
+    podman refuse the container, and both at-launch boundary probes announced
+    the capability neither had measured -- an unreachable proxy, an
+    untunnelled egress -- under advice to tear down a network that was fine.
+    """
+    # `sh` stands in for the container engine here. What is being pinned is a
+    # *contained* command exiting 125, the code both engines reserve for a run
+    # that failed before the container's own command existed.
+    engine_refused = Run(command=["-c", "exit 125"]).behind(["sh"])
+    found = requirement("proxy", engine_refused).check({})
+
+    assert not found.working
+    assert not found.exercised
+    rendered = "\n".join(item.text for item in found.notices())
+    assert "proxy: not established" in rendered
+    assert "the proxy capability is unavailable" not in rendered
+    assert "nothing here is a verdict on whatever proxy is for" in rendered
+
+
+def test_a_probe_that_ran_and_failed_is_still_the_capabilitys_own_answer() -> None:
+    """Inside a container that started, a failure is the capability's."""
+    probe_said_no = Run(command=["-c", "exit 1"]).behind(["sh"])
+    found = requirement("proxy", probe_said_no).check({})
+
+    assert not found.working
+    assert found.exercised
+    assert "the proxy capability is unavailable" in "\n".join(
+        item.text for item in found.notices()
+    )
+
+
+def test_an_unprefixed_exercise_reads_125_as_its_own_exit_code() -> None:
+    """Nothing started a container, so 125 is the program's own answer."""
+    found = requirement("odd", Run(command=["sh", "-c", "exit 125"])).check({})
+
+    assert not found.working
+    assert found.exercised
+
+
+def test_only_a_container_prefix_makes_an_exercise_contained() -> None:
+    """The flag is `behind`'s to set, because it is the only thing prefixing one."""
+    assert not Run(command=["echo", "hello"]).contained
+    assert Run(command=["echo", "hello"]).behind(["podman", "run"]).contained
+
+
 def test_the_declared_manifest_names_only_programs_this_project_invokes() -> None:
     """A manifest that invents a prerequisite refuses machines that were fine.
 
