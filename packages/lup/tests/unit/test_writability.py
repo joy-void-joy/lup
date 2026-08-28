@@ -119,6 +119,26 @@ def test_a_device_node_lock_names_the_sandbox(tmp_path: Path) -> None:
     assert "Rerun outside the sandbox" in reported
 
 
+def test_a_confinement_remedy_does_not_end_at_the_escape(tmp_path: Path) -> None:
+    """The loop a reader falls into when the escape reports the same refusal.
+
+    A per-call escape re-judges a call and never moves it to another
+    filesystem, so a confinement the session mounted refuses the escaped call
+    identically. A remedy naming only the escape is then read twice and tried
+    twice, and the second identical failure reads as the repository breaking
+    rather than as the boundary holding — which is the one reading this whole
+    module exists to prevent. So it has to name what the escape does not reach.
+    """
+    root = admin_dir(tmp_path / "admin")
+    (root / "config.lock").symlink_to(Path("/dev/null"))
+
+    reported = diagnosis(inspect_git_admin(root))
+
+    assert "Rerun outside the sandbox" in reported
+    assert "same refusal" in reported
+    assert "mounts make this directory writable" in reported
+
+
 def test_the_worktree_config_is_watched_alongside_the_lock(tmp_path: Path) -> None:
     """`config.worktree` is the second path a config write can be shadowed at."""
     root = admin_dir(tmp_path / "admin")

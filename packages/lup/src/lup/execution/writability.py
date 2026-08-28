@@ -145,7 +145,11 @@ class Confinement(LockObstruction, frozen=True):
 
     The three shapes differ only in what was observed — the remedy is one
     remedy, because no config write in this directory can succeed until the
-    run is outside the confinement.
+    run is outside the confinement. Outside the confinement is not the same
+    as outside the sandbox, and the remedy says both: a per-call escape
+    re-judges a call without moving it to another filesystem, so against a
+    mount the session placed it reports the identical refusal, and a remedy
+    naming only the escape sends the reader around that loop again.
     """
 
     @property
@@ -156,7 +160,11 @@ class Confinement(LockObstruction, frozen=True):
         return (
             "git config writes are blocked by the sandbox: `File exists` names "
             "that mount, not a stale lock, and there is none here to delete. "
-            "Rerun outside the sandbox."
+            "Rerun outside the sandbox — and if a per-call escape reports this "
+            "same refusal, the confinement is above the sandbox rather than "
+            "inside it: an escape changes which policy judges a call and never "
+            "which filesystem it runs on, so what is left is a session whose "
+            "mounts make this directory writable."
         )
 
 
