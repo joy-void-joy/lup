@@ -15,13 +15,14 @@ from lup.devtools.dev.comments import FoundComment
 from lup.devtools.harness.content.skills.report import SKILL
 from lup.devtools.report.build import authored_headings, note_items
 from lup.devtools.report.models import (
-    DEFAULT_REPORT_PATH,
+    DEFAULT_SCRATCH_ROOT,
     NOTES,
     REPORT_TOPICS,
     Report,
     ReportItem,
     ReportPart,
     ReportTopic,
+    inside_scratch,
     topic_bullets,
 )
 from lup.harness.ownership import GeneratedArtifacts, OwnedArtifact
@@ -155,13 +156,22 @@ def test_the_skill_recites_the_roster_the_command_fills_in() -> None:
     assert topic_bullets() in prose
     for topic in REPORT_TOPICS:
         assert f"- **{topic.title}** — {topic.guidance}\n" in prose
-    assert str(DEFAULT_REPORT_PATH) in prose
+    assert f"{DEFAULT_SCRATCH_ROOT}/" in prose
 
 
-def test_a_written_report_lands_in_scratch() -> None:
-    """Scratch is the whole reason writing one is not a tracking file."""
-    assert DEFAULT_REPORT_PATH.parts[0] == "tmp"
-    assert not DEFAULT_REPORT_PATH.is_absolute()
+def test_a_report_named_outside_scratch_is_refused() -> None:
+    """Scratch is the whole reason writing one is not a tracking file.
+
+    The name is whoever writes the report to choose; the directory is not,
+    because gitignored is what lets a file be rewritten whole every session
+    without reaching a diff, a reviewer, or a commit.
+    """
+    root = Path("/repo")
+
+    assert inside_scratch(root, Path("tmp/resolver_remaining.md"))
+    assert not inside_scratch(root, Path("docs/resolver_remaining.md"))
+    assert not inside_scratch(root, Path("tmp/../notes.md"))
+    assert not inside_scratch(root, Path("/elsewhere/notes.md"))
 
 
 def written_report() -> str:
@@ -215,4 +225,4 @@ def test_the_skill_says_it_is_replacing_the_whole_file() -> None:
     """The one caller that means it, saying so rather than being exempt."""
     prose = claude_prompt_renderer().render(SKILL.prompt)
 
-    assert "report --write --force" in prose
+    assert f"report --write {DEFAULT_SCRATCH_ROOT}/<name>.md --force" in prose

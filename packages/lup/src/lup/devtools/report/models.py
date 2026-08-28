@@ -16,16 +16,31 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
-DEFAULT_REPORT_PATH = Path("tmp/report.md")
-"""Where a written report goes unless a composition says otherwise.
+DEFAULT_SCRATCH_ROOT = Path("tmp")
+"""The directory a written report is named inside.
 
-Scratch, so it is gitignored and never reaches a diff, a reviewer, or a
-commit — which is the whole reason a report may be written at all. A backlog
-file parks work where no workflow will surface it again; this is rewritten
-whole from the surfaces every time, so a stale one cannot outlive what it
-describes. A default rather than a rule: a project keeping its scratch
-somewhere else passes its own.
+Scratch, so a report is gitignored and never reaches a diff, a reviewer, or a
+commit — which is the whole reason writing one is not a tracking file. The
+directory is declared and the file name is not: a report named for the work it
+covers says so from a directory listing, while one fixed name makes every
+session's report the same file and leaves whichever ran last. A default rather
+than a rule: a project keeping its scratch somewhere else passes its own.
 """
+
+
+def inside_scratch(
+    root: Path, requested: Path, scratch_root: Path = DEFAULT_SCRATCH_ROOT
+) -> bool:
+    """Whether a report asked for at ``requested`` lands inside scratch.
+
+    The name is whoever writes the report to choose; the directory is not,
+    because everything the file is allowed to be — unversioned, unreviewed,
+    replaced whole every session — is a property of where it sits rather than
+    of what it says. Resolved rather than compared as text, so a path climbing
+    back out with ``..`` is refused by landing outside rather than by looking
+    unusual.
+    """
+    return (root / requested).resolve().is_relative_to((root / scratch_root).resolve())
 
 
 class ReportTopic(BaseModel, frozen=True):

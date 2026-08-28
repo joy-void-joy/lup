@@ -75,7 +75,8 @@ the list stays as short as the toolchain's actual incompatibilities."""
 ARTIFACT_REFUSAL = (
     "publishing a page leaves the repository, and this project already owns"
     " surfaces that do not — run `uv run lup-devtools report` for everything"
-    " left to implement, or the report skill to write it whole to tmp/report.md"
+    " left to implement, or the report skill to write it whole to a file named"
+    " for the work, under tmp/"
 )
 """Why an artifact is the wrong reflex here, and what answers the same need.
 

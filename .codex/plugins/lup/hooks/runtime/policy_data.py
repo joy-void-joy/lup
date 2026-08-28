@@ -8644,12 +8644,12 @@ REFUSED_TOOLS: list[RefusedToolRow] = [
     {
         "tool": "Artifact",
         "specifier": "",
-        "reason": "publishing a page leaves the repository, and this project already owns surfaces that do not \u2014 run `uv run lup-devtools report` for everything left to implement, or the report skill to write it whole to tmp/report.md",
+        "reason": "publishing a page leaves the repository, and this project already owns surfaces that do not \u2014 run `uv run lup-devtools report` for everything left to implement, or the report skill to write it whole to a file named for the work, under tmp/",
     },
     {
         "tool": "Skill",
         "specifier": "artifact-design",
-        "reason": "publishing a page leaves the repository, and this project already owns surfaces that do not \u2014 run `uv run lup-devtools report` for everything left to implement, or the report skill to write it whole to tmp/report.md",
+        "reason": "publishing a page leaves the repository, and this project already owns surfaces that do not \u2014 run `uv run lup-devtools report` for everything left to implement, or the report skill to write it whole to a file named for the work, under tmp/",
     },
     {
         "tool": "EnterWorktree",

@@ -14,7 +14,7 @@ Examples::
 
     $ uv run lup-devtools report
     $ uv run lup-devtools report --json
-    $ uv run lup-devtools report --write
+    $ uv run lup-devtools report --write tmp/resolver_remaining.md
 """
 
 from pathlib import Path
@@ -25,7 +25,7 @@ import typer
 from lup.devtools.harness.composition import NativeTargets
 from lup.devtools.harness.drift import RepositoryWriter
 from lup.devtools.report.build import authored_headings, build_report
-from lup.devtools.report.models import DEFAULT_REPORT_PATH
+from lup.devtools.report.models import DEFAULT_SCRATCH_ROOT, inside_scratch
 from lup.devtools.supervisor.doors import resolve_state_root
 from lup.devtools.utils import output_json
 from lup.workspace.paths import project_root
@@ -34,14 +34,14 @@ from lup.workspace.paths import project_root
 def create_report_app(
     native_targets: NativeTargets,
     repository_writers: list[RepositoryWriter],
-    report_path: Path = DEFAULT_REPORT_PATH,
+    scratch_root: Path = DEFAULT_SCRATCH_ROOT,
 ) -> typer.Typer:
     """Wire the report surface over the artifacts one repository generates.
 
     The targets and writers are what only an application knows; the root every
     topic and the written path resolve against is found when the command runs,
     because a CLI is imported long before anyone knows where it is pointed. So
-    a relative ``report_path`` lands in the tree being reported on rather than
+    a relative ``--write`` path lands in the tree being reported on rather than
     wherever the command was invoked from.
     """
     app = typer.Typer(invoke_without_command=True, no_args_is_help=False)
@@ -50,9 +50,12 @@ def create_report_app(
     def report_cmd(
         as_json: Annotated[bool, typer.Option("--json", help="Output as JSON")] = False,
         write: Annotated[
-            bool,
-            typer.Option("--write", help=f"Rewrite {report_path} with this report"),
-        ] = False,
+            Path | None,
+            typer.Option(
+                "--write",
+                help=f"Rewrite this path under {scratch_root}/ with this report",
+            ),
+        ] = None,
         force: Annotated[
             bool,
             typer.Option(
@@ -62,14 +65,25 @@ def create_report_app(
     ) -> None:
         """Report everything left to implement, across every surface."""
         root = project_root()
+        if write is not None and not inside_scratch(root, write, scratch_root):
+            typer.echo(
+                f"{write} is outside {scratch_root}/, which is where a report "
+                "has to be named: there it is gitignored, so it reaches no "
+                "diff, no reviewer, and no commit, and that is what lets one be "
+                "written at all. Anywhere else it lands in the next commit as a "
+                f"tracking file. Name it inside {scratch_root}/ after the work "
+                "it covers.",
+                err=True,
+            )
+            raise typer.Exit(1)
         report = build_report(
             native_targets.resolve(native_targets.every, root),
             repository_writers,
             resolve_state_root(),
             root,
         )
-        if write:
-            written = root / report_path
+        if write is not None:
+            written = root / write
             standing = written.read_text(encoding="utf-8") if written.is_file() else ""
             authored = authored_headings(standing)
             if authored and not force:
