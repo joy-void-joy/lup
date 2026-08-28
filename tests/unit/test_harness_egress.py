@@ -213,9 +213,15 @@ def test_the_launch_names_what_fails_outside_the_proxys_vocabulary() -> None:
 
 def test_an_unfiltered_launch_says_what_it_is_leaving_open() -> None:
     """Turning the boundary off is a posture, and a posture is announced."""
-    lines = "\n".join(item.text for item in SessionEgress(mode="bridge").notice("feat"))
-    assert "no proxy" in lines
+    notices = SessionEgress(mode="bridge").notice("feat")
+    lines = "\n".join(item.text for item in notices)
+    assert {item.urgency for item in notices} == {"boundary"}
+    assert "unrestricted" in lines
     assert "metadata" in lines
+    host_lines = "\n".join(
+        item.text for item in SessionEgress(mode="host").notice("feat")
+    )
+    assert "your machine's localhost" in host_lines
 
 
 def test_teardown_removes_the_proxy_before_the_network_holding_it() -> None:

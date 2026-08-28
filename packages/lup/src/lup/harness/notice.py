@@ -45,9 +45,9 @@ Which is why each one states its test, and why the pair that decides the
 block's temperature states it twice. ``warning`` is for something wrong:
 this launch cannot do its work through it, or it is a misconfiguration that
 will fail later somewhere that names neither the cause nor the remedy.
-``boundary`` is for a capability the boundary does not grant, said with what
-grants it -- a posture working exactly as declared. The two read alike from
-inside the module that prints one, which is how a healthy launch ends up
+``boundary`` is for a declared security posture working exactly as configured.
+The two can read alike from inside the module that prints one, which is how a
+healthy launch ends up
 orange from top to bottom: every author of a notice knows their line is
 worth reading, and ``warning`` is the only urgency that says so. It is not.
 A reader who has learned that the opening block is orange whatever happened
@@ -205,7 +205,11 @@ class Banner(BaseModel):
                 urgency="warning",
                 carries=["refusal", "warning"],
             ),
-            Band(heading="Security", urgency="boundary", carries=["boundary"]),
+            Band(
+                heading="Session access — informational",
+                urgency="boundary",
+                carries=["boundary"],
+            ),
             Band(heading="Artifacts", urgency="artifact", carries=["artifact"]),
         ],
         description=(

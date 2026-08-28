@@ -255,7 +255,12 @@ class SigningOff(BaseModel, frozen=True):
     def notice(self) -> list[Notice]:
         """A capability the session does not have, which is not a fault."""
         return [
-            Notice(text="Signing: off for agent commits.", urgency="boundary"),
+            Notice(
+                text=(
+                    "Commit signing: off — agent commits do not use your signing identity."
+                ),
+                urgency="boundary",
+            ),
         ]
 
 
@@ -303,7 +308,7 @@ class AgentKey(BaseModel, frozen=True):
         return [
             Notice(
                 text=(
-                    f"Signing: on as {self.identity}, with a key held in this "
+                    f"Commit signing: on as {self.identity}, with a key held in this "
                     "container, which a forge shows as unverified."
                 ),
                 urgency="boundary",
@@ -334,7 +339,7 @@ class InheritedSigning(BaseModel, frozen=True):
         return [
             Notice(
                 text=(
-                    "Signing: inherited from this checkout — a key that lives "
+                    "Commit signing: inherited from this checkout — a key that lives "
                     "on the host fails mid-commit as `gpg: signing failed`, "
                     "which is a boundary, not a GPG fault."
                 ),
@@ -558,7 +563,10 @@ class AgentSocket(BaseModel, frozen=True):
         """One line. Which credential was selected is the whole of what a reader needs."""
         return [
             Notice(
-                text="Forge authentication: SSH via forwarded agent.",
+                text=(
+                    "Forge access: this session may authenticate through your "
+                    "forwarded SSH agent."
+                ),
                 urgency="boundary",
             )
         ]
@@ -597,7 +605,10 @@ class EphemeralKeys(BaseModel, frozen=True):
         """One line, and `ephemeral` is the load-bearing word in it."""
         return [
             Notice(
-                text="Forge authentication: SSH via ephemeral host credentials.",
+                text=(
+                    "Forge access: this session may use an ephemeral copy of your "
+                    "host SSH credentials."
+                ),
                 urgency="boundary",
             )
         ]
@@ -642,7 +653,9 @@ class ForgeToken(BaseModel, frozen=True):
         """One line, naming the variable so a reader knows which one is in play."""
         return [
             Notice(
-                text=f"Forge authentication: HTTPS via {self.variable}.",
+                text=(
+                    f"Forge access: this session may use the token in {self.variable}."
+                ),
                 urgency="boundary",
             )
         ]

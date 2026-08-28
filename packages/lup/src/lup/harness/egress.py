@@ -579,18 +579,18 @@ class SessionEgress(BaseModel, frozen=True):
         """
         if not self.filtered():
             shared = (
-                ", and your own loopback is this session's"
+                ", and services on your machine's localhost"
                 if self.shares_host_loopback()
                 else ""
             )
             return [
                 Notice(
                     text=(
-                        f"Egress: {self.mode} — no proxy; the LAN, localhost "
-                        "and cloud metadata are reachable from inside"
+                        "Network access: unrestricted — this session can reach "
+                        "the internet, LAN and cloud metadata"
                         f"{shared}."
                     ),
-                    urgency="warning",
+                    urgency="boundary",
                 )
             ]
         scoped = (
@@ -601,8 +601,8 @@ class SessionEgress(BaseModel, frozen=True):
         return [
             Notice(
                 text=(
-                    f"Egress: filtered through {self.proxy_name(project)} — "
-                    f"{scoped}. Private ranges, cloud metadata hosts and local "
+                    f"Network access: filtered through {self.proxy_name(project)} — "
+                    f"{scoped}. Private networks, cloud metadata hosts and local "
                     "names are refused."
                 ),
                 urgency="boundary",

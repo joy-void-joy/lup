@@ -149,9 +149,8 @@ class BrowserBridge(BaseModel, frozen=True):
     )
     completes: str = Field(
         default=(
-            "The tab finishes the sign-in on its own: this session shares "
-            "your machine's loopback, so the address it redirects to is a "
-            "port something in here is really listening on. Nothing to paste."
+            "Sign-in callbacks return directly to this session through your "
+            "machine's shared localhost; nothing needs to be pasted."
         ),
         description=(
             "The same instruction for the posture that has no second half. "
@@ -242,7 +241,10 @@ class BrowserBridge(BaseModel, frozen=True):
         if not serving:
             return [
                 Notice(
-                    text="Browser: not bridged — a sign-in prints its URL.",
+                    text=(
+                        "Browser access: sign-in URLs are printed instead of "
+                        "opening automatically."
+                    ),
                     urgency="boundary",
                 ),
                 Notice(text=self.ending(lands), urgency="detail", indent=1),
@@ -250,8 +252,9 @@ class BrowserBridge(BaseModel, frozen=True):
         return [
             Notice(
                 text=(
-                    f"Browser: sign-in URLs for {len(self.admits)} known "
-                    "address(es) open on your machine; nothing else crosses."
+                    "Browser access: this session may open HTTPS sign-in pages "
+                    f"on your machine for {len(self.admits)} approved hosts; the "
+                    "bridge carries no other data."
                 ),
                 urgency="boundary",
             ),

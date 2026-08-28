@@ -130,8 +130,10 @@ def test_the_launch_says_the_channel_exists_before_a_browser_opens_by_itself() -
     """
     said = BrowserBridge().notice(True)[0]
 
-    assert "open on your machine" in said.text
-    assert "nothing else crosses" in said.text
+    assert said.text == (
+        "Browser access: this session may open HTTPS sign-in pages on your machine "
+        "for 5 approved hosts; the bridge carries no other data."
+    )
     assert said.urgency == "boundary"
 
 

@@ -111,14 +111,16 @@ def test_indentation_survives_a_terminal_that_takes_no_colour() -> None:
 def test_a_launch_with_nothing_wrong_says_nothing_in_the_warning_colour() -> None:
     """Every posture here is doing exactly what it was declared to do.
 
-    A filtered proxy, a bridged browser, a session reaching its forge on a
-    token and signing nothing: four boundaries working, and every one of them
-    painted orange. What that taught a reader is that the opening block is
+    Filtered and deliberately unrestricted networks, a bridged browser, and a
+    session reaching its forge on a token while signing nothing are declared
+    security postures working as configured. None is an action item.
+    Painting them orange taught a reader that the opening block is
     orange whatever happened -- which is the same as having no warning
     colour, paid for at the one launch where something is actually wrong.
     """
     healthy = [
         *SessionEgress().notice("feat"),
+        *SessionEgress(mode="host").notice("feat"),
         *BrowserBridge().notice(serving=True),
         *GitAccess().notice(TOKEN, OPERATOR),
     ]
@@ -131,9 +133,8 @@ def test_the_postures_that_really_do_fail_keep_the_colour() -> None:
     """The other half, without which the one above passes by painting nothing.
 
     Each of these ends in a failure somewhere that names neither the cause nor
-    the remedy: a request reaching the LAN because no proxy stands there, a
-    session that can read a public repository and push to nothing, a commit
-    refused for an identity assembled from a hostname, and `gpg: signing
+    the remedy: a session that can read a public repository and push to nothing,
+    a commit refused for an identity assembled from a hostname, and `gpg: signing
     failed` in the middle of a commit whose key never crossed the boundary.
 
     A session with no credential at all belongs in this half rather than the
@@ -143,7 +144,6 @@ def test_the_postures_that_really_do_fail_keep_the_colour() -> None:
     session that can read and cannot push is the second one.
     """
     loud = [
-        *SessionEgress(mode="bridge").notice("feat"),
         *GitAccess().notice(
             NoCredential(variable="LUP_GIT_TOKEN", host="github.com"), OPERATOR
         ),
@@ -151,7 +151,7 @@ def test_the_postures_that_really_do_fail_keep_the_colour() -> None:
         *GitAccess(signing=InheritedSigning()).notice(TOKEN, OPERATOR),
     ]
 
-    assert sum(item.urgency == "warning" for item in loud) == 4
+    assert sum(item.urgency == "warning" for item in loud) == 3
 
 
 def test_a_band_keeps_a_subordinate_line_with_the_one_it_is_subordinate_to() -> None:
@@ -192,9 +192,10 @@ def test_a_band_with_nothing_to_say_prints_no_heading_at_all() -> None:
     action = next(band for band in banner.bands if band.heading == "Action required")
 
     assert banner.under(action) == []
+    assert banner.bands[2].heading == "Session access — informational"
     assert [item.text for item in banner.under(banner.bands[2])] == [
-        "Forge authentication: HTTPS via LUP_GIT_TOKEN.",
-        "Signing: off for agent commits.",
+        "Forge access: this session may use the token in LUP_GIT_TOKEN.",
+        "Commit signing: off — agent commits do not use your signing identity.",
     ]
 
 

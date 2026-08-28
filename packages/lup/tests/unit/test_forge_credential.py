@@ -218,11 +218,15 @@ def test_each_credential_says_which_one_it_is_in_one_line() -> None:
         )
     }
 
-    assert spoken["agent"] == ["Forge authentication: SSH via forwarded agent."]
-    assert spoken["files"] == [
-        "Forge authentication: SSH via ephemeral host credentials."
+    assert spoken["agent"] == [
+        "Forge access: this session may authenticate through your forwarded SSH agent."
     ]
-    assert spoken["token"] == ["Forge authentication: HTTPS via LUP_GIT_TOKEN."]
+    assert spoken["files"] == [
+        "Forge access: this session may use an ephemeral copy of your host SSH credentials."
+    ]
+    assert spoken["token"] == [
+        "Forge access: this session may use the token in LUP_GIT_TOKEN."
+    ]
 
 
 def test_remediation_appears_on_the_one_arm_that_has_something_to_do() -> None:
@@ -246,7 +250,7 @@ def test_remediation_appears_on_the_one_arm_that_has_something_to_do() -> None:
 
 
 def test_a_healthy_forge_line_is_a_boundary_fact_rather_than_an_alarm() -> None:
-    """Which is what puts it under `Security` and keeps `Action required` empty.
+    """Which puts it under informational session access, not an action item.
 
     A block where every posture is painted as a warning is a block with no
     warning colour, paid for at the one launch where something is wrong.
@@ -501,7 +505,9 @@ def test_signing_is_off_by_default_and_says_so_in_one_line() -> None:
     spoken = SigningOff().notice()
 
     assert settings["commit.gpgsign"] == "false"
-    assert [item.text for item in spoken] == ["Signing: off for agent commits."]
+    assert [item.text for item in spoken] == [
+        "Commit signing: off — agent commits do not use your signing identity."
+    ]
     assert [item.urgency for item in spoken] == ["boundary"]
 
 
