@@ -923,6 +923,36 @@ def recorded_base(branch: str) -> str | None:
     return value or None
 
 
+def decayed_base_complaint(branch: str, recorded: str, *, present: bool) -> str:
+    """Why a recorded base stopped answering, said at the moment it stops.
+
+    The record holds a branch name, and a name is only an answer while
+    something still carries it. Deleting the base leaves the record intact
+    and pointing at nothing, so detection falls through to the topological
+    guess it exists to avoid — and reports ``guessed``, which is what a
+    branch that never had a record reports. The two become the same story,
+    told much later by whatever refuses to run on a guess.
+
+    So the decay is named where it happens rather than inferred from a
+    refusal several commands away. What the reader needs is that a record
+    was found, whose referent is gone, and that naming a base directly is
+    the way past it — none of which survives being reduced to ``guessed``.
+    """
+    cause = (
+        "which no longer exists"
+        if not present
+        else "which shares no history with it, so nothing could be measured"
+    )
+    return (
+        f"{branch} records {recorded} as its base, {cause}. "
+        "Guessing from topology instead, which is what a branch carrying no "
+        "record does — so whatever reads this cannot tell the two apart, and "
+        "a command that refuses a guessed base will refuse this one.\n"
+        f"Name the base with --base <branch> to settle it, or re-record it as "
+        f"`git config {base_config_key(branch)} <branch>`."
+    )
+
+
 def detect_base_branch(branch: str | None = None) -> BaseCandidate:
     """Detect the base branch for the given (or current) branch.
 
@@ -932,6 +962,13 @@ def detect_base_branch(branch: str | None = None) -> BaseCandidate:
     parent in a two-tier model) over siblings. Among ancestors, picks the
     one with the fewest commits ahead (``distance``). Falls back to
     non-ancestors when no ancestor exists.
+
+    A record whose branch has since been deleted is the one case where
+    winning outright and having nothing to say are the same code path, so it
+    says so on the way past. The guess it falls back to is reported as
+    ``guessed`` either way, which is the whole problem: a base that decayed
+    and a base nobody recorded are indistinguishable downstream, and the
+    reader meets the difference as a refusal several commands later.
     """
     effective = branch or git.out("branch", "--show-current")
 
@@ -957,10 +994,14 @@ def detect_base_branch(branch: str | None = None) -> BaseCandidate:
         )
 
     recorded = recorded_base(effective)
-    if recorded is not None and recorded in local_branches:
-        pinned = measure(recorded)
+    if recorded is not None:
+        present = recorded in local_branches
+        pinned = measure(recorded) if present else None
         if pinned is not None:
             return pinned.model_copy(update={"source": "recorded"})
+        typer.echo(
+            decayed_base_complaint(effective, recorded, present=present), err=True
+        )
 
     measured = [m for c in local_branches if (m := measure(c)) is not None]
     ancestors = [m for m in measured if m.is_ancestor]
