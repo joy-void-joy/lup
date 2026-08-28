@@ -1,5 +1,5 @@
 {
-  "revision": "390821eecd04e2d4d6a0e44608b3ade9a729232b",
+  "revision": "3cf00e82f211a625212489747a60a467b5e33c41",
   "roots": [
     "lup",
     "lup_template"
@@ -863,7 +863,8 @@
         "get_integration_branch",
         "is_ancestor",
         "shares_history",
-        "never_diverged_from",
+        "reservation_config_key",
+        "still_at_reservation",
         "rewrite_suspects",
         "get_branch_worktree",
         "get_pr_info",
@@ -1512,6 +1513,8 @@
         "SyncBaseResult.base_source",
         "SyncBaseResult.merged",
         "SyncBaseResult.conflicts",
+        "SyncBaseResult.base_synced",
+        "SyncBaseResult.sync_complaint",
         "ExistingPR",
         "ExistingPR.number",
         "ExistingPR.url",
@@ -1707,7 +1710,8 @@
         "ssh_auth_refusal",
         "gh_auth_refusal",
         "remote_auth_refusal",
-        "check_remote_auth"
+        "check_remote_auth",
+        "check_forge_api"
       ]
     },
     {
@@ -4558,10 +4562,12 @@
         "Attempt.credential",
         "Attempt.because",
         "CredentialSource",
+        "ForgeTokenSource",
         "GitAccess",
         "GitAccess.host",
         "GitAccess.source",
         "GitAccess.token_variable",
+        "GitAccess.token_source",
         "GitAccess.username",
         "GitAccess.ssh_user",
         "GitAccess.ssh_inside",
@@ -4572,6 +4578,7 @@
         "GitAccess.select",
         "GitAccess.select.reached",
         "GitAccess.select.walked",
+        "GitAccess.sourced",
         "GitAccess.granted",
         "GitAccess.maintenance",
         "GitAccess.helper",
@@ -7297,6 +7304,7 @@
         "ShellRuleRow.allow_flags",
         "ShellRuleRow.read_verbs",
         "ShellRuleRow.write_markers",
+        "ShellRuleRow.bare_reads",
         "ShellRuleRow.value_flags",
         "ShellRuleRow.reason",
         "EditOperation",
@@ -7660,6 +7668,7 @@
         "ShellCommandRule.allow_flags",
         "ShellCommandRule.read_verbs",
         "ShellCommandRule.write_markers",
+        "ShellCommandRule.bare_reads",
         "ShellCommandRule.value_flags",
         "ShellCommandRule.subcommands",
         "ShellCommandRule.sandbox",
@@ -7710,6 +7719,7 @@
         "JudgedCommand.recovery",
         "JudgedCommand.read_verbs",
         "JudgedCommand.write_markers",
+        "JudgedCommand.bare_reads",
         "read_only_rules",
         "judged_ask_rules",
         "redirected_rules",
