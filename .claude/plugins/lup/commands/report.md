@@ -5,26 +5,23 @@ allowed-tools: Bash(uv run lup-devtools:*), Read, Write
 
 # Report what is left
 
-Write down everything there still is to implement, in a file under
-`tmp/` named for the work it covers.
+Write down everything there still is to implement, in a file under `tmp/`
+named for the work it covers.
 
 Two occasions, one output. After a long session, the report is written from
 scratch: what the session opened, what it left half-done, and what the
 surfaces can still see outstanding. After "please implement
-tmp/plan_something.md", the same report is written again
-from scratch, saying what remains of that plan — **rewritten whole, never
-appended to**, so a line that is no longer true cannot survive by being
-further down the file.
+tmp/plan_something.md", the same report is written again from scratch, saying
+what remains of that plan — **rewritten whole, never appended to**, so a line
+that is no longer true cannot survive by being further down the file.
 
 ## 1. Name the file
 
-`tmp/<the work it covers>.md`. What is left of
-`tmp/plan_relocated_notes.md` is
-`tmp/relocated_notes_remaining.md`; a session spent on the
-report surface leaves `tmp/report_surface_remaining.md`.
-The name is what the next session reads first — from a directory listing,
-before opening anything — so it says what the report is about rather than that
-it is a report.
+`tmp/<the work it covers>.md`. What is left of `tmp/plan_relocated_notes.md`
+is `tmp/relocated_notes_remaining.md`; a session spent on the report surface
+leaves `tmp/report_surface_remaining.md`. The name is what the next session
+reads first — from a directory listing, before opening anything — so it says
+what the report is about rather than that it is a report.
 
 Two things follow from naming it. Reporting the same work again reuses its
 name, so the new reading replaces the old one instead of standing beside it
@@ -46,9 +43,9 @@ knew, in a directory nothing versions. That refusal is for whoever reaches for
 `--write` outside this skill; here you are about to write section 4 back on
 top, so say so.
 
-The path has to sit under `tmp/` or the command refuses it:
-that is where a report is gitignored, and one written anywhere else lands in
-the next commit as a tracking file.
+The path has to sit under `tmp/` or the command refuses it: that is where a
+report is gitignored, and one written anywhere else lands in the next commit
+as a tracking file.
 
 This is the half no session can see from memory, reading every surface that
 already answers for one topic:
@@ -91,12 +88,12 @@ an edit to one line of a stale report leaves the rest of it stale.
 
 ## Guidelines
 
-- **One report per piece of work, named for it.** Under
-  `tmp/`, which is scratch: gitignored, so it reaches no
-  diff, no reviewer, and no commit. A second file about work a standing report
-  already covers is two reports disagreeing, and a `TODO.md`, a backlog, or a
-  roadmap is the same thing under another name — a tracking file parks work
-  where no workflow will surface it again.
+- **One report per piece of work, named for it.** Under `tmp/`, which is
+  scratch: gitignored, so it reaches no diff, no reviewer, and no commit. A
+  second file about work a standing report already covers is two reports
+  disagreeing, and a `TODO.md`, a backlog, or a roadmap is the same thing
+  under another name — a tracking file parks work where no workflow will
+  surface it again.
 - **Never append.** A report that grew is a report nobody can trust the top
   of. Every invocation replaces the whole file.
 - **Work that belongs in the code goes in the code.** A request about one
