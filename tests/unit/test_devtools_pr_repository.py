@@ -41,11 +41,19 @@ class Recorder:
 
 @pytest.fixture
 def named(monkeypatch: pytest.MonkeyPatch) -> Recorder:
-    """A `gh` whose repository is readable and whose branch is known."""
+    """A `gh` whose repository is readable, branch known, and API authenticated.
+
+    The credential gate is answered here rather than left live because it asks
+    the host's own `gh` login, which no `pr.gh` stand-in intercepts: left alone
+    these pass on a machine somebody signed in on and fail on every other one,
+    reporting where they ran rather than what they pin. That the gate refuses
+    an unauthenticated session is :mod:`test_remote_auth`'s to say.
+    """
     monkeypatch.setattr(utils, "repository_slug", lambda: "owner/name")
     monkeypatch.setattr(pr, "current_branch", lambda: "feat-thing")
     recorder = Recorder(output="https://github.com/owner/name/pull/7\n")
     monkeypatch.setattr(pr, "gh", recorder)
+    monkeypatch.setattr(pr, "check_forge_api", lambda: True)
     return recorder
 
 

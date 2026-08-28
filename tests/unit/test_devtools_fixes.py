@@ -221,6 +221,7 @@ class TestPrCreate:
                 return "https://github.com/org/repo/pull/42"
 
         monkeypatch.setattr(pr, "gh", FakeGh())
+        monkeypatch.setattr(pr, "check_forge_api", lambda: True)
 
         results: list[pr.CreateResult] = []
         monkeypatch.setattr(pr, "output_result", lambda r, _as_json: results.append(r))
