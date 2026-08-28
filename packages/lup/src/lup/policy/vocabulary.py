@@ -72,6 +72,12 @@ class JudgedCommand(BaseModel, frozen=True):
     The same exception stated negatively, for a command that has no query
     verb because its query form is the plain one: `dd` writes given an `of=`
     and reads without it."""
+    bare_reads: bool = False
+    """Whether this command reads when handed nothing at all.
+
+    Where `write_markers` still needs a word to find no marker in, this needs
+    every word to be absent: `mount` alone prints the mount table, and each
+    form that acts names a device or a mountpoint."""
 
 
 def read_only_rules(
@@ -211,6 +217,16 @@ def judged_ask_rules(
             recovery="container",
         ),
         JudgedCommand(
+            name="mount",
+            # Alone it prints the mount table, which is how a session finds out
+            # what its own boundary is made of. Every form that acts names a
+            # device or a mountpoint, so there is no marker to test for and no
+            # verb to list -- what separates the two is that one carries words
+            # and the other carries none.
+            bare_reads=True,
+            reason="mounting a filesystem requires approval",
+        ),
+        JudgedCommand(
             name="truncate",
             reason="truncating files requires approval",
             recovery="container",
@@ -335,6 +351,7 @@ def judged_ask_rules(
             default_effect="ask",
             read_verbs=command.read_verbs,
             write_markers=command.write_markers,
+            bare_reads=command.bare_reads,
             recovery=command.recovery,
             reason=command.reason,
         )

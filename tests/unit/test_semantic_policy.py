@@ -3616,6 +3616,42 @@ def test_absence_is_only_concluded_from_words_it_could_actually_read() -> None:
     assert effect("dd if=a of=$X") == "ask"
 
 
+def test_a_command_that_reads_by_carrying_nothing_is_allowed_carrying_nothing() -> None:
+    """Where the line `write_markers` starts ends: a form defined by emptiness.
+
+    `mount` alone prints the mount table, which is how a session finds out what
+    its own boundary is made of, and every form that acts names a device or a
+    mountpoint. No marker can be found missing because there is no word to look
+    in, so the absence of every word is the whole signal.
+    """
+    policy = ShellPolicy(SHELL_RULES)
+
+    def effect(command: str) -> str:
+        return policy.decide(ShellCommand(command=command)).effect
+
+    assert effect("mount") == "allow"
+    assert effect("mount -a") == "ask"
+    assert effect("mount /dev/sda1 /mnt") == "ask"
+    assert effect("mount -t ext4 /dev/sda1 /mnt") == "ask"
+
+
+def test_carrying_nothing_is_not_read_only_for_a_command_that_acts_on_nothing() -> None:
+    """Why emptiness is declared per command rather than inferred from a row.
+
+    `ssh-add` with no words adds the default key, so a rule reading "no
+    arguments, therefore nothing happened" would hand over a credential. The
+    inference is what is unsafe, which is why only a command that has said so
+    gets the allow.
+    """
+    policy = ShellPolicy(SHELL_RULES)
+
+    def effect(command: str) -> str:
+        return policy.decide(ShellCommand(command=command)).effect
+
+    assert effect("ssh-add") != "allow"
+    assert effect("dd") != "allow"
+
+
 def test_asking_git_its_own_version_is_not_an_unclassified_subcommand() -> None:
     """`git version` was allowed and `git --version` denied, for the same question.
 

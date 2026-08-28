@@ -59,7 +59,9 @@ def apply_command_row(row: ShellRuleRow, arguments: list[str]) -> KernelDecision
     verb pins the invocation to its query action. One with ``write_markers``
     states that de-escalation negatively, for a command whose read-only form
     is the one carrying nothing extra: it allows when no legible word carries
-    a marker.
+    a marker. One with ``bare_reads`` carries that to its limit, for a command
+    whose reading form carries no words at all: it allows the empty argument
+    list and nothing else.
     """
     if row["effect"] != "allow" and row["allow_flags"] and arguments:
         if all(word in row["allow_flags"] for word in arguments):
@@ -106,6 +108,17 @@ def apply_command_row(row: ShellRuleRow, arguments: list[str]) -> KernelDecision
                 row["sandbox"],
                 recovery=row["recovery"],
             )
+    # No opacity test here, unlike every de-escalation above. Those read the
+    # words to decide, so a word they cannot read is a word that might carry
+    # what they are looking for; this one is deciding *on* the absence of
+    # words, and a list with nothing in it has nothing to misread.
+    if row["effect"] != "allow" and row["bare_reads"] and not arguments:
+        return KernelDecision(
+            "allow",
+            "this command's argument-less form only reads",
+            row["sandbox"],
+            recovery=row["recovery"],
+        )
     if row["effect"] == "allow" and row["ask_flags"]:
         opaque = next(
             (word for word in arguments if opaque_argument(word)),

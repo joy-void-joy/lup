@@ -307,6 +307,18 @@ class ShellCommandRule(SelectableRule, frozen=True):
     form is the one with nothing extra in it, so a membership test can never
     recognize it and every such invocation stopped for approval as a write.
     """
+    bare_reads: bool = False
+    """Whether this command only reads when handed no arguments at all.
+
+    The one case `write_markers` cannot reach. That recognizes a reading form
+    by the marker it lacks, which still needs a word to examine; `mount` reads
+    in the form that has no words, and every form that acts names a device or
+    a mountpoint. So the emptiness itself is the whole signal.
+
+    Declared per command rather than derived, because a bare invocation is an
+    action for plenty of commands and nothing in the row's shape says which:
+    `ssh-add` with nothing after it adds the default key.
+    """
     value_flags: list[str] = []
     subcommands: list[ShellSubcommandRule] = []
     sandbox: SandboxPlacement = ROOT_SANDBOX
@@ -391,6 +403,7 @@ def erase_shell_rules(rules: list[ShellCommandRule]) -> list[ShellRuleRow]:
                 allow_flags=[],
                 read_verbs=[],
                 write_markers=[],
+                bare_reads=False,
                 value_flags=[],
                 reason=operation.reason,
                 **axes.inherit(operation.declared(), "operation").row_fields(),
@@ -405,6 +418,7 @@ def erase_shell_rules(rules: list[ShellCommandRule]) -> list[ShellRuleRow]:
             allow_flags=[],
             read_verbs=list(subcommand.read_verbs),
             write_markers=[],
+            bare_reads=False,
             value_flags=[],
             reason=subcommand.reason,
             **axes.row_fields(),
@@ -421,6 +435,7 @@ def erase_shell_rules(rules: list[ShellCommandRule]) -> list[ShellRuleRow]:
             allow_flags=list(command.allow_flags),
             read_verbs=list(command.read_verbs),
             write_markers=list(command.write_markers),
+            bare_reads=command.bare_reads,
             value_flags=list(command.value_flags),
             reason=command.reason,
             **axes.row_fields(),

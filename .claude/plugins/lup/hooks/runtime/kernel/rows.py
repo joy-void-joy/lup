@@ -200,6 +200,13 @@ class ShellRuleRow(TypedDict):
     de-escalates when no literal word carries a declared marker. Stated as
     absence because no membership test can recognize a form defined by what it
     lacks -- the gap that stopped every read-only ``dd`` as a write.
+    ``bare_reads`` is the end of that same line: a command whose reading form
+    carries no words at all (``mount`` alone lists what is mounted, and every
+    acting form names something). Absence cannot be tested against a marker
+    here because there is nothing to test, so the emptiness itself is what the
+    row declares. It is stated per command rather than inferred from the other
+    fields, since a bare invocation is an action for plenty of commands --
+    ``ssh-add`` with no words adds the default key.
 
     ``sandbox`` says where this command has to run, independently of who
     decides it: a verb that reaches a remote is unusable confined however the
@@ -232,6 +239,7 @@ class ShellRuleRow(TypedDict):
     allow_flags: list[str]
     read_verbs: list[str]
     write_markers: list[str]
+    bare_reads: bool
     value_flags: list[str]
     reason: str
 
