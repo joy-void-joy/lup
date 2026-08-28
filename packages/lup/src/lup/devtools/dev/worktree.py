@@ -218,10 +218,26 @@ class RecordedBase(SetupStep, frozen=True):
     lands by fast-forward — the tip is then the integration branch's own tip,
     exactly as an untouched workspace's is — so a reader with no record has
     no question left to ask.
+
+    Which is why only a branch this run cut carries the commit, where the
+    name is recorded wherever it is missing. The name answers what a base
+    was, and a re-attached branch's base is the same fact whenever it is
+    written down; the commit asserts that nobody has worked here, and against
+    a branch that already existed the run has no standing to assert it. Taking
+    the tip at re-attach time would record whatever had been committed as the
+    place nothing was committed, and a branch reserved by that reading holds
+    unlanded work behind a verb that means the opposite — the one direction
+    this record must never fail in. Nor can the tip be checked against the
+    base's instead: a branch whose work landed by fast-forward stands exactly
+    where an untouched one does, which is the whole reason the record exists.
+    So an interrupted run leaves a workspace no later run can vouch for, and
+    it is offered for deletion — a question answered once, against a spent
+    branch that would otherwise be hidden for good.
     """
 
     branch: str
     origin: str
+    cut_fresh: bool = False
 
     def label(self) -> str:
         return f"the base recorded for {self.branch}"
@@ -241,11 +257,12 @@ class RecordedBase(SetupStep, frozen=True):
 
     def run(self) -> None:
         git("config", f"branch.{self.branch}.lup-base", self.origin)
-        git(
-            "config",
-            f"branch.{self.branch}.lup-base-commit",
-            git.out("rev-parse", self.branch).strip(),
-        )
+        if self.cut_fresh:
+            git(
+                "config",
+                f"branch.{self.branch}.lup-base-commit",
+                git.out("rev-parse", self.branch).strip(),
+            )
 
 
 class PushedBranch(SetupStep, frozen=True):
@@ -439,7 +456,9 @@ def create(
     # nobody can name is refused here instead, where the answer is a flag
     # rather than archaeology.
     recorded = RecordedBase(
-        branch=name, origin=base_branch or git.out("branch", "--show-current")
+        branch=name,
+        origin=base_branch or git.out("branch", "--show-current"),
+        cut_fresh=not branch_exists(name),
     )
     if not recorded.origin and not no_record and not recorded.already_recorded():
         typer.echo(

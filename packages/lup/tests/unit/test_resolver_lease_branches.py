@@ -17,6 +17,7 @@ from lup.devtools.dev.branches import (
     disposition_for,
     still_at_reservation,
 )
+from lup.devtools.dev.worktree import RecordedBase
 from lup.devtools.report.build import lease_items
 from lup.harness.models import ResolveSpec, SkillInvocation
 from lup.harness.process import LaunchRequest, LocalProcessLauncher
@@ -426,6 +427,61 @@ def test_a_branch_nobody_reserved_is_not_read_as_a_workspace(
     monkeypatch.chdir(work)
 
     assert not still_at_reservation("dev")
+
+
+def test_re_attaching_a_worktree_does_not_reserve_the_work_already_on_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The record asserts nobody has worked here, so re-attaching cannot write it.
+
+    ``worktree create`` also re-attaches a branch that already exists, and
+    records a base wherever one is missing. Recording the tip there would take
+    whatever had been committed as the place nothing was committed — reserving
+    a branch that holds unlanded work, which then reads as a workspace somebody
+    is holding and is never offered for landing again. Work at risk, hidden
+    behind a verb meaning the opposite, is the one direction this must not fail
+    in.
+    """
+    work = build_history(tmp_path, LocalProcessLauncher())
+    monkeypatch.chdir(work)
+    commit_as = (
+        "-c",
+        "user.email=branches@example.test",
+        "-c",
+        "user.name=Branch Test",
+    )
+    for arguments in (
+        ["git", "-C", str(work), "checkout", "-b", "feat-already-worked", "dev"],
+        ["git", "-C", str(work), *commit_as, "commit", "--allow-empty", "-m", "work"],
+    ):
+        status = LocalProcessLauncher().launch(
+            LaunchRequest(arguments=arguments, cwd=work)
+        )
+        if status.code != 0:
+            raise AssertionError(status.stderr)
+
+    RecordedBase(branch="feat-already-worked", origin="dev", cut_fresh=False).run()
+
+    assert not still_at_reservation("feat-already-worked")
+
+
+def test_a_branch_this_run_cut_carries_the_record_it_writes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The other half: cutting the branch is what earns the commit record."""
+    work = build_history(tmp_path, LocalProcessLauncher())
+    monkeypatch.chdir(work)
+    status = LocalProcessLauncher().launch(
+        LaunchRequest(
+            arguments=["git", "-C", str(work), "branch", "feat-cut", "dev"], cwd=work
+        )
+    )
+    if status.code != 0:
+        raise AssertionError(status.stderr)
+
+    RecordedBase(branch="feat-cut", origin="dev", cut_fresh=True).run()
+
+    assert still_at_reservation("feat-cut")
 
 
 def test_an_undiverged_pointer_with_no_worktree_is_still_spent() -> None:
