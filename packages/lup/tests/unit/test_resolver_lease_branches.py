@@ -15,7 +15,7 @@ from lup.devtools.dev.branches import (
     PRStatus,
     WorktreeChanges,
     disposition_for,
-    never_diverged_from,
+    still_at_reservation,
 )
 from lup.devtools.report.build import lease_items
 from lup.harness.models import ResolveSpec, SkillInvocation
@@ -222,7 +222,7 @@ def test_a_reserved_worktree_is_not_spent_work() -> None:
         contained_in=["dev"],
         pr=None,
         unique_commits=0,
-        never_diverged=True,
+        reserved=True,
         worktree="/tree/feat-not-started",
     )
 
@@ -245,7 +245,7 @@ def test_a_reserved_worktree_holding_work_is_not_somebody_s_next_session() -> No
         contained_in=["dev"],
         pr=None,
         unique_commits=0,
-        never_diverged=True,
+        reserved=True,
         worktree="/tree/feat-worked-in",
         changes=WorktreeChanges(modified=3, untracked=0),
     )
@@ -271,7 +271,7 @@ def test_a_reserved_worktree_with_a_clean_tree_is_still_left_alone() -> None:
         contained_in=["dev"],
         pr=None,
         unique_commits=0,
-        never_diverged=True,
+        reserved=True,
         worktree="/tree/feat-not-started",
         changes=WorktreeChanges(modified=0, untracked=0),
     )
@@ -315,7 +315,7 @@ def test_a_merged_branch_still_holding_a_worktree_is_spent() -> None:
         contained_in=["dev"],
         pr=None,
         unique_commits=0,
-        never_diverged=False,
+        reserved=False,
         worktree="/tree/feat-landed",
     )
 
@@ -326,32 +326,56 @@ def test_a_merged_branch_still_holding_a_worktree_is_spent() -> None:
 def build_history(root: Path, launcher: LocalProcessLauncher) -> Path:
     """A repository holding one reserved branch and one whose work landed.
 
-    ``feat-reserved`` is cut from ``dev`` and never committed to, which is
-    what ``worktree create`` leaves behind. ``feat-landed`` diverges and is
-    merged, moving ``dev`` past both — so the two are ancestors alike, and
-    which side of that merge their tips sit on is all that separates them.
+    ``feat-reserved`` is cut from ``dev`` and never committed to, and carries
+    the record ``worktree create`` writes when it reserves the workspace.
+    ``feat-landed`` diverges and is merged, moving ``dev`` past both.
+    ``feat-fastforwarded`` carries the same record, is committed to, and is
+    then taken into ``dev`` by fast-forward — so its tip *is* ``dev``'s tip,
+    which is exactly where an untouched workspace's tip stands, and the graph
+    is left holding nothing that separates the two.
     """
     work = root / "work"
     # Identity per invocation, never `git config` — a persisted setting lands
     # in the shared config every worktree of a real repository inherits.
     who = ("-c", "user.email=branches@example.test", "-c", "user.name=Branch Test")
     git_in = ("git", "-C", str(work))
-    for arguments in (
-        ["git", "init", "-b", "dev", str(work)],
-        [*git_in, *who, "commit", "--allow-empty", "-m", "base"],
-        [*git_in, "branch", "feat-reserved"],
-        [*git_in, "checkout", "-b", "feat-landed"],
-        [*git_in, *who, "commit", "--allow-empty", "-m", "work"],
-        [*git_in, "checkout", "dev"],
-        [*git_in, *who, "merge", "--no-ff", "feat-landed", "-m", "merge"],
-    ):
-        status = launcher.launch(LaunchRequest(arguments=arguments, cwd=root))
+
+    def run(*arguments: str) -> str:
+        status = launcher.launch(LaunchRequest(arguments=list(arguments), cwd=root))
         if status.code != 0:
             raise AssertionError(status.stderr)
+        return status.stdout.strip()
+
+    def reserve(branch: str) -> None:
+        """Cut a branch and record where it stood, as `worktree create` does."""
+        run(*git_in, "branch", branch)
+        run(*git_in, "config", f"branch.{branch}.lup-base", "dev")
+        run(
+            *git_in,
+            "config",
+            f"branch.{branch}.lup-base-commit",
+            run(*git_in, "rev-parse", branch),
+        )
+
+    run("git", "init", "-b", "dev", str(work))
+    run(*git_in, *who, "commit", "--allow-empty", "-m", "base")
+
+    reserve("feat-reserved")
+
+    run(*git_in, "checkout", "-b", "feat-landed")
+    run(*git_in, *who, "commit", "--allow-empty", "-m", "work")
+    run(*git_in, "checkout", "dev")
+    run(*git_in, *who, "merge", "--no-ff", "feat-landed", "-m", "merge")
+
+    reserve("feat-fastforwarded")
+    run(*git_in, "checkout", "feat-fastforwarded")
+    run(*git_in, *who, "commit", "--allow-empty", "-m", "work landed by fast-forward")
+    run(*git_in, "checkout", "dev")
+    run(*git_in, "merge", "--ff-only", "feat-fastforwarded")
     return work
 
 
-def test_a_reserved_branch_stays_undiverged_after_the_tip_moves(
+def test_a_reservation_outlives_the_integration_branch_moving(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The case a sweep creates for itself, and the reason distance cannot answer.
@@ -360,13 +384,48 @@ def test_a_reserved_branch_stays_undiverged_after_the_tip_moves(
     every workspace reserved against it. Reading the reserved branch as spent
     the moment that happens offers to delete a workspace somebody is holding
     — and a sweep merges before it proposes deletions, so the window where a
-    tip comparison is right had closed before anyone was asked.
+    tip comparison is right had closed before anyone was asked. Comparing
+    against the recorded commit is unmoved by any of it.
     """
     work = build_history(tmp_path, LocalProcessLauncher())
     monkeypatch.chdir(work)
 
-    assert never_diverged_from("feat-reserved", "dev")
-    assert not never_diverged_from("feat-landed", "dev")
+    assert still_at_reservation("feat-reserved")
+    assert not still_at_reservation("feat-landed")
+
+
+def test_work_landed_by_fast_forward_is_not_a_reserved_workspace(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The landing no topological question can see, and the whole reason for a record.
+
+    A branch whose work landed through a merge sits on the side parent, off
+    the integration branch's first-parent history, which is what a tip
+    comparison used to read. Rebased and fast-forwarded, the same work leaves
+    the branch pointing at the integration branch's own tip — where an
+    untouched workspace points too. The two states are then the same graph,
+    so the branch is spent and only something written before the work
+    existed can still say so.
+    """
+    work = build_history(tmp_path, LocalProcessLauncher())
+    monkeypatch.chdir(work)
+
+    assert not still_at_reservation("feat-fastforwarded")
+
+
+def test_a_branch_nobody_reserved_is_not_read_as_a_workspace(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Reserving writes the record, so its absence is not a held session.
+
+    A branch made another way, or made before the record existed, has
+    nothing claiming somebody is holding it — while a spent branch read as
+    reserved is one nothing offers to clear ever again.
+    """
+    work = build_history(tmp_path, LocalProcessLauncher())
+    monkeypatch.chdir(work)
+
+    assert not still_at_reservation("dev")
 
 
 def test_an_undiverged_pointer_with_no_worktree_is_still_spent() -> None:
@@ -378,7 +437,7 @@ def test_an_undiverged_pointer_with_no_worktree_is_still_spent() -> None:
         contained_in=["dev"],
         pr=None,
         unique_commits=0,
-        never_diverged=True,
+        reserved=True,
         worktree=None,
     )
 

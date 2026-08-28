@@ -208,6 +208,16 @@ class RecordedBase(SetupStep, frozen=True):
     created: an interrupted run leaves the branch made and the record unmade,
     and afterwards the two are indistinguishable. A branch that already
     carries a record keeps it.
+
+    The commit is recorded beside the branch name because they answer
+    different questions and only one of them keeps answering. A name says
+    what this was cut from, which is what recovering a base needs; the commit
+    says where the branch stood when nobody had worked on it yet, which is
+    the only thing that still separates a workspace nobody opened from a
+    branch whose work landed. Topology stops separating them the moment work
+    lands by fast-forward — the tip is then the integration branch's own tip,
+    exactly as an untouched workspace's is — so a reader with no record has
+    no question left to ask.
     """
 
     branch: str
@@ -231,6 +241,11 @@ class RecordedBase(SetupStep, frozen=True):
 
     def run(self) -> None:
         git("config", f"branch.{self.branch}.lup-base", self.origin)
+        git(
+            "config",
+            f"branch.{self.branch}.lup-base-commit",
+            git.out("rev-parse", self.branch).strip(),
+        )
 
 
 class PushedBranch(SetupStep, frozen=True):

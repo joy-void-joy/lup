@@ -519,25 +519,50 @@ def shares_history(branch: str, integration: str) -> bool:
         return False
 
 
-def never_diverged_from(branch: str, integration: str) -> bool:
-    """Whether the branch still stands where it was cut from the integration branch.
+def reservation_config_key(branch: str) -> str:
+    """Where the commit a workspace was reserved at is recorded, for one branch.
 
-    The difference between a branch that never diverged and one whose work
-    landed. Both are ancestors, so containment alone reads them alike and
-    calls the first spent. What tells them apart is which side of a merge the
-    tip sits on: a branch cut from the integration branch and not yet
-    committed to points at one of that branch's own commits, so it stands on
-    its first-parent history, where a branch whose work landed points at the
-    side parent a merge absorbed and never appears there.
+    Written at creation beside the base branch name and read here, so the key
+    is named once instead of spelled at each end.
+    """
+    return f"branch.{branch}.lup-base-commit"
 
-    Pointing at the tip exactly answers this for one commit's worth of time
-    and stops answering it the moment anything else lands — which during a
-    sweep is almost at once, because every merge moves the integration branch
-    out from under every workspace reserved against it.
+
+def still_at_reservation(branch: str) -> bool:
+    """Whether this branch stands exactly where its workspace was reserved.
+
+    The difference between a workspace nobody opened and a branch whose work
+    landed. Both are ancestors of the integration branch, so containment
+    reads them alike and calls the first spent.
+
+    Asked of a record rather than of the graph, because the graph stops
+    holding the answer. A tip on the integration branch's first-parent
+    history used to stand in for it — work that landed through a merge sits
+    on the side parent, which never appears there — but that reads the way
+    the landing was spelled rather than whether any landing happened. Work
+    rebased and fast-forwarded moves the integration branch's own tip onto
+    the branch, so a spent branch and an untouched workspace become the same
+    graph, and no cleverer topological question separates them afterwards.
+
+    So the fact is recorded while it is still true and compared afterwards.
+    A branch standing where it was reserved has had nothing committed to it;
+    the first commit moves the tip and it stops being a workspace, whatever
+    the integration branch does later. Distance never enters: a sweep moves
+    that branch under every workspace reserved against it, and a reservation
+    compared against the recorded commit is unmoved by that, where one
+    compared against the current tip would be retired by the sweep's first
+    merge.
+
+    A branch with no record is not a workspace. Reserving one writes the
+    record, so its absence is either a branch made another way or one made
+    before the record existed — and neither is somebody's held session, while
+    a spent branch read as reserved is one nothing offers to clear again.
     """
     try:
-        head = git.out("rev-parse", branch).strip()
-        return head in git.lines("rev-list", "--first-parent", integration)
+        reserved_at = git.out(
+            "config", "--get", reservation_config_key(branch), _ok_code=[0]
+        ).strip()
+        return bool(reserved_at) and git.out("rev-parse", branch).strip() == reserved_at
     except sh.ErrorReturnCode:
         return False
 
@@ -631,7 +656,7 @@ def disposition_for(
     protected: AbstractSet[str] = PROTECTED_BRANCHES,
     held: str = "",
     related: bool = True,
-    never_diverged: bool = False,
+    reserved: bool = False,
     worktree: str | None = None,
     changes: WorktreeChanges | None = None,
 ) -> Disposition:
@@ -651,13 +676,14 @@ def disposition_for(
     Two guards sit ahead of containment because containment answers them
     wrongly rather than not at all. A branch sharing no history has no
     divergence to measure, so every figure downstream describes a comparison
-    that means nothing. A branch that never diverged has spent nothing — an
-    ancestor exactly as a merged branch is, and for the opposite reason — so
-    a worktree held open on one is a workspace somebody reserved, not a
-    leftover. Which of the two it is comes from where the tip stands, never
-    from how far the integration branch has since travelled: a sweep moves
-    that branch under every workspace reserved against it, so a guard reading
-    distance would protect a workspace only until the sweep's first merge.
+    that means nothing. A branch still standing where its workspace was
+    reserved has spent nothing — an ancestor exactly as a merged branch is,
+    and for the opposite reason — so a worktree held open on one is a
+    workspace somebody reserved, not a leftover. Which of the two it is comes
+    from the record written when the workspace was cut, never from where the
+    tip stands now: work that lands by fast-forward leaves the tip on the
+    integration branch's own tip, which is where an untouched workspace's
+    tip is too, so a guard reading topology protects spent branches forever.
 
     What that workspace holds then decides which verb it gets. Reserving one
     says nobody has started, which a clean tree agrees with and an uncommitted
@@ -677,7 +703,7 @@ def disposition_for(
         return Disposition(
             status="UNRELATED", reason=f"shares no history with {integration}"
         )
-    if never_diverged and worktree is not None:
+    if reserved and worktree is not None:
         if changes is not None and changes.dirty():
             return Disposition(
                 status="COMMIT",
@@ -1581,7 +1607,7 @@ def survey(as_json: bool) -> None:
             unique_commits=unique,
             held=leased[name].reason() if name in leased else "",
             related=related,
-            never_diverged=never_diverged_from(name, integration),
+            reserved=still_at_reservation(name),
             worktree=checkout,
             changes=uncommitted,
         )
