@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "9bd0fd30e24c84b8d5a957956cfe296761cb08467fbaa929b93162d14c26066c",
+  "source_digest": "5a13bd210477e45e928302b9075063b254e165a8745bae562471bbec482f25fe",
   "target_requirements": [
     "claude-code"
   ],
@@ -261,7 +261,7 @@
     {
       "path": ".claude/plugins/lup/commands/report.md",
       "category": "generated",
-      "sha256": "a71e254b21f5daea4fde5c3ee57df6fa33d09222d53330fada8fb608a81866f3",
+      "sha256": "7d07f2e45690d38e8fb51b2397a9b2660706f9bab464964a52faac41e6e88d76",
       "semantic_id": "skill.report",
       "executable": false
     },
@@ -408,7 +408,7 @@
     {
       "path": ".claude/plugins/lup/hooks/runtime/policy_data.py",
       "category": "generated",
-      "sha256": "1db88eef90d48d57c120e3e1eaf64c480ea8f1351adf4c62759739fb3ac50f4d",
+      "sha256": "8f08a3bde1ed15d26f6e6d134ffc7250a35cfb397922520203362cbdc6250cf1",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
