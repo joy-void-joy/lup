@@ -324,6 +324,33 @@ def test_a_branch_head_lacks_is_blocked_upstream_or_not(
     assert "branch is unmerged" in capsys.readouterr().err
 
 
+def test_landed_work_is_deleted_from_a_worktree_standing_elsewhere(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Containment is read off the branch work lands on, not off HEAD.
+
+    Deletion runs from wherever the caller is standing, which right after a
+    merge is routinely some other feature branch that never held the work.
+    Read from there, a branch that has landed is unmerged, and the cleanup
+    its own merge just asked for is refused as though something were at
+    stake — the one case where the force discards nothing at all.
+    """
+    work = tmp_path / "repo"
+    git = initialized_repo(work, tmp_path / "no-hooks")
+    commit_file(git, work, "file.txt", "base\n", "chore: base")
+    base = str(git("rev-parse", "HEAD", _tty_out=False)).strip()
+    git("checkout", "-q", "-b", "landed")
+    commit_file(git, work, "landed.txt", "landed\n", "feat: landed")
+    git("checkout", "-q", "main")
+    git("merge", "-q", "--no-edit", "landed")
+    git("checkout", "-q", "-b", "elsewhere", base)
+    monkeypatch.chdir(work)
+
+    branches.delete_branch("landed", dry_run=False, force=False)
+
+    assert "landed" not in branch_names(work)
+
+
 def test_a_stranded_worktree_is_pruned_and_the_branch_deleted(
     repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
