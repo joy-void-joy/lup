@@ -1421,7 +1421,7 @@ def admit_an_unread_base() -> None:
     if not sys.stdin.isatty():
         typer.echo("nobody is here to answer, so the session opens on it unread")
         return
-    if not typer.confirm("Open the session on a base nothing could read?"):
+    if not typer.confirm("Could not check the remote. Continue opening the session?"):
         raise typer.Abort()
 
 
