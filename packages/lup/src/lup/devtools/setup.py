@@ -225,9 +225,18 @@ class Integration(BaseModel):
         return values
 
     def check_status(self, env: EnvVars) -> IntegrationStatus:
-        """Return (is_configured, detail_string)."""
+        """Whether this integration is configured, and the detail to show.
+
+        An integration declaring no env keys cannot be judged from the
+        environment at all — it configures a file, a download, a roster. It
+        says so rather than being read as configured: ``all([])`` is true, so
+        the obvious spelling reports every such integration green and then
+        raises reaching for a value that is not there.
+        """
         if self.status_func:
             return self.status_func(env)
+        if not self.env_keys:
+            return IntegrationStatus(ok=False, detail="nothing in the environment says")
         values = [env.get(k, "") for k in self.env_keys]
         if all(values):
             return IntegrationStatus(ok=True, detail=mask(values[0]))
