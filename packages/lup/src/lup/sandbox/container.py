@@ -435,6 +435,18 @@ class Sandbox:
         under one directory it names. These go where the caller says, because
         what asks for them is a prompt that already names the path — mounting
         the same tree somewhere else would leave every such instruction wrong.
+
+        Ordered parent before child by container path, across both modes
+        together rather than read-only group then read-write group. A mount
+        engine applies these in sequence and a later entry covers an earlier
+        one it sits over, so grouping by mode can express only one nesting:
+        a read-write hole punched in a read-only base. The inverse — a
+        read-only hole inside a read-write base, which is how a shared git
+        directory keeps one subdirectory unwritable — came out with the
+        read-write parent applied last, silently shadowing the hole into
+        writability. Sorting on ``Path.parts`` puts every parent ahead of
+        everything beneath it, so each entry keeps its own mode whichever
+        way the nesting runs.
         """
 
         def placed(mounts: Mapping[Path, str], mode: MountMode) -> list[Mount]:
@@ -449,10 +461,10 @@ class Sandbox:
                 for host, path in sorted(mounts.items())
             ]
 
-        return [
-            *placed(self.read_only_mounts, "ro"),
-            *placed(self.rw_mounts, "rw"),
-        ]
+        return sorted(
+            [*placed(self.read_only_mounts, "ro"), *placed(self.rw_mounts, "rw")],
+            key=lambda mount: Path(mount.container_path).parts,
+        )
 
     def source_path(self) -> str:
         """The container-side ``PYTHONPATH`` for every mounted source root.

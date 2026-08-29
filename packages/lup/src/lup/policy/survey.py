@@ -102,11 +102,17 @@ def rule_forms(row: ShellRuleRow) -> list[str]:
 
     The flag lists are where a row's effect stops being the whole story —
     ``ask_flags`` downgrade an allow, ``allow_flags`` and ``read_verbs``
-    de-escalate a non-allow one — so a form per named word is what separates a
-    row that still decides as it did from one that only looks unchanged.
+    de-escalate a non-allow one, and ``guarded_keys`` are the words that hold
+    one — so a form per named word is what separates a row that still decides
+    as it did from one that only looks unchanged.
     """
     base = rule_path(row)
-    guarded = [*row["ask_flags"], *row["allow_flags"], *row["read_verbs"]]
+    guarded = [
+        *row["ask_flags"],
+        *row["allow_flags"],
+        *row["read_verbs"],
+        *row["guarded_keys"],
+    ]
     return [base, *[f"{base} {word}" for word in guarded]]
 
 

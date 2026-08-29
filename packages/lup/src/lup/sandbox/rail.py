@@ -17,7 +17,8 @@ So the lease is a mount fact. Absolute paths stay identical on both sides --
 forced rather than chosen, because a linked worktree's `.git` is a file
 holding an absolute `gitdir:` pointer -- and only the modes vary: this
 worktree read-write, every sibling read-only, the shared admin directory
-read-only except for this worktree's own entry.
+read-write with its `worktrees/` directory read-only inside it, and this
+worktree's own entry read-write again within that.
 
 **The trap that makes read-only siblings load-bearing.** The obvious move is
 not to mount siblings at all. It is wrong, and quietly so. `git gc` runs
@@ -26,9 +27,22 @@ not to mount siblings at all. It is wrong, and quietly so. `git gc` runs
 siblings would look around, find every one of their directories absent, and
 delete their administrative state from the shared repository -- as ordinary
 housekeeping, with no error anywhere. Hence three guards rather than one:
-siblings are mounted so they exist, the shared directory is read-only so only
-this worktree's own entry can be written, and `gc.worktreePruneExpire` is set
-to never.
+siblings are mounted so they exist, `worktrees/` is read-only so only this
+worktree's own entry can be written, and `gc.worktreePruneExpire` is set to
+never.
+
+**What the shared directory being writable costs.** It holds `config`, and a
+worker that cannot write `config` cannot cut a worktree at all, so it is
+mounted read-write and only `worktrees/` is held back. That is a deliberate
+exposure and not a small one: `core.hooksPath`, `alias.*`,
+`credential.helper` and the `merge.*.driver` family all name programs git
+runs, and a worker that sets one has arranged to execute code on the host at
+the operator's next git command in any worktree of this repository. Nothing
+in the mount table stops that -- `hooks/` is writable too, and holding it
+read-only would only move the same reach one key sideways. The guard is the
+semantic policy, which holds an approval question against those keys by
+name; this module is not the thing standing in the way, and should not be
+read as though it were.
 
 **What this deliberately does not rail.** Commits landing on another branch.
 The object store and refs have to be writable to commit at all, so branch
@@ -176,6 +190,13 @@ def sibling_worktrees(worktree: Path) -> list[Path]:
 def lease_for(worktree: Path, human_owned: list[Path] | None = None) -> Lease:
     """The mounts that confine one worker to this worktree.
 
+    Three nested modes rather than two flat ones: this worktree writable,
+    every sibling read-only, and the shared administrative directory writable
+    with `worktrees/` read-only inside it and this worktree's own entry
+    writable again within that. The shared directory is writable so `config`
+    can be written -- without which no worker can cut a worktree -- and the
+    comment below records what that deliberately exposes.
+
     ``human_owned`` are paths inside the checkout the project already
     declared its author owns; they come back read-only here rather than being
     listed a second time. That is the whole point of taking them: a path
@@ -186,28 +207,35 @@ def lease_for(worktree: Path, human_owned: list[Path] | None = None) -> Lease:
     writable = [worktree]
     read_only = list(sibling_worktrees(worktree))
     if layout.linked():
-        # The shared directory is mounted read-only as a whole, and the four
-        # paths a commit genuinely needs are mounted writable back over it --
-        # so every sibling's administrative entry stays present and
-        # unwritable, which is what keeps `worktree prune` from removing it.
+        # The shared directory is mounted writable as a whole, with
+        # `worktrees/` punched read-only back over it and this worktree's own
+        # entry writable again inside that -- so every sibling's
+        # administrative entry stays present and unwritable, which is what
+        # keeps `worktree prune` from removing it. That nesting is the whole
+        # arrangement, and `Sandbox.declared_mounts` is what holds it up: it
+        # emits mounts parent before child, so the read-only hole is applied
+        # after the writable base it sits in instead of being shadowed by it.
         #
-        # `logs` is one of the four, and leaving it out took commits away
-        # entirely: a ref update appends to `logs/refs/heads/<branch>`
-        # wherever that file already exists, and git fails the whole update
-        # when it cannot -- `cannot update the ref 'refs/heads/x': unable to
-        # append to '.../logs/refs/heads/x'`. It also took the reflog with
-        # them, which is the undo layer this module's docstring rests on for
-        # the one thing it says it deliberately does not rail.
-        read_only.append(layout.common)
-        # Created rather than skipped when absent, because a mount whose
-        # target does not exist is one the engine invents as root -- the same
-        # refusal spelled as a permission instead of a read-only filesystem.
-        (layout.common / "logs").mkdir(exist_ok=True)
+        # Writable rather than read-only because `config` lives here, and a
+        # worker that cannot write it cannot cut a worktree or record a base
+        # branch: git takes a `config.lock` beside the file for every write,
+        # so a read-only directory refuses the lock rather than the file, and
+        # reports it as a lock it cannot take on a file nobody is holding.
+        #
+        # This is an accepted exposure, chosen rather than overlooked. A
+        # writable `config` lets a worker set `core.hooksPath`, `alias.*`,
+        # `credential.helper` or a `merge.*.driver`, every one of which runs
+        # on the host at the operator's next git command in any worktree of
+        # this repository; `hooks/` is writable alongside it for the same
+        # reason, a read-only one moving that reach one key sideways rather
+        # than closing it. What guards this is the semantic policy, which
+        # holds an approval question against those keys by name -- so the
+        # barrier here is a judgement, and the mount table is not pretending
+        # to be one.
+        read_only.append(layout.common / "worktrees")
         writable += [
+            layout.common,
             layout.private,
-            layout.common / "objects",
-            layout.common / "refs",
-            layout.common / "logs",
         ]
     else:
         writable.append(layout.common)
@@ -216,7 +244,18 @@ def lease_for(worktree: Path, human_owned: list[Path] | None = None) -> Lease:
         for owned in (worktree / path for path in human_owned or [])
         if owned.exists()
     ]
-    return Lease(writable=same_path(writable), read_only=same_path(read_only))
+    # One path, one mode. `git worktree list` reports the main worktree, and
+    # in a bare layout that directory *is* the shared one -- so the shared
+    # directory arrives as its own sibling and would be declared read-only
+    # and read-write at once. Both spellings were read-only before this
+    # module made the shared directory writable, which is what kept the
+    # collision invisible rather than absent. Resolved toward writable
+    # because the paths that reach here writable are the ones named
+    # deliberately, and toward it here rather than in the engine, where two
+    # mounts at one target settle by whichever order they happen to be
+    # applied in.
+    kept = [path for path in read_only if path not in writable]
+    return Lease(writable=same_path(writable), read_only=same_path(kept))
 
 
 def hold_worktree_pruning(worktree: Path) -> bool:

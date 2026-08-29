@@ -18,6 +18,7 @@ from .words import (
     INTERPRETERS,
     flag_matches,
     git_restore_operands,
+    key_matches,
     opaque_argument,
     protected_write_target,
     rewrites_only_recoverable_files,
@@ -61,13 +62,42 @@ def apply_command_row(row: ShellRuleRow, arguments: list[str]) -> KernelDecision
     is the one carrying nothing extra: it allows when no legible word carries
     a marker. One with ``bare_reads`` carries that to its limit, for a command
     whose reading form carries no words at all: it allows the empty argument
-    list and nothing else.
+    list and nothing else. One with ``guarded_keys`` states absence about the
+    write's subject instead of its form: it allows when no legible word names
+    a setting that decides how later commands execute, so the row keeps its
+    effect for ``core.hooksPath`` and lets ``user.email`` past.
     """
     if row["effect"] != "allow" and row["allow_flags"] and arguments:
         if all(word in row["allow_flags"] for word in arguments):
             return KernelDecision(
                 "allow",
                 "every argument is a declared read-only flag",
+                row["sandbox"],
+                recovery=row["recovery"],
+            )
+    if row["effect"] != "allow" and row["guarded_keys"] and arguments:
+        # Absence is the test, so every word has to be legible on the same
+        # strict bar `write_markers` sets: a word this cannot read might be
+        # the guarded key, and "no guarded key found" would otherwise be
+        # indistinguishable from "none was readable". `git config --local
+        # "$KEY" v` is the shape that has to keep asking.
+        #
+        # Guarded flags block the de-escalation too, which is what keeps
+        # `--file` from turning an allowed write into one aimed at a path of
+        # the caller's choosing.
+        readable = not any(
+            opaque_argument(word)
+            or "$" in word
+            or "`" in word
+            or flag_matches(word, row["ask_flags"])
+            for word in arguments
+        )
+        if readable and not any(
+            key_matches(word, row["guarded_keys"]) for word in arguments
+        ):
+            return KernelDecision(
+                "allow",
+                "no setting that redirects how commands execute is named",
                 row["sandbox"],
                 recovery=row["recovery"],
             )

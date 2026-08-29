@@ -353,6 +353,7 @@ def shell_rule_rows_literal(rows: list[ShellRuleRow]) -> str:
             ("allow_flags", row["allow_flags"]),
             ("read_verbs", row["read_verbs"]),
             ("write_markers", row["write_markers"]),
+            ("guarded_keys", row["guarded_keys"]),
             ("value_flags", row["value_flags"]),
         ):
             if flags:
