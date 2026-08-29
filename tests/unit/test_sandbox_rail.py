@@ -65,20 +65,22 @@ def test_a_lease_does_not_mount_the_worktree_it_is_for_as_a_sibling(
     assert repository / "mine" not in leased.read_only
 
 
-def test_the_shared_directory_is_read_only_but_commits_still_work(
+def test_the_shared_directory_is_writable_with_only_worktrees_held_back(
     repository: Path,
 ) -> None:
-    """Objects and refs have to be writable to commit at all; the rest does not.
+    """`config` has to be writable to cut a worktree; `worktrees/` must not be.
 
-    Which is what keeps every sibling's entry under `worktrees/` present and
+    Three nested modes rather than two: the shared directory writable,
+    `worktrees/` read-only inside it, and this worktree's own entry writable
+    again within that. Which is what keeps every sibling's entry present and
     unwritable while this worktree's own entry stays writable.
     """
     layout = repository_layout(repository / "mine")
     leased = lease_for(repository / "mine")
-    assert layout.common in leased.read_only
-    assert layout.common / "objects" in leased.writable
-    assert layout.common / "refs" in leased.writable
-    assert layout.common / "logs" in leased.writable
+    assert layout.common in leased.writable
+    assert layout.common not in leased.read_only
+    assert layout.common / "worktrees" in leased.read_only
+    assert layout.common / "worktrees" / "other" not in leased.writable
     assert layout.private in leased.writable
 
 
@@ -87,11 +89,13 @@ def test_a_commit_survives_everything_the_lease_leaves_unwritable(
 ) -> None:
     """The claim above, run rather than asserted about a list of names.
 
-    `logs` was missing from the writable set for as long as this file only
-    compared paths. A ref update appends to `logs/refs/heads/<branch>`
-    wherever that file already exists, and git fails the whole update when it
-    cannot -- so a contained session could not commit at all, and the reflog
-    this module's docstring rests its case on was never written either.
+    A lease that names the paths a commit needs can always miss one, and
+    `logs` is the one it missed: a ref update appends to
+    `logs/refs/heads/<branch>` wherever that file already exists, git fails
+    the whole update when it cannot, and a contained session could not commit
+    at all -- with the reflog this module's docstring rests its case on never
+    written either. Comparing names could not catch that, because the name
+    nobody thought of is the one missing from both sides.
 
     Withholding write permission from exactly what the lease calls read-only
     is the cheapest faithful model of the mount table, and it is the only
@@ -100,9 +104,26 @@ def test_a_commit_survives_everything_the_lease_leaves_unwritable(
     worktree = repository / "mine"
     leased = lease_for(worktree)
     layout = repository_layout(worktree)
-    roots = [layout.common] + [
-        entry for entry in layout.common.iterdir() if entry not in leased.writable
-    ]
+
+    def read_only_here(found: Path) -> bool:
+        """Whether the deepest mount covering this path is a read-only one.
+
+        The lease nests, so "is this under something writable" answers the
+        wrong question: everything in the shared directory is under a
+        writable mount, and `worktrees/` is read-only inside it regardless.
+        A mount engine settles that by applying parents first and letting the
+        deepest entry win, so this has to as well -- a flat test withholds
+        nothing here and passes without exercising anything.
+        """
+        covering = [
+            (root, writable)
+            for roots, writable in ((leased.writable, True), (leased.read_only, False))
+            for root in roots
+            if root == found or root in found.parents
+        ]
+        deepest = max(covering, key=lambda pair: len(pair[0].parts), default=None)
+        return deepest is not None and not deepest[1]
+
     # Every file too, not only the directories holding them. A directory with
     # its write bit off still lets an existing file inside it be rewritten,
     # which a read-only mount does not -- and modelling only the directories
@@ -110,10 +131,13 @@ def test_a_commit_survives_everything_the_lease_leaves_unwritable(
     # was written for.
     withheld = [
         found
-        for root in roots
-        for found in ([root] if root.is_file() else [root, *root.rglob("*")])
-        if not any(kept == found or kept in found.parents for kept in leased.writable)
+        for found in [layout.common, *layout.common.rglob("*")]
+        if read_only_here(found)
     ]
+    # The sibling's administrative entry is the one this has to cover, and
+    # naming it here is what stops the set quietly emptying again.
+    assert layout.common / "worktrees" / "other" in withheld
+    assert layout.private not in withheld
     restored = {entry: entry.stat().st_mode for entry in withheld}
     try:
         for entry in withheld:
