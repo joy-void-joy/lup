@@ -128,6 +128,35 @@ class TestDeclaredMounts:
 
         assert paths == {"/workspace", "/shared"}
 
+    def test_a_read_only_hole_is_emitted_after_the_base_it_sits_inside(
+        self, tmp_path: Path
+    ) -> None:
+        """The nesting grouping by mode cannot express, and a lease depends on.
+
+        A mount engine applies these in order and lets a later entry cover an
+        earlier one it sits over. Emitting every read-only mount and then
+        every read-write one can only hold a writable hole in a read-only
+        base; the inverse comes out with the writable parent applied last,
+        filling the hole back in -- silently, as writability rather than as
+        an error. Parent before child across both modes is what keeps each
+        entry's own mode the one that lands.
+        """
+        base = tmp_path / "repo"
+        hole = base / "worktrees"
+        sandbox = Sandbox(
+            session_id="declared",
+            shared_dir=tmp_path / "shared",
+            read_only_mounts={hole: str(hole)},
+            rw_mounts={base: str(base)},
+        )
+        mounts = sandbox.mount_topology()
+        order = [mount.container_path for mount in mounts]
+        by_path = {mount.container_path: mount for mount in mounts}
+
+        assert order.index(str(base)) < order.index(str(hole))
+        assert by_path[str(base)].mode == "rw"
+        assert by_path[str(hole)].mode == "ro"
+
 
 class TestExecuteCodeDescription:
     """The tool description must name the mounted paths so the in-sandbox
